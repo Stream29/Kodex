@@ -1,3 +1,9 @@
 # CodexLite
 
-Working repository for BuildCodexLite.
+Kotlin Multiplatform library for BuildCodexLite.
+
+## Build
+
+```shell
+./gradlew build
+```
