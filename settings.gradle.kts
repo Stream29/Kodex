@@ -15,3 +15,6 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "CodexLite"
+
+include(":agent-loop:contract")
+include(":utils")
