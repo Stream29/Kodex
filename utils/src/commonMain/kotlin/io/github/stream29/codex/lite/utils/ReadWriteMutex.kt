@@ -70,7 +70,7 @@ private class ReadWriteMutexImpl : ReadWriteMutex {
 
     override val reader: Mutex = object : Mutex {
         override val isLocked: Boolean
-            get() = stateFlow.value !is State.Write
+            get() = stateFlow.value is State.Write
         @Deprecated(
             "Mutex.onLock deprecated without replacement. For additional details please refer to #2794",
             level = DeprecationLevel.WARNING
@@ -92,7 +92,7 @@ private class ReadWriteMutexImpl : ReadWriteMutex {
                 is State.Free -> {
                     val getLock = internalWriter.tryLock(owner)
                     if (getLock) {
-                        val stateCorrect = stateFlow.compareAndSet(State.Free, State.Read(0))
+                        val stateCorrect = stateFlow.compareAndSet(State.Free, State.Read(1))
                         if (!stateCorrect) {
                             error("State is broken")
                         }
