@@ -13,9 +13,6 @@ version = "0.1.0-SNAPSHOT"
 kotlin {
     explicitApi()
     jvmToolchain(26)
-    compilerOptions {
-        freeCompilerArgs.set(listOf("-Xexplicit-backing-fields"))
-    }
 
     jvm {
         compilerOptions {
@@ -42,7 +39,6 @@ kotlin {
 
     linuxX64()
     linuxArm64()
-    macosX64()
     macosArm64()
     mingwX64()
 
@@ -52,13 +48,11 @@ kotlin {
 
     tvosArm64()
     tvosSimulatorArm64()
-    tvosX64()
 
     watchosArm32()
     watchosArm64()
     watchosDeviceArm64()
     watchosSimulatorArm64()
-    watchosX64()
 
     sourceSets {
         commonTest.dependencies {
