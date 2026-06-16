@@ -13,7 +13,7 @@ public class SafeRw<out ImmutableType, out MutableType : ImmutableType>(
     internal val rwMutex: ReadWriteMutex = ReadWriteMutex()
 
     @OptIn(ExperimentalContracts::class)
-    public suspend inline fun <T> readSession(block: (ImmutableType) -> T): T {
+    public suspend inline fun <T> readSession(block: suspend (ImmutableType) -> T): T {
         contract {
             callsInPlace(block, InvocationKind.EXACTLY_ONCE)
         }
@@ -23,7 +23,7 @@ public class SafeRw<out ImmutableType, out MutableType : ImmutableType>(
     }
 
     @OptIn(ExperimentalContracts::class)
-    public suspend inline fun <T> writeSession(block: (MutableType) -> T): T {
+    public suspend inline fun <T> writeSession(block: suspend (MutableType) -> T): T {
         contract {
             callsInPlace(block, InvocationKind.EXACTLY_ONCE)
         }

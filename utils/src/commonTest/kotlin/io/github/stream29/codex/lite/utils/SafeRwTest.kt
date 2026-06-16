@@ -64,6 +64,26 @@ class SafeRwTest {
     }
 
     @Test
+    fun sessionsCanSuspendWhileHoldingTheirLocks() = runTest {
+        val safe = SafeRw<ImmutableListHolder, MutableListHolder>(MutableListHolder())
+
+        safe.writeSession { value ->
+            yield()
+            assertEquals(State.Write, safe.rwMutex.stateFlow.value)
+            value.add("after suspend")
+        }
+
+        val values = safe.readSession { value ->
+            yield()
+            assertEquals(State.Read(1), safe.rwMutex.stateFlow.value)
+            value.values
+        }
+
+        assertEquals(listOf("after suspend"), values)
+        assertEquals(State.Free, safe.rwMutex.stateFlow.value)
+    }
+
+    @Test
     fun writeSessionWaitsForExistingReader() = runTest {
         val safe = SafeRw<ImmutableListHolder, MutableListHolder>(MutableListHolder())
 
