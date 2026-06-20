@@ -2,6 +2,7 @@
 .kotlin/
 build/
 out/
+kotlin-js-store/wasm/
 
 local.properties
 
