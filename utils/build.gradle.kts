@@ -1,7 +1,5 @@
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-
 plugins {
-    id("codexlite.kmp-library")
+    id("codexlite.kmp-shared")
 }
 
 kotlin {

@@ -1,7 +1,5 @@
-import org.jetbrains.kotlin.gradle.idea.proto.com.google.protobuf.api
-
 plugins {
-    id("codexlite.kmp-library")
+    id("codexlite.kmp-shared")
 }
 
 kotlin {

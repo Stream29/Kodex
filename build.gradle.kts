@@ -1,3 +1,3 @@
 plugins {
-    id("codexlite.kmp-library")
+    id("codexlite.kmp-shared")
 }

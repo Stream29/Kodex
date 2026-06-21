@@ -1,11 +1,13 @@
 plugins {
-    id("codexlite.kmp-host")
+    id("codexlite.kmp-shared")
+    alias(libs.plugins.kotlin.serialization)
 }
 
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":llm-provider:api"))
+            api(libs.kotlinx.serialization.json)
+            api(libs.kotlinx.schema.json)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
