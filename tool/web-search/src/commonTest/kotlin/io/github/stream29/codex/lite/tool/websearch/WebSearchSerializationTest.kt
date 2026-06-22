@@ -1,9 +1,9 @@
 package io.github.stream29.codex.lite.tool.websearch
 
-import io.github.stream29.codex.lite.llmprovider.LlmContentItem
-import io.github.stream29.codex.lite.llmprovider.LlmMessageRole
-import io.github.stream29.codex.lite.llmprovider.LlmResponseItem
-import io.github.stream29.codex.lite.llmprovider.LlmTool
+import io.github.stream29.codex.lite.llmprovider.ContentItem
+import io.github.stream29.codex.lite.llmprovider.MessageRole
+import io.github.stream29.codex.lite.llmprovider.ResponseItem
+import io.github.stream29.codex.lite.tool.contract.ToolSpec
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -21,9 +21,9 @@ class WebSearchSerializationTest {
             model = "gpt-test",
             input = SearchInput.Items(
                 listOf(
-                    LlmResponseItem.Message(
-                        role = LlmMessageRole.User,
-                        content = listOf(LlmContentItem.InputText("find this")),
+                    ResponseItem.Message(
+                        role = MessageRole.User,
+                        content = listOf(ContentItem.InputText("find this")),
                     ),
                 ),
             ),
@@ -106,7 +106,7 @@ class WebSearchSerializationTest {
 
     @Test
     fun specUsesWebNamespace() {
-        val encoded = json.parseToJsonElement(json.encodeToString(LlmTool.serializer(), WebSearchTools.spec))
+        val encoded = json.parseToJsonElement(json.encodeToString(ToolSpec.serializer(), WebSearchTools.spec))
             .jsonObject
 
         assertEquals(JsonPrimitive("namespace"), encoded["type"])

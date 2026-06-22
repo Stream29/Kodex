@@ -3,10 +3,10 @@ package io.github.stream29.codex.lite.llmprovider
 import kotlinx.coroutines.flow.Flow
 
 public interface LlmProvider {
-    public suspend fun listModels(): LlmModels
-    public suspend fun createResponse(request: LlmResponseRequest): LlmResponse
-    public fun streamResponse(request: LlmResponseRequest): Flow<LlmResponseStreamEvent>
-    public suspend fun compactResponse(request: LlmCompactionRequest): LlmCompactionResponse
+    public suspend fun listModels(): ModelsResponse
+    public suspend fun createResponse(request: ResponsesApiRequest): Response
+    public fun streamResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent>
+    public suspend fun compactResponse(request: CompactionInput): CompactionResponse
 }
 
 public class LlmProviderException(

@@ -17,12 +17,12 @@ dependencyResolutionManagement {
 
 rootProject.name = "CodexLite"
 
-include(":agent-loop:contract")
 include(":auth")
 include(":codex-compatibility")
 include(":llm-provider")
 include(":llm-provider:api")
 include(":llm-provider:models")
+include(":tool:contract")
 include(":tool:web-search")
 include(":utils")
 include(":utils:read-write-mutex")

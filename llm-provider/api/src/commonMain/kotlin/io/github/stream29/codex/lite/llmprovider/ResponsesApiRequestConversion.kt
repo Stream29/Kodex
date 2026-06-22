@@ -2,15 +2,15 @@ package io.github.stream29.codex.lite.llmprovider
 
 import kotlinx.serialization.json.Json
 
-internal fun LlmResponseRequest.toResponsesApiRequest(json: Json): LlmResponseRequest =
+internal fun ResponsesApiRequest.toResponsesApiRequest(json: Json): ResponsesApiRequest =
     copy(input = input.map { it.toResponsesApiItem(json) })
 
-internal fun LlmCompactionRequest.toResponsesApiRequest(json: Json): LlmCompactionRequest =
+internal fun CompactionInput.toResponsesApiRequest(json: Json): CompactionInput =
     copy(input = input.map { it.toResponsesApiItem(json) })
 
-private fun LlmResponseItem.toResponsesApiItem(json: Json): LlmResponseItem =
+private fun ResponseItem.toResponsesApiItem(json: Json): ResponseItem =
     when (this) {
-        is LlmResponseItem.McpToolCallOutput -> LlmResponseItem.FunctionCallOutput(
+        is ResponseItem.McpToolCallOutput -> ResponseItem.FunctionCallOutput(
             callId = callId,
             output = output.toFunctionCallOutputPayload(json),
         )

@@ -1,5 +1,13 @@
 package io.github.stream29.codex.lite.llmprovider
 
+import io.github.stream29.codex.lite.tool.contract.FreeformTool
+import io.github.stream29.codex.lite.tool.contract.FreeformToolFormat
+import io.github.stream29.codex.lite.tool.contract.ResponsesApiNamespace
+import io.github.stream29.codex.lite.tool.contract.ResponsesApiWebSearchFilters
+import io.github.stream29.codex.lite.tool.contract.ResponsesApiWebSearchUserLocation
+import io.github.stream29.codex.lite.tool.contract.ResponsesApiTool
+import io.github.stream29.codex.lite.tool.contract.ToolSpec
+import io.github.stream29.codex.lite.tool.contract.WebSearchContextSize
 import kotlinx.schema.json.AdditionalPropertiesConstraint
 import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.schema.json.StringPropertyDefinition
@@ -16,12 +24,12 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun responseItemUsesTaggedPolymorphicShape() {
-        val request = LlmResponseRequest(
+        val request = ResponsesApiRequest(
             model = "test-model",
             input = listOf(
-                LlmResponseItem.Message(
-                    role = LlmMessageRole.User,
-                    content = listOf(LlmContentItem.InputText("hello")),
+                ResponseItem.Message(
+                    role = MessageRole.User,
+                    content = listOf(ContentItem.InputText("hello")),
                 ),
             ),
         )
@@ -38,11 +46,11 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun requestUsesExplicitWireNames() {
-        val request = LlmResponseRequest(
+        val request = ResponsesApiRequest(
             model = "test-model",
             input = textInput("hello"),
             previousResponseId = "resp_1",
-            toolChoice = LlmToolChoice.Required,
+            toolChoice = ToolChoice.Required,
             parallelToolCalls = true,
             serviceTier = "flex",
             promptCacheKey = "cache-key",
@@ -61,13 +69,13 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun functionCallOutputPayloadCanBeText() {
-        val item = LlmResponseItem.FunctionCallOutput(
+        val item = ResponseItem.FunctionCallOutput(
             callId = "call_1",
-            output = LlmFunctionCallOutputPayload.fromText("ok"),
+            output = FunctionCallOutputPayload.fromText("ok"),
         )
 
         val encoded = OpenAiSubscriptionLlmProvider.defaultJson
-            .parseToJsonElement(OpenAiSubscriptionLlmProvider.defaultJson.encodeToString<LlmResponseItem>(item))
+            .parseToJsonElement(OpenAiSubscriptionLlmProvider.defaultJson.encodeToString<ResponseItem>(item))
             .jsonObject
 
         assertEquals(JsonPrimitive("function_call_output"), encoded["type"])
@@ -76,15 +84,15 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun functionCallOutputPayloadCanBeContentItems() {
-        val item = LlmResponseItem.FunctionCallOutput(
+        val item = ResponseItem.FunctionCallOutput(
             callId = "call_1",
-            output = LlmFunctionCallOutputPayload.fromContentItems(
-                listOf(LlmFunctionCallOutputContentItem.InputText("note")),
+            output = FunctionCallOutputPayload.fromContentItems(
+                listOf(FunctionCallOutputContentItem.InputText("note")),
             ),
         )
 
         val encoded = OpenAiSubscriptionLlmProvider.defaultJson
-            .parseToJsonElement(OpenAiSubscriptionLlmProvider.defaultJson.encodeToString<LlmResponseItem>(item))
+            .parseToJsonElement(OpenAiSubscriptionLlmProvider.defaultJson.encodeToString<ResponseItem>(item))
             .jsonObject
 
         assertEquals(
@@ -101,30 +109,30 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun functionCallOutputPayloadDecodesText() {
-        val item = OpenAiSubscriptionLlmProvider.defaultJson.decodeFromString<LlmResponseItem>(
+        val item = OpenAiSubscriptionLlmProvider.defaultJson.decodeFromString<ResponseItem>(
             """{"type":"function_call_output","call_id":"call_1","output":"ok"}""",
         )
 
-        val output = (item as LlmResponseItem.FunctionCallOutput).output.body
-        assertEquals("ok", (output as LlmFunctionCallOutputBody.Text).text)
+        val output = (item as ResponseItem.FunctionCallOutput).output.body
+        assertEquals("ok", (output as FunctionCallOutputBody.Text).text)
     }
 
     @Test
     fun functionCallOutputPayloadDecodesContentItems() {
-        val item = OpenAiSubscriptionLlmProvider.defaultJson.decodeFromString<LlmResponseItem>(
+        val item = OpenAiSubscriptionLlmProvider.defaultJson.decodeFromString<ResponseItem>(
             """{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_text","text":"note"}]}""",
         )
 
-        val output = (item as LlmResponseItem.FunctionCallOutput).output.body
-        val contentItem = (output as LlmFunctionCallOutputBody.ContentItems).items.single()
-        assertEquals("note", (contentItem as LlmFunctionCallOutputContentItem.InputText).text)
+        val output = (item as ResponseItem.FunctionCallOutput).output.body
+        val contentItem = (output as FunctionCallOutputBody.ContentItems).items.single()
+        assertEquals("note", (contentItem as FunctionCallOutputContentItem.InputText).text)
     }
 
     @Test
     fun mcpToolCallOutputSerializesRawProtocolShape() {
-        val item = LlmResponseItem.McpToolCallOutput(
+        val item = ResponseItem.McpToolCallOutput(
             callId = "call_1",
-            output = LlmMcpCallToolResult(
+            output = CallToolResult(
                 content = listOf(json.parseToJsonElement("""{"type":"text","text":"ok"}""")),
                 structuredContent = json.parseToJsonElement("""{"answer":1}"""),
                 isError = false,
@@ -132,7 +140,7 @@ class OpenAiSubscriptionSerializationTest {
             ),
         )
 
-        val encoded = json.parseToJsonElement(json.encodeToString<LlmResponseItem>(item)).jsonObject
+        val encoded = json.parseToJsonElement(json.encodeToString<ResponseItem>(item)).jsonObject
 
         assertEquals(JsonPrimitive("mcp_tool_call_output"), encoded["type"])
         assertEquals(JsonPrimitive("call_1"), encoded["call_id"])
@@ -144,21 +152,21 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun mcpToolCallOutputStructuredContentConvertsToFunctionCallOutputText() {
-        val item = LlmResponseItem.McpToolCallOutput(
+        val item = ResponseItem.McpToolCallOutput(
             callId = "call_1",
-            output = LlmMcpCallToolResult(
+            output = CallToolResult(
                 content = listOf(json.parseToJsonElement("""{"type":"text","text":"ignored"}""")),
                 structuredContent = json.parseToJsonElement("""{"answer":1}"""),
                 isError = false,
             ),
         )
 
-        val converted = LlmResponseRequest(
+        val converted = ResponsesApiRequest(
             model = "test-model",
             input = listOf(item),
-        ).toResponsesApiRequest(json).input.single() as LlmResponseItem.FunctionCallOutput
+        ).toResponsesApiRequest(json).input.single() as ResponseItem.FunctionCallOutput
 
-        val body = converted.output.body as LlmFunctionCallOutputBody.Text
+        val body = converted.output.body as FunctionCallOutputBody.Text
         assertEquals("call_1", converted.callId)
         assertEquals("""{"answer":1}""", body.text)
         assertEquals(true, converted.output.success)
@@ -166,9 +174,9 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun mcpToolCallOutputImageContentConvertsToFunctionCallOutputContentItems() {
-        val item = LlmResponseItem.McpToolCallOutput(
+        val item = ResponseItem.McpToolCallOutput(
             callId = "call_1",
-            output = LlmMcpCallToolResult(
+            output = CallToolResult(
                 content = listOf(
                     json.parseToJsonElement("""{"type":"text","text":"caption"}"""),
                     json.parseToJsonElement(
@@ -187,23 +195,23 @@ class OpenAiSubscriptionSerializationTest {
         )
 
         val converted = item.output.toFunctionCallOutputPayload(json)
-        val body = converted.body as LlmFunctionCallOutputBody.ContentItems
+        val body = converted.body as FunctionCallOutputBody.ContentItems
 
         assertEquals(false, converted.success)
-        assertEquals("caption", (body.items[0] as LlmFunctionCallOutputContentItem.InputText).text)
-        val image = body.items[1] as LlmFunctionCallOutputContentItem.InputImage
+        assertEquals("caption", (body.items[0] as FunctionCallOutputContentItem.InputText).text)
+        val image = body.items[1] as FunctionCallOutputContentItem.InputImage
         assertEquals("data:image/png;base64,BASE64", image.imageUrl)
-        assertEquals(LlmImageDetail.Original, image.detail)
+        assertEquals(ImageDetail.Original, image.detail)
     }
 
     @Test
     fun mcpToolCallOutputTextOnlyContentConvertsToJsonText() {
-        val output = LlmMcpCallToolResult(
+        val output = CallToolResult(
             content = listOf(json.parseToJsonElement("""{"type":"text","text":"ok"}""")),
         )
 
         val converted = output.toFunctionCallOutputPayload(json)
-        val body = converted.body as LlmFunctionCallOutputBody.Text
+        val body = converted.body as FunctionCallOutputBody.Text
 
         assertEquals("""[{"type":"text","text":"ok"}]""", body.text)
         assertEquals(true, converted.success)
@@ -211,16 +219,16 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun compactionSummaryDecodesAsTaggedVariant() {
-        val item = OpenAiSubscriptionLlmProvider.defaultJson.decodeFromString<LlmResponseItem>(
+        val item = OpenAiSubscriptionLlmProvider.defaultJson.decodeFromString<ResponseItem>(
             """{"type":"compaction_summary","encrypted_content":"enc"}""",
         )
 
-        assertEquals("enc", (item as LlmResponseItem.CompactionSummary).encryptedContent)
+        assertEquals("enc", (item as ResponseItem.CompactionSummary).encryptedContent)
     }
 
     @Test
     fun streamEventDecodesAsTaggedVariant() {
-        val event = OpenAiSubscriptionLlmProvider.defaultJson.decodeFromString<LlmResponseStreamEvent>(
+        val event = OpenAiSubscriptionLlmProvider.defaultJson.decodeFromString<ResponsesStreamEvent>(
             """
                 {
                   "type":"response.output_text.delta",
@@ -232,23 +240,23 @@ class OpenAiSubscriptionSerializationTest {
             """.trimIndent(),
         )
 
-        assertEquals("hi", (event as LlmResponseStreamEvent.OutputTextDelta).delta)
+        assertEquals("hi", (event as ResponsesStreamEvent.OutputTextDelta).delta)
     }
 
     @Test
     fun completedStreamEventDecodesRawResponseShape() {
-        val event = OpenAiSubscriptionLlmProvider.defaultJson.decodeFromString<LlmResponseStreamEvent>(
+        val event = OpenAiSubscriptionLlmProvider.defaultJson.decodeFromString<ResponsesStreamEvent>(
             """{"type":"response.completed","response":{"id":"resp_1","end_turn":true}}""",
         )
 
-        val response = (event as LlmResponseStreamEvent.Completed).response
+        val response = (event as ResponsesStreamEvent.Completed).response
         assertEquals("resp_1", response.id)
         assertEquals(true, response.endTurn)
     }
 
     @Test
     fun contentPartStreamEventDecodesRawPartShape() {
-        val event = OpenAiSubscriptionLlmProvider.defaultJson.decodeFromString<LlmResponseStreamEvent>(
+        val event = OpenAiSubscriptionLlmProvider.defaultJson.decodeFromString<ResponsesStreamEvent>(
             """
                 {
                   "type":"response.content_part.added",
@@ -260,13 +268,13 @@ class OpenAiSubscriptionSerializationTest {
             """.trimIndent(),
         )
 
-        val part = (event as LlmResponseStreamEvent.ContentPartAdded).part
-        assertEquals("hi", (part as LlmContentItem.OutputText).text)
+        val part = (event as ResponsesStreamEvent.ContentPartAdded).part
+        assertEquals("hi", (part as ContentItem.OutputText).text)
     }
 
     @Test
     fun outputTextDoneStreamEventDecodesRawTextShape() {
-        val event = OpenAiSubscriptionLlmProvider.defaultJson.decodeFromString<LlmResponseStreamEvent>(
+        val event = OpenAiSubscriptionLlmProvider.defaultJson.decodeFromString<ResponsesStreamEvent>(
             """
                 {
                   "type":"response.output_text.done",
@@ -278,12 +286,12 @@ class OpenAiSubscriptionSerializationTest {
             """.trimIndent(),
         )
 
-        assertEquals("hi", (event as LlmResponseStreamEvent.OutputTextDone).text)
+        assertEquals("hi", (event as ResponsesStreamEvent.OutputTextDone).text)
     }
 
     @Test
     fun agentMessageInputTextDecodesAsTaggedVariant() {
-        val item = json.decodeFromString<LlmResponseItem>(
+        val item = json.decodeFromString<ResponseItem>(
             """
                 {
                   "type": "agent_message",
@@ -296,13 +304,13 @@ class OpenAiSubscriptionSerializationTest {
             """.trimIndent(),
         )
 
-        val content = (item as LlmResponseItem.AgentMessage).content.single()
-        assertEquals("hello", (content as LlmAgentMessageInputContent.InputText).text)
+        val content = (item as ResponseItem.AgentMessage).content.single()
+        assertEquals("hello", (content as AgentMessageInputContent.InputText).text)
     }
 
     @Test
     fun reasoningTextContentDecodesAsTaggedVariant() {
-        val item = json.decodeFromString<LlmResponseItem>(
+        val item = json.decodeFromString<ResponseItem>(
             """
                 {
                   "type": "reasoning",
@@ -316,14 +324,14 @@ class OpenAiSubscriptionSerializationTest {
             """.trimIndent(),
         )
 
-        val content = (item as LlmResponseItem.Reasoning).content.orEmpty()
-        assertEquals("plain", (content[0] as LlmReasoningContentItem.Text).text)
-        assertEquals("hidden", (content[1] as LlmReasoningContentItem.ReasoningText).text)
+        val content = (item as ResponseItem.Reasoning).content.orEmpty()
+        assertEquals("plain", (content[0] as ReasoningItemContent.Text).text)
+        assertEquals("hidden", (content[1] as ReasoningItemContent.ReasoningText).text)
     }
 
     @Test
     fun localShellCallDecodesStrictActionShape() {
-        val item = json.decodeFromString<LlmResponseItem>(
+        val item = json.decodeFromString<ResponseItem>(
             """
                 {
                   "type": "local_shell_call",
@@ -341,9 +349,9 @@ class OpenAiSubscriptionSerializationTest {
             """.trimIndent(),
         )
 
-        val call = item as LlmResponseItem.LocalShellCall
-        val action = call.action as LlmLocalShellAction.Exec
-        assertEquals(LlmLocalShellStatus.Completed, call.status)
+        val call = item as ResponseItem.LocalShellCall
+        val action = call.action as LocalShellAction.Exec
+        assertEquals(LocalShellStatus.Completed, call.status)
         assertEquals(listOf("bash", "-lc", "pwd"), action.command)
         assertEquals(1000, action.timeoutMs)
         assertEquals("/tmp", action.workingDirectory)
@@ -353,42 +361,42 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun webSearchCallDecodesStrictActionShapes() {
-        val search = json.decodeFromString<LlmResponseItem>(
+        val search = json.decodeFromString<ResponseItem>(
             """{"type":"web_search_call","status":"completed","action":{"type":"search","query":"weather","queries":["a","b"]}}""",
-        ) as LlmResponseItem.WebSearchCall
-        val openPage = json.decodeFromString<LlmResponseItem>(
+        ) as ResponseItem.WebSearchCall
+        val openPage = json.decodeFromString<ResponseItem>(
             """{"type":"web_search_call","status":"completed","action":{"type":"open_page","url":"https://example.com"}}""",
-        ) as LlmResponseItem.WebSearchCall
-        val findInPage = json.decodeFromString<LlmResponseItem>(
+        ) as ResponseItem.WebSearchCall
+        val findInPage = json.decodeFromString<ResponseItem>(
             """{"type":"web_search_call","status":"completed","action":{"type":"find_in_page","url":"https://example.com","pattern":"needle"}}""",
-        ) as LlmResponseItem.WebSearchCall
+        ) as ResponseItem.WebSearchCall
 
-        assertEquals("weather", (search.action as LlmWebSearchAction.Search).query)
-        assertEquals("https://example.com", (openPage.action as LlmWebSearchAction.OpenPage).url)
-        assertEquals("needle", (findInPage.action as LlmWebSearchAction.FindInPage).pattern)
+        assertEquals("weather", (search.action as WebSearchAction.Search).query)
+        assertEquals("https://example.com", (openPage.action as WebSearchAction.OpenPage).url)
+        assertEquals("needle", (findInPage.action as WebSearchAction.FindInPage).pattern)
     }
 
     @Test
     fun unknownResponseItemDecodesAsOther() {
-        val item = json.decodeFromString<LlmResponseItem>(
+        val item = json.decodeFromString<ResponseItem>(
             """{"type":"future_item","value":1}""",
         )
 
-        assertEquals(LlmResponseItem.Other, item)
+        assertEquals(ResponseItem.Other, item)
     }
 
     @Test
     fun unknownWebSearchActionDecodesAsOther() {
-        val item = json.decodeFromString<LlmResponseItem>(
+        val item = json.decodeFromString<ResponseItem>(
             """{"type":"web_search_call","status":"completed","action":{"type":"future_action","value":1}}""",
         )
 
-        assertEquals(LlmWebSearchAction.Other, (item as LlmResponseItem.WebSearchCall).action)
+        assertEquals(WebSearchAction.Other, (item as ResponseItem.WebSearchCall).action)
     }
 
     @Test
     fun functionToolSerializesExpectedWireShape() {
-        val tool = LlmTool.Function(
+        val tool = ResponsesApiTool(
             name = "demo",
             description = "A demo tool",
             parameters = ObjectPropertyDefinition(
@@ -419,11 +427,11 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun namespaceToolSerializesExpectedWireShape() {
-        val tool = LlmTool.Namespace(
+        val tool = ResponsesApiNamespace(
             name = "mcp__demo__",
             description = "Demo tools",
             tools = listOf(
-                LlmNamespaceTool.Function(
+                ResponsesApiTool(
                     name = "lookup_order",
                     description = "Look up an order",
                     parameters = ObjectPropertyDefinition(
@@ -463,7 +471,7 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun toolSearchToolSerializesExpectedWireShape() {
-        val tool = LlmTool.ToolSearch(
+        val tool = ToolSpec.ToolSearch(
             execution = "sync",
             description = "Search app tools",
             parameters = ObjectPropertyDefinition(
@@ -500,12 +508,12 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun toolSearchOutputSerializesLoadableToolsExpectedWireShape() {
-        val item = LlmResponseItem.ToolSearchOutput(
+        val item = ResponseItem.ToolSearchOutput(
             callId = "call_1",
             status = "completed",
             execution = "client",
             tools = listOf(
-                LlmLoadableToolSpec.Function(
+                ResponsesApiTool(
                     name = "lookup_order",
                     description = "Look up an order",
                     strict = false,
@@ -516,11 +524,11 @@ class OpenAiSubscriptionSerializationTest {
                         additionalProperties = AdditionalPropertiesConstraint.deny(),
                     ),
                 ),
-                LlmLoadableToolSpec.Namespace(
+                ResponsesApiNamespace(
                     name = "mcp__calendar",
                     description = "Calendar tools",
                     tools = listOf(
-                        LlmLoadableNamespaceTool.Function(
+                        ResponsesApiTool(
                             name = "create_event",
                             description = "Create events",
                             strict = false,
@@ -586,13 +594,13 @@ class OpenAiSubscriptionSerializationTest {
                     }
                 """.trimIndent(),
             ),
-            json.parseToJsonElement(json.encodeToString<LlmResponseItem>(item)),
+            json.parseToJsonElement(json.encodeToString<ResponseItem>(item)),
         )
     }
 
     @Test
     fun toolSearchOutputDecodesLoadableTools() {
-        val item = json.decodeFromString<LlmResponseItem>(
+        val item = json.decodeFromString<ResponseItem>(
             """
                 {
                   "type": "tool_search_output",
@@ -640,10 +648,10 @@ class OpenAiSubscriptionSerializationTest {
                   ]
                 }
             """.trimIndent(),
-        ) as LlmResponseItem.ToolSearchOutput
+        ) as ResponseItem.ToolSearchOutput
 
         assertEquals(
-            LlmLoadableToolSpec.Function(
+            ResponsesApiTool(
                 name = "lookup_order",
                 description = "Look up an order",
                 strict = false,
@@ -657,11 +665,11 @@ class OpenAiSubscriptionSerializationTest {
             item.tools[0],
         )
         assertEquals(
-            LlmLoadableToolSpec.Namespace(
+            ResponsesApiNamespace(
                 name = "mcp__calendar",
                 description = "Calendar tools",
                 tools = listOf(
-                    LlmLoadableNamespaceTool.Function(
+                    ResponsesApiTool(
                         name = "create_event",
                         description = "Create events",
                         strict = false,
@@ -680,16 +688,16 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun webSearchToolSerializesExpectedWireShape() {
-        val tool = LlmTool.WebSearch(
+        val tool = ToolSpec.WebSearch(
             externalWebAccess = true,
-            filters = LlmWebSearchFilters(allowedDomains = listOf("example.com")),
-            userLocation = LlmWebSearchUserLocation(
+            filters = ResponsesApiWebSearchFilters(allowedDomains = listOf("example.com")),
+            userLocation = ResponsesApiWebSearchUserLocation(
                 country = "US",
                 region = "California",
                 city = "San Francisco",
                 timezone = "America/Los_Angeles",
             ),
-            searchContextSize = LlmWebSearchContextSize.High,
+            searchContextSize = WebSearchContextSize.High,
             searchContentTypes = listOf("text", "image"),
         )
 
@@ -720,10 +728,10 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun customToolSerializesExpectedWireShape() {
-        val tool = LlmTool.Custom(
+        val tool = FreeformTool(
             name = "apply_patch",
             description = "Apply a patch",
-            format = LlmCustomToolFormat(
+            format = FreeformToolFormat(
                 type = "grammar",
                 syntax = "lark",
                 definition = "start: /.+/",
@@ -751,7 +759,7 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun imageGenerationToolSerializesExpectedWireShape() {
-        val tool = LlmTool.ImageGeneration(outputFormat = "png")
+        val tool = ToolSpec.ImageGeneration(outputFormat = "png")
 
         assertEquals(
             json.parseToJsonElement("""{"type":"image_generation","output_format":"png"}"""),
@@ -759,6 +767,6 @@ class OpenAiSubscriptionSerializationTest {
         )
     }
 
-    private fun encodeTool(tool: LlmTool): JsonElement =
-        json.parseToJsonElement(json.encodeToString<LlmTool>(tool))
+    private fun encodeTool(tool: ToolSpec): JsonElement =
+        json.parseToJsonElement(json.encodeToString<ToolSpec>(tool))
 }

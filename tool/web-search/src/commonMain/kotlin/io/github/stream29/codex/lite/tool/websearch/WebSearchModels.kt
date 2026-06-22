@@ -1,7 +1,7 @@
 package io.github.stream29.codex.lite.tool.websearch
 
-import io.github.stream29.codex.lite.llmprovider.LlmReasoning
-import io.github.stream29.codex.lite.llmprovider.LlmResponseItem
+import io.github.stream29.codex.lite.llmprovider.Reasoning
+import io.github.stream29.codex.lite.llmprovider.ResponseItem
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -21,7 +21,7 @@ import kotlinx.serialization.json.jsonPrimitive
 public data class SearchRequest(
     public val id: String,
     public val model: String,
-    public val reasoning: LlmReasoning? = null,
+    public val reasoning: Reasoning? = null,
     public val input: SearchInput? = null,
     public val commands: SearchCommands? = null,
     public val settings: SearchSettings? = null,
@@ -32,11 +32,11 @@ public data class SearchRequest(
 @Serializable(with = SearchInputSerializer::class)
 public sealed interface SearchInput {
     public data class Text(public val text: String) : SearchInput
-    public data class Items(public val items: List<LlmResponseItem>) : SearchInput
+    public data class Items(public val items: List<ResponseItem>) : SearchInput
 }
 
 public object SearchInputSerializer : kotlinx.serialization.KSerializer<SearchInput> {
-    private val itemsSerializer = ListSerializer(LlmResponseItem.serializer())
+    private val itemsSerializer = ListSerializer(ResponseItem.serializer())
 
     override val descriptor: SerialDescriptor = kotlinx.serialization.json.JsonElement.serializer().descriptor
 

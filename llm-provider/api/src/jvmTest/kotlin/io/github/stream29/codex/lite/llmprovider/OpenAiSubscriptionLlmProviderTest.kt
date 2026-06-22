@@ -64,7 +64,7 @@ class OpenAiSubscriptionLlmProviderTest {
 
             assertTrue(events.isNotEmpty(), "Expected at least one SSE event from Codex subscription backend.")
             assertTrue(
-                events.any { it is LlmResponseStreamEvent.Created || it is LlmResponseStreamEvent.Completed },
+                events.any { it is ResponsesStreamEvent.Created || it is ResponsesStreamEvent.Completed },
                 "Expected at least one mapped Responses API SSE event.",
             )
         } finally {
@@ -79,7 +79,7 @@ class OpenAiSubscriptionLlmProviderTest {
             val provider = liveProvider(client)
             val event = provider.streamResponse(codexResponseRequest(liveModel())).first()
 
-            assertTrue(event is LlmResponseStreamEvent.Created, "Expected a Responses API created event.")
+            assertTrue(event is ResponsesStreamEvent.Created, "Expected a Responses API created event.")
         } finally {
             client.close()
         }
@@ -91,7 +91,7 @@ class OpenAiSubscriptionLlmProviderTest {
         try {
             val provider = liveProvider(client)
             val response = provider.compactResponse(
-                LlmCompactionRequest(
+                CompactionInput(
                     model = liveModel(),
                     instructions = "Summarize the conversation into one short sentence.",
                     input = responseInput("The user asked whether the Codex subscription provider can call the backend."),
@@ -172,25 +172,25 @@ class OpenAiSubscriptionLlmProviderTest {
             ?.mapNotNull { (it as? JsonObject)?.string("slug")?.takeIf(String::isNotBlank) }
             .orEmpty()
 
-    private fun codexResponseRequest(model: String): LlmResponseRequest =
-        LlmResponseRequest(
+    private fun codexResponseRequest(model: String): ResponsesApiRequest =
+        ResponsesApiRequest(
             model = model,
             instructions = "Reply with exactly: codex-lite-live-ok",
             input = responseInput("Reply with exactly: codex-lite-live-ok"),
             store = false,
             tools = emptyList(),
-            toolChoice = LlmToolChoice.Auto,
+            toolChoice = ToolChoice.Auto,
             parallelToolCalls = false,
             include = emptySet(),
             promptCacheKey = "codex-lite-live-test",
             clientMetadata = mapOf("source" to "codex-lite-live-test"),
         )
 
-    private fun responseInput(text: String): List<LlmResponseItem> =
+    private fun responseInput(text: String): List<ResponseItem> =
         listOf(
-            LlmResponseItem.Message(
-                role = LlmMessageRole.User,
-                content = listOf(LlmContentItem.InputText(text)),
+            ResponseItem.Message(
+                role = MessageRole.User,
+                content = listOf(ContentItem.InputText(text)),
             ),
         )
 

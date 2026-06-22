@@ -33,7 +33,7 @@ public class OpenAiSubscriptionLlmProvider(
     private val config: OpenAiSubscriptionLlmProviderConfig = OpenAiSubscriptionLlmProviderConfig(),
     private val json: Json = defaultJson,
 ) : LlmProvider {
-    override suspend fun listModels(): LlmModels {
+    override suspend fun listModels(): ModelsResponse {
         val response = executeWithRetry {
             httpClient.getWithAuth("models", ContentType.Application.Json) {
                 parameter("client_version", config.clientVersion)
@@ -42,18 +42,18 @@ public class OpenAiSubscriptionLlmProvider(
         return response.body()
     }
 
-    override suspend fun createResponse(request: LlmResponseRequest): LlmResponse {
+    override suspend fun createResponse(request: ResponsesApiRequest): Response {
         val events = streamResponse(request).toList()
         val completed = events.asReversed().firstNotNullOfOrNull { event ->
-            event as? LlmResponseStreamEvent.Completed
+            event as? ResponsesStreamEvent.Completed
         } ?: throw LlmProviderException(message = "Response stream did not contain a completed response.")
 
         return completed.response.copy(
-            output = events.filterIsInstance<LlmResponseStreamEvent.OutputItemDone>().map { it.item },
+            output = events.filterIsInstance<ResponsesStreamEvent.OutputItemDone>().map { it.item },
         )
     }
 
-    override fun streamResponse(request: LlmResponseRequest): Flow<LlmResponseStreamEvent> = flow {
+    override fun streamResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent> = flow {
         var emittedAny = false
         var attempt = 0
         while (true) {
@@ -62,7 +62,7 @@ public class OpenAiSubscriptionLlmProvider(
                 response.throwIfUnsuccessful()
                 response.body<SSESession>()
                     .incoming
-                    .toLlmResponseStreamEvents(json)
+                    .toResponsesStreamEvents(json)
                     .collect { event ->
                         emittedAny = true
                         emit(event)
@@ -78,18 +78,18 @@ public class OpenAiSubscriptionLlmProvider(
         }
     }
 
-    override suspend fun compactResponse(request: LlmCompactionRequest): LlmCompactionResponse {
+    override suspend fun compactResponse(request: CompactionInput): CompactionResponse {
         val response = executeWithRetry {
             httpClient.postWithAuth("responses/compact", ContentType.Application.Json) {
                 contentType(ContentType.Application.Json)
                 setBody(request.toResponsesApiRequest(json))
             }.also { it.throwIfUnsuccessful() }
         }
-        return json.decodeFromString(LlmCompactionResponse.serializer(), response.bodyAsText())
+        return json.decodeFromString(CompactionResponse.serializer(), response.bodyAsText())
     }
 
     private suspend fun postResponse(
-        request: LlmResponseRequest,
+        request: ResponsesApiRequest,
         stream: Boolean,
         accept: ContentType,
     ): HttpResponse = httpClient.postWithAuth("responses", accept) {

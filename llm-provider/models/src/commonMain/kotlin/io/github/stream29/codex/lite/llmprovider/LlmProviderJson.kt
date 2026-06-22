@@ -20,11 +20,11 @@ public object LlmProviderJson {
     @OptIn(ExperimentalSerializationApi::class)
     public val default: Json = Json {
         serializersModule = SerializersModule {
-            polymorphic(LlmResponseItem::class) {
-                defaultDeserializer { LlmResponseItem.Other.serializer() }
+            polymorphic(ResponseItem::class) {
+                defaultDeserializer { ResponseItem.Other.serializer() }
             }
-            polymorphic(LlmWebSearchAction::class) {
-                defaultDeserializer { LlmWebSearchAction.Other.serializer() }
+            polymorphic(WebSearchAction::class) {
+                defaultDeserializer { WebSearchAction.Other.serializer() }
             }
         }
         ignoreUnknownKeys = true
@@ -33,52 +33,52 @@ public object LlmProviderJson {
     }
 }
 
-public object LlmToolChoiceSerializer : KSerializer<LlmToolChoice> {
+public object ToolChoiceSerializer : KSerializer<ToolChoice> {
     override val descriptor: SerialDescriptor = JsonPrimitive.serializer().descriptor
 
-    override fun serialize(encoder: Encoder, value: LlmToolChoice) {
+    override fun serialize(encoder: Encoder, value: ToolChoice) {
         encoder.encodeString(value.wireName)
     }
 
-    override fun deserialize(decoder: Decoder): LlmToolChoice =
+    override fun deserialize(decoder: Decoder): ToolChoice =
         when (val value = decoder.decodeString()) {
-            LlmToolChoice.Auto.wireName -> LlmToolChoice.Auto
-            LlmToolChoice.None.wireName -> LlmToolChoice.None
-            LlmToolChoice.Required.wireName -> LlmToolChoice.Required
+            ToolChoice.Auto.wireName -> ToolChoice.Auto
+            ToolChoice.None.wireName -> ToolChoice.None
+            ToolChoice.Required.wireName -> ToolChoice.Required
             else -> error("Unknown tool choice: $value")
         }
 }
 
-public object LlmFunctionCallOutputPayloadSerializer : KSerializer<LlmFunctionCallOutputPayload> {
-    private val contentItemsSerializer = ListSerializer(LlmFunctionCallOutputContentItem.serializer())
+public object FunctionCallOutputPayloadSerializer : KSerializer<FunctionCallOutputPayload> {
+    private val contentItemsSerializer = ListSerializer(FunctionCallOutputContentItem.serializer())
 
     override val descriptor: SerialDescriptor = JsonElement.serializer().descriptor
 
-    override fun serialize(encoder: Encoder, value: LlmFunctionCallOutputPayload) {
+    override fun serialize(encoder: Encoder, value: FunctionCallOutputPayload) {
         require(encoder is JsonEncoder) {
-            "LlmFunctionCallOutputPayload can only be encoded as JSON."
+            "FunctionCallOutputPayload can only be encoded as JSON."
         }
         val element = when (val body = value.body) {
-            is LlmFunctionCallOutputBody.Text -> JsonPrimitive(body.text)
-            is LlmFunctionCallOutputBody.ContentItems -> {
+            is FunctionCallOutputBody.Text -> JsonPrimitive(body.text)
+            is FunctionCallOutputBody.ContentItems -> {
                 encoder.json.encodeToJsonElement(contentItemsSerializer, body.items)
             }
         }
         encoder.encodeJsonElement(element)
     }
 
-    override fun deserialize(decoder: Decoder): LlmFunctionCallOutputPayload {
+    override fun deserialize(decoder: Decoder): FunctionCallOutputPayload {
         require(decoder is JsonDecoder) {
-            "LlmFunctionCallOutputPayload can only be decoded as JSON."
+            "FunctionCallOutputPayload can only be decoded as JSON."
         }
         val element = decoder.decodeJsonElement()
         val body = when (element) {
-            is JsonArray -> LlmFunctionCallOutputBody.ContentItems(
+            is JsonArray -> FunctionCallOutputBody.ContentItems(
                 decoder.json.decodeFromJsonElement(contentItemsSerializer, element),
             )
 
-            else -> LlmFunctionCallOutputBody.Text(element.jsonPrimitive.content)
+            else -> FunctionCallOutputBody.Text(element.jsonPrimitive.content)
         }
-        return LlmFunctionCallOutputPayload(body)
+        return FunctionCallOutputPayload(body)
     }
 }

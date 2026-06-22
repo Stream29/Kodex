@@ -11,6 +11,7 @@ kotlin {
             api(libs.ktor.client.core)
             api(project(":auth"))
             api(project(":llm-provider:models"))
+            api(project(":tool:contract"))
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
         }
