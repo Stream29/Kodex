@@ -26,7 +26,7 @@ public data class SearchRequest(
     public val commands: SearchCommands? = null,
     public val settings: SearchSettings? = null,
     @SerialName("max_output_tokens")
-    public val maxOutputTokens: ULong? = null,
+    public val maxOutputTokens: Long? = null,
 )
 
 @Serializable(with = SearchInputSerializer::class)
@@ -84,7 +84,7 @@ public data class SearchCommands(
 @Serializable
 public data class SearchQuery(
     public val q: String,
-    public val recency: ULong? = null,
+    public val recency: Int? = null,
     public val domains: List<String>? = null,
 )
 
@@ -92,14 +92,14 @@ public data class SearchQuery(
 public data class OpenOperation(
     @SerialName("ref_id")
     public val refId: String,
-    public val lineno: ULong? = null,
+    public val lineno: Int? = null,
 )
 
 @Serializable
 public data class ClickOperation(
     @SerialName("ref_id")
     public val refId: String,
-    public val id: ULong,
+    public val id: Int,
 )
 
 @Serializable
@@ -113,7 +113,7 @@ public data class FindOperation(
 public data class ScreenshotOperation(
     @SerialName("ref_id")
     public val refId: String,
-    public val pageno: ULong,
+    public val pageno: Int,
 )
 
 @Serializable
@@ -142,7 +142,7 @@ public enum class FinanceAssetType {
 public data class WeatherOperation(
     public val location: String,
     public val start: String? = null,
-    public val duration: ULong? = null,
+    public val duration: Int? = null,
 )
 
 @Serializable
@@ -158,7 +158,7 @@ public data class SportsOperation(
     @SerialName("date_to")
     public val dateTo: String? = null,
     @SerialName("num_games")
-    public val numGames: ULong? = null,
+    public val numGames: Int? = null,
     public val locale: String? = null,
 )
 
@@ -278,7 +278,7 @@ public data class SearchFilters(
 @Serializable
 public data class SearchImageSettings(
     @SerialName("max_results")
-    public val maxResults: ULong? = null,
+    public val maxResults: Int? = null,
     public val caption: Boolean? = null,
 )
 
