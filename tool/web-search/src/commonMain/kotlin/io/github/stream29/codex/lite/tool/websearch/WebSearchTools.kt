@@ -13,19 +13,14 @@ public object WebSearchTools {
     public const val DefaultRunDescription: String =
         "Search, open, inspect, and retrieve concise current information from the web."
 
-    public val spec: ToolSpec = createSpec()
-
-    public fun createSpec(
-        namespaceDescription: String = DefaultNamespaceDescription,
-        runDescription: String = DefaultRunDescription,
-    ): ToolSpec =
+    public val spec: ToolSpec =
         ResponsesApiNamespace(
             name = Namespace,
-            description = namespaceDescription,
+            description = DefaultNamespaceDescription,
             tools = listOf(
                 ResponsesApiTool(
                     name = RunToolName,
-                    description = runDescription,
+                    description = DefaultRunDescription,
                     strict = false,
                     parameters = SearchCommandsSchema,
                 ),

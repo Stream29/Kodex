@@ -17,6 +17,18 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 
+/**
+ * @property reasoning Nullable because search requests may omit reasoning
+ * controls; `null` means use backend defaults.
+ * @property input Nullable because callers may send commands without explicit
+ * conversation input; `null` means no input payload is sent.
+ * @property commands Nullable because callers may use settings-only requests;
+ * `null` means no command group is sent.
+ * @property settings Nullable because hosted search settings are optional;
+ * `null` means use backend defaults.
+ * @property maxOutputTokens Nullable because output budget is optional; `null`
+ * means use the backend default.
+ */
 @Serializable
 public data class SearchRequest(
     public val id: String,
@@ -63,6 +75,30 @@ public object SearchInputSerializer : kotlinx.serialization.KSerializer<SearchIn
     }
 }
 
+/**
+ * @property searchQuery Nullable because the search command group is optional;
+ * `null` means no text searches are requested.
+ * @property imageQuery Nullable because the image command group is optional;
+ * `null` means no image searches are requested.
+ * @property open Nullable because open operations are optional; `null` means no
+ * pages are opened.
+ * @property click Nullable because click operations are optional; `null` means
+ * no result links are clicked.
+ * @property find Nullable because find operations are optional; `null` means no
+ * in-page search is requested.
+ * @property screenshot Nullable because screenshots are optional; `null` means
+ * no screenshot capture is requested.
+ * @property finance Nullable because finance lookups are optional; `null` means
+ * no finance data is requested.
+ * @property weather Nullable because weather lookups are optional; `null` means
+ * no weather data is requested.
+ * @property sports Nullable because sports lookups are optional; `null` means
+ * no sports data is requested.
+ * @property time Nullable because time lookups are optional; `null` means no
+ * time data is requested.
+ * @property responseLength Nullable because response length is optional; `null`
+ * means use the backend default.
+ */
 @Serializable
 public data class SearchCommands(
     @SerialName("search_query")
@@ -81,6 +117,12 @@ public data class SearchCommands(
     public val responseLength: SearchResponseLength? = null,
 )
 
+/**
+ * @property recency Nullable because recency filtering is optional; `null`
+ * means no recency filter is applied.
+ * @property domains Nullable because domain filtering is optional; `null` means
+ * no domain filter is applied.
+ */
 @Serializable
 public data class SearchQuery(
     public val q: String,
@@ -88,6 +130,10 @@ public data class SearchQuery(
     public val domains: List<String>? = null,
 )
 
+/**
+ * @property lineno Nullable because opening a ref can omit a target line; `null`
+ * means the backend chooses the default or most relevant position.
+ */
 @Serializable
 public data class OpenOperation(
     @SerialName("ref_id")
@@ -116,6 +162,10 @@ public data class ScreenshotOperation(
     public val pageno: Int,
 )
 
+/**
+ * @property market Nullable because some asset types do not need an exchange market;
+ * `null` means no market qualifier is sent.
+ */
 @Serializable
 public data class FinanceOperation(
     public val ticker: String,
@@ -138,6 +188,12 @@ public enum class FinanceAssetType {
     Index,
 }
 
+/**
+ * @property start Nullable because weather lookup start date is optional;
+ * `null` means omit the start bound.
+ * @property duration Nullable because weather lookup duration is optional;
+ * `null` means omit the duration bound.
+ */
 @Serializable
 public data class WeatherOperation(
     public val location: String,
@@ -145,6 +201,22 @@ public data class WeatherOperation(
     public val duration: Int? = null,
 )
 
+/**
+ * @property tool Nullable because the legacy tool discriminator is optional;
+ * `null` means omit it.
+ * @property team Nullable because team filtering is optional; `null` means no
+ * team filter is applied.
+ * @property opponent Nullable because opponent filtering is optional; `null`
+ * means no opponent filter is applied.
+ * @property dateFrom Nullable because date range start is optional; `null`
+ * means no lower date bound is sent.
+ * @property dateTo Nullable because date range end is optional; `null` means no
+ * upper date bound is sent.
+ * @property numGames Nullable because result count is optional; `null` means
+ * use the backend default.
+ * @property locale Nullable because locale is optional; `null` means use the
+ * backend default locale.
+ */
 @Serializable
 public data class SportsOperation(
     public val tool: SportsToolName? = null,
@@ -225,6 +297,20 @@ public enum class SearchResponseLength {
     Long,
 }
 
+/**
+ * @property userLocation Nullable because location hints are optional; `null`
+ * means send no location hint.
+ * @property searchContextSize Nullable because context size is optional; `null`
+ * means use the backend default.
+ * @property filters Nullable because domain filters are optional; `null` means
+ * send no filters.
+ * @property imageSettings Nullable because image search settings are optional;
+ * `null` means use backend defaults.
+ * @property allowedCallers Nullable because caller filtering is optional; `null`
+ * means do not restrict callers.
+ * @property externalWebAccess Nullable because live-web control is optional;
+ * `null` means use the backend default.
+ */
 @Serializable
 public data class SearchSettings(
     @SerialName("user_location")
@@ -240,6 +326,16 @@ public data class SearchSettings(
     public val externalWebAccess: Boolean? = null,
 )
 
+/**
+ * @property country Nullable because approximate locations may be partial;
+ * `null` means the country is unknown or intentionally omitted.
+ * @property region Nullable because approximate locations may be partial;
+ * `null` means the region is unknown or intentionally omitted.
+ * @property city Nullable because approximate locations may be partial; `null`
+ * means the city is unknown or intentionally omitted.
+ * @property timezone Nullable because approximate locations may be partial;
+ * `null` means the timezone is unknown or intentionally omitted.
+ */
 @Serializable
 public data class ApproximateLocation(
     public val type: LocationType = LocationType.Approximate,
@@ -267,6 +363,12 @@ public enum class SearchContextSize {
     High,
 }
 
+/**
+ * @property allowedDomains Nullable because allow-list filtering is optional;
+ * `null` means no allow-list is sent.
+ * @property blockedDomains Nullable because block-list filtering is optional;
+ * `null` means no block-list is sent.
+ */
 @Serializable
 public data class SearchFilters(
     @SerialName("allowed_domains")
@@ -275,6 +377,12 @@ public data class SearchFilters(
     public val blockedDomains: List<String>? = null,
 )
 
+/**
+ * @property maxResults Nullable because image result count is optional; `null`
+ * means use the backend default.
+ * @property caption Nullable because caption generation is optional; `null`
+ * means use the backend default.
+ */
 @Serializable
 public data class SearchImageSettings(
     @SerialName("max_results")
@@ -294,6 +402,10 @@ public enum class AllowedCaller {
     CodeInterpreter,
 }
 
+/**
+ * @property encryptedOutput Nullable because not every response carries encrypted
+ * side-channel state; `null` means there is no encrypted payload to preserve.
+ */
 @Serializable
 public data class SearchResponse(
     @SerialName("encrypted_output")

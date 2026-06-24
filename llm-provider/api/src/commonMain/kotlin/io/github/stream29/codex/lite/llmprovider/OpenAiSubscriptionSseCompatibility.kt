@@ -41,6 +41,10 @@ private val CodexSseCompatibilityRequestAttribute: AttributeKey<Boolean> =
 private class CodexSseResponseAdapter(
     private val client: HttpClient,
 ) : ResponseAdapter {
+    /**
+     * @return Nullable because Ktor uses `null` to mean this adapter does not
+     * handle the response.
+     */
     @Suppress("DEPRECATION")
     override fun adapt(
         data: HttpRequestData,

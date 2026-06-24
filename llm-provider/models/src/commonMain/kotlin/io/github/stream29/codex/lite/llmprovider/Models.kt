@@ -18,6 +18,18 @@ public data class ModelsResponse(
     public val models: List<ModelInfo> = emptyList(),
 )
 
+/**
+ * @property id Nullable because providers may omit this model alias; `null`
+ * means that alias is absent, not that the model is invalid.
+ * @property slug Nullable because providers may omit this model alias; `null`
+ * means that alias is absent, not that the model is invalid.
+ * @property name Nullable because providers may omit this model alias; `null`
+ * means that alias is absent, not that the model is invalid.
+ * @property displayName Nullable because providers may omit this model alias;
+ * `null` means that alias is absent, not that the model is invalid.
+ * @property title Nullable because providers may omit this model alias; `null`
+ * means that alias is absent, not that the model is invalid.
+ */
 @Serializable
 public data class ModelInfo(
     public val id: String? = null,
@@ -28,6 +40,20 @@ public data class ModelInfo(
     public val title: String? = null,
 )
 
+/**
+ * @property instructions Nullable because request instructions are optional;
+ * `null` means omit the field.
+ * @property previousResponseId Nullable because a request may start a new
+ * response chain; `null` means no previous response is referenced.
+ * @property reasoning Nullable because reasoning controls are optional; `null`
+ * means use provider/session defaults.
+ * @property serviceTier Nullable because service tier is optional; `null`
+ * means use the provider default.
+ * @property promptCacheKey Nullable because prompt cache affinity is optional;
+ * `null` means no cache key is sent.
+ * @property text Nullable because text controls are optional; `null` means use
+ * provider/session defaults.
+ */
 @Serializable
 public data class ResponsesApiRequest(
     public val model: String,
@@ -53,6 +79,16 @@ public data class ResponsesApiRequest(
     public val clientMetadata: Map<String, String> = emptyMap(),
 )
 
+/**
+ * @property id Nullable because partial or compatibility responses may omit id;
+ * `null` means the provider did not include it.
+ * @property usage Nullable because providers may omit token usage; `null`
+ * means usage was not reported.
+ * @property outputText Nullable because not every response includes flattened
+ * output text; `null` means only structured output is available.
+ * @property endTurn Nullable because the provider may omit turn-end metadata;
+ * `null` means no turn-end value was reported.
+ */
 @Serializable
 public data class Response(
     public val id: String? = null,
@@ -78,6 +114,14 @@ public sealed interface ResponsesStreamEvent {
         public val response: Response,
     ) : ResponsesStreamEvent
 
+    /**
+     * @property responseId Nullable because metadata frames may omit it; `null`
+     * means the frame did not carry a response id.
+     * @property headers Nullable because metadata frames may omit headers;
+     * `null` means no headers were carried.
+     * @property metadata Nullable because metadata frames may omit user metadata;
+     * `null` means no metadata object was carried.
+     */
     @Serializable
     @SerialName("response.metadata")
     public data class Metadata(
@@ -169,6 +213,12 @@ public sealed interface ResponsesStreamEvent {
         public val text: String,
     ) : ResponsesStreamEvent
 
+    /**
+     * @property itemId Nullable because custom-tool delta frames may omit it;
+     * `null` means the stream did not repeat the item id on this chunk.
+     * @property callId Nullable because custom-tool delta frames may omit it;
+     * `null` means the stream did not repeat the call id on this chunk.
+     */
     @Serializable
     @SerialName("response.custom_tool_call_input.delta")
     public data class ToolCallInputDelta(
@@ -240,22 +290,42 @@ public sealed interface ResponsesStreamEvent {
     ) : ResponsesStreamEvent
 }
 
+/**
+ * @property error Nullable because failed response frames can omit structured error
+ * details; `null` means no structured error body was provided.
+ */
 @Serializable
 public data class FailedResponse(
     public val error: ResponseError? = null,
 )
 
+/**
+ * @property incompleteDetails Nullable because incomplete responses may omit a
+ * reason object; `null` means the provider did not explain the incompletion.
+ */
 @Serializable
 public data class IncompleteResponse(
     @SerialName("incomplete_details")
     public val incompleteDetails: IncompleteDetails? = null,
 )
 
+/**
+ * @property reason Nullable because provider incomplete-detail objects may be
+ * empty; `null` means the reason is unknown.
+ */
 @Serializable
 public data class IncompleteDetails(
     public val reason: String? = null,
 )
 
+/**
+ * @property message Nullable because provider errors may omit message; `null`
+ * means no message string was provided.
+ * @property code Nullable because provider errors may omit code; `null` means
+ * no code was provided.
+ * @property type Nullable because provider errors may omit type; `null` means
+ * no type was provided.
+ */
 @Serializable
 public data class ResponseError(
     public val message: String? = null,
@@ -263,6 +333,18 @@ public data class ResponseError(
     public val type: String? = null,
 )
 
+/**
+ * @property instructions Nullable because compaction instructions are optional;
+ * `null` means omit the field.
+ * @property reasoning Nullable because reasoning controls are optional; `null`
+ * means use provider/session defaults.
+ * @property serviceTier Nullable because service tier is optional; `null`
+ * means use the provider default.
+ * @property promptCacheKey Nullable because prompt cache affinity is optional;
+ * `null` means no cache key is sent.
+ * @property text Nullable because text controls are optional; `null` means use
+ * provider/session defaults.
+ */
 @Serializable
 public data class CompactionInput(
     public val model: String,
@@ -291,6 +373,12 @@ public data class CompactionResponse(
  */
 @Serializable
 public sealed interface ResponseItem {
+    /**
+     * @property id Nullable because providers may omit message ids; `null`
+     * means no id was provided.
+     * @property phase Nullable because providers may omit message phase; `null`
+     * means no phase was provided.
+     */
     @Serializable
     @SerialName("message")
     public data class Message(
@@ -308,6 +396,14 @@ public sealed interface ResponseItem {
         public val content: List<AgentMessageInputContent>,
     ) : ResponseItem
 
+    /**
+     * @property id Nullable because providers may omit reasoning ids; `null`
+     * means no id was provided.
+     * @property content Nullable because reasoning items may only contain
+     * summary; `null` means no full reasoning content was provided.
+     * @property encryptedContent Nullable because encrypted reasoning is
+     * optional; `null` means no encrypted payload was provided.
+     */
     @Serializable
     @SerialName("reasoning")
     public data class Reasoning(
@@ -318,6 +414,12 @@ public sealed interface ResponseItem {
         public val encryptedContent: String? = null,
     ) : ResponseItem
 
+    /**
+     * @property id Nullable because hosted shell-call metadata may omit id;
+     * `null` means no item id was provided.
+     * @property callId Nullable because hosted shell-call metadata may omit call
+     * id; `null` means no call id was provided.
+     */
     @Serializable
     @SerialName("local_shell_call")
     public data class LocalShellCall(
@@ -328,6 +430,12 @@ public sealed interface ResponseItem {
         public val action: LocalShellAction,
     ) : ResponseItem
 
+    /**
+     * @property id Nullable because function-call item metadata may omit id;
+     * `null` means no item id was provided.
+     * @property namespace Nullable because plain functions are not namespaced;
+     * `null` means route by function name only.
+     */
     @Serializable
     @SerialName("function_call")
     public data class FunctionCall(
@@ -339,6 +447,14 @@ public sealed interface ResponseItem {
         public val callId: String,
     ) : ResponseItem
 
+    /**
+     * @property id Nullable because tool-search call metadata may omit item id;
+     * `null` means no item id was provided.
+     * @property callId Nullable because some tool-search call items may omit
+     * call id; `null` means no originating call id is available.
+     * @property status Nullable because tool-search call metadata may omit
+     * status; `null` means no status was provided.
+     */
     @Serializable
     @SerialName("tool_search_call")
     public data class ToolSearchCall(
@@ -372,6 +488,12 @@ public sealed interface ResponseItem {
         public val output: CallToolResult,
     ) : ResponseItem
 
+    /**
+     * @property id Nullable because custom-tool call metadata may omit item id;
+     * `null` means no item id was provided.
+     * @property status Nullable because custom-tool call metadata may omit
+     * status; `null` means no status was provided.
+     */
     @Serializable
     @SerialName("custom_tool_call")
     public data class CustomToolCall(
@@ -383,6 +505,10 @@ public sealed interface ResponseItem {
         public val input: String,
     ) : ResponseItem
 
+    /**
+     * @property name Nullable because tool-call outputs may only need `call_id`;
+     * `null` means no redundant tool name is sent.
+     */
     @Serializable
     @SerialName("custom_tool_call_output")
     public data class CustomToolCallOutput(
@@ -392,6 +518,10 @@ public sealed interface ResponseItem {
         public val output: FunctionCallOutputPayload,
     ) : ResponseItem
 
+    /**
+     * @property callId Nullable because historical or normalized tool-search output
+     * items may lack it; `null` means no originating call id is available.
+     */
     @Serializable
     @SerialName("tool_search_output")
     public data class ToolSearchOutput(
@@ -402,6 +532,14 @@ public sealed interface ResponseItem {
         public val tools: List<LoadableToolSpec>,
     ) : ResponseItem
 
+    /**
+     * @property id Nullable because web-search call metadata may omit item id;
+     * `null` means no item id was provided.
+     * @property status Nullable because web-search call metadata may omit
+     * status; `null` means no status was provided.
+     * @property action Nullable because web-search call metadata may omit
+     * action details; `null` means no action was exposed.
+     */
     @Serializable
     @SerialName("web_search_call")
     public data class WebSearchCall(
@@ -410,6 +548,10 @@ public sealed interface ResponseItem {
         public val action: WebSearchAction? = null,
     ) : ResponseItem
 
+    /**
+     * @property revisedPrompt Nullable because image generation may not revise the
+     * prompt; `null` means no revised prompt was returned.
+     */
     @Serializable
     @SerialName("image_generation_call")
     public data class ImageGenerationCall(
@@ -444,6 +586,10 @@ public sealed interface ResponseItem {
     @SerialName("compaction_trigger")
     public data object CompactionTrigger : ResponseItem
 
+    /**
+     * @property encryptedContent Nullable because context compaction triggers can be
+     * structural; `null` means no encrypted payload accompanies the item.
+     */
     @Serializable
     @SerialName("context_compaction")
     public data class ContextCompaction(
@@ -462,6 +608,10 @@ public sealed interface ContentItem {
     @SerialName("input_text")
     public data class InputText(public val text: String) : ContentItem
 
+    /**
+     * @property detail Nullable because image detail can be omitted from the wire;
+     * `null` means the provider/default detail should apply.
+     */
     @Serializable
     @SerialName("input_image")
     public data class InputImage(
@@ -557,6 +707,16 @@ public enum class LocalShellStatus {
  */
 @Serializable
 public sealed interface LocalShellAction {
+    /**
+     * @property timeoutMs Nullable because timeout is optional; `null` means use
+     * the runtime default.
+     * @property workingDirectory Nullable because cwd override is optional;
+     * `null` means use the runtime default working directory.
+     * @property env Nullable because environment overrides are optional; `null`
+     * means send no environment override map.
+     * @property user Nullable because user override is optional; `null` means
+     * use the runtime default user.
+     */
     @Serializable
     @SerialName("exec")
     public data class Exec(
@@ -577,6 +737,12 @@ public sealed interface LocalShellAction {
  */
 @Serializable
 public sealed interface WebSearchAction {
+    /**
+     * @property query Nullable because search actions may carry a single query
+     * or a list; `null` means no single-query representation was provided.
+     * @property queries Nullable because search actions may carry a single query
+     * or a list; `null` means no multi-query representation was provided.
+     */
     @Serializable
     @SerialName("search")
     public data class Search(
@@ -584,12 +750,22 @@ public sealed interface WebSearchAction {
         public val queries: List<String>? = null,
     ) : WebSearchAction
 
+    /**
+     * @property url Nullable because hosted search actions may redact or omit it;
+     * `null` means no page URL was exposed.
+     */
     @Serializable
     @SerialName("open_page")
     public data class OpenPage(
         public val url: String? = null,
     ) : WebSearchAction
 
+    /**
+     * @property url Nullable because hosted search actions may redact or omit
+     * it; `null` means no page URL was exposed.
+     * @property pattern Nullable because hosted search actions may omit the
+     * pattern; `null` means no find pattern was exposed.
+     */
     @Serializable
     @SerialName("find_in_page")
     public data class FindInPage(
@@ -602,6 +778,10 @@ public sealed interface WebSearchAction {
     public data object Other : WebSearchAction
 }
 
+/**
+ * @property success Nullable because legacy function outputs may omit outcome
+ * metadata; `null` means success was not explicitly reported.
+ */
 @Serializable(with = FunctionCallOutputPayloadSerializer::class)
 public data class FunctionCallOutputPayload(
     public val body: FunctionCallOutputBody = FunctionCallOutputBody.Text(""),
@@ -629,6 +809,14 @@ public sealed interface FunctionCallOutputBody {
  * Mirrors MCP `CallToolResult`.
  *
  * `toFunctionCallOutputPayload` follows Rust `CallToolResult::into_function_call_output_payload`.
+ */
+/**
+ * @property structuredContent Nullable because MCP results may omit structured
+ * content; `null` means no structured content was provided.
+ * @property isError Nullable because MCP results may omit the error flag;
+ * `null` means the result did not explicitly report error status.
+ * @property meta Nullable because MCP results may omit metadata; `null` means
+ * no metadata was provided.
  */
 @Serializable
 public data class CallToolResult(
@@ -663,6 +851,10 @@ public sealed interface FunctionCallOutputContentItem {
     @SerialName("input_text")
     public data class InputText(public val text: String) : FunctionCallOutputContentItem
 
+    /**
+     * @property detail Nullable because image detail is optional in function-call
+     * output content; `null` means default image detail should apply.
+     */
     @Serializable
     @SerialName("input_image")
     public data class InputImage(
@@ -681,6 +873,10 @@ public sealed interface FunctionCallOutputContentItem {
 
 private val contentSerializer = ListSerializer(JsonElement.serializer())
 
+/**
+ * @return Nullable because only mixed content containing images needs content
+ * item conversion; `null` means callers should fall back to serialized text.
+ */
 private fun List<JsonElement>.toFunctionCallOutputContentItems(
     json: Json,
 ): List<FunctionCallOutputContentItem>? {
@@ -722,9 +918,17 @@ private fun List<JsonElement>.toFunctionCallOutputContentItems(
     return items.takeIf { sawImage }
 }
 
+/**
+ * @return Nullable because the JSON member may be absent, non-primitive, or
+ * JSON null; `null` means no string value is available.
+ */
 private fun JsonObject.string(name: String): String? =
     (this[name] as? JsonPrimitive)?.jsonPrimitive?.contentOrNull
 
+/**
+ * @return Nullable because the wire value may not be recognized; `null` means
+ * no `ImageDetail` mapping exists.
+ */
 private fun imageDetailFromWireName(value: String): ImageDetail? =
     when (value) {
         "auto" -> ImageDetail.Auto
@@ -772,6 +976,14 @@ public enum class ResponseInclude(public val wireName: String) {
     ReasoningEncryptedContent("reasoning.encrypted_content"),
 }
 
+/**
+ * @property effort Nullable because reasoning effort is optional; `null` means
+ * omit the setting and use the provider default.
+ * @property summary Nullable because reasoning summary is optional; `null`
+ * means omit the setting and use the provider default.
+ * @property context Nullable because reasoning context is optional; `null`
+ * means omit the setting and use the provider default.
+ */
 @Serializable
 public data class Reasoning(
     public val effort: ReasoningEffort? = null,
@@ -818,6 +1030,12 @@ public enum class ReasoningContext {
     AllTurns,
 }
 
+/**
+ * @property verbosity Nullable because text verbosity is optional; `null` means
+ * omit the setting and use the provider default.
+ * @property format Nullable because text output format is optional; `null`
+ * means omit the setting and request plain model output.
+ */
 @Serializable
 public data class TextControls(
     public val verbosity: OpenAiVerbosity? = null,
@@ -850,6 +1068,14 @@ public enum class TextFormatType {
     JsonSchema,
 }
 
+/**
+ * @property inputTokens Nullable because providers may omit this usage counter;
+ * `null` means input tokens were not reported.
+ * @property outputTokens Nullable because providers may omit this usage counter;
+ * `null` means output tokens were not reported.
+ * @property totalTokens Nullable because providers may omit this usage counter;
+ * `null` means total tokens were not reported.
+ */
 @Serializable
 public data class TokenUsage(
     @SerialName("input_tokens")

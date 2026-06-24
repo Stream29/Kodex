@@ -135,6 +135,20 @@ public fun WebSearchHttpClient(
 internal fun WebSearchClientConfig.url(path: String): String =
     "${baseUrl.trimEnd('/')}/${path.trimStart('/')}"
 
+/**
+ * @property status Nullable because failures may occur before an HTTP response;
+ * `null` means no HTTP status was available.
+ * @property responseBody Nullable because failures may not include a response
+ * body; `null` means no body was available.
+ * @property code Nullable because backend errors may omit a code; `null` means
+ * no structured error code was provided.
+ * @property type Nullable because backend errors may omit a type; `null` means
+ * no structured error type was provided.
+ * @property requestId Nullable because responses may omit request id headers;
+ * `null` means no request id was available.
+ * @property cfRay Nullable because responses may omit Cloudflare ray headers;
+ * `null` means no ray id was available.
+ */
 public class WebSearchException(
     public val status: Int? = null,
     override val message: String,
@@ -145,6 +159,18 @@ public class WebSearchException(
     public val cfRay: String? = null,
 ) : Exception(message)
 
+/**
+ * @property error Nullable because the backend may return a nested error
+ * object or flat fields; `null` means no nested object was present.
+ * @property detail Nullable because flat error payloads may omit detail; `null`
+ * means no detail string was present.
+ * @property message Nullable because flat error payloads may omit message;
+ * `null` means no message string was present.
+ * @property code Nullable because flat error payloads may omit code; `null`
+ * means no code was present.
+ * @property type Nullable because flat error payloads may omit type; `null`
+ * means no type was present.
+ */
 @Serializable
 private data class WebSearchErrorBody(
     val error: WebSearchError? = null,
@@ -157,6 +183,14 @@ private data class WebSearchErrorBody(
         error ?: WebSearchError(message = message ?: detail, code = code, type = type)
 }
 
+/**
+ * @property message Nullable because backend errors may omit message; `null`
+ * means no message string was provided.
+ * @property code Nullable because backend errors may omit code; `null` means no
+ * code was provided.
+ * @property type Nullable because backend errors may omit type; `null` means no
+ * type was provided.
+ */
 @Serializable
 private data class WebSearchError(
     val message: String? = null,

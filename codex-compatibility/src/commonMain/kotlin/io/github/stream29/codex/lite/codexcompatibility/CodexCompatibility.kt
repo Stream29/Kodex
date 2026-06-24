@@ -10,6 +10,10 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNamingStrategy
 
+/**
+ * @param cause Nullable because compatibility failures may be detected locally;
+ * `null` means there is no lower-level cause.
+ */
 public class CodexCompatibilityException(
     message: String,
     cause: Throwable? = null,
@@ -20,9 +24,17 @@ public fun codexDirectory(userHome: Path): Path = Path(userHome, ".codex")
 public fun isCodexDirectory(path: Path): Boolean =
     SystemFileSystem.exists(Path(path, "auth.json"))
 
+/**
+ * @return Nullable because the conventional `.codex` directory may be absent;
+ * `null` means no Codex directory was found under `userHome`.
+ */
 public fun detectCodexDirectory(userHome: Path): Path? =
     codexDirectory(userHome).takeIf(::isCodexDirectory)
 
+/**
+ * @return Nullable because none of the candidate paths may exist as a Codex
+ * directory; `null` means no candidate matched.
+ */
 public fun detectCodexDirectory(candidates: Iterable<Path>): Path? =
     candidates.firstOrNull(::isCodexDirectory)
 
@@ -84,12 +96,26 @@ private val codexJson: Json = Json {
     namingStrategy = JsonNamingStrategy.SnakeCase
 }
 
+/**
+ * @property authMode Nullable because Codex CLI auth JSON may omit it; `null`
+ * means `readCodexAuth` has not accepted an auth mode.
+ * @property tokens Nullable because Codex CLI auth JSON may omit the token
+ * object; `null` means no token object was present for validation.
+ */
 @Serializable
 private data class CodexAuthJson(
     val authMode: String? = null,
     val tokens: CodexAuthTokens? = null,
 )
 
+/**
+ * @property accessToken Nullable because token files are decoded before
+ * validation; `null` means no usable access token was present.
+ * @property accountId Nullable because Codex CLI may omit the account id;
+ * `null` means no account id should be propagated.
+ * @property planType Nullable because Codex CLI may omit the plan type; `null`
+ * means no plan type should be propagated.
+ */
 @Serializable
 private data class CodexAuthTokens(
     val accessToken: String? = null,

@@ -47,6 +47,10 @@ private class ReadWriteMutexImpl : ReadWriteMutex {
         override val isLocked: Boolean
             get() = canWrite.isLocked
 
+        /**
+         * Nullable select payload type mirrors the deprecated kotlinx.coroutines
+         * `Mutex` API; `null` represents an ownerless lock request.
+         */
         @Deprecated(
             "Mutex.onLock deprecated without replacement. For additional details please refer to #2794",
             level = DeprecationLevel.WARNING
@@ -54,6 +58,10 @@ private class ReadWriteMutexImpl : ReadWriteMutex {
         override val onLock: SelectClause2<Any?, Mutex>
             get() = throw UnsupportedOperationException("Deprecated")
 
+        /**
+         * @param owner Nullable to mirror kotlinx.coroutines `Mutex`; `null`
+         * means the write lock is ownerless.
+         */
         override fun tryLock(owner: Any?): Boolean {
             if (!canRead.tryLock(owner)) return false
             if (!canWrite.tryLock(owner)) {
@@ -64,6 +72,10 @@ private class ReadWriteMutexImpl : ReadWriteMutex {
             return true
         }
 
+        /**
+         * @param owner Nullable to mirror kotlinx.coroutines `Mutex`; `null`
+         * means the write lock is ownerless.
+         */
         override suspend fun lock(owner: Any?) {
             canRead.lock(owner)
             try {
@@ -76,6 +88,10 @@ private class ReadWriteMutexImpl : ReadWriteMutex {
         }
 
         override fun holdsLock(owner: Any): Boolean = canWrite.holdsLock(owner)
+        /**
+         * @param owner Nullable to mirror kotlinx.coroutines `Mutex`; `null`
+         * means the write lock is ownerless.
+         */
         override fun unlock(owner: Any?) {
             stateFlow.releaseWriteOrThrow()
             canWrite.unlock(owner)
@@ -87,6 +103,10 @@ private class ReadWriteMutexImpl : ReadWriteMutex {
         override val isLocked: Boolean
             get() = stateFlow.value is State.Write
 
+        /**
+         * Nullable select payload type mirrors the deprecated kotlinx.coroutines
+         * `Mutex` API; `null` represents an ownerless lock request.
+         */
         @Deprecated(
             "Mutex.onLock deprecated without replacement. For additional details please refer to #2794",
             level = DeprecationLevel.WARNING
@@ -94,6 +114,10 @@ private class ReadWriteMutexImpl : ReadWriteMutex {
         override val onLock: SelectClause2<Any?, Mutex>
             get() = throw UnsupportedOperationException("Deprecated")
 
+        /**
+         * @param owner Nullable to mirror kotlinx.coroutines `Mutex`; `null`
+         * means the read lock is ownerless.
+         */
         override fun tryLock(owner: Any?): Boolean {
             if (!canRead.tryLock(owner)) return false
             try {
@@ -114,6 +138,10 @@ private class ReadWriteMutexImpl : ReadWriteMutex {
             }
         }
 
+        /**
+         * @param owner Nullable to mirror kotlinx.coroutines `Mutex`; `null`
+         * means the read lock is ownerless.
+         */
         override suspend fun lock(owner: Any?) {
             canRead.withLock(owner) {
                 while (true) {
@@ -136,6 +164,10 @@ private class ReadWriteMutexImpl : ReadWriteMutex {
 
         override fun holdsLock(owner: Any): Boolean = false
 
+        /**
+         * @param owner Nullable to mirror kotlinx.coroutines `Mutex`; `null`
+         * means the read lock is ownerless.
+         */
         override fun unlock(owner: Any?) {
             val newState = stateFlow.releaseReadOrThrow()
             if (newState is State.Free) {

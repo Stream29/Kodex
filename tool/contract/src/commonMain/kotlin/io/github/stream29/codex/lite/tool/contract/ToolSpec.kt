@@ -27,6 +27,18 @@ public sealed interface ToolSpec {
         public val outputFormat: String,
     ) : ToolSpec
 
+    /**
+     * @property externalWebAccess Nullable because live web access is optional;
+     * `null` means omit the control and use the provider default.
+     * @property filters Nullable because web-search filters are optional;
+     * `null` means send no filters.
+     * @property userLocation Nullable because approximate user location is
+     * optional; `null` means send no location hint.
+     * @property searchContextSize Nullable because context size is optional;
+     * `null` means use the provider default.
+     * @property searchContentTypes Nullable because content-type filters are
+     * optional; `null` means do not restrict content types.
+     */
     @Serializable
     @SerialName("web_search")
     public data class WebSearch(
@@ -44,6 +56,9 @@ public sealed interface ToolSpec {
 
 /**
  * Mirrors Rust `ResponsesApiTool` from `shared-context/codex/codex-rs/tools/src/responses_api.rs`.
+ *
+ * @property deferLoading Nullable because the wire format omits false/default;
+ * `null` means the tool is loaded normally in the initial tool list.
  */
 @Serializable
 @SerialName("function")
@@ -97,12 +112,26 @@ public sealed interface LoadableToolSpec
 @Serializable
 public sealed interface ResponsesApiNamespaceTool
 
+/**
+ * @property allowedDomains Nullable because web search filters are optional; `null`
+ * means no domain allow-list is sent.
+ */
 @Serializable
 public data class ResponsesApiWebSearchFilters(
     @SerialName("allowed_domains")
     public val allowedDomains: List<String>? = null,
 )
 
+/**
+ * @property country Nullable because approximate location may be partial; `null`
+ * means the country is unknown or intentionally omitted.
+ * @property region Nullable because approximate location may be partial; `null`
+ * means the region is unknown or intentionally omitted.
+ * @property city Nullable because approximate location may be partial; `null`
+ * means the city is unknown or intentionally omitted.
+ * @property timezone Nullable because approximate location may be partial;
+ * `null` means the timezone is unknown or intentionally omitted.
+ */
 @Serializable
 public data class ResponsesApiWebSearchUserLocation(
     public val type: WebSearchUserLocationType = WebSearchUserLocationType.Approximate,
