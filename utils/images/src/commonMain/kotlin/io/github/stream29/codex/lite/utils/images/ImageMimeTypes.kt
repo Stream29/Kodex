@@ -53,11 +53,3 @@ private fun ByteArray.hasPrefix(vararg values: Int): Boolean {
     if (size < values.size) return false
     return values.indices.all { index -> this[index].toInt() and 0xff == values[index] }
 }
-
-private fun ByteArray.hasAsciiPrefix(value: String): Boolean =
-    hasAsciiAt(0, value)
-
-private fun ByteArray.hasAsciiAt(offset: Int, value: String): Boolean {
-    if (size < offset + value.length) return false
-    return value.indices.all { index -> this[offset + index].toInt() and 0xff == value[index].code }
-}

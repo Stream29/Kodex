@@ -9,6 +9,10 @@ public object PromptImages {
     public const val PatchSize: Int = 32
     public const val MaxDimension: Int = 2048
     public const val MaxInputBytes: Long = 1024L * 1024L * 1024L
+    public val HighDetailLimits: PromptImageResizeLimits =
+        PromptImageResizeLimits(maxDimension = MaxDimension, maxPatches = 2_500)
+    public val OriginalDetailLimits: PromptImageResizeLimits =
+        PromptImageResizeLimits(maxDimension = 6_000, maxPatches = 10_000)
 }
 
 public data class ImageDimensions(
@@ -29,6 +33,20 @@ public data class PromptImageResizeLimits(
         require(maxDimension >= 1) { "maxDimension must be positive" }
         require(maxPatches >= 1) { "maxPatches must be positive" }
     }
+}
+
+/**
+ * Fits dimensions into a bounding square while preserving aspect ratio.
+ */
+public fun ImageDimensions.fitWithinMaxDimension(maxDimension: Int): ImageDimensions {
+    require(maxDimension >= 1) { "maxDimension must be positive" }
+    if (width <= maxDimension && height <= maxDimension) return this
+
+    val scale = maxDimension.toDouble() / maxOf(width, height).toDouble()
+    return ImageDimensions(
+        (width.toDouble() * scale).roundToInt().coerceAtLeast(1),
+        (height.toDouble() * scale).roundToInt().coerceAtLeast(1),
+    )
 }
 
 /**
