@@ -26,5 +26,8 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
         }
+        jsMain.dependencies {
+            implementation(libs.kotlin.wrappers.node)
+        }
     }
 }

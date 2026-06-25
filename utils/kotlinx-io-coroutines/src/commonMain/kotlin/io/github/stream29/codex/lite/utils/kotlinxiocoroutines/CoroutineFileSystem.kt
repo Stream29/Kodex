@@ -26,9 +26,26 @@ public interface CoroutineFileSystem {
 
     public suspend fun list(directory: Path): Collection<Path>
 
-    public suspend fun readString(path: Path): String
+    public suspend fun source(path: Path): CoroutineRawSource
 
-    public suspend fun writeString(path: Path, content: String, append: Boolean = false)
+    public suspend fun sink(path: Path, append: Boolean = false): CoroutineRawSink
+
+    public suspend fun readBytes(path: Path, maxByteCount: Long = Long.MAX_VALUE): ByteArray =
+        source(path).use { it.readBytes(maxByteCount) }
+
+    public suspend fun writeBytes(path: Path, content: ByteArray, append: Boolean = false) {
+        sink(path, append).use {
+            it.writeBytes(content)
+            it.flush()
+        }
+    }
+
+    public suspend fun readString(path: Path): String =
+        readBytes(path).decodeToString()
+
+    public suspend fun writeString(path: Path, content: String, append: Boolean = false) {
+        writeBytes(path, content.encodeToByteArray(), append)
+    }
 }
 
 /**

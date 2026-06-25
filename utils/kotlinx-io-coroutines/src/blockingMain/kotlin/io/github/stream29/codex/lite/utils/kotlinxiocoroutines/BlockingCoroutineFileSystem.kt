@@ -2,13 +2,13 @@ package io.github.stream29.codex.lite.utils.kotlinxiocoroutines
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
-import kotlinx.io.buffered
+import kotlinx.io.Buffer
+import kotlinx.io.RawSink
+import kotlinx.io.RawSource
 import kotlinx.io.files.FileMetadata
 import kotlinx.io.files.FileSystem
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
-import kotlinx.io.readString
-import kotlinx.io.writeString
 
 public actual val SystemCoroutineFileSystem: CoroutineFileSystem =
     BlockingCoroutineFileSystem(SystemFileSystem)
@@ -39,23 +39,46 @@ private class BlockingCoroutineFileSystem(
     override suspend fun list(directory: Path): Collection<Path> =
         withContext(IoDispatcher) { delegate.list(directory) }
 
-    override suspend fun readString(path: Path): String =
-        withContext(IoDispatcher) {
-            val source = delegate.source(path).buffered()
-            try {
-                source.readString()
-            } finally {
-                source.close()
-            }
-        }
+    override suspend fun source(path: Path): CoroutineRawSource =
+        withContext(IoDispatcher) { BlockingCoroutineRawSource(delegate.source(path)) }
 
-    override suspend fun writeString(path: Path, content: String, append: Boolean): Unit =
+    override suspend fun sink(path: Path, append: Boolean): CoroutineRawSink =
+        withContext(IoDispatcher) { BlockingCoroutineRawSink(delegate.sink(path, append)) }
+}
+
+private class BlockingCoroutineRawSource(
+    private val delegate: RawSource,
+) : CoroutineRawSource {
+    override suspend fun readAtMostTo(sink: Buffer, byteCount: Long): Long {
+        require(byteCount >= 0L) { "byteCount: $byteCount" }
+        if (byteCount == 0L) return 0L
+        return withContext(IoDispatcher) {
+            delegate.readAtMostTo(sink, minOf(byteCount, CoroutineIoSegmentByteCount.toLong()))
+        }
+    }
+
+    override suspend fun close(): Unit =
+        withContext(IoDispatcher) { delegate.close() }
+}
+
+private class BlockingCoroutineRawSink(
+    private val delegate: RawSink,
+) : CoroutineRawSink {
+    override suspend fun write(source: Buffer, byteCount: Long) {
+        require(byteCount >= 0L) { "byteCount: $byteCount" }
         withContext(IoDispatcher) {
-            val sink = delegate.sink(path, append).buffered()
-            try {
-                sink.writeString(content)
-            } finally {
-                sink.close()
+            var remaining = byteCount
+            while (remaining > 0L) {
+                val writeByteCount = minOf(remaining, CoroutineIoSegmentByteCount.toLong())
+                delegate.write(source, writeByteCount)
+                remaining -= writeByteCount
             }
         }
+    }
+
+    override suspend fun flush(): Unit =
+        withContext(IoDispatcher) { delegate.flush() }
+
+    override suspend fun close(): Unit =
+        withContext(IoDispatcher) { delegate.close() }
 }

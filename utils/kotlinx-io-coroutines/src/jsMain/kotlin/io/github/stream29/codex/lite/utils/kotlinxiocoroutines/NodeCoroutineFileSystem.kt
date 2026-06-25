@@ -1,17 +1,33 @@
-@file:OptIn(ExperimentalWasmJsInterop::class)
-
 package io.github.stream29.codex.lite.utils.kotlinxiocoroutines
 
-import kotlinx.coroutines.await
+import js.array.toList
+import kotlinx.io.Buffer
 import kotlinx.io.IOException
 import kotlinx.io.files.FileMetadata
 import kotlinx.io.files.FileNotFoundException
 import kotlinx.io.files.Path
-import kotlin.js.ExperimentalWasmJsInterop
-import kotlin.js.JsAny
-import kotlin.js.JsModule
-import kotlin.js.JsNonModule
-import kotlin.js.Promise
+import kotlinx.io.readByteArray
+import js.objects.unsafeJso
+import js.typedarrays.Uint8Array
+import js.typedarrays.toByteArray
+import js.typedarrays.toUint8Array
+import node.ErrnoException
+import node.buffer.BufferEncoding
+import node.buffer.utf8
+import node.fs.FileHandle
+import node.fs.MkdirAsyncOptions
+import node.fs.appendFile as appendFileNode
+import node.fs.mkdir
+import node.fs.open as openFile
+import node.fs.readdir
+import node.fs.realpath
+import node.fs.rename
+import node.fs.rm
+import node.fs.rmdir
+import node.fs.stat
+import node.fs.writeFile as writeFileNode
+import node.fs.readFile as readFileNode
+import js.buffer.ArrayBuffer
 
 public actual val SystemCoroutineFileSystem: CoroutineFileSystem =
     NodeCoroutineFileSystem
@@ -19,10 +35,12 @@ public actual val SystemCoroutineFileSystem: CoroutineFileSystem =
 private object NodeCoroutineFileSystem : CoroutineFileSystem {
     override suspend fun exists(path: Path): Boolean =
         try {
-            fsPromises.stat(path.toString()).await()
+            stat(path.toString())
             true
+        } catch (error: ErrnoException) {
+            if (error.code == "ENOENT") false else throw IOException("Stat failed for $path", error)
         } catch (error: Throwable) {
-            if (error.nodeErrorCode == "ENOENT") false else throw IOException("Stat failed for $path", error)
+            throw IOException("Stat failed for $path", error)
         }
 
     override suspend fun delete(path: Path, mustExist: Boolean) {
@@ -35,9 +53,9 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
         val metadata = metadataOrNull(path) ?: throw FileNotFoundException("File does not exist: $path")
         try {
             if (metadata.isDirectory) {
-                fsPromises.rmdir(path.toString()).await()
+                rmdir(path.toString())
             } else {
-                fsPromises.rm(path.toString()).await()
+                rm(path.toString())
             }
         } catch (error: Throwable) {
             throw IOException("Delete failed for $path", error)
@@ -56,7 +74,7 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
             return
         }
         try {
-            fsPromises.mkdir(path.toString(), recursiveMkdirOptions()).await()
+            mkdir(path.toString(), unsafeJso<MkdirAsyncOptions> { recursive = true })
         } catch (error: Throwable) {
             throw IOException("Create directories failed for $path", error)
         }
@@ -67,7 +85,7 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
             throw FileNotFoundException("Source does not exist: $source")
         }
         try {
-            fsPromises.rename(source.toString(), destination.toString()).await()
+            rename(source.toString(), destination.toString())
         } catch (error: Throwable) {
             throw IOException("Move failed from $source to $destination", error)
         }
@@ -75,9 +93,11 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
 
     override suspend fun metadataOrNull(path: Path): FileMetadata? {
         val stats = try {
-            fsPromises.stat(path.toString()).await().unsafeCast<NodeStats>()
+            stat(path.toString())
+        } catch (error: ErrnoException) {
+            if (error.code == "ENOENT") return null
+            throw IOException("Stat failed for $path", error)
         } catch (error: Throwable) {
-            if (error.nodeErrorCode == "ENOENT") return null
             throw IOException("Stat failed for $path", error)
         }
         val isFile = stats.isFile()
@@ -93,7 +113,7 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
             throw FileNotFoundException(path.toString())
         }
         return try {
-            Path(fsPromises.realpath(path.toString()).await().unsafeCast<String>())
+            Path(realpath(path.toString()))
         } catch (error: Throwable) {
             throw IOException("Resolve failed for $path", error)
         }
@@ -105,30 +125,51 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
             throw IOException("Not a directory: $directory")
         }
         return try {
-            fsPromises.readdir(directory.toString()).await()
-                .unsafeCast<Array<String>>()
+            readdir(directory.toString())
+                .toList()
                 .map { Path(directory, it) }
         } catch (error: Throwable) {
             throw IOException("List failed for $directory", error)
         }
     }
 
-    override suspend fun readString(path: Path): String =
+    override suspend fun source(path: Path): CoroutineRawSource =
         try {
-            fsPromises.readFile(path.toString(), "utf8").await().unsafeCast<String>()
-        } catch (error: Throwable) {
-            if (error.nodeErrorCode == "ENOENT") {
+            NodeCoroutineRawSource(openFile(path.toString(), "r"))
+        } catch (error: ErrnoException) {
+            if (error.code == "ENOENT") {
                 throw FileNotFoundException("File does not exist: $path")
             }
+            throw IOException("Open source failed for $path", error)
+        } catch (error: Throwable) {
+            throw IOException("Open source failed for $path", error)
+        }
+
+    override suspend fun sink(path: Path, append: Boolean): CoroutineRawSink =
+        try {
+            NodeCoroutineRawSink(openFile(path.toString(), if (append) "a" else "w"))
+        } catch (error: Throwable) {
+            throw IOException("Open sink failed for $path", error)
+        }
+
+    override suspend fun readString(path: Path): String =
+        try {
+            readFileNode(path.toString(), BufferEncoding.utf8)
+        } catch (error: ErrnoException) {
+            if (error.code == "ENOENT") {
+                throw FileNotFoundException("File does not exist: $path")
+            }
+            throw IOException("Read failed for $path", error)
+        } catch (error: Throwable) {
             throw IOException("Read failed for $path", error)
         }
 
     override suspend fun writeString(path: Path, content: String, append: Boolean) {
         try {
             if (append) {
-                fsPromises.appendFile(path.toString(), content, "utf8").await()
+                appendFileNode(path.toString(), content, BufferEncoding.utf8)
             } else {
-                fsPromises.writeFile(path.toString(), content, "utf8").await()
+                writeFileNode(path.toString(), content, BufferEncoding.utf8)
             }
         } catch (error: Throwable) {
             throw IOException("Write failed for $path", error)
@@ -136,38 +177,79 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
     }
 }
 
-private val Throwable.nodeErrorCode: String?
-    get() = codeOf(this)
+private class NodeCoroutineRawSource(
+    private val handle: FileHandle,
+) : CoroutineRawSource {
+    private var closed = false
 
-@Suppress("UNUSED_PARAMETER")
-private fun codeOf(error: Throwable): String? =
-    js("error.code") as? String
+    override suspend fun readAtMostTo(sink: Buffer, byteCount: Long): Long {
+        require(byteCount >= 0L) { "byteCount: $byteCount" }
+        check(!closed) { "Source is closed." }
+        if (byteCount == 0L) return 0L
+        val readByteCount = minOf(byteCount, CoroutineIoSegmentByteCount.toLong()).toInt()
+        val nodeBuffer = Uint8Array<ArrayBuffer>(readByteCount)
+        val result = try {
+            handle.read(nodeBuffer, 0.0, readByteCount.toDouble(), null)
+        } catch (error: Throwable) {
+            throw IOException("Read failed", error)
+        }
+        val bytesRead = result.bytesRead.toInt()
+        if (bytesRead == 0) return -1L
+        sink.write(nodeBuffer.subarray(0, bytesRead).toByteArray())
+        return bytesRead.toLong()
+    }
 
-@Suppress("UNCHECKED_CAST_TO_EXTERNAL_INTERFACE")
-private fun recursiveMkdirOptions(): MkdirOptions =
-    js("({ recursive: true })")
-
-@JsModule("node:fs/promises")
-@JsNonModule
-private external val fsPromises: FsPromises
-
-private external interface FsPromises {
-    fun stat(path: String): Promise<JsAny?>
-    fun rm(path: String): Promise<JsAny?>
-    fun rmdir(path: String): Promise<JsAny?>
-    fun mkdir(path: String, options: MkdirOptions): Promise<JsAny?>
-    fun rename(source: String, destination: String): Promise<JsAny?>
-    fun realpath(path: String): Promise<JsAny?>
-    fun readdir(path: String): Promise<JsAny?>
-    fun readFile(path: String, encoding: String): Promise<JsAny?>
-    fun writeFile(path: String, content: String, encoding: String): Promise<JsAny?>
-    fun appendFile(path: String, content: String, encoding: String): Promise<JsAny?>
+    override suspend fun close() {
+        if (closed) return
+        closed = true
+        try {
+            handle.close()
+        } catch (error: Throwable) {
+            throw IOException("Close source failed", error)
+        }
+    }
 }
 
-private external interface MkdirOptions : JsAny
+private class NodeCoroutineRawSink(
+    private val handle: FileHandle,
+) : CoroutineRawSink {
+    private var closed = false
 
-private external interface NodeStats : JsAny {
-    val size: Double
-    fun isFile(): Boolean
-    fun isDirectory(): Boolean
+    override suspend fun write(source: Buffer, byteCount: Long) {
+        require(byteCount >= 0L) { "byteCount: $byteCount" }
+        check(!closed) { "Sink is closed." }
+        var remaining = byteCount
+        while (remaining > 0L) {
+            val chunkByteCount = minOf(remaining, CoroutineIoSegmentByteCount.toLong()).toInt()
+            val nodeBuffer = source.readByteArray(chunkByteCount).toUint8Array()
+            var offset = 0
+            while (offset < chunkByteCount) {
+                val result = try {
+                    handle.write(nodeBuffer, offset.toDouble(), (chunkByteCount - offset).toDouble(), null)
+                } catch (error: Throwable) {
+                    throw IOException("Write failed", error)
+                }
+                val bytesWritten = result.bytesWritten.toInt()
+                if (bytesWritten <= 0) {
+                    throw IOException("Write failed without writing bytes")
+                }
+                offset += bytesWritten
+            }
+            remaining -= chunkByteCount
+        }
+    }
+
+    override suspend fun flush() {
+        check(!closed) { "Sink is closed." }
+    }
+
+    override suspend fun close() {
+        if (closed) return
+        closed = true
+        try {
+            handle.close()
+        } catch (error: Throwable) {
+            throw IOException("Close sink failed", error)
+        }
+    }
 }
