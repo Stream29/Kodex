@@ -10,7 +10,6 @@ kotlin {
             implementation(project(":utils:patch"))
         }
         commonTest.dependencies {
-            implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

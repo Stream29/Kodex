@@ -9,7 +9,6 @@ kotlin {
             api(project(":utils:kotlinx-io-coroutines"))
         }
         commonTest.dependencies {
-            implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

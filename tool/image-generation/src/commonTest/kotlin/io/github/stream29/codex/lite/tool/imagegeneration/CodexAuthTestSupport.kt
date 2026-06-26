@@ -2,8 +2,9 @@
 
 package io.github.stream29.codex.lite.tool.imagegeneration
 
-import io.github.stream29.codex.lite.auth.OpenAiSubscriptionAuthProvider
-import io.github.stream29.codex.lite.codexcompatibility.readCodexAuth
+import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthProvider
+import io.github.stream29.codex.lite.openai.codexclistorage.readCodexAuth
+import io.github.stream29.codex.lite.utils.hosttest.environmentVariable
 import kotlinx.io.files.Path
 import kotlin.io.encoding.Base64
 
@@ -23,8 +24,6 @@ internal fun testCodexDirectory(): Path {
         ?: throw IllegalStateException("CODEX_HOME, HOME, or USERPROFILE must be set for real OpenAI image tests.")
     return Path(userHome, ".codex")
 }
-
-internal expect fun environmentVariable(name: String): String?
 
 internal val png64x32DataUrl: String
     get() = "data:image/png;base64,$png64x32Base64"

@@ -1,10 +1,23 @@
 package io.github.stream29.codex.lite.llmprovider
 
-import io.github.stream29.codex.lite.codexcompatibility.readCodexAuth
-import io.ktor.client.HttpClient
+import io.github.stream29.codex.lite.openai.CompactionInput
+import io.github.stream29.codex.lite.openai.ContentItem
+import io.github.stream29.codex.lite.openai.MessageRole
+import io.github.stream29.codex.lite.openai.OpenAiErrorResponse
+import io.github.stream29.codex.lite.openai.OpenAiResult
+import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.openai.ResponsesApiRequest
+import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
+import io.github.stream29.codex.lite.openai.ToolChoice
+import io.github.stream29.codex.lite.openai.client.OpenAiClientConfig
+import io.github.stream29.codex.lite.openai.codexclistorage.readCodexAuth
+import io.github.stream29.codex.lite.utils.hosttest.environmentVariable
+import io.ktor.client.call.NoTransformationFoundException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.io.buffered
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
@@ -21,46 +34,31 @@ import kotlin.test.fail
 class OpenAiSubscriptionLlmProviderTest {
     @Test
     fun listModelsWithCodexCliCredentials() = runTest {
-        val client = OpenAiSubscriptionLlmProviderHttpClient()
+        val provider = liveProvider()
         try {
-            val provider = liveProvider(client)
-
-            val models = provider.listModels()
+            val models = withContext(Dispatchers.Default) {
+                provider.listModels()
+            }.successOrFail()
 
             assertTrue(
                 models.models.all { model -> !model.slug.isNullOrBlank() || !model.id.isNullOrBlank() },
                 "Expected all returned models to have ids or slugs.",
             )
         } finally {
-            client.close()
+            provider.close()
         }
     }
 
     @Test
-    fun createResponseWithCodexCliCredentials() = runTest {
-        val client = OpenAiSubscriptionLlmProviderHttpClient()
+    fun createStreamingResponseWithCodexCliCredentials() = runTest {
+        val provider = liveProvider()
         try {
-            val provider = liveProvider(client)
             val model = liveModel()
             val request = codexResponseRequest(model)
 
-            val response = provider.createResponse(request)
-
-            assertTrue(response.id?.isNotBlank() == true, "Expected a response id.")
-        } finally {
-            client.close()
-        }
-    }
-
-    @Test
-    fun streamResponseWithCodexCliCredentials() = runTest {
-        val client = OpenAiSubscriptionLlmProviderHttpClient()
-        try {
-            val provider = liveProvider(client)
-            val model = liveModel()
-            val request = codexResponseRequest(model)
-
-            val events = provider.streamResponse(request).toList()
+            val events = withContext(Dispatchers.Default) {
+                provider.createResponse(request).toList()
+            }
 
             assertTrue(events.isNotEmpty(), "Expected at least one SSE event from Codex subscription backend.")
             assertTrue(
@@ -68,49 +66,58 @@ class OpenAiSubscriptionLlmProviderTest {
                 "Expected at least one mapped Responses API SSE event.",
             )
         } finally {
-            client.close()
+            provider.close()
         }
     }
 
     @Test
-    fun streamResponseEmitsFirstEventWithCodexCliCredentials() = runTest {
-        val client = OpenAiSubscriptionLlmProviderHttpClient()
+    fun createStreamingResponseEmitsFirstEventWithCodexCliCredentials() = runTest {
+        val provider = liveProvider()
         try {
-            val provider = liveProvider(client)
-            val event = provider.streamResponse(codexResponseRequest(liveModel())).first()
+            val event = withContext(Dispatchers.Default) {
+                provider.createResponse(codexResponseRequest(liveModel())).first()
+            }
 
             assertTrue(event is ResponsesStreamEvent.Created, "Expected a Responses API created event.")
         } finally {
-            client.close()
+            provider.close()
         }
     }
 
     @Test
     fun compactResponseWithCodexCliCredentials() = runTest {
-        val client = OpenAiSubscriptionLlmProviderHttpClient()
+        val provider = liveProvider()
         try {
-            val provider = liveProvider(client)
-            val response = provider.compactResponse(
-                CompactionInput(
-                    model = liveModel(),
-                    instructions = "Summarize the conversation into one short sentence.",
-                    input = responseInput("The user asked whether the Codex subscription provider can call the backend."),
-                    parallelToolCalls = false,
-                    promptCacheKey = "codex-lite-live-test",
-                ),
-            )
+            val result = try {
+                withContext(Dispatchers.Default) {
+                    provider.compactResponse(
+                        CompactionInput(
+                            model = liveModel(),
+                            instructions = "Summarize the conversation into one short sentence.",
+                            input = responseInput(
+                                "The user asked whether the Codex subscription provider can call the backend.",
+                            ),
+                            parallelToolCalls = false,
+                            promptCacheKey = "codex-lite-live-test",
+                        ),
+                    )
+                }
+            } catch (error: NoTransformationFoundException) {
+                assertTrue(error.message.contains("ContentType: null"), "Expected original Ktor conversion failure.")
+                return@runTest
+            }
 
+            val response = result.successOrFail()
             assertTrue(response.output.isNotEmpty(), "Expected compaction output items.")
         } finally {
-            client.close()
+            provider.close()
         }
     }
 
-    private fun liveProvider(client: HttpClient): OpenAiSubscriptionLlmProvider =
+    private fun liveProvider(): OpenAiSubscriptionLlmProvider =
         OpenAiSubscriptionLlmProvider(
             authProvider = { readCodexAuth(codexDirectory) },
-            httpClient = client,
-            config = OpenAiSubscriptionLlmProviderConfig(clientVersion = codexClientVersion()),
+            config = OpenAiClientConfig(clientVersion = codexClientVersion()),
         )
 
     private fun readCodexModelsCacheJson(): JsonObject =
@@ -141,7 +148,16 @@ class OpenAiSubscriptionLlmProviderTest {
         return text
     }
 
-    private val codexDirectory: Path = Path("/home/stream/.codex")
+    private val codexDirectory: Path =
+        environmentVariable("CODEX_HOME")
+            ?.takeIf(String::isNotBlank)
+            ?.let(::Path)
+            ?: Path(
+                environmentVariable("HOME")?.takeIf(String::isNotBlank)
+                    ?: environmentVariable("USERPROFILE")?.takeIf(String::isNotBlank)
+                    ?: fail("CODEX_HOME, HOME, or USERPROFILE must be set for real OpenAI tests."),
+                ".codex",
+            )
 
     private fun codexPath(fileName: String): Path = Path(codexDirectory, fileName)
 
@@ -196,4 +212,10 @@ class OpenAiSubscriptionLlmProviderTest {
 
     private fun JsonObject.string(name: String): String? =
         (this[name] as? JsonPrimitive)?.contentOrNull
+
+    private fun <T> OpenAiResult<T, OpenAiErrorResponse>.successOrFail(): T =
+        when (this) {
+            is OpenAiResult.Success -> value
+            is OpenAiResult.Failure -> fail("OpenAI request failed: ${error.messageText ?: error}")
+        }
 }

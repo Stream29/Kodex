@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.tool.imagegeneration
 
+import io.github.stream29.codex.lite.openai.OpenAiJson
 import io.github.stream29.codex.lite.tool.contract.ResponsesApiNamespace
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.jsonArray
@@ -10,7 +11,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ImageGenerationToolsTest {
-    private val json = OpenAiImageGenerationClient.defaultJson
+    private val json = OpenAiJson.default
 
     @Test
     fun specDeclaresImageGenNamespaceTool() {

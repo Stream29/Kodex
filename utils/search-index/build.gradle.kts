@@ -1,24 +1,26 @@
+@file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi::class)
+
+import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
+
 plugins {
     id("codexlite.kmp-host")
 }
 
 kotlin {
+    applyHierarchyTemplate(KotlinHierarchyTemplate.default) {
+        common {
+            group("lucene") {
+                withJvm()
+                withNative()
+            }
+        }
+    }
+
     sourceSets {
-        fun org.jetbrains.kotlin.gradle.plugin.KotlinSourceSet.useLucene() {
-            kotlin.srcDir("src/luceneMain/kotlin")
+        val luceneMain by getting {
             dependencies {
                 implementation(libs.lucene.kmp.core)
             }
-        }
-
-        jvmMain.get().useLucene()
-        linuxX64Main.get().useLucene()
-        linuxArm64Main.get().useLucene()
-        macosArm64Main.get().useLucene()
-        mingwX64Main.get().useLucene()
-
-        commonTest.dependencies {
-            implementation(kotlin("test"))
         }
     }
 }

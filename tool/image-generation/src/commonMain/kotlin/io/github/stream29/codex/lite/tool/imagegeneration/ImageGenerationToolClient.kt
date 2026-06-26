@@ -1,5 +1,13 @@
 package io.github.stream29.codex.lite.tool.imagegeneration
 
+import io.github.stream29.codex.lite.openai.ImageBackground
+import io.github.stream29.codex.lite.openai.ImageEditRequest
+import io.github.stream29.codex.lite.openai.ImageGenerationRequest
+import io.github.stream29.codex.lite.openai.ImageQuality
+import io.github.stream29.codex.lite.openai.ImageUrl
+import io.github.stream29.codex.lite.openai.OpenAiErrorResponse
+import io.github.stream29.codex.lite.openai.OpenAiResult
+import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
 import io.github.stream29.codex.lite.utils.images.PromptImageMode
 import io.github.stream29.codex.lite.utils.images.PromptImageTransformer
 import io.github.stream29.codex.lite.utils.images.codec.HostPromptImageTransformer
@@ -10,7 +18,7 @@ import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFi
 import kotlinx.io.files.Path
 
 public class ImageGenerationToolClient(
-    private val client: OpenAiImageGenerationClient,
+    private val client: OpenAiClient,
     private val root: Path = Path("."),
     private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     private val transformer: PromptImageTransformer = HostPromptImageTransformer,
@@ -19,13 +27,21 @@ public class ImageGenerationToolClient(
     public suspend fun run(arguments: ImageGenToolArguments): GeneratedImageOutput {
         val request = requestFor(arguments)
         val response = when (request) {
-            is ImageToolRequest.Generate -> client.generate(request.value)
-            is ImageToolRequest.Edit -> client.edit(request.value)
+            is ImageToolRequest.Generate -> client.generateImage(request.value)
+            is ImageToolRequest.Edit -> client.editImage(request.value)
         }
-        val result = response.data.firstOrNull()?.b64Json
+        val result = response.successOrThrow().data.firstOrNull()?.b64Json
             ?: throw ImageGenerationToolException("image generation returned no image data")
         return GeneratedImageOutput(result = result)
     }
+
+    private fun <T> OpenAiResult<T, OpenAiErrorResponse>.successOrThrow(): T =
+        when (this) {
+            is OpenAiResult.Success -> value
+            is OpenAiResult.Failure -> throw ImageGenerationToolException(
+                "image generation failed: ${error.messageText ?: error.toString()}",
+            )
+        }
 
     private suspend fun requestFor(arguments: ImageGenToolArguments): ImageToolRequest {
         if (arguments.prompt.isBlank()) {

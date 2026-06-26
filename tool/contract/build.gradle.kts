@@ -9,8 +9,5 @@ kotlin {
             api(libs.kotlinx.serialization.json)
             api(libs.kotlinx.schema.json)
         }
-        commonTest.dependencies {
-            implementation(kotlin("test"))
-        }
     }
 }

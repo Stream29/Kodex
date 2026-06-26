@@ -7,24 +7,14 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(libs.kotlinx.coroutines.core)
-            api(libs.ktor.client.core)
-            api(project(":auth"))
-            api(project(":llm-provider:models"))
-            implementation(libs.ktor.client.content.negotiation)
-            implementation(libs.ktor.serialization.kotlinx.json)
-            implementation(libs.ktor.sse)
+            api(project(":openai:client"))
+            api(project(":openai:models"))
         }
         commonTest.dependencies {
-            implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.kotlinx.io.core)
-            implementation(project(":codex-compatibility"))
-        }
-        jvmTest.dependencies {
-            implementation(libs.bundles.ktor.client.jvm.engines)
-        }
-        linuxTest.dependencies {
-            implementation(libs.bundles.ktor.client.linux.engines)
+            implementation(project(":openai:codex-cli-storage"))
+            implementation(project(":utils:host-test-support"))
         }
     }
 }

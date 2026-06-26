@@ -2,6 +2,12 @@
 
 package io.github.stream29.codex.lite.tool.imagegeneration
 
+import io.github.stream29.codex.lite.openai.ImageData
+import io.github.stream29.codex.lite.openai.ImageResponse
+import io.github.stream29.codex.lite.openai.OpenAiResult
+import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
+import io.github.stream29.codex.lite.openai.client.OpenAiClient as RealOpenAiClient
+import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
@@ -9,19 +15,46 @@ import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlin.random.Random
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
 class ImageGenerationToolClientTest {
     @Test
-    fun runGeneratesImageAgainstRealEndpoint() = runTest(timeout = 300.seconds) {
+    fun runGeneratesImageWithMockClient() = runTest {
         val toolClient = ImageGenerationToolClient(
-            client = realOpenAiClient(),
+            client = mockOpenAiClient {
+                generateImage { request ->
+                    assertEquals("draw", request.prompt)
+                    OpenAiResult.Success(
+                        ImageResponse(
+                            created = 1,
+                            data = listOf(ImageData("generated-image")),
+                        ),
+                    )
+                }
+            },
         )
 
-        val output = withContext(Dispatchers.Default) {
-            toolClient.run(ImageGenToolArguments(prompt = "A tiny black square on a plain white background."))
+        val output = toolClient.run(ImageGenToolArguments(prompt = "draw"))
+
+        assertEquals(GeneratedImageOutput(result = "generated-image"), output)
+    }
+
+    @Test
+    fun runGeneratesImageAgainstRealEndpoint() = runTest(timeout = 300.seconds) {
+        val client = realOpenAiClient()
+        val toolClient = ImageGenerationToolClient(
+            client = client,
+        )
+
+        val output = try {
+            withContext(Dispatchers.Default) {
+                toolClient.run(ImageGenToolArguments(prompt = "A tiny black square on a plain white background."))
+            }
+        } finally {
+            client.close()
         }
 
         assertTrue(output.result.isNotBlank(), "Expected generated image bytes.")
@@ -32,8 +65,9 @@ class ImageGenerationToolClientTest {
         val root = temporaryRoot()
         val imagePath = Path(root, "image.png")
         SystemCoroutineFileSystem.writeBytes(imagePath, png64x32)
+        val client = realOpenAiClient()
         val toolClient = ImageGenerationToolClient(
-            client = realOpenAiClient(),
+            client = client,
             root = root,
         )
 
@@ -49,6 +83,7 @@ class ImageGenerationToolClientTest {
 
             assertTrue(output.result.isNotBlank(), "Expected edited image bytes.")
         } finally {
+            client.close()
             if (SystemCoroutineFileSystem.exists(imagePath)) {
                 SystemCoroutineFileSystem.delete(imagePath, mustExist = true)
             }
@@ -60,7 +95,7 @@ class ImageGenerationToolClientTest {
 
     @Test
     fun tooManyReferencedImagesFailBeforeCallingApi() = runTest {
-        val toolClient = ImageGenerationToolClient(client = realOpenAiClient())
+        val toolClient = ImageGenerationToolClient(client = mockOpenAiClient())
 
         assertFailsWith<ImageGenerationToolException> {
             toolClient.run(
@@ -74,7 +109,7 @@ class ImageGenerationToolClientTest {
 
     @Test
     fun conversationImageSelectionRequiresAgentLoopHistory() = runTest {
-        val toolClient = ImageGenerationToolClient(client = realOpenAiClient())
+        val toolClient = ImageGenerationToolClient(client = mockOpenAiClient())
 
         assertFailsWith<ImageGenerationToolException> {
             toolClient.run(
@@ -86,8 +121,8 @@ class ImageGenerationToolClientTest {
         }
     }
 
-    private fun realOpenAiClient(): OpenAiImageGenerationClient =
-        OpenAiImageGenerationClient(
+    private fun realOpenAiClient(): OpenAiClient =
+        RealOpenAiClient(
             authProvider = codexAuthProvider(),
         )
 

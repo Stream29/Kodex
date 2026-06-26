@@ -32,7 +32,6 @@ kotlin {
                 implementation(libs.skiko)
             }
         }
-        val skikoNativeTest by getting
 
         commonMain.dependencies {
             api(project(":utils:images"))

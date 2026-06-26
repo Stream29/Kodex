@@ -25,6 +25,9 @@ ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx
 ktor-sse = { module = "io.ktor:ktor-sse", version.ref = "ktor" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
 ktor-client-curl = { module = "io.ktor:ktor-client-curl", version.ref = "ktor" }
+ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }
+ktor-client-js = { module = "io.ktor:ktor-client-js", version.ref = "ktor" }
+ktor-client-winhttp = { module = "io.ktor:ktor-client-winhttp", version.ref = "ktor" }
 lucene-kmp-core = { module = "org.gnit.lucene-kmp:lucene-kmp-core", version.ref = "lucene-kmp" }
 kotlin-wrappers-node = { module = "org.jetbrains.kotlin-wrappers:kotlin-node", version.ref = "kotlin-wrappers-node" }
 korim = { module = "com.soywiz.korlibs.korim:korim", version.ref = "korim" }
@@ -33,7 +36,10 @@ twelvemonkeys-imageio-jpeg = { module = "com.twelvemonkeys.imageio:imageio-jpeg"
 
 [bundles]
 ktor-client-jvm-engines = ["ktor-client-cio"]
+ktor-client-js-engines = ["ktor-client-js"]
 ktor-client-linux-engines = ["ktor-client-curl"]
+ktor-client-macos-engines = ["ktor-client-darwin"]
+ktor-client-mingw-engines = ["ktor-client-winhttp"]
 
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
