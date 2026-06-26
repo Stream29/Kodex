@@ -53,11 +53,6 @@ public object SharpPromptImageTransformer : PromptImageTransformer {
                     quality = 85
                 },
             )
-            ImageMimeType.Webp -> webp(
-                unsafeJso<SharpWebpOptions> {
-                    lossless = true
-                },
-            )
             ImageMimeType.Gif -> throw UnsupportedImageCodecException(mimeType, "encode")
         }
 }
@@ -79,8 +74,6 @@ private external interface SharpPipeline {
 
     fun jpeg(options: SharpJpegOptions = definedExternally): SharpPipeline
 
-    fun webp(options: SharpWebpOptions = definedExternally): SharpPipeline
-
     fun toBuffer(): Promise<Uint8Array<ArrayBuffer>>
 }
 
@@ -90,8 +83,4 @@ private external interface SharpResizeOptions {
 
 private external interface SharpJpegOptions {
     var quality: Int
-}
-
-private external interface SharpWebpOptions {
-    var lossless: Boolean
 }

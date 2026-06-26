@@ -41,7 +41,6 @@ kotlin {
         }
         jvmMain.dependencies {
             implementation(libs.twelvemonkeys.imageio.jpeg)
-            implementation(libs.usefulness.webp.imageio)
         }
         jsMain.dependencies {
             implementation(libs.kotlin.wrappers.node)

@@ -20,23 +20,12 @@ class ImageInfoTest {
             ImageInfo(ImageMimeType.Jpeg, ImageDimensions(64, 32)),
             jpegBytes(64, 32).detectImageInfo(),
         )
-        assertEquals(
-            ImageInfo(ImageMimeType.Webp, ImageDimensions(64, 32)),
-            webpExtendedBytes(64, 32).detectImageInfo(),
-        )
-        assertEquals(
-            ImageInfo(ImageMimeType.Webp, ImageDimensions(64, 32)),
-            webpLossyBytes(64, 32).detectImageInfo(),
-        )
-        assertEquals(
-            ImageInfo(ImageMimeType.Webp, ImageDimensions(64, 32)),
-            webpLosslessBytes(64, 32).detectImageInfo(),
-        )
     }
 
     @Test
     fun detectImageInfoReturnsNullForUnsupportedBytes() {
         assertNull("not an image".encodeToByteArray().detectImageInfo())
+        assertNull(riffWebpBytes().detectImageInfo())
         assertFailsWith<UnsupportedImageFormatException> {
             "not an image".encodeToByteArray().requireImageInfo()
         }

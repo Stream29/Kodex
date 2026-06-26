@@ -26,7 +26,6 @@ public fun ByteArray.detectImageInfo(): ImageInfo? {
             ImageMimeType.Png -> pngDimensions()
             ImageMimeType.Jpeg -> jpegDimensions()
             ImageMimeType.Gif -> gifDimensions()
-            ImageMimeType.Webp -> webpDimensions()
         },
     )
 }
@@ -89,50 +88,6 @@ private fun ByteArray.jpegDimensions(): ImageDimensions {
 
 private fun Int.isJpegStartOfFrame(): Boolean =
     this in 0xc0..0xcf && this != 0xc4 && this != 0xc8 && this != 0xcc
-
-private fun ByteArray.webpDimensions(): ImageDimensions {
-    if (size < 20) invalidImage("truncated WebP header")
-    return when {
-        hasAsciiAt(12, "VP8X") -> webpExtendedDimensions()
-        hasAsciiAt(12, "VP8 ") -> webpLossyDimensions()
-        hasAsciiAt(12, "VP8L") -> webpLosslessDimensions()
-        else -> invalidImage("unsupported WebP chunk")
-    }
-}
-
-private fun ByteArray.webpExtendedDimensions(): ImageDimensions {
-    if (size < 30) invalidImage("truncated WebP extended header")
-    return dimensionsFromInts(
-        width = u24LE(24) + 1,
-        height = u24LE(27) + 1,
-        format = "WebP",
-    )
-}
-
-private fun ByteArray.webpLossyDimensions(): ImageDimensions {
-    if (size < 30) invalidImage("truncated WebP lossy header")
-    if (!hasBytesAt(23, 0x9d, 0x01, 0x2a)) invalidImage("missing WebP lossy sync code")
-    return dimensionsFromInts(
-        width = u16LE(26) and 0x3fff,
-        height = u16LE(28) and 0x3fff,
-        format = "WebP",
-    )
-}
-
-private fun ByteArray.webpLosslessDimensions(): ImageDimensions {
-    if (size < 25) invalidImage("truncated WebP lossless header")
-    if (u8(20) != 0x2f) invalidImage("missing WebP lossless signature")
-
-    val b0 = u8(21)
-    val b1 = u8(22)
-    val b2 = u8(23)
-    val b3 = u8(24)
-    return dimensionsFromInts(
-        width = 1 + (((b1 and 0x3f) shl 8) or b0),
-        height = 1 + (((b3 and 0x0f) shl 10) or (b2 shl 2) or ((b1 and 0xc0) shr 6)),
-        format = "WebP",
-    )
-}
 
 private fun dimensionsFromInts(width: Int, height: Int, format: String): ImageDimensions =
     dimensionsFromLongs(width.toLong(), height.toLong(), format)

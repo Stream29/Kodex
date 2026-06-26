@@ -11,7 +11,6 @@ korim = "4.0.10"
 sharp = "0.35.2"
 skiko = "0.9.18"
 twelvemonkeys-imageio = "3.13.1"
-usefulness-webp-imageio = "0.11.0"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
@@ -31,7 +30,6 @@ kotlin-wrappers-node = { module = "org.jetbrains.kotlin-wrappers:kotlin-node", v
 korim = { module = "com.soywiz.korlibs.korim:korim", version.ref = "korim" }
 skiko = { module = "org.jetbrains.skiko:skiko", version.ref = "skiko" }
 twelvemonkeys-imageio-jpeg = { module = "com.twelvemonkeys.imageio:imageio-jpeg", version.ref = "twelvemonkeys-imageio" }
-usefulness-webp-imageio = { module = "com.github.usefulness:webp-imageio", version.ref = "usefulness-webp-imageio" }
 
 [bundles]
 ktor-client-jvm-engines = ["ktor-client-cio"]

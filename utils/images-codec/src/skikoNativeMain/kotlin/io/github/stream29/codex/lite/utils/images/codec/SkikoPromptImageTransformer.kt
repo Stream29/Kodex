@@ -94,7 +94,6 @@ private val ImageMimeType.backgroundColor: Int
         ImageMimeType.Jpeg -> Color.WHITE
         ImageMimeType.Png,
         ImageMimeType.Gif,
-        ImageMimeType.Webp,
         -> Color.TRANSPARENT
     }
 
@@ -103,7 +102,6 @@ private val ImageMimeType.skikoQuality: Int
         ImageMimeType.Jpeg -> 85
         ImageMimeType.Png,
         ImageMimeType.Gif,
-        ImageMimeType.Webp,
         -> 100
     }
 
@@ -111,6 +109,5 @@ private fun ImageMimeType.toSkikoFormat(): EncodedImageFormat =
     when (this) {
         ImageMimeType.Png -> EncodedImageFormat.PNG
         ImageMimeType.Jpeg -> EncodedImageFormat.JPEG
-        ImageMimeType.Webp -> EncodedImageFormat.WEBP
         ImageMimeType.Gif -> throw UnsupportedImageCodecException(this, "encode")
     }

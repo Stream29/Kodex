@@ -337,9 +337,7 @@ private fun ImageMimeType.toGdiPlusFormat(): _GUID =
     when (this) {
         ImageMimeType.Png -> ImageFormatPNG
         ImageMimeType.Jpeg -> ImageFormatJPEG
-        ImageMimeType.Gif,
-        ImageMimeType.Webp,
-        -> throw UnsupportedImageCodecException(this, capability = "encode")
+        ImageMimeType.Gif -> throw UnsupportedImageCodecException(this, capability = "encode")
     }
 
 private val ImageMimeType.backgroundColor: UInt
@@ -347,7 +345,6 @@ private val ImageMimeType.backgroundColor: UInt
         ImageMimeType.Jpeg -> 0xffffffffu
         ImageMimeType.Png,
         ImageMimeType.Gif,
-        ImageMimeType.Webp,
         -> 0x00000000u
     }
 

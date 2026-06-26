@@ -22,9 +22,6 @@ internal fun ByteArray.u16BE(index: Int): Int =
 internal fun ByteArray.u16LE(index: Int): Int =
     u8(index) or (u8(index + 1) shl 8)
 
-internal fun ByteArray.u24LE(index: Int): Int =
-    u8(index) or (u8(index + 1) shl 8) or (u8(index + 2) shl 16)
-
 internal fun ByteArray.u32BE(index: Int): Long =
     (u8(index).toLong() shl 24) or
         (u8(index + 1).toLong() shl 16) or

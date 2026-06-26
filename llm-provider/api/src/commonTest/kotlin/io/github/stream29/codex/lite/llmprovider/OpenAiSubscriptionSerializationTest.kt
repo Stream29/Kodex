@@ -426,6 +426,39 @@ class OpenAiSubscriptionSerializationTest {
     }
 
     @Test
+    fun functionToolSerializesOutputSchemaWhenPresent() {
+        val tool = ResponsesApiTool(
+            name = "view_image",
+            description = "View an image",
+            parameters = ObjectPropertyDefinition(),
+            outputSchema = ObjectPropertyDefinition(
+                properties = mapOf("image_url" to StringPropertyDefinition()),
+            ),
+        )
+
+        assertEquals(
+            json.parseToJsonElement(
+                """
+                    {
+                      "type": "function",
+                      "name": "view_image",
+                      "description": "View an image",
+                      "strict": false,
+                      "parameters": { "type": "object" },
+                      "output_schema": {
+                        "type": "object",
+                        "properties": {
+                          "image_url": { "type": "string" }
+                        }
+                      }
+                    }
+                """.trimIndent(),
+            ),
+            encodeTool(tool),
+        )
+    }
+
+    @Test
     fun namespaceToolSerializesExpectedWireShape() {
         val tool = ResponsesApiNamespace(
             name = "mcp__demo__",

@@ -16,15 +16,12 @@ class ImageMimeTypesTest {
         )
         assertEquals(ImageMimeType.Jpeg, byteArrayOf(-0x01, -0x28, -0x01).detectImageMimeType())
         assertEquals(ImageMimeType.Gif, "GIF89a".encodeToByteArray().detectImageMimeType())
-        assertEquals(
-            ImageMimeType.Webp,
-            "RIFFxxxxWEBP".encodeToByteArray().detectImageMimeType(),
-        )
     }
 
     @Test
     fun detectImageMimeTypeReturnsNullForUnknownBytes() {
         assertNull("not an image".encodeToByteArray().detectImageMimeType())
+        assertNull("RIFFxxxxWEBP".encodeToByteArray().detectImageMimeType())
         assertFailsWith<UnsupportedImageFormatException> {
             "not an image".encodeToByteArray().requireImageMimeType()
         }
@@ -34,7 +31,6 @@ class ImageMimeTypesTest {
     fun canPreserveSourceBytesMatchesCodexSupportedFormats() {
         assertTrue(ImageMimeType.Png.canPreserveSourceBytes)
         assertTrue(ImageMimeType.Jpeg.canPreserveSourceBytes)
-        assertTrue(ImageMimeType.Webp.canPreserveSourceBytes)
         assertFalse(ImageMimeType.Gif.canPreserveSourceBytes)
     }
 }

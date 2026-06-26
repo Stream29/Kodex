@@ -6,7 +6,6 @@ public enum class ImageMimeType(
     Png("image/png"),
     Jpeg("image/jpeg"),
     Gif("image/gif"),
-    Webp("image/webp"),
 }
 
 /**
@@ -26,7 +25,6 @@ public fun ByteArray.detectImageMimeType(): ImageMimeType? =
         hasPrefix(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a) -> ImageMimeType.Png
         hasPrefix(0xff, 0xd8, 0xff) -> ImageMimeType.Jpeg
         hasAsciiPrefix("GIF87a") || hasAsciiPrefix("GIF89a") -> ImageMimeType.Gif
-        hasAsciiPrefix("RIFF") && hasAsciiAt(8, "WEBP") -> ImageMimeType.Webp
         else -> null
     }
 
@@ -43,7 +41,6 @@ public val ImageMimeType.canPreserveSourceBytes: Boolean
     get() = when (this) {
         ImageMimeType.Png,
         ImageMimeType.Jpeg,
-        ImageMimeType.Webp,
         -> true
 
         ImageMimeType.Gif -> false

@@ -51,9 +51,7 @@ public object JvmImageIoPromptImageTransformer : PromptImageTransformer {
     ): BufferedImage {
         val outputType = when (mimeType) {
             ImageMimeType.Jpeg -> BufferedImage.TYPE_INT_RGB
-            ImageMimeType.Png,
-            ImageMimeType.Webp,
-            -> BufferedImage.TYPE_INT_ARGB
+            ImageMimeType.Png -> BufferedImage.TYPE_INT_ARGB
 
             ImageMimeType.Gif -> throw UnsupportedImageCodecException(mimeType, "encode")
         }

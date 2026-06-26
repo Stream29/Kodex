@@ -59,6 +59,8 @@ public sealed interface ToolSpec {
  *
  * @property deferLoading Nullable because the wire format omits false/default;
  * `null` means the tool is loaded normally in the initial tool list.
+ * @property outputSchema Nullable because most function tools do not declare
+ * structured output; `null` means omit `output_schema`.
  */
 @Serializable
 @SerialName("function")
@@ -69,6 +71,8 @@ public data class ResponsesApiTool(
     @SerialName("defer_loading")
     public val deferLoading: Boolean? = null,
     public val parameters: ObjectPropertyDefinition,
+    @SerialName("output_schema")
+    public val outputSchema: ObjectPropertyDefinition? = null,
 ) : ToolSpec, LoadableToolSpec, ResponsesApiNamespaceTool
 
 /**
