@@ -1,6 +1,7 @@
 package io.github.stream29.codex.lite.openai.client
 
 import io.github.stream29.codex.lite.openai.*
+import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.tool.contract.FreeformTool
 import io.github.stream29.codex.lite.tool.contract.FreeformToolFormat
 import io.github.stream29.codex.lite.tool.contract.ResponsesApiNamespace
@@ -12,6 +13,8 @@ import io.github.stream29.codex.lite.tool.contract.WebSearchContextSize
 import kotlinx.schema.json.AdditionalPropertiesConstraint
 import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.schema.json.StringPropertyDefinition
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -22,7 +25,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class OpenAiSubscriptionSerializationTest {
-    private val json = OpenAiJson.default
+    private val json = OpenAiJsonCodec
 
     @Test
     fun responseItemUsesTaggedPolymorphicShape() {
@@ -36,8 +39,8 @@ class OpenAiSubscriptionSerializationTest {
             ),
         )
 
-        val encoded = OpenAiJson.default
-            .parseToJsonElement(OpenAiJson.default.encodeToString(request))
+        val encoded = json
+            .parseToJsonElement(json.encodeToString(request))
             .jsonObject
         val item = encoded["input"]?.jsonArray?.single()?.jsonObject
 
@@ -50,7 +53,12 @@ class OpenAiSubscriptionSerializationTest {
     fun requestUsesExplicitWireNames() {
         val request = ResponsesApiRequest(
             model = "test-model",
-            input = textInput("hello"),
+            input = listOf(
+                ResponseItem.Message(
+                    role = MessageRole.User,
+                    content = listOf(ContentItem.InputText("hello")),
+                ),
+            ),
             previousResponseId = "resp_1",
             toolChoice = ToolChoice.Required,
             parallelToolCalls = true,
@@ -73,7 +81,12 @@ class OpenAiSubscriptionSerializationTest {
     fun responsesApiRequestForcesStreamWireShape() {
         val request = ResponsesApiRequest(
             model = "test-model",
-            input = textInput("hello"),
+            input = listOf(
+                ResponseItem.Message(
+                    role = MessageRole.User,
+                    content = listOf(ContentItem.InputText("hello")),
+                ),
+            ),
         )
 
         val encoded = json.parseToJsonElement(json.encodeToString(request)).jsonObject
@@ -88,8 +101,8 @@ class OpenAiSubscriptionSerializationTest {
             output = FunctionCallOutputPayload.fromText("ok"),
         )
 
-        val encoded = OpenAiJson.default
-            .parseToJsonElement(OpenAiJson.default.encodeToString<ResponseItem>(item))
+        val encoded = json
+            .parseToJsonElement(json.encodeToString<ResponseItem>(item))
             .jsonObject
 
         assertEquals(JsonPrimitive("function_call_output"), encoded["type"])
@@ -105,14 +118,14 @@ class OpenAiSubscriptionSerializationTest {
             ),
         )
 
-        val encoded = OpenAiJson.default
-            .parseToJsonElement(OpenAiJson.default.encodeToString<ResponseItem>(item))
+        val encoded = json
+            .parseToJsonElement(json.encodeToString<ResponseItem>(item))
             .jsonObject
 
         assertEquals(
             JsonArray(
                 listOf(
-                    OpenAiJson.default.parseToJsonElement(
+                    json.parseToJsonElement(
                         """{"type":"input_text","text":"note"}""",
                     ),
                 ),
@@ -123,7 +136,7 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun functionCallOutputPayloadDecodesText() {
-        val item = OpenAiJson.default.decodeFromString<ResponseItem>(
+        val item = json.decodeFromString<ResponseItem>(
             """{"type":"function_call_output","call_id":"call_1","output":"ok"}""",
         )
 
@@ -133,7 +146,7 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun functionCallOutputPayloadDecodesContentItems() {
-        val item = OpenAiJson.default.decodeFromString<ResponseItem>(
+        val item = json.decodeFromString<ResponseItem>(
             """{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_text","text":"note"}]}""",
         )
 
@@ -235,7 +248,7 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun compactionSummaryDecodesAsTaggedVariant() {
-        val item = OpenAiJson.default.decodeFromString<ResponseItem>(
+        val item = json.decodeFromString<ResponseItem>(
             """{"type":"compaction_summary","encrypted_content":"enc"}""",
         )
 
@@ -244,7 +257,7 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun streamEventDecodesAsTaggedVariant() {
-        val event = OpenAiJson.default.decodeFromString<ResponsesStreamEvent>(
+        val event = json.decodeFromString<ResponsesStreamEvent>(
             """
                 {
                   "type":"response.output_text.delta",
@@ -261,7 +274,7 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun completedStreamEventDecodesRawResponseShape() {
-        val event = OpenAiJson.default.decodeFromString<ResponsesStreamEvent>(
+        val event = json.decodeFromString<ResponsesStreamEvent>(
             """{"type":"response.completed","response":{"id":"resp_1","end_turn":true}}""",
         )
 
@@ -271,8 +284,32 @@ class OpenAiSubscriptionSerializationTest {
     }
 
     @Test
+    fun completedStreamEventDecodesTokenUsageCounters() {
+        val event = json.decodeFromString<ResponsesStreamEvent>(
+            """
+                {
+                  "type": "response.completed",
+                  "response": {
+                    "id": "resp_1",
+                    "usage": {
+                      "input_tokens": 1,
+                      "output_tokens": 2,
+                      "total_tokens": 3
+                    }
+                  }
+                }
+            """.trimIndent(),
+        )
+
+        val usage = (event as ResponsesStreamEvent.Completed).response.usage ?: error("missing usage")
+        assertEquals(1, usage.inputTokens)
+        assertEquals(2, usage.outputTokens)
+        assertEquals(3, usage.totalTokens)
+    }
+
+    @Test
     fun metadataStreamEventAllowsMissingOptionalWireFields() {
-        val event = OpenAiJson.default.decodeFromString<ResponsesStreamEvent>(
+        val event = json.decodeFromString<ResponsesStreamEvent>(
             """{"type":"response.metadata"}""",
         )
 
@@ -284,7 +321,7 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun customToolInputDeltaAllowsCallIdAsFallbackIdentifier() {
-        val event = OpenAiJson.default.decodeFromString<ResponsesStreamEvent>(
+        val event = json.decodeFromString<ResponsesStreamEvent>(
             """{"type":"response.custom_tool_call_input.delta","call_id":"call_1","delta":"abc"}""",
         )
 
@@ -296,7 +333,7 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun failedResponseAllowsPartialErrorPayload() {
-        val event = OpenAiJson.default.decodeFromString<ResponsesStreamEvent>(
+        val event = json.decodeFromString<ResponsesStreamEvent>(
             """{"type":"response.failed","response":{"error":{"code":"invalid_prompt"}}}""",
         )
 
@@ -308,7 +345,7 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun contentPartStreamEventDecodesRawPartShape() {
-        val event = OpenAiJson.default.decodeFromString<ResponsesStreamEvent>(
+        val event = json.decodeFromString<ResponsesStreamEvent>(
             """
                 {
                   "type":"response.content_part.added",
@@ -326,7 +363,7 @@ class OpenAiSubscriptionSerializationTest {
 
     @Test
     fun outputTextDoneStreamEventDecodesRawTextShape() {
-        val event = OpenAiJson.default.decodeFromString<ResponsesStreamEvent>(
+        val event = json.decodeFromString<ResponsesStreamEvent>(
             """
                 {
                   "type":"response.output_text.done",
@@ -376,9 +413,20 @@ class OpenAiSubscriptionSerializationTest {
             """.trimIndent(),
         )
 
-        val content = (item as ResponseItem.Reasoning).content.orEmpty()
+        val reasoning = item as ResponseItem.Reasoning
+        assertEquals("", reasoning.id)
+        val content = reasoning.content.orEmpty()
         assertEquals("plain", (content[0] as ReasoningItemContent.Text).text)
         assertEquals("hidden", (content[1] as ReasoningItemContent.ReasoningText).text)
+    }
+
+    @Test
+    fun reasoningDefaultIdIsNotEncoded() {
+        val item = ResponseItem.Reasoning(summary = emptyList())
+
+        val encoded = json.parseToJsonElement(json.encodeToString<ResponseItem>(item)).jsonObject
+
+        assertNull(encoded["id"])
     }
 
     @Test

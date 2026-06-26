@@ -1,12 +1,13 @@
 package io.github.stream29.codex.lite.openai
 
+import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class WebSearchSerializationTest {
-    private val json = OpenAiJson.default
+    private val json = OpenAiJsonCodec
 
     @Test
     fun searchRequestSerializesRequestShape() {

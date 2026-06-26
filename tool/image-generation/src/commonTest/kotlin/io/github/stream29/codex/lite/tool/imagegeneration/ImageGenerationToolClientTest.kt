@@ -121,7 +121,7 @@ class ImageGenerationToolClientTest {
         }
     }
 
-    private fun realOpenAiClient(): OpenAiClient =
+    private suspend fun realOpenAiClient(): OpenAiClient =
         RealOpenAiClient(
             authProvider = codexAuthProvider(),
         )

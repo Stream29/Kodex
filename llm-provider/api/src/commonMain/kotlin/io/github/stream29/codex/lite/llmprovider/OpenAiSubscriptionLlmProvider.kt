@@ -4,7 +4,7 @@ import io.github.stream29.codex.lite.openai.CompactionInput
 import io.github.stream29.codex.lite.openai.CompactionResponse
 import io.github.stream29.codex.lite.openai.ModelsResponse
 import io.github.stream29.codex.lite.openai.OpenAiResponseResult
-import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthProvider
+import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthSession
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.client.OpenAiClient
@@ -16,7 +16,7 @@ public class OpenAiSubscriptionLlmProvider private constructor(
     private val client: OpenAiClientContract,
 ) : LlmProvider {
     public constructor(
-        authProvider: OpenAiSubscriptionAuthProvider,
+        authProvider: OpenAiSubscriptionAuthSession,
         config: OpenAiClientConfig = OpenAiClientConfig(),
     ) : this(
         OpenAiClient(
@@ -28,7 +28,7 @@ public class OpenAiSubscriptionLlmProvider private constructor(
     override suspend fun listModels(): OpenAiResponseResult<ModelsResponse> =
         client.listModels()
 
-    override fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent> =
+    override suspend fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent> =
         client.createResponse(request)
 
     override suspend fun compactResponse(request: CompactionInput): OpenAiResponseResult<CompactionResponse> =

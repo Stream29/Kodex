@@ -8,10 +8,12 @@ kotlin {
         commonMain.dependencies {
             api(project(":openai:models"))
             api(libs.kotlinx.io.core)
-            implementation(libs.kotlinx.serialization.json)
+            implementation(project(":openai:json-codec"))
+            implementation(project(":utils:kotlinx-io-coroutines"))
+            implementation(project(":utils:os-environment"))
         }
         commonTest.dependencies {
-            implementation(project(":utils:host-test-support"))
+            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }

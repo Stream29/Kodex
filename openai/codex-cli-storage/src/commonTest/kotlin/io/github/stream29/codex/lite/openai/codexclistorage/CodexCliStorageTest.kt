@@ -1,6 +1,7 @@
 package io.github.stream29.codex.lite.openai.codexclistorage
 
-import io.github.stream29.codex.lite.utils.hosttest.environmentVariable
+import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
+import kotlinx.coroutines.test.runTest
 import kotlinx.io.files.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -9,30 +10,33 @@ import kotlin.test.assertTrue
 
 class CodexCliStorageTest {
     @Test
-    fun detectsCodexDirectory() {
+    fun detectsCodexDirectory() = runTest {
         val codexDirectory = testCodexDirectory()
 
         assertEquals(codexDirectory, detectCodexDirectory(listOf(Path("/tmp/not-a-codex-dir"), codexDirectory)))
-        assertTrue(isCodexDirectory(codexDirectory), "Expected $codexDirectory to contain Codex CLI auth.")
+        assertTrue(CodexCliStorage(codexDirectory).isCodexDirectory(), "Expected $codexDirectory to contain Codex CLI auth.")
     }
 
     @Test
-    fun readsCodexAuth() {
-        val auth = readCodexAuth(testCodexDirectory())
+    fun readsCodexAuth() = runTest {
+        val auth = CodexCliStorage(testCodexDirectory()).readAuth()
 
         assertTrue(auth.accessToken.isNotBlank(), "Expected Codex CLI access token.")
         assertNotNull(auth.accountId, "Expected Codex CLI ChatGPT account id.")
     }
-}
 
-private fun testCodexDirectory(): Path {
-    val explicitCodexHome = environmentVariable("CODEX_HOME")?.takeIf(String::isNotBlank)
-    if (explicitCodexHome != null) {
-        return Path(explicitCodexHome)
+    @Test
+    fun readsCodexMetadataFiles() = runTest {
+        val storage = CodexCliStorage(testCodexDirectory())
+
+        assertTrue(storage.readModelsCache().models.isNotEmpty(), "Expected Codex CLI models cache.")
+        assertTrue(storage.readConfigToml().isNotBlank(), "Expected Codex CLI config TOML.")
     }
-
-    val userHome = environmentVariable("HOME")?.takeIf(String::isNotBlank)
-        ?: environmentVariable("USERPROFILE")?.takeIf(String::isNotBlank)
-        ?: error("CODEX_HOME, HOME, or USERPROFILE must be set for real Codex CLI storage tests.")
-    return Path(userHome, ".codex")
 }
+
+private fun testCodexDirectory(): Path =
+    environmentVariable("CODEX_HOME")
+        ?.takeIf(String::isNotBlank)
+        ?.let(::Path)
+        ?: defaultCodexDirectory()
+        ?: error("CODEX_HOME or a readable user home directory must be set for real Codex CLI storage tests.")

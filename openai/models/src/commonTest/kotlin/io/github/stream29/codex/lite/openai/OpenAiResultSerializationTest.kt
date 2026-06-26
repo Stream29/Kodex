@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.openai
 
+import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlin.test.Test
@@ -7,20 +8,23 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 class OpenAiResultSerializationTest {
+    private val json = OpenAiJsonCodec
+
     @Test
     fun decodesSuccessfulResponseAsSuccess() {
-        val result = OpenAiJson.default.decodeFromString<OpenAiResponseResult<ModelsResponse>>(
-            """{"models":[{"slug":"gpt-test"}]}""",
+        val result = json.decodeFromString<OpenAiResponseResult<ModelsResponse>>(
+            """{"models":[{"slug":"gpt-test","display_name":"GPT Test"}]}""",
         )
 
         val success = assertIs<OpenAiResult.Success<*>>(result)
         val response = assertIs<ModelsResponse>(success.value)
         assertEquals("gpt-test", response.models.single().slug)
+        assertEquals("GPT Test", response.models.single().displayName)
     }
 
     @Test
     fun decodesNestedErrorResponseAsFailure() {
-        val result = OpenAiJson.default.decodeFromString<OpenAiResponseResult<ModelsResponse>>(
+        val result = json.decodeFromString<OpenAiResponseResult<ModelsResponse>>(
             """
             {
               "error": {
@@ -41,7 +45,7 @@ class OpenAiResultSerializationTest {
 
     @Test
     fun decodesFlatErrorResponseAsFailure() {
-        val result = OpenAiJson.default.decodeFromString<OpenAiResponseResult<ModelsResponse>>(
+        val result = json.decodeFromString<OpenAiResponseResult<ModelsResponse>>(
             """{"message":"rate limited","code":"rate_limit"}""",
         )
 
@@ -53,10 +57,14 @@ class OpenAiResultSerializationTest {
 
     @Test
     fun encodesResultAsRawPayload() {
-        val encoded = OpenAiJson.default.encodeToString<OpenAiResponseResult<ModelsResponse>>(
-            OpenAiResult.Success(ModelsResponse(listOf(ModelInfo(slug = "gpt-test")))),
+        val encoded = json.encodeToString<OpenAiResponseResult<ModelsResponse>>(
+            OpenAiResult.Success(
+                ModelsResponse(
+                    listOf(ModelInfo(slug = "gpt-test", displayName = "GPT Test")),
+                ),
+            ),
         )
 
-        assertEquals("""{"models":[{"slug":"gpt-test"}]}""", encoded)
+        assertEquals("""{"models":[{"slug":"gpt-test","display_name":"GPT Test"}]}""", encoded)
     }
 }

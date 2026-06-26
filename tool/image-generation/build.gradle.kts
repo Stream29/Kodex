@@ -30,7 +30,8 @@ kotlin {
             implementation(project(":openai:client"))
             implementation(project(":openai:client-test"))
             implementation(project(":openai:codex-cli-storage"))
-            implementation(project(":utils:host-test-support"))
+            implementation(project(":openai:json-codec"))
+            implementation(project(":utils:os-environment"))
         }
     }
 }

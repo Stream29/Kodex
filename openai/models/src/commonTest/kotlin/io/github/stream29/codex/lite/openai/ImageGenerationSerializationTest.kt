@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.openai
 
+import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonArray
@@ -10,7 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 
 class ImageGenerationSerializationTest {
-    private val json = OpenAiJson.default
+    private val json = OpenAiJsonCodec
 
     @Test
     fun generationRequestOmitsNullOptionals() {

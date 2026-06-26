@@ -3,6 +3,7 @@ package io.github.stream29.codex.lite.llmprovider
 import io.github.stream29.codex.lite.openai.CompactionInput
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
+import io.github.stream29.codex.lite.openai.MutableOpenAiSubscriptionAuthSession
 import io.github.stream29.codex.lite.openai.OpenAiErrorResponse
 import io.github.stream29.codex.lite.openai.OpenAiResult
 import io.github.stream29.codex.lite.openai.ResponseItem
@@ -10,23 +11,16 @@ import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.ToolChoice
 import io.github.stream29.codex.lite.openai.client.OpenAiClientConfig
-import io.github.stream29.codex.lite.openai.codexclistorage.readCodexAuth
-import io.github.stream29.codex.lite.utils.hosttest.environmentVariable
+import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
+import io.github.stream29.codex.lite.openai.codexclistorage.defaultCodexDirectory
+import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
 import io.ktor.client.call.NoTransformationFoundException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
-import kotlinx.io.buffered
 import kotlinx.io.files.Path
-import kotlinx.io.files.SystemFileSystem
-import kotlinx.io.readString
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -41,8 +35,8 @@ class OpenAiSubscriptionLlmProviderTest {
             }.successOrFail()
 
             assertTrue(
-                models.models.all { model -> !model.slug.isNullOrBlank() || !model.id.isNullOrBlank() },
-                "Expected all returned models to have ids or slugs.",
+                models.models.all { model -> model.slug.isNotBlank() && model.displayName.isNotBlank() },
+                "Expected all returned models to have Codex backend slugs and display names.",
             )
         } finally {
             provider.close()
@@ -114,66 +108,37 @@ class OpenAiSubscriptionLlmProviderTest {
         }
     }
 
-    private fun liveProvider(): OpenAiSubscriptionLlmProvider =
+    private suspend fun liveProvider(): OpenAiSubscriptionLlmProvider =
         OpenAiSubscriptionLlmProvider(
-            authProvider = { readCodexAuth(codexDirectory) },
+            authProvider = MutableOpenAiSubscriptionAuthSession(codexStorage.readAuth()),
             config = OpenAiClientConfig(clientVersion = codexClientVersion()),
         )
-
-    private fun readCodexModelsCacheJson(): JsonObject =
-        readJsonObject(codexPath("models_cache.json"), "Codex CLI models_cache.json")
-
-    private fun readCodexConfigToml(): String =
-        readText(codexPath("config.toml"), "Codex CLI config.toml")
-
-    private fun readJsonObject(path: Path, label: String): JsonObject {
-        val text = readText(path, label)
-        return Json.parseToJsonElement(text) as? JsonObject
-            ?: fail("$label must be a JSON object.")
-    }
-
-    private fun readText(path: Path, label: String): String {
-        if (!SystemFileSystem.exists(path)) {
-            fail("$label was not found at $path.")
-        }
-        val source = SystemFileSystem.source(path).buffered()
-        val text = try {
-            source.readString()
-        } finally {
-            source.close()
-        }
-        if (text.isBlank()) {
-            fail("$label must not be empty.")
-        }
-        return text
-    }
 
     private val codexDirectory: Path =
         environmentVariable("CODEX_HOME")
             ?.takeIf(String::isNotBlank)
             ?.let(::Path)
-            ?: Path(
-                environmentVariable("HOME")?.takeIf(String::isNotBlank)
-                    ?: environmentVariable("USERPROFILE")?.takeIf(String::isNotBlank)
-                    ?: fail("CODEX_HOME, HOME, or USERPROFILE must be set for real OpenAI tests."),
-                ".codex",
-            )
+            ?: defaultCodexDirectory()
+            ?: fail("CODEX_HOME or a readable user home directory must be set for real OpenAI tests.")
 
-    private fun codexPath(fileName: String): Path = Path(codexDirectory, fileName)
+    private val codexStorage: CodexCliStorage =
+        CodexCliStorage(codexDirectory)
 
-    private fun codexClientVersion(): String =
-        readCodexModelsCacheJson().string("client_version")
+    private suspend fun codexClientVersion(): String =
+        codexStorage.readModelsCache().clientVersion
             ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
             ?: "0.1.0"
 
-    private fun liveModel(): String =
-        configModel()
-            ?: cachedModels().firstOrNull { it.contains("codex", ignoreCase = true) }
-            ?: cachedModels().firstOrNull()
-            ?: fail("Codex CLI models_cache.json must contain at least one model.")
+    private suspend fun liveModel(): String =
+        cachedModels().let { models ->
+            configModel()
+                ?: models.firstOrNull { it.contains("codex", ignoreCase = true) }
+                ?: models.firstOrNull()
+        } ?: fail("Codex CLI models_cache.json must contain at least one model.")
 
-    private fun configModel(): String? {
-        val modelLine = readCodexConfigToml()
+    private suspend fun configModel(): String? {
+        val modelLine = codexStorage
+            .readConfigToml()
             .lineSequence()
             .firstOrNull { it.trimStart().startsWith("model = ") }
             ?: return null
@@ -183,10 +148,11 @@ class OpenAiSubscriptionLlmProviderTest {
             .takeIf { it.isNotBlank() }
     }
 
-    private fun cachedModels(): List<String> =
-        (readCodexModelsCacheJson()["models"] as? JsonArray)
-            ?.mapNotNull { (it as? JsonObject)?.string("slug")?.takeIf(String::isNotBlank) }
-            .orEmpty()
+    private suspend fun cachedModels(): List<String> =
+        codexStorage
+            .readModelsCache()
+            .models
+            .mapNotNull { it.slug?.takeIf(String::isNotBlank) }
 
     private fun codexResponseRequest(model: String): ResponsesApiRequest =
         ResponsesApiRequest(
@@ -209,9 +175,6 @@ class OpenAiSubscriptionLlmProviderTest {
                 content = listOf(ContentItem.InputText(text)),
             ),
         )
-
-    private fun JsonObject.string(name: String): String? =
-        (this[name] as? JsonPrimitive)?.contentOrNull
 
     private fun <T> OpenAiResult<T, OpenAiErrorResponse>.successOrFail(): T =
         when (this) {

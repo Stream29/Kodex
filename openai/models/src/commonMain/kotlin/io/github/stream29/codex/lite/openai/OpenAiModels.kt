@@ -2,6 +2,8 @@ package io.github.stream29.codex.lite.openai
 
 import io.github.stream29.codex.lite.tool.contract.LoadableToolSpec
 import io.github.stream29.codex.lite.tool.contract.ToolSpec
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -19,25 +21,16 @@ public data class ModelsResponse(
 )
 
 /**
- * @property id Nullable because providers may omit this model alias; `null`
- * means that alias is absent, not that the model is invalid.
- * @property slug Nullable because providers may omit this model alias; `null`
- * means that alias is absent, not that the model is invalid.
- * @property name Nullable because providers may omit this model alias; `null`
- * means that alias is absent, not that the model is invalid.
- * @property displayName Nullable because providers may omit this model alias;
- * `null` means that alias is absent, not that the model is invalid.
- * @property title Nullable because providers may omit this model alias; `null`
- * means that alias is absent, not that the model is invalid.
+ * Minimal model metadata returned by the Codex backend `/models` endpoint.
+ *
+ * @property slug Stable backend model identifier.
+ * @property displayName Human-readable model name.
  */
 @Serializable
 public data class ModelInfo(
-    public val id: String? = null,
-    public val slug: String? = null,
-    public val name: String? = null,
+    public val slug: String,
     @SerialName("display_name")
-    public val displayName: String? = null,
-    public val title: String? = null,
+    public val displayName: String,
 )
 
 /**
@@ -81,8 +74,6 @@ public data class ResponsesApiRequest(
 }
 
 /**
- * @property id Nullable because partial or compatibility responses may omit id;
- * `null` means the provider did not include it.
  * @property usage Nullable because providers may omit token usage; `null`
  * means usage was not reported.
  * @property outputText Nullable because not every response includes flattened
@@ -92,7 +83,7 @@ public data class ResponsesApiRequest(
  */
 @Serializable
 public data class Response(
-    public val id: String? = null,
+    public val id: String,
     public val output: List<ResponseItem> = emptyList(),
     public val usage: TokenUsage? = null,
     @SerialName("output_text")
@@ -385,8 +376,14 @@ public data class CompactionResponse(
  *
  * Unknown wire variants decode to `Other`.
  */
-@Serializable
+@Serializable(with = ResponseItemSerializer::class)
 public sealed interface ResponseItem {
+    /**
+     * Serialization helper for every variant except `Other`.
+     */
+    @Serializable
+    public sealed interface Known : ResponseItem
+
     /**
      * @property id Nullable because providers may omit message ids; `null`
      * means no id was provided.
@@ -400,7 +397,7 @@ public sealed interface ResponseItem {
         public val role: MessageRole,
         public val content: List<ContentItem>,
         public val phase: MessagePhase? = null,
-    ) : ResponseItem
+    ) : Known
 
     @Serializable
     @SerialName("agent_message")
@@ -408,11 +405,11 @@ public sealed interface ResponseItem {
         public val author: String,
         public val recipient: String,
         public val content: List<AgentMessageInputContent>,
-    ) : ResponseItem
+    ) : Known
 
     /**
-     * @property id Nullable because providers may omit reasoning ids; `null`
-     * means no id was provided.
+     * @property id Empty when the wire omits a reasoning id, matching Rust's
+     * `#[serde(default)]` compatibility behavior.
      * @property content Nullable because reasoning items may only contain
      * summary; `null` means no full reasoning content was provided.
      * @property encryptedContent Nullable because encrypted reasoning is
@@ -421,12 +418,14 @@ public sealed interface ResponseItem {
     @Serializable
     @SerialName("reasoning")
     public data class Reasoning(
-        public val id: String? = null,
+        @OptIn(ExperimentalSerializationApi::class)
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        public val id: String = "",
         public val summary: List<ReasoningItemReasoningSummary> = emptyList(),
         public val content: List<ReasoningItemContent>? = null,
         @SerialName("encrypted_content")
         public val encryptedContent: String? = null,
-    ) : ResponseItem
+    ) : Known
 
     /**
      * @property id Nullable because hosted shell-call metadata may omit id;
@@ -442,7 +441,7 @@ public sealed interface ResponseItem {
         public val callId: String? = null,
         public val status: LocalShellStatus,
         public val action: LocalShellAction,
-    ) : ResponseItem
+    ) : Known
 
     /**
      * @property id Nullable because function-call item metadata may omit id;
@@ -459,7 +458,7 @@ public sealed interface ResponseItem {
         public val arguments: String,
         @SerialName("call_id")
         public val callId: String,
-    ) : ResponseItem
+    ) : Known
 
     /**
      * @property id Nullable because tool-search call metadata may omit item id;
@@ -478,7 +477,7 @@ public sealed interface ResponseItem {
         public val status: String? = null,
         public val execution: String,
         public val arguments: JsonElement,
-    ) : ResponseItem
+    ) : Known
 
     @Serializable
     @SerialName("function_call_output")
@@ -486,7 +485,7 @@ public sealed interface ResponseItem {
         @SerialName("call_id")
         public val callId: String,
         public val output: FunctionCallOutputPayload,
-    ) : ResponseItem
+    ) : Known
 
     /**
      * Mirrors Rust `ResponseInputItem::McpToolCallOutput`.
@@ -500,7 +499,7 @@ public sealed interface ResponseItem {
         @SerialName("call_id")
         public val callId: String,
         public val output: CallToolResult,
-    ) : ResponseItem
+    ) : Known
 
     /**
      * @property id Nullable because custom-tool call metadata may omit item id;
@@ -517,7 +516,7 @@ public sealed interface ResponseItem {
         public val callId: String,
         public val name: String,
         public val input: String,
-    ) : ResponseItem
+    ) : Known
 
     /**
      * @property name Nullable because tool-call outputs may only need `call_id`;
@@ -530,7 +529,7 @@ public sealed interface ResponseItem {
         public val callId: String,
         public val name: String? = null,
         public val output: FunctionCallOutputPayload,
-    ) : ResponseItem
+    ) : Known
 
     /**
      * @property callId Nullable because historical or normalized tool-search output
@@ -544,7 +543,7 @@ public sealed interface ResponseItem {
         public val status: String,
         public val execution: String,
         public val tools: List<LoadableToolSpec>,
-    ) : ResponseItem
+    ) : Known
 
     /**
      * @property id Nullable because web-search call metadata may omit item id;
@@ -560,7 +559,7 @@ public sealed interface ResponseItem {
         public val id: String? = null,
         public val status: String? = null,
         public val action: WebSearchAction? = null,
-    ) : ResponseItem
+    ) : Known
 
     /**
      * @property revisedPrompt Nullable because image generation may not revise the
@@ -574,7 +573,7 @@ public sealed interface ResponseItem {
         @SerialName("revised_prompt")
         public val revisedPrompt: String? = null,
         public val result: String,
-    ) : ResponseItem
+    ) : Known
 
     /**
      * Preserves the Kotlin split between `compaction` and `compaction_summary`.
@@ -584,7 +583,7 @@ public sealed interface ResponseItem {
     public data class Compaction(
         @SerialName("encrypted_content")
         public val encryptedContent: String,
-    ) : ResponseItem
+    ) : Known
 
     /**
      * Preserves the Kotlin split between `compaction` and `compaction_summary`.
@@ -594,11 +593,11 @@ public sealed interface ResponseItem {
     public data class CompactionSummary(
         @SerialName("encrypted_content")
         public val encryptedContent: String,
-    ) : ResponseItem
+    ) : Known
 
     @Serializable
     @SerialName("compaction_trigger")
-    public data object CompactionTrigger : ResponseItem
+    public data object CompactionTrigger : Known
 
     /**
      * @property encryptedContent Nullable because context compaction triggers can be
@@ -609,7 +608,7 @@ public sealed interface ResponseItem {
     public data class ContextCompaction(
         @SerialName("encrypted_content")
         public val encryptedContent: String? = null,
-    ) : ResponseItem
+    ) : Known
 
     @Serializable
     @SerialName("other")
@@ -749,8 +748,14 @@ public sealed interface LocalShellAction {
  *
  * Unknown wire variants decode to `Other`.
  */
-@Serializable
+@Serializable(with = WebSearchActionSerializer::class)
 public sealed interface WebSearchAction {
+    /**
+     * Serialization helper for every variant except `Other`.
+     */
+    @Serializable
+    public sealed interface Known : WebSearchAction
+
     /**
      * @property query Nullable because search actions may carry a single query
      * or a list; `null` means no single-query representation was provided.
@@ -762,7 +767,7 @@ public sealed interface WebSearchAction {
     public data class Search(
         public val query: String? = null,
         public val queries: List<String>? = null,
-    ) : WebSearchAction
+    ) : Known
 
     /**
      * @property url Nullable because hosted search actions may redact or omit it;
@@ -772,7 +777,7 @@ public sealed interface WebSearchAction {
     @SerialName("open_page")
     public data class OpenPage(
         public val url: String? = null,
-    ) : WebSearchAction
+    ) : Known
 
     /**
      * @property url Nullable because hosted search actions may redact or omit
@@ -785,7 +790,7 @@ public sealed interface WebSearchAction {
     public data class FindInPage(
         public val url: String? = null,
         public val pattern: String? = null,
-    ) : WebSearchAction
+    ) : Known
 
     @Serializable
     @SerialName("other")
@@ -1085,31 +1090,12 @@ public enum class TextFormatType {
     JsonSchema,
 }
 
-/**
- * @property inputTokens Nullable because providers may omit this usage counter;
- * `null` means input tokens were not reported.
- * @property outputTokens Nullable because providers may omit this usage counter;
- * `null` means output tokens were not reported.
- * @property totalTokens Nullable because providers may omit this usage counter;
- * `null` means total tokens were not reported.
- */
 @Serializable
 public data class TokenUsage(
     @SerialName("input_tokens")
-    public val inputTokens: Long? = null,
+    public val inputTokens: Long,
     @SerialName("output_tokens")
-    public val outputTokens: Long? = null,
+    public val outputTokens: Long,
     @SerialName("total_tokens")
-    public val totalTokens: Long? = null,
+    public val totalTokens: Long,
 )
-
-public fun textInput(text: String): List<ResponseItem> =
-    messageInput(MessageRole.User, text)
-
-public fun messageInput(role: MessageRole, content: String): List<ResponseItem> =
-    listOf(
-        ResponseItem.Message(
-            role = role,
-            content = listOf(ContentItem.InputText(content)),
-        ),
-    )

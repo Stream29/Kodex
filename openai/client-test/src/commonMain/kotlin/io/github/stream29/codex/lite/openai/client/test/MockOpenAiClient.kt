@@ -21,7 +21,7 @@ public fun mockOpenAiClient(
 
 public class MockOpenAiClientBuilder {
     private var listModelsHandler: suspend () -> OpenAiResponseResult<ModelsResponse> = { missingHandler("listModels") }
-    private var createResponseHandler: (ResponsesApiRequest) -> Flow<ResponsesStreamEvent> = {
+    private var createResponseHandler: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent> = {
         missingHandler("createResponse")
     }
     private var compactResponseHandler: suspend (CompactionInput) -> OpenAiResponseResult<CompactionResponse> = {
@@ -41,7 +41,7 @@ public class MockOpenAiClientBuilder {
         listModelsHandler = handler
     }
 
-    public fun createResponse(handler: (ResponsesApiRequest) -> Flow<ResponsesStreamEvent>): Unit {
+    public fun createResponse(handler: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent>): Unit {
         createResponseHandler = handler
     }
 
@@ -74,7 +74,7 @@ public class MockOpenAiClientBuilder {
 
 private class MockOpenAiClient(
     private val listModelsHandler: suspend () -> OpenAiResponseResult<ModelsResponse>,
-    private val createResponseHandler: (ResponsesApiRequest) -> Flow<ResponsesStreamEvent>,
+    private val createResponseHandler: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent>,
     private val compactResponseHandler: suspend (CompactionInput) -> OpenAiResponseResult<CompactionResponse>,
     private val generateImageHandler: suspend (ImageGenerationRequest) -> OpenAiResponseResult<ImageResponse>,
     private val editImageHandler: suspend (ImageEditRequest) -> OpenAiResponseResult<ImageResponse>,
@@ -83,7 +83,7 @@ private class MockOpenAiClient(
     override suspend fun listModels(): OpenAiResponseResult<ModelsResponse> =
         listModelsHandler()
 
-    override fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent> =
+    override suspend fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent> =
         createResponseHandler(request)
 
     override suspend fun compactResponse(request: CompactionInput): OpenAiResponseResult<CompactionResponse> =

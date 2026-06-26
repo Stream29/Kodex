@@ -16,7 +16,7 @@ import kotlinx.coroutines.flow.Flow
 public interface OpenAiClient : AutoCloseable {
     public suspend fun listModels(): OpenAiResponseResult<ModelsResponse>
 
-    public fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent>
+    public suspend fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent>
 
     public suspend fun compactResponse(request: CompactionInput): OpenAiResponseResult<CompactionResponse>
 
