@@ -1,6 +1,7 @@
 package io.github.stream29.codex.lite.openai.client
 
 import io.github.stream29.codex.lite.openai.OpenAiErrorResponse
+import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.OpenAiResult
 import io.github.stream29.codex.lite.openai.MutableOpenAiSubscriptionAuthSession
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthSession
@@ -10,7 +11,7 @@ import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
 import kotlinx.io.files.Path
 import kotlin.test.fail
 
-internal const val ImageGenerationTestModel: String = "gpt-image-2"
+internal val ImageGenerationTestModel: OpenAiModelId = OpenAiModelId("gpt-image-2")
 
 internal fun <T> OpenAiResult<T, OpenAiErrorResponse>.successOrFail(): T =
     when (this) {
@@ -35,13 +36,12 @@ internal suspend fun testCodexClientVersion(): String =
         ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
         ?: "0.1.0"
 
-internal suspend fun testCodexModel(): String =
-    cachedModels().let { models ->
+internal suspend fun testCodexModel(): OpenAiModelId =
+    OpenAiModelId(cachedModels().let { models ->
         configModel()
             ?: models.firstOrNull { it.contains("codex", ignoreCase = true) }
             ?: models.firstOrNull()
-    }
-        ?: fail("Codex CLI models_cache.json must contain at least one model.")
+    } ?: fail("Codex CLI models_cache.json must contain at least one model."))
 
 private fun testCodexStorage(): CodexCliStorage =
     CodexCliStorage(testCodexDirectory())

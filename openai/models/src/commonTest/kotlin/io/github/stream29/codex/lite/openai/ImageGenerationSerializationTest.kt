@@ -16,7 +16,7 @@ class ImageGenerationSerializationTest {
     @Test
     fun generationRequestOmitsNullOptionals() {
         val element = json.parseToJsonElement(
-            json.encodeToString(ImageGenerationRequest(prompt = "draw", model = "gpt-image-1")),
+            json.encodeToString(ImageGenerationRequest(prompt = "draw", model = OpenAiModelId("gpt-image-1"))),
         ).jsonObject
 
         assertEquals(JsonPrimitive("draw"), element["prompt"])
@@ -34,7 +34,7 @@ class ImageGenerationSerializationTest {
                 ImageEditRequest(
                     images = listOf(ImageUrl("data:image/png;base64,AAAA")),
                     prompt = "edit",
-                    model = "gpt-image-1",
+                    model = OpenAiModelId("gpt-image-1"),
                     background = ImageBackground.Transparent,
                     quality = ImageQuality.High,
                     size = "1024x1024",

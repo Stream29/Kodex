@@ -1,7 +1,9 @@
 package io.github.stream29.codex.lite.storage.contract
 
+import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.Reasoning
 import io.github.stream29.codex.lite.openai.ResponseInclude
+import io.github.stream29.codex.lite.openai.ServiceTier
 import io.github.stream29.codex.lite.openai.TextControls
 import io.github.stream29.codex.lite.openai.ToolChoice
 import io.github.stream29.codex.lite.openai.ToolSpec
@@ -16,8 +18,8 @@ import io.github.stream29.codex.lite.openai.ToolSpec
  * model/tool event that publishes them.
  *
  * @property model Model identifier used for the next Responses API request.
- * @property instructions Nullable because instructions are optional; `null`
- * means no per-request instruction override is stored.
+ * @property instructions Request instructions active at this storage index.
+ * The empty default means no per-request instruction override is stored.
  * @property store Whether the provider should store the created response.
  * @property previousResponseId Nullable because a request may be built from
  * full local history instead of a provider-side response chain; `null` means no
@@ -26,29 +28,26 @@ import io.github.stream29.codex.lite.openai.ToolSpec
  * @property toolChoice Tool-choice policy active at this storage index.
  * @property parallelToolCalls Whether the model may request parallel tool
  * calls.
- * @property reasoning Nullable because reasoning controls are optional; `null`
- * means use provider or model defaults.
+ * @property reasoning Reasoning controls active at this storage index.
  * @property include Additional response fields requested from the provider.
- * @property serviceTier Nullable because service tier selection is optional;
- * `null` means use the provider default.
+ * @property serviceTier Service tier selection active at this storage index.
  * @property promptCacheKey Nullable because prompt-cache affinity is optional;
  * `null` means no explicit prompt cache key is stored.
- * @property text Nullable because text controls are optional; `null` means use
- * provider or model defaults for text output.
+ * @property text Text controls active at this storage index.
  * @property clientMetadata Client metadata attached to provider requests.
  */
 public data class CodexAgentSettings(
-    public val model: String,
-    public val instructions: String? = null,
+    public val model: OpenAiModelId,
+    public val instructions: String = "",
     public val store: Boolean = false,
     public val previousResponseId: String? = null,
     public val tools: List<ToolSpec> = emptyList(),
     public val toolChoice: ToolChoice = ToolChoice.Auto,
     public val parallelToolCalls: Boolean = false,
-    public val reasoning: Reasoning? = null,
+    public val reasoning: Reasoning = Reasoning(),
     public val include: Set<ResponseInclude> = emptySet(),
-    public val serviceTier: String? = null,
+    public val serviceTier: ServiceTier = ServiceTier.Default,
     public val promptCacheKey: String? = null,
-    public val text: TextControls? = null,
+    public val text: TextControls = TextControls(),
     public val clientMetadata: Map<String, String> = emptyMap(),
 )

@@ -18,7 +18,7 @@ class OpenAiResultSerializationTest {
 
         val success = assertIs<OpenAiResult.Success<*>>(result)
         val response = assertIs<ModelsResponse>(success.value)
-        assertEquals("gpt-test", response.models.single().slug)
+        assertEquals(OpenAiModelId("gpt-test"), response.models.single().slug)
         assertEquals("GPT Test", response.models.single().displayName)
     }
 
@@ -60,7 +60,7 @@ class OpenAiResultSerializationTest {
         val encoded = json.encodeToString<OpenAiResponseResult<ModelsResponse>>(
             OpenAiResult.Success(
                 ModelsResponse(
-                    listOf(ModelInfo(slug = "gpt-test", displayName = "GPT Test")),
+                    listOf(ModelInfo(slug = OpenAiModelId("gpt-test"), displayName = "GPT Test")),
                 ),
             ),
         )

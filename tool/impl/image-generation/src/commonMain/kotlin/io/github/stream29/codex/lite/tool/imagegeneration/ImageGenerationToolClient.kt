@@ -5,6 +5,7 @@ import io.github.stream29.codex.lite.openai.ImageEditRequest
 import io.github.stream29.codex.lite.openai.ImageGenerationRequest
 import io.github.stream29.codex.lite.openai.ImageQuality
 import io.github.stream29.codex.lite.openai.ImageUrl
+import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.OpenAiErrorResponse
 import io.github.stream29.codex.lite.openai.OpenAiResult
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
@@ -22,7 +23,7 @@ public class ImageGenerationToolClient(
     private val root: Path = Path("."),
     private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     private val transformer: PromptImageTransformer = HostPromptImageTransformer,
-    private val model: String = ImageGenDefaultModel,
+    private val model: OpenAiModelId = ImageGenDefaultModel,
 ) {
     public suspend fun run(arguments: ImageGenToolArguments): GeneratedImageOutput {
         val request = requestFor(arguments)

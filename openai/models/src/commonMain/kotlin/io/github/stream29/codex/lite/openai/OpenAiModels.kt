@@ -25,30 +25,31 @@ public data class ModelsResponse(
  */
 @Serializable
 public data class ModelInfo(
-    public val slug: String,
+    public val slug: OpenAiModelId,
     @SerialName("display_name")
     public val displayName: String,
 )
 
 /**
- * @property instructions Nullable because request instructions are optional;
- * `null` means omit the field.
+ * @property instructions Request instructions. The empty default is omitted
+ * from the wire.
  * @property previousResponseId Nullable because a request may start a new
  * response chain; `null` means no previous response is referenced.
- * @property reasoning Nullable because reasoning controls are optional; `null`
- * means use provider/session defaults.
- * @property serviceTier Nullable because service tier is optional; `null`
- * means use the provider default.
+ * @property reasoning Reasoning controls. The default value is omitted from
+ * the wire.
+ * @property serviceTier Service tier selection. [ServiceTier.Default] is
+ * omitted from the wire.
  * @property promptCacheKey Nullable because prompt cache affinity is optional;
  * `null` means no cache key is sent.
- * @property text Nullable because text controls are optional; `null` means use
- * provider/session defaults.
+ * @property text Text controls. The default value is omitted from the wire.
  */
 @Serializable
 public data class ResponsesApiRequest(
-    public val model: String,
+    public val model: OpenAiModelId,
     public val input: List<ResponseItem>,
-    public val instructions: String? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    public val instructions: String = "",
     public val store: Boolean = false,
     @SerialName("previous_response_id")
     public val previousResponseId: String? = null,
@@ -57,13 +58,19 @@ public data class ResponsesApiRequest(
     public val toolChoice: ToolChoice = ToolChoice.Auto,
     @SerialName("parallel_tool_calls")
     public val parallelToolCalls: Boolean = false,
-    public val reasoning: Reasoning? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    public val reasoning: Reasoning = Reasoning(),
     public val include: Set<ResponseInclude> = emptySet(),
     @SerialName("service_tier")
-    public val serviceTier: String? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    public val serviceTier: ServiceTier = ServiceTier.Default,
     @SerialName("prompt_cache_key")
     public val promptCacheKey: String? = null,
-    public val text: TextControls? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    public val text: TextControls = TextControls(),
     @SerialName("client_metadata")
     public val clientMetadata: Map<String, String> = emptyMap(),
 ) {
@@ -336,31 +343,38 @@ public data class ResponseError(
 )
 
 /**
- * @property instructions Nullable because compaction instructions are optional;
- * `null` means omit the field.
- * @property reasoning Nullable because reasoning controls are optional; `null`
- * means use provider/session defaults.
- * @property serviceTier Nullable because service tier is optional; `null`
- * means use the provider default.
+ * @property instructions Compaction instructions. The empty default is omitted
+ * from the wire.
+ * @property reasoning Reasoning controls. The default value is omitted from
+ * the wire.
+ * @property serviceTier Service tier selection. [ServiceTier.Default] is
+ * omitted from the wire.
  * @property promptCacheKey Nullable because prompt cache affinity is optional;
  * `null` means no cache key is sent.
- * @property text Nullable because text controls are optional; `null` means use
- * provider/session defaults.
+ * @property text Text controls. The default value is omitted from the wire.
  */
 @Serializable
 public data class CompactionInput(
-    public val model: String,
+    public val model: OpenAiModelId,
     public val input: List<ResponseItem>,
-    public val instructions: String? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    public val instructions: String = "",
     public val tools: List<ToolSpec> = emptyList(),
     @SerialName("parallel_tool_calls")
     public val parallelToolCalls: Boolean = false,
-    public val reasoning: Reasoning? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    public val reasoning: Reasoning = Reasoning(),
     @SerialName("service_tier")
-    public val serviceTier: String? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    public val serviceTier: ServiceTier = ServiceTier.Default,
     @SerialName("prompt_cache_key")
     public val promptCacheKey: String? = null,
-    public val text: TextControls? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    public val text: TextControls = TextControls(),
 )
 
 @Serializable
@@ -996,22 +1010,31 @@ public enum class ResponseInclude(public val wireName: String) {
 }
 
 /**
- * @property effort Nullable because reasoning effort is optional; `null` means
- * omit the setting and use the provider default.
- * @property summary Nullable because reasoning summary is optional; `null`
- * means omit the setting and use the provider default.
- * @property context Nullable because reasoning context is optional; `null`
- * means omit the setting and use the provider default.
+ * @property effort Reasoning effort. The default value is omitted from the
+ * wire.
+ * @property summary Reasoning summary policy. The default value is omitted
+ * from the wire.
+ * @property context Reasoning context policy. The default value is omitted
+ * from the wire.
  */
 @Serializable
 public data class Reasoning(
-    public val effort: ReasoningEffort? = null,
-    public val summary: ReasoningSummary? = null,
-    public val context: ReasoningContext? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    public val effort: ReasoningEffort = ReasoningEffort.Medium,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    public val summary: ReasoningSummary = ReasoningSummary.Auto,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    public val context: ReasoningContext = ReasoningContext.Auto,
 )
 
 @Serializable
 public enum class ReasoningEffort {
+    @SerialName("none")
+    None,
+
     @SerialName("minimal")
     Minimal,
 
@@ -1023,6 +1046,9 @@ public enum class ReasoningEffort {
 
     @SerialName("high")
     High,
+
+    @SerialName("xhigh")
+    XHigh,
 }
 
 @Serializable
@@ -1050,14 +1076,16 @@ public enum class ReasoningContext {
 }
 
 /**
- * @property verbosity Nullable because text verbosity is optional; `null` means
- * omit the setting and use the provider default.
+ * @property verbosity Text verbosity. The default value is omitted from the
+ * wire.
  * @property format Nullable because text output format is optional; `null`
  * means omit the setting and request plain model output.
  */
 @Serializable
 public data class TextControls(
-    public val verbosity: OpenAiVerbosity? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    public val verbosity: OpenAiVerbosity = OpenAiVerbosity.Medium,
     public val format: TextFormat? = null,
 )
 

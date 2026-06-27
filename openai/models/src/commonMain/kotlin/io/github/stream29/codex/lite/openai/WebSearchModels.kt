@@ -1,4 +1,6 @@
 package io.github.stream29.codex.lite.openai
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -15,8 +17,8 @@ import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * @property reasoning Nullable because search requests may omit reasoning
- * controls; `null` means use backend defaults.
+ * @property reasoning Reasoning controls. The default value is omitted from
+ * the wire.
  * @property input Nullable because callers may send commands without explicit
  * conversation input; `null` means no input payload is sent.
  * @property commands Nullable because callers may use settings-only requests;
@@ -29,8 +31,10 @@ import kotlinx.serialization.json.jsonPrimitive
 @Serializable
 public data class SearchRequest(
     public val id: String,
-    public val model: String,
-    public val reasoning: Reasoning? = null,
+    public val model: OpenAiModelId,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    public val reasoning: Reasoning = Reasoning(),
     public val input: SearchInput? = null,
     public val commands: SearchCommands? = null,
     public val settings: SearchSettings? = null,

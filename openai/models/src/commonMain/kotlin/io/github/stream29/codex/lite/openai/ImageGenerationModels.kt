@@ -15,7 +15,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 public data class ImageGenerationRequest(
     public val prompt: String,
-    public val model: String,
+    public val model: OpenAiModelId,
     public val background: ImageBackground? = null,
     public val n: Long? = null,
     public val quality: ImageQuality? = null,
@@ -35,7 +35,7 @@ public data class ImageGenerationRequest(
 public data class ImageEditRequest(
     public val images: List<ImageUrl>,
     public val prompt: String,
-    public val model: String,
+    public val model: OpenAiModelId,
     public val background: ImageBackground? = null,
     public val n: Long? = null,
     public val quality: ImageQuality? = null,

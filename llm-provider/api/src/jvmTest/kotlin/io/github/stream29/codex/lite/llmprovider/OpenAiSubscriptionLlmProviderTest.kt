@@ -5,6 +5,7 @@ import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.MutableOpenAiSubscriptionAuthSession
 import io.github.stream29.codex.lite.openai.OpenAiErrorResponse
+import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.OpenAiResult
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
@@ -35,7 +36,7 @@ class OpenAiSubscriptionLlmProviderTest {
             }.successOrFail()
 
             assertTrue(
-                models.models.all { model -> model.slug.isNotBlank() && model.displayName.isNotBlank() },
+                models.models.all { model -> model.slug.value.isNotBlank() && model.displayName.isNotBlank() },
                 "Expected all returned models to have Codex backend slugs and display names.",
             )
         } finally {
@@ -129,12 +130,12 @@ class OpenAiSubscriptionLlmProviderTest {
             ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
             ?: "0.1.0"
 
-    private suspend fun liveModel(): String =
-        cachedModels().let { models ->
+    private suspend fun liveModel(): OpenAiModelId =
+        OpenAiModelId(cachedModels().let { models ->
             configModel()
                 ?: models.firstOrNull { it.contains("codex", ignoreCase = true) }
                 ?: models.firstOrNull()
-        } ?: fail("Codex CLI models_cache.json must contain at least one model.")
+        } ?: fail("Codex CLI models_cache.json must contain at least one model."))
 
     private suspend fun configModel(): String? {
         val modelLine = codexStorage
@@ -154,7 +155,7 @@ class OpenAiSubscriptionLlmProviderTest {
             .models
             .mapNotNull { it.slug?.takeIf(String::isNotBlank) }
 
-    private fun codexResponseRequest(model: String): ResponsesApiRequest =
+    private fun codexResponseRequest(model: OpenAiModelId): ResponsesApiRequest =
         ResponsesApiRequest(
             model = model,
             instructions = "Reply with exactly: codex-lite-live-ok",

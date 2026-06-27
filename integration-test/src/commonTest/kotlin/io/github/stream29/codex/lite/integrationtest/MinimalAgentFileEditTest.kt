@@ -5,6 +5,7 @@ import io.github.stream29.codex.lite.openai.FreeformTool
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
 import io.github.stream29.codex.lite.openai.MessageRole
+import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
@@ -179,7 +180,7 @@ private data class MinimalAgentResult(
 private class MinimalAgent(
     private val client: OpenAiClient,
     private val tools: List<Tool>,
-    private val model: String = "test-model",
+    private val model: OpenAiModelId = OpenAiModelId("test-model"),
     private val maxSamplingRequests: Int = 8,
 ) {
     private val toolsByRoute = tools

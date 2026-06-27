@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.tool.imagegeneration
 
+import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ToolSpec
@@ -10,7 +11,7 @@ import io.github.stream29.codex.lite.tool.contract.Tool
 
 public const val ImageGenNamespace: String = "image_gen"
 public const val ImageGenToolName: String = "imagegen"
-public const val ImageGenDefaultModel: String = "gpt-image-2"
+public val ImageGenDefaultModel: OpenAiModelId = OpenAiModelId("gpt-image-2")
 public const val ImageGenMaxEditImages: Int = 5
 
 public object ImageGenerationTools {

@@ -13,7 +13,7 @@ class WebSearchSerializationTest {
     fun searchRequestSerializesRequestShape() {
         val request = SearchRequest(
             id = "search-session",
-            model = "gpt-test",
+            model = OpenAiModelId("gpt-test"),
             input = SearchInput.Items(
                 listOf(
                     ResponseItem.Message(

@@ -14,6 +14,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 
 class OpenAiSubscriptionSerializationTest {
@@ -22,7 +23,7 @@ class OpenAiSubscriptionSerializationTest {
     @Test
     fun responseItemUsesTaggedPolymorphicShape() {
         val request = ResponsesApiRequest(
-            model = "test-model",
+            model = OpenAiModelId("test-model"),
             input = listOf(
                 ResponseItem.Message(
                     role = MessageRole.User,
@@ -44,7 +45,7 @@ class OpenAiSubscriptionSerializationTest {
     @Test
     fun requestUsesExplicitWireNames() {
         val request = ResponsesApiRequest(
-            model = "test-model",
+            model = OpenAiModelId("test-model"),
             input = listOf(
                 ResponseItem.Message(
                     role = MessageRole.User,
@@ -54,7 +55,7 @@ class OpenAiSubscriptionSerializationTest {
             previousResponseId = "resp_1",
             toolChoice = ToolChoice.Required,
             parallelToolCalls = true,
-            serviceTier = "flex",
+            serviceTier = ServiceTier.Flex,
             promptCacheKey = "cache-key",
             clientMetadata = mapOf("client" to "test"),
         )
@@ -72,7 +73,7 @@ class OpenAiSubscriptionSerializationTest {
     @Test
     fun responsesApiRequestForcesStreamWireShape() {
         val request = ResponsesApiRequest(
-            model = "test-model",
+            model = OpenAiModelId("test-model"),
             input = listOf(
                 ResponseItem.Message(
                     role = MessageRole.User,
@@ -84,6 +85,26 @@ class OpenAiSubscriptionSerializationTest {
         val encoded = json.parseToJsonElement(json.encodeToString(request)).jsonObject
 
         assertEquals(JsonPrimitive(true), encoded["stream"])
+    }
+
+    @Test
+    fun responsesApiRequestOmitsDefaultOptionalControls() {
+        val request = ResponsesApiRequest(
+            model = OpenAiModelId("test-model"),
+            input = listOf(
+                ResponseItem.Message(
+                    role = MessageRole.User,
+                    content = listOf(ContentItem.InputText("hello")),
+                ),
+            ),
+        )
+
+        val encoded = json.parseToJsonElement(json.encodeToString(request)).jsonObject
+
+        assertFalse("instructions" in encoded)
+        assertFalse("reasoning" in encoded)
+        assertFalse("service_tier" in encoded)
+        assertFalse("text" in encoded)
     }
 
     @Test
@@ -181,7 +202,7 @@ class OpenAiSubscriptionSerializationTest {
         )
 
         val request = ResponsesApiRequest(
-            model = "test-model",
+            model = OpenAiModelId("test-model"),
             input = listOf(item),
         )
 
