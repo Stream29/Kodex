@@ -17,6 +17,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "CodexLite"
 
+include(":integration-test")
 include(":llm-provider")
 include(":llm-provider:api")
 include(":openai:json-codec")
@@ -25,6 +26,7 @@ include(":openai:client-contract")
 include(":openai:client")
 include(":openai:client-test")
 include(":openai:codex-cli-storage")
+include(":storage:contract")
 include(":tool:contract")
 include(":tool:tool-builder")
 include(":tool:impl:apply-patch")
