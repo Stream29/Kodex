@@ -1,7 +1,6 @@
 @file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi::class)
 
 import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
-import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
     id("codexlite.kmp-host")
@@ -14,14 +13,6 @@ kotlin {
                 withLinuxX64()
                 withLinuxArm64()
                 withMacosArm64()
-            }
-        }
-    }
-
-    targets.withType<KotlinNativeTarget>().configureEach {
-        if (name == "mingwX64") {
-            binaries.configureEach {
-                linkerOpts("-lole32")
             }
         }
     }

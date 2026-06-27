@@ -1,19 +1,9 @@
-import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
-
 plugins {
     id("codexlite.kmp-host")
     alias(libs.plugins.kotlin.serialization)
 }
 
 kotlin {
-    targets.withType<KotlinNativeTarget>().configureEach {
-        if (name == "mingwX64") {
-            binaries.configureEach {
-                linkerOpts("-lole32")
-            }
-        }
-    }
-
     js {
         nodejs {
             testTask {

@@ -30,7 +30,11 @@ kotlin {
     linuxX64()
     linuxArm64()
     macosArm64()
-    mingwX64()
+    mingwX64 {
+        binaries.all {
+            linkerOpts("-lole32")
+        }
+    }
 
     sourceSets {
         commonTest.dependencies {
