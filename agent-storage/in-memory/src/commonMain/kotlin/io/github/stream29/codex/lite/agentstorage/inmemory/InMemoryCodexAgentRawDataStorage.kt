@@ -1,6 +1,7 @@
 package io.github.stream29.codex.lite.agentstorage.inmemory
 
 import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentSettings
 import io.github.stream29.codex.lite.agentstorage.contract.CompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentRawDataStorage
@@ -8,6 +9,7 @@ import io.github.stream29.codex.lite.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.codex.lite.utils.SafeRw
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asFlow
+import kotlin.time.Instant
 
 /**
  * Process-local mutable raw storage for tests and transient agent sessions.
@@ -20,6 +22,9 @@ public class InMemoryCodexAgentRawDataStorage : MutableCodexAgentRawDataStorage 
     public override val history: MutableIndexVersioned<ResponseItem> = InMemoryIndexVersioned()
     public override val compaction: MutableIndexVersioned<CompactionCheckpoint> = InMemoryIndexVersioned()
     public override val settings: MutableIndexVersioned<CodexAgentSettings> = InMemoryIndexVersioned()
+    public override val plan: MutableIndexVersioned<UpdatePlanArgs> = InMemoryIndexVersioned()
+    public override val timestamp: MutableIndexVersioned<Instant> = InMemoryIndexVersioned()
+    public override val tokenCount: MutableIndexVersioned<Long> = InMemoryIndexVersioned()
 }
 
 private class InMemoryIndexVersioned<T> : MutableIndexVersioned<T> {
