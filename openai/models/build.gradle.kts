@@ -8,7 +8,7 @@ kotlin {
         commonMain.dependencies {
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.serialization.json)
-            api(project(":tool:contract"))
+            api(libs.kotlinx.schema.json)
         }
         commonTest.dependencies {
             implementation(project(":openai:json-codec"))

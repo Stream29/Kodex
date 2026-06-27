@@ -1,7 +1,7 @@
 package io.github.stream29.codex.lite.tool.toolsearch
 
-import io.github.stream29.codex.lite.tool.contract.LoadableToolSpec
-import io.github.stream29.codex.lite.tool.contract.ResponsesApiNamespace
+import io.github.stream29.codex.lite.openai.LoadableToolSpec
+import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.utils.searchindex.SearchDocument
 import io.github.stream29.codex.lite.utils.searchindex.SearchIndex
 import io.github.stream29.codex.lite.utils.searchindex.createSearchIndex

@@ -1,7 +1,4 @@
 package io.github.stream29.codex.lite.openai
-
-import io.github.stream29.codex.lite.tool.contract.LoadableToolSpec
-import io.github.stream29.codex.lite.tool.contract.ToolSpec
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName

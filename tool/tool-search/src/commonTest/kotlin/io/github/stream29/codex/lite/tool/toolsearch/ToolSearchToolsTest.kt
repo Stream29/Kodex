@@ -1,8 +1,8 @@
 package io.github.stream29.codex.lite.tool.toolsearch
 
-import io.github.stream29.codex.lite.tool.contract.ResponsesApiNamespace
-import io.github.stream29.codex.lite.tool.contract.ResponsesApiTool
-import io.github.stream29.codex.lite.tool.contract.ToolSpec
+import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
+import io.github.stream29.codex.lite.openai.ResponsesApiTool
+import io.github.stream29.codex.lite.openai.ToolSpec
 import kotlinx.schema.json.PropertyBuilder
 import kotlin.test.Test
 import kotlin.test.assertEquals

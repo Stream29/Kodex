@@ -2,14 +2,6 @@ package io.github.stream29.codex.lite.openai.client
 
 import io.github.stream29.codex.lite.openai.*
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
-import io.github.stream29.codex.lite.tool.contract.FreeformTool
-import io.github.stream29.codex.lite.tool.contract.FreeformToolFormat
-import io.github.stream29.codex.lite.tool.contract.ResponsesApiNamespace
-import io.github.stream29.codex.lite.tool.contract.ResponsesApiWebSearchFilters
-import io.github.stream29.codex.lite.tool.contract.ResponsesApiWebSearchUserLocation
-import io.github.stream29.codex.lite.tool.contract.ResponsesApiTool
-import io.github.stream29.codex.lite.tool.contract.ToolSpec
-import io.github.stream29.codex.lite.tool.contract.WebSearchContextSize
 import kotlinx.schema.json.AdditionalPropertiesConstraint
 import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.schema.json.StringPropertyDefinition

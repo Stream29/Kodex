@@ -1,6 +1,6 @@
 package io.github.stream29.codex.lite.tool.toolsearch
 
-import io.github.stream29.codex.lite.tool.contract.ResponsesApiTool
+import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import kotlinx.serialization.Serializable
 
 /**

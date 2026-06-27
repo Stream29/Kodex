@@ -1,6 +1,6 @@
 package io.github.stream29.codex.lite.tool.toolsearch
 
-import io.github.stream29.codex.lite.tool.contract.ToolSpec
+import io.github.stream29.codex.lite.openai.ToolSpec
 
 public object ToolSearchTools {
     public fun createToolSearchSpec(
