@@ -6,7 +6,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":openai:models"))
+            api(project(":openai-models"))
         }
     }
 }

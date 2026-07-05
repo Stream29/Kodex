@@ -17,31 +17,27 @@ dependencyResolutionManagement {
 
 rootProject.name = "CodexLite"
 
-include(":integration-test")
-include(":llm-provider")
-include(":llm-provider:api")
-include(":openai:json-codec")
-include(":openai:models")
-include(":openai:client-contract")
-include(":openai:client")
-include(":openai:client-test")
-include(":openai:codex-cli-storage")
-include(":agent-state:contract")
-include(":agent-storage:clean-models")
-include(":agent-storage:contract")
-include(":agent-storage:in-memory")
-include(":tool:contract")
-include(":tool:tool-builder")
-include(":tool:impl:apply-patch")
-include(":tool:impl:image-generation")
-include(":tool:impl:view-image")
-include(":tool:tool-search")
-include(":utils")
-include(":utils:images")
-include(":utils:images-codec")
-include(":utils:kotlinx-io-coroutines")
-include(":utils:ktor-client-ext")
-include(":utils:os-environment")
-include(":utils:patch")
-include(":utils:read-write-mutex")
-include(":utils:search-index")
+fun includeModuleDir(path: String) {
+    val projectPath = ":${path.replace('/', '-')}"
+    include(projectPath)
+    project(projectPath).projectDir = file(path)
+}
+
+fun includeModuleTree(rootPath: String) {
+    val root = file(rootPath)
+    includeModuleDir(rootPath)
+    root.walkTopDown()
+        .onEnter { it.name != "build" }
+        .filter { it != root && it.resolve("build.gradle.kts").isFile }
+        .map { it.relativeTo(rootDir).invariantSeparatorsPath }
+        .sorted()
+        .forEach(::includeModuleDir)
+}
+
+includeModuleTree("integration-test")
+includeModuleTree("llm-provider")
+includeModuleTree("openai")
+includeModuleTree("agent-state")
+includeModuleTree("agent-storage")
+includeModuleTree("tool")
+includeModuleTree("utils")

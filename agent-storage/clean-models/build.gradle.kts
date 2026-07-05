@@ -7,7 +7,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(libs.kotlinx.serialization.json)
-            api(project(":utils:patch"))
+            api(project(":utils-patch"))
         }
     }
 }

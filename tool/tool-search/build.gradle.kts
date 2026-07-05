@@ -6,10 +6,10 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":tool:contract"))
+            api(project(":tool-contract"))
             api(libs.kotlinx.serialization.json)
             api(libs.kotlinx.schema.json)
-            implementation(project(":utils:search-index"))
+            implementation(project(":utils-search-index"))
         }
     }
 }

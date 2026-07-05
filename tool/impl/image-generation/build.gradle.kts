@@ -17,22 +17,22 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(libs.kotlinx.serialization.json)
-            api(project(":openai:client-contract"))
-            api(project(":openai:models"))
-            api(project(":tool:tool-builder"))
-            api(project(":tool:contract"))
-            api(project(":utils:images"))
-            api(project(":utils:images-codec"))
-            api(project(":utils:kotlinx-io-coroutines"))
+            api(project(":openai-client-contract"))
+            api(project(":openai-models"))
+            api(project(":tool-tool-builder"))
+            api(project(":tool-contract"))
+            api(project(":utils-images"))
+            api(project(":utils-images-codec"))
+            api(project(":utils-kotlinx-io-coroutines"))
             implementation(libs.kotlinx.schema.json)
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
-            implementation(project(":openai:client"))
-            implementation(project(":openai:client-test"))
-            implementation(project(":openai:codex-cli-storage"))
-            implementation(project(":openai:json-codec"))
-            implementation(project(":utils:os-environment"))
+            implementation(project(":openai-client"))
+            implementation(project(":openai-client-test"))
+            implementation(project(":openai-codex-cli-storage"))
+            implementation(project(":openai-json-codec"))
+            implementation(project(":utils-os-environment"))
         }
     }
 }

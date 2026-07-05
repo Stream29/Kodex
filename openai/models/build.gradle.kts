@@ -11,7 +11,7 @@ kotlin {
             api(libs.kotlinx.schema.json)
         }
         commonTest.dependencies {
-            implementation(project(":openai:json-codec"))
+            implementation(project(":openai-json-codec"))
         }
     }
 }

@@ -6,7 +6,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":tool:contract"))
+            api(project(":tool-contract"))
             api(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {

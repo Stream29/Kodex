@@ -25,8 +25,8 @@ kotlin {
         }
 
         commonMain.dependencies {
-            api(project(":utils:images"))
-            api(project(":utils:kotlinx-io-coroutines"))
+            api(project(":utils-images"))
+            api(project(":utils-kotlinx-io-coroutines"))
             implementation(libs.korim)
         }
         jvmMain.dependencies {

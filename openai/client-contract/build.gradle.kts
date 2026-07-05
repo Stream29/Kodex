@@ -6,7 +6,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(libs.kotlinx.coroutines.core)
-            api(project(":openai:models"))
+            api(project(":openai-models"))
         }
     }
 }

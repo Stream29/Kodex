@@ -8,7 +8,7 @@ kotlin {
         commonMain.dependencies {
             api(libs.kotlinx.io.core)
             api(libs.kotlinx.serialization.json)
-            api(project(":utils:kotlinx-io-coroutines"))
+            api(project(":utils-kotlinx-io-coroutines"))
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
