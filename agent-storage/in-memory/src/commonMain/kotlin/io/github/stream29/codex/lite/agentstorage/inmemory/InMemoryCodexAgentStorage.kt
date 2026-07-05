@@ -4,21 +4,19 @@ import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentSettings
 import io.github.stream29.codex.lite.agentstorage.contract.CompactionCheckpoint
-import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentRawDataStorage
+import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.codex.lite.utils.SafeRw
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.asFlow
 import kotlin.time.Instant
 
 /**
- * Process-local mutable raw storage for tests and transient agent sessions.
+ * Process-local mutable storage for tests and transient agent sessions.
  *
  * This implementation keeps all published values in memory. It follows the
  * storage contract directly: every timeline is a sparse step-function
  * timeline.
  */
-public class InMemoryCodexAgentRawDataStorage : MutableCodexAgentRawDataStorage {
+public class InMemoryCodexAgentStorage : MutableCodexAgentStorage {
     public override val history: MutableIndexVersioned<ResponseItem> = InMemoryIndexVersioned()
     public override val compaction: MutableIndexVersioned<CompactionCheckpoint> = InMemoryIndexVersioned()
     public override val settings: MutableIndexVersioned<CodexAgentSettings> = InMemoryIndexVersioned()
@@ -41,15 +39,12 @@ private class InMemoryIndexVersioned<T> : MutableIndexVersioned<T> {
             entries[entryIndex].value
         }
 
-    override suspend fun indexes(from: Int): Flow<Int> {
+    override suspend fun nextIndex(from: Int): Int? {
         require(from >= 0) { "Index lower bound $from must be non-negative." }
-        val snapshot = entries.readSession { entries ->
-            entries.asSequence()
-                .map { it.index }
-                .filter { it >= from }
-                .toList()
+        return entries.readSession { entries ->
+            val entryIndex = entries.ceilingEntryIndex(from)
+            if (entryIndex >= 0) entries[entryIndex].index else null
         }
-        return snapshot.asFlow()
     }
 
     override suspend fun set(index: Int, value: T) {
@@ -74,6 +69,22 @@ private class InMemoryIndexVersioned<T> : MutableIndexVersioned<T> {
                 low = middle + 1
             } else {
                 high = middle - 1
+            }
+        }
+        return result
+    }
+
+    private fun List<IndexedValue<T>>.ceilingEntryIndex(index: Int): Int {
+        var low = 0
+        var high = lastIndex
+        var result = -1
+        while (low <= high) {
+            val middle = (low + high) ushr 1
+            if (this[middle].index >= index) {
+                result = middle
+                high = middle - 1
+            } else {
+                low = middle + 1
             }
         }
         return result

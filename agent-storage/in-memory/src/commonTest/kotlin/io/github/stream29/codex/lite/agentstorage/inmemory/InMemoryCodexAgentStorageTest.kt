@@ -10,6 +10,7 @@ import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentSettings
 import io.github.stream29.codex.lite.agentstorage.contract.CompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.forkTo
+import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
@@ -18,10 +19,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.time.Instant
 
-class InMemoryCodexAgentRawDataStorageTest {
+class InMemoryCodexAgentStorageTest {
     @Test
     fun historyUsesSparseAppendOnlyTimeline() = runTest {
-        val storage = InMemoryCodexAgentRawDataStorage()
+        val storage = InMemoryCodexAgentStorage()
         val first = userMessage("first")
         val second = assistantMessage("second")
 
@@ -34,6 +35,9 @@ class InMemoryCodexAgentRawDataStorageTest {
         assertEquals(first, storage.history[0])
         assertEquals(first, storage.history[2])
         assertEquals(second, storage.history[3])
+        assertEquals(0, storage.history.nextIndex(from = 0))
+        assertEquals(3, storage.history.nextIndex(from = 1))
+        assertEquals(null, storage.history.nextIndex(from = 4))
         assertEquals(listOf(0, 3), storage.history.indexes().toList())
         assertEquals(listOf(3), storage.history.indexes(from = 1).toList())
         assertFailsWith<IllegalArgumentException> {
@@ -44,7 +48,7 @@ class InMemoryCodexAgentRawDataStorageTest {
 
     @Test
     fun sparseTimelinesReturnActiveValueAtRequestedIndex() = runTest {
-        val storage = InMemoryCodexAgentRawDataStorage()
+        val storage = InMemoryCodexAgentStorage()
         val initialSettings = settings("initial-model")
         val updatedSettings = settings("updated-model")
         val initialPlan = plan("inspect", StepStatus.Pending)
@@ -87,7 +91,7 @@ class InMemoryCodexAgentRawDataStorageTest {
 
     @Test
     fun sparseTimelineRejectsReadsBeforeFirstStoredIndex() = runTest {
-        val storage = InMemoryCodexAgentRawDataStorage()
+        val storage = InMemoryCodexAgentStorage()
 
         storage.compaction[2] = CompactionCheckpoint(
             prefix = listOf(assistantMessage("summary")),
@@ -103,7 +107,7 @@ class InMemoryCodexAgentRawDataStorageTest {
 
     @Test
     fun storageLatestIndexUsesHistoryBoundary() = runTest {
-        val storage = InMemoryCodexAgentRawDataStorage()
+        val storage = InMemoryCodexAgentStorage()
 
         storage.settings[0] = settings("model")
         storage.compaction[0] = CompactionCheckpoint(prefix = emptyList(), historyBaseIndex = 0)
@@ -124,8 +128,8 @@ class InMemoryCodexAgentRawDataStorageTest {
 
     @Test
     fun forkCopiesEntriesBeforeExclusiveBoundary() = runTest {
-        val source = InMemoryCodexAgentRawDataStorage()
-        val target = InMemoryCodexAgentRawDataStorage()
+        val source = InMemoryCodexAgentStorage()
+        val target = InMemoryCodexAgentStorage()
         val oldSettings = settings("old-model")
         val newSettings = settings("new-model")
         val oldPlan = plan("old step", StepStatus.Completed)

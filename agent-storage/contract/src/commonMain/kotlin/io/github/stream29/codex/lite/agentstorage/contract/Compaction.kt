@@ -12,7 +12,7 @@ import io.github.stream29.codex.lite.openai.ResponseItem
  * through the snapshot index.
  *
  * Writers publish a checkpoint before publishing the history item that makes
- * the checkpoint visible. Readers use [CodexAgentRawDataStorage.latestIndex] as
+ * the checkpoint visible. Readers use [CodexAgentStorage.latestIndex] as
  * the visibility boundary before reading this timeline.
  *
  * @property prefix Replacement model-visible base history. This should contain

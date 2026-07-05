@@ -5,7 +5,7 @@ import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import kotlin.time.Instant
 
 /**
- * Raw persisted state for one agent thread.
+ * Persisted state for one agent thread.
  *
  * [history] is the publication boundary for the whole storage. Writers that
  * update several timelines for the same logical step must write [settings],
@@ -42,7 +42,7 @@ import kotlin.time.Instant
  * context-length estimate used for compaction scheduling, not cumulative usage
  * or billing data.
  */
-public interface CodexAgentRawDataStorage {
+public interface CodexAgentStorage {
     public val history: IndexVersioned<ResponseItem>
     public val compaction: IndexVersioned<CompactionCheckpoint>
     public val settings: IndexVersioned<CodexAgentSettings>
@@ -54,20 +54,20 @@ public interface CodexAgentRawDataStorage {
 /**
  * Returns the global snapshot boundary.
  *
- * This intentionally delegates to [CodexAgentRawDataStorage.history] because a
+ * This intentionally delegates to [CodexAgentStorage.history] because a
  * history entry is the commit marker for related settings and compaction
  * updates.
  */
-public suspend fun CodexAgentRawDataStorage.latestIndex(): Int = history.latestIndex()
+public suspend fun CodexAgentStorage.latestIndex(): Int = history.latestIndex()
 
 /**
- * Mutable form of [CodexAgentRawDataStorage].
+ * Mutable form of [CodexAgentStorage].
  *
  * Callers are responsible for publishing related timeline updates in the order
- * required by [CodexAgentRawDataStorage]: settings, compaction, plan,
+ * required by [CodexAgentStorage]: settings, compaction, plan,
  * timestamp, and tokenCount first, history last.
  */
-public interface MutableCodexAgentRawDataStorage : CodexAgentRawDataStorage {
+public interface MutableCodexAgentStorage : CodexAgentStorage {
     public override val history: MutableIndexVersioned<ResponseItem>
     public override val compaction: MutableIndexVersioned<CompactionCheckpoint>
     public override val settings: MutableIndexVersioned<CodexAgentSettings>
@@ -85,9 +85,9 @@ public interface MutableCodexAgentRawDataStorage : CodexAgentRawDataStorage {
  *
  * @param until Exclusive raw-history upper bound.
  */
-public suspend fun MutableCodexAgentRawDataStorage.forkTo(
+public suspend fun MutableCodexAgentStorage.forkTo(
     until: Int,
-    target: MutableCodexAgentRawDataStorage
+    target: MutableCodexAgentStorage
 ) {
     this.history.forkTo(until, target.history)
     this.compaction.forkTo(until, target.compaction)

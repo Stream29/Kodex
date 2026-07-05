@@ -12,8 +12,8 @@ import io.github.stream29.codex.lite.openai.ToolSpec
  * Model request settings visible at an agent-storage index.
  *
  * This type intentionally excludes request input; input is reconstructed from
- * [CodexAgentRawDataStorage.history] and the active [CompactionCheckpoint].
- * Store it in [CodexAgentRawDataStorage.settings] as a sparse timeline so
+ * [CodexAgentStorage.history] and the active [CompactionCheckpoint].
+ * Store it in [CodexAgentStorage.settings] as a sparse timeline so
  * settings changes can become visible at the same history boundary as the
  * model/tool event that publishes them.
  *
