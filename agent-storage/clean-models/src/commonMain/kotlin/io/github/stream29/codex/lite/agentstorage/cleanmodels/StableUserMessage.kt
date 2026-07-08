@@ -13,9 +13,10 @@ import kotlinx.serialization.Serializable
  * @property content User input content parts in message order.
  */
 @Serializable
+@SerialName("user_message")
 public data class StableUserMessage(
     public val content: List<StableUserMessageContent>,
-)
+) : StableCleanEvent
 
 /**
  * Content part allowed in a stable user message.

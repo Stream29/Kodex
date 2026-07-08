@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.agentstorage.cleanmodels
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -10,4 +11,5 @@ import kotlinx.serialization.Serializable
  * encrypted compacted context stay in raw storage rather than this clean model.
  */
 @Serializable
-public data object StableContextCompaction
+@SerialName("context_compaction")
+public data object StableContextCompaction : StableCleanEvent

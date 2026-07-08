@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.agentstorage.cleanmodels
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -10,4 +11,5 @@ import kotlinx.serialization.Serializable
  * that timeline entry when rendering the corresponding turn.
  */
 @Serializable
-public data object StablePlanUpdate
+@SerialName("plan_update")
+public data object StablePlanUpdate : StableCleanEvent

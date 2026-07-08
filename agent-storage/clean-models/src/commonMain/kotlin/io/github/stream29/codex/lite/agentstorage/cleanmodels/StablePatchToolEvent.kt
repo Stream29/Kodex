@@ -16,10 +16,11 @@ import kotlinx.serialization.Serializable
  * @property result Tool execution result after attempting to apply [diff].
  */
 @Serializable
+@SerialName("patch_tool_event")
 public data class StablePatchToolEvent(
     public val diff: Patch,
     public val result: StablePatchToolExecutionResult,
-)
+) : StableCleanEvent
 
 /**
  * Execution result for an `apply_patch` tool event.

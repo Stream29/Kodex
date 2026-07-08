@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.agentstorage.cleanmodels
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -12,6 +13,7 @@ import kotlinx.serialization.Serializable
  * @property text Assistant-visible text after provider-specific normalization.
  */
 @Serializable
+@SerialName("assistant_message")
 public data class StableAssistantMessage(
     public val text: String,
-)
+) : StableCleanEvent
