@@ -7,6 +7,8 @@ import io.github.stream29.codex.lite.openai.ImageGenerationRequest
 import io.github.stream29.codex.lite.openai.ImageResponse
 import io.github.stream29.codex.lite.openai.ModelsResponse
 import io.github.stream29.codex.lite.openai.OpenAiResponseResult
+import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
+import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.SearchRequest
@@ -21,8 +23,11 @@ public fun mockOpenAiClient(
 
 public class MockOpenAiClientBuilder {
     private var listModelsHandler: suspend () -> OpenAiResponseResult<ModelsResponse> = { missingHandler("listModels") }
-    private var createResponseHandler: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent> = {
+    private var createResponseHandler: suspend (ResponsesApiRequest, Map<String, String>) -> Flow<ResponsesStreamEvent> = { _, _ ->
         missingHandler("createResponse")
+    }
+    private var createRemoteCompactionV2ResponseHandler: suspend (RemoteCompactionV2Request) -> RemoteCompactionV2Response = {
+        missingHandler("createRemoteCompactionV2Response")
     }
     private var compactResponseHandler: suspend (CompactionInput) -> OpenAiResponseResult<CompactionResponse> = {
         missingHandler("compactResponse")
@@ -42,7 +47,19 @@ public class MockOpenAiClientBuilder {
     }
 
     public fun createResponse(handler: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent>): Unit {
+        createResponseHandler = { request, _ -> handler(request) }
+    }
+
+    public fun createResponseWithHeaders(
+        handler: suspend (ResponsesApiRequest, Map<String, String>) -> Flow<ResponsesStreamEvent>,
+    ): Unit {
         createResponseHandler = handler
+    }
+
+    public fun createRemoteCompactionV2Response(
+        handler: suspend (RemoteCompactionV2Request) -> RemoteCompactionV2Response,
+    ): Unit {
+        createRemoteCompactionV2ResponseHandler = handler
     }
 
     public fun compactResponse(handler: suspend (CompactionInput) -> OpenAiResponseResult<CompactionResponse>): Unit {
@@ -65,6 +82,7 @@ public class MockOpenAiClientBuilder {
         MockOpenAiClient(
             listModelsHandler = listModelsHandler,
             createResponseHandler = createResponseHandler,
+            createRemoteCompactionV2ResponseHandler = createRemoteCompactionV2ResponseHandler,
             compactResponseHandler = compactResponseHandler,
             generateImageHandler = generateImageHandler,
             editImageHandler = editImageHandler,
@@ -74,7 +92,8 @@ public class MockOpenAiClientBuilder {
 
 private class MockOpenAiClient(
     private val listModelsHandler: suspend () -> OpenAiResponseResult<ModelsResponse>,
-    private val createResponseHandler: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent>,
+    private val createResponseHandler: suspend (ResponsesApiRequest, Map<String, String>) -> Flow<ResponsesStreamEvent>,
+    private val createRemoteCompactionV2ResponseHandler: suspend (RemoteCompactionV2Request) -> RemoteCompactionV2Response,
     private val compactResponseHandler: suspend (CompactionInput) -> OpenAiResponseResult<CompactionResponse>,
     private val generateImageHandler: suspend (ImageGenerationRequest) -> OpenAiResponseResult<ImageResponse>,
     private val editImageHandler: suspend (ImageEditRequest) -> OpenAiResponseResult<ImageResponse>,
@@ -83,8 +102,16 @@ private class MockOpenAiClient(
     override suspend fun listModels(): OpenAiResponseResult<ModelsResponse> =
         listModelsHandler()
 
-    override suspend fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent> =
-        createResponseHandler(request)
+    override suspend fun createResponse(
+        request: ResponsesApiRequest,
+        extraHeaders: Map<String, String>,
+    ): Flow<ResponsesStreamEvent> =
+        createResponseHandler(request, extraHeaders)
+
+    override suspend fun createRemoteCompactionV2Response(
+        request: RemoteCompactionV2Request,
+    ): RemoteCompactionV2Response =
+        createRemoteCompactionV2ResponseHandler(request)
 
     override suspend fun compactResponse(request: CompactionInput): OpenAiResponseResult<CompactionResponse> =
         compactResponseHandler(request)

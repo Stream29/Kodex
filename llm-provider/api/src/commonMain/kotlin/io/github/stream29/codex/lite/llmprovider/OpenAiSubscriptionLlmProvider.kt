@@ -28,8 +28,11 @@ public class OpenAiSubscriptionLlmProvider private constructor(
     override suspend fun listModels(): OpenAiResponseResult<ModelsResponse> =
         client.listModels()
 
-    override suspend fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent> =
-        client.createResponse(request)
+    override suspend fun createResponse(
+        request: ResponsesApiRequest,
+        extraHeaders: Map<String, String>,
+    ): Flow<ResponsesStreamEvent> =
+        client.createResponse(request, extraHeaders)
 
     override suspend fun compactResponse(request: CompactionInput): OpenAiResponseResult<CompactionResponse> =
         client.compactResponse(request)

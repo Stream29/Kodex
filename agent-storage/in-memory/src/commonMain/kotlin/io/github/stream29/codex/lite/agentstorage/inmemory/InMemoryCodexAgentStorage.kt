@@ -2,8 +2,8 @@ package io.github.stream29.codex.lite.agentstorage.inmemory
 
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
-import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentSettings
-import io.github.stream29.codex.lite.agentstorage.contract.CompactionCheckpoint
+import io.github.stream29.codex.lite.openai.CodexAgentSettings
+import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.codex.lite.utils.SafeRw
@@ -17,7 +17,7 @@ import kotlin.time.Instant
  * timeline.
  */
 public class InMemoryCodexAgentStorage : MutableCodexAgentStorage {
-    public override val history: MutableIndexVersioned<ResponseItem> = InMemoryIndexVersioned()
+    public override val history: MutableIndexVersioned<ResponseItem.HistoryItem> = InMemoryIndexVersioned()
     public override val compaction: MutableIndexVersioned<CompactionCheckpoint> = InMemoryIndexVersioned()
     public override val settings: MutableIndexVersioned<CodexAgentSettings> = InMemoryIndexVersioned()
     public override val plan: MutableIndexVersioned<UpdatePlanArgs> = InMemoryIndexVersioned()

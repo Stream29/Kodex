@@ -7,6 +7,8 @@ import io.github.stream29.codex.lite.openai.ImageGenerationRequest
 import io.github.stream29.codex.lite.openai.ImageResponse
 import io.github.stream29.codex.lite.openai.ModelsResponse
 import io.github.stream29.codex.lite.openai.OpenAiResponseResult
+import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
+import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.SearchRequest
@@ -16,7 +18,12 @@ import kotlinx.coroutines.flow.Flow
 public interface OpenAiClient : AutoCloseable {
     public suspend fun listModels(): OpenAiResponseResult<ModelsResponse>
 
-    public suspend fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent>
+    public suspend fun createResponse(
+        request: ResponsesApiRequest,
+        extraHeaders: Map<String, String> = emptyMap(),
+    ): Flow<ResponsesStreamEvent>
+
+    public suspend fun createRemoteCompactionV2Response(request: RemoteCompactionV2Request): RemoteCompactionV2Response
 
     public suspend fun compactResponse(request: CompactionInput): OpenAiResponseResult<CompactionResponse>
 
