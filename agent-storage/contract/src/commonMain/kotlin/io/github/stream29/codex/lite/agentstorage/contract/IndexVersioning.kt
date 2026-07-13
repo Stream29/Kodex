@@ -1,9 +1,11 @@
 package io.github.stream29.codex.lite.agentstorage.contract
 
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.count
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
 
 /**
  * Index-addressed timeline.
@@ -69,7 +71,7 @@ public fun <T> IndexVersioned<T>.indexes(from: Int = 0): Flow<Int> = flow {
  */
 public suspend fun <T> IndexVersioned<T>.forkTo(
     until: Int,
-    target: MutableIndexVersioned<T>
+    target: MutableIndexVersioned<T>,
 ) {
     require(target.indexes().count() == 0) { "Only an empty target can be forked to." }
     this.indexes().filter { it < until }.collect { target[it] = this[it] }
@@ -83,6 +85,41 @@ public interface MutableIndexVersioned<T> : IndexVersioned<T> {
      * [latestIndex]; existing indexes must not be overwritten.
      */
     public suspend operator fun set(index: Int, value: T)
+
+    /**
+     * Removes every stored entry whose index is greater than or equal to
+     * [untilExclusive].
+     *
+     * This is a suffix-only rollback operation. Implementations must either
+     * remove the complete suffix or fail without changing the timeline.
+     * Passing a boundary after the current tail is a no-op.
+     *
+     * @param untilExclusive First stored index to remove.
+     */
+    public suspend fun revert(untilExclusive: Int)
+}
+
+/**
+ * Runs one externally serialized append transaction on this timeline.
+ *
+ * If [block] fails or is cancelled, every entry appended after the transaction
+ * started is removed before the original failure is rethrown. [block] must not
+ * revert entries that existed before the transaction.
+ */
+public suspend inline fun <R> MutableIndexVersioned<*>.transaction(block: () -> R): R {
+    val untilExclusive = latestIndex() + 1
+    return try {
+        block()
+    } catch (failure: Throwable) {
+        try {
+            withContext(NonCancellable) {
+                revert(untilExclusive)
+            }
+        } catch (rollbackFailure: Throwable) {
+            failure.addSuppressed(rollbackFailure)
+        }
+        throw failure
+    }
 }
 
 /**

@@ -23,7 +23,7 @@ public suspend fun MutableCodexAgentStorage.appendCompactionCheckpoint(
     tokenCount: Long?,
     previousCheckpoint: CompactionCheckpoint,
     nextWindowId: String,
-): Int {
+): Int = transaction {
     val index = latestIndex() + 1
     compaction[index] = CompactionCheckpoint(
         prefix = prefix,
@@ -38,5 +38,5 @@ public suspend fun MutableCodexAgentStorage.appendCompactionCheckpoint(
         this.tokenCount[index] = tokenCount
     }
     this.timestamp[index] = timestamp
-    return index
+    index
 }

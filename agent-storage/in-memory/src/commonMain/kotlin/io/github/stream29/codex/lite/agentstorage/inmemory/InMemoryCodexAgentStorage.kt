@@ -58,6 +58,18 @@ private class InMemoryIndexVersioned<T> : MutableIndexVersioned<T> {
         }
     }
 
+    override suspend fun revert(untilExclusive: Int) {
+        require(untilExclusive >= 0) {
+            "Revert boundary $untilExclusive must be non-negative."
+        }
+        entries.writeSession { entries ->
+            val suffixStart = entries.ceilingEntryIndex(untilExclusive)
+            if (suffixStart >= 0) {
+                entries.subList(suffixStart, entries.size).clear()
+            }
+        }
+    }
+
     private fun List<IndexedValue<T>>.floorEntryIndex(index: Int): Int {
         var low = 0
         var high = lastIndex

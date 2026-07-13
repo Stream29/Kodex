@@ -24,9 +24,9 @@ import kotlin.time.Instant
  * checkpoint.prefix + stored history items in [checkpoint.historyBaseIndex, index]
  * ```
  *
- * The storage contract only defines a shared index space. Concrete
- * implementations may still use transactions internally, but callers should not
- * require this interface to expose transaction primitives.
+ * Use [transaction] when one logical state transition updates multiple
+ * timelines. Transactions provide rollback on failure or cancellation; callers
+ * must still serialize concurrent writers.
  *
  * @property history Sparse response history log. Only real
  * [ResponseItem.HistoryItem] entries are stored. Use [IndexVersioned.nextIndex]
@@ -89,8 +89,8 @@ public suspend fun CodexAgentStorage.nextIndex(from: Int): Int? =
 /**
  * Mutable form of [CodexAgentStorage].
  *
- * Callers are responsible for publishing related timeline updates at the same
- * state index when those updates belong to one logical transition.
+ * Callers must publish related timeline updates at the same state index and use
+ * [transaction] when those updates belong to one logical transition.
  */
 public interface MutableCodexAgentStorage : CodexAgentStorage {
     public override val history: MutableIndexVersioned<ResponseItem.HistoryItem>
@@ -100,6 +100,29 @@ public interface MutableCodexAgentStorage : CodexAgentStorage {
     public override val timestamp: MutableIndexVersioned<Instant>
     public override val tokenCount: MutableIndexVersioned<Long>
 }
+
+/**
+ * Runs one externally serialized append transaction across every storage
+ * timeline.
+ *
+ * If [block] fails or is cancelled, each timeline is reverted to the tail it had
+ * when the transaction started. [block] must not revert entries that existed
+ * before the transaction.
+ */
+public suspend inline fun <R> MutableCodexAgentStorage.transaction(block: () -> R): R =
+    history.transaction {
+        compaction.transaction {
+            settings.transaction {
+                plan.transaction {
+                    timestamp.transaction {
+                        tokenCount.transaction {
+                            block()
+                        }
+                    }
+                }
+            }
+        }
+    }
 
 /**
  * Forks this storage into an empty [target].
@@ -112,12 +135,14 @@ public interface MutableCodexAgentStorage : CodexAgentStorage {
  */
 public suspend fun MutableCodexAgentStorage.forkTo(
     until: Int,
-    target: MutableCodexAgentStorage
+    target: MutableCodexAgentStorage,
 ) {
-    this.history.forkTo(until, target.history)
-    this.compaction.forkTo(until, target.compaction)
-    this.settings.forkTo(until, target.settings)
-    this.plan.forkTo(until, target.plan)
-    this.timestamp.forkTo(until, target.timestamp)
-    this.tokenCount.forkTo(until, target.tokenCount)
+    target.transaction {
+        this.history.forkTo(until, target.history)
+        this.compaction.forkTo(until, target.compaction)
+        this.settings.forkTo(until, target.settings)
+        this.plan.forkTo(until, target.plan)
+        this.timestamp.forkTo(until, target.timestamp)
+        this.tokenCount.forkTo(until, target.tokenCount)
+    }
 }

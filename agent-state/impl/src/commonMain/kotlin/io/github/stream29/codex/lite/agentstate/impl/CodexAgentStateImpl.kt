@@ -9,6 +9,7 @@ import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStor
 import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
+import io.github.stream29.codex.lite.agentstorage.contract.transaction
 import io.github.stream29.codex.lite.openai.CompactionInput
 import io.github.stream29.codex.lite.openai.OpenAiErrorResponse
 import io.github.stream29.codex.lite.openai.OpenAiResult
@@ -24,13 +25,13 @@ import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
-import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.withContext
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -99,12 +100,13 @@ public class CodexAgentStateImpl internal constructor(
 
                         is ResponsesStreamEvent.Completed -> {
                             event.response.usage?.totalTokens?.let { tokenCount ->
-                                withContext(NonCancellable) {
+                                val index = storage.transaction {
                                     val index = storage.latestIndex() + 1
                                     storage.tokenCount[index] = tokenCount
                                     storage.timestamp[index] = now()
-                                    latestIndex.value = index
+                                    index
                                 }
+                                latestIndex.value = index
                             }
                             if (event.response.endTurn == false) {
                                 needsFollowUp = true
@@ -133,7 +135,7 @@ public class CodexAgentStateImpl internal constructor(
                 }
             }
         }
-    }
+    }.buffer(Channel.UNLIMITED)
 
     public override suspend fun forcedCompact(): Int =
         mutate(CodexAgentStateEnum.LlmRequest.Compact) {
@@ -158,14 +160,15 @@ public class CodexAgentStateImpl internal constructor(
         plan: UpdatePlanArgs,
     ): Int =
         mutate(CodexAgentStateEnum.ExternalWrite) {
-            withContext(NonCancellable) {
+            val index = storage.transaction {
                 val index = storage.latestIndex() + 1
                 storage.plan[index] = plan
                 storage.history[index] = item
                 storage.timestamp[index] = now()
-                latestIndex.value = index
                 index
             }
+            latestIndex.value = index
+            index
         }
 
     public override suspend fun updateSetting(
@@ -174,7 +177,7 @@ public class CodexAgentStateImpl internal constructor(
         tokenCount: Long?,
     ): Int =
         mutate(CodexAgentStateEnum.ExternalWrite) {
-            withContext(NonCancellable) {
+            val index = storage.transaction {
                 val index = storage.latestIndex() + 1
                 require(index > 0) { "Settings updates require an existing state index." }
                 storage.settings[index] = settings
@@ -182,9 +185,10 @@ public class CodexAgentStateImpl internal constructor(
                     storage.tokenCount[index] = tokenCount
                 }
                 storage.timestamp[index] = timestamp
-                latestIndex.value = index
                 index
             }
+            latestIndex.value = index
+            index
         }
 
     @OptIn(ExperimentalUuidApi::class)
@@ -209,23 +213,21 @@ public class CodexAgentStateImpl internal constructor(
                     reason = reason,
                     phase = phase,
                 )
-                withContext(NonCancellable) {
-                    val index = storage.appendCompactionCheckpoint(
-                        prefix = input
-                            .filterIsInstance<ResponseItem.Message>()
-                            .filter { it.role == MessageRole.User }
-                            .plus(result.compactionOutput),
-                        marker = ResponseItem.ContextCompaction(
-                            encryptedContent = result.compactionOutput.encryptedContent,
-                        ),
-                        timestamp = now(),
-                        tokenCount = result.completedResponse?.usage?.totalTokens,
-                        previousCheckpoint = checkpoint,
-                        nextWindowId = Uuid.generateV7().toString(),
-                    )
-                    latestIndex.value = index
-                    index
-                }
+                val index = storage.appendCompactionCheckpoint(
+                    prefix = input
+                        .filterIsInstance<ResponseItem.Message>()
+                        .filter { it.role == MessageRole.User }
+                        .plus(result.compactionOutput),
+                    marker = ResponseItem.ContextCompaction(
+                        encryptedContent = result.compactionOutput.encryptedContent,
+                    ),
+                    timestamp = now(),
+                    tokenCount = result.completedResponse?.usage?.totalTokens,
+                    previousCheckpoint = checkpoint,
+                    nextWindowId = Uuid.generateV7().toString(),
+                )
+                latestIndex.value = index
+                index
             } else {
                 val response = when (
                     val result = client.compactResponse(
@@ -235,18 +237,16 @@ public class CodexAgentStateImpl internal constructor(
                     is OpenAiResult.Success -> result.value
                     is OpenAiResult.Failure -> throw CodexCompactionFailureException(result.error)
                 }
-                withContext(NonCancellable) {
-                    val index = storage.appendCompactionCheckpoint(
-                        prefix = response.output,
-                        marker = ResponseItem.ContextCompaction(),
-                        timestamp = now(),
-                        tokenCount = null,
-                        previousCheckpoint = checkpoint,
-                        nextWindowId = Uuid.generateV7().toString(),
-                    )
-                    latestIndex.value = index
-                    index
-                }
+                val index = storage.appendCompactionCheckpoint(
+                    prefix = response.output,
+                    marker = ResponseItem.ContextCompaction(),
+                    timestamp = now(),
+                    tokenCount = null,
+                    previousCheckpoint = checkpoint,
+                    nextWindowId = Uuid.generateV7().toString(),
+                )
+                latestIndex.value = index
+                index
             }
         }
 
@@ -275,15 +275,18 @@ public class CodexAgentStateImpl internal constructor(
         item: ResponseItem.HistoryItem,
         timestamp: Instant,
         tokenCount: Long?,
-    ): Int = withContext(NonCancellable) {
-        val index = storage.latestIndex() + 1
-        if (tokenCount != null) {
-            storage.tokenCount[index] = tokenCount
+    ): Int {
+        val index = storage.transaction {
+            val index = storage.latestIndex() + 1
+            if (tokenCount != null) {
+                storage.tokenCount[index] = tokenCount
+            }
+            storage.history[index] = item
+            storage.timestamp[index] = timestamp
+            index
         }
-        storage.history[index] = item
-        storage.timestamp[index] = timestamp
         latestIndex.value = index
-        index
+        return index
     }
 
     private suspend fun shouldAutoCompact(snapshotIndex: Int): Boolean {
@@ -306,10 +309,7 @@ public class CodexAgentStateImpl internal constructor(
         return try {
             block()
         } finally {
-            withContext(NonCancellable) {
-                latestIndex.value = storage.latestIndex()
-                mutableState.value = CodexAgentStateEnum.Idle
-            }
+            mutableState.value = CodexAgentStateEnum.Idle
         }
     }
 

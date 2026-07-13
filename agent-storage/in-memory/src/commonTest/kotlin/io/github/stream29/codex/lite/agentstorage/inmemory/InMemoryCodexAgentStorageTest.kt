@@ -14,7 +14,12 @@ import io.github.stream29.codex.lite.agentstorage.contract.forkTo
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.contract.nextIndex
+import io.github.stream29.codex.lite.agentstorage.contract.transaction
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -23,7 +28,7 @@ import kotlin.time.Instant
 
 class InMemoryCodexAgentStorageTest {
     @Test
-    fun historyUsesSparseAppendOnlyTimeline() = runTest {
+    fun historyUsesSparseTimelineAndRejectsNonTailWrites() = runTest {
         val storage = InMemoryCodexAgentStorage()
         val first = userMessage("first")
         val second = assistantMessage("second")
@@ -46,6 +51,115 @@ class InMemoryCodexAgentStorageTest {
             storage.history[1] = userMessage("overwrite")
         }
         assertEquals(listOf(0, 3), storage.history.indexes().toList())
+    }
+
+    @Test
+    fun revertRemovesStoredSuffixAndAllowsAppendingAgain() = runTest {
+        val storage = InMemoryCodexAgentStorage()
+        val first = userMessage("first")
+        val replacement = assistantMessage("replacement")
+
+        storage.history[0] = first
+        storage.history[3] = assistantMessage("third")
+        storage.history[5] = assistantMessage("fifth")
+
+        storage.history.revert(untilExclusive = 3)
+
+        assertEquals(0, storage.history.latestIndex())
+        assertEquals(listOf(0), storage.history.indexes().toList())
+        assertEquals(first, storage.history[8])
+
+        storage.history[3] = replacement
+        assertEquals(listOf(0, 3), storage.history.indexes().toList())
+        assertEquals(replacement, storage.history[3])
+
+        storage.history.revert(untilExclusive = 4)
+        assertEquals(listOf(0, 3), storage.history.indexes().toList())
+
+        storage.history.revert(untilExclusive = 0)
+        assertEquals(-1, storage.history.latestIndex())
+        assertEquals(emptyList(), storage.history.indexes().toList())
+    }
+
+    @Test
+    fun timelineTransactionRevertsAppendedEntriesOnFailure() = runTest {
+        val storage = InMemoryCodexAgentStorage()
+        val first = userMessage("first")
+        storage.history[0] = first
+
+        assertFailsWith<IllegalStateException> {
+            storage.history.transaction {
+                storage.history[2] = assistantMessage("temporary")
+                error("fail transaction")
+            }
+        }
+
+        assertEquals(0, storage.history.latestIndex())
+        assertEquals(listOf(0), storage.history.indexes().toList())
+        assertEquals(first, storage.history[2])
+    }
+
+    @Test
+    fun storageTransactionRevertsEveryTimelineOnFailure() = runTest {
+        val storage = InMemoryCodexAgentStorage()
+        val initialSettings = settings("initial-model")
+        val initialCheckpoint = checkpoint()
+        val initialPlan = plan("initial", StepStatus.Pending)
+        val initialTimestamp = timestamp(0)
+        val initialMessage = userMessage("initial")
+        storage.settings[0] = initialSettings
+        storage.compaction[0] = initialCheckpoint
+        storage.plan[0] = initialPlan
+        storage.timestamp[0] = initialTimestamp
+        storage.tokenCount[0] = 10
+        storage.history[0] = initialMessage
+
+        assertFailsWith<IllegalStateException> {
+            storage.transaction {
+                storage.settings[2] = settings("temporary-model")
+                storage.compaction[2] = checkpoint(windowNumber = 1, windowId = "window-1")
+                storage.plan[2] = plan("temporary", StepStatus.InProgress)
+                storage.timestamp[2] = timestamp(2)
+                storage.tokenCount[2] = 20
+                storage.history[2] = assistantMessage("temporary")
+                error("fail transaction")
+            }
+        }
+
+        assertEquals(0, storage.latestIndex())
+        assertEquals(initialSettings, storage.settings[2])
+        assertEquals(initialCheckpoint, storage.compaction[2])
+        assertEquals(initialPlan, storage.plan[2])
+        assertEquals(initialTimestamp, storage.timestamp[2])
+        assertEquals(10, storage.tokenCount[2])
+        assertEquals(initialMessage, storage.history[2])
+    }
+
+    @Test
+    fun storageTransactionRevertsEveryTimelineOnCancellation() = runTest {
+        val storage = InMemoryCodexAgentStorage()
+        storage.settings[0] = settings("initial-model")
+        storage.compaction[0] = checkpoint()
+        storage.plan[0] = plan("initial", StepStatus.Pending)
+        storage.timestamp[0] = timestamp(0)
+        storage.tokenCount[0] = 10
+        storage.history[0] = userMessage("initial")
+
+        val transaction = launch(start = CoroutineStart.UNDISPATCHED) {
+            storage.transaction {
+                storage.settings[2] = settings("temporary-model")
+                storage.timestamp[2] = timestamp(2)
+                storage.history[2] = assistantMessage("temporary")
+                awaitCancellation()
+            }
+        }
+
+        transaction.cancelAndJoin()
+
+        assertEquals(0, storage.latestIndex())
+        assertEquals(listOf(0), storage.settings.indexes().toList())
+        assertEquals(listOf(0), storage.timestamp.indexes().toList())
+        assertEquals(listOf(0), storage.history.indexes().toList())
     }
 
     @Test

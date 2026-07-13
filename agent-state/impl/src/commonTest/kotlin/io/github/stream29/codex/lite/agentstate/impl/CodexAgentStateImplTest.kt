@@ -32,6 +32,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -230,6 +231,70 @@ class CodexAgentStateImplTest {
         assertEquals(3, storage.latestIndex())
         assertEquals(null, storage.history.nextIndex(3))
         assertEquals(9, storage.tokenCount[3])
+    }
+
+    @Test
+    fun resumeDoesNotWaitForSlowStreamEventCollector() = runTest {
+        val storage = InMemoryCodexAgentStorage()
+        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
+        val deltaEvent = ResponsesStreamEvent.OutputTextDelta(
+            itemId = "message_1",
+            outputIndex = 0,
+            contentIndex = 0,
+            delta = "x",
+        )
+        val completedEvent = ResponsesStreamEvent.Completed(
+            Response(
+                id = "response_1",
+                usage = TokenUsage(
+                    inputTokens = 8,
+                    outputTokens = 1,
+                    totalTokens = 9,
+                ),
+                endTurn = true,
+            ),
+        )
+        val productionCompleted = CompletableDeferred<Unit>()
+        val firstEventCollected = CompletableDeferred<Unit>()
+        val releaseCollector = CompletableDeferred<Unit>()
+        val agent = CodexAgentStateImpl(
+            client = mockOpenAiClient {
+                createResponse {
+                    flow {
+                        repeat(1_024) {
+                            emit(deltaEvent)
+                        }
+                        emit(completedEvent)
+                        productionCompleted.complete(Unit)
+                    }
+                }
+            },
+            storage = storage,
+        )
+        val collected = mutableListOf<ResponsesStreamEvent>()
+
+        agent.appendResponseItem(userMessage("Start streaming."), instant(0), tokenCount = null)
+        val runningResume = async(start = CoroutineStart.UNDISPATCHED) {
+            agent.resume().collect { event ->
+                collected += event
+                if (collected.size == 1) {
+                    firstEventCollected.complete(Unit)
+                    releaseCollector.await()
+                }
+            }
+        }
+
+        firstEventCollected.await()
+        yield()
+        assertTrue(productionCompleted.isCompleted)
+        assertEquals(CodexAgentStateEnum.Idle, agent.state.value)
+        assertEquals(2, storage.latestIndex())
+        assertEquals(9, storage.tokenCount[2])
+
+        releaseCollector.complete(Unit)
+        runningResume.await()
+        assertEquals(1_025, collected.size)
+        assertEquals(completedEvent, collected.last())
     }
 
     @Test
