@@ -1,7 +1,5 @@
 package io.github.stream29.codex.lite.openai
 
-import kotlinx.serialization.EncodeDefault
-import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -27,6 +25,22 @@ public sealed interface ResponseItem {
     public sealed interface CompactionItem : HistoryItem
 
     /**
+     * Declares extra tool definitions inline in a Responses Lite input sequence.
+     *
+     * @property id Nullable because hosted Responses Lite input may omit an item
+     * id; `null` means no id was provided.
+     * @property tools Raw tool definitions because this protocol item may carry
+     * tool shapes outside this client's static [ToolSpec] hierarchy.
+     */
+    @Serializable
+    @SerialName("additional_tools")
+    public data class AdditionalTools(
+        public val id: ResponseItemId? = null,
+        public val role: String,
+        public val tools: List<JsonElement>,
+    ) : HistoryItem
+
+    /**
      * @property id Nullable because providers may omit message ids; `null`
      * means no id was provided.
      * @property phase Nullable because providers may omit message phase; `null`
@@ -35,23 +49,28 @@ public sealed interface ResponseItem {
     @Serializable
     @SerialName("message")
     public data class Message(
-        public val id: String? = null,
+        public val id: ResponseItemId? = null,
         public val role: MessageRole,
         public val content: List<ContentItem>,
         public val phase: MessagePhase? = null,
     ) : HistoryItem
 
+    /**
+     * @property id Nullable because providers may omit agent-message ids; `null`
+     * means no id was provided.
+     */
     @Serializable
     @SerialName("agent_message")
     public data class AgentMessage(
+        public val id: ResponseItemId? = null,
         public val author: String,
         public val recipient: String,
         public val content: List<AgentMessageInputContent>,
     ) : HistoryItem
 
     /**
-     * @property id Empty when the wire omits a reasoning id, matching Rust's
-     * `#[serde(default)]` compatibility behavior.
+     * @property id Nullable because providers may omit reasoning ids; `null`
+     * means no id was provided.
      * @property content Nullable because reasoning items may only contain
      * summary; `null` means no full reasoning content was provided.
      * @property encryptedContent Nullable because encrypted reasoning is
@@ -60,9 +79,7 @@ public sealed interface ResponseItem {
     @Serializable
     @SerialName("reasoning")
     public data class Reasoning(
-        @OptIn(ExperimentalSerializationApi::class)
-        @EncodeDefault(EncodeDefault.Mode.NEVER)
-        public val id: String = "",
+        public val id: ResponseItemId? = null,
         public val summary: List<ReasoningItemReasoningSummary> = emptyList(),
         public val content: List<ReasoningItemContent>? = null,
         @SerialName("encrypted_content")
@@ -78,7 +95,7 @@ public sealed interface ResponseItem {
     @Serializable
     @SerialName("local_shell_call")
     public data class LocalShellCall(
-        public val id: String? = null,
+        public val id: ResponseItemId? = null,
         @SerialName("call_id")
         public val callId: String? = null,
         public val status: LocalShellStatus,
@@ -94,7 +111,7 @@ public sealed interface ResponseItem {
     @Serializable
     @SerialName("function_call")
     public data class FunctionCall(
-        public val id: String? = null,
+        public val id: ResponseItemId? = null,
         public val name: String,
         public val namespace: String? = null,
         public val arguments: String,
@@ -113,7 +130,7 @@ public sealed interface ResponseItem {
     @Serializable
     @SerialName("tool_search_call")
     public data class ToolSearchCall(
-        public val id: String? = null,
+        public val id: ResponseItemId? = null,
         @SerialName("call_id")
         public val callId: String? = null,
         public val status: String? = null,
@@ -121,9 +138,14 @@ public sealed interface ResponseItem {
         public val arguments: JsonElement,
     ) : HistoryItem
 
+    /**
+     * @property id Nullable because providers may omit function-output ids;
+     * `null` means no id was provided.
+     */
     @Serializable
     @SerialName("function_call_output")
     public data class FunctionCallOutput(
+        public val id: ResponseItemId? = null,
         @SerialName("call_id")
         public val callId: String,
         public val output: FunctionCallOutputPayload,
@@ -148,25 +170,31 @@ public sealed interface ResponseItem {
      * `null` means no item id was provided.
      * @property status Nullable because custom-tool call metadata may omit
      * status; `null` means no status was provided.
+     * @property namespace Nullable because a custom tool may be declared at the
+     * root level; `null` means route by tool name alone.
      */
     @Serializable
     @SerialName("custom_tool_call")
     public data class CustomToolCall(
-        public val id: String? = null,
+        public val id: ResponseItemId? = null,
         public val status: String? = null,
         @SerialName("call_id")
         public val callId: String,
         public val name: String,
+        public val namespace: String? = null,
         public val input: String,
     ) : HistoryItem
 
     /**
+     * @property id Nullable because providers may omit custom-tool output ids;
+     * `null` means no id was provided.
      * @property name Nullable because tool-call outputs may only need `call_id`;
      * `null` means no redundant tool name is sent.
      */
     @Serializable
     @SerialName("custom_tool_call_output")
     public data class CustomToolCallOutput(
+        public val id: ResponseItemId? = null,
         @SerialName("call_id")
         public val callId: String,
         public val name: String? = null,
@@ -174,12 +202,15 @@ public sealed interface ResponseItem {
     ) : HistoryItem
 
     /**
+     * @property id Nullable because providers may omit tool-search output ids;
+     * `null` means no id was provided.
      * @property callId Nullable because historical or normalized tool-search output
      * items may lack it; `null` means no originating call id is available.
      */
     @Serializable
     @SerialName("tool_search_output")
     public data class ToolSearchOutput(
+        public val id: ResponseItemId? = null,
         @SerialName("call_id")
         public val callId: String? = null,
         public val status: String,
@@ -198,19 +229,21 @@ public sealed interface ResponseItem {
     @Serializable
     @SerialName("web_search_call")
     public data class WebSearchCall(
-        public val id: String? = null,
+        public val id: ResponseItemId? = null,
         public val status: String? = null,
         public val action: WebSearchAction? = null,
     ) : HistoryItem
 
     /**
+     * @property id Nullable because providers may omit image-generation ids;
+     * `null` means no id was provided.
      * @property revisedPrompt Nullable because image generation may not revise the
      * prompt; `null` means no revised prompt was returned.
      */
     @Serializable
     @SerialName("image_generation_call")
     public data class ImageGenerationCall(
-        public val id: String,
+        public val id: ResponseItemId? = null,
         public val status: String,
         @SerialName("revised_prompt")
         public val revisedPrompt: String? = null,
@@ -219,20 +252,28 @@ public sealed interface ResponseItem {
 
     /**
      * Preserves the Kotlin split between `compaction` and `compaction_summary`.
+     *
+     * @property id Nullable because providers may omit compaction ids; `null`
+     * means no id was provided.
      */
     @Serializable
     @SerialName("compaction")
     public data class Compaction(
+        public val id: ResponseItemId? = null,
         @SerialName("encrypted_content")
         public val encryptedContent: String,
     ) : CompactionItem
 
     /**
      * Preserves the Kotlin split between `compaction` and `compaction_summary`.
+     *
+     * @property id Nullable because providers may omit compaction-summary ids;
+     * `null` means no id was provided.
      */
     @Serializable
     @SerialName("compaction_summary")
     public data class CompactionSummary(
+        public val id: ResponseItemId? = null,
         @SerialName("encrypted_content")
         public val encryptedContent: String,
     ) : CompactionItem
@@ -242,12 +283,15 @@ public sealed interface ResponseItem {
     public data object CompactionTrigger : Known
 
     /**
+     * @property id Nullable because providers may omit context-compaction ids;
+     * `null` means no id was provided.
      * @property encryptedContent Nullable because context compaction triggers can be
      * structural; `null` means no encrypted payload accompanies the item.
      */
     @Serializable
     @SerialName("context_compaction")
     public data class ContextCompaction(
+        public val id: ResponseItemId? = null,
         @SerialName("encrypted_content")
         public val encryptedContent: String? = null,
     ) : CompactionItem

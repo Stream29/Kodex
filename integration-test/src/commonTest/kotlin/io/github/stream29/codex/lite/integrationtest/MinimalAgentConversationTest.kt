@@ -472,6 +472,7 @@ private fun List<ResponseItem>.typeNames(): List<String> =
 
 private fun ResponseItem.typeName(): String =
     when (this) {
+        is ResponseItem.AdditionalTools -> "additional_tools"
         is ResponseItem.Message -> "message"
         is ResponseItem.AgentMessage -> "agent_message"
         is ResponseItem.Reasoning -> "reasoning"
@@ -568,7 +569,9 @@ private suspend fun InMemoryCodexAgentStorage.initialize(settings: CodexAgentSet
     this.compaction[0] = CompactionCheckpoint(
         prefix = emptyList(),
         historyBaseIndex = 0,
-        windowId = 0,
+        windowNumber = 0,
+        firstWindowId = "window-0",
+        windowId = "window-0",
     )
     this.plan[0] = UpdatePlanArgs(plan = emptyList())
 }

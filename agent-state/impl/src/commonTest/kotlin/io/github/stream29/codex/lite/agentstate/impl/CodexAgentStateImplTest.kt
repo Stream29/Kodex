@@ -556,6 +556,7 @@ class CodexAgentStateImplTest {
     fun forcedCompactUsesRemoteCompactionV2ByDefault() = runTest {
         val storage = InMemoryCodexAgentStorage()
         storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
+        val initialCheckpoint = storage.compaction[0]
         val compactRequests = mutableListOf<RemoteCompactionV2Request>()
         val compaction = ResponseItem.Compaction(encryptedContent = "compact")
         val agent = CodexAgentStateImpl(
@@ -590,15 +591,13 @@ class CodexAgentStateImplTest {
         assertEquals(null, compactRequest.settings.installationId)
         assertEquals(null, compactRequest.settings.sessionId)
         assertEquals(null, compactRequest.settings.threadId)
-        assertEquals(0L, compactRequest.checkpoint.windowId)
+        assertEquals(initialCheckpoint, compactRequest.checkpoint)
         assertEquals(ResponseItem.ContextCompaction(encryptedContent = "compact"), storage.history[2])
-        assertEquals(
-            CompactionCheckpoint(
-                prefix = listOf(user, compaction),
-                historyBaseIndex = 3,
-                windowId = 1,
-            ),
-            storage.compaction[2],
+        assertAdvancedCompactionCheckpoint(
+            checkpoint = storage.compaction[2],
+            prefix = listOf(user, compaction),
+            historyBaseIndex = 3,
+            previousCheckpoint = initialCheckpoint,
         )
         assertEquals(11, storage.tokenCount[2])
         assertEquals(2, agent.latestIndex.value)
@@ -636,12 +635,13 @@ class CodexAgentStateImplTest {
     }
 
     @Test
-    fun remoteCompactionV2UsesWindowIdFromCheckpoint() = runTest {
+    fun remoteCompactionV2UsesWindowNumberFromCheckpoint() = runTest {
         val storage = InMemoryCodexAgentStorage()
         storage.initialize(
             settings = CodexAgentSettings(OpenAiModelId("test-model")),
-            windowId = 7,
+            windowNumber = 7,
         )
+        val initialCheckpoint = storage.compaction[0]
         val compactRequests = mutableListOf<RemoteCompactionV2Request>()
         val agent = CodexAgentStateImpl(
             client = mockOpenAiClient {
@@ -657,8 +657,13 @@ class CodexAgentStateImplTest {
         agent.forcedCompact()
 
         val compactRequest = compactRequests.single()
-        assertEquals(7L, compactRequest.checkpoint.windowId)
-        assertEquals(8L, storage.compaction[2].windowId)
+        assertEquals(7L, compactRequest.checkpoint.windowNumber)
+        assertAdvancedCompactionCheckpoint(
+            checkpoint = storage.compaction[2],
+            prefix = listOf(userMessage("Compact."), ResponseItem.Compaction(encryptedContent = "compact")),
+            historyBaseIndex = 3,
+            previousCheckpoint = initialCheckpoint,
+        )
     }
 
     @Test
@@ -670,6 +675,7 @@ class CodexAgentStateImplTest {
                 remoteCompactionV2 = false,
             ),
         )
+        val initialCheckpoint = storage.compaction[0]
         val compactSummary = ResponseItem.CompactionSummary(encryptedContent = "summary")
         val compactRequests = mutableListOf<CompactionInput>()
         val agent = CodexAgentStateImpl(
@@ -694,13 +700,11 @@ class CodexAgentStateImplTest {
         assertEquals(OpenAiModelId("test-model"), compactRequests.single().model)
         assertEquals(listOf(user, ResponseItem.CompactionTrigger), compactRequests.single().input)
         assertEquals(ResponseItem.ContextCompaction(), storage.history[2])
-        assertEquals(
-            CompactionCheckpoint(
-                prefix = listOf(compactSummary),
-                historyBaseIndex = 3,
-                windowId = 1,
-            ),
-            storage.compaction[2],
+        assertAdvancedCompactionCheckpoint(
+            checkpoint = storage.compaction[2],
+            prefix = listOf(compactSummary),
+            historyBaseIndex = 3,
+            previousCheckpoint = initialCheckpoint,
         )
         assertEquals(2, agent.latestIndex.value)
     }
@@ -714,6 +718,7 @@ class CodexAgentStateImplTest {
                 autoCompactionTokenLimit = 90,
             ),
         )
+        val initialCheckpoint = storage.compaction[0]
         val user = userMessage("Keep this user message.")
         val compaction = ResponseItem.Compaction(encryptedContent = "pre-turn-compact")
         val final = assistantMessage("After pre-turn compact.")
@@ -751,13 +756,11 @@ class CodexAgentStateImplTest {
         assertEquals(emptyMap(), responseRequests.single().extraHeaders)
         assertEquals(ResponseItem.ContextCompaction(encryptedContent = "pre-turn-compact"), storage.history[2])
         assertEquals(final, storage.history[3])
-        assertEquals(
-            CompactionCheckpoint(
-                prefix = listOf(user, compaction),
-                historyBaseIndex = 3,
-                windowId = 1,
-            ),
-            storage.compaction[2],
+        assertAdvancedCompactionCheckpoint(
+            checkpoint = storage.compaction[2],
+            prefix = listOf(user, compaction),
+            historyBaseIndex = 3,
+            previousCheckpoint = initialCheckpoint,
         )
     }
 
@@ -770,6 +773,7 @@ class CodexAgentStateImplTest {
                 autoCompactionTokenLimit = 20,
             ),
         )
+        val initialCheckpoint = storage.compaction[0]
         val user = userMessage("Continue until final.")
         val partial = assistantMessage("Partial answer.")
         val compaction = ResponseItem.Compaction(encryptedContent = "mid-turn-compact")
@@ -826,13 +830,11 @@ class CodexAgentStateImplTest {
         assertEquals(partial, storage.history[2])
         assertEquals(ResponseItem.ContextCompaction(encryptedContent = "mid-turn-compact"), storage.history[4])
         assertEquals(final, storage.history[5])
-        assertEquals(
-            CompactionCheckpoint(
-                prefix = listOf(user, compaction),
-                historyBaseIndex = 5,
-                windowId = 1,
-            ),
-            storage.compaction[4],
+        assertAdvancedCompactionCheckpoint(
+            checkpoint = storage.compaction[4],
+            prefix = listOf(user, compaction),
+            historyBaseIndex = 5,
+            previousCheckpoint = initialCheckpoint,
         )
     }
 
@@ -987,14 +989,35 @@ private fun remoteCompactionV2Response(
         completedResponse = usage?.let { Response(id = "compact_response", usage = it, endTurn = true) },
     )
 
+private fun assertAdvancedCompactionCheckpoint(
+    checkpoint: CompactionCheckpoint,
+    prefix: List<ResponseItem.HistoryItem>,
+    historyBaseIndex: Int,
+    previousCheckpoint: CompactionCheckpoint,
+) {
+    assertEquals(prefix, checkpoint.prefix)
+    assertEquals(historyBaseIndex, checkpoint.historyBaseIndex)
+    assertEquals(previousCheckpoint.windowNumber + 1, checkpoint.windowNumber)
+    assertEquals(previousCheckpoint.firstWindowId, checkpoint.firstWindowId)
+    assertEquals(previousCheckpoint.windowId, checkpoint.previousWindowId)
+    assertTrue(checkpoint.windowId != previousCheckpoint.windowId)
+    assertEquals('7', checkpoint.windowId[14])
+}
+
 private suspend fun InMemoryCodexAgentStorage.initialize(
     settings: CodexAgentSettings,
-    windowId: Long = 0,
+    windowNumber: Long = 0,
+    windowId: String = "window-$windowNumber",
+    firstWindowId: String = windowId,
+    previousWindowId: String? = null,
 ) {
     this.settings[0] = settings
     this.compaction[0] = CompactionCheckpoint(
         prefix = emptyList(),
         historyBaseIndex = 0,
+        windowNumber = windowNumber,
+        firstWindowId = firstWindowId,
+        previousWindowId = previousWindowId,
         windowId = windowId,
     )
     this.plan[0] = UpdatePlanArgs(plan = emptyList())

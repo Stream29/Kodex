@@ -100,13 +100,20 @@ public data class CodexAgentSettings(
  * @property historyBaseIndex First history state index not covered by [prefix].
  * Raw history items before this index remain stored for audit/forking, but are
  * excluded from the active prompt projection while this checkpoint is visible.
- * @property windowId Codex compaction window id active for requests built from
- * this checkpoint.
+ * @property windowNumber Monotonic compaction-window sequence number.
+ * @property firstWindowId Stable UUIDv7 identifier for the thread's first
+ * context window.
+ * @property previousWindowId Nullable because the first context window has no
+ * predecessor; `null` means this checkpoint belongs to that first window.
+ * @property windowId Stable UUIDv7 identifier for the active context window.
  */
 public data class CompactionCheckpoint(
     public val prefix: List<ResponseItem.HistoryItem>,
     public val historyBaseIndex: Int,
-    public val windowId: Long,
+    public val windowNumber: Long,
+    public val firstWindowId: String,
+    public val previousWindowId: String? = null,
+    public val windowId: String,
 )
 
 /**

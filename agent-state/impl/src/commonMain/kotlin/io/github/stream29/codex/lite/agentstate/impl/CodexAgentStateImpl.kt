@@ -34,6 +34,8 @@ import kotlinx.coroutines.withContext
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
  * Loads a state-layer implementation from [storage].
@@ -185,6 +187,7 @@ public class CodexAgentStateImpl internal constructor(
             }
         }
 
+    @OptIn(ExperimentalUuidApi::class)
     private suspend fun runAutoCompact(
         trigger: RemoteCompactionV2Trigger,
         reason: RemoteCompactionV2Reason,
@@ -217,7 +220,8 @@ public class CodexAgentStateImpl internal constructor(
                         ),
                         timestamp = now(),
                         tokenCount = result.completedResponse?.usage?.totalTokens,
-                        windowId = checkpoint.windowId + 1,
+                        previousCheckpoint = checkpoint,
+                        nextWindowId = Uuid.generateV7().toString(),
                     )
                     latestIndex.value = index
                     index
@@ -237,7 +241,8 @@ public class CodexAgentStateImpl internal constructor(
                         marker = ResponseItem.ContextCompaction(),
                         timestamp = now(),
                         tokenCount = null,
-                        windowId = checkpoint.windowId + 1,
+                        previousCheckpoint = checkpoint,
+                        nextWindowId = Uuid.generateV7().toString(),
                     )
                     latestIndex.value = index
                     index

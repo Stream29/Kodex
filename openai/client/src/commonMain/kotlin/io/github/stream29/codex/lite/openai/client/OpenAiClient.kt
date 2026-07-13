@@ -223,7 +223,7 @@ internal fun RemoteCompactionV2Request.remoteCompactionV2ExtraHeaders(): Map<Str
         put(HeaderCodexBetaFeatures, RemoteCompactionV2Feature)
         settings.installationId?.let { put(HeaderCodexInstallationId, it) }
         put(HeaderCodexTurnMetadata, remoteCompactionV2TurnMetadata())
-        put(HeaderCodexWindowId, checkpoint.windowId.toString())
+        put(HeaderCodexWindowId, checkpoint.windowNumber.toString())
     }
 
 internal fun RemoteCompactionV2Request.remoteCompactionV2TurnMetadata(): String =
@@ -234,7 +234,7 @@ internal fun RemoteCompactionV2Request.remoteCompactionV2TurnMetadata(): String 
             settings.sessionId?.let { put("session_id", it) }
             settings.threadId?.let { put("thread_id", it) }
             put("turn_id", turnId)
-            put("window_id", checkpoint.windowId.toString())
+            put("window_id", checkpoint.windowNumber.toString())
             put("request_kind", "compaction")
             put(
                 "compaction",
@@ -257,7 +257,7 @@ private fun RemoteCompactionV2Request.remoteCompactionV2ClientMetadata(
         settings.sessionId?.let { put("session_id", it) }
         settings.threadId?.let { put("thread_id", it) }
         put("turn_id", turnId)
-        put(HeaderCodexWindowId, checkpoint.windowId.toString())
+        put(HeaderCodexWindowId, checkpoint.windowNumber.toString())
         put(HeaderCodexTurnMetadata, turnMetadata)
     }
 

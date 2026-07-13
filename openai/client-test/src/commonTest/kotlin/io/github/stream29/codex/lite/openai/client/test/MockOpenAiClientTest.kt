@@ -84,7 +84,9 @@ class MockOpenAiClientTest {
             checkpoint = CompactionCheckpoint(
                 prefix = emptyList(),
                 historyBaseIndex = 0,
-                windowId = 0,
+                windowNumber = 0,
+                firstWindowId = "window-0",
+                windowId = "window-0",
             ),
             settings = CodexAgentSettings(OpenAiModelId("model")),
             turnId = "turn_0",

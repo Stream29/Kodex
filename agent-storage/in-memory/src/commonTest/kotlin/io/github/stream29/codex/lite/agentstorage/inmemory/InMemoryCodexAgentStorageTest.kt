@@ -98,7 +98,9 @@ class InMemoryCodexAgentStorageTest {
         storage.compaction[2] = CompactionCheckpoint(
             prefix = listOf(assistantMessage("summary")),
             historyBaseIndex = 2,
-            windowId = 0,
+            windowNumber = 0,
+            firstWindowId = "window-0",
+            windowId = "window-0",
         )
 
         assertFailsWith<IllegalArgumentException> {
@@ -120,7 +122,7 @@ class InMemoryCodexAgentStorageTest {
         assertEquals(0, storage.nextIndex(0))
 
         storage.settings[0] = settings("model")
-        storage.compaction[0] = CompactionCheckpoint(prefix = emptyList(), historyBaseIndex = 0, windowId = 0)
+        storage.compaction[0] = checkpoint()
         storage.plan[0] = UpdatePlanArgs(plan = emptyList())
         storage.tokenCount[0] = 10
         storage.timestamp[0] = timestamp(0)
@@ -152,7 +154,7 @@ class InMemoryCodexAgentStorageTest {
         val oldTimestamp = timestamp(0)
         val middleTimestamp = timestamp(1)
         val newTimestamp = timestamp(2)
-        val checkpoint = CompactionCheckpoint(prefix = emptyList(), historyBaseIndex = 0, windowId = 0)
+        val checkpoint = checkpoint()
 
         source.settings[0] = oldSettings
         source.compaction[0] = checkpoint
@@ -191,13 +193,22 @@ class InMemoryCodexAgentStorageTest {
         val prefix = listOf(userMessage("summary"))
         val marker = ResponseItem.ContextCompaction(encryptedContent = "encrypted")
         val transitionTime = timestamp(4)
+        val previousCheckpoint = CompactionCheckpoint(
+            prefix = emptyList(),
+            historyBaseIndex = 0,
+            windowNumber = 6,
+            firstWindowId = "window-0",
+            previousWindowId = "window-5",
+            windowId = "window-6",
+        )
 
         val index = storage.appendCompactionCheckpoint(
             prefix = prefix,
             marker = marker,
             timestamp = transitionTime,
             tokenCount = 42,
-            windowId = 7,
+            previousCheckpoint = previousCheckpoint,
+            nextWindowId = "window-7",
         )
 
         assertEquals(0, index)
@@ -207,7 +218,10 @@ class InMemoryCodexAgentStorageTest {
             CompactionCheckpoint(
                 prefix = prefix,
                 historyBaseIndex = 1,
-                windowId = 7,
+                windowNumber = 7,
+                firstWindowId = "window-0",
+                previousWindowId = "window-6",
+                windowId = "window-7",
             ),
             storage.compaction[0],
         )
@@ -229,6 +243,23 @@ class InMemoryCodexAgentStorageTest {
 
     private fun timestamp(seconds: Long): Instant =
         Instant.fromEpochSeconds(seconds)
+
+    private fun checkpoint(
+        prefix: List<ResponseItem.HistoryItem> = emptyList(),
+        historyBaseIndex: Int = 0,
+        windowNumber: Long = 0,
+        firstWindowId: String = "window-0",
+        previousWindowId: String? = null,
+        windowId: String = firstWindowId,
+    ): CompactionCheckpoint =
+        CompactionCheckpoint(
+            prefix = prefix,
+            historyBaseIndex = historyBaseIndex,
+            windowNumber = windowNumber,
+            firstWindowId = firstWindowId,
+            previousWindowId = previousWindowId,
+            windowId = windowId,
+        )
 
     private fun userMessage(text: String): ResponseItem.Message =
         ResponseItem.Message(

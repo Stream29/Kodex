@@ -427,7 +427,7 @@ class OpenAiSubscriptionSerializationTest {
         )
 
         val reasoning = item as ResponseItem.Reasoning
-        assertEquals("", reasoning.id)
+        assertNull(reasoning.id)
         val content = reasoning.content.orEmpty()
         assertEquals("plain", (content[0] as ReasoningItemContent.Text).text)
         assertEquals("hidden", (content[1] as ReasoningItemContent.ReasoningText).text)

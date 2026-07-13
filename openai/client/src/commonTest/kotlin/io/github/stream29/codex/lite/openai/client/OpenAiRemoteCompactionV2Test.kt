@@ -33,7 +33,10 @@ class OpenAiRemoteCompactionV2Test {
             checkpoint = CompactionCheckpoint(
                 prefix = emptyList(),
                 historyBaseIndex = 0,
-                windowId = 7,
+                windowNumber = 7,
+                firstWindowId = "window-0",
+                previousWindowId = "window-6",
+                windowId = "window-7",
             ),
             settings = CodexAgentSettings(
                 model = OpenAiModelId("test-model"),
@@ -86,7 +89,9 @@ class OpenAiRemoteCompactionV2Test {
             checkpoint = CompactionCheckpoint(
                 prefix = emptyList(),
                 historyBaseIndex = 0,
-                windowId = 0,
+                windowNumber = 0,
+                firstWindowId = "window-0",
+                windowId = "window-0",
             ),
             settings = CodexAgentSettings(OpenAiModelId("test-model")),
             turnId = "turn_2",
