@@ -6,6 +6,7 @@ import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
+import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.openai.CompactionInput
@@ -96,7 +97,7 @@ public class CodexAgentStateImpl internal constructor(
 
                         is ResponsesStreamEvent.Completed -> {
                             event.response.usage?.totalTokens?.let { tokenCount ->
-                                publishStorageTransition {
+                                withContext(NonCancellable) {
                                     val index = storage.latestIndex() + 1
                                     storage.tokenCount[index] = tokenCount
                                     storage.timestamp[index] = now()
@@ -155,7 +156,7 @@ public class CodexAgentStateImpl internal constructor(
         plan: UpdatePlanArgs,
     ): Int =
         mutate(CodexAgentStateEnum.ExternalWrite) {
-            publishStorageTransition {
+            withContext(NonCancellable) {
                 val index = storage.latestIndex() + 1
                 storage.plan[index] = plan
                 storage.history[index] = item
@@ -171,7 +172,7 @@ public class CodexAgentStateImpl internal constructor(
         tokenCount: Long?,
     ): Int =
         mutate(CodexAgentStateEnum.ExternalWrite) {
-            publishStorageTransition {
+            withContext(NonCancellable) {
                 val index = storage.latestIndex() + 1
                 require(index > 0) { "Settings updates require an existing state index." }
                 storage.settings[index] = settings
@@ -205,17 +206,22 @@ public class CodexAgentStateImpl internal constructor(
                     reason = reason,
                     phase = phase,
                 )
-                publishCompactionCheckpoint(
-                    prefix = input
-                        .filterIsInstance<ResponseItem.Message>()
-                        .filter { it.role == MessageRole.User }
-                        .plus(result.compactionOutput),
-                    marker = ResponseItem.ContextCompaction(
-                        encryptedContent = result.compactionOutput.encryptedContent,
-                    ),
-                    tokenCount = result.completedResponse?.usage?.totalTokens,
-                    windowId = checkpoint.windowId + 1,
-                )
+                withContext(NonCancellable) {
+                    val index = storage.appendCompactionCheckpoint(
+                        prefix = input
+                            .filterIsInstance<ResponseItem.Message>()
+                            .filter { it.role == MessageRole.User }
+                            .plus(result.compactionOutput),
+                        marker = ResponseItem.ContextCompaction(
+                            encryptedContent = result.compactionOutput.encryptedContent,
+                        ),
+                        timestamp = now(),
+                        tokenCount = result.completedResponse?.usage?.totalTokens,
+                        windowId = checkpoint.windowId + 1,
+                    )
+                    latestIndex.value = index
+                    index
+                }
             } else {
                 val response = when (
                     val result = client.compactResponse(
@@ -225,12 +231,17 @@ public class CodexAgentStateImpl internal constructor(
                     is OpenAiResult.Success -> result.value
                     is OpenAiResult.Failure -> throw CodexCompactionFailureException(result.error)
                 }
-                publishCompactionCheckpoint(
-                    prefix = response.output,
-                    marker = ResponseItem.ContextCompaction(),
-                    tokenCount = null,
-                    windowId = checkpoint.windowId + 1,
-                )
+                withContext(NonCancellable) {
+                    val index = storage.appendCompactionCheckpoint(
+                        prefix = response.output,
+                        marker = ResponseItem.ContextCompaction(),
+                        timestamp = now(),
+                        tokenCount = null,
+                        windowId = checkpoint.windowId + 1,
+                    )
+                    latestIndex.value = index
+                    index
+                }
             }
         }
 
@@ -255,32 +266,11 @@ public class CodexAgentStateImpl internal constructor(
         return client.createRemoteCompactionV2Response(request)
     }
 
-    private suspend fun publishCompactionCheckpoint(
-        prefix: List<ResponseItem.HistoryItem>,
-        marker: ResponseItem.ContextCompaction,
-        tokenCount: Long?,
-        windowId: Long,
-    ): Int = publishStorageTransition {
-        val index = storage.latestIndex() + 1
-        storage.compaction[index] = CompactionCheckpoint(
-            prefix = prefix,
-            historyBaseIndex = index + 1,
-            windowId = windowId,
-        )
-        storage.history[index] = marker
-        if (tokenCount != null) {
-            storage.tokenCount[index] = tokenCount
-        }
-        storage.timestamp[index] = now()
-        latestIndex.value = index
-        index
-    }
-
     private suspend fun appendHistoryItem(
         item: ResponseItem.HistoryItem,
         timestamp: Instant,
         tokenCount: Long?,
-    ): Int = publishStorageTransition {
+    ): Int = withContext(NonCancellable) {
         val index = storage.latestIndex() + 1
         if (tokenCount != null) {
             storage.tokenCount[index] = tokenCount
@@ -332,13 +322,6 @@ public class CodexAgentStateImpl internal constructor(
     }
 
 }
-
-private suspend inline fun <T> publishStorageTransition(
-    crossinline block: suspend () -> T,
-): T =
-    withContext(NonCancellable) {
-        block()
-    }
 
 public class CodexResponseStreamFailureException(
     public val error: ResponseError?,

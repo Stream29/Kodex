@@ -9,6 +9,7 @@ import io.github.stream29.codex.lite.openai.StepStatus
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
+import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.forkTo
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
@@ -182,6 +183,36 @@ class InMemoryCodexAgentStorageTest {
         assertEquals(listOf(0), target.plan.indexes().toList())
         assertEquals(listOf(0, 1), target.timestamp.indexes().toList())
         assertEquals(listOf(0), target.tokenCount.indexes().toList())
+    }
+
+    @Test
+    fun appendCompactionCheckpointPublishesSharedStorageTransition() = runTest {
+        val storage = InMemoryCodexAgentStorage()
+        val prefix = listOf(userMessage("summary"))
+        val marker = ResponseItem.ContextCompaction(encryptedContent = "encrypted")
+        val transitionTime = timestamp(4)
+
+        val index = storage.appendCompactionCheckpoint(
+            prefix = prefix,
+            marker = marker,
+            timestamp = transitionTime,
+            tokenCount = 42,
+            windowId = 7,
+        )
+
+        assertEquals(0, index)
+        assertEquals(0, storage.latestIndex())
+        assertEquals(marker, storage.history[0])
+        assertEquals(
+            CompactionCheckpoint(
+                prefix = prefix,
+                historyBaseIndex = 1,
+                windowId = 7,
+            ),
+            storage.compaction[0],
+        )
+        assertEquals(transitionTime, storage.timestamp[0])
+        assertEquals(42, storage.tokenCount[0])
     }
 
     private fun settings(model: String): CodexAgentSettings =
