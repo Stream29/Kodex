@@ -1,21 +1,34 @@
 package io.github.stream29.codex.lite.utils.kotlinxiocoroutines
 
-import kotlinx.coroutines.test.runTest
+import de.infix.testBalloon.framework.core.testSuite
+
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
-import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class CoroutineFileSystemTest {
-    @Test
-    fun readsWritesListsAndDeletesFiles() = runTest {
-        val root = Path(SystemTemporaryDirectory, "codex-lite-coroutine-fs-${Random.nextLong()}")
-        val child = Path(root, "dir/file.txt")
-        try {
+private suspend fun temporaryRoot(): Path =
+    Path(SystemTemporaryDirectory, "codex-lite-coroutine-fs-${Random.nextLong()}").also {
+        SystemCoroutineFileSystem.createDirectories(it)
+    }
+
+private suspend fun deleteRecursively(path: Path) {
+    val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
+    if (metadata.isDirectory) {
+        for (child in SystemCoroutineFileSystem.list(path)) {
+            deleteRecursively(child)
+        }
+    }
+    SystemCoroutineFileSystem.delete(path, mustExist = false)
+}
+
+val coroutineFileSystemTest by testSuite {
+    testFixture { temporaryRoot() } closeWith { deleteRecursively(this) } asParameterForEach {
+        test("reads writes lists and deletes files") { root ->
+            val child = Path(root, "dir/file.txt")
             SystemCoroutineFileSystem.createDirectories(child.parent!!)
             SystemCoroutineFileSystem.writeString(child, "hello\n")
             SystemCoroutineFileSystem.writeString(child, "world\n", append = true)
@@ -27,19 +40,12 @@ class CoroutineFileSystemTest {
 
             SystemCoroutineFileSystem.delete(child)
             assertFalse(SystemCoroutineFileSystem.exists(child))
-        } finally {
-            SystemCoroutineFileSystem.delete(Path(root, "dir"), mustExist = false)
-            SystemCoroutineFileSystem.delete(root, mustExist = false)
         }
-    }
 
-    @Test
-    fun readsWritesAndCopiesBinaryFiles() = runTest {
-        val root = Path(SystemTemporaryDirectory, "codex-lite-coroutine-fs-binary-${Random.nextLong()}")
-        val sourceFile = Path(root, "source.bin")
-        val copyFile = Path(root, "copy.bin")
-        val bytes = byteArrayOf(0, 1, 2, 127, -128, -1)
-        try {
+        test("reads writes and copies binary files") { root ->
+            val sourceFile = Path(root, "source.bin")
+            val copyFile = Path(root, "copy.bin")
+            val bytes = byteArrayOf(0, 1, 2, 127, -128, -1)
             SystemCoroutineFileSystem.createDirectories(root)
             SystemCoroutineFileSystem.writeBytes(sourceFile, bytes)
             SystemCoroutineFileSystem.writeBytes(sourceFile, bytes, append = true)
@@ -56,10 +62,6 @@ class CoroutineFileSystemTest {
 
             assertEquals((bytes.size * 2).toLong(), copied)
             assertContentEquals(bytes + bytes, SystemCoroutineFileSystem.readBytes(copyFile))
-        } finally {
-            SystemCoroutineFileSystem.delete(sourceFile, mustExist = false)
-            SystemCoroutineFileSystem.delete(copyFile, mustExist = false)
-            SystemCoroutineFileSystem.delete(root, mustExist = false)
         }
     }
 }

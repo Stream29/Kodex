@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.openai.client
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.openai.*
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.schema.json.AdditionalPropertiesConstraint
@@ -12,16 +14,19 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 
-class OpenAiSubscriptionSerializationTest {
-    private val json = OpenAiJsonCodec
 
-    @Test
-    fun responseItemUsesTaggedPolymorphicShape() {
+
+private val json = OpenAiJsonCodec
+
+private fun encodeTool(tool: ToolSpec): JsonElement =
+    json.parseToJsonElement(json.encodeToString<ToolSpec>(tool))
+
+val openAiSubscriptionSerializationTest by testSuite {
+    test("response item uses tagged polymorphic shape") {
         val request = ResponsesApiRequest(
             model = OpenAiModelId("test-model"),
             input = listOf(
@@ -42,8 +47,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals(JsonPrimitive("input_text"), item?.get("content")?.jsonArray?.single()?.jsonObject?.get("type"))
     }
 
-    @Test
-    fun requestUsesExplicitWireNames() {
+    test("request uses explicit wire names") {
         val request = ResponsesApiRequest(
             model = OpenAiModelId("test-model"),
             input = listOf(
@@ -70,8 +74,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals(JsonPrimitive("test"), encoded["client_metadata"]?.jsonObject?.get("client"))
     }
 
-    @Test
-    fun responsesApiRequestForcesStreamWireShape() {
+    test("responses api request forces stream wire shape") {
         val request = ResponsesApiRequest(
             model = OpenAiModelId("test-model"),
             input = listOf(
@@ -87,8 +90,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals(JsonPrimitive(true), encoded["stream"])
     }
 
-    @Test
-    fun responsesApiRequestOmitsDefaultOptionalControls() {
+    test("responses api request omits default optional controls") {
         val request = ResponsesApiRequest(
             model = OpenAiModelId("test-model"),
             input = listOf(
@@ -107,8 +109,7 @@ class OpenAiSubscriptionSerializationTest {
         assertFalse("text" in encoded)
     }
 
-    @Test
-    fun functionCallOutputPayloadCanBeText() {
+    test("function call output payload can be text") {
         val item = ResponseItem.FunctionCallOutput(
             callId = "call_1",
             output = FunctionCallOutputPayload.fromText("ok"),
@@ -122,8 +123,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals(JsonPrimitive("ok"), encoded["output"])
     }
 
-    @Test
-    fun functionCallOutputPayloadCanBeContentItems() {
+    test("function call output payload can be content items") {
         val item = ResponseItem.FunctionCallOutput(
             callId = "call_1",
             output = FunctionCallOutputPayload.fromContentItems(
@@ -147,8 +147,7 @@ class OpenAiSubscriptionSerializationTest {
         )
     }
 
-    @Test
-    fun functionCallOutputPayloadDecodesText() {
+    test("function call output payload decodes text") {
         val item = json.decodeFromString<ResponseItem>(
             """{"type":"function_call_output","call_id":"call_1","output":"ok"}""",
         )
@@ -157,8 +156,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals("ok", (output as FunctionCallOutputBody.Text).text)
     }
 
-    @Test
-    fun functionCallOutputPayloadDecodesContentItems() {
+    test("function call output payload decodes content items") {
         val item = json.decodeFromString<ResponseItem>(
             """{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_text","text":"note"}]}""",
         )
@@ -168,8 +166,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals("note", (contentItem as FunctionCallOutputContentItem.InputText).text)
     }
 
-    @Test
-    fun mcpToolCallOutputSerializesRawProtocolShape() {
+    test("mcp tool call output serializes raw protocol shape") {
         val item = ResponseItem.McpToolCallOutput(
             callId = "call_1",
             output = CallToolResult(
@@ -190,8 +187,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals(json.parseToJsonElement("""{"trace":"t"}"""), output["_meta"])
     }
 
-    @Test
-    fun responsesApiRequestKeepsMcpToolCallOutputShape() {
+    test("responses api request keeps mcp tool call output shape") {
         val item = ResponseItem.McpToolCallOutput(
             callId = "call_1",
             output = CallToolResult(
@@ -214,8 +210,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals(json.parseToJsonElement("""{"answer":1}"""), encodedItem["output"]?.jsonObject?.get("structuredContent"))
     }
 
-    @Test
-    fun mcpToolCallOutputImageContentConvertsToFunctionCallOutputContentItems() {
+    test("mcp tool call output image content converts to function call output content items") {
         val item = ResponseItem.McpToolCallOutput(
             callId = "call_1",
             output = CallToolResult(
@@ -246,8 +241,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals(ImageDetail.Original, image.detail)
     }
 
-    @Test
-    fun mcpToolCallOutputTextOnlyContentConvertsToJsonText() {
+    test("mcp tool call output text only content converts to json text") {
         val output = CallToolResult(
             content = listOf(json.parseToJsonElement("""{"type":"text","text":"ok"}""")),
         )
@@ -259,8 +253,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals(true, converted.success)
     }
 
-    @Test
-    fun compactionSummaryDecodesAsTaggedVariant() {
+    test("compaction summary decodes as tagged variant") {
         val item = json.decodeFromString<ResponseItem>(
             """{"type":"compaction_summary","encrypted_content":"enc"}""",
         )
@@ -268,8 +261,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals("enc", (item as ResponseItem.CompactionSummary).encryptedContent)
     }
 
-    @Test
-    fun streamEventDecodesAsTaggedVariant() {
+    test("stream event decodes as tagged variant") {
         val event = json.decodeFromString<ResponsesStreamEvent>(
             """
                 {
@@ -285,8 +277,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals("hi", (event as ResponsesStreamEvent.OutputTextDelta).delta)
     }
 
-    @Test
-    fun completedStreamEventDecodesRawResponseShape() {
+    test("completed stream event decodes raw response shape") {
         val event = json.decodeFromString<ResponsesStreamEvent>(
             """{"type":"response.completed","response":{"id":"resp_1","end_turn":true}}""",
         )
@@ -296,8 +287,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals(true, response.endTurn)
     }
 
-    @Test
-    fun completedStreamEventDecodesTokenUsageCounters() {
+    test("completed stream event decodes token usage counters") {
         val event = json.decodeFromString<ResponsesStreamEvent>(
             """
                 {
@@ -320,8 +310,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals(3, usage.totalTokens)
     }
 
-    @Test
-    fun metadataStreamEventAllowsMissingOptionalWireFields() {
+    test("metadata stream event allows missing optional wire fields") {
         val event = json.decodeFromString<ResponsesStreamEvent>(
             """{"type":"response.metadata"}""",
         )
@@ -332,8 +321,7 @@ class OpenAiSubscriptionSerializationTest {
         assertNull(metadata.metadata)
     }
 
-    @Test
-    fun customToolInputDeltaAllowsCallIdAsFallbackIdentifier() {
+    test("custom tool input delta allows call id as fallback identifier") {
         val event = json.decodeFromString<ResponsesStreamEvent>(
             """{"type":"response.custom_tool_call_input.delta","call_id":"call_1","delta":"abc"}""",
         )
@@ -344,8 +332,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals("abc", delta.delta)
     }
 
-    @Test
-    fun failedResponseAllowsPartialErrorPayload() {
+    test("failed response allows partial error payload") {
         val event = json.decodeFromString<ResponsesStreamEvent>(
             """{"type":"response.failed","response":{"error":{"code":"invalid_prompt"}}}""",
         )
@@ -356,8 +343,7 @@ class OpenAiSubscriptionSerializationTest {
         assertNull(error.type)
     }
 
-    @Test
-    fun contentPartStreamEventDecodesRawPartShape() {
+    test("content part stream event decodes raw part shape") {
         val event = json.decodeFromString<ResponsesStreamEvent>(
             """
                 {
@@ -374,8 +360,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals("hi", (part as ContentItem.OutputText).text)
     }
 
-    @Test
-    fun outputTextDoneStreamEventDecodesRawTextShape() {
+    test("output text done stream event decodes raw text shape") {
         val event = json.decodeFromString<ResponsesStreamEvent>(
             """
                 {
@@ -391,8 +376,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals("hi", (event as ResponsesStreamEvent.OutputTextDone).text)
     }
 
-    @Test
-    fun agentMessageInputTextDecodesAsTaggedVariant() {
+    test("agent message input text decodes as tagged variant") {
         val item = json.decodeFromString<ResponseItem>(
             """
                 {
@@ -410,8 +394,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals("hello", (content as AgentMessageInputContent.InputText).text)
     }
 
-    @Test
-    fun reasoningTextContentDecodesAsTaggedVariant() {
+    test("reasoning text content decodes as tagged variant") {
         val item = json.decodeFromString<ResponseItem>(
             """
                 {
@@ -433,8 +416,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals("hidden", (content[1] as ReasoningItemContent.ReasoningText).text)
     }
 
-    @Test
-    fun reasoningDefaultIdIsNotEncoded() {
+    test("reasoning default id is not encoded") {
         val item = ResponseItem.Reasoning(summary = emptyList())
 
         val encoded = json.parseToJsonElement(json.encodeToString<ResponseItem>(item)).jsonObject
@@ -442,8 +424,7 @@ class OpenAiSubscriptionSerializationTest {
         assertNull(encoded["id"])
     }
 
-    @Test
-    fun localShellCallDecodesStrictActionShape() {
+    test("local shell call decodes strict action shape") {
         val item = json.decodeFromString<ResponseItem>(
             """
                 {
@@ -472,8 +453,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals("stream", action.user)
     }
 
-    @Test
-    fun webSearchCallDecodesStrictActionShapes() {
+    test("web search call decodes strict action shapes") {
         val search = json.decodeFromString<ResponseItem>(
             """{"type":"web_search_call","status":"completed","action":{"type":"search","query":"weather","queries":["a","b"]}}""",
         ) as ResponseItem.WebSearchCall
@@ -489,8 +469,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals("needle", (findInPage.action as WebSearchAction.FindInPage).pattern)
     }
 
-    @Test
-    fun unknownResponseItemDecodesAsOther() {
+    test("unknown response item decodes as other") {
         val item = json.decodeFromString<ResponseItem>(
             """{"type":"future_item","value":1}""",
         )
@@ -498,8 +477,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals(ResponseItem.Other, item)
     }
 
-    @Test
-    fun unknownWebSearchActionDecodesAsOther() {
+    test("unknown web search action decodes as other") {
         val item = json.decodeFromString<ResponseItem>(
             """{"type":"web_search_call","status":"completed","action":{"type":"future_action","value":1}}""",
         )
@@ -507,8 +485,7 @@ class OpenAiSubscriptionSerializationTest {
         assertEquals(WebSearchAction.Other, (item as ResponseItem.WebSearchCall).action)
     }
 
-    @Test
-    fun functionToolSerializesExpectedWireShape() {
+    test("function tool serializes expected wire shape") {
         val tool = ResponsesApiTool(
             name = "demo",
             description = "A demo tool",
@@ -538,8 +515,7 @@ class OpenAiSubscriptionSerializationTest {
         )
     }
 
-    @Test
-    fun functionToolSerializesOutputSchemaWhenPresent() {
+    test("function tool serializes output schema when present") {
         val tool = ResponsesApiTool(
             name = "view_image",
             description = "View an image",
@@ -571,8 +547,7 @@ class OpenAiSubscriptionSerializationTest {
         )
     }
 
-    @Test
-    fun namespaceToolSerializesExpectedWireShape() {
+    test("namespace tool serializes expected wire shape") {
         val tool = ResponsesApiNamespace(
             name = "mcp__demo__",
             description = "Demo tools",
@@ -615,8 +590,7 @@ class OpenAiSubscriptionSerializationTest {
         )
     }
 
-    @Test
-    fun toolSearchToolSerializesExpectedWireShape() {
+    test("tool search tool serializes expected wire shape") {
         val tool = ToolSpec.ToolSearch(
             execution = "sync",
             description = "Search app tools",
@@ -652,8 +626,7 @@ class OpenAiSubscriptionSerializationTest {
         )
     }
 
-    @Test
-    fun toolSearchOutputSerializesLoadableToolsExpectedWireShape() {
+    test("tool search output serializes loadable tools expected wire shape") {
         val item = ResponseItem.ToolSearchOutput(
             callId = "call_1",
             status = "completed",
@@ -744,8 +717,7 @@ class OpenAiSubscriptionSerializationTest {
         )
     }
 
-    @Test
-    fun toolSearchOutputDecodesLoadableTools() {
+    test("tool search output decodes loadable tools") {
         val item = json.decodeFromString<ResponseItem>(
             """
                 {
@@ -832,8 +804,7 @@ class OpenAiSubscriptionSerializationTest {
         )
     }
 
-    @Test
-    fun webSearchToolSerializesExpectedWireShape() {
+    test("web search tool serializes expected wire shape") {
         val tool = ToolSpec.WebSearch(
             externalWebAccess = true,
             filters = ResponsesApiWebSearchFilters(allowedDomains = listOf("example.com")),
@@ -872,8 +843,7 @@ class OpenAiSubscriptionSerializationTest {
         )
     }
 
-    @Test
-    fun customToolSerializesExpectedWireShape() {
+    test("custom tool serializes expected wire shape") {
         val tool = FreeformTool(
             name = "apply_patch",
             description = "Apply a patch",
@@ -903,8 +873,7 @@ class OpenAiSubscriptionSerializationTest {
         )
     }
 
-    @Test
-    fun imageGenerationToolSerializesExpectedWireShape() {
+    test("image generation tool serializes expected wire shape") {
         val tool = ToolSpec.ImageGeneration(outputFormat = "png")
 
         assertEquals(
@@ -912,7 +881,4 @@ class OpenAiSubscriptionSerializationTest {
             encodeTool(tool),
         )
     }
-
-    private fun encodeTool(tool: ToolSpec): JsonElement =
-        json.parseToJsonElement(json.encodeToString<ToolSpec>(tool))
 }

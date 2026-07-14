@@ -1,15 +1,14 @@
 package io.github.stream29.codex.lite.openai.client
 
+import de.infix.testBalloon.framework.core.testSuite
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CancellationException
 import kotlinx.io.IOException
-import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class OpenAiClientRetryPolicyTest {
-    @Test
-    fun retryableStatusesAreTransientOnly() {
+val openAiClientRetryPolicyTest by testSuite {
+    test("retryable statuses are transient only") {
         val retry = OpenAiClientRetryConfig()
 
         assertTrue(HttpStatusCode.RequestTimeout.isRetryableOpenAiStatus(retry))
@@ -22,8 +21,7 @@ class OpenAiClientRetryPolicyTest {
         assertFalse(HttpStatusCode.BadRequest.isRetryableOpenAiStatus(retry))
     }
 
-    @Test
-    fun retryableStatusesRespectCategorySwitches() {
+    test("retryable statuses respect category switches") {
         val retry = OpenAiClientRetryConfig(
             retryRateLimited = false,
             retryServerErrors = false,
@@ -35,8 +33,7 @@ class OpenAiClientRetryPolicyTest {
         assertFalse(HttpStatusCode.InternalServerError.isRetryableOpenAiStatus(retry))
     }
 
-    @Test
-    fun retryableExceptionsAreTransportOnly() {
+    test("retryable exceptions are transport only") {
         val retry = OpenAiClientRetryConfig()
 
         assertTrue(IOException("network").isRetryableOpenAiTransportException(retry))

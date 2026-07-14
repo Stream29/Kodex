@@ -1,22 +1,23 @@
 package io.github.stream29.codex.lite.utils
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.utils.ReadWriteMutex.State
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-class ReadWriteMutexTest {
-    @Test
-    fun multipleReadersCanHoldTheLockTogether() = runTest {
+
+
+val readWriteMutexTest by testSuite {
+    test("multiple readers can hold the lock together") {
         val mutex = ReadWriteMutex()
 
         mutex.reader.lock()
@@ -35,8 +36,7 @@ class ReadWriteMutexTest {
         mutex.writer.unlock()
     }
 
-    @Test
-    fun writerBlocksNewReadersWhileWaitingForExistingReaders() = runTest {
+    test("writer blocks new readers while waiting for existing readers") {
         val mutex = ReadWriteMutex()
         val writerStarted = CompletableDeferred<Unit>()
         val writerAcquired = CompletableDeferred<Unit>()
@@ -61,8 +61,7 @@ class ReadWriteMutexTest {
         assertEquals(State.Free, mutex.stateFlow.value)
     }
 
-    @Test
-    fun writerTryLockFailureDoesNotBlockFutureReaders() = runTest {
+    test("writer try lock failure does not block future readers") {
         val mutex = ReadWriteMutex()
 
         mutex.reader.lock()
@@ -76,8 +75,7 @@ class ReadWriteMutexTest {
         assertEquals(State.Free, mutex.stateFlow.value)
     }
 
-    @Test
-    fun cancelledWriterWaitDoesNotBlockFutureReaders() = runTest {
+    test("cancelled writer wait does not block future readers") {
         val mutex = ReadWriteMutex()
 
         mutex.reader.lock()
@@ -96,8 +94,7 @@ class ReadWriteMutexTest {
         assertEquals(State.Free, mutex.stateFlow.value)
     }
 
-    @Test
-    fun cancelledReaderWaitDoesNotLeaveReadStateBehind() = runTest {
+    test("cancelled reader wait does not leave read state behind") {
         val mutex = ReadWriteMutex()
 
         mutex.writer.lock()
@@ -114,8 +111,7 @@ class ReadWriteMutexTest {
         mutex.writer.unlock()
     }
 
-    @Test
-    fun writerWaitsUntilAllReadersRelease() = runTest {
+    test("writer waits until all readers release") {
         val mutex = ReadWriteMutex()
 
         mutex.reader.lock()
@@ -139,8 +135,7 @@ class ReadWriteMutexTest {
         assertEquals(State.Free, mutex.stateFlow.value)
     }
 
-    @Test
-    fun tryLockTransitionsStateConsistently() = runTest {
+    test("try lock transitions state consistently") {
         val mutex = ReadWriteMutex()
 
         assertTrue(mutex.reader.tryLock())

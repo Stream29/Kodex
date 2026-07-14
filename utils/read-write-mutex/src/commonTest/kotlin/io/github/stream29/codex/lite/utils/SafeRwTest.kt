@@ -1,19 +1,40 @@
 package io.github.stream29.codex.lite.utils
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.utils.ReadWriteMutex.State
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
-import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-class SafeRwTest {
-    @Test
-    fun writeSessionMutatesValueAndReadSessionSeesImmutableView() = runTest {
+
+
+private interface ImmutableListHolder {
+    val values: List<String>
+    val version: Int
+}
+
+private class MutableListHolder : ImmutableListHolder {
+    private val backingValues = mutableListOf<String>()
+
+    override val values: List<String>
+        get() = backingValues.toList()
+
+    override var version: Int = 0
+        private set
+
+    fun add(value: String) {
+        backingValues += value
+        version++
+    }
+}
+
+val safeRwTest by testSuite {
+    test("write session mutates value and read session sees immutable view") {
         val safe = SafeRw<ImmutableListHolder, MutableListHolder>(MutableListHolder())
 
         safe.writeSession { value ->
@@ -33,8 +54,7 @@ class SafeRwTest {
         assertEquals(State.Free, safe.rwMutex.stateFlow.value)
     }
 
-    @Test
-    fun readSessionHoldsReaderLock() = runTest {
+    test("read session holds reader lock") {
         val safe = SafeRw<ImmutableListHolder, MutableListHolder>(MutableListHolder())
 
         safe.readSession {
@@ -47,8 +67,7 @@ class SafeRwTest {
         safe.rwMutex.writer.unlock()
     }
 
-    @Test
-    fun writeSessionHoldsWriterLock() = runTest {
+    test("write session holds writer lock") {
         val safe = SafeRw<ImmutableListHolder, MutableListHolder>(MutableListHolder())
 
         safe.writeSession { value ->
@@ -63,8 +82,7 @@ class SafeRwTest {
         }
     }
 
-    @Test
-    fun sessionsCanSuspendWhileHoldingTheirLocks() = runTest {
+    test("sessions can suspend while holding their locks") {
         val safe = SafeRw<ImmutableListHolder, MutableListHolder>(MutableListHolder())
 
         safe.writeSession { value ->
@@ -83,8 +101,7 @@ class SafeRwTest {
         assertEquals(State.Free, safe.rwMutex.stateFlow.value)
     }
 
-    @Test
-    fun writeSessionWaitsForExistingReader() = runTest {
+    test("write session waits for existing reader") {
         val safe = SafeRw<ImmutableListHolder, MutableListHolder>(MutableListHolder())
 
         safe.rwMutex.reader.lock()
@@ -107,8 +124,7 @@ class SafeRwTest {
         }
     }
 
-    @Test
-    fun readSessionWaitsForExistingWriter() = runTest {
+    test("read session waits for existing writer") {
         val safe = SafeRw<ImmutableListHolder, MutableListHolder>(MutableListHolder())
 
         safe.rwMutex.writer.lock()
@@ -128,8 +144,7 @@ class SafeRwTest {
         assertEquals(State.Free, safe.rwMutex.stateFlow.value)
     }
 
-    @Test
-    fun sessionsReleaseLockWhenBlockThrows() = runTest {
+    test("sessions release lock when block throws") {
         val safe = SafeRw<ImmutableListHolder, MutableListHolder>(MutableListHolder())
 
         val readFailure = runCatching {
@@ -153,25 +168,5 @@ class SafeRwTest {
         safe.readSession { value ->
             assertEquals(listOf("before failure"), value.values)
         }
-    }
-}
-
-private interface ImmutableListHolder {
-    val values: List<String>
-    val version: Int
-}
-
-private class MutableListHolder : ImmutableListHolder {
-    private val backingValues = mutableListOf<String>()
-
-    override val values: List<String>
-        get() = backingValues.toList()
-
-    override var version: Int = 0
-        private set
-
-    fun add(value: String) {
-        backingValues += value
-        version++
     }
 }

@@ -1,31 +1,29 @@
 package io.github.stream29.codex.lite.utils.applypatch
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
+
 import kotlin.test.assertEquals
 
-class FindLineSequenceRustTest {
-    @Test
-    fun exactMatchFindsSequence() {
+
+
+val findLineSequenceRustTest by testSuite {
+    test("exact match finds sequence") {
         assertEquals(1, findLineSequence(listOf("foo", "bar", "baz"), listOf("bar", "baz"), startIndex = 0, anchorAtEnd = false))
     }
 
-    @Test
-    fun rstripMatchIgnoresTrailingWhitespace() {
+    test("rstrip match ignores trailing whitespace") {
         assertEquals(0, findLineSequence(listOf("foo   ", "bar\t\t"), listOf("foo", "bar"), startIndex = 0, anchorAtEnd = false))
     }
 
-    @Test
-    fun trimMatchIgnoresLeadingAndTrailingWhitespace() {
+    test("trim match ignores leading and trailing whitespace") {
         assertEquals(0, findLineSequence(listOf("    foo   ", "   bar\t"), listOf("foo", "bar"), startIndex = 0, anchorAtEnd = false))
     }
 
-    @Test
-    fun targetLinesLongerThanInputReturnsNull() {
+    test("target lines longer than input returns null") {
         assertEquals(null, findLineSequence(listOf("just one line"), listOf("too", "many", "lines"), startIndex = 0, anchorAtEnd = false))
     }
 
-    @Test
-    fun startIndexSkipsEarlierMatches() {
+    test("start index skips earlier matches") {
         assertEquals(
             3,
             findLineSequence(
@@ -37,15 +35,13 @@ class FindLineSequenceRustTest {
         )
     }
 
-    @Test
-    fun anchorAtEndOnlyMatchesTailPosition() {
+    test("anchor at end only matches tail position") {
         val lines = listOf("target", "x", "other", "target", "x")
         assertEquals(3, findLineSequence(lines, listOf("target", "x"), startIndex = 0, anchorAtEnd = true))
         assertEquals(null, findLineSequence(lines, listOf("other", "target"), startIndex = 0, anchorAtEnd = true))
     }
 
-    @Test
-    fun repeatedPrefixesDoNotConfuseMatcher() {
+    test("repeated prefixes do not confuse matcher") {
         assertEquals(
             2,
             findLineSequence(
@@ -57,8 +53,7 @@ class FindLineSequenceRustTest {
         )
     }
 
-    @Test
-    fun unicodePunctuationMatchNormalizesCommonDashCharacters() {
+    test("unicode punctuation match normalizes common dash characters") {
         assertEquals(
             0,
             findLineSequence(

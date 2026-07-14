@@ -1,14 +1,16 @@
 package io.github.stream29.codex.lite.tool.applypatch
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.openai.FreeformTool
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-class ApplyPatchToolsTest {
-    @Test
-    fun specIsFreeformGrammarTool() {
+
+
+val applyPatchToolsTest by testSuite {
+    test("spec is freeform grammar tool") {
         val spec = assertIs<FreeformTool>(ApplyPatchTools.spec)
 
         assertEquals("apply_patch", spec.name)

@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.openai.client.test
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.CodexResponsesRequest
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
@@ -21,15 +23,14 @@ import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.client.contract.createResponse
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
-class MockOpenAiClientTest {
-    @Test
-    fun configuredHandlersReturnDslValues() = runTest {
+
+
+val mockOpenAiClientTest by testSuite {
+    test("configured handlers return dsl values") {
         val client = mockOpenAiClient {
             listModels { OpenAiResult.Success(ModelsResponse()) }
             generateImage { request ->
@@ -49,8 +50,7 @@ class MockOpenAiClientTest {
         )
     }
 
-    @Test
-    fun streamHandlerReturnsFlow() = runTest {
+    test("stream handler returns flow") {
         val completed = ResponsesStreamEvent.Completed(Response(id = "done"))
         val request = ResponsesApiRequest(model = OpenAiModelId("model"), input = emptyList())
         val client = mockOpenAiClient {
@@ -60,8 +60,7 @@ class MockOpenAiClientTest {
         assertEquals(listOf(completed), client.createResponse(request).toList())
     }
 
-    @Test
-    fun codexRequestExtensionSuppliesRequiredTransportValues() = runTest {
+    test("codex request extension supplies required transport values") {
         val completed = ResponsesStreamEvent.Completed(Response(id = "done"))
         val request = CodexResponsesRequest(
             input = emptyList(),
@@ -100,8 +99,7 @@ class MockOpenAiClientTest {
         assertTrue(observedTurnMetadata.orEmpty().contains("\"request_kind\":\"turn\""))
     }
 
-    @Test
-    fun remoteCompactionV2HandlerReturnsFlow() = runTest {
+    test("remote compaction v2 handler returns flow") {
         val completed = ResponsesStreamEvent.Completed(Response(id = "done"))
         val request = RemoteCompactionV2Request(
             history = emptyList(),
@@ -136,8 +134,7 @@ class MockOpenAiClientTest {
         assertEquals(listOf(request), observedRequests)
     }
 
-    @Test
-    fun unconfiguredHandlersFailClearly() = runTest {
+    test("unconfigured handlers fail clearly") {
         val client = mockOpenAiClient()
 
         assertFailsWith<IllegalStateException> {

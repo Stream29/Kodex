@@ -1,20 +1,22 @@
 package io.github.stream29.codex.lite.tool.imagegeneration
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class ImageGenerationToolsTest {
-    private val json = OpenAiJsonCodec
 
-    @Test
-    fun specDeclaresImageGenNamespaceTool() {
+
+private val json = OpenAiJsonCodec
+
+val imageGenerationToolsTest by testSuite {
+    test("spec declares image gen namespace tool") {
         val namespace = ImageGenerationTools.spec as ResponsesApiNamespace
         val encoded = json.parseToJsonElement(json.encodeToString(namespace)).jsonObject
         val tool = encoded.getValue("tools").jsonArray.single().jsonObject
@@ -24,8 +26,7 @@ class ImageGenerationToolsTest {
         assertFalse("output_schema" in tool)
     }
 
-    @Test
-    fun parametersExposePromptAndEditInputs() {
+    test("parameters expose prompt and edit inputs") {
         val namespace = ImageGenerationTools.spec as ResponsesApiNamespace
         val tool = namespace.tools.single()
         val encoded = json.parseToJsonElement(json.encodeToString(tool)).jsonObject

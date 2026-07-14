@@ -1,11 +1,13 @@
 package io.github.stream29.codex.lite.utils.osenvironment
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
+
 import kotlin.test.assertNull
 
-class OsEnvironmentTest {
-    @Test
-    fun missingEnvironmentVariableReturnsNull() {
+
+
+val osEnvironmentTest by testSuite {
+    test("missing environment variable returns null") {
         assertNull(environmentVariable("CODEX_LITE_TEST_ENVIRONMENT_VARIABLE_THAT_SHOULD_NOT_EXIST"))
     }
 }

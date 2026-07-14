@@ -1,21 +1,22 @@
 package io.github.stream29.codex.lite.utils.images
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
+
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class PromptImageDimensionsTest {
-    @Test
-    fun fitsPromptImageLimitsChecksPatchBudget() {
+
+
+val promptImageDimensionsTest by testSuite {
+    test("fits prompt image limits checks patch budget") {
         val limits = PromptImageResizeLimits(maxDimension = PromptImages.MaxDimension, maxPatches = 4)
 
         assertTrue(ImageDimensions(64, 64).fitsPromptImageLimits(limits))
         assertFalse(ImageDimensions(65, 64).fitsPromptImageLimits(limits))
     }
 
-    @Test
-    fun fitPromptImageLimitsRespectsDimensionBudget() {
+    test("fit prompt image limits respects dimension budget") {
         assertEquals(
             ImageDimensions(1024, 512),
             ImageDimensions(2048, 1024)
@@ -23,8 +24,7 @@ class PromptImageDimensionsTest {
         )
     }
 
-    @Test
-    fun fitPromptImageLimitsRespectsPatchBudget() {
+    test("fit prompt image limits respects patch budget") {
         assertEquals(
             ImageDimensions(1600, 1600),
             ImageDimensions(2048, 2048)

@@ -1,16 +1,28 @@
 package io.github.stream29.codex.lite.tool.toolsearch
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ToolSpec
 import kotlinx.schema.json.PropertyBuilder
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
-class ToolSearchToolsTest {
-    @Test
-    fun createToolSearchToolDeduplicatesAndRendersEnabledSources() {
+
+
+private fun tool(name: String, description: String): ResponsesApiTool =
+    ResponsesApiTool(
+        name = name,
+        description = description,
+        parameters = PropertyBuilder().obj {
+            additionalProperties = false
+            property("query") { string { this.description = "Query text" } }
+        },
+    )
+
+val toolSearchToolsTest by testSuite {
+    test("create tool search tool deduplicates and renders enabled sources") {
         val spec = ToolSearchTools.createToolSearchSpec(
             searchableSources = listOf(
                 ToolSearchSourceInfo(
@@ -35,8 +47,7 @@ class ToolSearchToolsTest {
         )
     }
 
-    @Test
-    fun namespaceSearchResultCoalescesByNamespace() {
+    test("namespace search result coalesces by namespace") {
         val createEvent = tool("create_event", "Create events")
         val listEvents = tool("list_events", "List events")
         val engine = ToolSearchEngine(
@@ -77,8 +88,7 @@ class ToolSearchToolsTest {
         assertEquals(setOf(createEvent, listEvents), calendar.tools.toSet())
     }
 
-    @Test
-    fun searchReturnsLoadableTools() {
+    test("search returns loadable tools") {
         val engine = ToolSearchEngine(
             ResponsesApiNamespace(
                 name = "calendar",
@@ -94,8 +104,7 @@ class ToolSearchToolsTest {
         assertEquals(true, (namespace.tools.single() as ResponsesApiTool).deferLoading)
     }
 
-    @Test
-    fun searchReturnsStandaloneLoadableTool() {
+    test("search returns standalone loadable tool") {
         val standaloneTool = tool("request_user_input", "Ask user a question")
         val engine = ToolSearchEngine(
             listOf<ToolSpec>(
@@ -115,8 +124,7 @@ class ToolSearchToolsTest {
         assertEquals(true, tool.deferLoading)
     }
 
-    @Test
-    fun namespaceSpecCreatesOneSearchDocumentPerTool() {
+    test("namespace spec creates one search document per tool") {
         val documents = ResponsesApiNamespace(
             name = "calendar",
             description = "Calendar tools",
@@ -135,14 +143,4 @@ class ToolSearchToolsTest {
         assertEquals("calendar", secondOutput.namespaceName)
         assertEquals("list_events", secondOutput.tool.name)
     }
-
-    private fun tool(name: String, description: String): ResponsesApiTool =
-        ResponsesApiTool(
-            name = name,
-            description = description,
-            parameters = PropertyBuilder().obj {
-                additionalProperties = false
-                property("query") { string { this.description = "Query text" } }
-            },
-        )
 }

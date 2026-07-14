@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.tool.contract
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
 import io.github.stream29.codex.lite.openai.ResponseItem
@@ -7,20 +9,19 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
-import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class ToolContractTest {
-    private val json = Json { encodeDefaults = true }
 
-    @Test
-    fun toolNameRendersPlainAndNamespacedNames() {
+
+private val json = Json { encodeDefaults = true }
+
+val toolContractTest by testSuite {
+    test("tool name renders plain and namespaced names") {
         assertEquals("apply_patch", ToolName.plain("apply_patch").toString())
         assertEquals("web.run", ToolName.namespaced("web", "run").toString())
     }
 
-    @Test
-    fun functionCallPayloadKeepsRawArgumentText() {
+    test("function call payload keeps raw argument text") {
         val payload = ToolCallPayload.FunctionCall(
             ResponseItem.FunctionCall(
                 name = "search",
@@ -32,8 +33,7 @@ class ToolContractTest {
         assertEquals("""{"query":"hello"}""", payload.logPayload)
     }
 
-    @Test
-    fun payloadUnionIsSerializable() {
+    test("payload union is serializable") {
         val encoded = json.encodeToString<ToolCallPayload>(
             ToolCallPayload.CustomToolCall(
                 ResponseItem.CustomToolCall(
@@ -50,8 +50,7 @@ class ToolContractTest {
         )
     }
 
-    @Test
-    fun toolCallResultUsesOpenAiOutputPayload() {
+    test("tool call result uses open ai output payload") {
         val result: ToolCallResult = FunctionCallOutputPayload(
             body = FunctionCallOutputBody.Text("ok"),
             success = false,

@@ -1,18 +1,20 @@
 package io.github.stream29.codex.lite.openai
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
-import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class ResponseItemSerializationTest {
-    private val json = OpenAiJsonCodec
 
-    @Test
-    fun additionalToolsPreserveOpaqueToolDefinitions() {
+
+private val json = OpenAiJsonCodec
+
+val responseItemSerializationTest by testSuite {
+    test("additional tools preserve opaque tool definitions") {
         val item = ResponseItem.AdditionalTools(
             id = ResponseItemId("at_server"),
             role = "developer",
@@ -31,8 +33,7 @@ class ResponseItemSerializationTest {
         assertEquals(item, json.decodeFromString<ResponseItem>(json.encodeToString<ResponseItem>(item)))
     }
 
-    @Test
-    fun responseItemIdsAndCustomToolNamespaceRoundTrip() {
+    test("response item ids and custom tool namespace round trip") {
         val id = ResponseItemId("legacy-id")
         val output = FunctionCallOutputPayload.fromText("ok")
         val items = listOf<ResponseItem>(

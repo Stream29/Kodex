@@ -1,16 +1,18 @@
 package io.github.stream29.codex.lite.openai
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
-import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class WebSearchSerializationTest {
-    private val json = OpenAiJsonCodec
 
-    @Test
-    fun searchRequestSerializesRequestShape() {
+
+private val json = OpenAiJsonCodec
+
+val webSearchSerializationTest by testSuite {
+    test("search request serializes request shape") {
         val request = SearchRequest(
             id = "search-session",
             model = OpenAiModelId("gpt-test"),
@@ -90,8 +92,7 @@ class WebSearchSerializationTest {
         )
     }
 
-    @Test
-    fun searchInputCanBeText() {
+    test("search input can be text") {
         val encoded = json.parseToJsonElement(
             json.encodeToString(SearchInput.serializer(), SearchInput.Text("query context")),
         )

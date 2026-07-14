@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.agentstorage.inmemory
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.ceilToIndex
 import io.github.stream29.codex.lite.agentstorage.contract.floorToIndex
@@ -24,16 +26,65 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 import kotlin.time.Instant
 
-class InMemoryCodexAgentStorageTest {
-    @Test
-    fun constructionPublishesLegalInitialSnapshotAndNewThreadId() = runTest {
+private fun storage(
+    initialSettings: CodexAgentSettings = settings("initial-model"),
+): InMemoryCodexAgentStorage =
+    InMemoryCodexAgentStorage(initialSettings)
+
+private fun settings(model: String): CodexAgentSettings =
+    CodexAgentSettings(
+        model = OpenAiModelId(model),
+        turnId = "turn-$model",
+    )
+
+private fun plan(
+    step: String,
+    status: StepStatus,
+): UpdatePlanArgs =
+    UpdatePlanArgs(
+        explanation = "plan update",
+        plan = listOf(PlanItemArg(step, status)),
+    )
+
+private fun timestamp(seconds: Long): Instant =
+    Instant.fromEpochSeconds(seconds)
+
+private fun checkpoint(
+    prefix: List<ResponseItem.HistoryItem> = emptyList(),
+    historyBaseIndex: Int = 0,
+    windowNumber: Long = 0,
+    firstWindowId: String = "window-0",
+    previousWindowId: String? = null,
+    windowId: String = firstWindowId,
+): CompactionCheckpoint =
+    CompactionCheckpoint(
+        prefix = prefix,
+        historyBaseIndex = historyBaseIndex,
+        windowNumber = windowNumber,
+        firstWindowId = firstWindowId,
+        previousWindowId = previousWindowId,
+        windowId = windowId,
+    )
+
+private fun userMessage(text: String): ResponseItem.Message =
+    ResponseItem.Message(
+        role = MessageRole.User,
+        content = listOf(ContentItem.InputText(text)),
+    )
+
+private fun assistantMessage(text: String): ResponseItem.Message =
+    ResponseItem.Message(
+        role = MessageRole.Assistant,
+        content = listOf(ContentItem.OutputText(text)),
+    )
+
+val inMemoryCodexAgentStorageTest by testSuite {
+    test("construction publishes legal initial snapshot and new thread id") {
         val storage = storage()
         val other = storage()
 
@@ -47,8 +98,7 @@ class InMemoryCodexAgentStorageTest {
         assertNotEquals(storage.id, other.id)
     }
 
-    @Test
-    fun historyUsesSparseTimelineAndRejectsNonTailWrites() = runTest {
+    test("history uses sparse timeline and rejects non tail writes") {
         val storage = storage()
         val first = userMessage("first")
         val second = assistantMessage("second")
@@ -84,8 +134,7 @@ class InMemoryCodexAgentStorageTest {
         assertEquals(listOf(0, 3), storage.history.indexes().toList())
     }
 
-    @Test
-    fun revertRemovesStoredSuffixAndAllowsAppendingAgain() = runTest {
+    test("revert removes stored suffix and allows appending again") {
         val storage = storage()
         val first = userMessage("first")
         val replacement = assistantMessage("replacement")
@@ -112,8 +161,7 @@ class InMemoryCodexAgentStorageTest {
         assertEquals(emptyList(), storage.history.indexes().toList())
     }
 
-    @Test
-    fun timelineTransactionRevertsAppendedEntriesOnFailure() = runTest {
+    test("timeline transaction reverts appended entries on failure") {
         val storage = storage()
         val first = userMessage("first")
         storage.history[0] = first
@@ -130,8 +178,7 @@ class InMemoryCodexAgentStorageTest {
         assertEquals(first, storage.history[2])
     }
 
-    @Test
-    fun storageTransactionRevertsEveryTimelineOnFailure() = runTest {
+    test("storage transaction reverts every timeline on failure") {
         val initialSettings = settings("initial-model")
         val storage = storage(initialSettings)
         val initialCheckpoint = storage.compaction[0]
@@ -163,8 +210,7 @@ class InMemoryCodexAgentStorageTest {
         assertEquals(initialMessage, storage.history[2])
     }
 
-    @Test
-    fun storageTransactionRevertsEveryTimelineOnCancellation() = runTest {
+    test("storage transaction reverts every timeline on cancellation") {
         val storage = storage()
         storage.timestamp[0] = timestamp(0)
         storage.tokenCount[0] = 10
@@ -187,8 +233,7 @@ class InMemoryCodexAgentStorageTest {
         assertEquals(listOf(0), storage.history.indexes().toList())
     }
 
-    @Test
-    fun sparseTimelinesReturnActiveValueAtRequestedIndex() = runTest {
+    test("sparse timelines return active value at requested index") {
         val initialSettings = settings("initial-model")
         val storage = storage(initialSettings)
         val updatedSettings = settings("updated-model")
@@ -230,8 +275,7 @@ class InMemoryCodexAgentStorageTest {
         assertEquals(30, storage.tokenCount[8])
     }
 
-    @Test
-    fun sparseTimelineRejectsReadsBeforeFirstStoredIndex() = runTest {
+    test("sparse timeline rejects reads before first stored index") {
         val storage = storage()
 
         storage.history[2] = assistantMessage("summary")
@@ -243,8 +287,7 @@ class InMemoryCodexAgentStorageTest {
         assertEquals(listOf(2), storage.history.indexes().toList())
     }
 
-    @Test
-    fun storageLatestIndexUsesCommonStateIndex() = runTest {
+    test("storage latest index uses common state index") {
         val storage = storage()
 
         assertEquals(0, storage.latestIndex())
@@ -278,8 +321,7 @@ class InMemoryCodexAgentStorageTest {
         assertEquals(null, storage.nextIndex(4))
     }
 
-    @Test
-    fun forkResetsTargetBeforeCopyingAndKeepsTargetThreadId() = runTest {
+    test("fork resets target before copying and keeps target thread id") {
         val oldSettings = settings("old-model")
         val source = storage(oldSettings)
         val target = storage(settings("target-model"))
@@ -316,8 +358,7 @@ class InMemoryCodexAgentStorageTest {
         assertEquals(listOf(1), target.tokenCount.indexes().toList())
     }
 
-    @Test
-    fun forkRejectsAnEmptyTargetSnapshot() = runTest {
+    test("fork rejects an empty target snapshot") {
         val source = storage()
         val target = storage()
 
@@ -326,8 +367,7 @@ class InMemoryCodexAgentStorageTest {
         }
     }
 
-    @Test
-    fun appendCompactionCheckpointPublishesSharedStorageTransition() = runTest {
+    test("append compaction checkpoint publishes shared storage transition") {
         val storage = storage()
         val prefix = listOf(userMessage("summary"))
         val marker = ResponseItem.ContextCompaction(encryptedContent = "encrypted")
@@ -370,56 +410,4 @@ class InMemoryCodexAgentStorageTest {
         assertEquals(42, storage.tokenCount[1])
         assertEquals(settings, storage.settings[1])
     }
-
-    private fun storage(
-        initialSettings: CodexAgentSettings = settings("initial-model"),
-    ): InMemoryCodexAgentStorage =
-        InMemoryCodexAgentStorage(initialSettings)
-
-    private fun settings(model: String): CodexAgentSettings =
-        CodexAgentSettings(
-            model = OpenAiModelId(model),
-            turnId = "turn-$model",
-        )
-
-    private fun plan(
-        step: String,
-        status: StepStatus,
-    ): UpdatePlanArgs =
-        UpdatePlanArgs(
-            explanation = "plan update",
-            plan = listOf(PlanItemArg(step, status)),
-        )
-
-    private fun timestamp(seconds: Long): Instant =
-        Instant.fromEpochSeconds(seconds)
-
-    private fun checkpoint(
-        prefix: List<ResponseItem.HistoryItem> = emptyList(),
-        historyBaseIndex: Int = 0,
-        windowNumber: Long = 0,
-        firstWindowId: String = "window-0",
-        previousWindowId: String? = null,
-        windowId: String = firstWindowId,
-    ): CompactionCheckpoint =
-        CompactionCheckpoint(
-            prefix = prefix,
-            historyBaseIndex = historyBaseIndex,
-            windowNumber = windowNumber,
-            firstWindowId = firstWindowId,
-            previousWindowId = previousWindowId,
-            windowId = windowId,
-        )
-
-    private fun userMessage(text: String): ResponseItem.Message =
-        ResponseItem.Message(
-            role = MessageRole.User,
-            content = listOf(ContentItem.InputText(text)),
-        )
-
-    private fun assistantMessage(text: String): ResponseItem.Message =
-        ResponseItem.Message(
-            role = MessageRole.Assistant,
-            content = listOf(ContentItem.OutputText(text)),
-        )
 }

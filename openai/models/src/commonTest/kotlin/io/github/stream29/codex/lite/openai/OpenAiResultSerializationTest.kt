@@ -1,18 +1,20 @@
 package io.github.stream29.codex.lite.openai
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
-class OpenAiResultSerializationTest {
-    private val json = OpenAiJsonCodec
 
-    @Test
-    fun decodesSuccessfulResponseAsSuccess() {
+
+private val json = OpenAiJsonCodec
+
+val openAiResultSerializationTest by testSuite {
+    test("decodes successful response as success") {
         val result = json.decodeFromString<OpenAiResponseResult<ModelsResponse>>(
             """{"models":[{"slug":"gpt-test","display_name":"GPT Test"}]}""",
         )
@@ -23,8 +25,7 @@ class OpenAiResultSerializationTest {
         assertEquals("GPT Test", response.models.single().displayName)
     }
 
-    @Test
-    fun decodesNestedErrorResponseAsFailure() {
+    test("decodes nested error response as failure") {
         val result = json.decodeFromString<OpenAiResponseResult<ModelsResponse>>(
             """
             {
@@ -44,8 +45,7 @@ class OpenAiResultSerializationTest {
         assertEquals("invalid_request_error", error.typeText)
     }
 
-    @Test
-    fun decodesFlatErrorResponseAsFailure() {
+    test("decodes flat error response as failure") {
         val result = json.decodeFromString<OpenAiResponseResult<ModelsResponse>>(
             """{"message":"rate limited","code":"rate_limit"}""",
         )
@@ -56,8 +56,7 @@ class OpenAiResultSerializationTest {
         assertEquals("rate_limit", error.codeText)
     }
 
-    @Test
-    fun encodesResultAsRawPayload() {
+    test("encodes result as raw payload") {
         val encoded = json.encodeToString<OpenAiResponseResult<ModelsResponse>>(
             OpenAiResult.Success(
                 ModelsResponse(
@@ -69,8 +68,7 @@ class OpenAiResultSerializationTest {
         assertEquals("""{"models":[{"slug":"gpt-test","display_name":"GPT Test"}]}""", encoded)
     }
 
-    @Test
-    fun getOrThrowRaisesTheStructuredError() {
+    test("get or throw raises the structured error") {
         val error = OpenAiErrorResponse(message = "bad request", code = "invalid_request")
         val result: OpenAiResponseResult<ModelsResponse> = OpenAiResult.Failure(error)
 

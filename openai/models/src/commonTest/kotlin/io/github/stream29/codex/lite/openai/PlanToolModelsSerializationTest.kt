@@ -1,17 +1,19 @@
 package io.github.stream29.codex.lite.openai
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-class PlanToolModelsSerializationTest {
-    private val json = OpenAiJsonCodec
 
-    @Test
-    fun updatePlanArgsSerializesRustWireShape() {
+
+private val json = OpenAiJsonCodec
+
+val planToolModelsSerializationTest by testSuite {
+    test("update plan args serializes rust wire shape") {
         val encoded = json.encodeToString(
             UpdatePlanArgs(
                 explanation = "next steps",
@@ -29,8 +31,7 @@ class PlanToolModelsSerializationTest {
         )
     }
 
-    @Test
-    fun updatePlanArgsDecodesOmittedExplanationAsNull() {
+    test("update plan args decodes omitted explanation as null") {
         val decoded = json.decodeFromString<UpdatePlanArgs>(
             """{"plan":[{"step":"Review model","status":"pending"}]}""",
         )

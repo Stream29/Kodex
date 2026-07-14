@@ -1,13 +1,15 @@
 package io.github.stream29.codex.lite.utils.images
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
+
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
-class ImageInfoTest {
-    @Test
-    fun detectImageInfoReadsSupportedContainerDimensions() {
+
+
+val imageInfoTest by testSuite {
+    test("detect image info reads supported container dimensions") {
         assertEquals(
             ImageInfo(ImageMimeType.Png, ImageDimensions(64, 32)),
             pngBytes(64, 32).detectImageInfo(),
@@ -22,8 +24,7 @@ class ImageInfoTest {
         )
     }
 
-    @Test
-    fun detectImageInfoReturnsNullForUnsupportedBytes() {
+    test("detect image info returns null for unsupported bytes") {
         assertNull("not an image".encodeToByteArray().detectImageInfo())
         assertNull(riffWebpBytes().detectImageInfo())
         assertFailsWith<UnsupportedImageFormatException> {
@@ -31,8 +32,7 @@ class ImageInfoTest {
         }
     }
 
-    @Test
-    fun detectImageInfoRejectsMalformedSupportedContainers() {
+    test("detect image info rejects malformed supported containers") {
         assertFailsWith<InvalidImageException> {
             byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
                 .detectImageInfo()

@@ -1,12 +1,14 @@
 package io.github.stream29.codex.lite.openai
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
+
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-class OpenAiSubscriptionAuthStateTest {
-    @Test
-    fun planParsesKnownRawValuesAndAliases() {
+
+
+val openAiSubscriptionAuthStateTest by testSuite {
+    test("plan parses known raw values and aliases") {
         assertEquals(OpenAiSubscriptionPlan.Pro, OpenAiSubscriptionPlan.fromRawValue("pro"))
         assertEquals(OpenAiSubscriptionPlan.ProLite, OpenAiSubscriptionPlan.fromRawValue("prolite"))
         assertEquals(
@@ -17,8 +19,7 @@ class OpenAiSubscriptionAuthStateTest {
         assertEquals(OpenAiSubscriptionPlan.Edu, OpenAiSubscriptionPlan.fromRawValue("education"))
     }
 
-    @Test
-    fun planRejectsUnknownRawValues() {
+    test("plan rejects unknown raw values") {
         assertNull(OpenAiSubscriptionPlan.fromRawValue("future-plan"))
     }
 }

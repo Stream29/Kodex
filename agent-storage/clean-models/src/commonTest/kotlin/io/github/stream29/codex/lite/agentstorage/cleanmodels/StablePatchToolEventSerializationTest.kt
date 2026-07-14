@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.agentstorage.cleanmodels
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.utils.applypatch.PatchAffectedPaths
 import io.github.stream29.codex.lite.utils.applypatch.PatchApplyResult
 import io.github.stream29.codex.lite.utils.applypatch.PatchChange
@@ -12,14 +14,12 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class StablePatchToolEventSerializationTest {
-    private val json = Json
+private val json = Json
 
-    @Test
-    fun roundTripsSuccessfulPatchToolEvent() {
+val stablePatchToolEventSerializationTest by testSuite {
+    test("round trips successful patch tool event") {
         val patchText = """
             *** Begin Patch
             *** Update File: old.txt
@@ -71,8 +71,7 @@ class StablePatchToolEventSerializationTest {
         assertEquals(event, json.decodeFromString<StablePatchToolEvent>(encoded))
     }
 
-    @Test
-    fun roundTripsFailedPatchToolEvent() {
+    test("round trips failed patch tool event") {
         val event = StablePatchToolEvent(
             diff = """
                 *** Begin Patch

@@ -1,12 +1,14 @@
 package io.github.stream29.codex.lite.utils.applypatch
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
+
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
-class PatchParserRustTest {
-    @Test
-    fun parsesBasicPatchShapes() {
+
+
+val patchParserRustTest by testSuite {
+    test("parses basic patch shapes") {
         assertFailsWith<ApplyPatchException> {
             "bad".parsePatch()
         }
@@ -67,8 +69,7 @@ class PatchParserRustTest {
         )
     }
 
-    @Test
-    fun parsesUpdateFollowedByAnotherHunk() {
+    test("parses update followed by another hunk") {
         assertEquals(
             listOf(
                 UpdateFileHunk(
@@ -94,8 +95,7 @@ class PatchParserRustTest {
         )
     }
 
-    @Test
-    fun parsesUpdateWithoutExplicitContextHeader() {
+    test("parses update without explicit context header") {
         assertEquals(
             listOf(
                 UpdateFileHunk(
@@ -118,8 +118,7 @@ class PatchParserRustTest {
         )
     }
 
-    @Test
-    fun preservesEndOfFileMarker() {
+    test("preserves end of file marker") {
         val patch = "*** Begin Patch\n*** Update File: file.txt\n@@\n+quux\n*** End of File\n\n*** End Patch"
         assertEquals(
             Patch(
@@ -141,8 +140,7 @@ class PatchParserRustTest {
         )
     }
 
-    @Test
-    fun acceptsRelativeAndAbsoluteHunkPaths() {
+    test("accepts relative and absolute hunk paths") {
         val patch = """
             *** Begin Patch
             *** Add File: relative-add.py
@@ -173,8 +171,7 @@ class PatchParserRustTest {
         )
     }
 
-    @Test
-    fun parsesLenientHeredocWrappers() {
+    test("parses lenient heredoc wrappers") {
         val patch = """
             *** Begin Patch
             *** Update File: file2.py
@@ -205,8 +202,7 @@ class PatchParserRustTest {
         }
     }
 
-    @Test
-    fun parsesEnvironmentIdPreamble() {
+    test("parses environment id preamble") {
         val parsed = """
             *** Begin Patch
             *** Environment ID: remote

@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.agentcontext.impl
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.agentcontext.contract.AgentContextProvider
 import io.github.stream29.codex.lite.agentcontext.contract.AgentContextSnapshot
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
@@ -20,13 +22,10 @@ import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class ContextInjectingCodexAgentStateTest {
-    @Test
-    fun agentMdPrecedesUserMessageAndIsIncludedInTheRequest() = runTest {
+val contextInjectingCodexAgentStateTest by testSuite {
+    test("agent md precedes user message and is included in the request") {
         val storage = InMemoryCodexAgentStorage(settings())
         val requests = mutableListOf<ResponsesApiRequest>()
         val delegate = createCodexAgentState(
@@ -61,8 +60,7 @@ class ContextInjectingCodexAgentStateTest {
         assertEquals(listOf(0), snapshots.map(AgentContextSnapshot::latestIndex))
     }
 
-    @Test
-    fun agentMdIsReinjectedAfterCompaction() = runTest {
+    test("agent md is reinjected after compaction") {
         val storage = InMemoryCodexAgentStorage(settings())
         val delegate = createCodexAgentState(
             client = mockOpenAiClient {

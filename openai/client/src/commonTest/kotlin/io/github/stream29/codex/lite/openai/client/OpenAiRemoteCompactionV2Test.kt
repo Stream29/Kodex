@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.openai.client
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.openai.ContentItem
@@ -13,18 +15,17 @@ import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.codexRequestWindowId
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 
-class OpenAiRemoteCompactionV2Test {
-    @Test
-    fun remoteCompactionV2BuildsResponsesRequestAndTransportValues() {
+
+
+val openAiRemoteCompactionV2Test by testSuite {
+    test("remote compaction v2 builds responses request and transport values") {
         val user = ResponseItem.Message(
             role = MessageRole.User,
             content = listOf(ContentItem.InputText("Compact this.")),
@@ -84,8 +85,7 @@ class OpenAiRemoteCompactionV2Test {
         assertEquals("memento", compaction.getValue("strategy").jsonPrimitive.content)
     }
 
-    @Test
-    fun remoteCompactionV2OmitsOptionalIdentityMetadata() {
+    test("remote compaction v2 omits optional identity metadata") {
         val request = RemoteCompactionV2Request(
             history = emptyList(),
             checkpoint = CompactionCheckpoint(
@@ -120,8 +120,7 @@ class OpenAiRemoteCompactionV2Test {
         assertEquals("thread", metadataJson.getValue("thread_id").jsonPrimitive.content)
     }
 
-    @Test
-    fun remoteCompactionV2SucceedsWhenCompactionOutputArrivesWithoutCompleted() = runTest {
+    test("remote compaction v2 succeeds when compaction output arrives without completed") {
         val compaction = ResponseItem.Compaction(encryptedContent = "compact")
 
         val response = flowOf<ResponsesStreamEvent>(
@@ -132,8 +131,7 @@ class OpenAiRemoteCompactionV2Test {
         assertNull(response.completedResponse)
     }
 
-    @Test
-    fun remoteCompactionV2RetriesWhenStreamClosesBeforeCompactionOutput() = runTest {
+    test("remote compaction v2 retries when stream closes before compaction output") {
         val compaction = ResponseItem.Compaction(encryptedContent = "compact")
         var attempts = 0
 

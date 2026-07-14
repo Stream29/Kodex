@@ -1,13 +1,15 @@
 package io.github.stream29.codex.lite.utils.ktorclientext
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.ktor.http.HeadersBuilder
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-class HeadersBuilderExtensionsTest {
-    @Test
-    fun nullableSetReplacesExistingValueWhenValueIsPresent() {
+
+
+val headersBuilderExtensionsTest by testSuite {
+    test("nullable set replaces existing value when value is present") {
         val headers = HeadersBuilder()
         val value: String? = "new"
 
@@ -17,8 +19,7 @@ class HeadersBuilderExtensionsTest {
         assertEquals(listOf("new"), headers.getAll("X-Test"))
     }
 
-    @Test
-    fun nullableSetRemovesExistingValueWhenValueIsNull() {
+    test("nullable set removes existing value when value is null") {
         val headers = HeadersBuilder()
         val value: String? = null
 
@@ -28,8 +29,7 @@ class HeadersBuilderExtensionsTest {
         assertNull(headers.getAll("X-Test"))
     }
 
-    @Test
-    fun addAllReplacesExistingValuesWithMapValues() {
+    test("add all replaces existing values with map values") {
         val headers = HeadersBuilder()
 
         headers.append("X-Test", "old")

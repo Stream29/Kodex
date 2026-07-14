@@ -1,19 +1,19 @@
 package io.github.stream29.codex.lite.agentstorage.cleanmodels
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class CleanHistorySerializationTest {
-    private val json = Json
+private val json = Json
 
-    @Test
-    fun roundTripsStableCleanEvent() {
+val cleanHistorySerializationTest by testSuite {
+    test("round trips stable clean event") {
         val event: StableCleanEvent = StableAssistantMessage("done")
 
         val encoded = json.encodeToString(event)
@@ -23,8 +23,7 @@ class CleanHistorySerializationTest {
         assertEquals(event, json.decodeFromString<StableCleanEvent>(encoded))
     }
 
-    @Test
-    fun roundTripsUnstableCleanTail() {
+    test("round trips unstable clean tail") {
         val tail = UnstableCleanTail(
             items = listOf(
                 UnstableCleanEvent.PendingToolCall(

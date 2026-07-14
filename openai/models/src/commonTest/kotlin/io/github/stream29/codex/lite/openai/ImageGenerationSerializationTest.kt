@@ -1,20 +1,22 @@
 package io.github.stream29.codex.lite.openai
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 
-class ImageGenerationSerializationTest {
-    private val json = OpenAiJsonCodec
 
-    @Test
-    fun generationRequestOmitsNullOptionals() {
+
+private val json = OpenAiJsonCodec
+
+val imageGenerationSerializationTest by testSuite {
+    test("generation request omits null optionals") {
         val element = json.parseToJsonElement(
             json.encodeToString(ImageGenerationRequest(prompt = "draw", model = OpenAiModelId("gpt-image-1"))),
         ).jsonObject
@@ -27,8 +29,7 @@ class ImageGenerationSerializationTest {
         assertFalse("size" in element)
     }
 
-    @Test
-    fun editRequestSerializesOpenAiWireNames() {
+    test("edit request serializes open ai wire names") {
         val element = json.parseToJsonElement(
             json.encodeToString(
                 ImageEditRequest(
@@ -53,8 +54,7 @@ class ImageGenerationSerializationTest {
         )
     }
 
-    @Test
-    fun responseDeserializesBase64Payload() {
+    test("response deserializes base64 payload") {
         val response = json.decodeFromString<ImageResponse>(
             """{"created":1,"data":[{"b64_json":"encoded"}],"background":"auto"}""",
         )

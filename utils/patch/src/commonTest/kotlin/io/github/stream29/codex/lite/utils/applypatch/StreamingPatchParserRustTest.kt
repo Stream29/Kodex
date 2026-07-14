@@ -1,13 +1,15 @@
 package io.github.stream29.codex.lite.utils.applypatch
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
+
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
-class IncrementalPatchParserRustTest {
-    @Test
-    fun streamsCompleteLinesBeforeEndPatch() {
+
+
+val incrementalPatchParserRustTest by testSuite {
+    test("streams complete lines before end patch") {
         IncrementalPatchParser().let { parser ->
             assertEquals(
                 listOf(AddFileHunk("src/hello.txt", "hello\n")),
@@ -45,8 +47,7 @@ class IncrementalPatchParserRustTest {
         }
     }
 
-    @Test
-    fun parsesEnvironmentIdMode() {
+    test("parses environment id mode") {
         val parser = IncrementalPatchParser()
         assertEquals(
             listOf(AddFileHunk("src/hello.txt", "hello\n")),
@@ -73,8 +74,7 @@ class IncrementalPatchParserRustTest {
         }
     }
 
-    @Test
-    fun largePatchSplitByCharacterNeverLosesHunks() {
+    test("large patch split by character never loses hunks") {
         val patch = """
             *** Begin Patch
             *** Add File: docs/release-notes.md
@@ -135,8 +135,7 @@ class IncrementalPatchParserRustTest {
         )
     }
 
-    @Test
-    fun keepsIndentedUpdateMarkersAsContextLines() {
+    test("keeps indented update markers as context lines") {
         assertEquals(
             listOf(
                 UpdateFileHunk(
@@ -171,8 +170,7 @@ class IncrementalPatchParserRustTest {
         )
     }
 
-    @Test
-    fun preservesBareEmptyUpdateLines() {
+    test("preserves bare empty update lines") {
         assertEquals(
             listOf(
                 UpdateFileHunk(
@@ -200,8 +198,7 @@ class IncrementalPatchParserRustTest {
         )
     }
 
-    @Test
-    fun ignoresEmptyLinesAfterEndOfFile() {
+    test("ignores empty lines after end of file") {
         assertEquals(
             listOf(
                 UpdateFileHunk(
@@ -221,8 +218,7 @@ class IncrementalPatchParserRustTest {
         )
     }
 
-    @Test
-    fun matchesLineEndingBehavior() {
+    test("matches line ending behavior") {
         assertEquals(
             listOf(
                 UpdateFileHunk(
@@ -248,8 +244,7 @@ class IncrementalPatchParserRustTest {
         )
     }
 
-    @Test
-    fun finishProcessesFinalLineWithoutNewline() {
+    test("finish processes final line without newline") {
         IncrementalPatchParser().let { parser ->
             assertEquals(
                 listOf(AddFileHunk("file.txt", "hello\n")),
@@ -273,8 +268,7 @@ class IncrementalPatchParserRustTest {
         }
     }
 
-    @Test
-    fun finishRequiresEndPatchAndRejectsContentAfterEndPatch() {
+    test("finish requires end patch and rejects content after end patch") {
         val parser = IncrementalPatchParser()
         assertEquals(listOf(AddFileHunk("file.txt", "hello\n")), parser.pushDelta("*** Begin Patch\n*** Add File: file.txt\n+hello\n"))
         assertFailsWith<ApplyPatchException> {
@@ -291,8 +285,7 @@ class IncrementalPatchParserRustTest {
         )
     }
 
-    @Test
-    fun returnsErrors() {
+    test("returns errors") {
         assertFailsWith<ApplyPatchException> {
             IncrementalPatchParser().pushDelta("bad\n")
         }

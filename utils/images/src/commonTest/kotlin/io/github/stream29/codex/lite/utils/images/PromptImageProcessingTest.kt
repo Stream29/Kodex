@@ -1,15 +1,17 @@
 package io.github.stream29.codex.lite.utils.images
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
+
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class PromptImageProcessingTest {
-    @Test
-    fun planPromptImagePreservesSupportedSourceBytesWhenNoResizeIsNeeded() {
+
+
+val promptImageProcessingTest by testSuite {
+    test("plan prompt image preserves supported source bytes when no resize is needed") {
         val source = ImageInfo(ImageMimeType.Png, ImageDimensions(64, 32))
         val plan = source.planPromptImage(PromptImageMode.ResizeToFit)
 
@@ -19,8 +21,7 @@ class PromptImageProcessingTest {
         assertFalse(plan.requiresTransformation)
     }
 
-    @Test
-    fun planPromptImageRequestsResizeForLargeImages() {
+    test("plan prompt image requests resize for large images") {
         val source = ImageInfo(ImageMimeType.Png, ImageDimensions(4096, 2048))
         val plan = source.planPromptImage(PromptImageMode.ResizeToFit)
 
@@ -30,8 +31,7 @@ class PromptImageProcessingTest {
         assertTrue(plan.requiresTransformation)
     }
 
-    @Test
-    fun planPromptImagePreservesSupportedOutputFormatWhenResizeIsNeeded() {
+    test("plan prompt image preserves supported output format when resize is needed") {
         val source = ImageInfo(ImageMimeType.Jpeg, ImageDimensions(4096, 2048))
         val plan = source.planPromptImage(PromptImageMode.ResizeToFit)
 
@@ -40,8 +40,7 @@ class PromptImageProcessingTest {
         assertTrue(plan.requiresTransformation)
     }
 
-    @Test
-    fun planPromptImageConvertsGifToPng() {
+    test("plan prompt image converts gif to png") {
         val source = ImageInfo(ImageMimeType.Gif, ImageDimensions(64, 32))
         val plan = source.planPromptImage(PromptImageMode.ResizeToFit)
 
@@ -50,8 +49,7 @@ class PromptImageProcessingTest {
         assertTrue(plan.requiresTransformation)
     }
 
-    @Test
-    fun toPromptImageReturnsEncodedImageWhenBytesCanBePreserved() {
+    test("to prompt image returns encoded image when bytes can be preserved") {
         val bytes = pngBytes(64, 32)
         val image = bytes.toPromptImage(PromptImageMode.Original)
 
@@ -61,8 +59,7 @@ class PromptImageProcessingTest {
         assertTrue(image.toDataUrl().startsWith("data:image/png;base64,"))
     }
 
-    @Test
-    fun toPromptImageRequiresTransformerForResizeOrTranscode() {
+    test("to prompt image requires transformer for resize or transcode") {
         assertFailsWith<ImageTransformRequiredException> {
             pngBytes(4096, 2048).toPromptImage(PromptImageMode.ResizeToFit)
         }
@@ -71,8 +68,7 @@ class PromptImageProcessingTest {
         }
     }
 
-    @Test
-    fun toPromptImageProcessesDataUrls() {
+    test("to prompt image processes data urls") {
         val bytes = pngBytes(64, 32)
         val image = bytes.toDataUrl(ImageMimeType.Png).toPromptImage(PromptImageMode.Original)
 

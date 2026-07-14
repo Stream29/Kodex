@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.agentruntime.impl
 
+import de.infix.testBalloon.framework.core.testSuite
+
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
@@ -30,14 +32,11 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
-class CodexAgentLoopImplTest {
-    @Test
-    fun runtimeExposesOnlyTheReadOnlyAgentStateProperties() = runTest {
+val codexAgentLoopImplTest by testSuite {
+    test("runtime exposes only the read only agent state properties") {
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val state = CodexAgentState(
             client = mockOpenAiClient {},
@@ -50,8 +49,7 @@ class CodexAgentLoopImplTest {
         assertEquals(state.storage, runtime.storage)
     }
 
-    @Test
-    fun loopDoesNotWaitForSlowStreamConsumer() = runTest {
+    test("loop does not wait for slow stream consumer") {
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val productionCompleted = CompletableDeferred<Unit>()
         val firstEventCollected = CompletableDeferred<Unit>()
@@ -92,8 +90,7 @@ class CodexAgentLoopImplTest {
         runningResume.await()
     }
 
-    @Test
-    fun loopContinuesSamplingWhenEndTurnIsFalse() = runTest {
+    test("loop continues sampling when end turn is false") {
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val requests = mutableListOf<ResponsesApiRequest>()
         val state = CodexAgentState(
@@ -150,8 +147,7 @@ class CodexAgentLoopImplTest {
         assertEquals(CodexAgentStateValue.AssistantMessage, state.state.value)
     }
 
-    @Test
-    fun loopRunsPreTurnCompactionBeforeSampling() = runTest {
+    test("loop runs pre turn compaction before sampling") {
         val storage = InMemoryCodexAgentStorage(
             CodexAgentSettings(
                 model = OpenAiModelId("test-model"),
@@ -198,8 +194,7 @@ class CodexAgentLoopImplTest {
         assertEquals(initialCheckpoint.windowNumber + 1, storage.compaction[2].windowNumber)
     }
 
-    @Test
-    fun loopRunsMidTurnCompactionBeforeFollowUpSampling() = runTest {
+    test("loop runs mid turn compaction before follow up sampling") {
         val storage = InMemoryCodexAgentStorage(
             CodexAgentSettings(
                 model = OpenAiModelId("test-model"),
@@ -256,8 +251,7 @@ class CodexAgentLoopImplTest {
         assertEquals(final, storage.history[5])
     }
 
-    @Test
-    fun loopStopsAtPendingToolCallWithoutIssuingAnotherRequest() = runTest {
+    test("loop stops at pending tool call without issuing another request") {
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val requests = mutableListOf<ResponsesApiRequest>()
         val toolCall = ResponseItem.FunctionCall(
