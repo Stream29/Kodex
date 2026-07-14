@@ -1,37 +1,35 @@
 package io.github.stream29.codex.lite.agentstate.impl
 
-import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateEnum
-import io.github.stream29.codex.lite.agentstate.contract.MutableCodexAgentState
-import io.github.stream29.codex.lite.openai.CodexAgentSettings
+import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
+import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
-import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
+import io.github.stream29.codex.lite.agentstorage.contract.prevIndex
 import io.github.stream29.codex.lite.agentstorage.contract.transaction
-import io.github.stream29.codex.lite.openai.CompactionInput
-import io.github.stream29.codex.lite.openai.OpenAiErrorResponse
-import io.github.stream29.codex.lite.openai.OpenAiResult
+import io.github.stream29.codex.lite.openai.CodexAgentSettings
+import io.github.stream29.codex.lite.openai.CodexResponsesRequest
+import io.github.stream29.codex.lite.openai.ContentItem
+import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Phase
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Reason
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
-import io.github.stream29.codex.lite.openai.ResponseError
 import io.github.stream29.codex.lite.openai.ResponseItem
-import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
-import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
+import io.github.stream29.codex.lite.openai.client.contract.createResponse
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -41,235 +39,228 @@ import kotlin.uuid.Uuid
 /**
  * Loads a state-layer implementation from [storage].
  *
- * Construction is suspend because [CodexAgentStorage.latestIndex] may require
- * asynchronous storage access.
+ * Construction is suspend because storage reads may be asynchronous. The
+ * initial phase is reconstructed from persisted history rather than assumed
+ * from the newest global index, which may belong to another timeline.
  */
-public suspend fun CodexAgentStateImpl(
+public suspend fun CodexAgentState(
     client: OpenAiClient,
     storage: MutableCodexAgentStorage,
-): CodexAgentStateImpl =
-    CodexAgentStateImpl(
+): CodexAgentState {
+    val loadedLatestIndex = storage.latestIndex()
+    return CodexAgentStateImpl(
         client = client,
         storage = storage,
-        loadedLatestIndex = storage.latestIndex(),
+        loadedLatestIndex = loadedLatestIndex,
+        initialState = storage.stateAt(loadedLatestIndex),
     )
+}
 
 /**
- * Minimal state-layer implementation of a Codex agent thread.
+ * Atomic state-layer implementation of one Codex agent thread.
  *
- * This class owns model-request projection, context compaction, and storage
- * maintenance. It records model-emitted tool calls, but it does not execute
- * tool effects; that belongs to AgentRuntime.
+ * This class projects persisted history into one Responses request and writes
+ * the resulting completed output items. It deliberately performs neither
+ * automatic compaction nor multi-request continuation; those are AgentRuntime
+ * responsibilities.
  */
-public class CodexAgentStateImpl internal constructor(
+private class CodexAgentStateImpl(
     private val client: OpenAiClient,
     override val storage: MutableCodexAgentStorage,
     loadedLatestIndex: Int,
-) : MutableCodexAgentState {
-    private val mutableState = MutableStateFlow<CodexAgentStateEnum>(CodexAgentStateEnum.Idle)
-    private var nextTurnOrdinal: Long = 0
-    public override val state: StateFlow<CodexAgentStateEnum> = mutableState
-    public override val latestIndex: StateFlow<Int>
+    initialState: CodexAgentStateValue,
+) : CodexAgentState {
+    override val state: StateFlow<CodexAgentStateValue>
+        field = MutableStateFlow(initialState)
+
+    override val latestIndex: StateFlow<Int>
         field = MutableStateFlow(loadedLatestIndex)
 
-    public override fun resume(): Flow<ResponsesStreamEvent> = flow {
-        mutate(CodexAgentStateEnum.LlmRequest.Response) {
-            check(storage.latestIndex() >= 0) { "Cannot resume an agent without initial state." }
-            if (shouldAutoCompact(storage.latestIndex())) {
-                runAutoCompact(
-                    trigger = RemoteCompactionV2Trigger.Auto,
-                    reason = RemoteCompactionV2Reason.ContextLimit,
-                    phase = RemoteCompactionV2Phase.PreTurn,
-                )
-            }
+    override fun requestResponseApi(): Flow<ResponsesStreamEvent> = flow {
+        val previousState = state.value
+        previousState.requireCanRequestResponseApi()
+        if (!state.compareAndSet(previousState, CodexAgentStateValue.RequestResponse)) {
+            throw CodexAgentStateInvalidTransitionException("start a response request", state.value)
+        }
 
-            while (true) {
-                val snapshotIndex = storage.latestIndex()
-                val settings = storage.settings[snapshotIndex]
-                val input = storage.modelInputAt(snapshotIndex)
-                var needsFollowUp = false
+        try {
+            check(storage.latestIndex() >= 0) { "Cannot request a response without initial state." }
 
-                client.createResponse(settings.toRequest(input)).collect { event ->
-                    when (event) {
-                        is ResponsesStreamEvent.OutputItemDone -> {
-                            val historyItem = event.item as? ResponseItem.HistoryItem
-                            if (historyItem != null) {
-                                appendHistoryItem(historyItem, now(), tokenCount = null)
-                            }
+            val snapshotIndex = storage.latestIndex()
+            val settings = storage.settings[snapshotIndex]
+            val input = storage.modelInputAt(snapshotIndex)
+
+            client.createResponse(
+                CodexResponsesRequest(
+                    input = input,
+                    checkpoint = storage.compaction[snapshotIndex],
+                    settings = settings,
+                    threadId = storage.id,
+                ),
+            ).collect { event ->
+                when (event) {
+                    is ResponsesStreamEvent.OutputItemDone -> {
+                        val historyItem = event.item as? ResponseItem.HistoryItem
+                        if (historyItem != null) {
+                            appendHistoryItem(historyItem, now(), tokenCount = null)
                         }
-
-                        is ResponsesStreamEvent.Completed -> {
-                            event.response.usage?.totalTokens?.let { tokenCount ->
-                                val index = storage.transaction {
-                                    val index = storage.latestIndex() + 1
-                                    storage.tokenCount[index] = tokenCount
-                                    storage.timestamp[index] = now()
-                                    index
-                                }
-                                latestIndex.value = index
-                            }
-                            if (event.response.endTurn == false) {
-                                needsFollowUp = true
-                            }
-                        }
-
-                        is ResponsesStreamEvent.Failed -> {
-                            emit(event)
-                            throw CodexResponseStreamFailureException(event.response.error)
-                        }
-
-                        else -> Unit
                     }
-                    emit(event)
-                }
 
-                if (!needsFollowUp) {
-                    break
+                    is ResponsesStreamEvent.Completed -> {
+                        event.response.usage?.totalTokens?.let { tokenCount ->
+                            appendTimestampAndTokenCount(tokenCount)
+                        }
+                    }
+
+                    else -> Unit
                 }
-                if (shouldAutoCompact(storage.latestIndex())) {
-                    runAutoCompact(
-                        trigger = RemoteCompactionV2Trigger.Auto,
-                        reason = RemoteCompactionV2Reason.ContextLimit,
-                        phase = RemoteCompactionV2Phase.MidTurn,
-                    )
-                }
+                emit(event)
+            }
+        } finally {
+            state.value = withContext(NonCancellable) {
+                storage.stateAt(storage.latestIndex())
             }
         }
     }.buffer(Channel.UNLIMITED)
 
-    public override suspend fun forcedCompact(): Int =
-        mutate(CodexAgentStateEnum.LlmRequest.Compact) {
-            runAutoCompact(
-                trigger = RemoteCompactionV2Trigger.Manual,
-                reason = RemoteCompactionV2Reason.UserRequested,
-                phase = RemoteCompactionV2Phase.StandaloneTurn,
-            )
-        }
-
-    public override suspend fun appendResponseItem(
-        item: ResponseItem.HistoryItem,
-        timestamp: Instant,
-        tokenCount: Long?,
-    ): Int =
-        mutate(CodexAgentStateEnum.ExternalWrite) {
-            appendHistoryItem(item, timestamp, tokenCount)
-        }
-
-    public override suspend fun appendPlanUpdate(
-        item: ResponseItem.FunctionCall,
-        plan: UpdatePlanArgs,
-    ): Int =
-        mutate(CodexAgentStateEnum.ExternalWrite) {
-            val index = storage.transaction {
-                val index = storage.latestIndex() + 1
-                storage.plan[index] = plan
-                storage.history[index] = item
-                storage.timestamp[index] = now()
-                index
-            }
-            latestIndex.value = index
-            index
-        }
-
-    public override suspend fun updateSetting(
-        settings: CodexAgentSettings,
-        timestamp: Instant,
-        tokenCount: Long?,
-    ): Int =
-        mutate(CodexAgentStateEnum.ExternalWrite) {
-            val index = storage.transaction {
-                val index = storage.latestIndex() + 1
-                require(index > 0) { "Settings updates require an existing state index." }
-                storage.settings[index] = settings
-                if (tokenCount != null) {
-                    storage.tokenCount[index] = tokenCount
-                }
-                storage.timestamp[index] = timestamp
-                index
-            }
-            latestIndex.value = index
-            index
-        }
-
     @OptIn(ExperimentalUuidApi::class)
-    private suspend fun runAutoCompact(
+    override suspend fun compact(
         trigger: RemoteCompactionV2Trigger,
         reason: RemoteCompactionV2Reason,
         phase: RemoteCompactionV2Phase,
     ): Int =
-        withInternalState(CodexAgentStateEnum.LlmRequest.Compact) {
+        mutate(
+            validate = CodexAgentStateValue::requireCanCompact,
+            inFlight = CodexAgentStateValue.Compacting,
+        ) {
             val snapshotIndex = storage.latestIndex()
             check(snapshotIndex >= 0) { "Cannot compact an agent without initial state." }
 
             val settings = storage.settings[snapshotIndex]
             val checkpoint = storage.compaction[snapshotIndex]
             val input = storage.modelInputAt(snapshotIndex)
-            if (settings.remoteCompactionV2) {
-                val result = requestRemoteCompactionV2(
-                    settings = settings,
+            val requestSettings = if (phase == RemoteCompactionV2Phase.StandaloneTurn) {
+                settings.copy(turnId = Uuid.generateV7().toString())
+            } else {
+                settings
+            }
+            val result = client.createRemoteCompactionV2Response(
+                RemoteCompactionV2Request(
+                    history = input,
                     checkpoint = checkpoint,
-                    input = input,
+                    settings = requestSettings,
+                    threadId = storage.id,
                     trigger = trigger,
                     reason = reason,
                     phase = phase,
-                )
-                val index = storage.appendCompactionCheckpoint(
-                    prefix = input
-                        .filterIsInstance<ResponseItem.Message>()
-                        .filter { it.role == MessageRole.User }
-                        .plus(result.compactionOutput),
-                    marker = ResponseItem.ContextCompaction(
-                        encryptedContent = result.compactionOutput.encryptedContent,
-                    ),
-                    timestamp = now(),
-                    tokenCount = result.completedResponse?.usage?.totalTokens,
-                    previousCheckpoint = checkpoint,
-                    nextWindowId = Uuid.generateV7().toString(),
-                )
-                latestIndex.value = index
-                index
-            } else {
-                val response = when (
-                    val result = client.compactResponse(
-                        settings.toCompactionInput(input + ResponseItem.CompactionTrigger),
-                    )
-                ) {
-                    is OpenAiResult.Success -> result.value
-                    is OpenAiResult.Failure -> throw CodexCompactionFailureException(result.error)
-                }
-                val index = storage.appendCompactionCheckpoint(
-                    prefix = response.output,
-                    marker = ResponseItem.ContextCompaction(),
-                    timestamp = now(),
-                    tokenCount = null,
-                    previousCheckpoint = checkpoint,
-                    nextWindowId = Uuid.generateV7().toString(),
-                )
-                latestIndex.value = index
-                index
-            }
+                ),
+            )
+            storage.appendCompactionCheckpoint(
+                prefix = buildRemoteCompactionV2Prefix(input, result.compactionOutput),
+                marker = ResponseItem.ContextCompaction(
+                    encryptedContent = result.compactionOutput.encryptedContent,
+                ),
+                timestamp = now(),
+                tokenCount = result.completedResponse?.usage?.totalTokens,
+                previousCheckpoint = checkpoint,
+                nextWindowId = Uuid.generateV7().toString(),
+                settings = requestSettings,
+            ).also { latestIndex.value = it }
         }
 
-    private suspend fun requestRemoteCompactionV2(
-        settings: CodexAgentSettings,
-        checkpoint: CompactionCheckpoint,
-        input: List<ResponseItem>,
-        trigger: RemoteCompactionV2Trigger,
-        reason: RemoteCompactionV2Reason,
-        phase: RemoteCompactionV2Phase,
-    ): RemoteCompactionV2Response {
-        val turnId = "turn_${nextTurnOrdinal++}"
-        val request = RemoteCompactionV2Request(
-            history = input,
-            checkpoint = checkpoint,
-            settings = settings,
-            turnId = turnId,
-            trigger = trigger,
-            reason = reason,
-            phase = phase,
-        )
-        return client.createRemoteCompactionV2Response(request)
+    @OptIn(ExperimentalUuidApi::class)
+    override suspend fun appendUserMessage(content: List<ContentItem>): Int =
+        mutate(
+            validate = CodexAgentStateValue::requireCanAppendUserMessage,
+            inFlight = CodexAgentStateValue.ExternalWrite,
+        ) {
+            val snapshotIndex = storage.latestIndex()
+            val currentSettings = storage.settings[snapshotIndex]
+            val settings = if (storage.stateAt(snapshotIndex) == CodexAgentStateValue.Empty) {
+                currentSettings
+            } else {
+                currentSettings.copy(turnId = Uuid.generateV7().toString())
+            }
+            val item = ResponseItem.Message(
+                role = MessageRole.User,
+                content = content,
+            )
+            val index = storage.transaction {
+                val index = storage.latestIndex() + 1
+                if (settings != currentSettings) {
+                    storage.settings[index] = settings
+                }
+                storage.history[index] = item
+                storage.timestamp[index] = now()
+                index
+            }
+            latestIndex.value = index
+            state.value = CodexAgentStateValue.UserMessage
+            index
+        }
+
+    override suspend fun completeToolCall(output: ResponseItem.ToolCallOutput): Int {
+        var pendingCalls = emptyList<ResponseItem.ToolCall>()
+        return mutate(
+            validate = { value -> pendingCalls = value.requireCanCompleteToolCalls() },
+            inFlight = CodexAgentStateValue.ExternalWrite,
+        ) {
+            val nextState = pendingCalls.stateAfterCompleting(output.callId)
+            val index = storage.transaction {
+                val index = storage.latestIndex() + 1
+                storage.history[index] = output
+                storage.timestamp[index] = now()
+                index
+            }
+            latestIndex.value = index
+            state.value = nextState
+            index
+        }
     }
+
+    override suspend fun appendPlanUpdate(
+        output: ResponseItem.FunctionCallOutput,
+        plan: UpdatePlanArgs,
+    ): Int {
+        var pendingCalls = emptyList<ResponseItem.ToolCall>()
+        return mutate(
+            validate = { value -> pendingCalls = value.requireCanCompleteToolCalls() },
+            inFlight = CodexAgentStateValue.ExternalWrite,
+        ) {
+            val pendingCall = pendingCalls.requireCall(output.callId)
+            require(pendingCall is ResponseItem.FunctionCall && pendingCall.name == "update_plan") {
+                "Plan updates can complete only a pending update_plan function call."
+            }
+            val nextState = pendingCalls.stateAfterCompleting(output.callId)
+            val index = storage.transaction {
+                val index = storage.latestIndex() + 1
+                storage.plan[index] = plan
+                storage.history[index] = output
+                storage.timestamp[index] = now()
+                index
+            }
+            latestIndex.value = index
+            state.value = nextState
+            index
+        }
+    }
+
+    override suspend fun updateSettings(settings: CodexAgentSettings): Int =
+        mutate(
+            validate = {},
+            inFlight = CodexAgentStateValue.ExternalWrite,
+        ) {
+            val currentSettings = storage.settings[storage.latestIndex()]
+            val index = storage.transaction {
+                val index = storage.latestIndex() + 1
+                require(index > 0) { "Settings updates require an existing state index." }
+                storage.settings[index] = settings.copy(turnId = currentSettings.turnId)
+                storage.timestamp[index] = now()
+                index
+            }
+            latestIndex.value = index
+            index
+        }
 
     private suspend fun appendHistoryItem(
         item: ResponseItem.HistoryItem,
@@ -289,91 +280,89 @@ public class CodexAgentStateImpl internal constructor(
         return index
     }
 
-    private suspend fun shouldAutoCompact(snapshotIndex: Int): Boolean {
-        if (snapshotIndex < 0 || storage.tokenCount.latestIndex() < 0) {
-            return false
+    private suspend fun appendTimestampAndTokenCount(tokenCount: Long) {
+        val index = storage.transaction {
+            val index = storage.latestIndex() + 1
+            storage.tokenCount[index] = tokenCount
+            storage.timestamp[index] = now()
+            index
         }
-        val settings = storage.settings[snapshotIndex]
-        val tokenCount = storage.tokenCount[snapshotIndex]
-        val limit = settings.autoCompactionTokenLimit ?: return false
-        return tokenCount >= limit
+        latestIndex.value = index
     }
 
-    private suspend inline fun <T> mutate(
-        newState: CodexAgentStateEnum,
+    private inline fun <T> mutate(
+        validate: (CodexAgentStateValue) -> Unit,
+        inFlight: CodexAgentStateValue,
         block: () -> T,
     ): T {
-        if (!mutableState.compareAndSet(CodexAgentStateEnum.Idle, newState)) {
-            throw CodexAgentStateConcurrentModificationException(mutableState.value)
+        val currentState = state.value
+        if (!currentState.isStable) {
+            throw CodexAgentStateInvalidTransitionException("start an atomic operation", currentState)
         }
-        return try {
-            block()
+        validate(currentState)
+        if (!state.compareAndSet(currentState, inFlight)) {
+            throw CodexAgentStateInvalidTransitionException("start an atomic operation", state.value)
+        }
+
+        try {
+            return block()
         } finally {
-            mutableState.value = CodexAgentStateEnum.Idle
+            if (state.value == inFlight) {
+                state.value = currentState
+            }
         }
     }
-
-    private suspend inline fun <T> withInternalState(
-        newState: CodexAgentStateEnum,
-        block: suspend () -> T,
-    ): T {
-        val previousState = mutableState.value
-        mutableState.value = newState
-        return try {
-            block()
-        } finally {
-            mutableState.value = previousState
-        }
-    }
-
 }
 
-public class CodexResponseStreamFailureException(
-    public val error: ResponseError?,
-) : IllegalStateException(
-    error?.message ?: "Response failed without structured error.",
-)
+public class CodexAgentStateInvalidTransitionException(
+    public val operation: String,
+    public val currentState: CodexAgentStateValue,
+) : IllegalStateException("Cannot $operation while agent state is $currentState.")
 
-public class CodexCompactionFailureException(
-    public val error: OpenAiErrorResponse,
-) : IllegalStateException(
-    "Compaction failed: ${error.messageText ?: error}",
-)
+private val CodexAgentStateValue.isStable: Boolean
+    get() = when (this) {
+        CodexAgentStateValue.Empty,
+        CodexAgentStateValue.UserMessage,
+        CodexAgentStateValue.AssistantMessage,
+        is CodexAgentStateValue.ToolPending,
+        CodexAgentStateValue.ToolCompleted,
+        -> true
 
-public class CodexAgentStateConcurrentModificationException(
-    public val currentState: CodexAgentStateEnum,
-) : ConcurrentModificationException("Agent state was modified concurrently: $currentState")
+        CodexAgentStateValue.ExternalWrite,
+        CodexAgentStateValue.RequestResponse,
+        CodexAgentStateValue.Compacting,
+        -> false
+    }
 
-private fun CodexAgentSettings.toRequest(input: List<ResponseItem>): ResponsesApiRequest =
-    ResponsesApiRequest(
-        model = model,
-        input = input,
-        instructions = instructions,
-        store = store,
-        previousResponseId = previousResponseId,
-        tools = tools,
-        toolChoice = toolChoice,
-        parallelToolCalls = parallelToolCalls,
-        reasoning = reasoning,
-        include = include,
-        serviceTier = serviceTier,
-        promptCacheKey = promptCacheKey,
-        text = text,
-        clientMetadata = clientMetadata,
-    )
+private fun CodexAgentStateValue.requireCanRequestResponseApi() {
+    if (
+        this != CodexAgentStateValue.UserMessage &&
+        this != CodexAgentStateValue.AssistantMessage &&
+        this != CodexAgentStateValue.ToolCompleted
+    ) {
+        throw CodexAgentStateInvalidTransitionException("request a response", this)
+    }
+}
 
-private fun CodexAgentSettings.toCompactionInput(input: List<ResponseItem>): CompactionInput =
-    CompactionInput(
-        model = model,
-        input = input,
-        instructions = instructions,
-        tools = tools,
-        parallelToolCalls = parallelToolCalls,
-        reasoning = reasoning,
-        serviceTier = serviceTier,
-        promptCacheKey = promptCacheKey,
-        text = text,
-    )
+private fun CodexAgentStateValue.requireCanCompact() {
+    if (
+        this != CodexAgentStateValue.UserMessage &&
+        this != CodexAgentStateValue.AssistantMessage &&
+        this != CodexAgentStateValue.ToolCompleted
+    ) {
+        throw CodexAgentStateInvalidTransitionException("compact context", this)
+    }
+}
+
+private fun CodexAgentStateValue.requireCanAppendUserMessage() {
+    if (this != CodexAgentStateValue.Empty && this != CodexAgentStateValue.AssistantMessage) {
+        throw CodexAgentStateInvalidTransitionException("append a user message", this)
+    }
+}
+
+private fun CodexAgentStateValue.requireCanCompleteToolCalls(): List<ResponseItem.ToolCall> =
+    (this as? CodexAgentStateValue.ToolPending)?.calls
+        ?: throw CodexAgentStateInvalidTransitionException("complete tool calls", this)
 
 private suspend fun CodexAgentStorage.modelInputAt(index: Int): List<ResponseItem> {
     val checkpoint = compaction[index]
@@ -384,6 +373,85 @@ private suspend fun CodexAgentStorage.modelInputAt(index: Int): List<ResponseIte
         }
     }
     return items
+}
+
+/**
+ * Derives the state from the active history tail at [index].
+ *
+ * A message ends the current local-tool batch, so this scans only that batch
+ * and returns every unresolved call in chronological order.
+ */
+private suspend fun CodexAgentStorage.stateAt(index: Int): CodexAgentStateValue {
+    if (index < 0) {
+        return CodexAgentStateValue.Empty
+    }
+
+    val checkpoint = compaction[index]
+    val completedToolCallIds = mutableSetOf<String>()
+    val pendingCallsReversed = mutableListOf<ResponseItem.ToolCall>()
+    var sawToolCallOutput = false
+    fun stateAfterReading(item: ResponseItem): CodexAgentStateValue? =
+        when (item) {
+            is ResponseItem.ToolCallOutput -> {
+                completedToolCallIds += item.callId
+                sawToolCallOutput = true
+                null
+            }
+
+            is ResponseItem.ToolCall -> {
+                if (completedToolCallIds.remove(item.callId)) {
+                    null
+                } else {
+                    pendingCallsReversed += item
+                    null
+                }
+            }
+
+            is ResponseItem.Message -> {
+                if (pendingCallsReversed.isNotEmpty()) {
+                    CodexAgentStateValue.ToolPending(pendingCallsReversed.asReversed().toList())
+                } else if (sawToolCallOutput) {
+                    CodexAgentStateValue.ToolCompleted
+                } else {
+                    when (item.role) {
+                        MessageRole.User -> CodexAgentStateValue.UserMessage
+                        MessageRole.Assistant -> CodexAgentStateValue.AssistantMessage
+                        MessageRole.Tool -> CodexAgentStateValue.ToolCompleted
+                    }
+                }
+            }
+
+            else -> null
+        }
+
+    var historyIndex = history.floorToIndex(index)
+    while (historyIndex != null && historyIndex >= checkpoint.historyBaseIndex) {
+        stateAfterReading(history[historyIndex])?.let { return it }
+        historyIndex = history.prevIndex(historyIndex)
+    }
+
+    for (item in checkpoint.prefix.asReversed()) {
+        stateAfterReading(item)?.let { return it }
+    }
+    return when {
+        pendingCallsReversed.isNotEmpty() -> CodexAgentStateValue.ToolPending(pendingCallsReversed.asReversed().toList())
+        sawToolCallOutput -> CodexAgentStateValue.ToolCompleted
+        else -> CodexAgentStateValue.Empty
+    }
+}
+
+private fun List<ResponseItem.ToolCall>.requireCall(callId: String): ResponseItem.ToolCall =
+    firstOrNull { call -> call.callId == callId }
+        ?: throw IllegalArgumentException("Tool output does not match a pending call id: $callId")
+
+private fun List<ResponseItem.ToolCall>.stateAfterCompleting(callId: String): CodexAgentStateValue {
+    requireCall(callId)
+    val remainingCalls = filterNot { call -> call.callId == callId }
+    return if (remainingCalls.isEmpty()) {
+        CodexAgentStateValue.ToolCompleted
+    } else {
+        CodexAgentStateValue.ToolPending(remainingCalls)
+    }
 }
 
 @OptIn(ExperimentalTime::class)

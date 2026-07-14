@@ -10,11 +10,11 @@ import kotlinx.coroutines.withContext
 /**
  * Index-addressed timeline.
  *
- * Implementations may be sparse. For sparse step-function timelines,
- * [nextIndex] returns change points and [get] returns the value active at the
- * requested index. For example, if stored indexes are `0, 2, 5`, [get] returns
- * the same value for indexes in `[0, 2)`, another value for `[2, 5)`, and
- * another value for indexes from `5` onward.
+ * Implementations may be sparse. [floorToIndex] and [ceilToIndex] locate stored
+ * change points; [get] returns the value active at the requested index. For
+ * example, if stored indexes are `0, 2, 5`, [get] returns the same value for
+ * indexes in `[0, 2)`, another value for `[2, 5)`, and another value for
+ * indexes from `5` onward.
  *
  * Append-only logs may also implement this contract by treating every item
  * index as a change point. Such implementations must make every index from
@@ -37,13 +37,34 @@ public interface IndexVersioned<T> {
     public suspend operator fun get(index: Int): T
 
     /**
-     * Returns the first stored index greater than or equal to [from].
+     * Returns the greatest stored index less than or equal to [index].
      *
-     * @param from Inclusive lower bound.
-     * @return `null` when this timeline has no stored index greater than or
-     * equal to [from].
+     * @return `null` when this timeline has no stored index at or before
+     * [index].
      */
-    public suspend fun nextIndex(from: Int): Int?
+    public suspend fun floorToIndex(index: Int): Int?
+
+    /**
+     * Returns the smallest stored index greater than or equal to [index].
+     *
+     * @return `null` when this timeline has no stored index at or after
+     * [index].
+     */
+    public suspend fun ceilToIndex(index: Int): Int?
+}
+
+/**
+ * Returns the first stored index strictly after [index].
+ */
+public suspend fun <T> IndexVersioned<T>.nextIndex(index: Int): Int? {
+    return if (index == Int.MAX_VALUE) null else ceilToIndex(index + 1)
+}
+
+/**
+ * Returns the first stored index strictly before [index].
+ */
+public suspend fun <T> IndexVersioned<T>.prevIndex(index: Int): Int? {
+    return if (index == Int.MIN_VALUE) null else floorToIndex(index - 1)
 }
 
 /**
@@ -52,11 +73,25 @@ public interface IndexVersioned<T> {
  * @param from Inclusive lower bound for returned indexes.
  */
 public fun <T> IndexVersioned<T>.indexes(from: Int = 0): Flow<Int> = flow {
-    var cursor = from
-    while (true) {
-        val next = nextIndex(cursor) ?: break
-        emit(next)
-        cursor = next + 1
+    require(from >= 0) { "Index lower bound $from must be non-negative." }
+    var index = ceilToIndex(from)
+    while (index != null) {
+        emit(index)
+        index = nextIndex(index)
+    }
+}
+
+/**
+ * Returns stored indexes in descending order.
+ *
+ * @param from Inclusive upper bound for returned indexes.
+ */
+public fun <T> IndexVersioned<T>.indexesDescending(from: Int): Flow<Int> = flow {
+    require(from >= 0) { "Index upper bound $from must be non-negative." }
+    var index = floorToIndex(from)
+    while (index != null) {
+        emit(index)
+        index = prevIndex(index)
     }
 }
 

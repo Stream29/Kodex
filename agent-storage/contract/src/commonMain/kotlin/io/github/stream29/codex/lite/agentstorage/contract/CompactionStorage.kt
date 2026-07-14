@@ -1,6 +1,7 @@
 package io.github.stream29.codex.lite.agentstorage.contract
 
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
+import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ResponseItem
 import kotlin.time.Instant
 
@@ -15,6 +16,7 @@ import kotlin.time.Instant
  * a compaction response; `null` means no token-count timeline entry is written.
  * @param previousCheckpoint Checkpoint whose context-window lineage is advanced.
  * @param nextWindowId Fresh UUIDv7 identifier for the new context window.
+ * @param settings Settings active after the compaction transition.
  */
 public suspend fun MutableCodexAgentStorage.appendCompactionCheckpoint(
     prefix: List<ResponseItem.HistoryItem>,
@@ -23,6 +25,7 @@ public suspend fun MutableCodexAgentStorage.appendCompactionCheckpoint(
     tokenCount: Long?,
     previousCheckpoint: CompactionCheckpoint,
     nextWindowId: String,
+    settings: CodexAgentSettings,
 ): Int = transaction {
     val index = latestIndex() + 1
     compaction[index] = CompactionCheckpoint(
@@ -33,6 +36,7 @@ public suspend fun MutableCodexAgentStorage.appendCompactionCheckpoint(
         previousWindowId = previousCheckpoint.windowId,
         windowId = nextWindowId,
     )
+    this.settings[index] = settings
     history[index] = marker
     if (tokenCount != null) {
         this.tokenCount[index] = tokenCount

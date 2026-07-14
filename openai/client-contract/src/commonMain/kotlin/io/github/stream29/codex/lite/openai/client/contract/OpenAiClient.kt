@@ -1,7 +1,5 @@
 package io.github.stream29.codex.lite.openai.client.contract
 
-import io.github.stream29.codex.lite.openai.CompactionInput
-import io.github.stream29.codex.lite.openai.CompactionResponse
 import io.github.stream29.codex.lite.openai.ImageEditRequest
 import io.github.stream29.codex.lite.openai.ImageGenerationRequest
 import io.github.stream29.codex.lite.openai.ImageResponse
@@ -18,14 +16,16 @@ import kotlinx.coroutines.flow.Flow
 public interface OpenAiClient : AutoCloseable {
     public suspend fun listModels(): OpenAiResponseResult<ModelsResponse>
 
+    public suspend fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent>
+
     public suspend fun createResponse(
         request: ResponsesApiRequest,
-        extraHeaders: Map<String, String> = emptyMap(),
+        installationId: String?,
+        turnMetadata: String,
+        windowId: String,
     ): Flow<ResponsesStreamEvent>
 
     public suspend fun createRemoteCompactionV2Response(request: RemoteCompactionV2Request): RemoteCompactionV2Response
-
-    public suspend fun compactResponse(request: CompactionInput): OpenAiResponseResult<CompactionResponse>
 
     public suspend fun generateImage(request: ImageGenerationRequest): OpenAiResponseResult<ImageResponse>
 

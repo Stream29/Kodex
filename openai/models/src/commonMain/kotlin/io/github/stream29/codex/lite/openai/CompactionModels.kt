@@ -1,49 +1,7 @@
 package io.github.stream29.codex.lite.openai
 
-import kotlinx.serialization.EncodeDefault
-import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
-
-/**
- * @property instructions Compaction instructions. The empty default is omitted
- * from the wire.
- * @property reasoning Reasoning controls. The default value is omitted from
- * the wire.
- * @property serviceTier Service tier selection. [ServiceTier.Default] is
- * omitted from the wire.
- * @property promptCacheKey Nullable because prompt cache affinity is optional;
- * `null` means no cache key is sent.
- * @property text Text controls. The default value is omitted from the wire.
- */
-@Serializable
-public data class CompactionInput(
-    public val model: OpenAiModelId,
-    public val input: List<ResponseItem>,
-    @OptIn(ExperimentalSerializationApi::class)
-    @EncodeDefault(EncodeDefault.Mode.NEVER)
-    public val instructions: String = "",
-    public val tools: List<ToolSpec> = emptyList(),
-    @SerialName("parallel_tool_calls")
-    public val parallelToolCalls: Boolean = false,
-    @OptIn(ExperimentalSerializationApi::class)
-    @EncodeDefault(EncodeDefault.Mode.NEVER)
-    public val reasoning: Reasoning = Reasoning(),
-    @SerialName("service_tier")
-    @OptIn(ExperimentalSerializationApi::class)
-    @EncodeDefault(EncodeDefault.Mode.NEVER)
-    public val serviceTier: ServiceTier = ServiceTier.Default,
-    @SerialName("prompt_cache_key")
-    public val promptCacheKey: String? = null,
-    @OptIn(ExperimentalSerializationApi::class)
-    @EncodeDefault(EncodeDefault.Mode.NEVER)
-    public val text: TextControls = TextControls(),
-)
-
-@Serializable
-public data class CompactionResponse(
-    public val output: List<ResponseItem.HistoryItem> = emptyList(),
-)
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
  * Model request settings visible at an agent state index.
@@ -53,29 +11,27 @@ public data class CompactionResponse(
  *
  * @property model Model identifier used for the next Responses API request.
  * @property autoCompactionTokenLimit Nullable because token-count-triggered
- * auto-compaction can be disabled; `null` means AgentState will not trigger
+ * auto-compaction can be disabled; `null` means AgentRuntime will not trigger
  * compaction from token count alone.
- * @property remoteCompactionV2 Whether compaction uses the Responses stream
- * with a trailing `compaction_trigger`.
+ * @property turnId UUIDv7 identity allocated for the active or next logical
+ * Codex turn. AgentState rotates it only when it begins a new logical turn.
  * @property installationId Nullable because Codex identity metadata is
  * optional; `null` means no installation id is sent.
  * @property sessionId Nullable because Codex identity metadata is optional;
  * `null` means no session id is sent.
- * @property threadId Nullable because Codex identity metadata is optional;
- * `null` means no thread id is sent.
  * @property previousResponseId Nullable because a request may be built from
  * full local history instead of a provider-side response chain; `null` means no
  * provider response id is referenced.
  * @property promptCacheKey Nullable because prompt-cache affinity is optional;
  * `null` means no explicit prompt cache key is stored.
  */
+@OptIn(ExperimentalUuidApi::class)
 public data class CodexAgentSettings(
     public val model: OpenAiModelId,
     public val autoCompactionTokenLimit: Long? = null,
-    public val remoteCompactionV2: Boolean = true,
+    public val turnId: String = Uuid.generateV7().toString(),
     public val installationId: String? = null,
     public val sessionId: String? = null,
-    public val threadId: String? = null,
     public val instructions: String = "",
     public val store: Boolean = false,
     public val previousResponseId: String? = null,
@@ -117,6 +73,31 @@ public data class CompactionCheckpoint(
 )
 
 /**
+ * Returns the Codex wire window identity for this checkpoint.
+ *
+ * [threadId] is owned by the agent storage that represents the Codex thread;
+ * [windowNumber] identifies this checkpoint within that thread.
+ */
+public fun CompactionCheckpoint.codexRequestWindowId(threadId: String): String =
+    "$threadId:$windowNumber"
+
+/**
+ * Typed input for a normal Codex Responses request.
+ *
+ * The OpenAI client projects [settings] and [checkpoint] into Codex request
+ * metadata and compatibility headers while keeping [input] as the Responses
+ * API body input.
+ *
+ * @property threadId Identity of the storage-backed Codex thread.
+ */
+public data class CodexResponsesRequest(
+    public val input: List<ResponseItem>,
+    public val checkpoint: CompactionCheckpoint,
+    public val settings: CodexAgentSettings,
+    public val threadId: String,
+)
+
+/**
  * Typed input for the Codex remote compaction v2 Responses flow.
  *
  * The OpenAI client owns the wire projection: it appends the
@@ -125,12 +106,13 @@ public data class CompactionCheckpoint(
  *
  * @property history Active model-visible history before the client appends the
  * remote-compaction trigger item.
+ * @property threadId Identity of the storage-backed Codex thread.
  */
 public data class RemoteCompactionV2Request(
     public val history: List<ResponseItem>,
     public val checkpoint: CompactionCheckpoint,
     public val settings: CodexAgentSettings,
-    public val turnId: String,
+    public val threadId: String,
     public val trigger: RemoteCompactionV2Trigger,
     public val reason: RemoteCompactionV2Reason,
     public val phase: RemoteCompactionV2Phase,

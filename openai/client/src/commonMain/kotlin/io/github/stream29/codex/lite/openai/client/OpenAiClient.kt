@@ -1,22 +1,25 @@
 package io.github.stream29.codex.lite.openai.client
 
-import io.github.stream29.codex.lite.openai.CompactionInput
-import io.github.stream29.codex.lite.openai.CompactionResponse
+import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ImageEditRequest
 import io.github.stream29.codex.lite.openai.ImageGenerationRequest
 import io.github.stream29.codex.lite.openai.ImageResponse
 import io.github.stream29.codex.lite.openai.ModelsResponse
+import io.github.stream29.codex.lite.openai.OpenAiErrorResponse
+import io.github.stream29.codex.lite.openai.OpenAiResult
+import io.github.stream29.codex.lite.openai.OpenAiResultSerializer
 import io.github.stream29.codex.lite.openai.OpenAiResponseResult
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthSession
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.Response
-import io.github.stream29.codex.lite.openai.ResponseError
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.SearchRequest
 import io.github.stream29.codex.lite.openai.SearchResponse
+import io.github.stream29.codex.lite.openai.codexRequestWindowId
+import io.github.stream29.codex.lite.openai.throwIfFailure
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient as OpenAiClientContract
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.utils.ktorclientext.ChatGptAccountId
@@ -40,7 +43,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
-import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.utils.unwrapCancellationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -56,8 +59,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.io.IOException
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.put
 import kotlin.random.Random
 
@@ -110,12 +116,29 @@ public class OpenAiClient(
             accept(ContentType.Application.Json)
             parameter("client_version", config.clientVersion)
         }
-        return response.body()
+        return response.openAiResponseResult(ModelsResponse.serializer())
+    }
+
+    override suspend fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent> {
+        val response = httpClient.post {
+            url {
+                appendPathSegments("responses")
+            }
+            accept(ContentType.Text.EventStream)
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }
+        return response.body<SSESession>()
+            .incoming
+            .mapNotNull { event -> event.data.takeIf { it != "[DONE]" } }
+            .map { OpenAiJsonCodec.decodeFromString<ResponsesStreamEvent>(it) }
     }
 
     override suspend fun createResponse(
         request: ResponsesApiRequest,
-        extraHeaders: Map<String, String>,
+        installationId: String?,
+        turnMetadata: String,
+        windowId: String,
     ): Flow<ResponsesStreamEvent> {
         val response = httpClient.post {
             url {
@@ -123,7 +146,9 @@ public class OpenAiClient(
             }
             accept(ContentType.Text.EventStream)
             contentType(ContentType.Application.Json)
-            headers.addAll(extraHeaders)
+            installationId?.let { headers[HeaderCodexInstallationId] = it }
+            headers[HeaderCodexTurnMetadata] = turnMetadata
+            headers[HeaderCodexWindowId] = windowId
             setBody(request)
         }
         return response.body<SSESession>()
@@ -136,23 +161,32 @@ public class OpenAiClient(
         request: RemoteCompactionV2Request,
     ): RemoteCompactionV2Response =
         retryOpenAiStreamingTransport(config.retry) {
-            createResponse(
-                request = request.toResponsesApiRequest(),
-                extraHeaders = request.remoteCompactionV2ExtraHeaders(),
-            ).collectRemoteCompactionV2Response()
-        }
-
-    override suspend fun compactResponse(request: CompactionInput): OpenAiResponseResult<CompactionResponse> {
-        val response = httpClient.post {
-            url {
-                appendPathSegments("responses", "compact")
+            val windowId = request.checkpoint.codexRequestWindowId(request.threadId)
+            val turnMetadata = request.toCodexTurnMetadata(windowId)
+            val response = httpClient.post {
+                url {
+                    appendPathSegments("responses")
+                }
+                accept(ContentType.Text.EventStream)
+                contentType(ContentType.Application.Json)
+                headers[HeaderCodexBetaFeatures] = RemoteCompactionV2Feature
+                request.settings.installationId?.let { headers[HeaderCodexInstallationId] = it }
+                headers[HeaderCodexTurnMetadata] = turnMetadata
+                headers[HeaderCodexWindowId] = windowId
+                setBody(
+                    request.toResponsesApiRequest(
+                        turnMetadata = turnMetadata,
+                        windowId = windowId,
+                    ),
+                )
             }
-            accept(ContentType.Application.Json)
-            contentType(ContentType.Application.Json)
-            setBody(request)
+            response.body<SSESession>()
+                .incoming
+                .mapNotNull { event -> event.data.takeIf { it != "[DONE]" } }
+                .map { OpenAiJsonCodec.decodeFromString<ResponsesStreamEvent>(it) }
+                .throwIfFailure()
+                .collectRemoteCompactionV2Response()
         }
-        return OpenAiJsonCodec.decodeFromString(response.bodyAsText())
-    }
 
     override suspend fun generateImage(request: ImageGenerationRequest): OpenAiResponseResult<ImageResponse> {
         val response = httpClient.post {
@@ -163,7 +197,7 @@ public class OpenAiClient(
             contentType(ContentType.Application.Json)
             setBody(request)
         }
-        return response.body()
+        return response.openAiResponseResult(ImageResponse.serializer())
     }
 
     override suspend fun editImage(request: ImageEditRequest): OpenAiResponseResult<ImageResponse> {
@@ -175,7 +209,7 @@ public class OpenAiClient(
             contentType(ContentType.Application.Json)
             setBody(request)
         }
-        return response.body()
+        return response.openAiResponseResult(ImageResponse.serializer())
     }
 
     override suspend fun search(request: SearchRequest): OpenAiResponseResult<SearchResponse> {
@@ -188,7 +222,7 @@ public class OpenAiClient(
             headers[HttpHeaders.OpenAiSearchVersion] = config.clientVersion
             setBody(request)
         }
-        return response.body()
+        return response.openAiResponseResult(SearchResponse.serializer())
     }
 
     override fun close(): Unit {
@@ -197,69 +231,81 @@ public class OpenAiClient(
 
 }
 
-internal fun RemoteCompactionV2Request.toResponsesApiRequest(): ResponsesApiRequest {
-    val metadata = remoteCompactionV2TurnMetadata()
-    val requestSettings = settings
-    return ResponsesApiRequest(
-        model = requestSettings.model,
+internal fun RemoteCompactionV2Request.toResponsesApiRequest(
+    turnMetadata: String,
+    windowId: String,
+): ResponsesApiRequest =
+    settings.toResponsesApiRequest(
         input = history + ResponseItem.CompactionTrigger,
-        instructions = requestSettings.instructions,
-        store = requestSettings.store,
-        previousResponseId = requestSettings.previousResponseId,
-        tools = requestSettings.tools,
-        toolChoice = requestSettings.toolChoice,
-        parallelToolCalls = requestSettings.parallelToolCalls,
-        reasoning = requestSettings.reasoning,
-        include = requestSettings.include,
-        serviceTier = requestSettings.serviceTier,
-        promptCacheKey = requestSettings.promptCacheKey,
-        text = requestSettings.text,
-        clientMetadata = requestSettings.clientMetadata + remoteCompactionV2ClientMetadata(metadata),
+        threadId = threadId,
+        turnMetadata = turnMetadata,
+        windowId = windowId,
     )
-}
 
-internal fun RemoteCompactionV2Request.remoteCompactionV2ExtraHeaders(): Map<String, String> =
-    buildMap {
-        put(HeaderCodexBetaFeatures, RemoteCompactionV2Feature)
-        settings.installationId?.let { put(HeaderCodexInstallationId, it) }
-        put(HeaderCodexTurnMetadata, remoteCompactionV2TurnMetadata())
-        put(HeaderCodexWindowId, checkpoint.windowNumber.toString())
-    }
-
-internal fun RemoteCompactionV2Request.remoteCompactionV2TurnMetadata(): String =
-    OpenAiJsonCodec.encodeToString(
-        JsonObject.serializer(),
-        buildJsonObject {
-            settings.installationId?.let { put("installation_id", it) }
-            settings.sessionId?.let { put("session_id", it) }
-            settings.threadId?.let { put("thread_id", it) }
-            put("turn_id", turnId)
-            put("window_id", checkpoint.windowNumber.toString())
-            put("request_kind", "compaction")
-            put(
-                "compaction",
-                buildJsonObject {
-                    put("trigger", trigger.wireName)
-                    put("reason", reason.wireName)
-                    put("implementation", "responses_compaction_v2")
-                    put("phase", phase.wireName)
-                    put("strategy", "memento")
-                },
-            )
+internal fun RemoteCompactionV2Request.toCodexTurnMetadata(windowId: String): String =
+    settings.toCodexTurnMetadata(
+        threadId = threadId,
+        windowId = windowId,
+        requestKind = "compaction",
+        compaction = buildJsonObject {
+            put("trigger", trigger.wireName)
+            put("reason", reason.wireName)
+            put("implementation", "responses_compaction_v2")
+            put("phase", phase.wireName)
+            put("strategy", "memento")
         },
     )
 
-private fun RemoteCompactionV2Request.remoteCompactionV2ClientMetadata(
+private fun CodexAgentSettings.toResponsesApiRequest(
+    input: List<ResponseItem>,
+    threadId: String,
     turnMetadata: String,
-): Map<String, String> =
-    buildMap {
-        settings.installationId?.let { put(HeaderCodexInstallationId, it) }
-        settings.sessionId?.let { put("session_id", it) }
-        settings.threadId?.let { put("thread_id", it) }
+    windowId: String,
+): ResponsesApiRequest {
+    val codexClientMetadata = buildMap {
+        installationId?.let { put(HeaderCodexInstallationId, it) }
+        sessionId?.let { put("session_id", it) }
+        put("thread_id", threadId)
         put("turn_id", turnId)
-        put(HeaderCodexWindowId, checkpoint.windowNumber.toString())
+        put(HeaderCodexWindowId, windowId)
         put(HeaderCodexTurnMetadata, turnMetadata)
     }
+    return ResponsesApiRequest(
+        model = model,
+        input = input,
+        instructions = instructions,
+        store = store,
+        previousResponseId = previousResponseId,
+        tools = tools,
+        toolChoice = toolChoice,
+        parallelToolCalls = parallelToolCalls,
+        reasoning = reasoning,
+        include = include,
+        serviceTier = serviceTier,
+        promptCacheKey = promptCacheKey,
+        text = text,
+        clientMetadata = clientMetadata + codexClientMetadata,
+    )
+}
+
+private fun CodexAgentSettings.toCodexTurnMetadata(
+    threadId: String,
+    windowId: String,
+    requestKind: String,
+    compaction: JsonObject? = null,
+): String =
+    OpenAiJsonCodec.encodeToString(
+        JsonObject.serializer(),
+        buildJsonObject {
+            installationId?.let { put("installation_id", it) }
+            sessionId?.let { put("session_id", it) }
+            put("thread_id", threadId)
+            put("turn_id", turnId)
+            put("window_id", windowId)
+            put("request_kind", requestKind)
+            compaction?.let { put("compaction", it) }
+        },
+    )
 
 private const val RemoteCompactionV2Feature: String = "remote_compaction_v2"
 private const val HeaderCodexBetaFeatures: String = "x-codex-beta-features"
@@ -292,7 +338,6 @@ internal suspend fun Flow<ResponsesStreamEvent>.collectRemoteCompactionV2Respons
                 completedResponse = event.response
             }
 
-            is ResponsesStreamEvent.Failed -> throw OpenAiRemoteCompactionV2FailureException(event.response.error)
             else -> Unit
         }
     }
@@ -315,6 +360,31 @@ internal suspend fun Flow<ResponsesStreamEvent>.collectRemoteCompactionV2Respons
     return RemoteCompactionV2Response(
         compactionOutput = checkNotNull(compactionOutput),
         completedResponse = completedResponse,
+    )
+}
+
+private suspend fun <Success> HttpResponse.openAiResponseResult(
+    successSerializer: KSerializer<Success>,
+): OpenAiResponseResult<Success> =
+    decodeOpenAiResponseResult(
+        status = status,
+        payload = body<JsonElement>(),
+        successSerializer = successSerializer,
+    )
+
+internal fun <Success> decodeOpenAiResponseResult(
+    status: HttpStatusCode,
+    payload: JsonElement,
+    successSerializer: KSerializer<Success>,
+): OpenAiResponseResult<Success> {
+    if (status.value !in 200..299) {
+        return OpenAiResult.Failure(
+            OpenAiJsonCodec.decodeFromJsonElement(OpenAiErrorResponse.serializer(), payload),
+        )
+    }
+    return OpenAiJsonCodec.decodeFromJsonElement(
+        OpenAiResultSerializer(successSerializer, OpenAiErrorResponse.serializer()),
+        payload,
     )
 }
 
@@ -348,12 +418,6 @@ private fun OpenAiClientRetryConfig.streamingRetryDelayMillis(retryIndex: Int): 
     }
     return randomizedDelayMillis.coerceAtMost(maxDelayMillis)
 }
-
-public class OpenAiRemoteCompactionV2FailureException(
-    public val error: ResponseError?,
-) : IllegalStateException(
-    error?.message ?: "Remote compaction v2 failed without structured error.",
-)
 
 public class OpenAiRemoteCompactionV2ProtocolException(
     message: String,

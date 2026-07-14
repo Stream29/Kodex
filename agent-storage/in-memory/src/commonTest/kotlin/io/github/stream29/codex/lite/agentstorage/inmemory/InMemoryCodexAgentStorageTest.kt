@@ -1,5 +1,17 @@
 package io.github.stream29.codex.lite.agentstorage.inmemory
 
+import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
+import io.github.stream29.codex.lite.agentstorage.contract.ceilToIndex
+import io.github.stream29.codex.lite.agentstorage.contract.floorToIndex
+import io.github.stream29.codex.lite.agentstorage.contract.forkTo
+import io.github.stream29.codex.lite.agentstorage.contract.indexes
+import io.github.stream29.codex.lite.agentstorage.contract.indexesDescending
+import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
+import io.github.stream29.codex.lite.agentstorage.contract.nextIndex
+import io.github.stream29.codex.lite.agentstorage.contract.prevIndex
+import io.github.stream29.codex.lite.agentstorage.contract.transaction
+import io.github.stream29.codex.lite.openai.CodexAgentSettings
+import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.OpenAiModelId
@@ -7,14 +19,6 @@ import io.github.stream29.codex.lite.openai.PlanItemArg
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.StepStatus
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
-import io.github.stream29.codex.lite.openai.CodexAgentSettings
-import io.github.stream29.codex.lite.openai.CompactionCheckpoint
-import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
-import io.github.stream29.codex.lite.agentstorage.contract.forkTo
-import io.github.stream29.codex.lite.agentstorage.contract.indexes
-import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
-import io.github.stream29.codex.lite.agentstorage.contract.nextIndex
-import io.github.stream29.codex.lite.agentstorage.contract.transaction
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
@@ -24,12 +28,28 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotEquals
 import kotlin.time.Instant
 
 class InMemoryCodexAgentStorageTest {
     @Test
+    fun constructionPublishesLegalInitialSnapshotAndNewThreadId() = runTest {
+        val storage = storage()
+        val other = storage()
+
+        assertEquals(0, storage.latestIndex())
+        assertEquals(settings("initial-model"), storage.settings[0])
+        assertEquals(emptyList(), storage.compaction[0].prefix)
+        assertEquals(0, storage.compaction[0].historyBaseIndex)
+        assertEquals(0L, storage.compaction[0].windowNumber)
+        assertEquals(UpdatePlanArgs(plan = emptyList()), storage.plan[0])
+        assertEquals(-1, storage.history.latestIndex())
+        assertNotEquals(storage.id, other.id)
+    }
+
+    @Test
     fun historyUsesSparseTimelineAndRejectsNonTailWrites() = runTest {
-        val storage = InMemoryCodexAgentStorage()
+        val storage = storage()
         val first = userMessage("first")
         val second = assistantMessage("second")
 
@@ -42,11 +62,22 @@ class InMemoryCodexAgentStorageTest {
         assertEquals(first, storage.history[0])
         assertEquals(first, storage.history[2])
         assertEquals(second, storage.history[3])
-        assertEquals(0, storage.history.nextIndex(from = 0))
-        assertEquals(3, storage.history.nextIndex(from = 1))
-        assertEquals(null, storage.history.nextIndex(from = 4))
+        assertEquals(null, storage.history.floorToIndex(-1))
+        assertEquals(0, storage.history.floorToIndex(0))
+        assertEquals(0, storage.history.floorToIndex(2))
+        assertEquals(3, storage.history.floorToIndex(3))
+        assertEquals(0, storage.history.ceilToIndex(-1))
+        assertEquals(0, storage.history.ceilToIndex(0))
+        assertEquals(3, storage.history.ceilToIndex(1))
+        assertEquals(null, storage.history.ceilToIndex(4))
+        assertEquals(3, storage.history.nextIndex(0))
+        assertEquals(null, storage.history.nextIndex(3))
+        assertEquals(0, storage.history.prevIndex(3))
+        assertEquals(null, storage.history.prevIndex(0))
         assertEquals(listOf(0, 3), storage.history.indexes().toList())
         assertEquals(listOf(3), storage.history.indexes(from = 1).toList())
+        assertEquals(listOf(3, 0), storage.history.indexesDescending(from = 3).toList())
+        assertEquals(listOf(0), storage.history.indexesDescending(from = 2).toList())
         assertFailsWith<IllegalArgumentException> {
             storage.history[1] = userMessage("overwrite")
         }
@@ -55,7 +86,7 @@ class InMemoryCodexAgentStorageTest {
 
     @Test
     fun revertRemovesStoredSuffixAndAllowsAppendingAgain() = runTest {
-        val storage = InMemoryCodexAgentStorage()
+        val storage = storage()
         val first = userMessage("first")
         val replacement = assistantMessage("replacement")
 
@@ -83,7 +114,7 @@ class InMemoryCodexAgentStorageTest {
 
     @Test
     fun timelineTransactionRevertsAppendedEntriesOnFailure() = runTest {
-        val storage = InMemoryCodexAgentStorage()
+        val storage = storage()
         val first = userMessage("first")
         storage.history[0] = first
 
@@ -101,15 +132,12 @@ class InMemoryCodexAgentStorageTest {
 
     @Test
     fun storageTransactionRevertsEveryTimelineOnFailure() = runTest {
-        val storage = InMemoryCodexAgentStorage()
         val initialSettings = settings("initial-model")
-        val initialCheckpoint = checkpoint()
-        val initialPlan = plan("initial", StepStatus.Pending)
+        val storage = storage(initialSettings)
+        val initialCheckpoint = storage.compaction[0]
+        val initialPlan = storage.plan[0]
         val initialTimestamp = timestamp(0)
         val initialMessage = userMessage("initial")
-        storage.settings[0] = initialSettings
-        storage.compaction[0] = initialCheckpoint
-        storage.plan[0] = initialPlan
         storage.timestamp[0] = initialTimestamp
         storage.tokenCount[0] = 10
         storage.history[0] = initialMessage
@@ -137,10 +165,7 @@ class InMemoryCodexAgentStorageTest {
 
     @Test
     fun storageTransactionRevertsEveryTimelineOnCancellation() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.settings[0] = settings("initial-model")
-        storage.compaction[0] = checkpoint()
-        storage.plan[0] = plan("initial", StepStatus.Pending)
+        val storage = storage()
         storage.timestamp[0] = timestamp(0)
         storage.tokenCount[0] = 10
         storage.history[0] = userMessage("initial")
@@ -164,17 +189,16 @@ class InMemoryCodexAgentStorageTest {
 
     @Test
     fun sparseTimelinesReturnActiveValueAtRequestedIndex() = runTest {
-        val storage = InMemoryCodexAgentStorage()
         val initialSettings = settings("initial-model")
+        val storage = storage(initialSettings)
         val updatedSettings = settings("updated-model")
         val initialPlan = plan("inspect", StepStatus.Pending)
         val updatedPlan = plan("implement", StepStatus.InProgress)
         val initialTimestamp = timestamp(1)
         val updatedTimestamp = timestamp(3)
 
-        storage.settings[0] = initialSettings
         storage.settings[3] = updatedSettings
-        storage.plan[0] = initialPlan
+        storage.plan[1] = initialPlan
         storage.plan[3] = updatedPlan
         storage.timestamp[0] = initialTimestamp
         storage.timestamp[3] = updatedTimestamp
@@ -193,6 +217,7 @@ class InMemoryCodexAgentStorageTest {
         }
 
         assertEquals(3, storage.plan.latestIndex())
+        assertEquals(UpdatePlanArgs(plan = emptyList()), storage.plan[0])
         assertEquals(initialPlan, storage.plan[2])
         assertEquals(updatedPlan, storage.plan[8])
 
@@ -207,46 +232,41 @@ class InMemoryCodexAgentStorageTest {
 
     @Test
     fun sparseTimelineRejectsReadsBeforeFirstStoredIndex() = runTest {
-        val storage = InMemoryCodexAgentStorage()
+        val storage = storage()
 
-        storage.compaction[2] = CompactionCheckpoint(
-            prefix = listOf(assistantMessage("summary")),
-            historyBaseIndex = 2,
-            windowNumber = 0,
-            firstWindowId = "window-0",
-            windowId = "window-0",
-        )
+        storage.history[2] = assistantMessage("summary")
 
         assertFailsWith<IllegalArgumentException> {
-            storage.compaction[1]
+            storage.history[1]
         }
-        assertEquals(2, storage.compaction.latestIndex())
-        assertEquals(listOf(2), storage.compaction.indexes().toList())
+        assertEquals(2, storage.history.latestIndex())
+        assertEquals(listOf(2), storage.history.indexes().toList())
     }
 
     @Test
     fun storageLatestIndexUsesCommonStateIndex() = runTest {
-        val storage = InMemoryCodexAgentStorage()
+        val storage = storage()
 
-        assertEquals(-1, storage.latestIndex())
+        assertEquals(0, storage.latestIndex())
+        assertEquals(0, storage.floorToIndex(0))
+        assertEquals(0, storage.ceilToIndex(0))
         assertEquals(null, storage.nextIndex(0))
 
-        storage.history[0] = userMessage("hello")
-        assertEquals(0, storage.latestIndex())
-        assertEquals(0, storage.nextIndex(0))
+        storage.history[1] = userMessage("hello")
+        assertEquals(1, storage.latestIndex())
+        assertEquals(1, storage.nextIndex(0))
+        assertEquals(0, storage.prevIndex(1))
 
-        storage.settings[0] = settings("model")
-        storage.compaction[0] = checkpoint()
-        storage.plan[0] = UpdatePlanArgs(plan = emptyList())
-        storage.tokenCount[0] = 10
-        storage.timestamp[0] = timestamp(0)
-        assertEquals(0, storage.latestIndex())
+        storage.tokenCount[1] = 10
+        storage.timestamp[1] = timestamp(1)
+        assertEquals(1, storage.latestIndex())
 
         storage.settings[2] = settings("future-model")
         storage.plan[2] = plan("future", StepStatus.Pending)
         storage.tokenCount[2] = 30
         assertEquals(2, storage.latestIndex())
         assertEquals(2, storage.nextIndex(1))
+        assertEquals(1, storage.prevIndex(2))
 
         storage.timestamp[2] = timestamp(2)
         assertEquals(2, storage.latestIndex())
@@ -254,56 +274,61 @@ class InMemoryCodexAgentStorageTest {
         storage.history[4] = assistantMessage("future history")
         assertEquals(4, storage.latestIndex())
         assertEquals(4, storage.nextIndex(3))
-        assertEquals(null, storage.nextIndex(5))
+        assertEquals(2, storage.prevIndex(4))
+        assertEquals(null, storage.nextIndex(4))
     }
 
     @Test
-    fun forkCopiesEntriesBeforeExclusiveBoundary() = runTest {
-        val source = InMemoryCodexAgentStorage()
-        val target = InMemoryCodexAgentStorage()
+    fun forkResetsTargetBeforeCopyingAndKeepsTargetThreadId() = runTest {
         val oldSettings = settings("old-model")
-        val newSettings = settings("new-model")
+        val source = storage(oldSettings)
+        val target = storage(settings("target-model"))
+        val targetId = target.id
         val oldPlan = plan("old step", StepStatus.Completed)
-        val newPlan = plan("new step", StepStatus.InProgress)
-        val oldTimestamp = timestamp(0)
-        val middleTimestamp = timestamp(1)
-        val newTimestamp = timestamp(2)
-        val checkpoint = checkpoint()
+        val newSettings = settings("new-model")
 
-        source.settings[0] = oldSettings
-        source.compaction[0] = checkpoint
-        source.plan[0] = oldPlan
-        source.timestamp[0] = oldTimestamp
-        source.tokenCount[0] = 10
-        source.history[0] = userMessage("first")
-        source.history[1] = assistantMessage("second")
-        source.timestamp[1] = middleTimestamp
+        source.history[1] = userMessage("first")
+        source.plan[1] = oldPlan
+        source.timestamp[1] = timestamp(1)
+        source.tokenCount[1] = 10
         source.settings[2] = newSettings
-        source.plan[2] = newPlan
-        source.tokenCount[2] = 30
-        source.history[2] = userMessage("third")
-        source.timestamp[2] = newTimestamp
+        source.history[2] = assistantMessage("second")
+
+        target.history[1] = userMessage("stale")
+        target.settings[2] = settings("stale-model")
+        target.tokenCount[2] = 999
 
         source.forkTo(until = 2, target = target)
 
+        assertEquals(targetId, target.id)
         assertEquals(1, target.latestIndex())
-        assertEquals(userMessage("first"), target.history[0])
-        assertEquals(assistantMessage("second"), target.history[1])
-        assertEquals(oldSettings, target.settings[1])
-        assertEquals(checkpoint, target.compaction[1])
+        assertEquals(userMessage("first"), target.history[1])
+        assertEquals(userMessage("first"), target.history[2])
+        assertEquals(oldSettings, target.settings[2])
         assertEquals(oldPlan, target.plan[1])
-        assertEquals(middleTimestamp, target.timestamp[1])
+        assertEquals(timestamp(1), target.timestamp[1])
         assertEquals(10, target.tokenCount[1])
         assertEquals(listOf(0), target.settings.indexes().toList())
         assertEquals(listOf(0), target.compaction.indexes().toList())
-        assertEquals(listOf(0), target.plan.indexes().toList())
-        assertEquals(listOf(0, 1), target.timestamp.indexes().toList())
-        assertEquals(listOf(0), target.tokenCount.indexes().toList())
+        assertEquals(listOf(0, 1), target.plan.indexes().toList())
+        assertEquals(listOf(1), target.history.indexes().toList())
+        assertEquals(listOf(1), target.timestamp.indexes().toList())
+        assertEquals(listOf(1), target.tokenCount.indexes().toList())
+    }
+
+    @Test
+    fun forkRejectsAnEmptyTargetSnapshot() = runTest {
+        val source = storage()
+        val target = storage()
+
+        assertFailsWith<IllegalArgumentException> {
+            source.forkTo(until = 0, target = target)
+        }
     }
 
     @Test
     fun appendCompactionCheckpointPublishesSharedStorageTransition() = runTest {
-        val storage = InMemoryCodexAgentStorage()
+        val storage = storage()
         val prefix = listOf(userMessage("summary"))
         val marker = ResponseItem.ContextCompaction(encryptedContent = "encrypted")
         val transitionTime = timestamp(4)
@@ -315,6 +340,7 @@ class InMemoryCodexAgentStorageTest {
             previousWindowId = "window-5",
             windowId = "window-6",
         )
+        val settings = settings("test-model")
 
         val index = storage.appendCompactionCheckpoint(
             prefix = prefix,
@@ -323,28 +349,38 @@ class InMemoryCodexAgentStorageTest {
             tokenCount = 42,
             previousCheckpoint = previousCheckpoint,
             nextWindowId = "window-7",
+            settings = settings,
         )
 
-        assertEquals(0, index)
-        assertEquals(0, storage.latestIndex())
-        assertEquals(marker, storage.history[0])
+        assertEquals(1, index)
+        assertEquals(1, storage.latestIndex())
+        assertEquals(marker, storage.history[1])
         assertEquals(
             CompactionCheckpoint(
                 prefix = prefix,
-                historyBaseIndex = 1,
+                historyBaseIndex = 2,
                 windowNumber = 7,
                 firstWindowId = "window-0",
                 previousWindowId = "window-6",
                 windowId = "window-7",
             ),
-            storage.compaction[0],
+            storage.compaction[1],
         )
-        assertEquals(transitionTime, storage.timestamp[0])
-        assertEquals(42, storage.tokenCount[0])
+        assertEquals(transitionTime, storage.timestamp[1])
+        assertEquals(42, storage.tokenCount[1])
+        assertEquals(settings, storage.settings[1])
     }
 
+    private fun storage(
+        initialSettings: CodexAgentSettings = settings("initial-model"),
+    ): InMemoryCodexAgentStorage =
+        InMemoryCodexAgentStorage(initialSettings)
+
     private fun settings(model: String): CodexAgentSettings =
-        CodexAgentSettings(model = OpenAiModelId(model))
+        CodexAgentSettings(
+            model = OpenAiModelId(model),
+            turnId = "turn-$model",
+        )
 
     private fun plan(
         step: String,

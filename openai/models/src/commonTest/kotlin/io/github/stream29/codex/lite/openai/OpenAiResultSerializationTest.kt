@@ -5,6 +5,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
 class OpenAiResultSerializationTest {
@@ -66,5 +67,17 @@ class OpenAiResultSerializationTest {
         )
 
         assertEquals("""{"models":[{"slug":"gpt-test","display_name":"GPT Test"}]}""", encoded)
+    }
+
+    @Test
+    fun getOrThrowRaisesTheStructuredError() {
+        val error = OpenAiErrorResponse(message = "bad request", code = "invalid_request")
+        val result: OpenAiResponseResult<ModelsResponse> = OpenAiResult.Failure(error)
+
+        val failure = assertFailsWith<OpenAiResponseResultException> {
+            result.getOrThrow()
+        }
+
+        assertEquals(error, failure.error)
     }
 }

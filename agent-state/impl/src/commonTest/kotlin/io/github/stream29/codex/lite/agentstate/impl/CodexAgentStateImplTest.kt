@@ -1,17 +1,19 @@
 package io.github.stream29.codex.lite.agentstate.impl
 
-import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateEnum
+import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
+import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
+import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
+import io.github.stream29.codex.lite.agentstate.contract.forcedCompact
+import io.github.stream29.codex.lite.agentstorage.contract.nextIndex
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
+import io.github.stream29.codex.lite.openai.FailedResponse
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
-import io.github.stream29.codex.lite.openai.CompactionInput
-import io.github.stream29.codex.lite.openai.CompactionResponse
 import io.github.stream29.codex.lite.openai.ContentItem
+import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
 import io.github.stream29.codex.lite.openai.MessageRole
-import io.github.stream29.codex.lite.openai.OpenAiErrorResponse
 import io.github.stream29.codex.lite.openai.OpenAiModelId
-import io.github.stream29.codex.lite.openai.OpenAiResult
 import io.github.stream29.codex.lite.openai.PlanItemArg
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Phase
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Reason
@@ -19,6 +21,7 @@ import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
 import io.github.stream29.codex.lite.openai.Response
+import io.github.stream29.codex.lite.openai.ResponseError
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
@@ -29,6 +32,7 @@ import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
@@ -47,22 +51,201 @@ import kotlin.time.Instant
 
 class CodexAgentStateImplTest {
     @Test
-    fun defaultSettingsMatchRustCompactionDefaults() {
-        val settings = CodexAgentSettings(OpenAiModelId("test-model"))
+    fun stateTracksPendingToolCallsAndRejectsMismatchedResults() = runTest {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val user = userMessage("Run a command.")
+        val call = ResponseItem.FunctionCall(
+            name = "exec_command",
+            arguments = "{}",
+            callId = "call_1",
+        )
+        storage.history[1] = user
+        storage.history[2] = call
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
 
-        assertEquals(true, settings.remoteCompactionV2)
-        assertEquals(null, settings.autoCompactionTokenLimit)
-        assertEquals(null, settings.installationId)
-        assertEquals(null, settings.sessionId)
-        assertEquals(null, settings.threadId)
+        assertEquals(CodexAgentStateValue.ToolPending(listOf(call)), agent.state.value)
+
+        assertFailsWith<IllegalArgumentException> {
+            agent.completeToolCall(
+                ResponseItem.FunctionCallOutput(
+                    callId = "other_call",
+                    output = FunctionCallOutputPayload.fromText("no"),
+                ),
+            )
+        }
+        assertFailsWith<CodexAgentStateInvalidTransitionException> {
+            agent.requestResponseApi().toList()
+        }
+
+        agent.completeToolCall(
+            ResponseItem.FunctionCallOutput(
+                callId = "call_1",
+                output = FunctionCallOutputPayload.fromText("done"),
+            ),
+        )
+        assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
     }
 
     @Test
-    fun resumeContinuesSamplingWhenEndTurnIsFalse() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
+    fun completeToolCallPersistsResultsOneAtATime() = runTest {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val firstCall = ResponseItem.FunctionCall(
+            name = "exec_command",
+            arguments = "{}",
+            callId = "call_1",
+        )
+        val secondCall = ResponseItem.CustomToolCall(
+            name = "apply_patch",
+            input = "*** Begin Patch",
+            callId = "call_2",
+        )
+        storage.history[1] = userMessage("Run both tools.")
+        storage.history[2] = firstCall
+        storage.history[3] = secondCall
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+
+        assertEquals(CodexAgentStateValue.ToolPending(listOf(firstCall, secondCall)), agent.state.value)
+
+        val secondOutput = ResponseItem.CustomToolCallOutput(
+            callId = secondCall.callId,
+            name = secondCall.name,
+            output = FunctionCallOutputPayload.fromText("second"),
+        )
+        val firstOutput = ResponseItem.FunctionCallOutput(
+            callId = firstCall.callId,
+            output = FunctionCallOutputPayload.fromText("first"),
+        )
+
+        val secondIndex = agent.completeToolCall(secondOutput)
+
+        assertEquals(4, secondIndex)
+        assertEquals(secondOutput, storage.history[4])
+        assertEquals(CodexAgentStateValue.ToolPending(listOf(firstCall)), agent.state.value)
+
+        val finalIndex = agent.completeToolCall(firstOutput)
+
+        assertEquals(5, finalIndex)
+        assertEquals(secondOutput, storage.history[4])
+        assertEquals(firstOutput, storage.history[5])
+        assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
+    }
+
+    @Test
+    fun stateReconstructionPairsTailToolCallsBeforeChoosingState() = runTest {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val firstCall = ResponseItem.FunctionCall(
+            name = "first",
+            arguments = "{}",
+            callId = "call_1",
+        )
+        val secondCall = ResponseItem.CustomToolCall(
+            name = "second",
+            input = "input",
+            callId = "call_2",
+        )
+        storage.history[1] = userMessage("Run both tools.")
+        storage.history[2] = firstCall
+        storage.history[3] = secondCall
+        storage.history[4] = ResponseItem.CustomToolCallOutput(
+            callId = secondCall.callId,
+            output = FunctionCallOutputPayload.fromText("second"),
+        )
+        storage.history[5] = ResponseItem.FunctionCallOutput(
+            callId = firstCall.callId,
+            output = FunctionCallOutputPayload.fromText("first"),
+        )
+
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+
+        assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
+    }
+
+    @Test
+    fun completeToolCallDoesNotUpdatePlan() = runTest {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val planCall = ResponseItem.FunctionCall(
+            name = "update_plan",
+            arguments = "{}",
+            callId = "plan_call",
+        )
+        storage.history[1] = userMessage("Start.")
+        storage.history[2] = planCall
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+
+        val outputIndex = agent.completeToolCall(
+            ResponseItem.FunctionCallOutput(
+                callId = planCall.callId,
+                output = FunctionCallOutputPayload.fromText("Plan updated").copy(success = true),
+            ),
+        )
+
+        assertEquals(3, outputIndex)
+        assertEquals(null, storage.plan.nextIndex(3))
+        assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
+    }
+
+    @Test
+    fun defaultSettingsAllocateUuidV7TurnId() {
+        val settings = CodexAgentSettings(OpenAiModelId("test-model"))
+
+        assertEquals('7', settings.turnId[14])
+        assertEquals(null, settings.autoCompactionTokenLimit)
+        assertEquals(null, settings.installationId)
+        assertEquals(null, settings.sessionId)
+    }
+
+    @Test
+    fun initializedStorageLoadsAsAnEmptyAgentState() = runTest {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+
+        assertEquals(0, agent.latestIndex.value)
+        assertEquals(CodexAgentStateValue.Empty, agent.state.value)
+    }
+
+    @Test
+    fun responseFailureIsPublishedWithoutAgentStateException() = runTest {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val failure = ResponsesStreamEvent.Failed(
+            FailedResponse(ResponseError(message = "bad request")),
+        )
+        val agent = CodexAgentState(
+            client = mockOpenAiClient {
+                createResponse { flowOf<ResponsesStreamEvent>(failure) }
+            },
+            storage = storage,
+        )
+        val received = mutableListOf<ResponsesStreamEvent>()
+
+        agent.appendUserMessage(userMessage("Start."))
+
+        agent.requestResponseApi().collect(received::add)
+
+        assertEquals(listOf<ResponsesStreamEvent>(failure), received)
+        assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
+        assertEquals(1, storage.latestIndex())
+    }
+
+    @Test
+    fun resumeExecutesOneRequestWhenEndTurnIsFalse() = runTest {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val requests = mutableListOf<ResponsesApiRequest>()
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createResponse { request ->
                     requests += request
@@ -121,36 +304,33 @@ class CodexAgentStateImplTest {
         )
 
         val user = userMessage("Answer briefly.")
-        assertEquals(1, agent.appendResponseItem(user, instant(0), tokenCount = 1))
+        assertEquals(1, agent.appendUserMessage(user, tokenCount = 1))
 
-        agent.resume().toList()
+        agent.requestResponseApi().toList()
 
-        assertEquals(CodexAgentStateEnum.Idle, agent.state.value)
-        assertEquals(2, requests.size)
+        assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
+        assertEquals(1, requests.size)
         assertEquals(listOf(user), requests[0].input)
-        assertEquals(
-            listOf(
-                user,
-                ResponseItem.Reasoning(summary = emptyList()),
-                assistantMessage("Preparing the answer."),
-            ),
-            requests[1].input,
-        )
-        assertEquals(6, storage.latestIndex())
+        assertEquals(4, storage.latestIndex())
         assertIs<ResponseItem.Reasoning>(storage.history[2])
-        assertEquals(assistantMessage("Done."), storage.history[5])
-        assertEquals(null, storage.history.nextIndex(6))
-        assertEquals(13, storage.tokenCount[6])
+        assertEquals(assistantMessage("Preparing the answer."), storage.history[3])
+        assertEquals(null, storage.history.nextIndex(4))
+        assertEquals(12, storage.tokenCount[4])
         assertTrue(storage.timestamp[4] > instant(0))
-        assertEquals(6, agent.latestIndex.value)
+        assertEquals(4, agent.latestIndex.value)
     }
 
     @Test
     fun resumeSendsStoredReasoningItemsBackToModel() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val requests = mutableListOf<ResponsesApiRequest>()
-        val agent = CodexAgentStateImpl(
+        val user = userMessage("Continue.")
+        val reasoning = ResponseItem.Reasoning(summary = emptyList())
+        val assistant = assistantMessage("Ready.")
+        storage.history[1] = user
+        storage.history[2] = reasoning
+        storage.history[3] = assistant
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createResponse { request ->
                     requests += request
@@ -163,26 +343,20 @@ class CodexAgentStateImplTest {
             },
             storage = storage,
         )
-        val user = userMessage("Continue.")
-        val reasoning = ResponseItem.Reasoning(summary = emptyList())
-        val assistant = assistantMessage("Ready.")
 
-        agent.appendResponseItem(user, instant(0), tokenCount = null)
-        agent.appendResponseItem(reasoning, instant(1), tokenCount = null)
-        agent.appendResponseItem(assistant, instant(2), tokenCount = null)
-
-        agent.resume().toList()
+        agent.requestResponseApi().toList()
 
         assertEquals(
             listOf(user, reasoning, assistant),
             requests.single().input,
         )
+        assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
     }
 
     @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun resumePublishesOutputItemAndRawStreamEventsBeforeCompleted() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val outputItem = assistantMessage("Streaming item is visible before completion.")
         val outputEvent = ResponsesStreamEvent.OutputItemDone(
             outputIndex = 0,
@@ -201,7 +375,7 @@ class CodexAgentStateImplTest {
         )
         val outputItemCollected = CompletableDeferred<Unit>()
         val releaseCompletion = CompletableDeferred<Unit>()
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createResponse {
                     flow {
@@ -215,9 +389,9 @@ class CodexAgentStateImplTest {
             storage = storage,
         )
 
-        agent.appendResponseItem(userMessage("Start streaming."), instant(0), tokenCount = null)
+        agent.appendUserMessage(userMessage("Start streaming."))
         val runningResume = async(start = CoroutineStart.UNDISPATCHED) {
-            agent.resume().toList()
+            agent.requestResponseApi().toList()
         }
 
         outputItemCollected.await()
@@ -235,8 +409,7 @@ class CodexAgentStateImplTest {
 
     @Test
     fun resumeDoesNotWaitForSlowStreamEventCollector() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val deltaEvent = ResponsesStreamEvent.OutputTextDelta(
             itemId = "message_1",
             outputIndex = 0,
@@ -257,7 +430,7 @@ class CodexAgentStateImplTest {
         val productionCompleted = CompletableDeferred<Unit>()
         val firstEventCollected = CompletableDeferred<Unit>()
         val releaseCollector = CompletableDeferred<Unit>()
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createResponse {
                     flow {
@@ -273,9 +446,9 @@ class CodexAgentStateImplTest {
         )
         val collected = mutableListOf<ResponsesStreamEvent>()
 
-        agent.appendResponseItem(userMessage("Start streaming."), instant(0), tokenCount = null)
+        agent.appendUserMessage(userMessage("Start streaming."))
         val runningResume = async(start = CoroutineStart.UNDISPATCHED) {
-            agent.resume().collect { event ->
+            agent.requestResponseApi().collect { event ->
                 collected += event
                 if (collected.size == 1) {
                     firstEventCollected.complete(Unit)
@@ -287,7 +460,7 @@ class CodexAgentStateImplTest {
         firstEventCollected.await()
         yield()
         assertTrue(productionCompleted.isCompleted)
-        assertEquals(CodexAgentStateEnum.Idle, agent.state.value)
+        assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
         assertEquals(2, storage.latestIndex())
         assertEquals(9, storage.tokenCount[2])
 
@@ -299,8 +472,7 @@ class CodexAgentStateImplTest {
 
     @Test
     fun cancellingResumeAfterDeltaResetsStateAndDoesNotPersistPartialText() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val deltaEvent = ResponsesStreamEvent.OutputTextDelta(
             itemId = "message_1",
             outputIndex = 0,
@@ -309,7 +481,7 @@ class CodexAgentStateImplTest {
         )
         val deltaCollected = CompletableDeferred<Unit>()
         val releaseStream = CompletableDeferred<Unit>()
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createResponse {
                     flow {
@@ -324,9 +496,9 @@ class CodexAgentStateImplTest {
         val user = userMessage("Start streaming.")
         val collected = mutableListOf<ResponsesStreamEvent>()
 
-        agent.appendResponseItem(user, instant(0), tokenCount = null)
+        agent.appendUserMessage(user)
         val runningResume = async(start = CoroutineStart.UNDISPATCHED) {
-            agent.resume().toList(collected)
+            agent.requestResponseApi().toList(collected)
         }
 
         deltaCollected.await()
@@ -337,7 +509,7 @@ class CodexAgentStateImplTest {
             runningResume.await()
         }
 
-        assertEquals(CodexAgentStateEnum.Idle, agent.state.value)
+        assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
         assertEquals(1, storage.latestIndex())
         assertEquals(user, storage.history[1])
         assertEquals(null, storage.history.nextIndex(2))
@@ -346,9 +518,8 @@ class CodexAgentStateImplTest {
 
     @Test
     fun resumePropagatesCancellationExceptionWithoutWrappingIt() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
-        val agent = CodexAgentStateImpl(
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createResponse {
                     flow {
@@ -360,27 +531,26 @@ class CodexAgentStateImplTest {
         )
         val user = userMessage("Start streaming.")
 
-        agent.appendResponseItem(user, instant(0), tokenCount = null)
+        agent.appendUserMessage(user)
         val exception = assertFailsWith<CancellationException> {
-            agent.resume().toList()
+            agent.requestResponseApi().toList()
         }
 
         assertEquals("transport cancelled", exception.message)
-        assertEquals(CodexAgentStateEnum.Idle, agent.state.value)
+        assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
         assertEquals(1, storage.latestIndex())
         assertEquals(user, storage.history[1])
     }
 
     @Test
     fun cancellingResumeFromOutputItemCollectorKeepsStableHistoryItem() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val outputItem = assistantMessage("Stable output.")
         val outputEvent = ResponsesStreamEvent.OutputItemDone(
             outputIndex = 0,
             item = outputItem,
         )
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createResponse {
                     flowOf(outputEvent)
@@ -390,9 +560,9 @@ class CodexAgentStateImplTest {
         )
         val collected = mutableListOf<ResponsesStreamEvent>()
 
-        agent.appendResponseItem(userMessage("Start."), instant(0), tokenCount = null)
+        agent.appendUserMessage(userMessage("Start."))
         val runningResume = async(start = CoroutineStart.UNDISPATCHED) {
-            agent.resume().collect { event ->
+            agent.requestResponseApi().collect { event ->
                 collected += event
                 currentCoroutineContext().cancel(CancellationException("runtime cancelled after stable item"))
             }
@@ -403,7 +573,7 @@ class CodexAgentStateImplTest {
         }
 
         assertEquals(listOf<ResponsesStreamEvent>(outputEvent), collected)
-        assertEquals(CodexAgentStateEnum.Idle, agent.state.value)
+        assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
         assertEquals(2, storage.latestIndex())
         assertEquals(outputItem, storage.history[2])
         assertEquals(null, storage.history.nextIndex(3))
@@ -411,8 +581,7 @@ class CodexAgentStateImplTest {
 
     @Test
     fun cancellingResumeFromCompletedCollectorKeepsStableTokenCount() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val completedEvent = ResponsesStreamEvent.Completed(
             Response(
                 id = "response_1",
@@ -424,7 +593,7 @@ class CodexAgentStateImplTest {
                 endTurn = true,
             ),
         )
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createResponse {
                     flowOf(completedEvent)
@@ -434,9 +603,9 @@ class CodexAgentStateImplTest {
         )
         val collected = mutableListOf<ResponsesStreamEvent>()
 
-        agent.appendResponseItem(userMessage("Start."), instant(0), tokenCount = null)
+        agent.appendUserMessage(userMessage("Start."))
         val runningResume = async(start = CoroutineStart.UNDISPATCHED) {
-            agent.resume().collect { event ->
+            agent.requestResponseApi().collect { event ->
                 collected += event
                 currentCoroutineContext().cancel(CancellationException("runtime cancelled after completion"))
             }
@@ -447,7 +616,7 @@ class CodexAgentStateImplTest {
         }
 
         assertEquals(listOf<ResponsesStreamEvent>(completedEvent), collected)
-        assertEquals(CodexAgentStateEnum.Idle, agent.state.value)
+        assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
         assertEquals(2, storage.latestIndex())
         assertEquals(null, storage.history.nextIndex(2))
         assertEquals(9, storage.tokenCount[2])
@@ -455,15 +624,14 @@ class CodexAgentStateImplTest {
 
     @Test
     fun resumePersistsToolCallOutputItem() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val requests = mutableListOf<ResponsesApiRequest>()
         val toolCall = ResponseItem.FunctionCall(
             name = "exec_command",
             arguments = """{"cmd":"date"}""",
             callId = "call_1",
         )
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createResponse { request ->
                     requests += request
@@ -481,8 +649,8 @@ class CodexAgentStateImplTest {
             storage = storage,
         )
 
-        agent.appendResponseItem(userMessage("What time is it?"), instant(0), tokenCount = null)
-        agent.resume().toList()
+        agent.appendUserMessage(userMessage("What time is it?"))
+        agent.requestResponseApi().toList()
 
         assertEquals(1, requests.size)
         assertEquals(2, storage.latestIndex())
@@ -491,11 +659,10 @@ class CodexAgentStateImplTest {
     }
 
     @Test
-    fun updateSettingPublishesStateIndexWithoutHistoryItem() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("old-model")))
+    fun updateSettingsPublishesStateIndexWithoutHistoryItem() = runTest {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("old-model")))
         val requests = mutableListOf<ResponsesApiRequest>()
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createResponse { request ->
                     requests += request
@@ -512,31 +679,23 @@ class CodexAgentStateImplTest {
         )
         val user = userMessage("Use the new settings.")
 
-        agent.appendResponseItem(user, instant(0), tokenCount = 1)
-        val settingsIndex = agent.updateSetting(
-            settings = CodexAgentSettings(OpenAiModelId("new-model")),
-            timestamp = instant(1),
-            tokenCount = 2,
-        )
+        agent.appendUserMessage(user, tokenCount = 1)
+        val settingsIndex = agent.updateSettings(CodexAgentSettings(OpenAiModelId("new-model")))
 
         assertEquals(2, settingsIndex)
         assertEquals(null, storage.history.nextIndex(2))
         assertEquals(OpenAiModelId("new-model"), storage.settings[2].model)
+        assertEquals(1, storage.tokenCount[2])
 
-        agent.resume().toList()
+        agent.requestResponseApi().toList()
 
         assertEquals(OpenAiModelId("new-model"), requests.single().model)
         assertEquals(listOf(user), requests.single().input)
     }
 
     @Test
-    fun appendPlanUpdatePublishesRelatedTimelineBeforeHistory() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
-        val agent = CodexAgentStateImpl(
-            client = mockOpenAiClient(),
-            storage = storage,
-        )
+    fun appendPlanUpdatePublishesPlanAndMatchingToolResultAtomically() = runTest {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val plan = UpdatePlanArgs(
             plan = listOf(PlanItemArg(step = "inspect", status = StepStatus.InProgress)),
         )
@@ -545,24 +704,37 @@ class CodexAgentStateImplTest {
             arguments = "{}",
             callId = "plan_call",
         )
+        storage.history[1] = userMessage("Start.")
+        storage.tokenCount[1] = 1
+        storage.history[2] = planCall
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
 
-        agent.appendResponseItem(userMessage("Start."), instant(0), tokenCount = 1)
-        val planIndex = agent.appendPlanUpdate(planCall, plan)
+        val output = ResponseItem.FunctionCallOutput(
+            callId = planCall.callId,
+            output = FunctionCallOutputPayload.fromText("Plan updated").copy(success = true),
+        )
+        val planIndex = agent.appendPlanUpdate(
+            output = output,
+            plan = plan,
+        )
 
-        assertEquals(2, planIndex)
-        assertEquals(plan, storage.plan[2])
+        assertEquals(3, planIndex)
+        assertEquals(plan, storage.plan[3])
         assertEquals(planCall, storage.history[2])
-        assertEquals(1, storage.tokenCount[2])
-        assertTrue(storage.timestamp[2] > instant(0))
+        assertEquals(output, storage.history[3])
+        assertEquals(1, storage.tokenCount[3])
+        assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
     }
 
     @Test
     fun mutationFailsWhenAnotherMutationIsRunning() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val requestStarted = CompletableDeferred<Unit>()
         val releaseResponse = CompletableDeferred<Unit>()
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createResponse {
                     flow {
@@ -575,14 +747,14 @@ class CodexAgentStateImplTest {
             storage = storage,
         )
 
-        agent.appendResponseItem(userMessage("Wait."), instant(0), tokenCount = null)
-        val runningResume = async { agent.resume().toList() }
+        agent.appendUserMessage(userMessage("Wait."))
+        val runningResume = async { agent.requestResponseApi().toList() }
         requestStarted.await()
 
-        val exception = assertFailsWith<CodexAgentStateConcurrentModificationException> {
-            agent.appendResponseItem(userMessage("Concurrent input."), instant(1), tokenCount = null)
+        val exception = assertFailsWith<CodexAgentStateInvalidTransitionException> {
+            agent.appendUserMessage(userMessage("Concurrent input."))
         }
-        assertEquals(CodexAgentStateEnum.LlmRequest.Response, exception.currentState)
+        assertEquals(CodexAgentStateValue.RequestResponse, exception.currentState)
 
         releaseResponse.complete(Unit)
         runningResume.await()
@@ -590,10 +762,9 @@ class CodexAgentStateImplTest {
 
     @Test
     fun resumePersistsCompactionOutputWithoutRequestingCompaction() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val compactItem = ResponseItem.ContextCompaction(encryptedContent = "compact")
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createResponse {
                     flowOf(
@@ -609,8 +780,8 @@ class CodexAgentStateImplTest {
         )
 
         val user = userMessage("Compact.")
-        agent.appendResponseItem(user, instant(0), tokenCount = null)
-        agent.resume().toList()
+        agent.appendUserMessage(user)
+        agent.requestResponseApi().toList()
 
         assertEquals(2, storage.latestIndex())
         assertEquals(compactItem, storage.history[2])
@@ -619,12 +790,12 @@ class CodexAgentStateImplTest {
 
     @Test
     fun forcedCompactUsesRemoteCompactionV2ByDefault() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val initialTurnId = storage.settings[0].turnId
         val initialCheckpoint = storage.compaction[0]
         val compactRequests = mutableListOf<RemoteCompactionV2Request>()
         val compaction = ResponseItem.Compaction(encryptedContent = "compact")
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createRemoteCompactionV2Response { request ->
                     compactRequests += request
@@ -642,11 +813,11 @@ class CodexAgentStateImplTest {
         )
 
         val user = userMessage("This context is too large.")
-        agent.appendResponseItem(user, instant(0), tokenCount = null)
+        agent.appendUserMessage(user)
         val compactIndex = agent.forcedCompact()
 
         assertEquals(2, compactIndex)
-        assertEquals(CodexAgentStateEnum.Idle, agent.state.value)
+        assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
         assertEquals(1, compactRequests.size)
         val compactRequest = compactRequests.single()
         assertEquals(listOf(user), compactRequest.history)
@@ -655,7 +826,8 @@ class CodexAgentStateImplTest {
         assertEquals(RemoteCompactionV2Phase.StandaloneTurn, compactRequest.phase)
         assertEquals(null, compactRequest.settings.installationId)
         assertEquals(null, compactRequest.settings.sessionId)
-        assertEquals(null, compactRequest.settings.threadId)
+        assertEquals(storage.id, compactRequest.threadId)
+        assertTrue(compactRequest.settings.turnId != initialTurnId)
         assertEquals(initialCheckpoint, compactRequest.checkpoint)
         assertEquals(ResponseItem.ContextCompaction(encryptedContent = "compact"), storage.history[2])
         assertAdvancedCompactionCheckpoint(
@@ -665,22 +837,52 @@ class CodexAgentStateImplTest {
             previousCheckpoint = initialCheckpoint,
         )
         assertEquals(11, storage.tokenCount[2])
+        assertEquals(compactRequest.settings.turnId, storage.settings[2].turnId)
         assertEquals(2, agent.latestIndex.value)
     }
 
     @Test
-    fun remoteCompactionV2IncludesIdentityMetadataFromSettings() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(
+    fun remoteCompactionV2RetainsOnlyNewestUserMessagesWithinRustBudget() = runTest {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val old = userMessage("old user message")
+        val oversized = userMessage("x".repeat((64_000 + 2) * 4))
+        val newest = userMessage("newest user message")
+        val compaction = ResponseItem.Compaction(encryptedContent = "compact")
+        storage.history[1] = old
+        storage.history[2] = oversized
+        storage.history[3] = newest
+        val agent = CodexAgentState(
+            client = mockOpenAiClient {
+                createRemoteCompactionV2Response {
+                    remoteCompactionV2Response(compaction)
+                }
+            },
+            storage = storage,
+        )
+
+        agent.forcedCompact()
+
+        val prefix = storage.compaction[4].prefix
+        assertEquals(3, prefix.size)
+        val truncated = assertIs<ResponseItem.Message>(prefix[0])
+        val retainedText = assertIs<ContentItem.InputText>(truncated.content.single()).text
+        assertTrue(retainedText.contains("tokens truncated"))
+        assertEquals(newest, prefix[1])
+        assertEquals(compaction, prefix[2])
+        assertTrue(prefix.none { it == old })
+    }
+
+    @Test
+    fun remoteCompactionV2UsesStorageThreadIdentity() = runTest {
+        val storage = InMemoryCodexAgentStorage(
             CodexAgentSettings(
                 model = OpenAiModelId("test-model"),
                 installationId = "install",
                 sessionId = "session",
-                threadId = "thread",
             ),
         )
         val compactRequests = mutableListOf<RemoteCompactionV2Request>()
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createRemoteCompactionV2Response { request ->
                     compactRequests += request
@@ -690,25 +892,30 @@ class CodexAgentStateImplTest {
             storage = storage,
         )
 
-        agent.appendResponseItem(userMessage("Compact."), instant(0), tokenCount = null)
+        agent.appendUserMessage(userMessage("Compact."))
         agent.forcedCompact()
 
         val compactRequest = compactRequests.single()
         assertEquals("install", compactRequest.settings.installationId)
         assertEquals("session", compactRequest.settings.sessionId)
-        assertEquals("thread", compactRequest.settings.threadId)
+        assertEquals(storage.id, compactRequest.threadId)
     }
 
     @Test
     fun remoteCompactionV2UsesWindowNumberFromCheckpoint() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(
-            settings = CodexAgentSettings(OpenAiModelId("test-model")),
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val initialCheckpoint = CompactionCheckpoint(
+            prefix = emptyList(),
+            historyBaseIndex = 0,
             windowNumber = 7,
+            firstWindowId = "window-7",
+            windowId = "window-7",
         )
-        val initialCheckpoint = storage.compaction[0]
+        val user = userMessage("Compact.")
+        storage.compaction[1] = initialCheckpoint
+        storage.history[1] = user
         val compactRequests = mutableListOf<RemoteCompactionV2Request>()
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createRemoteCompactionV2Response { request ->
                     compactRequests += request
@@ -718,66 +925,21 @@ class CodexAgentStateImplTest {
             storage = storage,
         )
 
-        agent.appendResponseItem(userMessage("Compact."), instant(0), tokenCount = null)
         agent.forcedCompact()
 
         val compactRequest = compactRequests.single()
         assertEquals(7L, compactRequest.checkpoint.windowNumber)
         assertAdvancedCompactionCheckpoint(
             checkpoint = storage.compaction[2],
-            prefix = listOf(userMessage("Compact."), ResponseItem.Compaction(encryptedContent = "compact")),
+            prefix = listOf(user, ResponseItem.Compaction(encryptedContent = "compact")),
             historyBaseIndex = 3,
             previousCheckpoint = initialCheckpoint,
         )
     }
 
     @Test
-    fun forcedCompactCanUseLegacyCompactResponseWhenRemoteCompactionV2IsDisabled() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(
-            CodexAgentSettings(
-                model = OpenAiModelId("test-model"),
-                remoteCompactionV2 = false,
-            ),
-        )
-        val initialCheckpoint = storage.compaction[0]
-        val compactSummary = ResponseItem.CompactionSummary(encryptedContent = "summary")
-        val compactRequests = mutableListOf<CompactionInput>()
-        val agent = CodexAgentStateImpl(
-            client = mockOpenAiClient {
-                compactResponse { request ->
-                    compactRequests += request
-                    OpenAiResult.Success(
-                        CompactionResponse(output = listOf(compactSummary)),
-                    )
-                }
-            },
-            storage = storage,
-        )
-
-        val user = userMessage("This context is too large.")
-        agent.appendResponseItem(user, instant(0), tokenCount = null)
-        val compactIndex = agent.forcedCompact()
-
-        assertEquals(2, compactIndex)
-        assertEquals(CodexAgentStateEnum.Idle, agent.state.value)
-        assertEquals(1, compactRequests.size)
-        assertEquals(OpenAiModelId("test-model"), compactRequests.single().model)
-        assertEquals(listOf(user, ResponseItem.CompactionTrigger), compactRequests.single().input)
-        assertEquals(ResponseItem.ContextCompaction(), storage.history[2])
-        assertAdvancedCompactionCheckpoint(
-            checkpoint = storage.compaction[2],
-            prefix = listOf(compactSummary),
-            historyBaseIndex = 3,
-            previousCheckpoint = initialCheckpoint,
-        )
-        assertEquals(2, agent.latestIndex.value)
-    }
-
-    @Test
-    fun resumeRunsPreTurnRemoteCompactionBeforeSamplingWhenTokenLimitIsReached() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(
+    fun resumeDoesNotApplyAutoCompactionPolicy() = runTest {
+        val storage = InMemoryCodexAgentStorage(
             CodexAgentSettings(
                 model = OpenAiModelId("test-model"),
                 autoCompactionTokenLimit = 90,
@@ -789,7 +951,7 @@ class CodexAgentStateImplTest {
         val final = assistantMessage("After pre-turn compact.")
         val compactRequests = mutableListOf<RemoteCompactionV2Request>()
         val responseRequests = mutableListOf<RecordedCreateResponse>()
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createRemoteCompactionV2Response { request ->
                     compactRequests += request
@@ -799,8 +961,8 @@ class CodexAgentStateImplTest {
                     )
                 }
 
-                createResponseWithHeaders { request, extraHeaders ->
-                    responseRequests += RecordedCreateResponse(request, extraHeaders)
+                createResponse { request, installationId, turnMetadata, windowId ->
+                    responseRequests += RecordedCreateResponse(request, installationId, turnMetadata, windowId)
                     flowOf(
                         ResponsesStreamEvent.OutputItemDone(0, final),
                         ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = true)),
@@ -810,29 +972,21 @@ class CodexAgentStateImplTest {
             storage = storage,
         )
 
-        agent.appendResponseItem(user, instant(0), tokenCount = 90)
-        agent.resume().toList()
+        agent.appendUserMessage(user, tokenCount = 90)
+        agent.requestResponseApi().toList()
 
-        assertEquals(1, compactRequests.size)
-        assertEquals(listOf(user), compactRequests.single().history)
-        assertEquals(RemoteCompactionV2Phase.PreTurn, compactRequests.single().phase)
+        assertEquals(0, compactRequests.size)
         assertEquals(1, responseRequests.size)
-        assertEquals(listOf(user, compaction), responseRequests.single().request.input)
-        assertEquals(emptyMap(), responseRequests.single().extraHeaders)
-        assertEquals(ResponseItem.ContextCompaction(encryptedContent = "pre-turn-compact"), storage.history[2])
-        assertEquals(final, storage.history[3])
-        assertAdvancedCompactionCheckpoint(
-            checkpoint = storage.compaction[2],
-            prefix = listOf(user, compaction),
-            historyBaseIndex = 3,
-            previousCheckpoint = initialCheckpoint,
-        )
+        assertEquals(listOf(user), responseRequests.single().request.input)
+        assertEquals("${storage.id}:0", responseRequests.single().windowId)
+        assertTrue(responseRequests.single().turnMetadata.contains("\"request_kind\":\"turn\""))
+        assertEquals(final, storage.history[2])
+        assertEquals(initialCheckpoint, storage.compaction[2])
     }
 
     @Test
-    fun resumeRunsMidTurnRemoteCompactionThenContinuesSamplingWhenFollowUpIsNeeded() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(
+    fun resumeDoesNotContinueOrCompactWhenFollowUpIsNeeded() = runTest {
+        val storage = InMemoryCodexAgentStorage(
             CodexAgentSettings(
                 model = OpenAiModelId("test-model"),
                 autoCompactionTokenLimit = 20,
@@ -845,7 +999,7 @@ class CodexAgentStateImplTest {
         val final = assistantMessage("Final answer.")
         val compactRequests = mutableListOf<RemoteCompactionV2Request>()
         val responseRequests = mutableListOf<RecordedCreateResponse>()
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createRemoteCompactionV2Response { request ->
                     compactRequests += request
@@ -855,8 +1009,8 @@ class CodexAgentStateImplTest {
                     )
                 }
 
-                createResponseWithHeaders { request, extraHeaders ->
-                    responseRequests += RecordedCreateResponse(request, extraHeaders)
+                createResponse { request, installationId, turnMetadata, windowId ->
+                    responseRequests += RecordedCreateResponse(request, installationId, turnMetadata, windowId)
                     when (responseRequests.size) {
                         1 -> flowOf(
                             ResponsesStreamEvent.OutputItemDone(0, partial),
@@ -881,32 +1035,23 @@ class CodexAgentStateImplTest {
             storage = storage,
         )
 
-        agent.appendResponseItem(user, instant(0), tokenCount = 1)
-        agent.resume().toList()
+        agent.appendUserMessage(user, tokenCount = 1)
+        agent.requestResponseApi().toList()
 
-        assertEquals(2, responseRequests.size)
+        assertEquals(1, responseRequests.size)
         assertEquals(listOf(user), responseRequests[0].request.input)
-        assertEquals(emptyMap(), responseRequests[0].extraHeaders)
-        assertEquals(1, compactRequests.size)
-        assertEquals(listOf(user, partial), compactRequests.single().history)
-        assertEquals(RemoteCompactionV2Phase.MidTurn, compactRequests.single().phase)
-        assertEquals(listOf(user, compaction), responseRequests[1].request.input)
-        assertEquals(emptyMap(), responseRequests[1].extraHeaders)
+        assertEquals("${storage.id}:0", responseRequests[0].windowId)
+        assertTrue(responseRequests[0].turnMetadata.contains("\"request_kind\":\"turn\""))
+        assertEquals(0, compactRequests.size)
         assertEquals(partial, storage.history[2])
-        assertEquals(ResponseItem.ContextCompaction(encryptedContent = "mid-turn-compact"), storage.history[4])
-        assertEquals(final, storage.history[5])
-        assertAdvancedCompactionCheckpoint(
-            checkpoint = storage.compaction[4],
-            prefix = listOf(user, compaction),
-            historyBaseIndex = 5,
-            previousCheckpoint = initialCheckpoint,
-        )
+        assertEquals(20, storage.tokenCount[3])
+        assertEquals(initialCheckpoint, storage.compaction[3])
+        assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
     }
 
     @Test
-    fun resumeDoesNotCompactAfterFinalResponseUntilNextResume() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(
+    fun resumeNeverAppliesAutoCompactionPolicyAcrossRequests() = runTest {
+        val storage = InMemoryCodexAgentStorage(
             CodexAgentSettings(
                 model = OpenAiModelId("test-model"),
                 autoCompactionTokenLimit = 20,
@@ -918,7 +1063,7 @@ class CodexAgentStateImplTest {
         val secondFinal = assistantMessage("Second final.")
         val compactRequests = mutableListOf<RemoteCompactionV2Request>()
         val responseRequests = mutableListOf<RecordedCreateResponse>()
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createRemoteCompactionV2Response { request ->
                     compactRequests += request
@@ -928,8 +1073,8 @@ class CodexAgentStateImplTest {
                     )
                 }
 
-                createResponseWithHeaders { request, extraHeaders ->
-                    responseRequests += RecordedCreateResponse(request, extraHeaders)
+                createResponse { request, installationId, turnMetadata, windowId ->
+                    responseRequests += RecordedCreateResponse(request, installationId, turnMetadata, windowId)
                     when (responseRequests.size) {
                         1 -> flowOf(
                             ResponsesStreamEvent.OutputItemDone(0, firstFinal),
@@ -954,30 +1099,28 @@ class CodexAgentStateImplTest {
             storage = storage,
         )
 
-        agent.appendResponseItem(user, instant(0), tokenCount = 1)
-        agent.resume().toList()
+        agent.appendUserMessage(user, tokenCount = 1)
+        agent.requestResponseApi().toList()
 
         assertEquals(1, responseRequests.size)
-        assertEquals(emptyMap(), responseRequests.single().extraHeaders)
+        assertEquals("${storage.id}:0", responseRequests.single().windowId)
+        assertTrue(responseRequests.single().turnMetadata.contains("\"request_kind\":\"turn\""))
         assertEquals(0, compactRequests.size)
         assertEquals(firstFinal, storage.history[2])
         assertEquals(20, storage.tokenCount[3])
 
-        agent.resume().toList()
+        agent.requestResponseApi().toList()
 
         assertEquals(2, responseRequests.size)
-        assertEquals(1, compactRequests.size)
-        assertEquals(listOf(user, firstFinal), compactRequests.single().history)
-        assertEquals(RemoteCompactionV2Phase.PreTurn, compactRequests.single().phase)
-        assertEquals(listOf(user, compaction), responseRequests[1].request.input)
-        assertEquals(secondFinal, storage.history[5])
+        assertEquals(0, compactRequests.size)
+        assertEquals(listOf(user, firstFinal), responseRequests[1].request.input)
+        assertEquals(secondFinal, storage.history[4])
     }
 
     @Test
     fun remoteCompactionV2ClientFailureDoesNotMutateStorage() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
-        val agent = CodexAgentStateImpl(
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val agent = CodexAgentState(
             client = mockOpenAiClient {
                 createRemoteCompactionV2Response {
                     throw IllegalStateException("bad remote compaction v2")
@@ -986,48 +1129,22 @@ class CodexAgentStateImplTest {
             storage = storage,
         )
 
-        agent.appendResponseItem(userMessage("Compact."), instant(0), tokenCount = null)
+        agent.appendUserMessage(userMessage("Compact."))
 
         assertFailsWith<IllegalStateException> {
             agent.forcedCompact()
         }
         assertEquals(1, storage.latestIndex())
-        assertEquals(CodexAgentStateEnum.Idle, agent.state.value)
+        assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
     }
 
-    @Test
-    fun forcedCompactFailsWhenCompactionRequestFails() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(
-            CodexAgentSettings(
-                model = OpenAiModelId("test-model"),
-                remoteCompactionV2 = false,
-            ),
-        )
-        val error = OpenAiErrorResponse(message = "forced compact failed")
-        val agent = CodexAgentStateImpl(
-            client = mockOpenAiClient {
-                compactResponse {
-                    OpenAiResult.Failure(error)
-                }
-            },
-            storage = storage,
-        )
-
-        agent.appendResponseItem(userMessage("This context is too large."), instant(0), tokenCount = null)
-
-        val exception = assertFailsWith<CodexCompactionFailureException> {
-            agent.forcedCompact()
-        }
-        assertEquals(error, exception.error)
-        assertEquals(1, storage.latestIndex())
-        assertEquals(CodexAgentStateEnum.Idle, agent.state.value)
-    }
 }
 
 private data class RecordedCreateResponse(
     val request: ResponsesApiRequest,
-    val extraHeaders: Map<String, String>,
+    val installationId: String?,
+    val turnMetadata: String,
+    val windowId: String,
 )
 
 private fun userMessage(text: String): ResponseItem.Message =
@@ -1041,6 +1158,18 @@ private fun assistantMessage(text: String): ResponseItem.Message =
         role = MessageRole.Assistant,
         content = listOf(ContentItem.OutputText(text)),
     )
+
+private suspend fun CodexAgentStateContract.appendUserMessage(
+    message: ResponseItem.Message,
+    tokenCount: Long? = null,
+): Int {
+    require(message.role == MessageRole.User)
+    return appendUserMessage(message.content).also { index ->
+        if (tokenCount != null) {
+            (storage as MutableCodexAgentStorage).tokenCount[index] = tokenCount
+        }
+    }
+}
 
 private fun instant(epochSecond: Long): Instant =
     Instant.fromEpochSeconds(epochSecond)
@@ -1067,23 +1196,4 @@ private fun assertAdvancedCompactionCheckpoint(
     assertEquals(previousCheckpoint.windowId, checkpoint.previousWindowId)
     assertTrue(checkpoint.windowId != previousCheckpoint.windowId)
     assertEquals('7', checkpoint.windowId[14])
-}
-
-private suspend fun InMemoryCodexAgentStorage.initialize(
-    settings: CodexAgentSettings,
-    windowNumber: Long = 0,
-    windowId: String = "window-$windowNumber",
-    firstWindowId: String = windowId,
-    previousWindowId: String? = null,
-) {
-    this.settings[0] = settings
-    this.compaction[0] = CompactionCheckpoint(
-        prefix = emptyList(),
-        historyBaseIndex = 0,
-        windowNumber = windowNumber,
-        firstWindowId = firstWindowId,
-        previousWindowId = previousWindowId,
-        windowId = windowId,
-    )
-    this.plan[0] = UpdatePlanArgs(plan = emptyList())
 }

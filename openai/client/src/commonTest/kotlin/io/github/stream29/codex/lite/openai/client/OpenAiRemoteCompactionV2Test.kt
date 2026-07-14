@@ -11,6 +11,7 @@ import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
+import io.github.stream29.codex.lite.openai.codexRequestWindowId
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -23,7 +24,7 @@ import kotlin.test.assertNull
 
 class OpenAiRemoteCompactionV2Test {
     @Test
-    fun remoteCompactionV2BuildsResponsesRequestAndHeaders() {
+    fun remoteCompactionV2BuildsResponsesRequestAndTransportValues() {
         val user = ResponseItem.Message(
             role = MessageRole.User,
             content = listOf(ContentItem.InputText("Compact this.")),
@@ -43,17 +44,20 @@ class OpenAiRemoteCompactionV2Test {
                 clientMetadata = mapOf("existing" to "value"),
                 installationId = "install",
                 sessionId = "session",
-                threadId = "thread",
+                turnId = "turn_1",
             ),
-            turnId = "turn_1",
+            threadId = "thread",
             trigger = RemoteCompactionV2Trigger.Manual,
             reason = RemoteCompactionV2Reason.UserRequested,
             phase = RemoteCompactionV2Phase.StandaloneTurn,
         )
 
-        val responsesRequest = request.toResponsesApiRequest()
-        val headers = request.remoteCompactionV2ExtraHeaders()
-        val metadata = headers.getValue("x-codex-turn-metadata")
+        val windowId = request.checkpoint.codexRequestWindowId(request.threadId)
+        val metadata = request.toCodexTurnMetadata(windowId)
+        val responsesRequest = request.toResponsesApiRequest(
+            turnMetadata = metadata,
+            windowId = windowId,
+        )
 
         assertEquals(listOf(user, ResponseItem.CompactionTrigger), responsesRequest.input)
         assertEquals("value", responsesRequest.clientMetadata["existing"])
@@ -61,18 +65,16 @@ class OpenAiRemoteCompactionV2Test {
         assertEquals("session", responsesRequest.clientMetadata["session_id"])
         assertEquals("thread", responsesRequest.clientMetadata["thread_id"])
         assertEquals("turn_1", responsesRequest.clientMetadata["turn_id"])
-        assertEquals("7", responsesRequest.clientMetadata["x-codex-window-id"])
+        assertEquals(windowId, responsesRequest.clientMetadata["x-codex-window-id"])
         assertEquals(metadata, responsesRequest.clientMetadata["x-codex-turn-metadata"])
-        assertEquals("remote_compaction_v2", headers["x-codex-beta-features"])
-        assertEquals("install", headers["x-codex-installation-id"])
-        assertEquals("7", headers["x-codex-window-id"])
+        assertEquals("thread:7", windowId)
 
         val metadataJson = Json.parseToJsonElement(metadata).jsonObject
         assertEquals("install", metadataJson.getValue("installation_id").jsonPrimitive.content)
         assertEquals("session", metadataJson.getValue("session_id").jsonPrimitive.content)
         assertEquals("thread", metadataJson.getValue("thread_id").jsonPrimitive.content)
         assertEquals("turn_1", metadataJson.getValue("turn_id").jsonPrimitive.content)
-        assertEquals("7", metadataJson.getValue("window_id").jsonPrimitive.content)
+        assertEquals("thread:7", metadataJson.getValue("window_id").jsonPrimitive.content)
         assertEquals("compaction", metadataJson.getValue("request_kind").jsonPrimitive.content)
         val compaction = metadataJson.getValue("compaction").jsonObject
         assertEquals("manual", compaction.getValue("trigger").jsonPrimitive.content)
@@ -83,7 +85,7 @@ class OpenAiRemoteCompactionV2Test {
     }
 
     @Test
-    fun remoteCompactionV2OmitsAbsentIdentityMetadata() {
+    fun remoteCompactionV2OmitsOptionalIdentityMetadata() {
         val request = RemoteCompactionV2Request(
             history = emptyList(),
             checkpoint = CompactionCheckpoint(
@@ -93,24 +95,29 @@ class OpenAiRemoteCompactionV2Test {
                 firstWindowId = "window-0",
                 windowId = "window-0",
             ),
-            settings = CodexAgentSettings(OpenAiModelId("test-model")),
-            turnId = "turn_2",
+            settings = CodexAgentSettings(
+                model = OpenAiModelId("test-model"),
+                turnId = "turn_2",
+            ),
+            threadId = "thread",
             trigger = RemoteCompactionV2Trigger.Auto,
             reason = RemoteCompactionV2Reason.ContextLimit,
             phase = RemoteCompactionV2Phase.PreTurn,
         )
 
-        val responsesRequest = request.toResponsesApiRequest()
-        val headers = request.remoteCompactionV2ExtraHeaders()
-        val metadataJson = Json.parseToJsonElement(headers.getValue("x-codex-turn-metadata")).jsonObject
+        val windowId = request.checkpoint.codexRequestWindowId(request.threadId)
+        val metadataJson = Json.parseToJsonElement(request.toCodexTurnMetadata(windowId)).jsonObject
+        val responsesRequest = request.toResponsesApiRequest(
+            turnMetadata = request.toCodexTurnMetadata(windowId),
+            windowId = windowId,
+        )
 
-        assertFalse(headers.containsKey("x-codex-installation-id"))
         assertFalse(responsesRequest.clientMetadata.containsKey("x-codex-installation-id"))
         assertFalse(responsesRequest.clientMetadata.containsKey("session_id"))
-        assertFalse(responsesRequest.clientMetadata.containsKey("thread_id"))
+        assertEquals("thread", responsesRequest.clientMetadata["thread_id"])
         assertFalse(metadataJson.containsKey("installation_id"))
         assertFalse(metadataJson.containsKey("session_id"))
-        assertFalse(metadataJson.containsKey("thread_id"))
+        assertEquals("thread", metadataJson.getValue("thread_id").jsonPrimitive.content)
     }
 
     @Test

@@ -1,6 +1,5 @@
 package io.github.stream29.codex.lite.llmprovider
 
-import io.github.stream29.codex.lite.openai.CompactionInput
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.MutableOpenAiSubscriptionAuthSession
@@ -15,7 +14,6 @@ import io.github.stream29.codex.lite.openai.client.OpenAiClientConfig
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.codexclistorage.defaultCodexDirectory
 import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
-import io.ktor.client.call.NoTransformationFoundException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
@@ -74,36 +72,6 @@ class OpenAiSubscriptionLlmProviderTest {
             }
 
             assertTrue(event is ResponsesStreamEvent.Created, "Expected a Responses API created event.")
-        } finally {
-            provider.close()
-        }
-    }
-
-    @Test
-    fun compactResponseWithCodexCliCredentials() = runTest {
-        val provider = liveProvider()
-        try {
-            val result = try {
-                withContext(Dispatchers.Default) {
-                    provider.compactResponse(
-                        CompactionInput(
-                            model = liveModel(),
-                            instructions = "Summarize the conversation into one short sentence.",
-                            input = responseInput(
-                                "The user asked whether the Codex subscription provider can call the backend.",
-                            ),
-                            parallelToolCalls = false,
-                            promptCacheKey = "codex-lite-live-test",
-                        ),
-                    )
-                }
-            } catch (error: NoTransformationFoundException) {
-                assertTrue(error.message.contains("ContentType: null"), "Expected original Ktor conversion failure.")
-                return@runTest
-            }
-
-            val response = result.successOrFail()
-            assertTrue(response.output.isNotEmpty(), "Expected compaction output items.")
         } finally {
             provider.close()
         }

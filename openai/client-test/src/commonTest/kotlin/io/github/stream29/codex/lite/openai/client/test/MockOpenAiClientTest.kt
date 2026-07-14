@@ -1,6 +1,7 @@
 package io.github.stream29.codex.lite.openai.client.test
 
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
+import io.github.stream29.codex.lite.openai.CodexResponsesRequest
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.openai.ImageData
 import io.github.stream29.codex.lite.openai.ImageGenerationRequest
@@ -17,12 +18,14 @@ import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
+import io.github.stream29.codex.lite.openai.client.contract.createResponse
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class MockOpenAiClientTest {
     @Test
@@ -58,22 +61,43 @@ class MockOpenAiClientTest {
     }
 
     @Test
-    fun streamHandlerCanObserveExtraHeaders() = runTest {
+    fun codexRequestExtensionSuppliesRequiredTransportValues() = runTest {
         val completed = ResponsesStreamEvent.Completed(Response(id = "done"))
-        val request = ResponsesApiRequest(model = OpenAiModelId("model"), input = emptyList())
-        val observedHeaders = mutableListOf<Map<String, String>>()
+        val request = CodexResponsesRequest(
+            input = emptyList(),
+            checkpoint = CompactionCheckpoint(
+                prefix = emptyList(),
+                historyBaseIndex = 0,
+                windowNumber = 3,
+                firstWindowId = "window-0",
+                windowId = "window-3",
+            ),
+            settings = CodexAgentSettings(
+                model = OpenAiModelId("model"),
+                installationId = "install",
+                turnId = "turn_3",
+            ),
+            threadId = "thread_3",
+        )
+        var observedRequest: ResponsesApiRequest? = null
+        var observedInstallationId: String? = null
+        var observedTurnMetadata: String? = null
+        var observedWindowId: String? = null
         val client = mockOpenAiClient {
-            createResponseWithHeaders { _, extraHeaders ->
-                observedHeaders += extraHeaders
+            createResponse { rawRequest, installationId, turnMetadata, windowId ->
+                observedRequest = rawRequest
+                observedInstallationId = installationId
+                observedTurnMetadata = turnMetadata
+                observedWindowId = windowId
                 flowOf(completed)
             }
         }
 
-        assertEquals(
-            listOf(completed),
-            client.createResponse(request, mapOf("x-test" to "value")).toList(),
-        )
-        assertEquals(listOf(mapOf("x-test" to "value")), observedHeaders)
+        assertEquals(listOf(completed), client.createResponse(request).toList())
+        assertEquals("install", observedInstallationId)
+        assertEquals("thread_3:3", observedWindowId)
+        assertEquals("turn_3", observedRequest?.clientMetadata?.get("turn_id"))
+        assertTrue(observedTurnMetadata.orEmpty().contains("\"request_kind\":\"turn\""))
     }
 
     @Test
@@ -88,8 +112,11 @@ class MockOpenAiClientTest {
                 firstWindowId = "window-0",
                 windowId = "window-0",
             ),
-            settings = CodexAgentSettings(OpenAiModelId("model")),
-            turnId = "turn_0",
+            settings = CodexAgentSettings(
+                model = OpenAiModelId("model"),
+                turnId = "turn_0",
+            ),
+            threadId = "thread_0",
             trigger = RemoteCompactionV2Trigger.Manual,
             reason = RemoteCompactionV2Reason.UserRequested,
             phase = RemoteCompactionV2Phase.StandaloneTurn,

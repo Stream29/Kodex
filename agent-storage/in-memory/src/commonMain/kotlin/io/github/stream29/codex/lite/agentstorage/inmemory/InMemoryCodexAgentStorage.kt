@@ -8,25 +8,51 @@ import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStor
 import io.github.stream29.codex.lite.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.codex.lite.utils.SafeRw
 import kotlin.time.Instant
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
  * Process-local mutable storage for tests and transient agent sessions.
  *
- * This implementation keeps all published values in memory. It follows the
- * storage contract directly: every timeline is a sparse step-function
- * timeline.
+ * This implementation keeps all published values in memory. Construction
+ * publishes the required snapshot-zero settings, checkpoint, and empty plan,
+ * so it can always back a legal empty agent state.
  */
-public class InMemoryCodexAgentStorage : MutableCodexAgentStorage {
+@OptIn(ExperimentalUuidApi::class)
+public class InMemoryCodexAgentStorage(
+    initialSettings: CodexAgentSettings,
+) : MutableCodexAgentStorage {
+    private val initialWindowId: String = Uuid.generateV7().toString()
+
+    public override val id: String = Uuid.generateV7().toString()
     public override val history: MutableIndexVersioned<ResponseItem.HistoryItem> = InMemoryIndexVersioned()
-    public override val compaction: MutableIndexVersioned<CompactionCheckpoint> = InMemoryIndexVersioned()
-    public override val settings: MutableIndexVersioned<CodexAgentSettings> = InMemoryIndexVersioned()
-    public override val plan: MutableIndexVersioned<UpdatePlanArgs> = InMemoryIndexVersioned()
+    public override val compaction: MutableIndexVersioned<CompactionCheckpoint> =
+        InMemoryIndexVersioned(
+            listOf(
+                IndexedValue(
+                    0,
+                    CompactionCheckpoint(
+                        prefix = emptyList(),
+                        historyBaseIndex = 0,
+                        windowNumber = 0,
+                        firstWindowId = initialWindowId,
+                        windowId = initialWindowId,
+                    ),
+                ),
+            ),
+        )
+    public override val settings: MutableIndexVersioned<CodexAgentSettings> =
+        InMemoryIndexVersioned(listOf(IndexedValue(0, initialSettings)))
+    public override val plan: MutableIndexVersioned<UpdatePlanArgs> =
+        InMemoryIndexVersioned(listOf(IndexedValue(0, UpdatePlanArgs(plan = emptyList()))))
     public override val timestamp: MutableIndexVersioned<Instant> = InMemoryIndexVersioned()
     public override val tokenCount: MutableIndexVersioned<Long> = InMemoryIndexVersioned()
 }
 
-private class InMemoryIndexVersioned<T> : MutableIndexVersioned<T> {
-    private val entries = SafeRw<List<IndexedValue<T>>, MutableList<IndexedValue<T>>>(mutableListOf())
+private class InMemoryIndexVersioned<T>(
+    initialEntries: List<IndexedValue<T>> = emptyList(),
+) : MutableIndexVersioned<T> {
+    private val entries = SafeRw<List<IndexedValue<T>>, MutableList<IndexedValue<T>>>(initialEntries.toMutableList())
 
     override suspend fun latestIndex(): Int =
         entries.readSession { it.lastOrNull()?.index ?: -1 }
@@ -39,10 +65,16 @@ private class InMemoryIndexVersioned<T> : MutableIndexVersioned<T> {
             entries[entryIndex].value
         }
 
-    override suspend fun nextIndex(from: Int): Int? {
-        require(from >= 0) { "Index lower bound $from must be non-negative." }
+    override suspend fun floorToIndex(index: Int): Int? {
         return entries.readSession { entries ->
-            val entryIndex = entries.ceilingEntryIndex(from)
+            val entryIndex = entries.floorEntryIndex(index)
+            if (entryIndex >= 0) entries[entryIndex].index else null
+        }
+    }
+
+    override suspend fun ceilToIndex(index: Int): Int? {
+        return entries.readSession { entries ->
+            val entryIndex = entries.ceilingEntryIndex(index)
             if (entryIndex >= 0) entries[entryIndex].index else null
         }
     }

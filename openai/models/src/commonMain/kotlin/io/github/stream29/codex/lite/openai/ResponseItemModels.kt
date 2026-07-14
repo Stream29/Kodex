@@ -19,6 +19,22 @@ public sealed interface ResponseItem {
     public sealed interface HistoryItem : Known
 
     /**
+     * Model-issued local tool call that awaits one matching [ToolCallOutput].
+     */
+    @Serializable
+    public sealed interface ToolCall : HistoryItem {
+        public val callId: String
+    }
+
+    /**
+     * Locally produced result for one preceding [ToolCall].
+     */
+    @Serializable
+    public sealed interface ToolCallOutput : HistoryItem {
+        public val callId: String
+    }
+
+    /**
      * Model-visible items that represent compaction state changes.
      */
     @Serializable
@@ -116,8 +132,8 @@ public sealed interface ResponseItem {
         public val namespace: String? = null,
         public val arguments: String,
         @SerialName("call_id")
-        public val callId: String,
-    ) : HistoryItem
+        override val callId: String,
+    ) : ToolCall
 
     /**
      * @property id Nullable because tool-search call metadata may omit item id;
@@ -147,9 +163,9 @@ public sealed interface ResponseItem {
     public data class FunctionCallOutput(
         public val id: ResponseItemId? = null,
         @SerialName("call_id")
-        public val callId: String,
+        override val callId: String,
         public val output: FunctionCallOutputPayload,
-    ) : HistoryItem
+    ) : ToolCallOutput
 
     /**
      * Mirrors Rust `ResponseInputItem::McpToolCallOutput`.
@@ -161,9 +177,9 @@ public sealed interface ResponseItem {
     @SerialName("mcp_tool_call_output")
     public data class McpToolCallOutput(
         @SerialName("call_id")
-        public val callId: String,
+        override val callId: String,
         public val output: CallToolResult,
-    ) : HistoryItem
+    ) : ToolCallOutput
 
     /**
      * @property id Nullable because custom-tool call metadata may omit item id;
@@ -179,11 +195,11 @@ public sealed interface ResponseItem {
         public val id: ResponseItemId? = null,
         public val status: String? = null,
         @SerialName("call_id")
-        public val callId: String,
+        override val callId: String,
         public val name: String,
         public val namespace: String? = null,
         public val input: String,
-    ) : HistoryItem
+    ) : ToolCall
 
     /**
      * @property id Nullable because providers may omit custom-tool output ids;
@@ -196,10 +212,10 @@ public sealed interface ResponseItem {
     public data class CustomToolCallOutput(
         public val id: ResponseItemId? = null,
         @SerialName("call_id")
-        public val callId: String,
+        override val callId: String,
         public val name: String? = null,
         public val output: FunctionCallOutputPayload,
-    ) : HistoryItem
+    ) : ToolCallOutput
 
     /**
      * @property id Nullable because providers may omit tool-search output ids;

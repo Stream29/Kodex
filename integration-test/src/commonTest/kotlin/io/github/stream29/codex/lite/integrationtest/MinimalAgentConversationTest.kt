@@ -1,25 +1,27 @@
 package io.github.stream29.codex.lite.integrationtest
 
-import io.github.stream29.codex.lite.agentstate.impl.CodexAgentStateImpl
+import io.github.stream29.codex.lite.agentruntime.impl.CodexAgentLoopImpl
+import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
+import io.github.stream29.codex.lite.agentstate.contract.forcedCompact
+import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
-import io.github.stream29.codex.lite.openai.CompactionInput
-import io.github.stream29.codex.lite.openai.CompactionResponse
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MutableOpenAiSubscriptionAuthSession
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.OpenAiModelId
-import io.github.stream29.codex.lite.openai.OpenAiResponseResult
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.openai.RemoteCompactionV2Phase
+import io.github.stream29.codex.lite.openai.RemoteCompactionV2Reason
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
+import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
-import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.client.OpenAiClient as RealOpenAiClient
@@ -47,21 +49,19 @@ import kotlin.time.Instant
 class MinimalAgentConversationTest {
     @Test
     fun conversationLoopPersistsHistoryInStorage() = runTest {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(OpenAiModelId("test-model")))
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val requests = mutableListOf<ResponsesApiRequest>()
         val client = scriptedConversationClient(requests)
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = client,
             storage = storage,
         )
+        val runtime = CodexAgentLoopImpl(agent)
         val user = userMessage("Answer with a short greeting.")
 
         try {
-            agent.appendResponseItem(user, Instant.fromEpochSeconds(0), tokenCount = null)
-            agent.resume().collect()
-            assertEquals(1, requests.size)
-            agent.resume().collect()
+            agent.appendUserMessage(user.content)
+            runtime.resume().collect()
         } finally {
             client.close()
         }
@@ -95,7 +95,7 @@ class MinimalAgentConversationTest {
         requests: MutableList<ResponsesApiRequest>,
     ): OpenAiClient =
         mockOpenAiClient {
-            createResponse { request ->
+            createResponse { request, _, _, _ ->
                 requests += request
 
                 when (requests.size) {
@@ -134,8 +134,7 @@ class MinimalAgentConversationTest {
 class OpenAiStoryContinuationProbeTest {
     @Test
     fun realClientContinuesStoryFromStorage() = runTest(timeout = 180.seconds) {
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(CodexAgentSettings(model = testCodexModel()))
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(model = testCodexModel()))
         val client = RecordingOpenAiClient(
             RealOpenAiClient(
                 authProvider = MutableOpenAiSubscriptionAuthSession(testCodexStorage().readAuth()),
@@ -144,7 +143,7 @@ class OpenAiStoryContinuationProbeTest {
                 ),
             ),
         )
-        val agent = CodexAgentStateImpl(
+        val agent = CodexAgentState(
             client = client,
             storage = storage,
         )
@@ -153,14 +152,14 @@ class OpenAiStoryContinuationProbeTest {
         val continuation: String
         try {
             firstStory = withContext(Dispatchers.Default) {
-                agent.appendUserMessage(storage, "请用中文讲一个两句以内的微型故事，只讲故事本身。")
-                agent.resume().collect()
+                agent.appendUserMessage("请用中文讲一个两句以内的微型故事，只讲故事本身。")
+                agent.requestResponseApi().collect()
                 storage.lastAssistantMessage()
             } ?: fail("Expected the first response to contain an assistant story.")
 
             continuation = withContext(Dispatchers.Default) {
-                agent.appendUserMessage(storage, "请基于上一段故事继续写两句以内，不要重讲开头。")
-                agent.resume().collect()
+                agent.appendUserMessage("请基于上一段故事继续写两句以内，不要重讲开头。")
+                agent.requestResponseApi().collect()
                 storage.lastAssistantMessage()
             } ?: fail("Expected the second response to contain a continuation.")
         } finally {
@@ -171,14 +170,14 @@ class OpenAiStoryContinuationProbeTest {
         println("story probe continuation: $continuation")
 
         assertEquals(2, client.requests.size)
-        assertEquals(emptyList(), client.requests[0].tools)
-        assertEquals(emptyList(), client.requests[1].tools)
+        assertEquals(emptyList(), client.requests[0].request.tools)
+        assertEquals(emptyList(), client.requests[1].request.tools)
         assertTrue(firstStory.isNotBlank(), "Expected a non-empty first story.")
         assertTrue(continuation.isNotBlank(), "Expected a non-empty continuation.")
         assertNotEquals(firstStory, continuation, "Expected the continuation to add new text.")
         assertTrue(storage.latestIndex() >= 3, "Expected both turns to be persisted.")
         assertTrue(
-            client.requests[1].input.any { item ->
+            client.requests[1].request.input.any { item ->
                 item is ResponseItem.Message &&
                     item.role == MessageRole.Assistant &&
                     item.text() == firstStory
@@ -192,8 +191,7 @@ class OpenAiForcedCompactProbeTest {
     @Test
     fun realClientForcedCompactInstallsServerCompactionOutput() = runTest(timeout = 180.seconds) {
         val model = testCodexModel()
-        val storage = InMemoryCodexAgentStorage()
-        storage.initialize(
+        val storage = InMemoryCodexAgentStorage(
             CodexAgentSettings(
                 model = model,
                 instructions = "Summarize the conversation into a compact continuation context.",
@@ -208,7 +206,11 @@ class OpenAiForcedCompactProbeTest {
                 ),
             ),
         )
-        val agent = CodexAgentStateImpl(
+        storage.history[1] = userMessage(
+            "请记住：项目代号是 Cedar，目标是把 Kotlin agent state 的上下文压缩链路跑通。",
+        )
+        storage.history[2] = assistantMessage("已记录 Cedar 项目的目标。")
+        val agent = CodexAgentState(
             client = client,
             storage = storage,
         )
@@ -216,18 +218,6 @@ class OpenAiForcedCompactProbeTest {
         val compactIndex: Int
         try {
             compactIndex = withContext(Dispatchers.Default) {
-                agent.appendResponseItem(
-                    userMessage(
-                        "请记住：项目代号是 Cedar，目标是把 Kotlin agent state 的上下文压缩链路跑通。",
-                    ),
-                    Instant.fromEpochSeconds(0),
-                    tokenCount = null,
-                )
-                agent.appendResponseItem(
-                    assistantMessage("已记录 Cedar 项目的目标。"),
-                    Instant.fromEpochSeconds(1),
-                    tokenCount = null,
-                )
                 agent.forcedCompact()
             }
         } finally {
@@ -301,45 +291,49 @@ class OpenAiCompactionItemProbeTest {
     }
 
     @Test
-    fun realResponsesCompactionV2EmitsCompactionItem() = runTest(timeout = 180.seconds) {
-        val metadata = compactionV2TurnMetadata()
-        val events = withContext(Dispatchers.Default) {
-            runRealResponseProbe(
-                request = ResponsesApiRequest(
-                    model = testCodexModel(),
-                    input = listOf(
-                        userMessage("请记住：Kotlin 探针正在确认 remote compaction v2 的输出形状。"),
-                        assistantMessage("已记录这个探针目标。"),
-                        ResponseItem.CompactionTrigger,
+    fun realResponsesCompactionV2ReturnsCompactionOutput() = runTest(timeout = 180.seconds) {
+        val client = RealOpenAiClient(
+            authProvider = MutableOpenAiSubscriptionAuthSession(testCodexStorage().readAuth()),
+            config = OpenAiClientConfig(clientVersion = testCodexClientVersion()),
+        )
+        val response = try {
+            withContext(Dispatchers.Default) {
+                client.createRemoteCompactionV2Response(
+                    RemoteCompactionV2Request(
+                        history = listOf(
+                            userMessage("请记住：Kotlin 探针正在确认 remote compaction v2 的输出形状。"),
+                            assistantMessage("已记录这个探针目标。"),
+                        ),
+                        checkpoint = CompactionCheckpoint(
+                            prefix = emptyList(),
+                            historyBaseIndex = 0,
+                            windowNumber = 1,
+                            firstWindowId = "compaction-probe-window-0",
+                            windowId = "compaction-probe-window-1",
+                        ),
+                        settings = CodexAgentSettings(
+                            model = testCodexModel(),
+                            instructions = "Summarize the conversation into a compact continuation context.",
+                            store = false,
+                            promptCacheKey = "codex-lite-compaction-v2-probe",
+                            installationId = "codex-lite-compaction-probe-installation",
+                            sessionId = "codex-lite-compaction-probe-session",
+                        ),
+                        threadId = "codex-lite-compaction-probe-thread",
+                        trigger = RemoteCompactionV2Trigger.Manual,
+                        reason = RemoteCompactionV2Reason.UserRequested,
+                        phase = RemoteCompactionV2Phase.StandaloneTurn,
                     ),
-                    instructions = "Summarize the conversation into a compact continuation context.",
-                    store = false,
-                    clientMetadata = compactionV2ClientMetadata(metadata),
-                ),
-                config = OpenAiClientConfig(
-                    clientVersion = testCodexClientVersion(),
-                    defaultHeaders = compactionV2Headers(metadata),
-                ),
-            )
+                )
+            }
+        } finally {
+            client.close()
         }
-        val outputItems = events.outputItems()
-        val compactionItems = outputItems.filterIsInstance<ResponseItem.CompactionItem>()
 
-        println("compaction v2 output item types: ${outputItems.typeNames()}")
-        println(
-            "compaction v2 encrypted content lengths: " +
-                compactionItems.map { item -> item.encryptedContentOrNull()?.length },
-        )
-
-        events.completedResponseOrFail("responses compaction v2")
-        assertEquals(
-            1,
-            compactionItems.size,
-            "Remote compaction v2 should emit exactly one compaction item. Output items: $outputItems",
-        )
+        println("compaction v2 encrypted content length: ${response.compactionOutput.encryptedContent.length}")
         assertTrue(
-            compactionItems.single().encryptedContentOrNull()?.isNotBlank() == true,
-            "Remote compaction v2 compaction item should carry encrypted content. Output items: $outputItems",
+            response.compactionOutput.encryptedContent.isNotBlank(),
+            "Remote compaction v2 compaction output should carry encrypted content.",
         )
     }
 }
@@ -347,21 +341,17 @@ class OpenAiCompactionItemProbeTest {
 private class RecordingOpenAiClient(
     private val delegate: OpenAiClient,
 ) : OpenAiClient by delegate {
-    val requests: MutableList<ResponsesApiRequest> = mutableListOf()
-    val compactionRequests: MutableList<CompactionInput> = mutableListOf()
+    val requests: MutableList<RecordedCodexResponse> = mutableListOf()
     val remoteCompactionV2Requests: MutableList<RemoteCompactionV2Request> = mutableListOf()
 
     override suspend fun createResponse(
         request: ResponsesApiRequest,
-        extraHeaders: Map<String, String>,
+        installationId: String?,
+        turnMetadata: String,
+        windowId: String,
     ): Flow<ResponsesStreamEvent> {
-        requests += request
-        return delegate.createResponse(request, extraHeaders)
-    }
-
-    override suspend fun compactResponse(request: CompactionInput): OpenAiResponseResult<CompactionResponse> {
-        compactionRequests += request
-        return delegate.compactResponse(request)
+        requests += RecordedCodexResponse(request, installationId, turnMetadata, windowId)
+        return delegate.createResponse(request, installationId, turnMetadata, windowId)
     }
 
     override suspend fun createRemoteCompactionV2Response(
@@ -371,6 +361,13 @@ private class RecordingOpenAiClient(
         return delegate.createRemoteCompactionV2Response(request)
     }
 }
+
+private data class RecordedCodexResponse(
+    val request: ResponsesApiRequest,
+    val installationId: String?,
+    val turnMetadata: String,
+    val windowId: String,
+)
 
 private suspend fun runRealResponseProbe(input: List<ResponseItem>): List<ResponsesStreamEvent> =
     runRealResponseProbe(
@@ -402,49 +399,6 @@ private suspend fun runRealResponseProbe(
     }
     return events
 }
-
-private fun compactionV2Headers(metadata: String): Map<String, String> =
-    mapOf(
-        "x-codex-beta-features" to "remote_compaction_v2",
-        "x-codex-installation-id" to CompactionProbeInstallationId,
-        "x-codex-turn-metadata" to metadata,
-        "x-codex-window-id" to CompactionProbeWindowId,
-    )
-
-private fun compactionV2ClientMetadata(metadata: String): Map<String, String> =
-    mapOf(
-        "x-codex-installation-id" to CompactionProbeInstallationId,
-        "session_id" to CompactionProbeSessionId,
-        "thread_id" to CompactionProbeThreadId,
-        "turn_id" to CompactionProbeTurnId,
-        "x-codex-window-id" to CompactionProbeWindowId,
-        "x-codex-turn-metadata" to metadata,
-    )
-
-private fun compactionV2TurnMetadata(): String =
-    """
-    {
-      "installation_id":"$CompactionProbeInstallationId",
-      "session_id":"$CompactionProbeSessionId",
-      "thread_id":"$CompactionProbeThreadId",
-      "turn_id":"$CompactionProbeTurnId",
-      "window_id":"$CompactionProbeWindowId",
-      "request_kind":"compaction",
-      "compaction":{
-        "trigger":"manual",
-        "reason":"user_requested",
-        "implementation":"responses_compaction_v2",
-        "phase":"standalone_turn",
-        "strategy":"memento"
-      }
-    }
-    """.trimIndent().lineSequence().joinToString(separator = "") { line -> line.trim() }
-
-private const val CompactionProbeInstallationId: String = "codex-lite-compaction-probe-installation"
-private const val CompactionProbeSessionId: String = "codex-lite-compaction-probe-session"
-private const val CompactionProbeThreadId: String = "codex-lite-compaction-probe-thread"
-private const val CompactionProbeTurnId: String = "codex-lite-compaction-probe-turn"
-private const val CompactionProbeWindowId: String = "codex-lite-compaction-probe-thread:1"
 
 private fun List<ResponsesStreamEvent>.completedResponseOrFail(probeName: String): Response {
     filterIsInstance<ResponsesStreamEvent.Failed>().firstOrNull()?.let { event ->
@@ -493,13 +447,6 @@ private fun ResponseItem.typeName(): String =
         ResponseItem.Other -> "other"
     }
 
-private fun ResponseItem.CompactionItem.encryptedContentOrNull(): String? =
-    when (this) {
-        is ResponseItem.Compaction -> encryptedContent
-        is ResponseItem.CompactionSummary -> encryptedContent
-        is ResponseItem.ContextCompaction -> encryptedContent
-    }
-
 private fun testCodexDirectory(): Path {
     val explicitCodexHome = environmentVariable("CODEX_HOME")?.takeIf(String::isNotBlank)
     if (explicitCodexHome != null) {
@@ -541,17 +488,8 @@ private suspend fun testCodexModel(): OpenAiModelId {
     )
 }
 
-private suspend fun CodexAgentStateImpl.appendUserMessage(
-    storage: InMemoryCodexAgentStorage,
-    text: String,
-): Int {
-    val index = storage.latestIndex() + 1
-    return appendResponseItem(
-        item = userMessage(text),
-        timestamp = Instant.fromEpochSeconds(index.toLong()),
-        tokenCount = null,
-    )
-}
+private suspend fun CodexAgentStateContract.appendUserMessage(text: String): Int =
+    appendUserMessage(listOf(ContentItem.InputText(text)))
 
 private suspend fun InMemoryCodexAgentStorage.lastAssistantMessage(): String? {
     var message: String? = null
@@ -562,18 +500,6 @@ private suspend fun InMemoryCodexAgentStorage.lastAssistantMessage(): String? {
         }
     }
     return message
-}
-
-private suspend fun InMemoryCodexAgentStorage.initialize(settings: CodexAgentSettings) {
-    this.settings[0] = settings
-    this.compaction[0] = CompactionCheckpoint(
-        prefix = emptyList(),
-        historyBaseIndex = 0,
-        windowNumber = 0,
-        firstWindowId = "window-0",
-        windowId = "window-0",
-    )
-    this.plan[0] = UpdatePlanArgs(plan = emptyList())
 }
 
 private fun userMessage(text: String): ResponseItem.Message =

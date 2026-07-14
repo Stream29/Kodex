@@ -1,7 +1,5 @@
 package io.github.stream29.codex.lite.llmprovider
 
-import io.github.stream29.codex.lite.openai.CompactionInput
-import io.github.stream29.codex.lite.openai.CompactionResponse
 import io.github.stream29.codex.lite.openai.ModelsResponse
 import io.github.stream29.codex.lite.openai.OpenAiResponseResult
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthSession
@@ -28,14 +26,8 @@ public class OpenAiSubscriptionLlmProvider private constructor(
     override suspend fun listModels(): OpenAiResponseResult<ModelsResponse> =
         client.listModels()
 
-    override suspend fun createResponse(
-        request: ResponsesApiRequest,
-        extraHeaders: Map<String, String>,
-    ): Flow<ResponsesStreamEvent> =
-        client.createResponse(request, extraHeaders)
-
-    override suspend fun compactResponse(request: CompactionInput): OpenAiResponseResult<CompactionResponse> =
-        client.compactResponse(request)
+    override suspend fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent> =
+        client.createResponse(request)
 
     override fun close(): Unit {
         client.close()

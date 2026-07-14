@@ -9,6 +9,10 @@ import kotlin.time.Instant
 /**
  * Persisted state for one agent thread.
  *
+ * A storage accepted by `CodexAgentState` must publish its initial snapshot at
+ * index `0`: [settings], [compaction], and [plan] must each have a visible
+ * value there. An empty storage cannot represent a legal agent state.
+ *
  * All timelines share one sparse state index space. A state index may contain
  * entries in one timeline or several timelines; use [nextIndex] to enumerate
  * indexes that exist in at least one timeline.
@@ -28,6 +32,9 @@ import kotlin.time.Instant
  * timelines. Transactions provide rollback on failure or cancellation; callers
  * must still serialize concurrent writers.
  *
+ * @property id Stable identity of this storage-backed Codex thread. Request
+ * projection combines it with a compaction window number for the Codex wire
+ * `window_id`.
  * @property history Sparse response history log. Only real
  * [ResponseItem.HistoryItem] entries are stored. Use [IndexVersioned.nextIndex]
  * or [indexes] to enumerate stored history indexes; `history[index]` returns
@@ -47,6 +54,7 @@ import kotlin.time.Instant
  * means OpenAI did not report a new count for that transition.
  */
 public interface CodexAgentStorage {
+    public val id: String
     public val history: IndexVersioned<ResponseItem.HistoryItem>
     public val compaction: IndexVersioned<CompactionCheckpoint>
     public val settings: IndexVersioned<CodexAgentSettings>
@@ -71,20 +79,50 @@ public suspend fun CodexAgentStorage.latestIndex(): Int =
     )
 
 /**
- * Returns the first state index greater than or equal to [from] that is stored
- * in any timeline.
+ * Returns the greatest state index less than or equal to [index] that is
+ * stored in any timeline.
  *
- * @param from Inclusive lower bound.
+ * @param index Inclusive upper bound.
  */
-public suspend fun CodexAgentStorage.nextIndex(from: Int): Int? =
+public suspend fun CodexAgentStorage.floorToIndex(index: Int): Int? =
     listOfNotNull(
-        history.nextIndex(from),
-        compaction.nextIndex(from),
-        settings.nextIndex(from),
-        plan.nextIndex(from),
-        timestamp.nextIndex(from),
-        tokenCount.nextIndex(from),
+        history.floorToIndex(index),
+        compaction.floorToIndex(index),
+        settings.floorToIndex(index),
+        plan.floorToIndex(index),
+        timestamp.floorToIndex(index),
+        tokenCount.floorToIndex(index),
+    ).maxOrNull()
+
+/**
+ * Returns the smallest state index greater than or equal to [index] that is
+ * stored in any timeline.
+ *
+ * @param index Inclusive lower bound.
+ */
+public suspend fun CodexAgentStorage.ceilToIndex(index: Int): Int? =
+    listOfNotNull(
+        history.ceilToIndex(index),
+        compaction.ceilToIndex(index),
+        settings.ceilToIndex(index),
+        plan.ceilToIndex(index),
+        timestamp.ceilToIndex(index),
+        tokenCount.ceilToIndex(index),
     ).minOrNull()
+
+/**
+ * Returns the first global state index strictly after [index].
+ */
+public suspend fun CodexAgentStorage.nextIndex(index: Int): Int? {
+    return if (index == Int.MAX_VALUE) null else ceilToIndex(index + 1)
+}
+
+/**
+ * Returns the first global state index strictly before [index].
+ */
+public suspend fun CodexAgentStorage.prevIndex(index: Int): Int? {
+    return if (index == Int.MIN_VALUE) null else floorToIndex(index - 1)
+}
 
 /**
  * Mutable form of [CodexAgentStorage].
@@ -125,18 +163,25 @@ public suspend inline fun <R> MutableCodexAgentStorage.transaction(block: () -> 
     }
 
 /**
- * Forks this storage into an empty [target].
+ * Resets [target] and copies this storage into it.
  *
  * [until] is the exclusive state boundary. Callers should pass a
  * stable turn boundary, not an arbitrary index inside an unfinished model/tool
  * exchange.
  *
- * @param until Exclusive state upper bound.
+ * [target] keeps its own [CodexAgentStorage.id], so a fork represents a new
+ * Codex thread even when its initial history matches this storage.
+ *
+ * @param until Exclusive state upper bound. It must be greater than zero so
+ * the target retains its required initialized snapshot.
  */
 public suspend fun MutableCodexAgentStorage.forkTo(
     until: Int,
     target: MutableCodexAgentStorage,
 ) {
+    require(this !== target) { "Cannot fork a storage into itself." }
+    require(until > 0) { "A fork must include the initialized state at index 0." }
+    target.revertAll()
     target.transaction {
         this.history.forkTo(until, target.history)
         this.compaction.forkTo(until, target.compaction)
@@ -145,4 +190,13 @@ public suspend fun MutableCodexAgentStorage.forkTo(
         this.timestamp.forkTo(until, target.timestamp)
         this.tokenCount.forkTo(until, target.tokenCount)
     }
+}
+
+private suspend fun MutableCodexAgentStorage.revertAll() {
+    history.revert(0)
+    compaction.revert(0)
+    settings.revert(0)
+    plan.revert(0)
+    timestamp.revert(0)
+    tokenCount.revert(0)
 }

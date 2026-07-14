@@ -1,39 +1,80 @@
 package io.github.stream29.codex.lite.agentstate.contract
 
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
+import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
+import io.github.stream29.codex.lite.openai.RemoteCompactionV2Phase
+import io.github.stream29.codex.lite.openai.RemoteCompactionV2Reason
+import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
-import kotlin.time.Instant
 
 /**
- * Coarse-grained mutable-state phase visible to runtime callers.
+ * Observable agent-state value.
+ *
+ * Stable values describe which next atomic operation is legal. Transient
+ * values reserve state ownership while an atomic operation is in flight.
  */
-public sealed interface CodexAgentStateEnum {
-    public data object Idle : CodexAgentStateEnum
+public sealed interface CodexAgentStateValue {
+    /** The storage contains no conversation item that can start a request. */
+    public data object Empty : CodexAgentStateValue
 
-    public sealed interface LlmRequest : CodexAgentStateEnum {
-        public data object Response : LlmRequest
-        public data object Compact : LlmRequest
+    /** The latest conversation action is a user message. */
+    public data object UserMessage : CodexAgentStateValue
+
+    /** The latest completed conversation action is an assistant message. */
+    public data object AssistantMessage : CodexAgentStateValue
+
+    /**
+     * The model emitted tool calls whose outputs have not all been persisted.
+     *
+     * [calls] is a snapshot derived from the active storage history. It lets
+     * AgentState validate and complete one local tool result without rescanning
+     * that history.
+     */
+    public data class ToolPending(
+        public val calls: List<ResponseItem.ToolCall>,
+    ) : CodexAgentStateValue {
+        init {
+            require(calls.isNotEmpty()) { "ToolPending requires at least one pending tool call." }
+        }
     }
 
-    public data object ExternalWrite : CodexAgentStateEnum
+    /** All tool outputs for the preceding tool-call batch have been persisted. */
+    public data object ToolCompleted : CodexAgentStateValue
+
+    /** A caller-initiated storage update is in flight. */
+    public data object ExternalWrite : CodexAgentStateValue
+
+    /** A single Responses API request is in flight. */
+    public data object RequestResponse : CodexAgentStateValue
+
+    /** A single server-side context compaction request is in flight. */
+    public data object Compacting : CodexAgentStateValue
 }
 
 /**
- * Read-only observable agent state.
+ * Observable atomic agent state.
+ *
+ * This interface intentionally contains both observation and state-transition
+ * operations while exposing [storage] only as read-only data.
+ *
+ * Implementations commit each storage transition before publishing its next
+ * stable [state]. They publish [tokenCount] only when OpenAI reports it.
  */
 public interface CodexAgentState {
     /**
-     * Current coarse-grained mutation phase.
+     * Current atomic state value.
      */
-    public val state: StateFlow<CodexAgentStateEnum>
+    public val state: StateFlow<CodexAgentStateValue>
 
     /**
      * Latest globally visible storage snapshot index.
+     * When updating [storage], this value will be updated only after the
+     * transaction completes to keep the consistent snapshot semantic.
      *
      * Readers should capture this value once and use it to read [storage].
      */
@@ -43,62 +84,62 @@ public interface CodexAgentState {
      * Read-only persisted agent data.
      */
     public val storage: CodexAgentStorage
-}
-
-/**
- * Mutable observable agent state.
- *
- * Implementations must publish [timestamp] atomically with every
- * state-changing method below. They publish [tokenCount] only when the caller
- * has an OpenAI-reported context token count.
- */
-public interface MutableCodexAgentState : CodexAgentState {
-    /**
-     * Executes one model request from the current state, publishes resulting state
-     * changes, and returns the raw stream events for this resume operation.
-     */
-    public fun resume(): Flow<ResponsesStreamEvent>
 
     /**
-     * Requests one server-side context compaction from the current state and
-     * returns the state index that publishes the returned checkpoint.
-     */
-    public suspend fun forcedCompact(): Int
-
-    /**
-     * Appends one response history item and updates [timestamp] for the
-     * same state transition.
+     * Executes exactly one model request from the current state, commits each
+     * completed output item, and returns that request's raw stream events.
      *
-     * @param tokenCount Nullable because OpenAI may not report context token
-     * count for this transition; `null` means the `token_count` timeline is
-     * left unchanged.
+     * Automatic compaction and `end_turn == false` continuation belong to
+     * AgentRuntime rather than this state-layer operation.
      */
-    public suspend fun appendResponseItem(
-        item: ResponseItem.HistoryItem,
-        timestamp: Instant,
-        tokenCount: Long?,
+    public fun requestResponseApi(): Flow<ResponsesStreamEvent>
+
+    /**
+     * Requests one server-side context compaction using the specified runtime
+     * policy metadata and returns the index that publishes its checkpoint.
+     *
+     * Runtime owns the decision to call this operation automatically.
+     */
+    public suspend fun compact(
+        trigger: RemoteCompactionV2Trigger,
+        reason: RemoteCompactionV2Reason,
+        phase: RemoteCompactionV2Phase,
     ): Int
 
     /**
-     * Appends one update-plan tool call item, publishes one plan snapshot, and
-     * records a timestamp for the same state transition.
+     * Appends one user message and records its timestamp in the same state
+     * transition.
+     *
+     * This is valid only for a new conversation or after an assistant message.
+     */
+    public suspend fun appendUserMessage(content: List<ContentItem>): Int
+
+    /**
+     * Persists one output for a currently pending local tool call.
+     *
+     * The output call id must match a pending call. State remains ToolPending
+     * until every call from the current batch has an output.
+     */
+    public suspend fun completeToolCall(output: ResponseItem.ToolCallOutput): Int
+
+    /**
+     * Persists one parsed `update_plan` result and plan snapshot atomically.
+     *
+     * [output] must match a pending function call named `update_plan`. Tool
+     * dispatch selects this operation explicitly rather than relying on
+     * [completeToolCall] to inspect tool-specific payloads.
      */
     public suspend fun appendPlanUpdate(
-        item: ResponseItem.FunctionCall,
+        output: ResponseItem.FunctionCallOutput,
         plan: UpdatePlanArgs,
     ): Int
 
     /**
-     * Updates model request settings and updates [timestamp] for the same state
-     * transition.
+     * Updates model request settings and records a timestamp for the same state
+     * transition. This does not change the conversation state.
      *
-     * @param tokenCount Nullable because OpenAI may not report context token
-     * count for this transition; `null` means the `token_count` timeline is
-     * left unchanged.
+     * OpenAI-reported token counts are written only by completed model or
+     * compaction requests, so callers cannot supply an arbitrary value here.
      */
-    public suspend fun updateSetting(
-        settings: CodexAgentSettings,
-        timestamp: Instant,
-        tokenCount: Long?,
-    ): Int
+    public suspend fun updateSettings(settings: CodexAgentSettings): Int
 }

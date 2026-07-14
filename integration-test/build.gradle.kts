@@ -5,6 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonTest.dependencies {
+            implementation(project(":agent-runtime-impl"))
             implementation(project(":agent-state-impl"))
             implementation(project(":agent-storage-contract"))
             implementation(project(":agent-storage-in-memory"))

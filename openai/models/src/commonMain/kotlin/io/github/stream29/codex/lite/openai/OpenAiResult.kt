@@ -11,6 +11,8 @@ import kotlinx.serialization.json.JsonEncoder
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.transform
 
 public typealias OpenAiResponseResult<Success> = OpenAiResult<Success, OpenAiErrorResponse>
 
@@ -24,6 +26,15 @@ public sealed interface OpenAiResult<out Success, out Failure> {
         public val error: Failure,
     ) : OpenAiResult<Nothing, Failure>
 }
+
+/**
+ * Returns the successful payload or raises the structured OpenAI error.
+ */
+public fun <Success> OpenAiResponseResult<Success>.getOrThrow(): Success =
+    when (this) {
+        is OpenAiResult.Success -> value
+        is OpenAiResult.Failure -> throw OpenAiResponseResultException(error)
+    }
 
 public class OpenAiResultSerializer<Success, Failure>(
     private val successSerializer: KSerializer<Success>,
@@ -120,3 +131,34 @@ public data class OpenAiError(
     public val code: String? = null,
     public val type: String? = null,
 )
+
+/**
+ * Raised when a non-streaming OpenAI endpoint returns a structured error
+ * result.
+ */
+public class OpenAiResponseResultException(
+    public val error: OpenAiErrorResponse,
+) : IllegalStateException(
+    error.messageText ?: "OpenAI returned an error response without a message.",
+)
+
+/**
+ * Raised when a Responses stream emits `response.failed`.
+ */
+public class OpenAiResponseStreamFailureException(
+    public val error: ResponseError?,
+) : IllegalStateException(
+    error?.message ?: "OpenAI response stream failed without structured error.",
+)
+
+/**
+ * Emits every stream event and raises [OpenAiResponseStreamFailureException]
+ * immediately after a `response.failed` event reaches the caller.
+ */
+public fun Flow<ResponsesStreamEvent>.throwIfFailure(): Flow<ResponsesStreamEvent> =
+    transform { event ->
+        emit(event)
+        if (event is ResponsesStreamEvent.Failed) {
+            throw OpenAiResponseStreamFailureException(event.response.error)
+        }
+    }
