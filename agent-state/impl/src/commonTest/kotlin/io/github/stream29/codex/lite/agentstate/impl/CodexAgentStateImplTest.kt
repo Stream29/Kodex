@@ -51,6 +51,24 @@ import kotlin.time.Instant
 
 class CodexAgentStateImplTest {
     @Test
+    fun appendUserMessageAllowsConsecutiveUserMessages() = runTest {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+        val context = userMessage("# AGENTS.md instructions")
+        val userInput = userMessage("Implement the change.")
+
+        assertEquals(1, agent.appendUserMessage(context.content))
+        assertEquals(2, agent.appendUserMessage(userInput.content))
+
+        assertEquals(context, storage.history[1])
+        assertEquals(userInput, storage.history[2])
+        assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
+    }
+
+    @Test
     fun stateTracksPendingToolCallsAndRejectsMismatchedResults() = runTest {
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val user = userMessage("Run a command.")

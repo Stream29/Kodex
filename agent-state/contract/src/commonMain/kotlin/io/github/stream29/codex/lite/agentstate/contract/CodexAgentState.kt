@@ -107,10 +107,21 @@ public interface CodexAgentState {
     ): Int
 
     /**
+     * Injects model-visible host history without reopening a generic history
+     * write API.
+     *
+     * An empty [items] list is a no-op and returns the current visible index.
+     * Non-empty lists are persisted as one atomic state transition in the
+     * supplied order.
+     */
+    public suspend fun injectHistory(items: List<ResponseItem.HistoryItem>): Int
+
+    /**
      * Appends one user message and records its timestamp in the same state
      * transition.
      *
-     * This is valid only for a new conversation or after an assistant message.
+     * This is valid for a new conversation or after a user or assistant
+     * message. Consecutive user messages are valid Responses API input.
      */
     public suspend fun appendUserMessage(content: List<ContentItem>): Int
 

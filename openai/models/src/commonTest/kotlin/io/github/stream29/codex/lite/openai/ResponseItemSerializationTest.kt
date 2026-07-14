@@ -41,6 +41,11 @@ class ResponseItemSerializationTest {
                 role = MessageRole.User,
                 content = listOf(ContentItem.InputText("hello")),
             ),
+            ResponseItem.Message(
+                id = id,
+                role = MessageRole.Developer,
+                content = listOf(ContentItem.InputText("follow the workspace instructions")),
+            ),
             ResponseItem.AgentMessage(
                 id = id,
                 author = "worker",

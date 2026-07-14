@@ -504,6 +504,9 @@ public enum class MessageRole(public val wireName: String) {
     @SerialName("user")
     User("user"),
 
+    @SerialName("developer")
+    Developer("developer"),
+
     @SerialName("assistant")
     Assistant("assistant"),
 

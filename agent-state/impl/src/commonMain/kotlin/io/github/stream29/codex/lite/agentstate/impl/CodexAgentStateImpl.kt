@@ -168,6 +168,30 @@ private class CodexAgentStateImpl(
             ).also { latestIndex.value = it }
         }
 
+    override suspend fun injectHistory(items: List<ResponseItem.HistoryItem>): Int {
+        if (items.isEmpty()) {
+            return latestIndex.value
+        }
+        return mutate(
+            validate = {},
+            inFlight = CodexAgentStateValue.ExternalWrite,
+        ) {
+            val timestamp = now()
+            val index = storage.transaction {
+                var index = storage.latestIndex()
+                for (item in items) {
+                    index += 1
+                    storage.history[index] = item
+                    storage.timestamp[index] = timestamp
+                }
+                index
+            }
+            latestIndex.value = index
+            state.value = storage.stateAt(index)
+            index
+        }
+    }
+
     @OptIn(ExperimentalUuidApi::class)
     override suspend fun appendUserMessage(content: List<ContentItem>): Int =
         mutate(
@@ -355,7 +379,11 @@ private fun CodexAgentStateValue.requireCanCompact() {
 }
 
 private fun CodexAgentStateValue.requireCanAppendUserMessage() {
-    if (this != CodexAgentStateValue.Empty && this != CodexAgentStateValue.AssistantMessage) {
+    if (
+        this != CodexAgentStateValue.Empty &&
+        this != CodexAgentStateValue.UserMessage &&
+        this != CodexAgentStateValue.AssistantMessage
+    ) {
         throw CodexAgentStateInvalidTransitionException("append a user message", this)
     }
 }
@@ -378,8 +406,9 @@ private suspend fun CodexAgentStorage.modelInputAt(index: Int): List<ResponseIte
 /**
  * Derives the state from the active history tail at [index].
  *
- * A message ends the current local-tool batch, so this scans only that batch
- * and returns every unresolved call in chronological order.
+ * A user, assistant, or tool message ends the current local-tool batch. A
+ * developer message is context-only, so this scans past it and returns every
+ * unresolved call in chronological order.
  */
 private suspend fun CodexAgentStorage.stateAt(index: Int): CodexAgentStateValue {
     if (index < 0) {
@@ -415,6 +444,7 @@ private suspend fun CodexAgentStorage.stateAt(index: Int): CodexAgentStateValue 
                 } else {
                     when (item.role) {
                         MessageRole.User -> CodexAgentStateValue.UserMessage
+                        MessageRole.Developer -> null
                         MessageRole.Assistant -> CodexAgentStateValue.AssistantMessage
                         MessageRole.Tool -> CodexAgentStateValue.ToolCompleted
                     }
