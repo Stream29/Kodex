@@ -3,9 +3,11 @@ package io.github.stream29.codex.lite.agentruntime.impl
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
-import io.github.stream29.codex.lite.agentcontext.contract.AgentContextInjection
-import io.github.stream29.codex.lite.agentcontext.contract.AgentEnvironment
-import io.github.stream29.codex.lite.agentcontext.contract.EnvironmentContext
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentsMdInstruction
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.EnvironmentContext
+import io.github.stream29.codex.lite.agentcontext.skill.contract.AvailableSkill
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
@@ -16,11 +18,7 @@ import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.OpenAiModelId
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Phase
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Reason
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
@@ -40,6 +38,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 val codexAgentLoopImplTest by testSuite {
     test("runtime exposes only the read only agent state properties") {
@@ -47,7 +46,7 @@ val codexAgentLoopImplTest by testSuite {
         val state = CodexAgentState(
             client = mockOpenAiClient {},
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         val runtime: CodexAgentRuntime = CodexAgentLoopImpl(state)
 
@@ -78,7 +77,7 @@ val codexAgentLoopImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         val runtime = CodexAgentLoopImpl(state)
 
@@ -139,7 +138,7 @@ val codexAgentLoopImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         val runtime = CodexAgentLoopImpl(state)
         val user = userMessage("Answer briefly.")
@@ -164,14 +163,19 @@ val codexAgentLoopImplTest by testSuite {
             ),
         )
         val initialCheckpoint = storage.compaction[0]
-        val compactRequests = mutableListOf<RemoteCompactionV2Request>()
+        val compactRequests = mutableListOf<RecordedRemoteCompactionV2Request>()
         val responseRequests = mutableListOf<ResponsesApiRequest>()
         val compaction = ResponseItem.Compaction(encryptedContent = "pre-turn-compact")
         val final = assistantMessage("After compaction.")
         val state = CodexAgentState(
             client = mockOpenAiClient {
-                createRemoteCompactionV2Response { request ->
-                    compactRequests += request
+                createRemoteCompactionV2Response { request, installationId, turnMetadata, windowId ->
+                    compactRequests += RecordedRemoteCompactionV2Request(
+                        request = request,
+                        installationId = installationId,
+                        turnMetadata = turnMetadata,
+                        windowId = windowId,
+                    )
                     RemoteCompactionV2Response(compactionOutput = compaction, completedResponse = null)
                 }
                 createResponse { request ->
@@ -183,7 +187,7 @@ val codexAgentLoopImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         val runtime = CodexAgentLoopImpl(state)
         val user = userMessage("Keep this context.")
@@ -193,10 +197,10 @@ val codexAgentLoopImplTest by testSuite {
 
         assertEquals(1, compactRequests.size)
         val compactRequest = compactRequests.single()
-        assertEquals(RemoteCompactionV2Trigger.Auto, compactRequest.trigger)
-        assertEquals(RemoteCompactionV2Reason.ContextLimit, compactRequest.reason)
-        assertEquals(RemoteCompactionV2Phase.PreTurn, compactRequest.phase)
-        assertEquals(listOf(user), compactRequest.history)
+        assertTrue(compactRequest.turnMetadata.contains("\"trigger\":\"auto\""))
+        assertTrue(compactRequest.turnMetadata.contains("\"reason\":\"context_limit\""))
+        assertTrue(compactRequest.turnMetadata.contains("\"phase\":\"pre_turn\""))
+        assertEquals(listOf(user, ResponseItem.CompactionTrigger), compactRequest.request.input)
         assertEquals(requestInput(user, compaction), responseRequests.single().input)
         assertEquals(ResponseItem.ContextCompaction(encryptedContent = "pre-turn-compact"), storage.history[2])
         assertEquals(final, storage.history[3])
@@ -211,7 +215,7 @@ val codexAgentLoopImplTest by testSuite {
                 autoCompactionTokenLimit = 20,
             ),
         )
-        val compactRequests = mutableListOf<RemoteCompactionV2Request>()
+        val compactRequests = mutableListOf<RecordedRemoteCompactionV2Request>()
         val responseRequests = mutableListOf<ResponsesApiRequest>()
         val user = userMessage("Continue until final.")
         val partial = assistantMessage("Partial answer.")
@@ -219,8 +223,13 @@ val codexAgentLoopImplTest by testSuite {
         val final = assistantMessage("Final answer.")
         val state = CodexAgentState(
             client = mockOpenAiClient {
-                createRemoteCompactionV2Response { request ->
-                    compactRequests += request
+                createRemoteCompactionV2Response { request, installationId, turnMetadata, windowId ->
+                    compactRequests += RecordedRemoteCompactionV2Request(
+                        request = request,
+                        installationId = installationId,
+                        turnMetadata = turnMetadata,
+                        windowId = windowId,
+                    )
                     RemoteCompactionV2Response(compactionOutput = compaction, completedResponse = null)
                 }
                 createResponse { request ->
@@ -247,7 +256,7 @@ val codexAgentLoopImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         val runtime = CodexAgentLoopImpl(state)
 
@@ -256,8 +265,11 @@ val codexAgentLoopImplTest by testSuite {
 
         assertEquals(2, responseRequests.size)
         assertEquals(requestInput(user), responseRequests[0].input)
-        assertEquals(listOf(user, partial), compactRequests.single().history)
-        assertEquals(RemoteCompactionV2Phase.MidTurn, compactRequests.single().phase)
+        assertEquals(
+            listOf(user, partial, ResponseItem.CompactionTrigger),
+            compactRequests.single().request.input,
+        )
+        assertTrue(compactRequests.single().turnMetadata.contains("\"phase\":\"mid_turn\""))
         assertEquals(requestInput(user, compaction), responseRequests[1].input)
         assertEquals(final, storage.history[5])
     }
@@ -281,7 +293,7 @@ val codexAgentLoopImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         val runtime = CodexAgentLoopImpl(state)
 
@@ -295,6 +307,13 @@ val codexAgentLoopImplTest by testSuite {
     }
 }
 
+private data class RecordedRemoteCompactionV2Request(
+    val request: ResponsesApiRequest,
+    val installationId: String?,
+    val turnMetadata: String,
+    val windowId: String,
+)
+
 private fun userMessage(text: String): ResponseItem.Message =
     ResponseItem.Message(
         role = MessageRole.User,
@@ -307,9 +326,10 @@ private fun assistantMessage(text: String): ResponseItem.Message =
         content = listOf(ContentItem.OutputText(text)),
     )
 
-private val testContextInjection: AgentContextInjection =
-    AgentContextInjection(
-        environmentContext = EnvironmentContext(
+private val testContextPrefixProvider: AgentContextPrefixProvider =
+    object : AgentContextPrefixProvider {
+        override val environmentContext: EnvironmentContext =
+            EnvironmentContext(
             environments = listOf(
                 AgentEnvironment(
                     id = "test",
@@ -319,8 +339,12 @@ private val testContextInjection: AgentContextInjection =
             ),
             currentDate = LocalDate(2026, 7, 15),
             timeZone = TimeZone.UTC,
-        ),
-    )
+            )
+
+        override val availableSkills: List<AvailableSkill> = emptyList()
+
+        override val agentMd: List<AgentsMdInstruction> = emptyList()
+    }
 
 private val testContextInput: ResponseItem.Message =
     ResponseItem.Message(

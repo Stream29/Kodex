@@ -6,9 +6,9 @@ import kotlinx.serialization.Serializable
 /**
  * Stable clean marker for a plan update.
  *
- * The actual plan snapshot is stored in the raw storage plan timeline at the
- * same state index. This clean event only marks that consumers should look up
- * that timeline entry when rendering the corresponding turn.
+ * The actual plan snapshot is stored in the raw storage settings timeline at
+ * the same state index. This clean event only marks that consumers should look
+ * up that settings entry when rendering the corresponding turn.
  */
 @Serializable
 @SerialName("plan_update")

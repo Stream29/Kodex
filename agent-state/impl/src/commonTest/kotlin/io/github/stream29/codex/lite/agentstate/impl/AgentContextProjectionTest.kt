@@ -1,27 +1,32 @@
 package io.github.stream29.codex.lite.agentstate.impl
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.agentcontext.contract.AgentContextInjection
-import io.github.stream29.codex.lite.agentcontext.contract.AgentEnvironment
-import io.github.stream29.codex.lite.agentcontext.contract.AgentsMdInstruction
-import io.github.stream29.codex.lite.agentcontext.contract.AvailableSkill
-import io.github.stream29.codex.lite.agentcontext.contract.DeveloperInstructions
-import io.github.stream29.codex.lite.agentcontext.contract.EnvironmentContext
+import io.github.stream29.codex.lite.agentcontext.collaboration.render.render as renderCollaborationMode
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentsMdInstruction
+import io.github.stream29.codex.lite.agentcontext.skill.contract.AvailableSkill
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.EnvironmentContext
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
+import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
+import io.github.stream29.codex.lite.openai.PlanItemArg
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Phase
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Reason
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
+import io.github.stream29.codex.lite.openai.StepStatus
+import io.github.stream29.codex.lite.openai.ThreadGoal
+import io.github.stream29.codex.lite.openai.ThreadGoalStatus
+import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
@@ -42,7 +47,7 @@ val agentContextProjectionTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = AgentContextInjection(
+            contextPrefixProvider = fixedAgentContextPrefixProvider(
                 environmentContext = testEnvironmentContext,
                 agentMd = listOf(
                     AgentsMdInstruction.User(
@@ -81,8 +86,25 @@ val agentContextProjectionTest by testSuite {
         assertEquals(1, storage.latestIndex())
     }
 
-    test("renders every context source in the request prefix") {
-        val storage = InMemoryCodexAgentStorage(settings())
+    test("projects Plan mode without plan or goal settings") {
+        val storage = InMemoryCodexAgentStorage(
+            settings(
+                collaborationMode = ModeKind.Plan,
+                plan = UpdatePlanArgs(
+                    explanation = "Keep this plan out of the model prompt.",
+                    plan = listOf(
+                        PlanItemArg(
+                            step = "Complete the implementation.",
+                            status = StepStatus.InProgress,
+                        ),
+                    ),
+                ),
+                goal = ThreadGoal(
+                    objective = "Finish the implementation.",
+                    status = ThreadGoalStatus.Active,
+                ),
+            ),
+        )
         val requests = mutableListOf<ResponsesApiRequest>()
         val skillCatalog = listOf(
             AvailableSkill(
@@ -112,9 +134,8 @@ val agentContextProjectionTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = AgentContextInjection(
+            contextPrefixProvider = fixedAgentContextPrefixProvider(
                 environmentContext = environment,
-                developerInstructions = DeveloperInstructions("developer instructions"),
                 availableSkills = skillCatalog,
                 agentMd = listOf(
                     AgentsMdInstruction.Internal(text = "agent instructions"),
@@ -129,7 +150,9 @@ val agentContextProjectionTest by testSuite {
         assertEquals(
             listOf(
                 developerMessage(
-                    "developer instructions",
+                    requireNotNull(ModeKind.Plan.renderCollaborationMode()),
+                ),
+                developerMessage(
                     availableSkills(skillCatalog),
                 ),
                 contextualUserMessage(
@@ -160,7 +183,7 @@ val agentContextProjectionTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = AgentContextInjection(
+            contextPrefixProvider = fixedAgentContextPrefixProvider(
                 environmentContext = testEnvironmentContext,
                 agentMd = listOf(
                     AgentsMdInstruction.Internal(text = "agent instructions"),
@@ -184,12 +207,51 @@ val agentContextProjectionTest by testSuite {
         assertEquals(1, storage.history.latestIndex())
     }
 
-    test("remote compaction does not persist context injection") {
+    test("reads a changed context prefix for the next response request") {
         val storage = InMemoryCodexAgentStorage(settings())
-        val compactionRequests = mutableListOf<RemoteCompactionV2Request>()
+        val requests = mutableListOf<ResponsesApiRequest>()
+        var revision = 0
+        val contextPrefixProvider = object : AgentContextPrefixProvider {
+            override val environmentContext: EnvironmentContext = testEnvironmentContext
+
+            override val availableSkills: List<AvailableSkill> = emptyList()
+
+            override val agentMd: List<AgentsMdInstruction>
+                get() = listOf(AgentsMdInstruction.Internal("agent instructions ${++revision}"))
+        }
         val agent = CodexAgentState(
             client = mockOpenAiClient {
-                createRemoteCompactionV2Response { request ->
+                createResponse { request ->
+                    requests += request
+                    flowOf(ResponsesStreamEvent.Completed(Response(id = "response_${requests.size}")))
+                }
+            },
+            storage = storage,
+            contextPrefixProvider = contextPrefixProvider,
+        )
+        val user = userMessage("continue")
+
+        agent.appendUserMessage(user.content)
+        agent.requestResponseApi().toList()
+        agent.requestResponseApi().toList()
+
+        assertEquals(
+            listOf(
+                listOf(contextualUserMessage(agentMd("agent instructions 1"), environmentContext()), user),
+                listOf(contextualUserMessage(agentMd("agent instructions 2"), environmentContext()), user),
+            ),
+            requests.map(ResponsesApiRequest::input),
+        )
+        assertEquals(user, storage.history[1])
+        assertEquals(1, storage.history.latestIndex())
+    }
+
+    test("remote compaction does not persist context prefix") {
+        val storage = InMemoryCodexAgentStorage(settings())
+        val compactionRequests = mutableListOf<ResponsesApiRequest>()
+        val agent = CodexAgentState(
+            client = mockOpenAiClient {
+                createRemoteCompactionV2Response { request, _, _, _ ->
                     compactionRequests += request
                     RemoteCompactionV2Response(
                         compactionOutput = ResponseItem.Compaction(encryptedContent = "compacted"),
@@ -198,7 +260,7 @@ val agentContextProjectionTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = AgentContextInjection(
+            contextPrefixProvider = fixedAgentContextPrefixProvider(
                 environmentContext = testEnvironmentContext,
                 agentMd = listOf(
                     AgentsMdInstruction.Internal(text = "agent instructions"),
@@ -214,7 +276,7 @@ val agentContextProjectionTest by testSuite {
             phase = RemoteCompactionV2Phase.PreTurn,
         )
 
-        assertEquals(listOf(user), compactionRequests.single().history)
+        assertEquals(listOf(user, ResponseItem.CompactionTrigger), compactionRequests.single().input)
         assertEquals(2, compactIndex)
         assertEquals(user, storage.history[1])
         assertEquals(
@@ -234,7 +296,7 @@ val agentContextProjectionTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = AgentContextInjection(
+            contextPrefixProvider = fixedAgentContextPrefixProvider(
                 environmentContext = testEnvironmentContext,
                 agentMd = listOf(
                     AgentsMdInstruction.User(
@@ -312,8 +374,17 @@ private val testEnvironmentContext: EnvironmentContext =
         timeZone = TimeZone.UTC,
     )
 
-private fun settings(): CodexAgentSettings =
-    CodexAgentSettings(OpenAiModelId("test-model"))
+private fun settings(
+    collaborationMode: ModeKind = ModeKind.Default,
+    plan: UpdatePlanArgs = UpdatePlanArgs(plan = emptyList()),
+    goal: ThreadGoal? = null,
+): CodexAgentSettings =
+    CodexAgentSettings(
+        model = OpenAiModelId("test-model"),
+        collaborationMode = collaborationMode,
+        plan = plan,
+        goal = goal,
+    )
 
 private fun userMessage(text: String): ResponseItem.Message =
     message(MessageRole.User, text)

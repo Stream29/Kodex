@@ -5,14 +5,15 @@ import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentruntime.impl.CodexAgentLoopImpl
-import io.github.stream29.codex.lite.agentcontext.contract.AgentContextInjection
-import io.github.stream29.codex.lite.agentcontext.contract.AgentEnvironment
-import io.github.stream29.codex.lite.agentcontext.contract.EnvironmentContext
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentsMdInstruction
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.EnvironmentContext
+import io.github.stream29.codex.lite.agentcontext.skill.contract.AvailableSkill
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.forcedCompact
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
-import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
@@ -22,11 +23,7 @@ import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseItem
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Phase
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Reason
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
@@ -58,7 +55,7 @@ private class RecordingOpenAiClient(
     private val delegate: OpenAiClient,
 ) : OpenAiClient by delegate {
     val requests: MutableList<RecordedCodexResponse> = mutableListOf()
-    val remoteCompactionV2Requests: MutableList<RemoteCompactionV2Request> = mutableListOf()
+    val remoteCompactionV2Requests: MutableList<RecordedCodexResponse> = mutableListOf()
 
     override suspend fun createResponse(
         request: ResponsesApiRequest,
@@ -71,10 +68,13 @@ private class RecordingOpenAiClient(
     }
 
     override suspend fun createRemoteCompactionV2Response(
-        request: RemoteCompactionV2Request,
+        request: ResponsesApiRequest,
+        installationId: String?,
+        turnMetadata: String,
+        windowId: String,
     ): RemoteCompactionV2Response {
-        remoteCompactionV2Requests += request
-        return delegate.createRemoteCompactionV2Response(request)
+        remoteCompactionV2Requests += RecordedCodexResponse(request, installationId, turnMetadata, windowId)
+        return delegate.createRemoteCompactionV2Response(request, installationId, turnMetadata, windowId)
     }
 }
 
@@ -85,9 +85,10 @@ private data class RecordedCodexResponse(
     val windowId: String,
 )
 
-private val testContextInjection: AgentContextInjection =
-    AgentContextInjection(
-        environmentContext = EnvironmentContext(
+private val testContextPrefixProvider: AgentContextPrefixProvider =
+    object : AgentContextPrefixProvider {
+        override val environmentContext: EnvironmentContext =
+            EnvironmentContext(
             environments = listOf(
                 AgentEnvironment(
                     id = "test",
@@ -97,8 +98,12 @@ private val testContextInjection: AgentContextInjection =
             ),
             currentDate = LocalDate(2026, 7, 15),
             timeZone = TimeZone.UTC,
-        ),
-    )
+            )
+
+        override val availableSkills: List<AvailableSkill> = emptyList()
+
+        override val agentMd: List<AgentsMdInstruction> = emptyList()
+    }
 
 private val testContextInput: ResponseItem.Message =
     ResponseItem.Message(
@@ -305,7 +310,7 @@ val minimalAgentConversationTest by testSuite {
         val testAgent = CodexAgentState(
             client = testClient,
             storage = testStorage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         object {
             val storage = testStorage
@@ -361,7 +366,7 @@ val openAiStoryContinuationProbeTest by testSuite {
             val agent = CodexAgentState(
                 client = client,
                 storage = storage,
-                contextInjection = testContextInjection,
+                contextPrefixProvider = testContextPrefixProvider,
             )
             val firstStory = withContext(Dispatchers.Default) {
                 agent.appendUserMessage("请用中文讲一个两句以内的微型故事，只讲故事本身。")
@@ -419,7 +424,7 @@ val openAiForcedCompactProbeTest by testSuite {
             val agent = CodexAgentState(
                 client = client,
                 storage = storage,
-                contextInjection = testContextInjection,
+                contextPrefixProvider = testContextPrefixProvider,
             )
 
             val compactIndex = withContext(Dispatchers.Default) {
@@ -428,10 +433,11 @@ val openAiForcedCompactProbeTest by testSuite {
 
             val checkpoint = storage.compaction[compactIndex]
             assertEquals(1, client.remoteCompactionV2Requests.size)
-            assertEquals(model, client.remoteCompactionV2Requests.single().settings.model)
+            val request = client.remoteCompactionV2Requests.single()
+            assertEquals(model, request.request.model)
             assertTrue(
-                client.remoteCompactionV2Requests.single().history.none { item -> item == ResponseItem.CompactionTrigger },
-                "Remote compaction v2 client request should receive history before wire trigger projection.",
+                request.request.input.last() == ResponseItem.CompactionTrigger,
+                "AgentState should project the remote-compaction trigger into the wire request.",
             )
             assertTrue(checkpoint.prefix.isNotEmpty(), "Expected server compaction output to become checkpoint prefix.")
             assertEquals(compactIndex + 1, checkpoint.historyBaseIndex)
@@ -496,47 +502,6 @@ val openAiCompactionItemProbeTest by testSuite {
             assertTrue(
                 events.assistantText().contains(marker),
                 "Expected normal response output to contain $marker.",
-            )
-        }
-
-        test(
-            "real responses compaction v2 returns compaction output",
-            testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
-        ) { client ->
-            val response = withContext(Dispatchers.Default) {
-                client.createRemoteCompactionV2Response(
-                    RemoteCompactionV2Request(
-                        history = listOf(
-                            userMessage("请记住：Kotlin 探针正在确认 remote compaction v2 的输出形状。"),
-                            assistantMessage("已记录这个探针目标。"),
-                        ),
-                        checkpoint = CompactionCheckpoint(
-                            prefix = emptyList(),
-                            historyBaseIndex = 0,
-                            windowNumber = 1,
-                            firstWindowId = "compaction-probe-window-0",
-                            windowId = "compaction-probe-window-1",
-                        ),
-                        settings = CodexAgentSettings(
-                            model = testCodexModel(),
-                            instructions = "Summarize the conversation into a compact continuation context.",
-                            store = false,
-                            promptCacheKey = "codex-lite-compaction-v2-probe",
-                            installationId = "codex-lite-compaction-probe-installation",
-                            sessionId = "codex-lite-compaction-probe-session",
-                        ),
-                        threadId = "codex-lite-compaction-probe-thread",
-                        trigger = RemoteCompactionV2Trigger.Manual,
-                        reason = RemoteCompactionV2Reason.UserRequested,
-                        phase = RemoteCompactionV2Phase.StandaloneTurn,
-                    ),
-                )
-            }
-
-            println("compaction v2 encrypted content length: ${response.compactionOutput.encryptedContent.length}")
-            assertTrue(
-                response.compactionOutput.encryptedContent.isNotBlank(),
-                "Remote compaction v2 compaction output should carry encrypted content.",
             )
         }
     }

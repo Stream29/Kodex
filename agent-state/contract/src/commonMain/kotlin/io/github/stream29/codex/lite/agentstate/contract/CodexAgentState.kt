@@ -134,11 +134,13 @@ public interface CodexAgentState {
     public suspend fun completeToolCall(output: ResponseItem.ToolCallOutput): Int
 
     /**
-     * Persists one parsed `update_plan` result and plan snapshot atomically.
+     * Persists one parsed `update_plan` result and updates the settings
+     * snapshot's plan atomically.
      *
      * [output] must match a pending function call named `update_plan`. Tool
      * dispatch selects this operation explicitly rather than relying on
-     * [completeToolCall] to inspect tool-specific payloads.
+     * [completeToolCall] to inspect tool-specific payloads. Plan mode rejects
+     * this operation because Codex does not expose `update_plan` in that mode.
      */
     public suspend fun appendPlanUpdate(
         output: ResponseItem.FunctionCallOutput,

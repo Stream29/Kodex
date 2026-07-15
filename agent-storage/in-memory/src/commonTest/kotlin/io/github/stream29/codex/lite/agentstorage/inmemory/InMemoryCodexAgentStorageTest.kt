@@ -93,7 +93,6 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(emptyList(), storage.compaction[0].prefix)
         assertEquals(0, storage.compaction[0].historyBaseIndex)
         assertEquals(0L, storage.compaction[0].windowNumber)
-        assertEquals(UpdatePlanArgs(plan = emptyList()), storage.plan[0])
         assertEquals(-1, storage.history.latestIndex())
         assertNotEquals(storage.id, other.id)
     }
@@ -182,7 +181,6 @@ val inMemoryCodexAgentStorageTest by testSuite {
         val initialSettings = settings("initial-model")
         val storage = storage(initialSettings)
         val initialCheckpoint = storage.compaction[0]
-        val initialPlan = storage.plan[0]
         val initialTimestamp = timestamp(0)
         val initialMessage = userMessage("initial")
         storage.timestamp[0] = initialTimestamp
@@ -193,7 +191,6 @@ val inMemoryCodexAgentStorageTest by testSuite {
             storage.transaction {
                 storage.settings[2] = settings("temporary-model")
                 storage.compaction[2] = checkpoint(windowNumber = 1, windowId = "window-1")
-                storage.plan[2] = plan("temporary", StepStatus.InProgress)
                 storage.timestamp[2] = timestamp(2)
                 storage.tokenCount[2] = 20
                 storage.history[2] = assistantMessage("temporary")
@@ -204,7 +201,6 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(0, storage.latestIndex())
         assertEquals(initialSettings, storage.settings[2])
         assertEquals(initialCheckpoint, storage.compaction[2])
-        assertEquals(initialPlan, storage.plan[2])
         assertEquals(initialTimestamp, storage.timestamp[2])
         assertEquals(10, storage.tokenCount[2])
         assertEquals(initialMessage, storage.history[2])
@@ -234,17 +230,13 @@ val inMemoryCodexAgentStorageTest by testSuite {
     }
 
     test("sparse timelines return active value at requested index") {
-        val initialSettings = settings("initial-model")
+        val initialSettings = settings("initial-model").copy(plan = plan("inspect", StepStatus.Pending))
         val storage = storage(initialSettings)
-        val updatedSettings = settings("updated-model")
-        val initialPlan = plan("inspect", StepStatus.Pending)
-        val updatedPlan = plan("implement", StepStatus.InProgress)
+        val updatedSettings = settings("updated-model").copy(plan = plan("implement", StepStatus.InProgress))
         val initialTimestamp = timestamp(1)
         val updatedTimestamp = timestamp(3)
 
         storage.settings[3] = updatedSettings
-        storage.plan[1] = initialPlan
-        storage.plan[3] = updatedPlan
         storage.timestamp[0] = initialTimestamp
         storage.timestamp[3] = updatedTimestamp
         storage.tokenCount[0] = 10
@@ -261,10 +253,8 @@ val inMemoryCodexAgentStorageTest by testSuite {
             storage.settings[3] = settings("overwrite")
         }
 
-        assertEquals(3, storage.plan.latestIndex())
-        assertEquals(UpdatePlanArgs(plan = emptyList()), storage.plan[0])
-        assertEquals(initialPlan, storage.plan[2])
-        assertEquals(updatedPlan, storage.plan[8])
+        assertEquals(initialSettings.plan, storage.settings[2].plan)
+        assertEquals(updatedSettings.plan, storage.settings[8].plan)
 
         assertEquals(3, storage.timestamp.latestIndex())
         assertEquals(initialTimestamp, storage.timestamp[2])
@@ -305,7 +295,6 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(1, storage.latestIndex())
 
         storage.settings[2] = settings("future-model")
-        storage.plan[2] = plan("future", StepStatus.Pending)
         storage.tokenCount[2] = 30
         assertEquals(2, storage.latestIndex())
         assertEquals(2, storage.nextIndex(1))
@@ -322,15 +311,14 @@ val inMemoryCodexAgentStorageTest by testSuite {
     }
 
     test("fork resets target before copying and keeps target thread id") {
-        val oldSettings = settings("old-model")
+        val oldPlan = plan("old step", StepStatus.Completed)
+        val oldSettings = settings("old-model").copy(plan = oldPlan)
         val source = storage(oldSettings)
         val target = storage(settings("target-model"))
         val targetId = target.id
-        val oldPlan = plan("old step", StepStatus.Completed)
         val newSettings = settings("new-model")
 
         source.history[1] = userMessage("first")
-        source.plan[1] = oldPlan
         source.timestamp[1] = timestamp(1)
         source.tokenCount[1] = 10
         source.settings[2] = newSettings
@@ -347,12 +335,11 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(userMessage("first"), target.history[1])
         assertEquals(userMessage("first"), target.history[2])
         assertEquals(oldSettings, target.settings[2])
-        assertEquals(oldPlan, target.plan[1])
+        assertEquals(oldPlan, target.settings[1].plan)
         assertEquals(timestamp(1), target.timestamp[1])
         assertEquals(10, target.tokenCount[1])
         assertEquals(listOf(0), target.settings.indexes().toList())
         assertEquals(listOf(0), target.compaction.indexes().toList())
-        assertEquals(listOf(0, 1), target.plan.indexes().toList())
         assertEquals(listOf(1), target.history.indexes().toList())
         assertEquals(listOf(1), target.timestamp.indexes().toList())
         assertEquals(listOf(1), target.tokenCount.indexes().toList())

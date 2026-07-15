@@ -3,15 +3,14 @@ package io.github.stream29.codex.lite.agentstorage.contract
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.openai.ResponseItem
-import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import kotlin.time.Instant
 
 /**
  * Persisted state for one agent thread.
  *
  * A storage accepted by `CodexAgentState` must publish its initial snapshot at
- * index `0`: [settings], [compaction], and [plan] must each have a visible
- * value there. An empty storage cannot represent a legal agent state.
+ * index `0`: [settings] and [compaction] must each have a visible value there.
+ * An empty storage cannot represent a legal agent state.
  *
  * All timelines share one sparse state index space. A state index may contain
  * entries in one timeline or several timelines; use [nextIndex] to enumerate
@@ -42,10 +41,9 @@ import kotlin.time.Instant
  * [index] itself stores a history item.
  * @property compaction Sparse checkpoint timeline. `compaction[index]` returns
  * the checkpoint active for the snapshot at [index].
- * @property settings Sparse settings timeline. `settings[index]` returns the
- * settings active for the snapshot at [index].
- * @property plan Sparse task-plan timeline. `plan[index]` returns the latest
- * full `update_plan` snapshot active for the snapshot at [index].
+ * @property settings Sparse agent-thread settings timeline. `settings[index]`
+ * returns the model request configuration, collaboration mode, plan, and goal
+ * active for the snapshot at [index].
  * @property timestamp Sparse timestamp timeline. Entries record the time
  * associated with the state index where they are stored.
  * @property tokenCount Sparse `token_count` timeline. The value is the latest
@@ -58,7 +56,6 @@ public interface CodexAgentStorage {
     public val history: IndexVersioned<ResponseItem.HistoryItem>
     public val compaction: IndexVersioned<CompactionCheckpoint>
     public val settings: IndexVersioned<CodexAgentSettings>
-    public val plan: IndexVersioned<UpdatePlanArgs>
     public val timestamp: IndexVersioned<Instant>
     public val tokenCount: IndexVersioned<Long>
 }
@@ -73,7 +70,6 @@ public suspend fun CodexAgentStorage.latestIndex(): Int =
         history.latestIndex(),
         compaction.latestIndex(),
         settings.latestIndex(),
-        plan.latestIndex(),
         timestamp.latestIndex(),
         tokenCount.latestIndex(),
     )
@@ -89,7 +85,6 @@ public suspend fun CodexAgentStorage.floorToIndex(index: Int): Int? =
         history.floorToIndex(index),
         compaction.floorToIndex(index),
         settings.floorToIndex(index),
-        plan.floorToIndex(index),
         timestamp.floorToIndex(index),
         tokenCount.floorToIndex(index),
     ).maxOrNull()
@@ -105,7 +100,6 @@ public suspend fun CodexAgentStorage.ceilToIndex(index: Int): Int? =
         history.ceilToIndex(index),
         compaction.ceilToIndex(index),
         settings.ceilToIndex(index),
-        plan.ceilToIndex(index),
         timestamp.ceilToIndex(index),
         tokenCount.ceilToIndex(index),
     ).minOrNull()
@@ -134,7 +128,6 @@ public interface MutableCodexAgentStorage : CodexAgentStorage {
     public override val history: MutableIndexVersioned<ResponseItem.HistoryItem>
     public override val compaction: MutableIndexVersioned<CompactionCheckpoint>
     public override val settings: MutableIndexVersioned<CodexAgentSettings>
-    public override val plan: MutableIndexVersioned<UpdatePlanArgs>
     public override val timestamp: MutableIndexVersioned<Instant>
     public override val tokenCount: MutableIndexVersioned<Long>
 }
@@ -151,11 +144,9 @@ public suspend inline fun <R> MutableCodexAgentStorage.transaction(block: () -> 
     history.transaction {
         compaction.transaction {
             settings.transaction {
-                plan.transaction {
-                    timestamp.transaction {
-                        tokenCount.transaction {
-                            block()
-                        }
+                timestamp.transaction {
+                    tokenCount.transaction {
+                        block()
                     }
                 }
             }
@@ -186,7 +177,6 @@ public suspend fun MutableCodexAgentStorage.forkTo(
         this.history.forkTo(until, target.history)
         this.compaction.forkTo(until, target.compaction)
         this.settings.forkTo(until, target.settings)
-        this.plan.forkTo(until, target.plan)
         this.timestamp.forkTo(until, target.timestamp)
         this.tokenCount.forkTo(until, target.tokenCount)
     }
@@ -196,7 +186,6 @@ private suspend fun MutableCodexAgentStorage.revertAll() {
     history.revert(0)
     compaction.revert(0)
     settings.revert(0)
-    plan.revert(0)
     timestamp.revert(0)
     tokenCount.revert(0)
 }

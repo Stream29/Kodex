@@ -2,9 +2,9 @@ package io.github.stream29.codex.lite.agentstate.impl
 
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.codex.lite.agentcontext.contract.AgentContextInjection
-import io.github.stream29.codex.lite.agentcontext.contract.AgentEnvironment
-import io.github.stream29.codex.lite.agentcontext.contract.EnvironmentContext
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.EnvironmentContext
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
@@ -18,11 +18,11 @@ import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentSto
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
 import io.github.stream29.codex.lite.openai.MessageRole
+import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.PlanItemArg
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Phase
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Reason
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
 import io.github.stream29.codex.lite.openai.Response
@@ -33,6 +33,7 @@ import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.StepStatus
 import io.github.stream29.codex.lite.openai.TokenUsage
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
+import io.github.stream29.codex.lite.openai.codexRequestWindowId
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -61,7 +62,7 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         val context = userMessage("# AGENTS.md instructions")
         val userInput = userMessage("Implement the change.")
@@ -87,7 +88,7 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         assertEquals(CodexAgentStateValue.ToolPending(listOf(call)), agent.state.value)
@@ -131,7 +132,7 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         assertEquals(CodexAgentStateValue.ToolPending(listOf(firstCall, secondCall)), agent.state.value)
@@ -187,7 +188,7 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
@@ -205,7 +206,7 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         val outputIndex = agent.completeToolCall(
@@ -216,7 +217,7 @@ val codexAgentStateImplTest by testSuite {
         )
 
         assertEquals(3, outputIndex)
-        assertEquals(null, storage.plan.nextIndex(3))
+        assertEquals(null, storage.settings.nextIndex(3))
         assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
     }
 
@@ -234,7 +235,7 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         assertEquals(0, agent.latestIndex.value)
@@ -251,7 +252,7 @@ val codexAgentStateImplTest by testSuite {
                 createResponse { flowOf<ResponsesStreamEvent>(failure) }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         val received = mutableListOf<ResponsesStreamEvent>()
 
@@ -323,7 +324,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         val user = userMessage("Answer briefly.")
@@ -364,7 +365,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.requestResponseApi().toList()
@@ -408,7 +409,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(userMessage("Start streaming."))
@@ -464,7 +465,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         val collected = mutableListOf<ResponsesStreamEvent>()
 
@@ -513,7 +514,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         val user = userMessage("Start streaming.")
         val collected = mutableListOf<ResponsesStreamEvent>()
@@ -549,7 +550,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         val user = userMessage("Start streaming.")
 
@@ -578,7 +579,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         val collected = mutableListOf<ResponsesStreamEvent>()
 
@@ -621,7 +622,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         val collected = mutableListOf<ResponsesStreamEvent>()
 
@@ -668,7 +669,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(userMessage("What time is it?"))
@@ -682,11 +683,11 @@ val codexAgentStateImplTest by testSuite {
 
     test("update settings publishes state index without history item") {
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("old-model")))
-        val requests = mutableListOf<ResponsesApiRequest>()
+        val requests = mutableListOf<RecordedCreateResponse>()
         val agent = CodexAgentState(
             client = mockOpenAiClient {
-                createResponse { request ->
-                    requests += request
+                createResponse { request, installationId, turnMetadata, windowId ->
+                    requests += RecordedCreateResponse(request, installationId, turnMetadata, windowId)
                     flowOf(
                         ResponsesStreamEvent.OutputItemDone(
                             outputIndex = 0,
@@ -697,12 +698,19 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
         val user = userMessage("Use the new settings.")
 
         agent.appendUserMessage(user, tokenCount = 1)
-        val settingsIndex = agent.updateSettings(CodexAgentSettings(OpenAiModelId("new-model")))
+        val settingsIndex = agent.updateSettings(
+            CodexAgentSettings(
+                model = OpenAiModelId("new-model"),
+                installationId = "install",
+                sessionId = "session",
+                clientMetadata = mapOf("existing" to "value"),
+            ),
+        )
 
         assertEquals(2, settingsIndex)
         assertEquals(null, storage.history.nextIndex(2))
@@ -711,8 +719,18 @@ val codexAgentStateImplTest by testSuite {
 
         agent.requestResponseApi().toList()
 
-        assertEquals(OpenAiModelId("new-model"), requests.single().model)
-        assertEquals(requestInput(user), requests.single().input)
+        val request = requests.single()
+        assertEquals(OpenAiModelId("new-model"), request.request.model)
+        assertEquals(requestInput(user), request.request.input)
+        assertEquals(false, request.request.store)
+        assertEquals("install", request.installationId)
+        assertEquals("value", request.request.clientMetadata["existing"])
+        assertEquals("install", request.request.clientMetadata["x-codex-installation-id"])
+        assertEquals("session", request.request.clientMetadata["session_id"])
+        assertEquals(storage.id, request.request.clientMetadata["thread_id"])
+        assertEquals(storage.settings[2].turnId, request.request.clientMetadata["turn_id"])
+        assertEquals("${storage.id}:0", request.windowId)
+        assertTrue(request.turnMetadata.contains("\"request_kind\":\"turn\""))
     }
 
     test("append plan update publishes plan and matching tool result atomically") {
@@ -731,7 +749,7 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         val output = ResponseItem.FunctionCallOutput(
@@ -744,11 +762,45 @@ val codexAgentStateImplTest by testSuite {
         )
 
         assertEquals(3, planIndex)
-        assertEquals(plan, storage.plan[3])
+        assertEquals(plan, storage.settings[3].plan)
         assertEquals(planCall, storage.history[2])
         assertEquals(output, storage.history[3])
         assertEquals(1, storage.tokenCount[3])
         assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
+    }
+
+    test("append plan update rejects plan mode") {
+        val storage = InMemoryCodexAgentStorage(
+            CodexAgentSettings(
+                model = OpenAiModelId("test-model"),
+                collaborationMode = ModeKind.Plan,
+            ),
+        )
+        val planCall = ResponseItem.FunctionCall(
+            name = "update_plan",
+            arguments = "{}",
+            callId = "plan_call",
+        )
+        storage.history[1] = userMessage("Start.")
+        storage.history[2] = planCall
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+            contextPrefixProvider = testContextPrefixProvider,
+        )
+
+        assertFailsWith<IllegalArgumentException> {
+            agent.appendPlanUpdate(
+                output = ResponseItem.FunctionCallOutput(
+                    callId = planCall.callId,
+                    output = FunctionCallOutputPayload.fromText("Plan updated"),
+                ),
+                plan = UpdatePlanArgs(plan = emptyList()),
+            )
+        }
+
+        assertEquals(2, storage.latestIndex())
+        assertEquals(CodexAgentStateValue.ToolPending(listOf(planCall)), agent.state.value)
     }
 
     test("mutation fails when another mutation is running") {
@@ -766,7 +818,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(userMessage("Wait."))
@@ -798,7 +850,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         val user = userMessage("Compact.")
@@ -814,12 +866,17 @@ val codexAgentStateImplTest by testSuite {
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val initialTurnId = storage.settings[0].turnId
         val initialCheckpoint = storage.compaction[0]
-        val compactRequests = mutableListOf<RemoteCompactionV2Request>()
+        val compactRequests = mutableListOf<RecordedRemoteCompactionV2Request>()
         val compaction = ResponseItem.Compaction(encryptedContent = "compact")
         val agent = CodexAgentState(
             client = mockOpenAiClient {
-                createRemoteCompactionV2Response { request ->
-                    compactRequests += request
+                createRemoteCompactionV2Response { request, installationId, turnMetadata, windowId ->
+                    compactRequests += RecordedRemoteCompactionV2Request(
+                        request = request,
+                        installationId = installationId,
+                        turnMetadata = turnMetadata,
+                        windowId = windowId,
+                    )
                     remoteCompactionV2Response(
                         compactionOutput = compaction,
                         usage = TokenUsage(
@@ -831,7 +888,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         val user = userMessage("This context is too large.")
@@ -842,15 +899,17 @@ val codexAgentStateImplTest by testSuite {
         assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
         assertEquals(1, compactRequests.size)
         val compactRequest = compactRequests.single()
-        assertEquals(listOf(user), compactRequest.history)
-        assertEquals(RemoteCompactionV2Trigger.Manual, compactRequest.trigger)
-        assertEquals(RemoteCompactionV2Reason.UserRequested, compactRequest.reason)
-        assertEquals(RemoteCompactionV2Phase.StandaloneTurn, compactRequest.phase)
-        assertEquals(null, compactRequest.settings.installationId)
-        assertEquals(null, compactRequest.settings.sessionId)
-        assertEquals(storage.id, compactRequest.threadId)
-        assertTrue(compactRequest.settings.turnId != initialTurnId)
-        assertEquals(initialCheckpoint, compactRequest.checkpoint)
+        assertEquals(listOf(user, ResponseItem.CompactionTrigger), compactRequest.request.input)
+        assertEquals(null, compactRequest.installationId)
+        assertEquals(null, compactRequest.request.clientMetadata["session_id"])
+        assertEquals(storage.id, compactRequest.request.clientMetadata["thread_id"])
+        assertEquals("${storage.id}:0", compactRequest.windowId)
+        assertTrue(compactRequest.request.clientMetadata.getValue("turn_id") != initialTurnId)
+        assertEquals(initialCheckpoint.codexRequestWindowId(storage.id), compactRequest.windowId)
+        assertTrue(compactRequest.turnMetadata.contains("\"request_kind\":\"compaction\""))
+        assertTrue(compactRequest.turnMetadata.contains("\"trigger\":\"manual\""))
+        assertTrue(compactRequest.turnMetadata.contains("\"reason\":\"user_requested\""))
+        assertTrue(compactRequest.turnMetadata.contains("\"phase\":\"standalone_turn\""))
         assertEquals(ResponseItem.ContextCompaction(encryptedContent = "compact"), storage.history[2])
         assertAdvancedCompactionCheckpoint(
             checkpoint = storage.compaction[2],
@@ -859,7 +918,7 @@ val codexAgentStateImplTest by testSuite {
             previousCheckpoint = initialCheckpoint,
         )
         assertEquals(11, storage.tokenCount[2])
-        assertEquals(compactRequest.settings.turnId, storage.settings[2].turnId)
+        assertEquals(compactRequest.request.clientMetadata["turn_id"], storage.settings[2].turnId)
         assertEquals(2, agent.latestIndex.value)
     }
 
@@ -874,12 +933,12 @@ val codexAgentStateImplTest by testSuite {
         storage.history[3] = newest
         val agent = CodexAgentState(
             client = mockOpenAiClient {
-                createRemoteCompactionV2Response {
+                createRemoteCompactionV2Response { _, _, _, _ ->
                     remoteCompactionV2Response(compaction)
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.forcedCompact()
@@ -902,25 +961,30 @@ val codexAgentStateImplTest by testSuite {
                 sessionId = "session",
             ),
         )
-        val compactRequests = mutableListOf<RemoteCompactionV2Request>()
+        val compactRequests = mutableListOf<RecordedRemoteCompactionV2Request>()
         val agent = CodexAgentState(
             client = mockOpenAiClient {
-                createRemoteCompactionV2Response { request ->
-                    compactRequests += request
+                createRemoteCompactionV2Response { request, installationId, turnMetadata, windowId ->
+                    compactRequests += RecordedRemoteCompactionV2Request(
+                        request = request,
+                        installationId = installationId,
+                        turnMetadata = turnMetadata,
+                        windowId = windowId,
+                    )
                     remoteCompactionV2Response(ResponseItem.Compaction(encryptedContent = "compact"))
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(userMessage("Compact."))
         agent.forcedCompact()
 
         val compactRequest = compactRequests.single()
-        assertEquals("install", compactRequest.settings.installationId)
-        assertEquals("session", compactRequest.settings.sessionId)
-        assertEquals(storage.id, compactRequest.threadId)
+        assertEquals("install", compactRequest.installationId)
+        assertEquals("session", compactRequest.request.clientMetadata["session_id"])
+        assertEquals(storage.id, compactRequest.request.clientMetadata["thread_id"])
     }
 
     test("remote compaction v2 uses window number from checkpoint") {
@@ -935,22 +999,27 @@ val codexAgentStateImplTest by testSuite {
         val user = userMessage("Compact.")
         storage.compaction[1] = initialCheckpoint
         storage.history[1] = user
-        val compactRequests = mutableListOf<RemoteCompactionV2Request>()
+        val compactRequests = mutableListOf<RecordedRemoteCompactionV2Request>()
         val agent = CodexAgentState(
             client = mockOpenAiClient {
-                createRemoteCompactionV2Response { request ->
-                    compactRequests += request
+                createRemoteCompactionV2Response { request, installationId, turnMetadata, windowId ->
+                    compactRequests += RecordedRemoteCompactionV2Request(
+                        request = request,
+                        installationId = installationId,
+                        turnMetadata = turnMetadata,
+                        windowId = windowId,
+                    )
                     remoteCompactionV2Response(ResponseItem.Compaction(encryptedContent = "compact"))
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.forcedCompact()
 
         val compactRequest = compactRequests.single()
-        assertEquals(7L, compactRequest.checkpoint.windowNumber)
+        assertEquals("${storage.id}:7", compactRequest.windowId)
         assertAdvancedCompactionCheckpoint(
             checkpoint = storage.compaction[2],
             prefix = listOf(user, ResponseItem.Compaction(encryptedContent = "compact")),
@@ -970,12 +1039,17 @@ val codexAgentStateImplTest by testSuite {
         val user = userMessage("Keep this user message.")
         val compaction = ResponseItem.Compaction(encryptedContent = "pre-turn-compact")
         val final = assistantMessage("After pre-turn compact.")
-        val compactRequests = mutableListOf<RemoteCompactionV2Request>()
+        val compactRequests = mutableListOf<RecordedRemoteCompactionV2Request>()
         val responseRequests = mutableListOf<RecordedCreateResponse>()
         val agent = CodexAgentState(
             client = mockOpenAiClient {
-                createRemoteCompactionV2Response { request ->
-                    compactRequests += request
+                createRemoteCompactionV2Response { request, installationId, turnMetadata, windowId ->
+                    compactRequests += RecordedRemoteCompactionV2Request(
+                        request = request,
+                        installationId = installationId,
+                        turnMetadata = turnMetadata,
+                        windowId = windowId,
+                    )
                     remoteCompactionV2Response(
                         compactionOutput = compaction,
                         usage = TokenUsage(90, 1, 91),
@@ -991,7 +1065,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(user, tokenCount = 90)
@@ -1018,12 +1092,17 @@ val codexAgentStateImplTest by testSuite {
         val partial = assistantMessage("Partial answer.")
         val compaction = ResponseItem.Compaction(encryptedContent = "mid-turn-compact")
         val final = assistantMessage("Final answer.")
-        val compactRequests = mutableListOf<RemoteCompactionV2Request>()
+        val compactRequests = mutableListOf<RecordedRemoteCompactionV2Request>()
         val responseRequests = mutableListOf<RecordedCreateResponse>()
         val agent = CodexAgentState(
             client = mockOpenAiClient {
-                createRemoteCompactionV2Response { request ->
-                    compactRequests += request
+                createRemoteCompactionV2Response { request, installationId, turnMetadata, windowId ->
+                    compactRequests += RecordedRemoteCompactionV2Request(
+                        request = request,
+                        installationId = installationId,
+                        turnMetadata = turnMetadata,
+                        windowId = windowId,
+                    )
                     remoteCompactionV2Response(
                         compactionOutput = compaction,
                         usage = TokenUsage(20, 1, 21),
@@ -1054,7 +1133,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(user, tokenCount = 1)
@@ -1082,12 +1161,17 @@ val codexAgentStateImplTest by testSuite {
         val firstFinal = assistantMessage("First final.")
         val compaction = ResponseItem.Compaction(encryptedContent = "next-turn-compact")
         val secondFinal = assistantMessage("Second final.")
-        val compactRequests = mutableListOf<RemoteCompactionV2Request>()
+        val compactRequests = mutableListOf<RecordedRemoteCompactionV2Request>()
         val responseRequests = mutableListOf<RecordedCreateResponse>()
         val agent = CodexAgentState(
             client = mockOpenAiClient {
-                createRemoteCompactionV2Response { request ->
-                    compactRequests += request
+                createRemoteCompactionV2Response { request, installationId, turnMetadata, windowId ->
+                    compactRequests += RecordedRemoteCompactionV2Request(
+                        request = request,
+                        installationId = installationId,
+                        turnMetadata = turnMetadata,
+                        windowId = windowId,
+                    )
                     remoteCompactionV2Response(
                         compactionOutput = compaction,
                         usage = TokenUsage(20, 1, 21),
@@ -1118,7 +1202,7 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(user, tokenCount = 1)
@@ -1143,12 +1227,12 @@ val codexAgentStateImplTest by testSuite {
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val agent = CodexAgentState(
             client = mockOpenAiClient {
-                createRemoteCompactionV2Response {
+                createRemoteCompactionV2Response { _, _, _, _ ->
                     throw IllegalStateException("bad remote compaction v2")
                 }
             },
             storage = storage,
-            contextInjection = testContextInjection,
+            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(userMessage("Compact."))
@@ -1168,8 +1252,15 @@ private data class RecordedCreateResponse(
     val windowId: String,
 )
 
-private val testContextInjection: AgentContextInjection =
-    AgentContextInjection(
+private data class RecordedRemoteCompactionV2Request(
+    val request: ResponsesApiRequest,
+    val installationId: String?,
+    val turnMetadata: String,
+    val windowId: String,
+)
+
+private val testContextPrefixProvider: AgentContextPrefixProvider =
+    fixedAgentContextPrefixProvider(
         environmentContext = EnvironmentContext(
             environments = listOf(
                 AgentEnvironment(

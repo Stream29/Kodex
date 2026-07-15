@@ -5,7 +5,6 @@ import io.github.stream29.codex.lite.openai.ImageGenerationRequest
 import io.github.stream29.codex.lite.openai.ImageResponse
 import io.github.stream29.codex.lite.openai.ModelsResponse
 import io.github.stream29.codex.lite.openai.OpenAiResponseResult
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
@@ -25,7 +24,12 @@ public interface OpenAiClient : AutoCloseable {
         windowId: String,
     ): Flow<ResponsesStreamEvent>
 
-    public suspend fun createRemoteCompactionV2Response(request: RemoteCompactionV2Request): RemoteCompactionV2Response
+    public suspend fun createRemoteCompactionV2Response(
+        request: ResponsesApiRequest,
+        installationId: String?,
+        turnMetadata: String,
+        windowId: String,
+    ): RemoteCompactionV2Response
 
     public suspend fun generateImage(request: ImageGenerationRequest): OpenAiResponseResult<ImageResponse>
 

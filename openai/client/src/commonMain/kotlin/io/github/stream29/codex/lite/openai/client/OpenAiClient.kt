@@ -1,6 +1,5 @@
 package io.github.stream29.codex.lite.openai.client
 
-import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ImageEditRequest
 import io.github.stream29.codex.lite.openai.ImageGenerationRequest
 import io.github.stream29.codex.lite.openai.ImageResponse
@@ -10,7 +9,6 @@ import io.github.stream29.codex.lite.openai.OpenAiResult
 import io.github.stream29.codex.lite.openai.OpenAiResultSerializer
 import io.github.stream29.codex.lite.openai.OpenAiResponseResult
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthSession
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
@@ -18,7 +16,6 @@ import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.SearchRequest
 import io.github.stream29.codex.lite.openai.SearchResponse
-import io.github.stream29.codex.lite.openai.codexRequestWindowId
 import io.github.stream29.codex.lite.openai.throwIfFailure
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient as OpenAiClientContract
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
@@ -61,10 +58,7 @@ import kotlinx.io.IOException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.put
 import kotlin.random.Random
 
 public class OpenAiClient(
@@ -158,11 +152,12 @@ public class OpenAiClient(
     }
 
     override suspend fun createRemoteCompactionV2Response(
-        request: RemoteCompactionV2Request,
+        request: ResponsesApiRequest,
+        installationId: String?,
+        turnMetadata: String,
+        windowId: String,
     ): RemoteCompactionV2Response =
         retryOpenAiStreamingTransport(config.retry) {
-            val windowId = request.checkpoint.codexRequestWindowId(request.threadId)
-            val turnMetadata = request.toCodexTurnMetadata(windowId)
             val response = httpClient.post {
                 url {
                     appendPathSegments("responses")
@@ -170,15 +165,10 @@ public class OpenAiClient(
                 accept(ContentType.Text.EventStream)
                 contentType(ContentType.Application.Json)
                 headers[HeaderCodexBetaFeatures] = RemoteCompactionV2Feature
-                request.settings.installationId?.let { headers[HeaderCodexInstallationId] = it }
+                installationId?.let { headers[HeaderCodexInstallationId] = it }
                 headers[HeaderCodexTurnMetadata] = turnMetadata
                 headers[HeaderCodexWindowId] = windowId
-                setBody(
-                    request.toResponsesApiRequest(
-                        turnMetadata = turnMetadata,
-                        windowId = windowId,
-                    ),
-                )
+                setBody(request)
             }
             response.body<SSESession>()
                 .incoming
@@ -230,82 +220,6 @@ public class OpenAiClient(
     }
 
 }
-
-internal fun RemoteCompactionV2Request.toResponsesApiRequest(
-    turnMetadata: String,
-    windowId: String,
-): ResponsesApiRequest =
-    settings.toResponsesApiRequest(
-        input = history + ResponseItem.CompactionTrigger,
-        threadId = threadId,
-        turnMetadata = turnMetadata,
-        windowId = windowId,
-    )
-
-internal fun RemoteCompactionV2Request.toCodexTurnMetadata(windowId: String): String =
-    settings.toCodexTurnMetadata(
-        threadId = threadId,
-        windowId = windowId,
-        requestKind = "compaction",
-        compaction = buildJsonObject {
-            put("trigger", trigger.wireName)
-            put("reason", reason.wireName)
-            put("implementation", "responses_compaction_v2")
-            put("phase", phase.wireName)
-            put("strategy", "memento")
-        },
-    )
-
-private fun CodexAgentSettings.toResponsesApiRequest(
-    input: List<ResponseItem>,
-    threadId: String,
-    turnMetadata: String,
-    windowId: String,
-): ResponsesApiRequest {
-    val codexClientMetadata = buildMap {
-        installationId?.let { put(HeaderCodexInstallationId, it) }
-        sessionId?.let { put("session_id", it) }
-        put("thread_id", threadId)
-        put("turn_id", turnId)
-        put(HeaderCodexWindowId, windowId)
-        put(HeaderCodexTurnMetadata, turnMetadata)
-    }
-    return ResponsesApiRequest(
-        model = model,
-        input = input,
-        instructions = instructions,
-        store = store,
-        previousResponseId = previousResponseId,
-        tools = tools,
-        toolChoice = toolChoice,
-        parallelToolCalls = parallelToolCalls,
-        reasoning = reasoning,
-        include = include,
-        serviceTier = serviceTier,
-        promptCacheKey = promptCacheKey,
-        text = text,
-        clientMetadata = clientMetadata + codexClientMetadata,
-    )
-}
-
-private fun CodexAgentSettings.toCodexTurnMetadata(
-    threadId: String,
-    windowId: String,
-    requestKind: String,
-    compaction: JsonObject? = null,
-): String =
-    OpenAiJsonCodec.encodeToString(
-        JsonObject.serializer(),
-        buildJsonObject {
-            installationId?.let { put("installation_id", it) }
-            sessionId?.let { put("session_id", it) }
-            put("thread_id", threadId)
-            put("turn_id", turnId)
-            put("window_id", windowId)
-            put("request_kind", requestKind)
-            compaction?.let { put("compaction", it) }
-        },
-    )
 
 private const val RemoteCompactionV2Feature: String = "remote_compaction_v2"
 private const val HeaderCodexBetaFeatures: String = "x-codex-beta-features"

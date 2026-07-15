@@ -1,7 +1,6 @@
 package io.github.stream29.codex.lite.agentstorage.inmemory
 
 import io.github.stream29.codex.lite.openai.ResponseItem
-import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
@@ -15,8 +14,8 @@ import kotlin.uuid.Uuid
  * Process-local mutable storage for tests and transient agent sessions.
  *
  * This implementation keeps all published values in memory. Construction
- * publishes the required snapshot-zero settings, checkpoint, and empty plan,
- * so it can always back a legal empty agent state.
+ * publishes the required snapshot-zero settings and checkpoint, so it can
+ * always back a legal empty agent state.
  */
 @OptIn(ExperimentalUuidApi::class)
 public class InMemoryCodexAgentStorage(
@@ -43,8 +42,6 @@ public class InMemoryCodexAgentStorage(
         )
     public override val settings: MutableIndexVersioned<CodexAgentSettings> =
         InMemoryIndexVersioned(listOf(IndexedValue(0, initialSettings)))
-    public override val plan: MutableIndexVersioned<UpdatePlanArgs> =
-        InMemoryIndexVersioned(listOf(IndexedValue(0, UpdatePlanArgs(plan = emptyList()))))
     public override val timestamp: MutableIndexVersioned<Instant> = InMemoryIndexVersioned()
     public override val tokenCount: MutableIndexVersioned<Long> = InMemoryIndexVersioned()
 }

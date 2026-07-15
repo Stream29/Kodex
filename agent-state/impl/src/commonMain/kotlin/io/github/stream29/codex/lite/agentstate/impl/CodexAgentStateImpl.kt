@@ -1,7 +1,8 @@
 package io.github.stream29.codex.lite.agentstate.impl
 
-import io.github.stream29.codex.lite.agentcontext.contract.AgentContextInjection
-import io.github.stream29.codex.lite.agentcontext.render.render
+import io.github.stream29.codex.lite.agentcontext.collaboration.render.render as renderCollaborationMode
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
+import io.github.stream29.codex.lite.agentcontext.prefix.render.render
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
@@ -12,18 +13,17 @@ import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.contract.prevIndex
 import io.github.stream29.codex.lite.agentstorage.contract.transaction
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
-import io.github.stream29.codex.lite.openai.CodexResponsesRequest
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
+import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Phase
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Reason
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
+import io.github.stream29.codex.lite.openai.codexRequestWindowId
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
-import io.github.stream29.codex.lite.openai.client.contract.createResponse
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -32,6 +32,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -44,13 +46,13 @@ import kotlin.uuid.Uuid
  * Construction is suspend because storage reads may be asynchronous. The
  * initial phase is reconstructed from persisted history rather than assumed
  * from the newest global index, which may belong to another timeline.
- * [contextInjection] contributes transient request input and is never persisted
+ * [contextPrefixProvider] contributes transient request input and is never persisted
  * in [storage].
  */
 public suspend fun CodexAgentState(
     client: OpenAiClient,
     storage: MutableCodexAgentStorage,
-    contextInjection: AgentContextInjection,
+    contextPrefixProvider: AgentContextPrefixProvider,
 ): CodexAgentState {
     val loadedLatestIndex = storage.latestIndex()
     return CodexAgentStateImpl(
@@ -58,7 +60,7 @@ public suspend fun CodexAgentState(
         storage = storage,
         loadedLatestIndex = loadedLatestIndex,
         initialState = storage.stateAt(loadedLatestIndex),
-        contextInjection = contextInjection,
+        contextPrefixProvider = contextPrefixProvider,
     )
 }
 
@@ -75,7 +77,7 @@ private class CodexAgentStateImpl(
     override val storage: MutableCodexAgentStorage,
     loadedLatestIndex: Int,
     initialState: CodexAgentStateValue,
-    private val contextInjection: AgentContextInjection,
+    private val contextPrefixProvider: AgentContextPrefixProvider,
 ) : CodexAgentState {
     override val state: StateFlow<CodexAgentStateValue>
         field = MutableStateFlow(initialState)
@@ -96,15 +98,31 @@ private class CodexAgentStateImpl(
 
             val settings = storage.settings[snapshotIndex]
             val durableInput = storage.modelInputAt(snapshotIndex)
-            val requestContext = contextInjection.render()
+            val collaborationContext = settings.collaborationMode.renderCollaborationMode()?.let { instructions ->
+                ResponseItem.Message(
+                    role = MessageRole.Developer,
+                    content = listOf(ContentItem.InputText(instructions)),
+                )
+            }
+            val requestContext = contextPrefixProvider.render()
+            val checkpoint = storage.compaction[snapshotIndex]
+            val windowId = checkpoint.codexRequestWindowId(storage.id)
+            val turnMetadata = settings.toCodexTurnMetadata(
+                threadId = storage.id,
+                windowId = windowId,
+                requestKind = "turn",
+            )
 
             client.createResponse(
-                CodexResponsesRequest(
-                    input = requestContext + durableInput,
-                    checkpoint = storage.compaction[snapshotIndex],
-                    settings = settings,
+                request = settings.toResponsesApiRequest(
+                    input = listOfNotNull(collaborationContext) + requestContext + durableInput,
                     threadId = storage.id,
+                    turnMetadata = turnMetadata,
+                    windowId = windowId,
                 ),
+                installationId = settings.installationId,
+                turnMetadata = turnMetadata,
+                windowId = windowId,
             ).collect { event ->
                 when (event) {
                     is ResponsesStreamEvent.OutputItemDone -> {
@@ -152,16 +170,29 @@ private class CodexAgentStateImpl(
             } else {
                 settings
             }
+            val windowId = checkpoint.codexRequestWindowId(storage.id)
+            val turnMetadata = requestSettings.toCodexTurnMetadata(
+                threadId = storage.id,
+                windowId = windowId,
+                requestKind = "compaction",
+                compaction = buildJsonObject {
+                    put("trigger", trigger.wireName)
+                    put("reason", reason.wireName)
+                    put("implementation", "responses_compaction_v2")
+                    put("phase", phase.wireName)
+                    put("strategy", "memento")
+                },
+            )
             val result = client.createRemoteCompactionV2Response(
-                RemoteCompactionV2Request(
-                    history = input,
-                    checkpoint = checkpoint,
-                    settings = requestSettings,
+                request = requestSettings.toResponsesApiRequest(
+                    input = input + ResponseItem.CompactionTrigger,
                     threadId = storage.id,
-                    trigger = trigger,
-                    reason = reason,
-                    phase = phase,
+                    turnMetadata = turnMetadata,
+                    windowId = windowId,
                 ),
+                installationId = requestSettings.installationId,
+                turnMetadata = turnMetadata,
+                windowId = windowId,
             )
             storage.appendCompactionCheckpoint(
                 prefix = buildRemoteCompactionV2Prefix(input, result.compactionOutput),
@@ -263,10 +294,14 @@ private class CodexAgentStateImpl(
             require(pendingCall is ResponseItem.FunctionCall && pendingCall.name == "update_plan") {
                 "Plan updates can complete only a pending update_plan function call."
             }
+            val currentSettings = storage.settings[storage.latestIndex()]
+            require(currentSettings.collaborationMode != ModeKind.Plan) {
+                "update_plan is a TODO/checklist tool and is not allowed in Plan mode."
+            }
             val nextState = pendingCalls.stateAfterCompleting(output.callId)
             val index = storage.transaction {
                 val index = storage.latestIndex() + 1
-                storage.plan[index] = plan
+                storage.settings[index] = currentSettings.copy(plan = plan)
                 storage.history[index] = output
                 storage.timestamp[index] = now()
                 index

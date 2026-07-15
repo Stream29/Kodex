@@ -5,7 +5,6 @@ import io.github.stream29.codex.lite.openai.ImageGenerationRequest
 import io.github.stream29.codex.lite.openai.ImageResponse
 import io.github.stream29.codex.lite.openai.ModelsResponse
 import io.github.stream29.codex.lite.openai.OpenAiResponseResult
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Request
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
@@ -28,9 +27,10 @@ public class MockOpenAiClientBuilder {
             request, _, _, _ ->
         createResponseHandler(request)
     }
-    private var createRemoteCompactionV2ResponseHandler: suspend (RemoteCompactionV2Request) -> RemoteCompactionV2Response = {
-        missingHandler("createRemoteCompactionV2Response")
-    }
+    private var createRemoteCompactionV2ResponseHandler:
+        suspend (ResponsesApiRequest, String?, String, String) -> RemoteCompactionV2Response = { _, _, _, _ ->
+            missingHandler("createRemoteCompactionV2Response")
+        }
     private var generateImageHandler: suspend (ImageGenerationRequest) -> OpenAiResponseResult<ImageResponse> = {
         missingHandler("generateImage")
     }
@@ -56,7 +56,7 @@ public class MockOpenAiClientBuilder {
     }
 
     public fun createRemoteCompactionV2Response(
-        handler: suspend (RemoteCompactionV2Request) -> RemoteCompactionV2Response,
+        handler: suspend (ResponsesApiRequest, String?, String, String) -> RemoteCompactionV2Response,
     ): Unit {
         createRemoteCompactionV2ResponseHandler = handler
     }
@@ -89,7 +89,8 @@ private class MockOpenAiClient(
     private val listModelsHandler: suspend () -> OpenAiResponseResult<ModelsResponse>,
     private val createResponseHandler: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent>,
     private val codexResponseHandler: suspend (ResponsesApiRequest, String?, String, String) -> Flow<ResponsesStreamEvent>,
-    private val createRemoteCompactionV2ResponseHandler: suspend (RemoteCompactionV2Request) -> RemoteCompactionV2Response,
+    private val createRemoteCompactionV2ResponseHandler:
+        suspend (ResponsesApiRequest, String?, String, String) -> RemoteCompactionV2Response,
     private val generateImageHandler: suspend (ImageGenerationRequest) -> OpenAiResponseResult<ImageResponse>,
     private val editImageHandler: suspend (ImageEditRequest) -> OpenAiResponseResult<ImageResponse>,
     private val searchHandler: suspend (SearchRequest) -> OpenAiResponseResult<SearchResponse>,
@@ -109,9 +110,12 @@ private class MockOpenAiClient(
         codexResponseHandler(request, installationId, turnMetadata, windowId)
 
     override suspend fun createRemoteCompactionV2Response(
-        request: RemoteCompactionV2Request,
+        request: ResponsesApiRequest,
+        installationId: String?,
+        turnMetadata: String,
+        windowId: String,
     ): RemoteCompactionV2Response =
-        createRemoteCompactionV2ResponseHandler(request)
+        createRemoteCompactionV2ResponseHandler(request, installationId, turnMetadata, windowId)
 
     override suspend fun generateImage(request: ImageGenerationRequest): OpenAiResponseResult<ImageResponse> =
         generateImageHandler(request)

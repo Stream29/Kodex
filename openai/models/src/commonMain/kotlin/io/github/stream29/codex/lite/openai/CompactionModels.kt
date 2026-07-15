@@ -4,10 +4,11 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * Model request settings visible at an agent state index.
+ * Agent-thread settings visible at an agent state index.
  *
- * This type intentionally excludes request input; input is reconstructed from
- * persisted history and the active [CompactionCheckpoint].
+ * This type intentionally excludes request input; AgentState reconstructs it
+ * from persisted history and the active [CompactionCheckpoint], then projects
+ * the request-facing fields into a [ResponsesApiRequest].
  *
  * @property model Model identifier used for the next Responses API request.
  * @property autoCompactionTokenLimit Nullable because token-count-triggered
@@ -15,6 +16,12 @@ import kotlin.uuid.Uuid
  * compaction from token count alone.
  * @property turnId UUIDv7 identity allocated for the active or next logical
  * Codex turn. AgentState rotates it only when it begins a new logical turn.
+ * @property collaborationMode Active collaboration behavior. It is independent
+ * of the task checklist and current goal.
+ * @property plan Full replacement `update_plan` snapshot. An empty plan means
+ * the thread has no active checklist steps.
+ * @property goal Nullable because a thread may not have a current goal; `null`
+ * means no goal has been created or retained for this thread.
  * @property installationId Nullable because Codex identity metadata is
  * optional; `null` means no installation id is sent.
  * @property sessionId Nullable because Codex identity metadata is optional;
@@ -30,10 +37,12 @@ public data class CodexAgentSettings(
     public val model: OpenAiModelId,
     public val autoCompactionTokenLimit: Long? = null,
     public val turnId: String = Uuid.generateV7().toString(),
+    public val collaborationMode: ModeKind = ModeKind.Default,
+    public val plan: UpdatePlanArgs = UpdatePlanArgs(plan = emptyList()),
+    public val goal: ThreadGoal? = null,
     public val installationId: String? = null,
     public val sessionId: String? = null,
     public val instructions: String = "",
-    public val store: Boolean = false,
     public val previousResponseId: String? = null,
     public val tools: List<ToolSpec> = emptyList(),
     public val toolChoice: ToolChoice = ToolChoice.Auto,
@@ -82,42 +91,8 @@ public fun CompactionCheckpoint.codexRequestWindowId(threadId: String): String =
     "$threadId:$windowNumber"
 
 /**
- * Typed input for a normal Codex Responses request.
- *
- * The OpenAI client projects [settings] and [checkpoint] into Codex request
- * metadata and compatibility headers while keeping [input] as the Responses
- * API body input.
- *
- * @property threadId Identity of the storage-backed Codex thread.
+ * Result of a remote compaction v2 Responses stream.
  */
-public data class CodexResponsesRequest(
-    public val input: List<ResponseItem>,
-    public val checkpoint: CompactionCheckpoint,
-    public val settings: CodexAgentSettings,
-    public val threadId: String,
-)
-
-/**
- * Typed input for the Codex remote compaction v2 Responses flow.
- *
- * The OpenAI client owns the wire projection: it appends the
- * `compaction_trigger`, injects remote-compaction client metadata, and sends
- * the required `x-codex-*` headers.
- *
- * @property history Active model-visible history before the client appends the
- * remote-compaction trigger item.
- * @property threadId Identity of the storage-backed Codex thread.
- */
-public data class RemoteCompactionV2Request(
-    public val history: List<ResponseItem>,
-    public val checkpoint: CompactionCheckpoint,
-    public val settings: CodexAgentSettings,
-    public val threadId: String,
-    public val trigger: RemoteCompactionV2Trigger,
-    public val reason: RemoteCompactionV2Reason,
-    public val phase: RemoteCompactionV2Phase,
-)
-
 public data class RemoteCompactionV2Response(
     public val compactionOutput: ResponseItem.Compaction,
     public val completedResponse: Response?,
