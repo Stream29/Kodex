@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.agentstate.impl
 
+import io.github.stream29.codex.lite.agentcontext.contract.AgentContextInjection
+import io.github.stream29.codex.lite.agentcontext.render.render
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
@@ -42,10 +44,13 @@ import kotlin.uuid.Uuid
  * Construction is suspend because storage reads may be asynchronous. The
  * initial phase is reconstructed from persisted history rather than assumed
  * from the newest global index, which may belong to another timeline.
+ * [contextInjection] contributes transient request input and is never persisted
+ * in [storage].
  */
 public suspend fun CodexAgentState(
     client: OpenAiClient,
     storage: MutableCodexAgentStorage,
+    contextInjection: AgentContextInjection,
 ): CodexAgentState {
     val loadedLatestIndex = storage.latestIndex()
     return CodexAgentStateImpl(
@@ -53,6 +58,7 @@ public suspend fun CodexAgentState(
         storage = storage,
         loadedLatestIndex = loadedLatestIndex,
         initialState = storage.stateAt(loadedLatestIndex),
+        contextInjection = contextInjection,
     )
 }
 
@@ -69,6 +75,7 @@ private class CodexAgentStateImpl(
     override val storage: MutableCodexAgentStorage,
     loadedLatestIndex: Int,
     initialState: CodexAgentStateValue,
+    private val contextInjection: AgentContextInjection,
 ) : CodexAgentState {
     override val state: StateFlow<CodexAgentStateValue>
         field = MutableStateFlow(initialState)
@@ -84,15 +91,16 @@ private class CodexAgentStateImpl(
         }
 
         try {
-            check(storage.latestIndex() >= 0) { "Cannot request a response without initial state." }
-
             val snapshotIndex = storage.latestIndex()
+            check(snapshotIndex >= 0) { "Cannot request a response without initial state." }
+
             val settings = storage.settings[snapshotIndex]
-            val input = storage.modelInputAt(snapshotIndex)
+            val durableInput = storage.modelInputAt(snapshotIndex)
+            val requestContext = contextInjection.render()
 
             client.createResponse(
                 CodexResponsesRequest(
-                    input = input,
+                    input = requestContext + durableInput,
                     checkpoint = storage.compaction[snapshotIndex],
                     settings = settings,
                     threadId = storage.id,

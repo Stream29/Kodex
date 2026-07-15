@@ -5,8 +5,8 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-state-contract"))
-            api(project(":agent-storage-contract"))
+            api(libs.kotlinx.datetime)
+            api(libs.kotlinx.io.core)
         }
     }
 }

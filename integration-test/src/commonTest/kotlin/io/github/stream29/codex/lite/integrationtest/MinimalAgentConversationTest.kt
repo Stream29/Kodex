@@ -5,6 +5,9 @@ import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentruntime.impl.CodexAgentLoopImpl
+import io.github.stream29.codex.lite.agentcontext.contract.AgentContextInjection
+import io.github.stream29.codex.lite.agentcontext.contract.AgentEnvironment
+import io.github.stream29.codex.lite.agentcontext.contract.EnvironmentContext
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.forcedCompact
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
@@ -40,6 +43,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
 import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -79,6 +84,39 @@ private data class RecordedCodexResponse(
     val turnMetadata: String,
     val windowId: String,
 )
+
+private val testContextInjection: AgentContextInjection =
+    AgentContextInjection(
+        environmentContext = EnvironmentContext(
+            environments = listOf(
+                AgentEnvironment(
+                    id = "test",
+                    cwd = Path("/workspace"),
+                    shell = "bash",
+                ),
+            ),
+            currentDate = LocalDate(2026, 7, 15),
+            timeZone = TimeZone.UTC,
+        ),
+    )
+
+private val testContextInput: ResponseItem.Message =
+    ResponseItem.Message(
+        role = MessageRole.User,
+        content = listOf(
+            ContentItem.InputText(
+                "<environment_context>\n" +
+                    "  <cwd>/workspace</cwd>\n" +
+                    "  <shell>bash</shell>\n" +
+                    "  <current_date>2026-07-15</current_date>\n" +
+                    "  <timezone>UTC</timezone>\n" +
+                    "</environment_context>",
+            ),
+        ),
+    )
+
+private fun requestInput(vararg durableItems: ResponseItem): List<ResponseItem> =
+    listOf(testContextInput, *durableItems)
 
 private suspend fun OpenAiClient.collectResponseProbe(input: List<ResponseItem>): List<ResponsesStreamEvent> =
     createResponse(
@@ -267,6 +305,7 @@ val minimalAgentConversationTest by testSuite {
         val testAgent = CodexAgentState(
             client = testClient,
             storage = testStorage,
+            contextInjection = testContextInjection,
         )
         object {
             val storage = testStorage
@@ -288,11 +327,11 @@ val minimalAgentConversationTest by testSuite {
             assertEquals(emptyList(), requests[0].tools)
             assertEquals(emptyList(), requests[1].tools)
             assertEquals(
-                listOf(user),
+                requestInput(user),
                 requests[0].input,
             )
             assertEquals(
-                listOf(
+                requestInput(
                     user,
                     assistantMessage("Preparing the greeting."),
                 ),
@@ -322,6 +361,7 @@ val openAiStoryContinuationProbeTest by testSuite {
             val agent = CodexAgentState(
                 client = client,
                 storage = storage,
+                contextInjection = testContextInjection,
             )
             val firstStory = withContext(Dispatchers.Default) {
                 agent.appendUserMessage("请用中文讲一个两句以内的微型故事，只讲故事本身。")
@@ -379,6 +419,7 @@ val openAiForcedCompactProbeTest by testSuite {
             val agent = CodexAgentState(
                 client = client,
                 storage = storage,
+                contextInjection = testContextInjection,
             )
 
             val compactIndex = withContext(Dispatchers.Default) {

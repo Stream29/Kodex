@@ -6,6 +6,8 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":agent-state-contract"))
+            api(project(":agent-context-contract"))
+            implementation(project(":agent-context-render"))
             implementation(project(":openai-client-contract"))
             implementation(libs.kotlinx.coroutines.core)
         }

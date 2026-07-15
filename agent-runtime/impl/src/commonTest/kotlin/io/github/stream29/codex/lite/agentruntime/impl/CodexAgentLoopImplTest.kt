@@ -3,6 +3,9 @@ package io.github.stream29.codex.lite.agentruntime.impl
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
+import io.github.stream29.codex.lite.agentcontext.contract.AgentContextInjection
+import io.github.stream29.codex.lite.agentcontext.contract.AgentEnvironment
+import io.github.stream29.codex.lite.agentcontext.contract.EnvironmentContext
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
@@ -32,6 +35,9 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
@@ -41,6 +47,7 @@ val codexAgentLoopImplTest by testSuite {
         val state = CodexAgentState(
             client = mockOpenAiClient {},
             storage = storage,
+            contextInjection = testContextInjection,
         )
         val runtime: CodexAgentRuntime = CodexAgentLoopImpl(state)
 
@@ -71,6 +78,7 @@ val codexAgentLoopImplTest by testSuite {
                 }
             },
             storage = storage,
+            contextInjection = testContextInjection,
         )
         val runtime = CodexAgentLoopImpl(state)
 
@@ -131,6 +139,7 @@ val codexAgentLoopImplTest by testSuite {
                 }
             },
             storage = storage,
+            contextInjection = testContextInjection,
         )
         val runtime = CodexAgentLoopImpl(state)
         val user = userMessage("Answer briefly.")
@@ -139,8 +148,8 @@ val codexAgentLoopImplTest by testSuite {
         runtime.resume().toList()
 
         assertEquals(2, requests.size)
-        assertEquals(listOf(user), requests[0].input)
-        assertEquals(listOf(user, assistantMessage("Preparing the answer.")), requests[1].input)
+        assertEquals(requestInput(user), requests[0].input)
+        assertEquals(requestInput(user, assistantMessage("Preparing the answer.")), requests[1].input)
         assertEquals(assistantMessage("Done."), storage.history[5])
         assertEquals(13, storage.tokenCount[5])
         assertEquals(5, storage.latestIndex())
@@ -174,6 +183,7 @@ val codexAgentLoopImplTest by testSuite {
                 }
             },
             storage = storage,
+            contextInjection = testContextInjection,
         )
         val runtime = CodexAgentLoopImpl(state)
         val user = userMessage("Keep this context.")
@@ -187,7 +197,7 @@ val codexAgentLoopImplTest by testSuite {
         assertEquals(RemoteCompactionV2Reason.ContextLimit, compactRequest.reason)
         assertEquals(RemoteCompactionV2Phase.PreTurn, compactRequest.phase)
         assertEquals(listOf(user), compactRequest.history)
-        assertEquals(listOf(user, compaction), responseRequests.single().input)
+        assertEquals(requestInput(user, compaction), responseRequests.single().input)
         assertEquals(ResponseItem.ContextCompaction(encryptedContent = "pre-turn-compact"), storage.history[2])
         assertEquals(final, storage.history[3])
         assertEquals(3, storage.compaction[2].historyBaseIndex)
@@ -237,6 +247,7 @@ val codexAgentLoopImplTest by testSuite {
                 }
             },
             storage = storage,
+            contextInjection = testContextInjection,
         )
         val runtime = CodexAgentLoopImpl(state)
 
@@ -244,10 +255,10 @@ val codexAgentLoopImplTest by testSuite {
         runtime.resume().toList()
 
         assertEquals(2, responseRequests.size)
-        assertEquals(listOf(user), responseRequests[0].input)
+        assertEquals(requestInput(user), responseRequests[0].input)
         assertEquals(listOf(user, partial), compactRequests.single().history)
         assertEquals(RemoteCompactionV2Phase.MidTurn, compactRequests.single().phase)
-        assertEquals(listOf(user, compaction), responseRequests[1].input)
+        assertEquals(requestInput(user, compaction), responseRequests[1].input)
         assertEquals(final, storage.history[5])
     }
 
@@ -270,6 +281,7 @@ val codexAgentLoopImplTest by testSuite {
                 }
             },
             storage = storage,
+            contextInjection = testContextInjection,
         )
         val runtime = CodexAgentLoopImpl(state)
 
@@ -294,6 +306,39 @@ private fun assistantMessage(text: String): ResponseItem.Message =
         role = MessageRole.Assistant,
         content = listOf(ContentItem.OutputText(text)),
     )
+
+private val testContextInjection: AgentContextInjection =
+    AgentContextInjection(
+        environmentContext = EnvironmentContext(
+            environments = listOf(
+                AgentEnvironment(
+                    id = "test",
+                    cwd = Path("/workspace"),
+                    shell = "bash",
+                ),
+            ),
+            currentDate = LocalDate(2026, 7, 15),
+            timeZone = TimeZone.UTC,
+        ),
+    )
+
+private val testContextInput: ResponseItem.Message =
+    ResponseItem.Message(
+        role = MessageRole.User,
+        content = listOf(
+            ContentItem.InputText(
+                "<environment_context>\n" +
+                    "  <cwd>/workspace</cwd>\n" +
+                    "  <shell>bash</shell>\n" +
+                    "  <current_date>2026-07-15</current_date>\n" +
+                    "  <timezone>UTC</timezone>\n" +
+                    "</environment_context>",
+            ),
+        ),
+    )
+
+private fun requestInput(vararg durableItems: ResponseItem): List<ResponseItem> =
+    listOf(testContextInput, *durableItems)
 
 private suspend fun CodexAgentStateContract.appendUserMessage(
     message: ResponseItem.Message,
