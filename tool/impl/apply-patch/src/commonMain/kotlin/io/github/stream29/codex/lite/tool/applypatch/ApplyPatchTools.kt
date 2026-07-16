@@ -4,10 +4,9 @@ import io.github.stream29.codex.lite.openai.FreeformTool
 import io.github.stream29.codex.lite.openai.FreeformToolFormat
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
+import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.tool.contract.Tool
-import io.github.stream29.codex.lite.tool.contract.ToolCallPayload
-import io.github.stream29.codex.lite.tool.contract.ToolCallResult
 
 public object ApplyPatchTools {
     public const val Name: String = "apply_patch"
@@ -33,19 +32,23 @@ public class ApplyPatchTool(
 
     override fun close(): Unit = Unit
 
-    override suspend fun handle(payload: ToolCallPayload): ToolCallResult {
-        val patch = when (payload) {
-            is ToolCallPayload.CustomToolCall -> payload.call.input
-            is ToolCallPayload.FunctionCall -> return output("apply_patch received function-call JSON payload", false)
-        }
+    override suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput =
+        when (call) {
+            is ResponseItem.FunctionCall -> ResponseItem.FunctionCallOutput(
+                callId = call.callId,
+                output = output("apply_patch received function-call JSON payload", success = false),
+            )
 
-        return try {
-            client.apply(patch)
-            output("Success. Patch applied.")
-        } catch (error: IllegalArgumentException) {
-            output(error.message ?: "apply_patch failed", success = false)
+            is ResponseItem.CustomToolCall -> ResponseItem.CustomToolCallOutput(
+                callId = call.callId,
+                output = try {
+                    client.apply(call.input)
+                    output("Success. Patch applied.")
+                } catch (error: IllegalArgumentException) {
+                    output(error.message ?: "apply_patch failed", success = false)
+                },
+            )
         }
-    }
 
     private fun output(text: String, success: Boolean = true): FunctionCallOutputPayload =
         FunctionCallOutputPayload(

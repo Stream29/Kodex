@@ -98,12 +98,10 @@ private class CodexAgentStateImpl(
 
             val settings = storage.settings[snapshotIndex]
             val durableInput = storage.modelInputAt(snapshotIndex)
-            val collaborationContext = settings.collaborationMode.renderCollaborationMode()?.let { instructions ->
-                ResponseItem.Message(
-                    role = MessageRole.Developer,
-                    content = listOf(ContentItem.InputText(instructions)),
-                )
-            }
+            val collaborationContext = ResponseItem.Message(
+                role = MessageRole.Developer,
+                content = listOf(ContentItem.InputText(settings.collaborationMode.renderCollaborationMode())),
+            )
             val requestContext = contextPrefixProvider.render()
             val checkpoint = storage.compaction[snapshotIndex]
             val windowId = checkpoint.codexRequestWindowId(storage.id)
@@ -115,7 +113,7 @@ private class CodexAgentStateImpl(
 
             client.createResponse(
                 request = settings.toResponsesApiRequest(
-                    input = listOfNotNull(collaborationContext) + requestContext + durableInput,
+                    input = listOf(collaborationContext) + requestContext + durableInput,
                     threadId = storage.id,
                     turnMetadata = turnMetadata,
                     windowId = windowId,

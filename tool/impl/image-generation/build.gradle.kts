@@ -27,6 +27,7 @@ kotlin {
             implementation(libs.kotlinx.schema.json)
         }
         commonTest.dependencies {
+            implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.coroutines.test)
             implementation(project(":openai-client"))
             implementation(project(":openai-client-test"))

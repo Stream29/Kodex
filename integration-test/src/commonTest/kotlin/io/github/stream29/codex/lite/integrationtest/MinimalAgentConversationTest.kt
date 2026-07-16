@@ -4,13 +4,17 @@ import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.codex.lite.agentruntime.impl.CodexAgentLoopImpl
+import io.github.stream29.codex.lite.agentruntime.compact.compactionRuntime
+import io.github.stream29.codex.lite.agentruntime.plan.planRuntime
+import io.github.stream29.codex.lite.agentruntime.tool.toolRuntime
+import io.github.stream29.codex.lite.agentcontext.collaboration.render.render as renderCollaborationMode
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentsMdInstruction
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.EnvironmentContext
 import io.github.stream29.codex.lite.agentcontext.skill.contract.AvailableSkill
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
+import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.contract.forcedCompact
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
@@ -18,14 +22,23 @@ import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.openai.ContentItem
+import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
+import io.github.stream29.codex.lite.openai.ImageData
+import io.github.stream29.codex.lite.openai.ImageResponse
 import io.github.stream29.codex.lite.openai.MutableOpenAiSubscriptionAuthSession
 import io.github.stream29.codex.lite.openai.MessageRole
+import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
+import io.github.stream29.codex.lite.openai.OpenAiResult
+import io.github.stream29.codex.lite.openai.PlanItemArg
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
+import io.github.stream29.codex.lite.openai.StepStatus
+import io.github.stream29.codex.lite.openai.ToolSpec
+import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.client.OpenAiClient as RealOpenAiClient
@@ -33,6 +46,13 @@ import io.github.stream29.codex.lite.openai.client.OpenAiClientConfig
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorageException
 import io.github.stream29.codex.lite.openai.codexclistorage.defaultCodexDirectory
+import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
+import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchTools
+import io.github.stream29.codex.lite.tool.contract.Tool
+import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationToolClient
+import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationTools
+import io.github.stream29.codex.lite.tool.plan.PlanTools
+import io.github.stream29.codex.lite.tool.viewimage.ViewImageTools
 import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
@@ -43,7 +63,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.io.files.Path
+import kotlinx.serialization.encodeToString
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
@@ -85,6 +107,24 @@ private data class RecordedCodexResponse(
     val windowId: String,
 )
 
+private class RecordingTool(
+    override val spec: ToolSpec,
+    private val resultText: String,
+) : Tool {
+    val calls: MutableList<ResponseItem.ToolCall> = mutableListOf()
+
+    override fun close(): Unit = Unit
+
+    override suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput {
+        calls += call
+        val output = FunctionCallOutputPayload.fromText(resultText).copy(success = true)
+        return when (call) {
+            is ResponseItem.FunctionCall -> ResponseItem.FunctionCallOutput(callId = call.callId, output = output)
+            is ResponseItem.CustomToolCall -> ResponseItem.CustomToolCallOutput(callId = call.callId, output = output)
+        }
+    }
+}
+
 private val testContextPrefixProvider: AgentContextPrefixProvider =
     object : AgentContextPrefixProvider {
         override val environmentContext: EnvironmentContext =
@@ -120,8 +160,14 @@ private val testContextInput: ResponseItem.Message =
         ),
     )
 
+private val defaultCollaborationInput: ResponseItem.Message =
+    ResponseItem.Message(
+        role = MessageRole.Developer,
+        content = listOf(ContentItem.InputText(ModeKind.Default.renderCollaborationMode())),
+    )
+
 private fun requestInput(vararg durableItems: ResponseItem): List<ResponseItem> =
-    listOf(testContextInput, *durableItems)
+    listOf(defaultCollaborationInput, testContextInput, *durableItems)
 
 private suspend fun OpenAiClient.collectResponseProbe(input: List<ResponseItem>): List<ResponsesStreamEvent> =
     createResponse(
@@ -317,7 +363,7 @@ val minimalAgentConversationTest by testSuite {
             val requests = testRequests
             val client = testClient
             val agent = testAgent
-            val runtime = CodexAgentLoopImpl(agent)
+            val runtime = agent.compactionRuntime()
             val user = userMessage("Answer with a short greeting.")
         }
     } closeWith {
@@ -351,6 +397,174 @@ val minimalAgentConversationTest by testSuite {
             assertTrue(storage.timestamp[3] > Instant.fromEpochSeconds(0))
             assertEquals(-1, storage.tokenCount.latestIndex())
         }
+    }
+}
+
+val toolRuntimeCompositionTest by testSuite {
+    test("tool runtime rejects duplicate tool names") {
+        val state = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model"))),
+            contextPrefixProvider = testContextPrefixProvider,
+        )
+
+        assertFailsWith<IllegalArgumentException> {
+            state.compactionRuntime().toolRuntime(
+                listOf(
+                    RecordingTool(ViewImageTools.spec, "first handler"),
+                    RecordingTool(ViewImageTools.spec, "second handler"),
+                ),
+            )
+        }
+    }
+
+    test("tool runtime leaves unconfigured calls pending") {
+        val configuredCall = ResponseItem.FunctionCall(
+            name = ViewImageTools.Name,
+            arguments = "{\"path\":\"diagram.png\"}",
+            callId = "call_view",
+        )
+        val unconfiguredCall = ResponseItem.FunctionCall(
+            name = "unconfigured_tool",
+            arguments = "{}",
+            callId = "call_unconfigured",
+        )
+        val requests = mutableListOf<ResponsesApiRequest>()
+        val storage = InMemoryCodexAgentStorage(
+            CodexAgentSettings(
+                model = OpenAiModelId("test-model"),
+                tools = listOf(ViewImageTools.spec),
+            ),
+        )
+        val state = CodexAgentState(
+            client = mockOpenAiClient {
+                createResponse { request ->
+                    requests += request
+                    flowOf(
+                        ResponsesStreamEvent.OutputItemDone(0, configuredCall),
+                        ResponsesStreamEvent.OutputItemDone(1, unconfiguredCall),
+                        ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
+                    )
+                }
+            },
+            storage = storage,
+            contextPrefixProvider = testContextPrefixProvider,
+        )
+        val viewTool = RecordingTool(ViewImageTools.spec, "image viewed")
+
+        state.appendUserMessage(userMessage("Inspect the image.").content)
+        state.compactionRuntime().toolRuntime(listOf(viewTool)).resume().toList()
+
+        assertEquals(1, requests.size)
+        assertEquals(listOf(ViewImageTools.spec), requests.single().tools)
+        assertEquals(listOf<ResponseItem.ToolCall>(configuredCall), viewTool.calls)
+        assertEquals(
+            listOf<ResponseItem.ToolCall>(unconfiguredCall),
+            assertIs<CodexAgentStateValue.ToolPending>(state.state.value).calls,
+        )
+        assertIs<ResponseItem.FunctionCallOutput>(storage.history[4])
+    }
+
+    test("tool runtime completes its configured calls and continues the response") {
+        val plan = UpdatePlanArgs(
+            plan = listOf(PlanItemArg("Handle local tools", StepStatus.InProgress)),
+        )
+        val planCall = ResponseItem.FunctionCall(
+            name = PlanTools.Name,
+            arguments = OpenAiJsonCodec.encodeToString(plan),
+            callId = "call_plan",
+        )
+        val patchCall = ResponseItem.CustomToolCall(
+            name = ApplyPatchTools.Name,
+            input = "*** Begin Patch",
+            callId = "call_patch",
+        )
+        val viewCall = ResponseItem.FunctionCall(
+            name = ViewImageTools.Name,
+            arguments = "{\"path\":\"diagram.png\"}",
+            callId = "call_view",
+        )
+        val imageCall = ResponseItem.FunctionCall(
+            namespace = "image_gen",
+            name = "imagegen",
+            arguments = "{\"prompt\":\"draw a square\"}",
+            callId = "call_image",
+        )
+        val requests = mutableListOf<ResponsesApiRequest>()
+        val toolSpecs = listOf(
+            PlanTools.spec,
+            ApplyPatchTools.spec,
+            ViewImageTools.spec,
+            ImageGenerationTools.spec,
+        )
+        val storage = InMemoryCodexAgentStorage(
+            CodexAgentSettings(
+                model = OpenAiModelId("test-model"),
+                tools = toolSpecs,
+            ),
+        )
+        val state = CodexAgentState(
+            client = mockOpenAiClient {
+                createResponse { request ->
+                    requests += request
+                    when (requests.size) {
+                        1 -> flowOf(
+                            ResponsesStreamEvent.OutputItemDone(0, planCall),
+                            ResponsesStreamEvent.OutputItemDone(1, patchCall),
+                            ResponsesStreamEvent.OutputItemDone(2, viewCall),
+                            ResponsesStreamEvent.OutputItemDone(3, imageCall),
+                            ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
+                        )
+
+                        2 -> flowOf(
+                            ResponsesStreamEvent.OutputItemDone(0, assistantMessage("All tools completed.")),
+                            ResponsesStreamEvent.Completed(Response(id = "response_2", endTurn = true)),
+                        )
+
+                        else -> fail("Unexpected request count ${requests.size}.")
+                    }
+                }
+            },
+            storage = storage,
+            contextPrefixProvider = testContextPrefixProvider,
+        )
+        val patchTool = RecordingTool(ApplyPatchTools.spec, "patch applied")
+        val viewTool = RecordingTool(ViewImageTools.spec, "image viewed")
+        val imagePrompts = mutableListOf<String>()
+        val imageClient = ImageGenerationToolClient(
+            client = mockOpenAiClient {
+                generateImage { request ->
+                    imagePrompts += request.prompt
+                    OpenAiResult.Success(
+                        ImageResponse(
+                            created = 1,
+                            data = listOf(ImageData("generated-image")),
+                        ),
+                    )
+                }
+            },
+        )
+        val imageTool = ImageGenerationTools.createTool(imageClient)
+        val runtime = state
+            .compactionRuntime()
+            .planRuntime()
+            .toolRuntime(listOf(patchTool, viewTool, imageTool))
+
+        state.appendUserMessage(userMessage("Use every local tool.").content)
+        runtime.resume().toList()
+
+        assertEquals(2, requests.size)
+        assertEquals(toolSpecs, requests.first().tools)
+        assertEquals(toolSpecs, requests[1].tools)
+        assertEquals(listOf<ResponseItem.ToolCall>(patchCall), patchTool.calls)
+        assertEquals(listOf<ResponseItem.ToolCall>(viewCall), viewTool.calls)
+        assertEquals(listOf("draw a square"), imagePrompts)
+        assertEquals(plan, storage.settings[storage.latestIndex()].plan)
+        assertIs<ResponseItem.FunctionCallOutput>(storage.history[6])
+        assertIs<ResponseItem.CustomToolCallOutput>(storage.history[7])
+        assertIs<ResponseItem.FunctionCallOutput>(storage.history[8])
+        assertIs<ResponseItem.FunctionCallOutput>(storage.history[9])
+        assertEquals("All tools completed.", storage.lastAssistantMessage())
     }
 }
 

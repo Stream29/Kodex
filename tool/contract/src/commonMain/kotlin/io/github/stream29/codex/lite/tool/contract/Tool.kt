@@ -1,6 +1,7 @@
 package io.github.stream29.codex.lite.tool.contract
 
 import io.github.stream29.codex.lite.openai.ToolSpec
+import io.github.stream29.codex.lite.openai.ResponseItem
 
 /**
  * Non-generic executable tool contract used by the agent loop.
@@ -13,5 +14,5 @@ import io.github.stream29.codex.lite.openai.ToolSpec
 public interface Tool : AutoCloseable {
     public val spec: ToolSpec
 
-    public suspend fun handle(payload: ToolCallPayload): ToolCallResult
+    public suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput
 }
