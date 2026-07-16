@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.tool.contract
 
+import io.github.stream29.codex.lite.openai.ResponseItem
 import kotlinx.serialization.Serializable
 
 /**
@@ -29,3 +30,10 @@ public data class ToolName(
             ToolName(name = name, namespace = namespace)
     }
 }
+
+/** Returns whether this call targets [toolName], including its namespace. */
+public fun ResponseItem.ToolCall.matches(toolName: ToolName): Boolean =
+    when (this) {
+        is ResponseItem.FunctionCall -> name == toolName.name && namespace == toolName.namespace
+        is ResponseItem.CustomToolCall -> name == toolName.name && namespace == toolName.namespace
+    }

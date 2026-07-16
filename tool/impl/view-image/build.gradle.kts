@@ -14,8 +14,5 @@ kotlin {
             implementation(libs.kotlinx.schema.json)
             implementation(libs.kotlinx.serialization.json)
         }
-        commonTest.dependencies {
-            implementation(libs.kotlinx.coroutines.test)
-        }
     }
 }

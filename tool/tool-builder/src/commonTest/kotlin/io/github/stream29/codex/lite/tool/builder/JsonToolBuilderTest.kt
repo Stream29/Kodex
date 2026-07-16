@@ -6,7 +6,6 @@ import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ResponseItem
-import io.github.stream29.codex.lite.tool.contract.ToolCallPayload
 import kotlinx.schema.json.PropertyBuilder
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -41,19 +40,20 @@ val jsonToolBuilderTest by testSuite {
         }
 
         assertEquals(
-            FunctionCallOutputPayload(
-                body = FunctionCallOutputBody.Text(
-                    ToolBuilderJson.encodeToString(JsonToolOutput.serializer(), JsonToolOutput("hello")),
+            ResponseItem.FunctionCallOutput(
+                callId = "call_1",
+                output = FunctionCallOutputPayload(
+                    body = FunctionCallOutputBody.Text(
+                        ToolBuilderJson.encodeToString(JsonToolOutput.serializer(), JsonToolOutput("hello")),
+                    ),
+                    success = true,
                 ),
-                success = true,
             ),
             tool.handle(
-                ToolCallPayload.FunctionCall(
-                    ResponseItem.FunctionCall(
-                        name = "echo",
-                        arguments = """{"value":"hello"}""",
-                        callId = "call_1",
-                    ),
+                ResponseItem.FunctionCall(
+                    name = "echo",
+                    arguments = """{"value":"hello"}""",
+                    callId = "call_1",
                 ),
             ),
         )
@@ -69,17 +69,18 @@ val jsonToolBuilderTest by testSuite {
         }
 
         assertEquals(
-            FunctionCallOutputPayload(
-                body = FunctionCallOutputBody.Text("JSON tool received custom tool payload"),
-                success = false,
+            ResponseItem.CustomToolCallOutput(
+                callId = "call_1",
+                output = FunctionCallOutputPayload(
+                    body = FunctionCallOutputBody.Text("JSON tool received custom tool payload"),
+                    success = false,
+                ),
             ),
             tool.handle(
-                ToolCallPayload.CustomToolCall(
-                    ResponseItem.CustomToolCall(
-                        callId = "call_1",
-                        name = "echo",
-                        input = "raw",
-                    ),
+                ResponseItem.CustomToolCall(
+                    callId = "call_1",
+                    name = "echo",
+                    input = "raw",
                 ),
             ),
         )

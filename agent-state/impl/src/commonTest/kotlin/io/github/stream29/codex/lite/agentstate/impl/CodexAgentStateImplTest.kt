@@ -2,6 +2,7 @@ package io.github.stream29.codex.lite.agentstate.impl
 
 import de.infix.testBalloon.framework.core.testSuite
 
+import io.github.stream29.codex.lite.agentcontext.collaboration.render.render as renderCollaborationMode
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.EnvironmentContext
@@ -1289,8 +1290,14 @@ private val testContextInput: ResponseItem.Message =
         ),
     )
 
+private val defaultCollaborationInput: ResponseItem.Message =
+    ResponseItem.Message(
+        role = MessageRole.Developer,
+        content = listOf(ContentItem.InputText(ModeKind.Default.renderCollaborationMode())),
+    )
+
 private fun requestInput(vararg durableItems: ResponseItem): List<ResponseItem> =
-    listOf(testContextInput, *durableItems)
+    listOf(defaultCollaborationInput, testContextInput, *durableItems)
 
 private fun userMessage(text: String): ResponseItem.Message =
     ResponseItem.Message(

@@ -2,10 +2,9 @@ package io.github.stream29.codex.lite.tool.builder
 
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
+import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.tool.contract.Tool
-import io.github.stream29.codex.lite.tool.contract.ToolCallPayload
-import io.github.stream29.codex.lite.tool.contract.ToolCallResult
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.SerializationStrategy
@@ -54,12 +53,20 @@ private class JsonTool<Input, Output>(
 ) : Tool {
     override fun close(): Unit = Unit
 
-    override suspend fun handle(payload: ToolCallPayload): ToolCallResult {
-        val argumentsJson = when (payload) {
-            is ToolCallPayload.FunctionCall -> payload.call.arguments
-            is ToolCallPayload.CustomToolCall -> return failedOutput("JSON tool received custom tool payload")
+    override suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput =
+        when (call) {
+            is ResponseItem.FunctionCall -> ResponseItem.FunctionCallOutput(
+                callId = call.callId,
+                output = handleFunctionCall(call.arguments),
+            )
+
+            is ResponseItem.CustomToolCall -> ResponseItem.CustomToolCallOutput(
+                callId = call.callId,
+                output = failedOutput("JSON tool received custom tool payload"),
+            )
         }
 
+    private suspend fun handleFunctionCall(argumentsJson: String): FunctionCallOutputPayload {
         val input = try {
             json.decodeFromString(inputDeserializer, argumentsJson)
         } catch (error: SerializationException) {

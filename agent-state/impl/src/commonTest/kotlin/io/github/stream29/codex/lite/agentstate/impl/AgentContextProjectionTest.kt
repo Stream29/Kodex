@@ -70,6 +70,7 @@ val agentContextProjectionTest by testSuite {
 
         assertEquals(
             listOf(
+                collaborationMessage(ModeKind.Default),
                 contextualUserMessage(
                     agentMdForDirectory(
                         "user instructions\n\n--- project-doc ---\n\nproject instructions",
@@ -149,9 +150,7 @@ val agentContextProjectionTest by testSuite {
 
         assertEquals(
             listOf(
-                developerMessage(
-                    requireNotNull(ModeKind.Plan.renderCollaborationMode()),
-                ),
+                collaborationMessage(ModeKind.Plan),
                 developerMessage(
                     availableSkills(skillCatalog),
                 ),
@@ -198,8 +197,16 @@ val agentContextProjectionTest by testSuite {
 
         assertEquals(
             listOf(
-                listOf(contextualUserMessage(agentMd("agent instructions"), environmentContext()), user),
-                listOf(contextualUserMessage(agentMd("agent instructions"), environmentContext()), user),
+                listOf(
+                    collaborationMessage(ModeKind.Default),
+                    contextualUserMessage(agentMd("agent instructions"), environmentContext()),
+                    user,
+                ),
+                listOf(
+                    collaborationMessage(ModeKind.Default),
+                    contextualUserMessage(agentMd("agent instructions"), environmentContext()),
+                    user,
+                ),
             ),
             requests.map(ResponsesApiRequest::input),
         )
@@ -237,8 +244,16 @@ val agentContextProjectionTest by testSuite {
 
         assertEquals(
             listOf(
-                listOf(contextualUserMessage(agentMd("agent instructions 1"), environmentContext()), user),
-                listOf(contextualUserMessage(agentMd("agent instructions 2"), environmentContext()), user),
+                listOf(
+                    collaborationMessage(ModeKind.Default),
+                    contextualUserMessage(agentMd("agent instructions 1"), environmentContext()),
+                    user,
+                ),
+                listOf(
+                    collaborationMessage(ModeKind.Default),
+                    contextualUserMessage(agentMd("agent instructions 2"), environmentContext()),
+                    user,
+                ),
             ),
             requests.map(ResponsesApiRequest::input),
         )
@@ -332,6 +347,7 @@ val agentContextProjectionTest by testSuite {
 
         assertEquals(
             listOf(
+                collaborationMessage(ModeKind.Default),
                 contextualUserMessage(
                     agentMd(
                         """
@@ -391,6 +407,9 @@ private fun userMessage(text: String): ResponseItem.Message =
 
 private fun developerMessage(vararg sections: String): ResponseItem.Message =
     message(MessageRole.Developer, *sections)
+
+private fun collaborationMessage(mode: ModeKind): ResponseItem.Message =
+    developerMessage(mode.renderCollaborationMode())
 
 private fun contextualUserMessage(vararg sections: String): ResponseItem.Message =
     message(MessageRole.User, *sections)
