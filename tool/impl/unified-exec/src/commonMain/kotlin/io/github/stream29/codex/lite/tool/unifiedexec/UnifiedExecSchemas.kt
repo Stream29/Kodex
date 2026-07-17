@@ -23,7 +23,7 @@ public val ExecCommandParametersSchema: ObjectPropertyDefinition =
             integer { description = "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy." }
         }
         property("shell") {
-            string { description = "Shell binary to launch. Defaults to the host's default shell." }
+            string { description = execCommandShellDescription }
         }
         property("login") {
             boolean { description = "True runs the shell with login semantics when the selected shell supports it." }
