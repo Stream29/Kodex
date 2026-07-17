@@ -86,6 +86,32 @@ val jsonToolBuilderTest by testSuite {
         )
     }
 
+    test("decodes json payload and returns plain text") {
+        val tool = textTool(
+            spec = jsonToolTestSpec,
+            inputDeserializer = JsonToolInput.serializer(),
+        ) { input ->
+            jsonToolSuccess("echoed: ${input.value}")
+        }
+
+        assertEquals(
+            ResponseItem.FunctionCallOutput(
+                callId = "call_1",
+                output = FunctionCallOutputPayload(
+                    body = FunctionCallOutputBody.Text("echoed: hello"),
+                    success = true,
+                ),
+            ),
+            tool.handle(
+                ResponseItem.FunctionCall(
+                    name = "echo",
+                    arguments = """{"value":"hello"}""",
+                    callId = "call_1",
+                ),
+            ),
+        )
+    }
+
     test("closes without resources") {
         val tool = jsonTool(
             spec = jsonToolTestSpec,
