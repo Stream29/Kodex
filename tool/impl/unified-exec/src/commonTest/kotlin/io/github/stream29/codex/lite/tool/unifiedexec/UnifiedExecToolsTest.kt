@@ -16,6 +16,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.io.files.Path
+import kotlinx.schema.json.StringPropertyDefinition
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlin.coroutines.cancellation.CancellationException
@@ -81,6 +82,39 @@ val unifiedExecToolsTest by testSuite {
         assertEquals(UnifiedExecOutputSchema, UnifiedExecTools.writeStdinSpec.outputSchema)
         assertTrue(UnifiedExecTools.execCommandSpec.parameters.required?.contains("cmd") == true)
         assertTrue(UnifiedExecTools.writeStdinSpec.parameters.required?.contains("session_id") == true)
+    }
+
+    test("exec_command describes the host shell in its schema") {
+        val shell = assertIs<StringPropertyDefinition>(
+            requireNotNull(ExecCommandParametersSchema.properties?.get("shell")),
+        )
+        val description = requireNotNull(shell.description)
+
+        assertEquals(execCommandShellDescription, description)
+        assertTrue(description.contains("dynamically resolved"))
+        assertTrue(description.contains("`${Shell.default.path}`"))
+    }
+
+    test("exec_command shell guidance distinguishes host platforms") {
+        val windows = renderExecCommandShellDescription(
+            platform = ExecCommandHostPlatform.Windows,
+            defaultShell = Shell(ShellType.PowerShell, Path("C:\\Tools\\pwsh.exe")),
+        )
+        val macos = renderExecCommandShellDescription(
+            platform = ExecCommandHostPlatform.Macos,
+            defaultShell = Shell(ShellType.Zsh, Path("/bin/zsh")),
+        )
+        val linux = renderExecCommandShellDescription(
+            platform = ExecCommandHostPlatform.Linux,
+            defaultShell = Shell(ShellType.Bash, Path("/bin/bash")),
+        )
+
+        assertTrue("Windows default" in windows)
+        assertTrue("PowerShell syntax" in windows)
+        assertTrue("macOS default" in macos)
+        assertTrue("POSIX shell syntax" in macos)
+        assertTrue("Linux default" in linux)
+        assertTrue("POSIX shell syntax" in linux)
     }
 
     test("exec_command decodes a shell string into a path-preserving shell") {

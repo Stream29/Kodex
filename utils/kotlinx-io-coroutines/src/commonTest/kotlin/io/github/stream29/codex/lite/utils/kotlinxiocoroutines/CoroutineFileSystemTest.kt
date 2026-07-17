@@ -63,5 +63,25 @@ val coroutineFileSystemTest by testSuite {
             assertEquals((bytes.size * 2).toLong(), copied)
             assertContentEquals(bytes + bytes, SystemCoroutineFileSystem.readBytes(copyFile))
         }
+
+        test("preserves Unicode paths and UTF-8 contents") { root ->
+            val directory = Path(root, "目录-Русский-日本語")
+            val sourceFile = Path(directory, "源文件-данные.txt")
+            val destinationFile = Path(directory, "已移动-итог.txt")
+            val content = "中文 / русский / 日本語 / cafe\u0301\n"
+
+            SystemCoroutineFileSystem.createDirectories(directory)
+            SystemCoroutineFileSystem.writeString(sourceFile, content)
+
+            assertTrue(SystemCoroutineFileSystem.exists(sourceFile))
+            assertEquals(content, SystemCoroutineFileSystem.readString(sourceFile))
+            assertEquals(listOf(sourceFile), SystemCoroutineFileSystem.list(directory))
+
+            SystemCoroutineFileSystem.atomicMove(sourceFile, destinationFile)
+
+            assertFalse(SystemCoroutineFileSystem.exists(sourceFile))
+            assertEquals(content, SystemCoroutineFileSystem.readString(destinationFile))
+            assertEquals(listOf(destinationFile), SystemCoroutineFileSystem.list(directory))
+        }
     }
 }

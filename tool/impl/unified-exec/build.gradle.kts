@@ -25,6 +25,9 @@ kotlin {
             api(project(":utils-shell-client"))
             implementation(libs.kotlinx.schema.json)
         }
+        jsMain.dependencies {
+            implementation(libs.kotlin.wrappers.node)
+        }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
