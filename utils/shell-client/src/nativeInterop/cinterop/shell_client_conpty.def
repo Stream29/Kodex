@@ -1,0 +1,232 @@
+package = io.github.stream29.codex.lite.utils.shellclient.conpty
+
+headers = windows.h
+
+---
+
+#define _WIN32_WINNT 0x0A00
+#include <windows.h>
+
+#ifndef PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
+#define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE ProcThreadAttributeValue(22, FALSE, TRUE, FALSE)
+#endif
+
+typedef HRESULT (WINAPI *codexlite_create_pseudo_console)(
+    COORD,
+    HANDLE,
+    HANDLE,
+    DWORD,
+    HANDLE *
+);
+
+typedef VOID (WINAPI *codexlite_close_pseudo_console)(HANDLE);
+
+typedef struct codexlite_windows_pseudo_console {
+    HANDLE pseudo_console;
+    HANDLE input_read;
+    HANDLE output_write;
+} codexlite_windows_pseudo_console;
+
+static inline void codexlite_close_handle(HANDLE *handle) {
+    if (*handle != NULL) {
+        CloseHandle(*handle);
+        *handle = NULL;
+    }
+}
+
+static inline int codexlite_spawn_windows_pty(
+    HANDLE *process_out,
+    HANDLE *thread_out,
+    void **pseudo_console_out,
+    HANDLE *stdin_write_out,
+    HANDLE *output_read_out,
+    wchar_t *command_line,
+    const wchar_t *working_directory,
+    SHORT columns,
+    SHORT rows
+) {
+    HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+    codexlite_create_pseudo_console create_pseudo_console;
+    codexlite_close_pseudo_console close_pseudo_console;
+    SECURITY_ATTRIBUTES security_attributes;
+    HANDLE stdin_read = NULL;
+    HANDLE stdin_write = NULL;
+    HANDLE output_read = NULL;
+    HANDLE output_write = NULL;
+    HANDLE pseudo_console = NULL;
+    codexlite_windows_pseudo_console *pseudo_console_owner = NULL;
+    SIZE_T attribute_list_size = 0;
+    LPPROC_THREAD_ATTRIBUTE_LIST attribute_list = NULL;
+    STARTUPINFOEXW startup_info;
+    PROCESS_INFORMATION process_info;
+    COORD size;
+    HRESULT pseudo_console_result;
+    DWORD error = ERROR_GEN_FAILURE;
+    BOOL attribute_list_initialized = FALSE;
+
+    if (
+        process_out == NULL ||
+        thread_out == NULL ||
+        pseudo_console_out == NULL ||
+        stdin_write_out == NULL ||
+        output_read_out == NULL ||
+        command_line == NULL
+    ) {
+        return ERROR_INVALID_PARAMETER;
+    }
+    *process_out = NULL;
+    *thread_out = NULL;
+    *pseudo_console_out = NULL;
+    *stdin_write_out = NULL;
+    *output_read_out = NULL;
+
+    if (kernel32 == NULL) return ERROR_CALL_NOT_IMPLEMENTED;
+    create_pseudo_console = (codexlite_create_pseudo_console)GetProcAddress(kernel32, "CreatePseudoConsole");
+    close_pseudo_console = (codexlite_close_pseudo_console)GetProcAddress(kernel32, "ClosePseudoConsole");
+    if (create_pseudo_console == NULL || close_pseudo_console == NULL) return ERROR_CALL_NOT_IMPLEMENTED;
+
+    ZeroMemory(&security_attributes, sizeof(security_attributes));
+    security_attributes.nLength = sizeof(security_attributes);
+    security_attributes.bInheritHandle = TRUE;
+    if (!CreatePipe(&stdin_read, &stdin_write, &security_attributes, 0)) {
+        error = GetLastError();
+        goto fail;
+    }
+    if (!CreatePipe(&output_read, &output_write, &security_attributes, 0)) {
+        error = GetLastError();
+        goto fail;
+    }
+    if (!SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0)) {
+        error = GetLastError();
+        goto fail;
+    }
+    if (!SetHandleInformation(output_read, HANDLE_FLAG_INHERIT, 0)) {
+        error = GetLastError();
+        goto fail;
+    }
+
+    size.X = columns;
+    size.Y = rows;
+    pseudo_console_result = create_pseudo_console(size, stdin_read, output_write, 0, &pseudo_console);
+    if (FAILED(pseudo_console_result)) {
+        error = HRESULT_CODE(pseudo_console_result);
+        goto fail;
+    }
+    // CreatePseudoConsole borrows these handles until ClosePseudoConsole.
+    pseudo_console_owner = (codexlite_windows_pseudo_console *)HeapAlloc(
+        GetProcessHeap(),
+        HEAP_ZERO_MEMORY,
+        sizeof(codexlite_windows_pseudo_console)
+    );
+    if (pseudo_console_owner == NULL) {
+        error = ERROR_NOT_ENOUGH_MEMORY;
+        goto fail;
+    }
+    pseudo_console_owner->pseudo_console = pseudo_console;
+    pseudo_console_owner->input_read = stdin_read;
+    pseudo_console_owner->output_write = output_write;
+    pseudo_console = NULL;
+    stdin_read = NULL;
+    output_write = NULL;
+
+    InitializeProcThreadAttributeList(NULL, 1, 0, &attribute_list_size);
+    if (attribute_list_size == 0) {
+        error = GetLastError();
+        goto fail;
+    }
+    attribute_list = (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(
+        GetProcessHeap(),
+        HEAP_ZERO_MEMORY,
+        attribute_list_size
+    );
+    if (attribute_list == NULL) {
+        error = ERROR_NOT_ENOUGH_MEMORY;
+        goto fail;
+    }
+    if (!InitializeProcThreadAttributeList(attribute_list, 1, 0, &attribute_list_size)) {
+        error = GetLastError();
+        goto fail;
+    }
+    attribute_list_initialized = TRUE;
+    if (!UpdateProcThreadAttribute(
+        attribute_list,
+        0,
+        PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+        pseudo_console_owner->pseudo_console,
+        sizeof(pseudo_console_owner->pseudo_console),
+        NULL,
+        NULL
+    )) {
+        error = GetLastError();
+        goto fail;
+    }
+
+    ZeroMemory(&startup_info, sizeof(startup_info));
+    startup_info.StartupInfo.cb = sizeof(startup_info);
+    startup_info.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup_info.StartupInfo.hStdInput = INVALID_HANDLE_VALUE;
+    startup_info.StartupInfo.hStdOutput = INVALID_HANDLE_VALUE;
+    startup_info.StartupInfo.hStdError = INVALID_HANDLE_VALUE;
+    startup_info.lpAttributeList = attribute_list;
+    ZeroMemory(&process_info, sizeof(process_info));
+    if (!CreateProcessW(
+        NULL,
+        command_line,
+        NULL,
+        NULL,
+        FALSE,
+        EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED,
+        NULL,
+        working_directory,
+        &startup_info.StartupInfo,
+        &process_info
+    )) {
+        error = GetLastError();
+        goto fail;
+    }
+
+    DeleteProcThreadAttributeList(attribute_list);
+    HeapFree(GetProcessHeap(), 0, attribute_list);
+    *process_out = process_info.hProcess;
+    *thread_out = process_info.hThread;
+    *pseudo_console_out = (void *)pseudo_console_owner;
+    *stdin_write_out = stdin_write;
+    *output_read_out = output_read;
+    return 0;
+
+fail:
+    if (attribute_list_initialized) DeleteProcThreadAttributeList(attribute_list);
+    if (attribute_list != NULL) HeapFree(GetProcessHeap(), 0, attribute_list);
+    if (pseudo_console_owner != NULL) {
+        if (pseudo_console_owner->pseudo_console != NULL && close_pseudo_console != NULL) {
+            close_pseudo_console(pseudo_console_owner->pseudo_console);
+        }
+        codexlite_close_handle(&pseudo_console_owner->input_read);
+        codexlite_close_handle(&pseudo_console_owner->output_write);
+        HeapFree(GetProcessHeap(), 0, pseudo_console_owner);
+    } else if (pseudo_console != NULL && close_pseudo_console != NULL) {
+        close_pseudo_console(pseudo_console);
+    }
+    codexlite_close_handle(&stdin_read);
+    codexlite_close_handle(&stdin_write);
+    codexlite_close_handle(&output_read);
+    codexlite_close_handle(&output_write);
+    return (int)error;
+}
+
+static inline void codexlite_close_windows_pseudo_console(void *pseudo_console) {
+    HMODULE kernel32;
+    codexlite_close_pseudo_console close_pseudo_console;
+    codexlite_windows_pseudo_console *owner = (codexlite_windows_pseudo_console *)pseudo_console;
+    if (owner == NULL) return;
+    kernel32 = GetModuleHandleW(L"kernel32.dll");
+    close_pseudo_console = kernel32 == NULL
+        ? NULL
+        : (codexlite_close_pseudo_console)GetProcAddress(kernel32, "ClosePseudoConsole");
+    if (close_pseudo_console != NULL && owner->pseudo_console != NULL) {
+        close_pseudo_console(owner->pseudo_console);
+    }
+    codexlite_close_handle(&owner->input_read);
+    codexlite_close_handle(&owner->output_write);
+    HeapFree(GetProcessHeap(), 0, owner);
+}

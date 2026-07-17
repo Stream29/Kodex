@@ -1,0 +1,17 @@
+plugins {
+    id("codexlite.kmp-host")
+}
+
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            api(project(":tool-contract"))
+            api(project(":tool-tool-builder"))
+            api(libs.kotlinx.datetime)
+            implementation(libs.kotlinx.schema.json)
+        }
+        commonTest.dependencies {
+            implementation(libs.kotlinx.serialization.json)
+        }
+    }
+}

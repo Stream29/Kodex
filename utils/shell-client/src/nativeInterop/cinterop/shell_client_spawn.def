@@ -1,0 +1,105 @@
+package = io.github.stream29.codex.lite.utils.shellclient.cinterop
+
+headers = spawn.h unistd.h
+
+---
+
+#ifdef __APPLE__
+#include <crt_externs.h>
+#include <util.h>
+#define CODEXLITE_ENVIRON (*_NSGetEnviron())
+#else
+#include <pty.h>
+extern char **environ;
+#define CODEXLITE_ENVIRON environ
+#endif
+
+#include <errno.h>
+
+static inline int codexlite_spawn_shell(
+    pid_t *pid,
+    int *process_group,
+    int stdin_read,
+    int stdin_write,
+    int output_read,
+    int output_write,
+    const char *shell,
+    const char *first_argument,
+    const char *second_argument,
+    const char *command
+) {
+    posix_spawn_file_actions_t actions;
+    int result = posix_spawn_file_actions_init(&actions);
+    if (result != 0) return result;
+
+    posix_spawnattr_t attributes;
+    result = posix_spawnattr_init(&attributes);
+    if (result != 0) {
+        posix_spawn_file_actions_destroy(&actions);
+        return result;
+    }
+
+    short attributes_flags = 0;
+    int owns_process_group = 0;
+#ifdef POSIX_SPAWN_SETPGROUP
+    result = posix_spawnattr_setpgroup(&attributes, 0);
+    if (result == 0) {
+        attributes_flags |= POSIX_SPAWN_SETPGROUP;
+        owns_process_group = 1;
+    }
+#endif
+    if (result == 0) result = posix_spawnattr_setflags(&attributes, attributes_flags);
+
+    if (result == 0) result = posix_spawn_file_actions_adddup2(&actions, stdin_read, STDIN_FILENO);
+    if (result == 0) result = posix_spawn_file_actions_adddup2(&actions, output_write, STDOUT_FILENO);
+    if (result == 0) result = posix_spawn_file_actions_adddup2(&actions, output_write, STDERR_FILENO);
+    if (result == 0) result = posix_spawn_file_actions_addclose(&actions, stdin_read);
+    if (result == 0) result = posix_spawn_file_actions_addclose(&actions, stdin_write);
+    if (result == 0) result = posix_spawn_file_actions_addclose(&actions, output_read);
+    if (result == 0) result = posix_spawn_file_actions_addclose(&actions, output_write);
+
+    if (result == 0) {
+        char *argv[5];
+        int argument_count = 0;
+        argv[0] = (char *)shell;
+        if (first_argument != NULL) argv[++argument_count] = (char *)first_argument;
+        if (second_argument != NULL) argv[++argument_count] = (char *)second_argument;
+        argv[++argument_count] = (char *)command;
+        argv[++argument_count] = NULL;
+        result = posix_spawnp(pid, shell, &actions, &attributes, argv, CODEXLITE_ENVIRON);
+        if (result == 0) *process_group = owns_process_group;
+    }
+
+    int attributes_destroy_result = posix_spawnattr_destroy(&attributes);
+    int destroy_result = posix_spawn_file_actions_destroy(&actions);
+    if (result != 0) return result;
+    if (attributes_destroy_result != 0) return attributes_destroy_result;
+    return destroy_result;
+}
+
+static inline int codexlite_spawn_pty_shell(
+    pid_t *pid,
+    int *master_fd,
+    const char *shell,
+    const char *first_argument,
+    const char *second_argument,
+    const char *command
+) {
+    pid_t child = forkpty(master_fd, NULL, NULL, NULL);
+    if (child < 0) return errno;
+
+    if (child == 0) {
+        char *argv[5];
+        int argument_count = 0;
+        argv[0] = (char *)shell;
+        if (first_argument != NULL) argv[++argument_count] = (char *)first_argument;
+        if (second_argument != NULL) argv[++argument_count] = (char *)second_argument;
+        argv[++argument_count] = (char *)command;
+        argv[++argument_count] = NULL;
+        execvp(shell, argv);
+        _exit(127);
+    }
+
+    *pid = child;
+    return 0;
+}
