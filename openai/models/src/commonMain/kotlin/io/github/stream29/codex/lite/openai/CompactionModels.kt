@@ -11,9 +11,10 @@ import kotlin.uuid.Uuid
  * the request-facing fields into a [ResponsesApiRequest].
  *
  * @property model Model identifier used for the next Responses API request.
- * @property autoCompactionTokenLimit Nullable because token-count-triggered
- * auto-compaction can be disabled; `null` means AgentRuntime will not trigger
- * compaction from token count alone.
+ * @property autoCompactionTokenLimit Nullable because a thread may defer its
+ * threshold to the selected model metadata; `null` means use the catalog
+ * policy, or 90% of the resolved model context window when no catalog-specific
+ * threshold is present.
  * @property turnId UUIDv7 identity allocated for the active or next logical
  * Codex turn. AgentState rotates it only when it begins a new logical turn.
  * @property collaborationMode Active collaboration behavior. It is independent

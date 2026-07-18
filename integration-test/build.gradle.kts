@@ -17,6 +17,7 @@ kotlin {
             implementation(project(":openai-client-test"))
             implementation(project(":openai-codex-cli-storage"))
             implementation(project(":openai-json-codec"))
+            implementation(project(":openai-model-catalog"))
             implementation(project(":tool-impl-apply-patch"))
             implementation(project(":tool-impl-image-generation"))
             implementation(project(":tool-impl-plan"))

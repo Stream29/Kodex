@@ -26,6 +26,8 @@ import io.github.stream29.codex.lite.openai.RemoteCompactionV2Phase
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Reason
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
+import io.github.stream29.codex.lite.openai.Reasoning
+import io.github.stream29.codex.lite.openai.ReasoningEffort
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseError
 import io.github.stream29.codex.lite.openai.ResponseItem
@@ -61,6 +63,20 @@ import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 val codexAgentStateImplTest by testSuite {
+    test("request projection maps Codex ultra reasoning to Responses max") {
+        val request = CodexAgentSettings(
+            model = OpenAiModelId("test-model"),
+            reasoning = Reasoning(effort = ReasoningEffort.Ultra),
+        ).toResponsesApiRequest(
+            input = emptyList(),
+            threadId = "thread_1",
+            turnMetadata = "{}",
+            windowId = "window_1",
+        )
+
+        assertEquals(ReasoningEffort.Max, request.reasoning.effort)
+    }
+
     test("append user message allows consecutive user messages") {
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val agent = CodexAgentState(

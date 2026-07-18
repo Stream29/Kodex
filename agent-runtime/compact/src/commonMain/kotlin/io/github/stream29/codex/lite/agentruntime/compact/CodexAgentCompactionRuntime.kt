@@ -1,13 +1,14 @@
 package io.github.stream29.codex.lite.agentruntime.compact
 
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
+import io.github.stream29.codex.lite.agentruntime.contextwindow.tokensUntilCompaction
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
-import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Phase
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Reason
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
+import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.collect
  */
 public class CodexAgentCompactionRuntime(
     private val delegate: CodexAgentState,
+    private val modelCatalog: OpenAiModelCatalog,
 ) : CodexAgentRuntime, CodexAgentState by delegate {
 
     public override fun resume(): Flow<ResponsesStreamEvent> = channelFlow {
@@ -62,15 +64,12 @@ public class CodexAgentCompactionRuntime(
     }
 
     private suspend fun shouldAutoCompact(): Boolean {
-        val snapshotIndex = storage.latestIndex()
-        if (snapshotIndex < 0 || storage.tokenCount.latestIndex() < 0) {
-            return false
-        }
-        val tokenLimit = storage.settings[snapshotIndex].autoCompactionTokenLimit ?: return false
-        return storage.tokenCount[snapshotIndex] >= tokenLimit
+        return tokensUntilCompaction(modelCatalog) == 0L
     }
 }
 
 /** Adds automatic compaction and server-requested continuation to this state. */
-public fun CodexAgentState.compactionRuntime(): CodexAgentRuntime =
-    CodexAgentCompactionRuntime(this)
+public fun CodexAgentState.compactionRuntime(
+    modelCatalog: OpenAiModelCatalog,
+): CodexAgentRuntime =
+    CodexAgentCompactionRuntime(this, modelCatalog)

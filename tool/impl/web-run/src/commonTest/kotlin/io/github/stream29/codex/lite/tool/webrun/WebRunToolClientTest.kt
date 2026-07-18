@@ -41,9 +41,9 @@ private suspend fun testModel(): OpenAiModelId {
     val storage = CodexCliStorage(testCodexDirectory())
     val model = storage.readModelsCache()
         .models
-        .mapNotNull { it.slug?.takeIf(String::isNotBlank) }
+        .map { it.slug.value }
         .firstOrNull { it.contains("codex", ignoreCase = true) }
-        ?: storage.readModelsCache().models.firstOrNull()?.slug
+        ?: storage.readModelsCache().models.firstOrNull()?.slug?.value
         ?: error("Codex CLI models_cache.json must contain at least one model.")
     return OpenAiModelId(model)
 }

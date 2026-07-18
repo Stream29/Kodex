@@ -62,7 +62,7 @@ private suspend fun cachedModels(): List<String> =
     testCodexStorage()
         .readModelsCache()
         .models
-        .mapNotNull { it.slug?.takeIf(String::isNotBlank) }
+        .map { it.slug.value }
 
 internal val png64x32DataUrl: String
     get() = "data:image/png;base64,$png64x32Base64"

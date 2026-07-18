@@ -403,25 +403,56 @@ public data class Reasoning(
     public val context: ReasoningContext = ReasoningContext.Auto,
 )
 
-@Serializable
-public enum class ReasoningEffort {
-    @SerialName("none")
-    None,
+/**
+ * A reasoning strength accepted by Codex model metadata or request controls.
+ *
+ * The backend may introduce model-defined strengths. [Custom] preserves their
+ * wire value instead of rejecting an otherwise usable model catalog.
+ */
+@Serializable(with = ReasoningEffortSerializer::class)
+public sealed interface ReasoningEffort {
+    /** Exact string representation used by Codex and the Responses API. */
+    public val wireName: String
 
-    @SerialName("minimal")
-    Minimal,
+    /** Built-in effort values understood by this client. */
+    public sealed interface Known : ReasoningEffort
 
-    @SerialName("low")
-    Low,
+    public data object None : Known {
+        override val wireName: String = "none"
+    }
 
-    @SerialName("medium")
-    Medium,
+    public data object Minimal : Known {
+        override val wireName: String = "minimal"
+    }
 
-    @SerialName("high")
-    High,
+    public data object Low : Known {
+        override val wireName: String = "low"
+    }
 
-    @SerialName("xhigh")
-    XHigh,
+    public data object Medium : Known {
+        override val wireName: String = "medium"
+    }
+
+    public data object High : Known {
+        override val wireName: String = "high"
+    }
+
+    public data object XHigh : Known {
+        override val wireName: String = "xhigh"
+    }
+
+    public data object Max : Known {
+        override val wireName: String = "max"
+    }
+
+    public data object Ultra : Known {
+        override val wireName: String = "ultra"
+    }
+
+    /** A future server-defined reasoning strength. */
+    public data class Custom(
+        override val wireName: String,
+    ) : ReasoningEffort
 }
 
 @Serializable

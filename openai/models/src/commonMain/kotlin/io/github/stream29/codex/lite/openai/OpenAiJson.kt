@@ -168,6 +168,27 @@ public object ToolChoiceSerializer : KSerializer<ToolChoice> {
         }
 }
 
+public object ReasoningEffortSerializer : KSerializer<ReasoningEffort> {
+    override val descriptor: SerialDescriptor = JsonPrimitive.serializer().descriptor
+
+    override fun serialize(encoder: Encoder, value: ReasoningEffort) {
+        encoder.encodeString(value.wireName)
+    }
+
+    override fun deserialize(decoder: Decoder): ReasoningEffort =
+        when (val wireName = decoder.decodeString()) {
+            ReasoningEffort.None.wireName -> ReasoningEffort.None
+            ReasoningEffort.Minimal.wireName -> ReasoningEffort.Minimal
+            ReasoningEffort.Low.wireName -> ReasoningEffort.Low
+            ReasoningEffort.Medium.wireName -> ReasoningEffort.Medium
+            ReasoningEffort.High.wireName -> ReasoningEffort.High
+            ReasoningEffort.XHigh.wireName -> ReasoningEffort.XHigh
+            ReasoningEffort.Max.wireName -> ReasoningEffort.Max
+            ReasoningEffort.Ultra.wireName -> ReasoningEffort.Ultra
+            else -> ReasoningEffort.Custom(wireName)
+        }
+}
+
 public object FunctionCallOutputPayloadSerializer : KSerializer<FunctionCallOutputPayload> {
     private val contentItemsSerializer = ListSerializer(FunctionCallOutputContentItem.serializer())
 

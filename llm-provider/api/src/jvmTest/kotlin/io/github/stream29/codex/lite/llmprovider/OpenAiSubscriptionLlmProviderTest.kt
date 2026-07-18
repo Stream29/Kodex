@@ -68,7 +68,7 @@ private suspend fun cachedModels(): List<String> =
     codexStorage
         .readModelsCache()
         .models
-        .mapNotNull { it.slug?.takeIf(String::isNotBlank) }
+        .map { it.slug.value }
 
 private fun codexResponseRequest(model: OpenAiModelId): ResponsesApiRequest =
     ResponsesApiRequest(
