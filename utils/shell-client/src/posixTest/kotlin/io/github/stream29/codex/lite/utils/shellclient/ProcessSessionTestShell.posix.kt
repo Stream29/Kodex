@@ -20,3 +20,12 @@ internal actual val ttyProbeProcessCommand: TestShellCommand
         command = "[ -t 0 ] && [ -t 1 ] && printf 'tty=yes\\n' || printf 'tty=no\\n'",
         shell = testShell,
     )
+
+internal actual fun unicodeProbeProcessCommand(
+    markerFileName: String,
+    content: String,
+): TestShellCommand =
+    TestShellCommand(
+        command = "printf '%s' '$content' > '$markerFileName'; printf '%s' '$content'",
+        shell = testShell,
+    )

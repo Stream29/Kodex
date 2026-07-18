@@ -35,7 +35,7 @@ val coroutineFileSystemTest by testSuite {
 
             assertTrue(SystemCoroutineFileSystem.exists(child))
             assertEquals("hello\nworld\n", SystemCoroutineFileSystem.readString(child))
-            assertTrue(SystemCoroutineFileSystem.metadataOrNull(child)?.isRegularFile == true)
+            assertEquals(true, SystemCoroutineFileSystem.metadataOrNull(child)?.isRegularFile)
             assertEquals(listOf(child), SystemCoroutineFileSystem.list(child.parent!!))
 
             SystemCoroutineFileSystem.delete(child)
@@ -76,6 +76,7 @@ val coroutineFileSystemTest by testSuite {
             assertTrue(SystemCoroutineFileSystem.exists(sourceFile))
             assertEquals(content, SystemCoroutineFileSystem.readString(sourceFile))
             assertEquals(listOf(sourceFile), SystemCoroutineFileSystem.list(directory))
+            assertEquals(content, SystemCoroutineFileSystem.readString(SystemCoroutineFileSystem.resolve(sourceFile)))
 
             SystemCoroutineFileSystem.atomicMove(sourceFile, destinationFile)
 

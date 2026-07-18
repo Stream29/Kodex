@@ -15,6 +15,20 @@ internal actual val delayedProcessCommand: TestShellCommand
 internal actual val ttyProbeProcessCommand: TestShellCommand
     get() = TestShellCommand(command = PowerShellTtyProbeProcessCommand, shell = testShell)
 
+internal actual fun unicodeProbeProcessCommand(
+    markerFileName: String,
+    content: String,
+): TestShellCommand =
+    TestShellCommand(
+        command = "if (-not [System.Console]::IsOutputRedirected) { " +
+            "[System.Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(\$false) }; " +
+            "\$bytes = [System.Text.Encoding]::UTF8.GetBytes('$content'); " +
+            "[System.IO.File]::WriteAllBytes('$markerFileName', \$bytes); " +
+            "\$stdout = [System.Console]::OpenStandardOutput(); " +
+            "\$stdout.Write(\$bytes, 0, \$bytes.Length)",
+        shell = testShell,
+    )
+
 private const val PowerShellInteractiveProcessCommand: String =
     "Write-Output ready; \$line = [Console]::In.ReadLine(); Write-Output \"received:\$line\""
 

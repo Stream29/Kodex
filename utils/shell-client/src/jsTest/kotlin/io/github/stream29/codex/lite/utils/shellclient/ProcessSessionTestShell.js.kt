@@ -38,6 +38,22 @@ internal actual val ttyProbeProcessCommand: TestShellCommand
         shell = testShell,
     )
 
+internal actual fun unicodeProbeProcessCommand(
+    markerFileName: String,
+    content: String,
+): TestShellCommand =
+    TestShellCommand(
+        command = if (isWindows) {
+            "\$bytes = [System.Text.Encoding]::UTF8.GetBytes('$content'); " +
+                "[System.IO.File]::WriteAllBytes('$markerFileName', \$bytes); " +
+                "\$stdout = [System.Console]::OpenStandardOutput(); " +
+                "\$stdout.Write(\$bytes, 0, \$bytes.Length)"
+        } else {
+            "printf '%s' '$content' > '$markerFileName'; printf '%s' '$content'"
+        },
+        shell = testShell,
+    )
+
 private const val PosixTtyProbeProcessCommand: String =
     "[ -t 0 ] && [ -t 1 ] && printf 'tty=yes\\n' || printf 'tty=no\\n'"
 
