@@ -53,6 +53,9 @@ public class PlanRuntime(
                     output = failure("update_plan handler received unsupported payload"),
                 ),
             )
+
+            is ResponseItem.ClientToolSearchCall ->
+                error("Client tool-search calls are handled by CodexToolRuntime.")
         }
     }
 

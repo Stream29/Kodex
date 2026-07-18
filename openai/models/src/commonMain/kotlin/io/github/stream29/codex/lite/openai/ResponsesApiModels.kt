@@ -4,6 +4,7 @@ import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -72,19 +73,23 @@ public data class Response(
     public val endTurn: Boolean? = null,
 )
 
-@Serializable
+@Serializable(with = ResponsesStreamEventSerializer::class)
 public sealed interface ResponsesStreamEvent {
+    /** Serialization helper for every event variant except [Other]. */
+    @Serializable
+    public sealed interface Known : ResponsesStreamEvent
+
     @Serializable
     @SerialName("response.created")
     public data class Created(
         public val response: Response,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     @Serializable
     @SerialName("response.in_progress")
     public data class InProgress(
         public val response: Response,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     /**
      * Mirrors Rust `ResponsesStreamEvent`, where metadata frames are decoded
@@ -105,7 +110,7 @@ public sealed interface ResponsesStreamEvent {
         public val responseId: String? = null,
         public val headers: JsonObject? = null,
         public val metadata: JsonObject? = null,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     @Serializable
     @SerialName("response.output_item.added")
@@ -113,7 +118,7 @@ public sealed interface ResponsesStreamEvent {
         @SerialName("output_index")
         public val outputIndex: Long,
         public val item: ResponseItem,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     @Serializable
     @SerialName("response.output_item.done")
@@ -121,25 +126,52 @@ public sealed interface ResponsesStreamEvent {
         @SerialName("output_index")
         public val outputIndex: Long,
         public val item: ResponseItem,
-    ) : ResponsesStreamEvent
+    ) : Known
+
+    @Serializable
+    @SerialName("response.web_search_call.in_progress")
+    public data class WebSearchCallInProgress(
+        @SerialName("item_id")
+        public val itemId: String,
+        @SerialName("output_index")
+        public val outputIndex: Long,
+    ) : Known
+
+    @Serializable
+    @SerialName("response.web_search_call.searching")
+    public data class WebSearchCallSearching(
+        @SerialName("item_id")
+        public val itemId: String,
+        @SerialName("output_index")
+        public val outputIndex: Long,
+    ) : Known
+
+    @Serializable
+    @SerialName("response.web_search_call.completed")
+    public data class WebSearchCallCompleted(
+        @SerialName("item_id")
+        public val itemId: String,
+        @SerialName("output_index")
+        public val outputIndex: Long,
+    ) : Known
 
     @Serializable
     @SerialName("response.completed")
     public data class Completed(
         public val response: Response,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     @Serializable
     @SerialName("response.failed")
     public data class Failed(
         public val response: FailedResponse,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     @Serializable
     @SerialName("response.incomplete")
     public data class Incomplete(
         public val response: IncompleteResponse,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     @Serializable
     @SerialName("response.content_part.added")
@@ -151,7 +183,7 @@ public sealed interface ResponsesStreamEvent {
         @SerialName("content_index")
         public val contentIndex: Long,
         public val part: ContentItem,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     @Serializable
     @SerialName("response.content_part.done")
@@ -163,7 +195,7 @@ public sealed interface ResponsesStreamEvent {
         @SerialName("content_index")
         public val contentIndex: Long,
         public val part: ContentItem,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     @Serializable
     @SerialName("response.output_text.delta")
@@ -175,7 +207,7 @@ public sealed interface ResponsesStreamEvent {
         @SerialName("content_index")
         public val contentIndex: Long,
         public val delta: String,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     @Serializable
     @SerialName("response.output_text.done")
@@ -187,7 +219,7 @@ public sealed interface ResponsesStreamEvent {
         @SerialName("content_index")
         public val contentIndex: Long,
         public val text: String,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     /**
      * Mirrors Rust `ResponseEvent::ToolCallInputDelta`: `item_id` and
@@ -208,7 +240,7 @@ public sealed interface ResponsesStreamEvent {
         @SerialName("call_id")
         public val callId: String? = null,
         public val delta: String,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     @Serializable
     @SerialName("response.reasoning_summary_text.delta")
@@ -220,7 +252,7 @@ public sealed interface ResponsesStreamEvent {
         public val delta: String,
         @SerialName("summary_index")
         public val summaryIndex: Long,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     @Serializable
     @SerialName("response.reasoning_summary_text.done")
@@ -232,7 +264,7 @@ public sealed interface ResponsesStreamEvent {
         public val text: String,
         @SerialName("summary_index")
         public val summaryIndex: Long,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     @Serializable
     @SerialName("response.reasoning_text.delta")
@@ -244,7 +276,7 @@ public sealed interface ResponsesStreamEvent {
         public val delta: String,
         @SerialName("content_index")
         public val contentIndex: Long,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     @Serializable
     @SerialName("response.reasoning_text.done")
@@ -256,7 +288,7 @@ public sealed interface ResponsesStreamEvent {
         public val text: String,
         @SerialName("content_index")
         public val contentIndex: Long,
-    ) : ResponsesStreamEvent
+    ) : Known
 
     @Serializable
     @SerialName("response.reasoning_summary_part.added")
@@ -268,6 +300,15 @@ public sealed interface ResponsesStreamEvent {
         @SerialName("summary_index")
         public val summaryIndex: Long,
         public val part: ReasoningItemReasoningSummary,
+    ) : Known
+
+    /**
+     * A server event outside the currently modeled Responses stream protocol.
+     * The raw payload remains available to stream observers and is never sent
+     * back to the API as an input event.
+     */
+    public data class Other(
+        public val payload: JsonElement,
     ) : ResponsesStreamEvent
 }
 

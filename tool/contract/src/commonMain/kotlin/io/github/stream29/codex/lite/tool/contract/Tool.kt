@@ -10,6 +10,10 @@ import io.github.stream29.codex.lite.openai.ResponseItem
  * OpenAI protocol DTOs so agent-loop state can persist calls and results
  * without depending on a tool module's private business model. Implementations
  * own their close behavior because handlers may hold resources.
+ *
+ * `ClientToolSearchCall` shares the generic [ResponseItem.ToolCall] lifecycle,
+ * but runtime reserves it for deferred-tool search and never passes it to a
+ * [Tool].
  */
 public interface Tool : AutoCloseable {
     public val spec: ToolSpec

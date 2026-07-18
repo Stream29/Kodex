@@ -263,10 +263,14 @@ private class CodexAgentStateImpl(
     override suspend fun completeToolCall(output: ResponseItem.ToolCallOutput): Int {
         var pendingCalls = emptyList<ResponseItem.ToolCall>()
         return mutate(
-            validate = { value -> pendingCalls = value.requireCanCompleteToolCalls() },
+            validate = { value ->
+                val pending = value.requireToolPending()
+                pendingCalls = pending.calls
+            },
             inFlight = CodexAgentStateValue.ExternalWrite,
         ) {
-            val nextState = pendingCalls.stateAfterCompleting(output.callId)
+            pendingCalls.requireCall(output.callId)
+            val nextState = toolPendingState(pendingCalls.filterNot { call -> call.callId == output.callId })
             val index = storage.transaction {
                 val index = storage.latestIndex() + 1
                 storage.history[index] = output
@@ -285,7 +289,10 @@ private class CodexAgentStateImpl(
     ): Int {
         var pendingCalls = emptyList<ResponseItem.ToolCall>()
         return mutate(
-            validate = { value -> pendingCalls = value.requireCanCompleteToolCalls() },
+            validate = { value ->
+                val pending = value.requireToolPending()
+                pendingCalls = pending.calls
+            },
             inFlight = CodexAgentStateValue.ExternalWrite,
         ) {
             val pendingCall = pendingCalls.requireCall(output.callId)
@@ -296,7 +303,7 @@ private class CodexAgentStateImpl(
             require(currentSettings.collaborationMode != ModeKind.Plan) {
                 "update_plan is a TODO/checklist tool and is not allowed in Plan mode."
             }
-            val nextState = pendingCalls.stateAfterCompleting(output.callId)
+            val nextState = toolPendingState(pendingCalls.filterNot { call -> call.callId == output.callId })
             val index = storage.transaction {
                 val index = storage.latestIndex() + 1
                 storage.settings[index] = currentSettings.copy(plan = plan)
@@ -429,8 +436,8 @@ private fun CodexAgentStateValue.requireCanAppendUserMessage() {
     }
 }
 
-private fun CodexAgentStateValue.requireCanCompleteToolCalls(): List<ResponseItem.ToolCall> =
-    (this as? CodexAgentStateValue.ToolPending)?.calls
+private fun CodexAgentStateValue.requireToolPending(): CodexAgentStateValue.ToolPending =
+    this as? CodexAgentStateValue.ToolPending
         ?: throw CodexAgentStateInvalidTransitionException("complete tool calls", this)
 
 private suspend fun CodexAgentStorage.modelInputAt(index: Int): List<ResponseItem> {
@@ -459,12 +466,12 @@ private suspend fun CodexAgentStorage.stateAt(index: Int): CodexAgentStateValue 
     val checkpoint = compaction[index]
     val completedToolCallIds = mutableSetOf<String>()
     val pendingCallsReversed = mutableListOf<ResponseItem.ToolCall>()
-    var sawToolCallOutput = false
+    var sawToolOutput = false
     fun stateAfterReading(item: ResponseItem): CodexAgentStateValue? =
         when (item) {
             is ResponseItem.ToolCallOutput -> {
                 completedToolCallIds += item.callId
-                sawToolCallOutput = true
+                sawToolOutput = true
                 null
             }
 
@@ -480,7 +487,7 @@ private suspend fun CodexAgentStorage.stateAt(index: Int): CodexAgentStateValue 
             is ResponseItem.Message -> {
                 if (pendingCallsReversed.isNotEmpty()) {
                     CodexAgentStateValue.ToolPending(pendingCallsReversed.asReversed().toList())
-                } else if (sawToolCallOutput) {
+                } else if (sawToolOutput) {
                     CodexAgentStateValue.ToolCompleted
                 } else {
                     when (item.role) {
@@ -505,8 +512,10 @@ private suspend fun CodexAgentStorage.stateAt(index: Int): CodexAgentStateValue 
         stateAfterReading(item)?.let { return it }
     }
     return when {
-        pendingCallsReversed.isNotEmpty() -> CodexAgentStateValue.ToolPending(pendingCallsReversed.asReversed().toList())
-        sawToolCallOutput -> CodexAgentStateValue.ToolCompleted
+        pendingCallsReversed.isNotEmpty() ->
+            CodexAgentStateValue.ToolPending(pendingCallsReversed.asReversed().toList())
+
+        sawToolOutput -> CodexAgentStateValue.ToolCompleted
         else -> CodexAgentStateValue.Empty
     }
 }
@@ -515,13 +524,11 @@ private fun List<ResponseItem.ToolCall>.requireCall(callId: String): ResponseIte
     firstOrNull { call -> call.callId == callId }
         ?: throw IllegalArgumentException("Tool output does not match a pending call id: $callId")
 
-private fun List<ResponseItem.ToolCall>.stateAfterCompleting(callId: String): CodexAgentStateValue {
-    requireCall(callId)
-    val remainingCalls = filterNot { call -> call.callId == callId }
-    return if (remainingCalls.isEmpty()) {
+private fun toolPendingState(calls: List<ResponseItem.ToolCall>): CodexAgentStateValue {
+    return if (calls.isEmpty()) {
         CodexAgentStateValue.ToolCompleted
     } else {
-        CodexAgentStateValue.ToolPending(remainingCalls)
+        CodexAgentStateValue.ToolPending(calls)
     }
 }
 

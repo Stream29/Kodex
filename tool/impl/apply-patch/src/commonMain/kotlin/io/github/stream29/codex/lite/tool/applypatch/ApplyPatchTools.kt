@@ -48,6 +48,9 @@ public class ApplyPatchTool(
                     output(error.message ?: "apply_patch failed", success = false)
                 },
             )
+
+            is ResponseItem.ClientToolSearchCall ->
+                error("Client tool-search calls are handled by CodexToolRuntime.")
         }
 
     private fun output(text: String, success: Boolean = true): FunctionCallOutputPayload =

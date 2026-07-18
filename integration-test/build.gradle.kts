@@ -21,6 +21,7 @@ kotlin {
             implementation(project(":tool-impl-image-generation"))
             implementation(project(":tool-impl-plan"))
             implementation(project(":tool-impl-view-image"))
+            implementation(project(":tool-tool-search"))
             implementation(project(":utils-os-environment"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.coroutines.test)

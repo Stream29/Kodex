@@ -85,6 +85,9 @@ private class JsonTool<Input, Output>(
                 callId = call.callId,
                 output = failedOutput("JSON tool received custom tool payload"),
             )
+
+            is ResponseItem.ClientToolSearchCall ->
+                error("Client tool-search calls are handled by CodexToolRuntime.")
         }
 
     private suspend fun handleFunctionCall(argumentsJson: String): FunctionCallOutputPayload {
@@ -136,6 +139,9 @@ private class TextTool<Input>(
                 callId = call.callId,
                 output = failedOutput("JSON tool received custom tool payload"),
             )
+
+            is ResponseItem.ClientToolSearchCall ->
+                error("Client tool-search calls are handled by CodexToolRuntime.")
         }
 
     private suspend fun handleFunctionCall(argumentsJson: String): FunctionCallOutputPayload {

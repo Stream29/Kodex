@@ -30,6 +30,8 @@ public sealed interface ToolSpec {
     /**
      * @property externalWebAccess Nullable because live web access is optional;
      * `null` means omit the control and use the provider default.
+     * @property indexedWebAccess Nullable because restricting live fetches to
+     * indexed URLs is optional; `null` means omit the restriction control.
      * @property filters Nullable because web-search filters are optional;
      * `null` means send no filters.
      * @property userLocation Nullable because approximate user location is
@@ -44,6 +46,8 @@ public sealed interface ToolSpec {
     public data class WebSearch(
         @SerialName("external_web_access")
         public val externalWebAccess: Boolean? = null,
+        @SerialName("indexed_web_access")
+        public val indexedWebAccess: Boolean? = null,
         public val filters: ResponsesApiWebSearchFilters? = null,
         @SerialName("user_location")
         public val userLocation: ResponsesApiWebSearchUserLocation? = null,

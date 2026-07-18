@@ -78,7 +78,9 @@ val toolSearchToolsTest by testSuite {
                 ),
             ),
         )
-        val results = engine.search(SearchToolCallParams(query = "calendar"))
+        val results = assertIs<ToolSearchResult.Success>(
+            engine.search(SearchToolCallParams(query = "calendar")),
+        ).tools
 
         assertEquals(2, results.size)
         val calendar = results
@@ -97,7 +99,9 @@ val toolSearchToolsTest by testSuite {
             ).toToolSearchDocuments()
         )
 
-        val result = engine.search(SearchToolCallParams(query = "create calendar event"))
+        val result = assertIs<ToolSearchResult.Success>(
+            engine.search(SearchToolCallParams(query = "create calendar event")),
+        ).tools
 
         val namespace = assertIs<ResponsesApiNamespace>(result.single())
         assertEquals("calendar", namespace.name)
@@ -117,7 +121,9 @@ val toolSearchToolsTest by testSuite {
             ).flatMap { it.toToolSearchDocuments() },
         )
 
-        val result = engine.search(SearchToolCallParams(query = "user question"))
+        val result = assertIs<ToolSearchResult.Success>(
+            engine.search(SearchToolCallParams(query = "user question")),
+        ).tools
 
         val tool = assertIs<ResponsesApiTool>(result.single())
         assertEquals("request_user_input", tool.name)
@@ -142,5 +148,19 @@ val toolSearchToolsTest by testSuite {
         val secondOutput = assertIs<ResponsesApiToolWithNamespace>(documents.last().output)
         assertEquals("calendar", secondOutput.namespaceName)
         assertEquals("list_events", secondOutput.tool.name)
+    }
+
+    test("search reports invalid arguments without throwing") {
+        val engine = ToolSearchEngine(emptyList())
+
+        val blankQuery = assertIs<ToolSearchResult.InvalidArguments>(
+            engine.search(SearchToolCallParams(query = "  ")),
+        )
+        val invalidLimit = assertIs<ToolSearchResult.InvalidArguments>(
+            engine.search(SearchToolCallParams(query = "calendar", limit = 0)),
+        )
+
+        assertEquals("query must not be empty", blankQuery.message)
+        assertEquals("limit must be greater than zero", invalidLimit.message)
     }
 }
