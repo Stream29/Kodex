@@ -136,21 +136,39 @@ public sealed interface ResponseItem {
     ) : ToolCall
 
     /**
+     * Deferred tool search that this client must execute and complete.
+     *
      * @property id Nullable because tool-search call metadata may omit item id;
      * `null` means no item id was provided.
-     * @property callId Nullable because some tool-search call items may omit
-     * call id; `null` means no originating call id is available.
      * @property status Nullable because tool-search call metadata may omit
      * status; `null` means no status was provided.
      */
     @Serializable
-    @SerialName("tool_search_call")
-    public data class ToolSearchCall(
+    @SerialName("client_tool_search_call")
+    public data class ClientToolSearchCall(
         public val id: ResponseItemId? = null,
         @SerialName("call_id")
-        public val callId: String? = null,
+        override val callId: String,
         public val status: String? = null,
-        public val execution: String,
+        public val arguments: JsonElement,
+    ) : ToolCall
+
+    /**
+     * Hosted tool search already executed by the Responses service.
+     *
+     * Its wire `call_id` is absent or `null`, so this type intentionally has no
+     * call id and never enters the local tool-completion lifecycle.
+     *
+     * @property id Nullable because tool-search call metadata may omit item id;
+     * `null` means no item id was provided.
+     * @property status Nullable because tool-search call metadata may omit
+     * status; `null` means no status was provided.
+     */
+    @Serializable
+    @SerialName("server_tool_search_call")
+    public data class ServerToolSearchCall(
+        public val id: ResponseItemId? = null,
+        public val status: String? = null,
         public val arguments: JsonElement,
     ) : HistoryItem
 
@@ -218,19 +236,35 @@ public sealed interface ResponseItem {
     ) : ToolCallOutput
 
     /**
+     * Result this client produced for one [ClientToolSearchCall].
+     *
      * @property id Nullable because providers may omit tool-search output ids;
      * `null` means no id was provided.
-     * @property callId Nullable because historical or normalized tool-search output
-     * items may lack it; `null` means no originating call id is available.
      */
     @Serializable
-    @SerialName("tool_search_output")
-    public data class ToolSearchOutput(
+    @SerialName("client_tool_search_output")
+    public data class ClientToolSearchOutput(
         public val id: ResponseItemId? = null,
         @SerialName("call_id")
-        public val callId: String? = null,
+        override val callId: String,
         public val status: String,
-        public val execution: String,
+        public val tools: List<LoadableToolSpec>,
+    ) : ToolCallOutput
+
+    /**
+     * Hosted tool-search result produced by the Responses service.
+     *
+     * Its wire `call_id` is absent or `null`, so it is ordinary persisted
+     * history rather than a local tool-call output.
+     *
+     * @property id Nullable because providers may omit tool-search output ids;
+     * `null` means no id was provided.
+     */
+    @Serializable
+    @SerialName("server_tool_search_output")
+    public data class ServerToolSearchOutput(
+        public val id: ResponseItemId? = null,
+        public val status: String,
         public val tools: List<LoadableToolSpec>,
     ) : HistoryItem
 

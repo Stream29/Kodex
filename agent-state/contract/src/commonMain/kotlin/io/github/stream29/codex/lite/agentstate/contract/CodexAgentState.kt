@@ -31,15 +31,16 @@ public sealed interface CodexAgentStateValue {
     /**
      * The model emitted tool calls whose outputs have not all been persisted.
      *
-     * [calls] is a snapshot derived from the active storage history. It lets
-     * AgentState validate and complete one local tool result without rescanning
-     * that history.
+     * @property calls Pending locally executable calls, including client tool
+     * search calls.
      */
     public data class ToolPending(
         public val calls: List<ResponseItem.ToolCall>,
     ) : CodexAgentStateValue {
         init {
-            require(calls.isNotEmpty()) { "ToolPending requires at least one pending tool call." }
+            require(calls.isNotEmpty()) {
+                "ToolPending requires at least one pending local tool call."
+            }
         }
     }
 
@@ -126,7 +127,8 @@ public interface CodexAgentState {
     public suspend fun appendUserMessage(content: List<ContentItem>): Int
 
     /**
-     * Persists one output for a currently pending local tool call.
+     * Persists one output for a currently pending local tool call, including a
+     * client-executed tool-search call.
      *
      * The output call id must match a pending call. State remains ToolPending
      * until every call from the current batch has an output.

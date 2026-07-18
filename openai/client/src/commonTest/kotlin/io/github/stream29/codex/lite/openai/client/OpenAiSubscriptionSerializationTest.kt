@@ -277,6 +277,32 @@ val openAiSubscriptionSerializationTest by testSuite {
         assertEquals("hi", (event as ResponsesStreamEvent.OutputTextDelta).delta)
     }
 
+    test("hosted web search stream events decode at every progress stage") {
+        val inProgress = json.decodeFromString<ResponsesStreamEvent>(
+            """{"type":"response.web_search_call.in_progress","item_id":"ws_1","output_index":0}""",
+        )
+        val searching = json.decodeFromString<ResponsesStreamEvent>(
+            """{"type":"response.web_search_call.searching","item_id":"ws_1","output_index":0}""",
+        )
+        val completed = json.decodeFromString<ResponsesStreamEvent>(
+            """{"type":"response.web_search_call.completed","item_id":"ws_1","output_index":0}""",
+        )
+
+        assertEquals("ws_1", (inProgress as ResponsesStreamEvent.WebSearchCallInProgress).itemId)
+        assertEquals("ws_1", (searching as ResponsesStreamEvent.WebSearchCallSearching).itemId)
+        assertEquals("ws_1", (completed as ResponsesStreamEvent.WebSearchCallCompleted).itemId)
+    }
+
+    test("unknown stream event preserves its raw payload") {
+        val event = json.decodeFromString<ResponsesStreamEvent>(
+            """{"type":"response.future_event","value":1}""",
+        )
+
+        val other = event as ResponsesStreamEvent.Other
+        assertEquals(JsonPrimitive("response.future_event"), other.payload.jsonObject["type"])
+        assertEquals(JsonPrimitive(1), other.payload.jsonObject["value"])
+    }
+
     test("completed stream event decodes raw response shape") {
         val event = json.decodeFromString<ResponsesStreamEvent>(
             """{"type":"response.completed","response":{"id":"resp_1","end_turn":true}}""",
@@ -627,10 +653,9 @@ val openAiSubscriptionSerializationTest by testSuite {
     }
 
     test("tool search output serializes loadable tools expected wire shape") {
-        val item = ResponseItem.ToolSearchOutput(
+        val item = ResponseItem.ClientToolSearchOutput(
             callId = "call_1",
             status = "completed",
-            execution = "client",
             tools = listOf(
                 ResponsesApiTool(
                     name = "lookup_order",
@@ -766,7 +791,7 @@ val openAiSubscriptionSerializationTest by testSuite {
                   ]
                 }
             """.trimIndent(),
-        ) as ResponseItem.ToolSearchOutput
+        ) as ResponseItem.ClientToolSearchOutput
 
         assertEquals(
             ResponsesApiTool(

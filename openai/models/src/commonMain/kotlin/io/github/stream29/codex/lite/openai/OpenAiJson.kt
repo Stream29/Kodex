@@ -7,9 +7,11 @@ import kotlinx.serialization.descriptors.elementNames
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonEncoder
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -19,7 +21,7 @@ import kotlinx.serialization.json.jsonPrimitive
 
 public object ResponseItemSerializer : KSerializer<ResponseItem> {
     private val knownDelegate = ResponseItem.Known.serializer()
-    private val knownTypes = knownDelegate.sealedSubtypeSerialNames()
+    private val knownTypes = knownDelegate.sealedSubtypeSerialNames() - toolSearchInternalTypes
 
     override val descriptor: SerialDescriptor = knownDelegate.descriptor
 
@@ -33,6 +35,36 @@ public object ResponseItemSerializer : KSerializer<ResponseItem> {
         }
 
         val element = when (value) {
+            is ResponseItem.ClientToolSearchCall -> encoder.json.encodeToolSearchItem(
+                value = value,
+                serializer = ResponseItem.ClientToolSearchCall.serializer(),
+                type = toolSearchCallType,
+                execution = clientToolSearchExecution,
+            )
+
+            is ResponseItem.ServerToolSearchCall -> encoder.json.encodeToolSearchItem(
+                value = value,
+                serializer = ResponseItem.ServerToolSearchCall.serializer(),
+                type = toolSearchCallType,
+                execution = serverToolSearchExecution,
+                callId = JsonNull,
+            )
+
+            is ResponseItem.ClientToolSearchOutput -> encoder.json.encodeToolSearchItem(
+                value = value,
+                serializer = ResponseItem.ClientToolSearchOutput.serializer(),
+                type = toolSearchOutputType,
+                execution = clientToolSearchExecution,
+            )
+
+            is ResponseItem.ServerToolSearchOutput -> encoder.json.encodeToolSearchItem(
+                value = value,
+                serializer = ResponseItem.ServerToolSearchOutput.serializer(),
+                type = toolSearchOutputType,
+                execution = serverToolSearchExecution,
+                callId = JsonNull,
+            )
+
             is ResponseItem.Known -> encoder.json.encodeToJsonElement(knownDelegate, value)
 
             ResponseItem.Other -> {
@@ -45,7 +77,44 @@ public object ResponseItemSerializer : KSerializer<ResponseItem> {
     override fun deserialize(decoder: Decoder): ResponseItem {
         if (decoder !is JsonDecoder) return knownDelegate.deserialize(decoder)
         val element = decoder.decodeJsonElement()
+        if (element is JsonObject) {
+            when (element.wireTypeOrNull()) {
+                toolSearchCallType -> return element.decodeToolSearchCall(decoder.json)
+                toolSearchOutputType -> return element.decodeToolSearchOutput(decoder.json)
+            }
+        }
         val knownElement = element.knownTaggedObjectOrNull(knownTypes) ?: return ResponseItem.Other
+        return decoder.json.decodeFromJsonElement(knownDelegate, knownElement)
+    }
+}
+
+public object ResponsesStreamEventSerializer : KSerializer<ResponsesStreamEvent> {
+    private val knownDelegate = ResponsesStreamEvent.Known.serializer()
+    private val knownTypes = knownDelegate.sealedSubtypeSerialNames()
+
+    override val descriptor: SerialDescriptor = knownDelegate.descriptor
+
+    override fun serialize(encoder: Encoder, value: ResponsesStreamEvent) {
+        if (encoder !is JsonEncoder) {
+            require(value is ResponsesStreamEvent.Known) {
+                "ResponsesStreamEvent.Other can only be encoded as JSON."
+            }
+            knownDelegate.serialize(encoder, value)
+            return
+        }
+
+        val element = when (value) {
+            is ResponsesStreamEvent.Known -> encoder.json.encodeToJsonElement(knownDelegate, value)
+            is ResponsesStreamEvent.Other -> value.payload
+        }
+        encoder.encodeJsonElement(element)
+    }
+
+    override fun deserialize(decoder: Decoder): ResponsesStreamEvent {
+        if (decoder !is JsonDecoder) return knownDelegate.deserialize(decoder)
+        val element = decoder.decodeJsonElement()
+        if (element !is JsonObject) return ResponsesStreamEvent.Other(element)
+        val knownElement = element.knownTaggedObjectOrNull(knownTypes) ?: return ResponsesStreamEvent.Other(element)
         return decoder.json.decodeFromJsonElement(knownDelegate, knownElement)
     }
 }
@@ -138,6 +207,95 @@ private fun JsonElement.wireTypeOrNull(): String? =
         ?.get("type")
         ?.jsonPrimitive
         ?.contentOrNull
+
+private fun JsonObject.decodeToolSearchCall(json: Json): ResponseItem =
+    when (this["execution"]?.jsonPrimitive?.contentOrNull) {
+        clientToolSearchExecution -> {
+            if (this["call_id"]?.jsonPrimitive?.contentOrNull == null) {
+                ResponseItem.Other
+            } else {
+                json.decodeFromJsonElement(
+                    ResponseItem.ClientToolSearchCall.serializer(),
+                    withoutKeys("type", "execution"),
+                )
+            }
+        }
+
+        serverToolSearchExecution -> {
+            if (this["call_id"]?.jsonPrimitive?.contentOrNull != null) {
+                ResponseItem.Other
+            } else {
+                json.decodeFromJsonElement(
+                    ResponseItem.ServerToolSearchCall.serializer(),
+                    withoutKeys("type", "execution", "call_id"),
+                )
+            }
+        }
+
+        else -> ResponseItem.Other
+    }
+
+private fun JsonObject.decodeToolSearchOutput(json: Json): ResponseItem =
+    when (this["execution"]?.jsonPrimitive?.contentOrNull) {
+        clientToolSearchExecution -> {
+            if (this["call_id"]?.jsonPrimitive?.contentOrNull == null) {
+                ResponseItem.Other
+            } else {
+                json.decodeFromJsonElement(
+                    ResponseItem.ClientToolSearchOutput.serializer(),
+                    withoutKeys("type", "execution"),
+                )
+            }
+        }
+
+        serverToolSearchExecution -> {
+            if (this["call_id"]?.jsonPrimitive?.contentOrNull != null) {
+                ResponseItem.Other
+            } else {
+                json.decodeFromJsonElement(
+                    ResponseItem.ServerToolSearchOutput.serializer(),
+                    withoutKeys("type", "execution", "call_id"),
+                )
+            }
+        }
+
+        else -> ResponseItem.Other
+    }
+
+private fun JsonObject.withoutKeys(vararg names: String): JsonObject =
+    JsonObject(filterKeys { key -> key !in names })
+
+private fun <T> Json.encodeToolSearchItem(
+    value: T,
+    serializer: KSerializer<T>,
+    type: String,
+    execution: String,
+    callId: JsonElement? = null,
+): JsonObject {
+    val fields = encodeToJsonElement(serializer, value) as JsonObject
+    return JsonObject(
+        buildMap {
+            put("type", JsonPrimitive(type))
+            putAll(fields)
+            if (callId != null) {
+                put("call_id", callId)
+            }
+            put("execution", JsonPrimitive(execution))
+        },
+    )
+}
+
+private const val toolSearchCallType: String = "tool_search_call"
+private const val toolSearchOutputType: String = "tool_search_output"
+private const val clientToolSearchExecution: String = "client"
+private const val serverToolSearchExecution: String = "server"
+
+private val toolSearchInternalTypes: Set<String> = setOf(
+    "client_tool_search_call",
+    "server_tool_search_call",
+    "client_tool_search_output",
+    "server_tool_search_output",
+)
 
 private fun KSerializer<*>.sealedSubtypeSerialNames(): Set<String> =
     descriptor

@@ -1,6 +1,5 @@
 package io.github.stream29.codex.lite.tool.toolsearch
 
-import io.github.stream29.codex.lite.openai.LoadableToolSpec
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.utils.searchindex.SearchDocument
 import io.github.stream29.codex.lite.utils.searchindex.SearchIndex
@@ -18,15 +17,19 @@ public class ToolSearchEngine(
         },
     )
 
-    public fun search(arguments: SearchToolCallParams): List<LoadableToolSpec> {
+    public fun search(arguments: SearchToolCallParams): ToolSearchResult {
         val query = arguments.query.trim()
-        require(query.isNotEmpty()) { "query must not be empty" }
+        if (query.isEmpty()) {
+            return ToolSearchResult.InvalidArguments("query must not be empty")
+        }
 
         val limit = arguments.limit ?: ToolSearchDefaultLimit
-        require(limit > 0) { "limit must be greater than zero" }
+        if (limit <= 0) {
+            return ToolSearchResult.InvalidArguments("limit must be greater than zero")
+        }
 
         if (documents.isEmpty()) {
-            return emptyList()
+            return ToolSearchResult.Success(emptyList())
         }
 
         val results = index.search(query, limit)
@@ -42,11 +45,11 @@ public class ToolSearchEngine(
             }
             .toMutableMap()
 
-        return results.mapNotNull { result ->
+        return ToolSearchResult.Success(results.mapNotNull { result ->
             when (val output = result.output) {
                 is StandaloneResponsesApiTool -> output.tool
                 is ResponsesApiToolWithNamespace -> namespacesByName.remove(output.namespaceName)
             }
-        }
+        })
     }
 }

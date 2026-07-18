@@ -36,4 +36,5 @@ public fun ResponseItem.ToolCall.matches(toolName: ToolName): Boolean =
     when (this) {
         is ResponseItem.FunctionCall -> name == toolName.name && namespace == toolName.namespace
         is ResponseItem.CustomToolCall -> name == toolName.name && namespace == toolName.namespace
+        is ResponseItem.ClientToolSearchCall -> false
     }

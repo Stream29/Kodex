@@ -6,7 +6,10 @@ import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentruntime.compact.compactionRuntime
 import io.github.stream29.codex.lite.agentruntime.plan.planRuntime
+import io.github.stream29.codex.lite.agentruntime.tool.ToolExposure
+import io.github.stream29.codex.lite.agentruntime.tool.ToolRuntimeEntry
 import io.github.stream29.codex.lite.agentruntime.tool.toolRuntime
+import io.github.stream29.codex.lite.agentruntime.tool.toolRuntimePlan
 import io.github.stream29.codex.lite.agentcontext.collaboration.render.render as renderCollaborationMode
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
@@ -38,6 +41,7 @@ import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.StepStatus
 import io.github.stream29.codex.lite.openai.ToolSpec
+import io.github.stream29.codex.lite.openai.ToolChoice
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
@@ -52,7 +56,10 @@ import io.github.stream29.codex.lite.tool.contract.Tool
 import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationToolClient
 import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationTools
 import io.github.stream29.codex.lite.tool.plan.PlanTools
+import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchSourceInfo
 import io.github.stream29.codex.lite.tool.viewimage.ViewImageTools
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
@@ -121,6 +128,8 @@ private class RecordingTool(
         return when (call) {
             is ResponseItem.FunctionCall -> ResponseItem.FunctionCallOutput(callId = call.callId, output = output)
             is ResponseItem.CustomToolCall -> ResponseItem.CustomToolCallOutput(callId = call.callId, output = output)
+            is ResponseItem.ClientToolSearchCall ->
+                error("Client tool-search calls are handled by CodexToolRuntime.")
         }
     }
 }
@@ -218,12 +227,16 @@ private fun ResponseItem.typeName(): String =
         is ResponseItem.Reasoning -> "reasoning"
         is ResponseItem.LocalShellCall -> "local_shell_call"
         is ResponseItem.FunctionCall -> "function_call"
-        is ResponseItem.ToolSearchCall -> "tool_search_call"
+        is ResponseItem.ClientToolSearchCall,
+        is ResponseItem.ServerToolSearchCall,
+        -> "tool_search_call"
         is ResponseItem.FunctionCallOutput -> "function_call_output"
         is ResponseItem.McpToolCallOutput -> "mcp_tool_call_output"
         is ResponseItem.CustomToolCall -> "custom_tool_call"
         is ResponseItem.CustomToolCallOutput -> "custom_tool_call_output"
-        is ResponseItem.ToolSearchOutput -> "tool_search_output"
+        is ResponseItem.ClientToolSearchOutput,
+        is ResponseItem.ServerToolSearchOutput,
+        -> "tool_search_output"
         is ResponseItem.WebSearchCall -> "web_search_call"
         is ResponseItem.ImageGenerationCall -> "image_generation_call"
         is ResponseItem.Compaction -> "compaction"
@@ -566,6 +579,77 @@ val toolRuntimeCompositionTest by testSuite {
         assertIs<ResponseItem.FunctionCallOutput>(storage.history[9])
         assertEquals("All tools completed.", storage.lastAssistantMessage())
     }
+
+    test("tool runtime discovers a deferred tool through history without changing settings") {
+        val searchCall = ResponseItem.ClientToolSearchCall(
+            callId = "call_search",
+            arguments = buildJsonObject { put("query", "view image") },
+        )
+        val viewCall = ResponseItem.FunctionCall(
+            name = ViewImageTools.Name,
+            arguments = "{\"path\":\"diagram.png\"}",
+            callId = "call_view",
+        )
+        val viewTool = RecordingTool(ViewImageTools.spec, "image viewed")
+        val plan = toolRuntimePlan(
+            entries = listOf(
+                ToolRuntimeEntry(
+                    tool = viewTool,
+                    exposure = ToolExposure.Deferred,
+                    sourceInfo = ToolSearchSourceInfo(
+                        name = "Workspace tools",
+                        description = "Tools that inspect the current workspace.",
+                    ),
+                ),
+            ),
+            toolSearchEnabled = true,
+        )
+        val requests = mutableListOf<ResponsesApiRequest>()
+        val storage = InMemoryCodexAgentStorage(
+            CodexAgentSettings(
+                model = OpenAiModelId("test-model"),
+                tools = plan.modelVisibleSpecs,
+            ),
+        )
+        val state = CodexAgentState(
+            client = mockOpenAiClient {
+                createResponse { request ->
+                    requests += request
+                    when (requests.size) {
+                        1 -> flowOf(
+                            ResponsesStreamEvent.OutputItemDone(0, searchCall),
+                            ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
+                        )
+
+                        2 -> flowOf(
+                            ResponsesStreamEvent.OutputItemDone(0, viewCall),
+                            ResponsesStreamEvent.Completed(Response(id = "response_2", endTurn = false)),
+                        )
+
+                        3 -> flowOf(
+                            ResponsesStreamEvent.OutputItemDone(0, assistantMessage("Image inspected.")),
+                            ResponsesStreamEvent.Completed(Response(id = "response_3", endTurn = true)),
+                        )
+
+                        else -> fail("Unexpected request count ${requests.size}.")
+                    }
+                }
+            },
+            storage = storage,
+            contextPrefixProvider = testContextPrefixProvider,
+        )
+
+        state.appendUserMessage(userMessage("Inspect the diagram.").content)
+        state.compactionRuntime().toolRuntime(plan).resume().toList()
+
+        assertEquals(3, requests.size)
+        assertEquals(List(3) { plan.modelVisibleSpecs }, requests.map { request -> request.tools })
+        val searchOutput = assertIs<ResponseItem.ClientToolSearchOutput>(requests[1].input.last())
+        assertEquals("call_search", searchOutput.callId)
+        assertEquals(listOf(ViewImageTools.spec.copy(deferLoading = true)), searchOutput.tools)
+        assertEquals(listOf<ResponseItem.ToolCall>(viewCall), viewTool.calls)
+        assertEquals("Image inspected.", storage.lastAssistantMessage())
+    }
 }
 
 val openAiStoryContinuationProbeTest by testSuite {
@@ -716,6 +800,57 @@ val openAiCompactionItemProbeTest by testSuite {
             assertTrue(
                 events.assistantText().contains(marker),
                 "Expected normal response output to contain $marker.",
+            )
+        }
+    }
+}
+
+val openAiHostedWebSearchProbeTest by testSuite {
+    testFixture { realOpenAiClient() } asParameterForEach {
+        test(
+            "real client executes hosted web search",
+            testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
+        ) { client ->
+            val events = withContext(Dispatchers.Default) {
+                client.createResponse(
+                    ResponsesApiRequest(
+                        model = testCodexModel(),
+                        input = listOf(
+                            userMessage(
+                                "Search the web for the current official Kotlin release, then reply with its version.",
+                            ),
+                        ),
+                        tools = listOf(ToolSpec.WebSearch(externalWebAccess = true)),
+                        toolChoice = ToolChoice.Required,
+                        store = false,
+                    ),
+                ).toList()
+            }
+            val outputItems = events.outputItems()
+
+            println("hosted web search output item types: ${outputItems.typeNames()}")
+            println("hosted web search output text: ${events.assistantText()}")
+
+            events.completedResponseOrFail("hosted web search")
+            assertTrue(
+                outputItems.any { item -> item is ResponseItem.WebSearchCall },
+                "Expected hosted search to emit web_search_call. Output items: $outputItems",
+            )
+            assertTrue(
+                events.any { event -> event is ResponsesStreamEvent.WebSearchCallInProgress },
+                "Expected hosted search to emit its in-progress stream event.",
+            )
+            assertTrue(
+                events.any { event -> event is ResponsesStreamEvent.WebSearchCallSearching },
+                "Expected hosted search to emit its searching stream event.",
+            )
+            assertTrue(
+                events.any { event -> event is ResponsesStreamEvent.WebSearchCallCompleted },
+                "Expected hosted search to emit its completed stream event.",
+            )
+            assertTrue(
+                events.assistantText().isNotBlank(),
+                "Expected hosted search to produce an assistant response.",
             )
         }
     }

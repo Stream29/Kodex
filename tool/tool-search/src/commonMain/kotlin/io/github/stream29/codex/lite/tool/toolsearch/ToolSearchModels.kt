@@ -1,6 +1,7 @@
 package io.github.stream29.codex.lite.tool.toolsearch
 
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
+import io.github.stream29.codex.lite.openai.LoadableToolSpec
 import kotlinx.serialization.Serializable
 
 /**
@@ -49,3 +50,16 @@ public data class SearchToolCallParams(
     public val query: String,
     public val limit: Int? = null,
 )
+
+/** Result of searching deferred tool metadata. */
+public sealed interface ToolSearchResult {
+    /** A completed search, including an empty result set. */
+    public data class Success(
+        public val tools: List<LoadableToolSpec>,
+    ) : ToolSearchResult
+
+    /** The model supplied syntactically valid JSON with invalid search values. */
+    public data class InvalidArguments(
+        public val message: String,
+    ) : ToolSearchResult
+}

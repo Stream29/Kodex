@@ -8,18 +8,25 @@ import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
+import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.tool.contract.Tool
 import io.github.stream29.codex.lite.tool.contract.ToolName
+import io.github.stream29.codex.lite.tool.toolsearch.SearchToolCallParams
+import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchEngine
+import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchResult
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.decodeFromJsonElement
 
 /** Runtime layer that executes the pending calls owned by [tools]. */
-public class CodexToolRuntime(
+public class CodexToolRuntime internal constructor(
     private val delegate: CodexAgentRuntime,
     tools: List<Tool>,
+    private val toolSearchEngine: ToolSearchEngine,
 ) : CodexAgentRuntime by delegate {
     private val toolsByName: Map<ToolName, Tool> = tools.toToolMap()
 
@@ -27,18 +34,24 @@ public class CodexToolRuntime(
         while (true) {
             delegate.resume().collect { send(it) }
 
-            val calls = (state.value as? CodexAgentStateValue.ToolPending)
-                ?.calls
-                .orEmpty()
-            val handled = calls.mapNotNull { call ->
-                toolsByName[call.toolName]?.let { tool -> call to tool }
+            val pending = state.value as? CodexAgentStateValue.ToolPending
+                ?: return@channelFlow
+            var handledCall = false
+            for (call in pending.calls) {
+                val output = when (call) {
+                    is ResponseItem.ClientToolSearchCall -> toolSearchEngine.handle(call)
+                    is ResponseItem.FunctionCall,
+                    is ResponseItem.CustomToolCall,
+                    -> {
+                        val tool = toolsByName[call.toolName] ?: continue
+                        tool.handle(call)
+                    }
+                }
+                completeToolCall(output)
+                handledCall = true
             }
-            if (handled.isEmpty()) {
+            if (!handledCall) {
                 return@channelFlow
-            }
-
-            handled.forEach { (call, tool) ->
-                completeToolCall(tool.handle(call))
             }
             if (state.value is CodexAgentStateValue.ToolPending) {
                 return@channelFlow
@@ -49,7 +62,14 @@ public class CodexToolRuntime(
 
 /** Adds handling for [tools]; callers declare their specs through settings. */
 public fun CodexAgentRuntime.toolRuntime(tools: List<Tool>): CodexAgentRuntime =
-    CodexToolRuntime(this, tools)
+    CodexToolRuntime(this, tools, ToolSearchEngine(emptyList()))
+
+/**
+ * Adds handling for every tool in [plan]. Callers declare
+ * [ToolRuntimePlan.modelVisibleSpecs] through `CodexAgentSettings.tools`.
+ */
+public fun CodexAgentRuntime.toolRuntime(plan: ToolRuntimePlan): CodexAgentRuntime =
+    CodexToolRuntime(this, plan.tools, plan.toolSearchEngine)
 
 private fun List<Tool>.toToolMap(): Map<ToolName, Tool> {
     val routes = flatMap { tool ->
@@ -87,4 +107,21 @@ private val ResponseItem.ToolCall.toolName: ToolName
     get() = when (this) {
         is ResponseItem.FunctionCall -> ToolName(name = name, namespace = namespace)
         is ResponseItem.CustomToolCall -> ToolName(name = name, namespace = namespace)
+        is ResponseItem.ClientToolSearchCall -> error("Client tool search calls have no tool name.")
     }
+
+private fun ToolSearchEngine.handle(
+    call: ResponseItem.ClientToolSearchCall,
+): ResponseItem.ClientToolSearchOutput {
+    val result = try {
+        val arguments = OpenAiJsonCodec.decodeFromJsonElement<SearchToolCallParams>(call.arguments)
+        search(arguments)
+    } catch (_: SerializationException) {
+        null
+    }
+    return ResponseItem.ClientToolSearchOutput(
+        callId = call.callId,
+        status = "completed",
+        tools = (result as? ToolSearchResult.Success)?.tools.orEmpty(),
+    )
+}

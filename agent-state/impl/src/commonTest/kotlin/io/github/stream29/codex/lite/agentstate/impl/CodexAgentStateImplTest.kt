@@ -29,6 +29,7 @@ import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseError
 import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.StepStatus
@@ -51,6 +52,8 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.io.files.Path
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
@@ -160,6 +163,85 @@ val codexAgentStateImplTest by testSuite {
         assertEquals(secondOutput, storage.history[4])
         assertEquals(firstOutput, storage.history[5])
         assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
+    }
+
+    test("state completes a client tool search call through the generic tool-call path") {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val functionCall = ResponseItem.FunctionCall(
+            name = "exec_command",
+            arguments = "{}",
+            callId = "call_function",
+        )
+        val toolSearchCall = ResponseItem.ClientToolSearchCall(
+            callId = "call_search",
+            arguments = buildJsonObject { put("query", "calendar") },
+        )
+        storage.history[1] = userMessage("Find and run a tool.")
+        storage.history[2] = functionCall
+        storage.history[3] = toolSearchCall
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+            contextPrefixProvider = testContextPrefixProvider,
+        )
+
+        assertEquals(
+            CodexAgentStateValue.ToolPending(listOf(functionCall, toolSearchCall)),
+            agent.state.value,
+        )
+
+        assertFailsWith<IllegalArgumentException> {
+            agent.completeToolCall(
+                ResponseItem.ClientToolSearchOutput(
+                    callId = "other_call",
+                    status = "completed",
+                    tools = emptyList(),
+                ),
+            )
+        }
+
+        val searchOutput = ResponseItem.ClientToolSearchOutput(
+            callId = toolSearchCall.callId,
+            status = "completed",
+            tools = emptyList(),
+        )
+        assertEquals(4, agent.completeToolCall(searchOutput))
+        assertEquals(searchOutput, storage.history[4])
+        assertEquals(CodexAgentStateValue.ToolPending(listOf(functionCall)), agent.state.value)
+
+        agent.completeToolCall(
+            ResponseItem.FunctionCallOutput(
+                callId = functionCall.callId,
+                output = FunctionCallOutputPayload.fromText("done"),
+            ),
+        )
+        val reloadedAgent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+            contextPrefixProvider = testContextPrefixProvider,
+        )
+
+        assertEquals(CodexAgentStateValue.ToolCompleted, reloadedAgent.state.value)
+    }
+
+    test("state does not locally pend hosted tool-search history") {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        storage.history[1] = userMessage("Search server tools.")
+        storage.history[2] = ResponseItem.ServerToolSearchCall(
+            arguments = buildJsonObject { put("query", "calendar") },
+        )
+        storage.history[3] = ResponseItem.ServerToolSearchOutput(
+            status = "completed",
+            tools = emptyList(),
+        )
+
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+            contextPrefixProvider = testContextPrefixProvider,
+        )
+
+        assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
     }
 
     test("state reconstruction pairs tail tool calls before choosing state") {
@@ -921,6 +1003,43 @@ val codexAgentStateImplTest by testSuite {
         assertEquals(11, storage.tokenCount[2])
         assertEquals(compactRequest.request.clientMetadata["turn_id"], storage.settings[2].turnId)
         assertEquals(2, agent.latestIndex.value)
+    }
+
+    test("remote compaction preserves deferred tool schemas in its request") {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val user = userMessage("Search for the available image tool.")
+        val searchOutput = ResponseItem.ClientToolSearchOutput(
+            callId = "call_search",
+            status = "completed",
+            tools = listOf(
+                ResponsesApiNamespace(
+                    name = "mcp__images",
+                    description = "Image tools",
+                    tools = emptyList(),
+                ),
+            ),
+        )
+        storage.history[1] = user
+        storage.history[2] = searchOutput
+        val compactionRequests = mutableListOf<ResponsesApiRequest>()
+        val agent = CodexAgentState(
+            client = mockOpenAiClient {
+                createRemoteCompactionV2Response { request, _, _, _ ->
+                    compactionRequests += request
+                    remoteCompactionV2Response(ResponseItem.Compaction(encryptedContent = "compact"))
+                }
+            },
+            storage = storage,
+            contextPrefixProvider = testContextPrefixProvider,
+        )
+
+        agent.forcedCompact()
+
+        assertEquals(
+            listOf(user, searchOutput, ResponseItem.CompactionTrigger),
+            compactionRequests.single().input,
+        )
+        assertEquals(searchOutput, storage.history[2])
     }
 
     test("remote compaction v2 retains only newest user messages within rust budget") {
