@@ -2,6 +2,7 @@ package io.github.stream29.codex.lite.openai.codexclistorage
 
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionPlan
+import io.github.stream29.codex.lite.openai.ModelInfo
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -9,6 +10,7 @@ import io.github.stream29.codex.lite.utils.osenvironment.userHomeDirectory
 import kotlinx.io.files.Path
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlin.time.Instant
 
 /**
  * @param cause Nullable because storage failures may be detected locally; `null`
@@ -67,6 +69,20 @@ public class CodexCliStorage(
         } catch (error: Throwable) {
             throw CodexCliStorageException("Codex CLI models_cache.json must be valid JSON.", error)
         }
+    }
+
+    /**
+     * Reads the shared Codex CLI model cache when it exists.
+     *
+     * @return Nullable because Codex may not have fetched a model catalog yet;
+     * `null` means `models_cache.json` is absent. Malformed or unreadable cache
+     * files still raise [CodexCliStorageException].
+     */
+    public suspend fun readModelsCacheOrNull(): CodexModelsCache? {
+        if (!fileSystem.exists(modelsCachePath)) {
+            return null
+        }
+        return readModelsCache()
     }
 
     public suspend fun readConfigToml(): String =
@@ -172,23 +188,26 @@ private const val CodexModelsCacheFileName: String = "models_cache.json"
 private const val CodexConfigFileName: String = "config.toml"
 
 /**
+ * Read-only snapshot written by Codex CLI to `models_cache.json`.
+ *
+ * Kotlin code must not write this file: it is a shared cache whose complete
+ * model entries are owned by the installed Codex CLI.
+ *
+ * @property fetchedAt Nullable because older Codex CLI versions may omit the
+ * fetch time; `null` means cache freshness cannot be determined.
+ * @property etag Nullable because a cache entry may have been written without
+ * an HTTP entity tag; `null` means no entity tag is available for comparison.
  * @property clientVersion Nullable because older or partial Codex CLI cache
  * files may omit it; `null` means no cached client version is available.
  */
 @Serializable
 public data class CodexModelsCache(
+    @SerialName("fetched_at")
+    public val fetchedAt: Instant? = null,
+    public val etag: String? = null,
     @SerialName("client_version")
     public val clientVersion: String? = null,
-    public val models: List<CodexCachedModel> = emptyList(),
-)
-
-/**
- * @property slug Nullable because cache entries are decoded before validation;
- * `null` means no usable backend model slug was present.
- */
-@Serializable
-public data class CodexCachedModel(
-    public val slug: String? = null,
+    public val models: List<ModelInfo> = emptyList(),
 )
 
 /**

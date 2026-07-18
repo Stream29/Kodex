@@ -1,6 +1,7 @@
 package io.github.stream29.codex.lite.agentstate.impl
 
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
+import io.github.stream29.codex.lite.openai.ReasoningEffort
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
@@ -31,7 +32,10 @@ internal fun CodexAgentSettings.toResponsesApiRequest(
         tools = tools,
         toolChoice = toolChoice,
         parallelToolCalls = parallelToolCalls,
-        reasoning = reasoning,
+        reasoning = when (reasoning.effort) {
+            ReasoningEffort.Ultra -> reasoning.copy(effort = ReasoningEffort.Max)
+            else -> reasoning
+        },
         include = include,
         serviceTier = serviceTier,
         promptCacheKey = promptCacheKey,

@@ -3,6 +3,7 @@ package io.github.stream29.codex.lite.agentruntime.compact
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
+import io.github.stream29.codex.lite.agentcontext.collaboration.render.render as renderCollaborationMode
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentsMdInstruction
@@ -17,7 +18,10 @@ import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentSto
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
+import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
+import io.github.stream29.codex.lite.openai.OpenAiResult
+import io.github.stream29.codex.lite.openai.ModelsResponse
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseItem
@@ -25,6 +29,8 @@ import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.TokenUsage
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
+import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
+import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
@@ -49,7 +55,7 @@ val codexAgentCompactionRuntimeTest by testSuite {
             storage = storage,
             contextPrefixProvider = testContextPrefixProvider,
         )
-        val runtime: CodexAgentRuntime = state.compactionRuntime()
+        val runtime: CodexAgentRuntime = state.compactionRuntime(testModelCatalog())
         val agentState: CodexAgentStateContract = runtime
 
         assertSame(state.state, agentState.state)
@@ -66,7 +72,7 @@ val codexAgentCompactionRuntimeTest by testSuite {
             storage = storage,
             contextPrefixProvider = testContextPrefixProvider,
         )
-        val runtime: CodexAgentRuntime = DelegatingRuntime(CodexAgentCompactionRuntime(state))
+        val runtime: CodexAgentRuntime = DelegatingRuntime(CodexAgentCompactionRuntime(state, testModelCatalog()))
 
         assertEquals(1, runtime.appendUserMessage(userMessage("Start.").content))
         assertSame(state.state, runtime.state)
@@ -98,7 +104,7 @@ val codexAgentCompactionRuntimeTest by testSuite {
             storage = storage,
             contextPrefixProvider = testContextPrefixProvider,
         )
-        val runtime = CodexAgentCompactionRuntime(state)
+        val runtime = CodexAgentCompactionRuntime(state, testModelCatalog())
 
         state.appendUserMessage(userMessage("Start."))
         val runningResume = async(start = CoroutineStart.UNDISPATCHED) {
@@ -159,7 +165,7 @@ val codexAgentCompactionRuntimeTest by testSuite {
             storage = storage,
             contextPrefixProvider = testContextPrefixProvider,
         )
-        val runtime = CodexAgentCompactionRuntime(state)
+        val runtime = CodexAgentCompactionRuntime(state, testModelCatalog())
         val user = userMessage("Answer briefly.")
 
         state.appendUserMessage(user, tokenCount = 1)
@@ -208,7 +214,7 @@ val codexAgentCompactionRuntimeTest by testSuite {
             storage = storage,
             contextPrefixProvider = testContextPrefixProvider,
         )
-        val runtime = CodexAgentCompactionRuntime(state)
+        val runtime = CodexAgentCompactionRuntime(state, testModelCatalog())
         val user = userMessage("Keep this context.")
 
         state.appendUserMessage(user, tokenCount = 90)
@@ -277,7 +283,7 @@ val codexAgentCompactionRuntimeTest by testSuite {
             storage = storage,
             contextPrefixProvider = testContextPrefixProvider,
         )
-        val runtime = CodexAgentCompactionRuntime(state)
+        val runtime = CodexAgentCompactionRuntime(state, testModelCatalog())
 
         state.appendUserMessage(user, tokenCount = 1)
         runtime.resume().toList()
@@ -314,7 +320,7 @@ val codexAgentCompactionRuntimeTest by testSuite {
             storage = storage,
             contextPrefixProvider = testContextPrefixProvider,
         )
-        val runtime = CodexAgentCompactionRuntime(state)
+        val runtime = CodexAgentCompactionRuntime(state, testModelCatalog())
 
         state.appendUserMessage(userMessage("What time is it?"))
         runtime.resume().toList()
@@ -332,6 +338,14 @@ private data class RecordedRemoteCompactionV2Request(
     val turnMetadata: String,
     val windowId: String,
 )
+
+private fun testModelCatalog(): OpenAiModelCatalog =
+    OpenAiModelCatalog(
+        client = mockOpenAiClient {
+            listModels { OpenAiResult.Success(ModelsResponse()) }
+        },
+        codexCliStorage = CodexCliStorage(Path(".codex-lite-test-model-catalog")),
+    )
 
 private class DelegatingRuntime(
     private val delegate: CodexAgentRuntime,
@@ -384,8 +398,14 @@ private val testContextInput: ResponseItem.Message =
         ),
     )
 
+private val testCollaborationInput: ResponseItem.Message =
+    ResponseItem.Message(
+        role = MessageRole.Developer,
+        content = listOf(ContentItem.InputText(ModeKind.Default.renderCollaborationMode())),
+    )
+
 private fun requestInput(vararg durableItems: ResponseItem): List<ResponseItem> =
-    listOf(testContextInput, *durableItems)
+    listOf(testCollaborationInput, testContextInput, *durableItems)
 
 private suspend fun CodexAgentStateContract.appendUserMessage(
     message: ResponseItem.Message,

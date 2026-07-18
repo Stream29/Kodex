@@ -33,6 +33,7 @@ import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.OpenAiResult
+import io.github.stream29.codex.lite.openai.ModelsResponse
 import io.github.stream29.codex.lite.openai.PlanItemArg
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseItem
@@ -51,6 +52,7 @@ import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorageException
 import io.github.stream29.codex.lite.openai.codexclistorage.defaultCodexDirectory
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
+import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchTools
 import io.github.stream29.codex.lite.tool.contract.Tool
 import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationToolClient
@@ -278,7 +280,7 @@ private suspend fun testCodexModel(): OpenAiModelId {
     }
     val cachedModels = storage.readModelsCache()
         .models
-        .mapNotNull { model -> model.slug?.takeIf(String::isNotBlank) }
+        .map { model -> model.slug.value }
     return OpenAiModelId(
         configuredModel
             ?: cachedModels.firstOrNull { it.contains("codex", ignoreCase = true) }
@@ -305,6 +307,14 @@ private fun userMessage(text: String): ResponseItem.Message =
     ResponseItem.Message(
         role = MessageRole.User,
         content = listOf(ContentItem.InputText(text)),
+    )
+
+private fun testModelCatalog(): OpenAiModelCatalog =
+    OpenAiModelCatalog(
+        client = mockOpenAiClient {
+            listModels { OpenAiResult.Success(ModelsResponse()) }
+        },
+        codexCliStorage = CodexCliStorage(Path(".codex-lite-test-model-catalog")),
     )
 
 private fun assistantMessage(text: String): ResponseItem.Message =
@@ -376,7 +386,7 @@ val minimalAgentConversationTest by testSuite {
             val requests = testRequests
             val client = testClient
             val agent = testAgent
-            val runtime = agent.compactionRuntime()
+            val runtime = agent.compactionRuntime(testModelCatalog())
             val user = userMessage("Answer with a short greeting.")
         }
     } closeWith {
@@ -422,7 +432,7 @@ val toolRuntimeCompositionTest by testSuite {
         )
 
         assertFailsWith<IllegalArgumentException> {
-            state.compactionRuntime().toolRuntime(
+            state.compactionRuntime(testModelCatalog()).toolRuntime(
                 listOf(
                     RecordingTool(ViewImageTools.spec, "first handler"),
                     RecordingTool(ViewImageTools.spec, "second handler"),
@@ -466,7 +476,7 @@ val toolRuntimeCompositionTest by testSuite {
         val viewTool = RecordingTool(ViewImageTools.spec, "image viewed")
 
         state.appendUserMessage(userMessage("Inspect the image.").content)
-        state.compactionRuntime().toolRuntime(listOf(viewTool)).resume().toList()
+        state.compactionRuntime(testModelCatalog()).toolRuntime(listOf(viewTool)).resume().toList()
 
         assertEquals(1, requests.size)
         assertEquals(listOf(ViewImageTools.spec), requests.single().tools)
@@ -559,7 +569,7 @@ val toolRuntimeCompositionTest by testSuite {
         )
         val imageTool = ImageGenerationTools.createTool(imageClient)
         val runtime = state
-            .compactionRuntime()
+            .compactionRuntime(testModelCatalog())
             .planRuntime()
             .toolRuntime(listOf(patchTool, viewTool, imageTool))
 
@@ -640,7 +650,7 @@ val toolRuntimeCompositionTest by testSuite {
         )
 
         state.appendUserMessage(userMessage("Inspect the diagram.").content)
-        state.compactionRuntime().toolRuntime(plan).resume().toList()
+        state.compactionRuntime(testModelCatalog()).toolRuntime(plan).resume().toList()
 
         assertEquals(3, requests.size)
         assertEquals(List(3) { plan.modelVisibleSpecs }, requests.map { request -> request.tools })

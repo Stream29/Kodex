@@ -17,6 +17,8 @@ import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
+import io.github.stream29.codex.lite.openai.OpenAiResult
+import io.github.stream29.codex.lite.openai.ModelsResponse
 import io.github.stream29.codex.lite.openai.PlanItemArg
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseItem
@@ -25,7 +27,9 @@ import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.StepStatus
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
+import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
+import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.codex.lite.tool.plan.PlanTools
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
@@ -101,7 +105,7 @@ val planRuntimeTest by testSuite {
         )
 
         state.appendUserMessage(listOf(ContentItem.InputText("Make a plan.")))
-        state.compactionRuntime().planRuntime().resume().toList()
+        state.compactionRuntime(testModelCatalog()).planRuntime().resume().toList()
 
         assertEquals(2, requests.size)
         assertEquals(listOf(PlanTools.spec), requests[0].tools)
@@ -155,7 +159,7 @@ val planRuntimeTest by testSuite {
         )
 
         state.appendUserMessage(listOf(ContentItem.InputText("Make a plan.")))
-        state.compactionRuntime().planRuntime().resume().toList()
+        state.compactionRuntime(testModelCatalog()).planRuntime().resume().toList()
 
         assertEquals(2, requestCount)
         assertEquals(UpdatePlanArgs(plan = emptyList()), storage.settings[storage.latestIndex()].plan)
@@ -188,7 +192,7 @@ val planRuntimeTest by testSuite {
         )
 
         state.appendUserMessage(listOf(ContentItem.InputText("Call another tool.")))
-        state.compactionRuntime().planRuntime().resume().toList()
+        state.compactionRuntime(testModelCatalog()).planRuntime().resume().toList()
 
         assertEquals(1, requests.size)
         assertTrue(requests.single().tools.isEmpty())
@@ -204,4 +208,12 @@ private fun assistantMessage(text: String): ResponseItem.Message =
     ResponseItem.Message(
         role = io.github.stream29.codex.lite.openai.MessageRole.Assistant,
         content = listOf(ContentItem.OutputText(text)),
+    )
+
+private fun testModelCatalog(): OpenAiModelCatalog =
+    OpenAiModelCatalog(
+        client = mockOpenAiClient {
+            listModels { OpenAiResult.Success(ModelsResponse()) }
+        },
+        codexCliStorage = CodexCliStorage(Path(".codex-lite-test-model-catalog")),
     )
