@@ -7,6 +7,8 @@ import kotlinx.io.files.FileMetadata
 import kotlinx.io.files.FileNotFoundException
 import kotlinx.io.files.Path
 import kotlinx.io.readByteArray
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import js.objects.unsafeJso
 import js.typedarrays.Uint8Array
 import js.typedarrays.toByteArray
@@ -31,6 +33,9 @@ import js.buffer.ArrayBuffer
 
 public actual val SystemCoroutineFileSystem: CoroutineFileSystem =
     NodeCoroutineFileSystem
+
+internal actual val IoDispatcher: CoroutineDispatcher =
+    Dispatchers.Default
 
 private object NodeCoroutineFileSystem : CoroutineFileSystem {
     override suspend fun exists(path: Path): Boolean =

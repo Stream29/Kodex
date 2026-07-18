@@ -1,6 +1,5 @@
 package io.github.stream29.codex.lite.utils.kotlinxiocoroutines
 
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import kotlinx.io.Buffer
 import kotlinx.io.RawSink
@@ -8,14 +7,8 @@ import kotlinx.io.RawSource
 import kotlinx.io.files.FileMetadata
 import kotlinx.io.files.FileSystem
 import kotlinx.io.files.Path
-import kotlinx.io.files.SystemFileSystem
 
-public actual val SystemCoroutineFileSystem: CoroutineFileSystem =
-    BlockingCoroutineFileSystem(SystemFileSystem)
-
-internal expect val IoDispatcher: CoroutineDispatcher
-
-private class BlockingCoroutineFileSystem(
+internal class BlockingCoroutineFileSystem(
     private val delegate: FileSystem,
 ) : CoroutineFileSystem {
     override suspend fun exists(path: Path): Boolean =

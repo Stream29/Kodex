@@ -11,8 +11,10 @@ kotlin {
         common {
             group("blocking") {
                 withJvm()
-                group("native") {
-                    withNative()
+                group("posix") {
+                    withLinuxX64()
+                    withLinuxArm64()
+                    withMacosArm64()
                 }
             }
         }

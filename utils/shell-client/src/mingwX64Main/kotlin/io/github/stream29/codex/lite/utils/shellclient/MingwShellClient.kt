@@ -111,22 +111,42 @@ private fun ShellProcessCommand.startWindowsPipeProcess(parentScope: CoroutineSc
 
                 val startupInfo = alloc<STARTUPINFOW>().apply {
                     cb = sizeOf<STARTUPINFOW>().toUInt()
+                    lpReserved = null
+                    lpDesktop = null
+                    lpTitle = null
+                    dwX = 0u
+                    dwY = 0u
+                    dwXSize = 0u
+                    dwYSize = 0u
+                    dwXCountChars = 0u
+                    dwYCountChars = 0u
+                    dwFillAttribute = 0u
                     dwFlags = STARTF_USESTDHANDLES.toUInt()
+                    wShowWindow = 0u
+                    cbReserved2 = 0u
+                    lpReserved2 = null
                     hStdInput = stdinRead
                     hStdOutput = outputWrite
                     hStdError = outputWrite
                 }
-                val processInfo = alloc<PROCESS_INFORMATION>()
+                val processInfo = alloc<PROCESS_INFORMATION>().apply {
+                    hProcess = null
+                    hThread = null
+                    dwProcessId = 0u
+                    dwThreadId = 0u
+                }
+                val commandLine = windowsCommandLine()
+                val currentDirectory = workingDirectory.windowsPath()
                 checkWindowsSuccess(
                     CreateProcessW(
                         null,
-                        windowsStringBuffer(windowsCommandLine()),
+                        windowsStringBuffer(commandLine),
                         null,
                         null,
                         1,
                         CREATE_NO_WINDOW.toUInt() or CREATE_SUSPENDED.toUInt(),
                         null,
-                        workingDirectory.toString(),
+                        currentDirectory,
                         startupInfo.ptr,
                         processInfo.ptr,
                     ),
@@ -188,7 +208,7 @@ private fun ShellProcessCommand.startWindowsPtyProcess(parentScope: CoroutineSco
         stdin_write_out = stdin.ptr,
         output_read_out = output.ptr,
         command_line = windowsStringBuffer(windowsCommandLine()),
-        working_directory = windowsStringBuffer(workingDirectory.toString()),
+        working_directory = windowsStringBuffer(workingDirectory.windowsPath()),
         columns = DefaultPtyColumns.toShort(),
         rows = DefaultPtyRows.toShort(),
     )
@@ -548,7 +568,28 @@ private fun String.quoteWindowsArgument(): String =
     if (isNotEmpty() && none { it.isWhitespace() || it == '"' }) {
         this
     } else {
-        "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
+        buildString(length + 2) {
+            append('"')
+            var backslashCount = 0
+            this@quoteWindowsArgument.forEach { character ->
+                when (character) {
+                    '\\' -> backslashCount += 1
+                    '"' -> {
+                        repeat(backslashCount * 2 + 1) { append('\\') }
+                        append('"')
+                        backslashCount = 0
+                    }
+
+                    else -> {
+                        repeat(backslashCount) { append('\\') }
+                        append(character)
+                        backslashCount = 0
+                    }
+                }
+            }
+            repeat(backslashCount * 2) { append('\\') }
+            append('"')
+        }
     }
 
 private fun kotlinx.cinterop.MemScope.windowsStringBuffer(value: String): CPointer<UShortVar> {

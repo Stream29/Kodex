@@ -2,7 +2,6 @@ package io.github.stream29.codex.lite.utils.shellclient
 
 import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
 import kotlinx.io.files.Path
-import kotlinx.io.files.SystemFileSystem
 
 internal fun resolveDefaultShell(): Shell =
     when (shellHostPlatform) {
@@ -182,10 +181,7 @@ private fun windowsSystemRoot(): Path? =
         ?.let(::Path)
 
 private fun Path?.existingRegularFileOrNull(): Path? =
-    this?.takeIf { path ->
-        runCatching { SystemFileSystem.metadataOrNull(path)?.isRegularFile == true }
-            .getOrDefault(false)
-    }
+    this?.takeIf { path -> path.isRegularFileForShellResolution() }
 
 private fun ultimateFallbackShell(): Shell =
     when (shellHostPlatform) {
