@@ -1,0 +1,6 @@
+[submodule "Mosaic"]
+	path = Mosaic
+	url = git@github.com:Stream29/mosaic.git
+[submodule "TomlKt"]
+	path = TomlKt
+	url = git@github.com:Stream29/tomlkt.git
