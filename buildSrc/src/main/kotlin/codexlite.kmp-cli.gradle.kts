@@ -10,15 +10,4 @@ kotlin {
     configureCompiler()
     configureHostTargets()
     configureCommonTests(project)
-
-    js {
-        nodejs {
-            testTask {
-                useMocha {
-                    timeout = "120s"
-                }
-            }
-        }
-        binaries.library()
-    }
 }
