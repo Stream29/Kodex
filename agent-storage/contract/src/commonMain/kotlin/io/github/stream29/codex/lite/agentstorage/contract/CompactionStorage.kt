@@ -26,21 +26,26 @@ public suspend fun MutableCodexAgentStorage.appendCompactionCheckpoint(
     previousCheckpoint: CompactionCheckpoint,
     nextWindowId: String,
     settings: CodexAgentSettings,
-): Int = transaction {
+): Int {
     val index = latestIndex() + 1
-    compaction[index] = CompactionCheckpoint(
+    return compaction.setWithTransaction(index, CompactionCheckpoint(
         prefix = prefix,
         historyBaseIndex = index + 1,
         windowNumber = previousCheckpoint.windowNumber + 1,
         firstWindowId = previousCheckpoint.firstWindowId,
         previousWindowId = previousCheckpoint.windowId,
         windowId = nextWindowId,
-    )
-    this.settings[index] = settings
-    history[index] = marker
-    if (tokenCount != null) {
-        this.tokenCount[index] = tokenCount
+    )) {
+        this.settings.setWithTransaction(index, settings) {
+            history.setWithTransaction(index, marker) {
+                if (tokenCount == null) {
+                    this.timestamp.setWithTransaction(index, timestamp) { index }
+                } else {
+                    this.tokenCount.setWithTransaction(index, tokenCount) {
+                        this.timestamp.setWithTransaction(index, timestamp) { index }
+                    }
+                }
+            }
+        }
     }
-    this.timestamp[index] = timestamp
-    index
 }
