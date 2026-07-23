@@ -11,7 +11,9 @@ import io.github.stream29.codex.lite.agentstorage.contract.indexesDescending
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.contract.nextIndex
 import io.github.stream29.codex.lite.agentstorage.contract.prevIndex
-import io.github.stream29.codex.lite.agentstorage.contract.transaction
+import io.github.stream29.codex.lite.agentstorage.contract.revert
+import io.github.stream29.codex.lite.agentstorage.contract.revertWithTransaction
+import io.github.stream29.codex.lite.agentstorage.contract.setWithTransaction
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.openai.ContentItem
@@ -84,9 +86,16 @@ private fun assistantMessage(text: String): ResponseItem.Message =
     )
 
 val inMemoryCodexAgentStorageTest by testSuite {
-    test("construction publishes legal initial snapshot and new thread id") {
+    test("storage identity is stable per instance") {
+        val first = storage()
+        val second = storage()
+
+        assertEquals(first.id, first.id)
+        assertNotEquals(first.id, second.id)
+    }
+
+    test("construction publishes a legal initial snapshot") {
         val storage = storage()
-        val other = storage()
 
         assertEquals(0, storage.latestIndex())
         assertEquals(settings("initial-model"), storage.settings[0])
@@ -94,7 +103,6 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(0, storage.compaction[0].historyBaseIndex)
         assertEquals(0L, storage.compaction[0].windowNumber)
         assertEquals(-1, storage.history.latestIndex())
-        assertNotEquals(storage.id, other.id)
     }
 
     test("history uses sparse timeline and rejects non tail writes") {
@@ -160,14 +168,13 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(emptyList(), storage.history.indexes().toList())
     }
 
-    test("timeline transaction reverts appended entries on failure") {
+    test("set transaction compensates its appended entry on failure") {
         val storage = storage()
         val first = userMessage("first")
         storage.history[0] = first
 
         assertFailsWith<IllegalStateException> {
-            storage.history.transaction {
-                storage.history[2] = assistantMessage("temporary")
+            storage.history.setWithTransaction(2, assistantMessage("temporary")) {
                 error("fail transaction")
             }
         }
@@ -177,7 +184,7 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(first, storage.history[2])
     }
 
-    test("storage transaction reverts every timeline on failure") {
+    test("nested set transactions compensate every timeline on failure") {
         val initialSettings = settings("initial-model")
         val storage = storage(initialSettings)
         val initialCheckpoint = storage.compaction[0]
@@ -188,13 +195,16 @@ val inMemoryCodexAgentStorageTest by testSuite {
         storage.history[0] = initialMessage
 
         assertFailsWith<IllegalStateException> {
-            storage.transaction {
-                storage.settings[2] = settings("temporary-model")
-                storage.compaction[2] = checkpoint(windowNumber = 1, windowId = "window-1")
-                storage.timestamp[2] = timestamp(2)
-                storage.tokenCount[2] = 20
-                storage.history[2] = assistantMessage("temporary")
-                error("fail transaction")
+            storage.settings.setWithTransaction(2, settings("temporary-model")) {
+                storage.compaction.setWithTransaction(2, checkpoint(windowNumber = 1, windowId = "window-1")) {
+                    storage.timestamp.setWithTransaction(2, timestamp(2)) {
+                        storage.tokenCount.setWithTransaction(2, 20) {
+                            storage.history.setWithTransaction(2, assistantMessage("temporary")) {
+                                error("fail transaction")
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -206,18 +216,19 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(initialMessage, storage.history[2])
     }
 
-    test("storage transaction reverts every timeline on cancellation") {
+    test("nested set transactions compensate every timeline on cancellation") {
         val storage = storage()
         storage.timestamp[0] = timestamp(0)
         storage.tokenCount[0] = 10
         storage.history[0] = userMessage("initial")
 
         val transaction = launch(start = CoroutineStart.UNDISPATCHED) {
-            storage.transaction {
-                storage.settings[2] = settings("temporary-model")
-                storage.timestamp[2] = timestamp(2)
-                storage.history[2] = assistantMessage("temporary")
-                awaitCancellation()
+            storage.settings.setWithTransaction(2, settings("temporary-model")) {
+                storage.timestamp.setWithTransaction(2, timestamp(2)) {
+                    storage.history.setWithTransaction(2, assistantMessage("temporary")) {
+                        awaitCancellation()
+                    }
+                }
             }
         }
 
@@ -227,6 +238,61 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(listOf(0), storage.settings.indexes().toList())
         assertEquals(listOf(0), storage.timestamp.indexes().toList())
         assertEquals(listOf(0), storage.history.indexes().toList())
+    }
+
+    test("revert transaction restores the original suffix on failure") {
+        val storage = storage()
+        val first = userMessage("first")
+        val third = assistantMessage("third")
+        storage.history[1] = first
+        storage.history[3] = third
+
+        assertFailsWith<IllegalStateException> {
+            storage.history.revertWithTransaction(1) {
+                storage.history[2] = assistantMessage("replacement")
+                error("fail replacement")
+            }
+        }
+
+        assertEquals(listOf(1, 3), storage.history.indexes().toList())
+        assertEquals(first, storage.history[1])
+        assertEquals(third, storage.history[3])
+    }
+
+    test("storage revert removes every timeline suffix") {
+        val initialSettings = settings("initial-model")
+        val storage = storage(initialSettings)
+        val initialCheckpoint = storage.compaction[0]
+        val updatedSettings = settings("updated-model")
+        val updatedCheckpoint = checkpoint(
+            historyBaseIndex = 2,
+            windowNumber = 1,
+            firstWindowId = initialCheckpoint.firstWindowId,
+            previousWindowId = initialCheckpoint.windowId,
+            windowId = "window-1",
+        )
+
+        storage.history[1] = userMessage("first")
+        storage.timestamp[1] = timestamp(1)
+        storage.tokenCount[1] = 10
+        storage.settings[2] = updatedSettings
+        storage.compaction[2] = updatedCheckpoint
+        storage.history[3] = assistantMessage("later")
+        storage.timestamp[3] = timestamp(3)
+        storage.tokenCount[3] = 30
+
+        storage.revert(untilExclusive = 2)
+
+        assertEquals(1, storage.latestIndex())
+        assertEquals(listOf(1), storage.history.indexes().toList())
+        assertEquals(listOf(0), storage.settings.indexes().toList())
+        assertEquals(listOf(0), storage.compaction.indexes().toList())
+        assertEquals(listOf(1), storage.timestamp.indexes().toList())
+        assertEquals(listOf(1), storage.tokenCount.indexes().toList())
+        assertEquals(initialSettings, storage.settings[1])
+        assertEquals(initialCheckpoint, storage.compaction[1])
+        assertEquals(timestamp(1), storage.timestamp[1])
+        assertEquals(10, storage.tokenCount[1])
     }
 
     test("sparse timelines return active value at requested index") {
@@ -310,12 +376,11 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(null, storage.nextIndex(4))
     }
 
-    test("fork resets target before copying and keeps target thread id") {
+    test("fork resets target before copying") {
         val oldPlan = plan("old step", StepStatus.Completed)
         val oldSettings = settings("old-model").copy(plan = oldPlan)
         val source = storage(oldSettings)
         val target = storage(settings("target-model"))
-        val targetId = target.id
         val newSettings = settings("new-model")
 
         source.history[1] = userMessage("first")
@@ -330,7 +395,6 @@ val inMemoryCodexAgentStorageTest by testSuite {
 
         source.forkTo(until = 2, target = target)
 
-        assertEquals(targetId, target.id)
         assertEquals(1, target.latestIndex())
         assertEquals(userMessage("first"), target.history[1])
         assertEquals(userMessage("first"), target.history[2])

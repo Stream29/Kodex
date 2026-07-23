@@ -2,9 +2,9 @@ package io.github.stream29.codex.lite.agentstorage.contract
 
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.count
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withContext
 
 /**
@@ -108,7 +108,7 @@ public suspend fun <T> IndexVersioned<T>.forkTo(
     until: Int,
     target: MutableIndexVersioned<T>,
 ) {
-    require(target.indexes().count() == 0) { "Only an empty target can be forked to." }
+    require(target.latestIndex() == -1) { "Only an empty target can be forked to." }
     this.indexes().filter { it < until }.collect { target[it] = this[it] }
 }
 
@@ -135,23 +135,56 @@ public interface MutableIndexVersioned<T> : IndexVersioned<T> {
 }
 
 /**
- * Runs one externally serialized append transaction on this timeline.
+ * Publishes one change point and compensates it when [block] fails.
  *
- * If [block] fails or is cancelled, every entry appended after the transaction
- * started is removed before the original failure is rethrown. [block] must not
- * revert entries that existed before the transaction.
+ * Writers must be externally serialized. [block] may append later entries but
+ * must not remove entries older than [index]. Compensation is cancellation-safe.
  */
-public suspend inline fun <R> MutableIndexVersioned<*>.transaction(block: () -> R): R {
-    val untilExclusive = latestIndex() + 1
+public suspend inline fun <T, R> MutableIndexVersioned<T>.setWithTransaction(
+    index: Int,
+    value: T,
+    block: () -> R,
+): R {
+    this[index] = value
+    return try {
+        block()
+    } catch (failure: Throwable) {
+        try {
+            withContext(NonCancellable) {
+                revert(index)
+            }
+        } catch (compensationFailure: Throwable) {
+            failure.addSuppressed(compensationFailure)
+        }
+        throw failure
+    }
+}
+
+/**
+ * Removes one suffix and restores it when [block] fails.
+ *
+ * Writers must be externally serialized. [block] may publish a replacement
+ * suffix but must not modify entries older than [untilExclusive]. Compensation
+ * removes that replacement before restoring the original stored change points.
+ */
+public suspend inline fun <T, R> MutableIndexVersioned<T>.revertWithTransaction(
+    untilExclusive: Int,
+    block: () -> R,
+): R {
+    val removed = indexes(from = untilExclusive)
+        .toList()
+        .map { index -> IndexedValue(index, this[index]) }
+    revert(untilExclusive)
     return try {
         block()
     } catch (failure: Throwable) {
         try {
             withContext(NonCancellable) {
                 revert(untilExclusive)
+                removed.forEach { (index, value) -> this@revertWithTransaction[index] = value }
             }
-        } catch (rollbackFailure: Throwable) {
-            failure.addSuppressed(rollbackFailure)
+        } catch (compensationFailure: Throwable) {
+            failure.addSuppressed(compensationFailure)
         }
         throw failure
     }
@@ -161,6 +194,7 @@ public suspend inline fun <R> MutableIndexVersioned<*>.transaction(block: () -> 
  * Appends [value] at `latestIndex() + 1` and returns the published index.
  */
 public suspend fun <T> MutableIndexVersioned<T>.append(value: T): Int {
-    this[latestIndex() + 1] = value
-    return latestIndex()
+    val index = latestIndex() + 1
+    this[index] = value
+    return index
 }
