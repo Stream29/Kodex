@@ -8,6 +8,8 @@ kotlin {
         commonMain.dependencies {
             api(project(":openai-models"))
             api(libs.kotlinx.io.core)
+            api(libs.kotlinx.coroutines.core)
+            implementation(libs.tomlkt)
             implementation(project(":openai-json-codec"))
             implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(project(":utils-os-environment"))
