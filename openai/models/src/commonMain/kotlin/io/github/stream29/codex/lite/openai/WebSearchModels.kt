@@ -1,6 +1,5 @@
 package io.github.stream29.codex.lite.openai
 import kotlinx.serialization.EncodeDefault
-import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -12,8 +11,6 @@ import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonEncoder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
@@ -32,7 +29,6 @@ import kotlinx.serialization.json.jsonPrimitive
 public data class SearchRequest(
     public val id: String,
     public val model: OpenAiModelId,
-    @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     public val reasoning: Reasoning = Reasoning(),
     public val input: SearchInput? = null,
@@ -68,8 +64,7 @@ public object SearchInputSerializer : kotlinx.serialization.KSerializer<SearchIn
         require(decoder is JsonDecoder) {
             "SearchInput can only be decoded as JSON."
         }
-        val element = decoder.decodeJsonElement()
-        return when (element) {
+        return when (val element = decoder.decodeJsonElement()) {
             is JsonArray -> SearchInput.Items(decoder.json.decodeFromJsonElement(itemsSerializer, element))
             else -> SearchInput.Text(element.jsonPrimitive.contentOrNull.orEmpty())
         }
@@ -127,7 +122,7 @@ public data class SearchCommands(
 @Serializable
 public data class SearchQuery(
     public val q: String,
-    public val recency: Int? = null,
+    public val recency: Long? = null,
     public val domains: List<String>? = null,
 )
 
@@ -139,14 +134,14 @@ public data class SearchQuery(
 public data class OpenOperation(
     @SerialName("ref_id")
     public val refId: String,
-    public val lineno: Int? = null,
+    public val lineno: Long? = null,
 )
 
 @Serializable
 public data class ClickOperation(
     @SerialName("ref_id")
     public val refId: String,
-    public val id: Int,
+    public val id: Long,
 )
 
 @Serializable
@@ -160,7 +155,7 @@ public data class FindOperation(
 public data class ScreenshotOperation(
     @SerialName("ref_id")
     public val refId: String,
-    public val pageno: Int,
+    public val pageno: Long,
 )
 
 /**
@@ -199,7 +194,7 @@ public enum class FinanceAssetType {
 public data class WeatherOperation(
     public val location: String,
     public val start: String? = null,
-    public val duration: Int? = null,
+    public val duration: Long? = null,
 )
 
 /**
@@ -231,7 +226,7 @@ public data class SportsOperation(
     @SerialName("date_to")
     public val dateTo: String? = null,
     @SerialName("num_games")
-    public val numGames: Int? = null,
+    public val numGames: Long? = null,
     public val locale: String? = null,
 )
 

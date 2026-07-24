@@ -19,6 +19,8 @@ import kotlinx.serialization.json.JsonObject
  * @property promptCacheKey Nullable because prompt cache affinity is optional;
  * `null` means no cache key is sent.
  * @property text Text controls. The default value is omitted from the wire.
+ * @property clientMetadata Nullable because a plain Responses API request may
+ * not belong to a Codex session; `null` means `client_metadata` is omitted.
  */
 @Serializable
 public data class ResponsesApiRequest(
@@ -49,7 +51,7 @@ public data class ResponsesApiRequest(
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     public val text: TextControls = TextControls(),
     @SerialName("client_metadata")
-    public val clientMetadata: Map<String, String> = emptyMap(),
+    public val clientMetadata: CodexResponsesClientMetadata? = null,
 ) {
     public val stream: Boolean = true
 }

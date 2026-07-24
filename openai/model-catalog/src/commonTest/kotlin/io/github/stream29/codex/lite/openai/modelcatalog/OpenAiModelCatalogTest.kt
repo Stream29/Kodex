@@ -6,6 +6,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.openai.ModelInfo
 import io.github.stream29.codex.lite.openai.ModelsResponse
 import io.github.stream29.codex.lite.openai.MutableOpenAiSubscriptionAuthSession
+import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.OpenAiResult
 import io.github.stream29.codex.lite.openai.ReasoningEffort
@@ -14,11 +15,12 @@ import io.github.stream29.codex.lite.openai.client.OpenAiClient
 import io.github.stream29.codex.lite.openai.client.OpenAiClientConfig
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
+import io.github.stream29.codex.lite.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexModelsCache
-import io.github.stream29.codex.lite.openai.codexclistorage.defaultCodexDirectory
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
+import io.github.stream29.codex.lite.utils.osenvironment.userHomeDirectory
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
@@ -65,12 +67,12 @@ private suspend fun deleteRecursively(path: Path) {
 }
 
 private suspend fun writeCodexModelsCache(
-    storage: CodexCliStorage,
+    directory: Path,
     cache: CodexModelsCache,
 ) {
-    SystemCoroutineFileSystem.createDirectories(storage.directory)
+    SystemCoroutineFileSystem.createDirectories(directory)
     SystemCoroutineFileSystem.writeString(
-        storage.modelsCachePath,
+        Path(directory, "models_cache.json"),
         OpenAiJsonCodec.encodeToString(CodexModelsCache.serializer(), cache),
     )
 }
@@ -79,20 +81,28 @@ private fun testCodexDirectory(): Path =
     environmentVariable("CODEX_HOME")
         ?.takeIf(String::isNotBlank)
         ?.let(::Path)
-        ?: defaultCodexDirectory()
+        ?: userHomeDirectory()?.let { home -> Path(home, ".codex") }
         ?: error("CODEX_HOME or a readable user home directory must be set for model-catalog tests.")
 
 private suspend fun liveCatalog(): LiveCatalogFixture {
     val storage = CodexCliStorage(testCodexDirectory())
     val client = OpenAiClient(
-        authProvider = MutableOpenAiSubscriptionAuthSession(storage.readAuth()),
+        authProvider = MutableOpenAiSubscriptionAuthSession(storage.readAuthOrNull().toSubscriptionAuthStateOrThrow()),
         config = OpenAiClientConfig(
-            clientVersion = storage.readModelsCache().clientVersion
+            clientVersion = storage.readModelsCacheOrNull()?.clientVersion
                 ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
                 ?: "0.1.0",
         ),
     )
     return LiveCatalogFixture(client, OpenAiModelCatalog(client, storage))
+}
+
+private fun CodexAuthJson?.toSubscriptionAuthStateOrThrow(): OpenAiSubscriptionAuthState {
+    val tokens = this?.tokens ?: error("Codex CLI auth tokens are required.")
+    return OpenAiSubscriptionAuthState(
+        accessToken = tokens.accessToken,
+        accountId = tokens.accountId?.takeIf(String::isNotBlank),
+    )
 }
 
 private class LiveCatalogFixture(
@@ -193,7 +203,7 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
                 clientVersion = "0.1.0",
                 models = listOf(cachedModel),
             )
-            writeCodexModelsCache(storage, cache)
+            writeCodexModelsCache(root, cache)
             val remoteStarted = CompletableDeferred<Unit>()
             val continueRemote = CompletableDeferred<Unit>()
             val catalog = OpenAiModelCatalog(
@@ -234,8 +244,9 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
             val cache = CodexModelsCache(
                 fetchedAt = Instant.fromEpochSeconds(0),
                 clientVersion = "0.1.0",
+                models = emptyList(),
             )
-            writeCodexModelsCache(storage, cache)
+            writeCodexModelsCache(root, cache)
             val catalog = OpenAiModelCatalog(
                 client = mockOpenAiClient {
                     listModels { OpenAiResult.Success(ModelsResponse()) }

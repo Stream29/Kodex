@@ -3,6 +3,7 @@ package io.github.stream29.codex.lite.openai
 import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /**
  * Mirrors Rust `ToolSpec` from `shared-context/codex/codex-rs/tools/src/tool_spec.rs`.
@@ -63,8 +64,10 @@ public sealed interface ToolSpec {
  *
  * @property deferLoading Nullable because the wire format omits false/default;
  * `null` means the tool is loaded normally in the initial tool list.
- * @property outputSchema Nullable because most function tools do not declare
- * structured output; `null` means omit `output_schema`.
+ * @property outputSchema Nullable because most function tools do not expose
+ * structured code-mode output; `null` means no structured output metadata is
+ * available. This is internal metadata and is never serialized into a
+ * Responses API tool declaration, matching Rust's `#[serde(skip)]`.
  */
 @Serializable
 @SerialName("function")
@@ -75,7 +78,7 @@ public data class ResponsesApiTool(
     @SerialName("defer_loading")
     public val deferLoading: Boolean? = null,
     public val parameters: ObjectPropertyDefinition,
-    @SerialName("output_schema")
+    @Transient
     public val outputSchema: ObjectPropertyDefinition? = null,
 ) : ToolSpec, LoadableToolSpec, ResponsesApiNamespaceTool
 

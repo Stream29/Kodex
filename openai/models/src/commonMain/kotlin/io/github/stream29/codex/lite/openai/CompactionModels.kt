@@ -1,5 +1,8 @@
 package io.github.stream29.codex.lite.openai
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -11,12 +14,16 @@ import kotlin.uuid.Uuid
  * the request-facing fields into a [ResponsesApiRequest].
  *
  * @property model Model identifier used for the next Responses API request.
+ * @property threadName Local user-facing thread title. Session repositories
+ * ensure root snapshots use a non-empty title; an empty value is retained only
+ * for legacy or independently initialized non-root Agent storage.
  * @property autoCompactionTokenLimit Nullable because a thread may defer its
  * threshold to the selected model metadata; `null` means use the catalog
  * policy, or 90% of the resolved model context window when no catalog-specific
  * threshold is present.
- * @property turnId UUIDv7 identity allocated for the active or next logical
- * Codex turn. AgentState rotates it only when it begins a new logical turn.
+ * @property turnId UUIDv7 identity of the active logical user turn. Accepting
+ * a new user message is the only operation that rotates it; compaction and
+ * other state transitions retain the current value.
  * @property collaborationMode Active collaboration behavior. It is independent
  * of the task checklist and current goal.
  * @property plan Full replacement `update_plan` snapshot. An empty plan means
@@ -34,9 +41,12 @@ import kotlin.uuid.Uuid
  * `null` means no explicit prompt cache key is stored.
  */
 @OptIn(ExperimentalUuidApi::class)
+@Serializable
 public data class CodexAgentSettings(
     public val model: OpenAiModelId,
+    public val threadName: String = "",
     public val autoCompactionTokenLimit: Long? = null,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val turnId: String = Uuid.generateV7().toString(),
     public val collaborationMode: ModeKind = ModeKind.Default,
     public val plan: UpdatePlanArgs = UpdatePlanArgs(plan = emptyList()),
@@ -45,7 +55,6 @@ public data class CodexAgentSettings(
     public val sessionId: String? = null,
     public val instructions: String = "",
     public val previousResponseId: String? = null,
-    public val tools: List<ToolSpec> = emptyList(),
     public val toolChoice: ToolChoice = ToolChoice.Auto,
     public val parallelToolCalls: Boolean = false,
     public val reasoning: Reasoning = Reasoning(),
@@ -53,7 +62,6 @@ public data class CodexAgentSettings(
     public val serviceTier: ServiceTier = ServiceTier.Default,
     public val promptCacheKey: String? = null,
     public val text: TextControls = TextControls(),
-    public val clientMetadata: Map<String, String> = emptyMap(),
 )
 
 /**
@@ -73,6 +81,7 @@ public data class CodexAgentSettings(
  * predecessor; `null` means this checkpoint belongs to that first window.
  * @property windowId Stable UUIDv7 identifier for the active context window.
  */
+@Serializable
 public data class CompactionCheckpoint(
     public val prefix: List<ResponseItem.HistoryItem>,
     public val historyBaseIndex: Int,
@@ -85,32 +94,58 @@ public data class CompactionCheckpoint(
 /**
  * Returns the Codex wire window identity for this checkpoint.
  *
- * [threadId] is owned by the agent storage that represents the Codex thread;
- * [windowNumber] identifies this checkpoint within that thread.
+ * [threadId] is the stable provider-facing projection of the backing agent
+ * storage identity; [windowNumber] identifies this checkpoint within that
+ * thread namespace.
  */
 public fun CompactionCheckpoint.codexRequestWindowId(threadId: String): String =
     "$threadId:$windowNumber"
 
 /**
  * Result of a remote compaction v2 Responses stream.
+ *
+ * @property compactionOutput Compaction item returned by the service.
+ * @property completedResponse Nullable because a valid compaction stream may
+ * end after the compaction item without a `response.completed` event; `null`
+ * means no completed response was observed.
  */
 public data class RemoteCompactionV2Response(
     public val compactionOutput: ResponseItem.Compaction,
     public val completedResponse: Response?,
 )
 
-public enum class RemoteCompactionV2Trigger(public val wireName: String) {
-    Auto("auto"),
-    Manual("manual"),
+@Serializable
+public enum class CompactionTrigger {
+    @SerialName("auto")
+    Auto,
+
+    @SerialName("manual")
+    Manual,
 }
 
-public enum class RemoteCompactionV2Reason(public val wireName: String) {
-    UserRequested("user_requested"),
-    ContextLimit("context_limit"),
+@Serializable
+public enum class CompactionReason {
+    @SerialName("user_requested")
+    UserRequested,
+
+    @SerialName("context_limit")
+    ContextLimit,
+
+    @SerialName("model_downshift")
+    ModelDownshift,
+
+    @SerialName("comp_hash_changed")
+    CompHashChanged,
 }
 
-public enum class RemoteCompactionV2Phase(public val wireName: String) {
-    StandaloneTurn("standalone_turn"),
-    PreTurn("pre_turn"),
-    MidTurn("mid_turn"),
+@Serializable
+public enum class CompactionPhase {
+    @SerialName("standalone_turn")
+    StandaloneTurn,
+
+    @SerialName("pre_turn")
+    PreTurn,
+
+    @SerialName("mid_turn")
+    MidTurn,
 }

@@ -1,9 +1,11 @@
 package io.github.stream29.codex.lite.openai.modelcatalog
 
 import io.github.stream29.codex.lite.openai.ModelInfo
+import io.github.stream29.codex.lite.openai.ModelServiceTier
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.ReasoningEffort
 import io.github.stream29.codex.lite.openai.ReasoningEffortPreset
+import io.github.stream29.codex.lite.openai.ServiceTier
 
 private val standardReasoningLevels: List<ReasoningEffortPreset> = listOf(
     ReasoningEffortPreset(ReasoningEffort.Low, "Fast responses with lighter reasoning"),
@@ -34,6 +36,14 @@ private val gpt52ReasoningLevels: List<ReasoningEffortPreset> = listOf(
     ReasoningEffortPreset(ReasoningEffort.XHigh, "Extra high reasoning for complex problems"),
 )
 
+private val fastServiceTier: List<ModelServiceTier> = listOf(
+    ModelServiceTier(
+        id = ServiceTier.Fast.requestValue,
+        name = "Fast",
+        description = "Priority processing.",
+    ),
+)
+
 /** Relevant model metadata mirrored from Codex's bundled `models.json`. */
 internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
     ModelInfo(
@@ -41,6 +51,7 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         displayName = "GPT-5.6-Sol",
         defaultReasoningLevel = ReasoningEffort.Low,
         supportedReasoningLevels = ultraReasoningLevels,
+        serviceTiers = fastServiceTier,
         contextWindow = 372_000L,
         maxContextWindow = 372_000L,
     ),
@@ -49,6 +60,7 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         displayName = "GPT-5.6-Terra",
         defaultReasoningLevel = ReasoningEffort.Medium,
         supportedReasoningLevels = ultraReasoningLevels,
+        serviceTiers = fastServiceTier,
         contextWindow = 372_000L,
         maxContextWindow = 372_000L,
     ),
@@ -57,6 +69,7 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         displayName = "GPT-5.6-Luna",
         defaultReasoningLevel = ReasoningEffort.Medium,
         supportedReasoningLevels = maxReasoningLevels,
+        serviceTiers = fastServiceTier,
         contextWindow = 372_000L,
         maxContextWindow = 372_000L,
     ),
@@ -65,6 +78,7 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         displayName = "GPT-5.5",
         defaultReasoningLevel = ReasoningEffort.Medium,
         supportedReasoningLevels = standardReasoningLevels,
+        serviceTiers = fastServiceTier,
         contextWindow = 272_000L,
         maxContextWindow = 272_000L,
     ),
@@ -73,6 +87,7 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         displayName = "GPT-5.4",
         defaultReasoningLevel = ReasoningEffort.Medium,
         supportedReasoningLevels = standardReasoningLevels,
+        serviceTiers = fastServiceTier,
         contextWindow = 272_000L,
         maxContextWindow = 1_000_000L,
     ),
