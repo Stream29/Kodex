@@ -1,28 +1,21 @@
 package io.github.stream29.codex.lite.agentstate.impl
 
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
+import io.github.stream29.codex.lite.openai.CodexResponsesClientMetadata
+import io.github.stream29.codex.lite.openai.CodexResponsesMetadata
 import io.github.stream29.codex.lite.openai.ReasoningEffort
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
+import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 internal fun CodexAgentSettings.toResponsesApiRequest(
     input: List<ResponseItem>,
-    threadId: String,
-    turnMetadata: String,
-    windowId: String,
+    clientMetadata: CodexResponsesClientMetadata,
+    tools: List<ToolSpec>,
 ): ResponsesApiRequest {
-    val codexClientMetadata = buildMap {
-        installationId?.let { put(CodexInstallationIdMetadataKey, it) }
-        sessionId?.let { put("session_id", it) }
-        put("thread_id", threadId)
-        put("turn_id", turnId)
-        put(CodexWindowIdMetadataKey, windowId)
-        put(CodexTurnMetadataMetadataKey, turnMetadata)
-    }
     return ResponsesApiRequest(
         model = model,
         input = input,
@@ -40,29 +33,45 @@ internal fun CodexAgentSettings.toResponsesApiRequest(
         serviceTier = serviceTier,
         promptCacheKey = promptCacheKey,
         text = text,
-        clientMetadata = clientMetadata + codexClientMetadata,
+        clientMetadata = clientMetadata,
     )
 }
 
-internal fun CodexAgentSettings.toCodexTurnMetadata(
-    threadId: String,
-    windowId: String,
-    requestKind: String,
-    compaction: JsonObject? = null,
-): String =
-    OpenAiJsonCodec.encodeToString(
-        JsonObject.serializer(),
-        buildJsonObject {
-            installationId?.let { put("installation_id", it) }
-            sessionId?.let { put("session_id", it) }
-            put("thread_id", threadId)
-            put("turn_id", turnId)
-            put("window_id", windowId)
-            put("request_kind", requestKind)
-            compaction?.let { put("compaction", it) }
-        },
+internal fun CodexResponsesMetadata.toCodexClientMetadata(): CodexResponsesClientMetadata =
+    CodexResponsesClientMetadata(
+        installationId = installationId,
+        sessionId = sessionId,
+        threadId = threadId,
+        turnId = turnId,
+        windowId = windowId,
+        turnMetadata = OpenAiJsonCodec.encodeToString(
+            CodexResponsesMetadata.serializer(),
+            this,
+        ),
     )
 
-private const val CodexInstallationIdMetadataKey: String = "x-codex-installation-id"
-private const val CodexTurnMetadataMetadataKey: String = "x-codex-turn-metadata"
-private const val CodexWindowIdMetadataKey: String = "x-codex-window-id"
+/** Projects an arbitrary local storage identity into a stable UUID-shaped provider identity. */
+@OptIn(ExperimentalUuidApi::class)
+internal fun String.toCodexThreadId(): String {
+    val input = (CodexThreadIdentityNamespace + this).encodeToByteArray()
+    val high = (input.stableHash(CodexThreadIdentityHighSeed) and 0xffffffffffff0fffUL) or 0x8000UL
+    val low = (input.stableHash(CodexThreadIdentityLowSeed) and 0x3fffffffffffffffUL) or 0x8000000000000000UL
+    return Uuid.fromULongs(high, low).toString()
+}
+
+private fun ByteArray.stableHash(seed: ULong): ULong {
+    var hash = seed
+    for (byte in this) {
+        hash = (hash xor byte.toUByte().toULong()) * FnvPrime
+    }
+    hash = (hash xor (hash shr 33)) * MurmurMixFirst
+    hash = (hash xor (hash shr 33)) * MurmurMixSecond
+    return hash xor (hash shr 33)
+}
+
+private const val CodexThreadIdentityNamespace: String = "io.github.stream29.codex.lite/openai-thread/v1\u0000"
+private const val FnvPrime: ULong = 0x100000001b3UL
+private const val CodexThreadIdentityHighSeed: ULong = 0xcbf29ce484222325UL
+private const val CodexThreadIdentityLowSeed: ULong = 0x6c62272e07bb0142UL
+private const val MurmurMixFirst: ULong = 0xff51afd7ed558ccdUL
+private const val MurmurMixSecond: ULong = 0xc4ceb9fe1a85ec53UL

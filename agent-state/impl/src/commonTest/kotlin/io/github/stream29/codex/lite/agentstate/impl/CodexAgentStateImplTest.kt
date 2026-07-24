@@ -3,29 +3,30 @@ package io.github.stream29.codex.lite.agentstate.impl
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentcontext.collaboration.render.render as renderCollaborationMode
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.EnvironmentContext
+import io.github.stream29.codex.lite.agentcontext.collaboration.render.renderMultiAgentMode
+import io.github.stream29.codex.lite.agentcontext.prefix.render.render
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstate.contract.forcedCompact
+import io.github.stream29.codex.lite.agentstate.contract.renameThread
 import io.github.stream29.codex.lite.agentstorage.contract.nextIndex
+import io.github.stream29.codex.lite.agentstorage.contract.revert
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.openai.FailedResponse
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
+import io.github.stream29.codex.lite.openai.AgentMessageInputContent
 import io.github.stream29.codex.lite.openai.ContentItem
+import io.github.stream29.codex.lite.openai.CodexResponsesMetadata
+import io.github.stream29.codex.lite.openai.CodexResponsesRequestKind
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.PlanItemArg
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Phase
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Reason
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
 import io.github.stream29.codex.lite.openai.Reasoning
 import io.github.stream29.codex.lite.openai.ReasoningEffort
 import io.github.stream29.codex.lite.openai.Response
@@ -35,6 +36,7 @@ import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.StepStatus
+import io.github.stream29.codex.lite.openai.ServiceTier
 import io.github.stream29.codex.lite.openai.TokenUsage
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.codexRequestWindowId
@@ -42,39 +44,59 @@ import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.yield
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
-import kotlinx.datetime.LocalDate
-import kotlinx.datetime.TimeZone
-import kotlinx.io.files.Path
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 val codexAgentStateImplTest by testSuite {
     test("request projection maps Codex ultra reasoning to Responses max") {
+        val metadata = CodexResponsesMetadata(
+            threadId = "thread_1",
+            turnId = "turn_1",
+            windowId = "window_1",
+            requestKind = CodexResponsesRequestKind.Turn,
+        )
         val request = CodexAgentSettings(
             model = OpenAiModelId("test-model"),
             reasoning = Reasoning(effort = ReasoningEffort.Ultra),
         ).toResponsesApiRequest(
             input = emptyList(),
-            threadId = "thread_1",
-            turnMetadata = "{}",
-            windowId = "window_1",
+            clientMetadata = metadata.toCodexClientMetadata(),
+            tools = emptyList(),
         )
 
         assertEquals(ReasoningEffort.Max, request.reasoning.effort)
+    }
+
+    test("request projection preserves the selected service tier") {
+        val metadata = CodexResponsesMetadata(
+            threadId = "thread_1",
+            turnId = "turn_1",
+            windowId = "window_1",
+            requestKind = CodexResponsesRequestKind.Turn,
+        )
+        val request = CodexAgentSettings(
+            model = OpenAiModelId("test-model"),
+            serviceTier = ServiceTier.Fast,
+        ).toResponsesApiRequest(
+            input = emptyList(),
+            clientMetadata = metadata.toCodexClientMetadata(),
+            tools = emptyList(),
+        )
+
+        assertEquals(ServiceTier.Fast, request.serviceTier)
     }
 
     test("append user message allows consecutive user messages") {
@@ -82,7 +104,6 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
         val context = userMessage("# AGENTS.md instructions")
         val userInput = userMessage("Implement the change.")
@@ -93,6 +114,124 @@ val codexAgentStateImplTest by testSuite {
         assertEquals(context, storage.history[1])
         assertEquals(userInput, storage.history[2])
         assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
+    }
+
+    test("agent messages are requestable user-side history") {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+        val task = ResponseItem.AgentMessage(
+            author = "/root",
+            recipient = "/root/worker",
+            content = listOf(
+                AgentMessageInputContent.InputText(
+                    "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\nInspect storage.",
+                ),
+            ),
+        )
+
+        assertEquals(1, agent.injectHistory(listOf(task)))
+        assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
+
+        val reloaded = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+        assertEquals(CodexAgentStateValue.UserMessage, reloaded.state.value)
+    }
+
+    test("user messages do not derive or replace the thread name") {
+        val storage = InMemoryCodexAgentStorage(
+            CodexAgentSettings(OpenAiModelId("test-model"), threadName = "Session 0"),
+        )
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+
+        agent.appendUserMessage(listOf(ContentItem.InputImage("data:image/png;base64,AA==")))
+        assertEquals("Session 0", storage.settings[1].threadName)
+
+        agent.appendUserMessage(
+            listOf(ContentItem.InputText("<environment_context/>\n## My request for Codex:  Initial request  ")),
+        )
+        assertEquals("Session 0", storage.settings[2].threadName)
+
+        agent.renameThread("Named by user")
+        agent.appendUserMessage(listOf(ContentItem.InputText("Later request")))
+        assertEquals("Named by user", storage.settings[4].threadName)
+
+        storage.revert(untilExclusive = 1)
+        assertEquals("Session 0", storage.settings[0].threadName)
+    }
+
+    test("revert restores a completed assistant snapshot across every timeline") {
+        val initialSettings = CodexAgentSettings(OpenAiModelId("initial-model"))
+        val storage = InMemoryCodexAgentStorage(initialSettings)
+        val initialCheckpoint = storage.compaction[0]
+        val user = userMessage("First turn.")
+        val assistant = assistantMessage("First answer.")
+        val replacementSettings = CodexAgentSettings(OpenAiModelId("replacement-model"))
+
+        storage.history[1] = user
+        storage.timestamp[1] = instant(1)
+        storage.history[2] = assistant
+        storage.timestamp[2] = instant(2)
+        storage.tokenCount[2] = 20
+        storage.settings[3] = replacementSettings
+        storage.compaction[4] = initialCheckpoint.copy(
+            prefix = listOf(user, assistant),
+            historyBaseIndex = 3,
+            windowNumber = 1,
+            previousWindowId = initialCheckpoint.windowId,
+            windowId = "window-1",
+        )
+        storage.timestamp[5] = instant(5)
+        storage.tokenCount[5] = 50
+
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+
+        assertEquals(5, agent.latestIndex.value)
+        assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
+
+        assertEquals(2, agent.revert(untilExclusive = 3))
+
+        assertEquals(2, agent.latestIndex.value)
+        assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
+        assertEquals(assistant, storage.history[2])
+        assertEquals(initialSettings, storage.settings[2])
+        assertEquals(initialCheckpoint, storage.compaction[2])
+        assertEquals(20, storage.tokenCount[2])
+        assertEquals(null, storage.history.nextIndex(2))
+        assertEquals(null, storage.settings.nextIndex(2))
+        assertEquals(null, storage.compaction.nextIndex(2))
+        assertEquals(null, storage.timestamp.nextIndex(2))
+        assertEquals(null, storage.tokenCount.nextIndex(2))
+    }
+
+    test("revert rejects a non-completed target without changing storage") {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        storage.history[1] = userMessage("First turn.")
+        storage.history[2] = assistantMessage("First answer.")
+        storage.history[3] = userMessage("Second turn.")
+        storage.history[4] = assistantMessage("Second answer.")
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+
+        assertFailsWith<IllegalArgumentException> {
+            agent.revert(untilExclusive = 2)
+        }
+
+        assertEquals(4, agent.latestIndex.value)
+        assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
+        assertEquals(assistantMessage("Second answer."), storage.history[4])
     }
 
     test("state tracks pending tool calls and rejects mismatched results") {
@@ -108,7 +247,6 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         assertEquals(CodexAgentStateValue.ToolPending(listOf(call)), agent.state.value)
@@ -152,7 +290,6 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         assertEquals(CodexAgentStateValue.ToolPending(listOf(firstCall, secondCall)), agent.state.value)
@@ -198,7 +335,6 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         assertEquals(
@@ -234,7 +370,6 @@ val codexAgentStateImplTest by testSuite {
         val reloadedAgent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         assertEquals(CodexAgentStateValue.ToolCompleted, reloadedAgent.state.value)
@@ -254,7 +389,6 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
@@ -287,7 +421,6 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
@@ -305,7 +438,6 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         val outputIndex = agent.completeToolCall(
@@ -334,7 +466,6 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         assertEquals(0, agent.latestIndex.value)
@@ -351,7 +482,6 @@ val codexAgentStateImplTest by testSuite {
                 createResponse { flowOf<ResponsesStreamEvent>(failure) }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
         val received = mutableListOf<ResponsesStreamEvent>()
 
@@ -423,7 +553,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         val user = userMessage("Answer briefly.")
@@ -464,7 +593,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.requestResponseApi().toList()
@@ -508,7 +636,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(userMessage("Start streaming."))
@@ -564,7 +691,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
         val collected = mutableListOf<ResponsesStreamEvent>()
 
@@ -613,7 +739,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
         val user = userMessage("Start streaming.")
         val collected = mutableListOf<ResponsesStreamEvent>()
@@ -649,7 +774,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
         val user = userMessage("Start streaming.")
 
@@ -678,7 +802,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
         val collected = mutableListOf<ResponsesStreamEvent>()
 
@@ -721,7 +844,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
         val collected = mutableListOf<ResponsesStreamEvent>()
 
@@ -768,7 +890,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(userMessage("What time is it?"))
@@ -797,7 +918,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
         val user = userMessage("Use the new settings.")
 
@@ -807,7 +927,6 @@ val codexAgentStateImplTest by testSuite {
                 model = OpenAiModelId("new-model"),
                 installationId = "install",
                 sessionId = "session",
-                clientMetadata = mapOf("existing" to "value"),
             ),
         )
 
@@ -823,12 +942,13 @@ val codexAgentStateImplTest by testSuite {
         assertEquals(requestInput(user), request.request.input)
         assertEquals(false, request.request.store)
         assertEquals("install", request.installationId)
-        assertEquals("value", request.request.clientMetadata["existing"])
-        assertEquals("install", request.request.clientMetadata["x-codex-installation-id"])
-        assertEquals("session", request.request.clientMetadata["session_id"])
-        assertEquals(storage.id, request.request.clientMetadata["thread_id"])
-        assertEquals(storage.settings[2].turnId, request.request.clientMetadata["turn_id"])
-        assertEquals("${storage.id}:0", request.windowId)
+        val clientMetadata = assertNotNull(request.request.clientMetadata)
+        assertEquals("install", clientMetadata.installationId)
+        assertEquals("session", clientMetadata.sessionId)
+        assertEquals(storage.id.toCodexThreadId(), clientMetadata.threadId)
+        assertEquals(storage.settings[2].turnId, clientMetadata.turnId)
+        assertEquals("${storage.id.toCodexThreadId()}:0", request.windowId)
+        assertEquals(request.turnMetadata, clientMetadata.turnMetadata)
         assertTrue(request.turnMetadata.contains("\"request_kind\":\"turn\""))
     }
 
@@ -848,7 +968,6 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         val output = ResponseItem.FunctionCallOutput(
@@ -885,7 +1004,6 @@ val codexAgentStateImplTest by testSuite {
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         assertFailsWith<IllegalArgumentException> {
@@ -917,7 +1035,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(userMessage("Wait."))
@@ -949,7 +1066,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         val user = userMessage("Compact.")
@@ -961,7 +1077,7 @@ val codexAgentStateImplTest by testSuite {
         assertEquals(0, storage.compaction[2].historyBaseIndex)
     }
 
-    test("forced compact uses remote compaction v2 by default") {
+    test("forced compact uses remote compaction v2 without rotating the turn") {
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val initialTurnId = storage.settings[0].turnId
         val initialCheckpoint = storage.compaction[0]
@@ -987,7 +1103,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         val user = userMessage("This context is too large.")
@@ -1000,11 +1115,13 @@ val codexAgentStateImplTest by testSuite {
         val compactRequest = compactRequests.single()
         assertEquals(listOf(user, ResponseItem.CompactionTrigger), compactRequest.request.input)
         assertEquals(null, compactRequest.installationId)
-        assertEquals(null, compactRequest.request.clientMetadata["session_id"])
-        assertEquals(storage.id, compactRequest.request.clientMetadata["thread_id"])
-        assertEquals("${storage.id}:0", compactRequest.windowId)
-        assertTrue(compactRequest.request.clientMetadata.getValue("turn_id") != initialTurnId)
-        assertEquals(initialCheckpoint.codexRequestWindowId(storage.id), compactRequest.windowId)
+        val clientMetadata = assertNotNull(compactRequest.request.clientMetadata)
+        assertEquals(null, clientMetadata.sessionId)
+        assertEquals(storage.id.toCodexThreadId(), clientMetadata.threadId)
+        assertEquals("${storage.id.toCodexThreadId()}:0", compactRequest.windowId)
+        assertEquals(initialTurnId, clientMetadata.turnId)
+        assertEquals(compactRequest.turnMetadata, clientMetadata.turnMetadata)
+        assertEquals(initialCheckpoint.codexRequestWindowId(storage.id.toCodexThreadId()), compactRequest.windowId)
         assertTrue(compactRequest.turnMetadata.contains("\"request_kind\":\"compaction\""))
         assertTrue(compactRequest.turnMetadata.contains("\"trigger\":\"manual\""))
         assertTrue(compactRequest.turnMetadata.contains("\"reason\":\"user_requested\""))
@@ -1017,7 +1134,7 @@ val codexAgentStateImplTest by testSuite {
             previousCheckpoint = initialCheckpoint,
         )
         assertEquals(11, storage.tokenCount[2])
-        assertEquals(compactRequest.request.clientMetadata["turn_id"], storage.settings[2].turnId)
+        assertEquals(initialTurnId, storage.settings[2].turnId)
         assertEquals(2, agent.latestIndex.value)
     }
 
@@ -1046,7 +1163,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.forcedCompact()
@@ -1074,7 +1190,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.forcedCompact()
@@ -1111,7 +1226,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(userMessage("Compact."))
@@ -1119,8 +1233,9 @@ val codexAgentStateImplTest by testSuite {
 
         val compactRequest = compactRequests.single()
         assertEquals("install", compactRequest.installationId)
-        assertEquals("session", compactRequest.request.clientMetadata["session_id"])
-        assertEquals(storage.id, compactRequest.request.clientMetadata["thread_id"])
+        val clientMetadata = assertNotNull(compactRequest.request.clientMetadata)
+        assertEquals("session", clientMetadata.sessionId)
+        assertEquals(storage.id.toCodexThreadId(), clientMetadata.threadId)
     }
 
     test("remote compaction v2 uses window number from checkpoint") {
@@ -1149,13 +1264,12 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.forcedCompact()
 
         val compactRequest = compactRequests.single()
-        assertEquals("${storage.id}:7", compactRequest.windowId)
+        assertEquals("${storage.id.toCodexThreadId()}:7", compactRequest.windowId)
         assertAdvancedCompactionCheckpoint(
             checkpoint = storage.compaction[2],
             prefix = listOf(user, ResponseItem.Compaction(encryptedContent = "compact")),
@@ -1201,7 +1315,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(user, tokenCount = 90)
@@ -1210,7 +1323,7 @@ val codexAgentStateImplTest by testSuite {
         assertEquals(0, compactRequests.size)
         assertEquals(1, responseRequests.size)
         assertEquals(requestInput(user), responseRequests.single().request.input)
-        assertEquals("${storage.id}:0", responseRequests.single().windowId)
+        assertEquals("${storage.id.toCodexThreadId()}:0", responseRequests.single().windowId)
         assertTrue(responseRequests.single().turnMetadata.contains("\"request_kind\":\"turn\""))
         assertEquals(final, storage.history[2])
         assertEquals(initialCheckpoint, storage.compaction[2])
@@ -1269,7 +1382,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(user, tokenCount = 1)
@@ -1277,7 +1389,7 @@ val codexAgentStateImplTest by testSuite {
 
         assertEquals(1, responseRequests.size)
         assertEquals(requestInput(user), responseRequests[0].request.input)
-        assertEquals("${storage.id}:0", responseRequests[0].windowId)
+        assertEquals("${storage.id.toCodexThreadId()}:0", responseRequests[0].windowId)
         assertTrue(responseRequests[0].turnMetadata.contains("\"request_kind\":\"turn\""))
         assertEquals(0, compactRequests.size)
         assertEquals(partial, storage.history[2])
@@ -1338,14 +1450,13 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(user, tokenCount = 1)
         agent.requestResponseApi().toList()
 
         assertEquals(1, responseRequests.size)
-        assertEquals("${storage.id}:0", responseRequests.single().windowId)
+        assertEquals("${storage.id.toCodexThreadId()}:0", responseRequests.single().windowId)
         assertTrue(responseRequests.single().turnMetadata.contains("\"request_kind\":\"turn\""))
         assertEquals(0, compactRequests.size)
         assertEquals(firstFinal, storage.history[2])
@@ -1368,7 +1479,6 @@ val codexAgentStateImplTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
         )
 
         agent.appendUserMessage(userMessage("Compact."))
@@ -1395,44 +1505,22 @@ private data class RecordedRemoteCompactionV2Request(
     val windowId: String,
 )
 
-private val testContextPrefixProvider: AgentContextPrefixProvider =
-    fixedAgentContextPrefixProvider(
-        environmentContext = EnvironmentContext(
-            environments = listOf(
-                AgentEnvironment(
-                    id = "test",
-                    cwd = Path("/workspace"),
-                    shell = "bash",
-                ),
-            ),
-            currentDate = LocalDate(2026, 7, 15),
-            timeZone = TimeZone.UTC,
-        ),
-    )
-
-private val testContextInput: ResponseItem.Message =
-    ResponseItem.Message(
-        role = MessageRole.User,
-        content = listOf(
-            ContentItem.InputText(
-                "<environment_context>\n" +
-                    "  <cwd>/workspace</cwd>\n" +
-                    "  <shell>bash</shell>\n" +
-                    "  <current_date>2026-07-15</current_date>\n" +
-                    "  <timezone>UTC</timezone>\n" +
-                    "</environment_context>",
-            ),
-        ),
-    )
-
 private val defaultCollaborationInput: ResponseItem.Message =
     ResponseItem.Message(
         role = MessageRole.Developer,
         content = listOf(ContentItem.InputText(ModeKind.Default.renderCollaborationMode())),
     )
 
+private val defaultMultiAgentInput: ResponseItem.Message =
+    ResponseItem.Message(
+        role = MessageRole.Developer,
+        content = listOf(ContentItem.InputText(ReasoningEffort.Medium.renderMultiAgentMode())),
+    )
+
+private val defaultContextInput: List<ResponseItem.HistoryItem> = TestContextPrefix.render()
+
 private fun requestInput(vararg durableItems: ResponseItem): List<ResponseItem> =
-    listOf(defaultCollaborationInput, testContextInput, *durableItems)
+    listOf(defaultCollaborationInput, defaultMultiAgentInput) + defaultContextInput + durableItems
 
 private fun userMessage(text: String): ResponseItem.Message =
     ResponseItem.Message(

@@ -1,6 +1,7 @@
 package io.github.stream29.codex.lite.agentstate.impl
 
 import io.github.stream29.codex.lite.agentcontext.collaboration.render.render as renderCollaborationMode
+import io.github.stream29.codex.lite.agentcontext.collaboration.render.renderMultiAgentMode
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
 import io.github.stream29.codex.lite.agentcontext.prefix.render.render
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
@@ -11,16 +12,24 @@ import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheck
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.contract.prevIndex
-import io.github.stream29.codex.lite.agentstorage.contract.transaction
+import io.github.stream29.codex.lite.agentstorage.contract.revert
+import io.github.stream29.codex.lite.agentstorage.contract.revertWithTransaction
+import io.github.stream29.codex.lite.agentstorage.contract.setWithTransaction
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
+import io.github.stream29.codex.lite.openai.CodexResponsesMetadata
+import io.github.stream29.codex.lite.openai.CodexResponsesRequestKind
+import io.github.stream29.codex.lite.openai.CompactionImplementation
+import io.github.stream29.codex.lite.openai.CompactionStrategy
+import io.github.stream29.codex.lite.openai.CompactionTurnMetadata
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.ModeKind
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Phase
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Reason
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
+import io.github.stream29.codex.lite.openai.CompactionPhase
+import io.github.stream29.codex.lite.openai.CompactionReason
+import io.github.stream29.codex.lite.openai.CompactionTrigger
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
+import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.codexRequestWindowId
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
@@ -32,10 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import kotlin.time.Clock
-import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -46,21 +52,30 @@ import kotlin.uuid.Uuid
  * Construction is suspend because storage reads may be asynchronous. The
  * initial phase is reconstructed from persisted history rather than assumed
  * from the newest global index, which may belong to another timeline.
- * [contextPrefixProvider] contributes transient request input and is never persisted
- * in [storage].
+ *
+ * [contextPrefixProvider] supplies the complete structured request prefix.
+ * It is resolved for every normal Responses request and is never persisted or
+ * included in remote compaction input.
+ *
+ * [toolSearchToolSpec] is required and evaluated once for every normal
+ * Responses request and remote compaction request. This lets dynamic MCP
+ * catalogs change without moving complete request-tool assembly outside the
+ * state layer.
  */
 public suspend fun CodexAgentState(
     client: OpenAiClient,
     storage: MutableCodexAgentStorage,
     contextPrefixProvider: AgentContextPrefixProvider,
+    toolSearchToolSpec: suspend () -> ToolSpec.ToolSearch,
 ): CodexAgentState {
     val loadedLatestIndex = storage.latestIndex()
     return CodexAgentStateImpl(
         client = client,
         storage = storage,
+        contextPrefixProvider = contextPrefixProvider,
+        toolSearchToolSpec = toolSearchToolSpec,
         loadedLatestIndex = loadedLatestIndex,
         initialState = storage.stateAt(loadedLatestIndex),
-        contextPrefixProvider = contextPrefixProvider,
     )
 }
 
@@ -75,9 +90,10 @@ public suspend fun CodexAgentState(
 private class CodexAgentStateImpl(
     private val client: OpenAiClient,
     override val storage: MutableCodexAgentStorage,
+    private val contextPrefixProvider: AgentContextPrefixProvider,
+    private val toolSearchToolSpec: suspend () -> ToolSpec.ToolSearch,
     loadedLatestIndex: Int,
     initialState: CodexAgentStateValue,
-    private val contextPrefixProvider: AgentContextPrefixProvider,
 ) : CodexAgentState {
     override val state: StateFlow<CodexAgentStateValue>
         field = MutableStateFlow(initialState)
@@ -102,25 +118,33 @@ private class CodexAgentStateImpl(
                 role = MessageRole.Developer,
                 content = listOf(ContentItem.InputText(settings.collaborationMode.renderCollaborationMode())),
             )
-            val requestContext = contextPrefixProvider.render()
-            val checkpoint = storage.compaction[snapshotIndex]
-            val windowId = checkpoint.codexRequestWindowId(storage.id)
-            val turnMetadata = settings.toCodexTurnMetadata(
-                threadId = storage.id,
-                windowId = windowId,
-                requestKind = "turn",
+            val multiAgentContext = ResponseItem.Message(
+                role = MessageRole.Developer,
+                content = listOf(ContentItem.InputText(settings.reasoning.effort.renderMultiAgentMode())),
             )
+            val contextPrefix = contextPrefixProvider.resolve().render()
+            val checkpoint = storage.compaction[snapshotIndex]
+            val threadId = storage.id.toCodexThreadId()
+            val windowId = checkpoint.codexRequestWindowId(threadId)
+            val metadata = CodexResponsesMetadata(
+                installationId = settings.installationId,
+                sessionId = settings.sessionId,
+                threadId = threadId,
+                turnId = settings.turnId,
+                windowId = windowId,
+                requestKind = CodexResponsesRequestKind.Turn,
+            )
+            val clientMetadata = metadata.toCodexClientMetadata()
 
             client.createResponse(
                 request = settings.toResponsesApiRequest(
-                    input = listOf(collaborationContext) + requestContext + durableInput,
-                    threadId = storage.id,
-                    turnMetadata = turnMetadata,
-                    windowId = windowId,
+                    input = listOf(collaborationContext, multiAgentContext) + contextPrefix + durableInput,
+                    clientMetadata = clientMetadata,
+                    tools = codexRequestToolSpecs(settings, toolSearchToolSpec()),
                 ),
-                installationId = settings.installationId,
-                turnMetadata = turnMetadata,
-                windowId = windowId,
+                installationId = clientMetadata.installationId,
+                turnMetadata = clientMetadata.turnMetadata,
+                windowId = clientMetadata.windowId,
             ).collect { event ->
                 when (event) {
                     is ResponsesStreamEvent.OutputItemDone -> {
@@ -149,9 +173,9 @@ private class CodexAgentStateImpl(
 
     @OptIn(ExperimentalUuidApi::class)
     override suspend fun compact(
-        trigger: RemoteCompactionV2Trigger,
-        reason: RemoteCompactionV2Reason,
-        phase: RemoteCompactionV2Phase,
+        trigger: CompactionTrigger,
+        reason: CompactionReason,
+        phase: CompactionPhase,
     ): Int =
         mutate(
             validate = CodexAgentStateValue::requireCanCompact,
@@ -163,34 +187,34 @@ private class CodexAgentStateImpl(
             val settings = storage.settings[snapshotIndex]
             val checkpoint = storage.compaction[snapshotIndex]
             val input = storage.modelInputAt(snapshotIndex)
-            val requestSettings = if (phase == RemoteCompactionV2Phase.StandaloneTurn) {
-                settings.copy(turnId = Uuid.generateV7().toString())
-            } else {
-                settings
-            }
-            val windowId = checkpoint.codexRequestWindowId(storage.id)
-            val turnMetadata = requestSettings.toCodexTurnMetadata(
-                threadId = storage.id,
+            val threadId = storage.id.toCodexThreadId()
+            val windowId = checkpoint.codexRequestWindowId(threadId)
+            val metadata = CodexResponsesMetadata(
+                installationId = settings.installationId,
+                sessionId = settings.sessionId,
+                threadId = threadId,
+                turnId = settings.turnId,
                 windowId = windowId,
-                requestKind = "compaction",
-                compaction = buildJsonObject {
-                    put("trigger", trigger.wireName)
-                    put("reason", reason.wireName)
-                    put("implementation", "responses_compaction_v2")
-                    put("phase", phase.wireName)
-                    put("strategy", "memento")
-                },
-            )
-            val result = client.createRemoteCompactionV2Response(
-                request = requestSettings.toResponsesApiRequest(
-                    input = input + ResponseItem.CompactionTrigger,
-                    threadId = storage.id,
-                    turnMetadata = turnMetadata,
-                    windowId = windowId,
+                requestKind = CodexResponsesRequestKind.Compaction(
+                    metadata = CompactionTurnMetadata(
+                        trigger = trigger,
+                        reason = reason,
+                        implementation = CompactionImplementation.ResponsesCompactionV2,
+                        phase = phase,
+                        strategy = CompactionStrategy.Memento,
+                    ),
                 ),
-                installationId = requestSettings.installationId,
-                turnMetadata = turnMetadata,
-                windowId = windowId,
+            )
+            val clientMetadata = metadata.toCodexClientMetadata()
+            val result = client.createRemoteCompactionV2Response(
+                request = settings.toResponsesApiRequest(
+                    input = input + ResponseItem.CompactionTrigger,
+                    clientMetadata = clientMetadata,
+                    tools = codexRequestToolSpecs(settings, toolSearchToolSpec()),
+                ),
+                installationId = clientMetadata.installationId,
+                turnMetadata = clientMetadata.turnMetadata,
+                windowId = clientMetadata.windowId,
             )
             storage.appendCompactionCheckpoint(
                 prefix = buildRemoteCompactionV2Prefix(input, result.compactionOutput),
@@ -201,7 +225,7 @@ private class CodexAgentStateImpl(
                 tokenCount = result.completedResponse?.usage?.totalTokens,
                 previousCheckpoint = checkpoint,
                 nextWindowId = Uuid.generateV7().toString(),
-                settings = requestSettings,
+                settings = settings,
             ).also { latestIndex.value = it }
         }
 
@@ -214,14 +238,17 @@ private class CodexAgentStateImpl(
             inFlight = CodexAgentStateValue.ExternalWrite,
         ) {
             val timestamp = now()
-            val index = storage.transaction {
-                var index = storage.latestIndex()
-                for (item in items) {
-                    index += 1
-                    storage.history[index] = item
-                    storage.timestamp[index] = timestamp
+            val firstIndex = storage.latestIndex() + 1
+            val index = storage.history.revertWithTransaction(firstIndex) {
+                storage.timestamp.revertWithTransaction(firstIndex) {
+                    var index = storage.latestIndex()
+                    for (item in items) {
+                        index += 1
+                        storage.history[index] = item
+                        storage.timestamp[index] = timestamp
+                    }
+                    index
                 }
-                index
             }
             latestIndex.value = index
             state.value = storage.stateAt(index)
@@ -231,32 +258,53 @@ private class CodexAgentStateImpl(
 
     @OptIn(ExperimentalUuidApi::class)
     override suspend fun appendUserMessage(content: List<ContentItem>): Int =
+        appendUserMessage(content) { snapshotIndex, currentSettings ->
+            if (storage.stateAt(snapshotIndex) == CodexAgentStateValue.Empty) {
+                currentSettings.turnId
+            } else {
+                Uuid.generateV7().toString()
+            }
+        }
+
+    override suspend fun appendUserMessage(
+        content: List<ContentItem>,
+        turnId: String,
+    ): Int {
+        require(turnId.isNotBlank()) { "Turn id must not be blank." }
+        return appendUserMessage(content) { _, _ -> turnId }
+    }
+
+    private suspend inline fun appendUserMessage(
+        content: List<ContentItem>,
+        turnId: (snapshotIndex: Int, currentSettings: CodexAgentSettings) -> String,
+    ): Int =
         mutate(
             validate = CodexAgentStateValue::requireCanAppendUserMessage,
             inFlight = CodexAgentStateValue.ExternalWrite,
         ) {
             val snapshotIndex = storage.latestIndex()
             val currentSettings = storage.settings[snapshotIndex]
-            val settings = if (storage.stateAt(snapshotIndex) == CodexAgentStateValue.Empty) {
-                currentSettings
-            } else {
-                currentSettings.copy(turnId = Uuid.generateV7().toString())
-            }
+            val settings = currentSettings.copy(turnId = turnId(snapshotIndex, currentSettings))
             val item = ResponseItem.Message(
                 role = MessageRole.User,
                 content = content,
             )
-            val index = storage.transaction {
-                val index = storage.latestIndex() + 1
+            val firstIndex = snapshotIndex + 1
+            val timestamp = now()
+            val index = storage.settings.revertWithTransaction(firstIndex) {
                 if (settings != currentSettings) {
-                    storage.settings[index] = settings
+                    storage.settings[firstIndex] = settings
                 }
-                storage.history[index] = item
-                storage.timestamp[index] = now()
-                index
+                storage.history.revertWithTransaction(firstIndex) {
+                    storage.timestamp.revertWithTransaction(firstIndex) {
+                        storage.history[firstIndex] = item
+                        storage.timestamp[firstIndex] = timestamp
+                        firstIndex
+                    }
+                }
             }
             latestIndex.value = index
-            state.value = CodexAgentStateValue.UserMessage
+            state.value = storage.stateAt(index)
             index
         }
 
@@ -271,11 +319,9 @@ private class CodexAgentStateImpl(
         ) {
             pendingCalls.requireCall(output.callId)
             val nextState = toolPendingState(pendingCalls.filterNot { call -> call.callId == output.callId })
-            val index = storage.transaction {
-                val index = storage.latestIndex() + 1
-                storage.history[index] = output
-                storage.timestamp[index] = now()
-                index
+            val index = storage.latestIndex() + 1
+            storage.history.setWithTransaction(index, output) {
+                storage.timestamp.setWithTransaction(index, now()) { index }
             }
             latestIndex.value = index
             state.value = nextState
@@ -304,12 +350,11 @@ private class CodexAgentStateImpl(
                 "update_plan is a TODO/checklist tool and is not allowed in Plan mode."
             }
             val nextState = toolPendingState(pendingCalls.filterNot { call -> call.callId == output.callId })
-            val index = storage.transaction {
-                val index = storage.latestIndex() + 1
-                storage.settings[index] = currentSettings.copy(plan = plan)
-                storage.history[index] = output
-                storage.timestamp[index] = now()
-                index
+            val index = storage.latestIndex() + 1
+            storage.settings.setWithTransaction(index, currentSettings.copy(plan = plan)) {
+                storage.history.setWithTransaction(index, output) {
+                    storage.timestamp.setWithTransaction(index, now()) { index }
+                }
             }
             latestIndex.value = index
             state.value = nextState
@@ -323,15 +368,32 @@ private class CodexAgentStateImpl(
             inFlight = CodexAgentStateValue.ExternalWrite,
         ) {
             val currentSettings = storage.settings[storage.latestIndex()]
-            val index = storage.transaction {
-                val index = storage.latestIndex() + 1
-                require(index > 0) { "Settings updates require an existing state index." }
-                storage.settings[index] = settings.copy(turnId = currentSettings.turnId)
-                storage.timestamp[index] = now()
-                index
+            val index = storage.latestIndex() + 1
+            require(index > 0) { "Settings updates require an existing state index." }
+            storage.settings.setWithTransaction(index, settings.copy(turnId = currentSettings.turnId)) {
+                storage.timestamp.setWithTransaction(index, now()) { index }
             }
             latestIndex.value = index
             index
+        }
+
+    override suspend fun revert(untilExclusive: Int): Int =
+        mutate(
+            validate = CodexAgentStateValue::requireCanRevert,
+            inFlight = CodexAgentStateValue.ExternalWrite,
+        ) {
+            val currentLatestIndex = storage.latestIndex()
+            require(untilExclusive in 1..(currentLatestIndex + 1)) {
+                "Revert boundary $untilExclusive must retain a visible agent snapshot."
+            }
+            val targetState = storage.stateAt(untilExclusive - 1)
+            targetState.requireRevertTarget()
+
+            storage.revert(untilExclusive)
+            val revertedIndex = storage.latestIndex()
+            latestIndex.value = revertedIndex
+            state.value = storage.stateAt(revertedIndex)
+            revertedIndex
         }
 
     private suspend fun appendHistoryItem(
@@ -339,25 +401,26 @@ private class CodexAgentStateImpl(
         timestamp: Instant,
         tokenCount: Long?,
     ): Int {
-        val index = storage.transaction {
-            val index = storage.latestIndex() + 1
-            if (tokenCount != null) {
-                storage.tokenCount[index] = tokenCount
+        val index = storage.latestIndex() + 1
+        if (tokenCount == null) {
+            storage.history.setWithTransaction(index, item) {
+                storage.timestamp.setWithTransaction(index, timestamp) { index }
             }
-            storage.history[index] = item
-            storage.timestamp[index] = timestamp
-            index
+        } else {
+            storage.tokenCount.setWithTransaction(index, tokenCount) {
+                storage.history.setWithTransaction(index, item) {
+                    storage.timestamp.setWithTransaction(index, timestamp) { index }
+                }
+            }
         }
         latestIndex.value = index
         return index
     }
 
     private suspend fun appendTimestampAndTokenCount(tokenCount: Long) {
-        val index = storage.transaction {
-            val index = storage.latestIndex() + 1
-            storage.tokenCount[index] = tokenCount
-            storage.timestamp[index] = now()
-            index
+        val index = storage.latestIndex() + 1
+        storage.tokenCount.setWithTransaction(index, tokenCount) {
+            storage.timestamp.setWithTransaction(index, now()) { index }
         }
         latestIndex.value = index
     }
@@ -387,7 +450,7 @@ private class CodexAgentStateImpl(
 }
 
 public class CodexAgentStateInvalidTransitionException(
-    public val operation: String,
+    operation: String,
     public val currentState: CodexAgentStateValue,
 ) : IllegalStateException("Cannot $operation while agent state is $currentState.")
 
@@ -430,9 +493,22 @@ private fun CodexAgentStateValue.requireCanAppendUserMessage() {
     if (
         this != CodexAgentStateValue.Empty &&
         this != CodexAgentStateValue.UserMessage &&
-        this != CodexAgentStateValue.AssistantMessage
+        this != CodexAgentStateValue.AssistantMessage &&
+        this != CodexAgentStateValue.ToolCompleted
     ) {
         throw CodexAgentStateInvalidTransitionException("append a user message", this)
+    }
+}
+
+private fun CodexAgentStateValue.requireCanRevert() {
+    if (this != CodexAgentStateValue.Empty && this != CodexAgentStateValue.AssistantMessage) {
+        throw CodexAgentStateInvalidTransitionException("revert history", this)
+    }
+}
+
+private fun CodexAgentStateValue.requireRevertTarget() {
+    if (this != CodexAgentStateValue.Empty && this != CodexAgentStateValue.AssistantMessage) {
+        throw IllegalArgumentException("Revert target must be an empty or completed assistant snapshot, got $this.")
     }
 }
 
@@ -454,9 +530,9 @@ private suspend fun CodexAgentStorage.modelInputAt(index: Int): List<ResponseIte
 /**
  * Derives the state from the active history tail at [index].
  *
- * A user, assistant, or tool message ends the current local-tool batch. A
- * developer message is context-only, so this scans past it and returns every
- * unresolved call in chronological order.
+ * A user, inter-Agent, Hook, assistant, or tool message ends the current
+ * local-tool batch. A developer message is context-only, so this scans past it
+ * and returns every unresolved call in chronological order.
  */
 private suspend fun CodexAgentStorage.stateAt(index: Int): CodexAgentStateValue {
     if (index < 0) {
@@ -499,6 +575,16 @@ private suspend fun CodexAgentStorage.stateAt(index: Int): CodexAgentStateValue 
                 }
             }
 
+            is ResponseItem.AgentMessage -> {
+                if (pendingCallsReversed.isNotEmpty()) {
+                    CodexAgentStateValue.ToolPending(pendingCallsReversed.asReversed().toList())
+                } else if (sawToolOutput) {
+                    CodexAgentStateValue.ToolCompleted
+                } else {
+                    CodexAgentStateValue.UserMessage
+                }
+            }
+
             else -> null
         }
 
@@ -532,5 +618,4 @@ private fun toolPendingState(calls: List<ResponseItem.ToolCall>): CodexAgentStat
     }
 }
 
-@OptIn(ExperimentalTime::class)
 private fun now(): Instant = Clock.System.now()
