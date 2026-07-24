@@ -24,6 +24,7 @@ import io.github.stream29.codex.lite.utils.ktorclientext.CodexOriginator
 import io.github.stream29.codex.lite.utils.ktorclientext.OpenAiSearchVersion
 import io.github.stream29.codex.lite.utils.ktorclientext.SseCompatibility
 import io.github.stream29.codex.lite.utils.ktorclientext.addAll
+import io.github.stream29.codex.lite.utils.ktorclientext.postSseEvents
 import io.github.stream29.codex.lite.utils.ktorclientext.set
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -33,7 +34,7 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.cookies.AcceptAllCookiesStorage
 import io.ktor.client.plugins.cookies.HttpCookies
 import io.ktor.client.plugins.defaultRequest
-import io.ktor.client.plugins.sse.SSESession
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.accept
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
@@ -51,15 +52,13 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.io.IOException
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.decodeFromJsonElement
 import kotlin.random.Random
+import kotlin.time.Duration.Companion.milliseconds
 
 public class OpenAiClient(
     private val authProvider: OpenAiSubscriptionAuthSession,
@@ -114,18 +113,13 @@ public class OpenAiClient(
     }
 
     override suspend fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent> {
-        val response = httpClient.post {
+        return httpClient.streamResponseEvents {
             url {
                 appendPathSegments("responses")
             }
-            accept(ContentType.Text.EventStream)
             contentType(ContentType.Application.Json)
             setBody(request)
         }
-        return response.body<SSESession>()
-            .incoming
-            .mapNotNull { event -> event.data.takeIf { it != "[DONE]" } }
-            .map { OpenAiJsonCodec.decodeFromString<ResponsesStreamEvent>(it) }
     }
 
     override suspend fun createResponse(
@@ -134,21 +128,16 @@ public class OpenAiClient(
         turnMetadata: String,
         windowId: String,
     ): Flow<ResponsesStreamEvent> {
-        val response = httpClient.post {
+        return httpClient.streamResponseEvents {
             url {
                 appendPathSegments("responses")
             }
-            accept(ContentType.Text.EventStream)
             contentType(ContentType.Application.Json)
             installationId?.let { headers[HeaderCodexInstallationId] = it }
             headers[HeaderCodexTurnMetadata] = turnMetadata
             headers[HeaderCodexWindowId] = windowId
             setBody(request)
         }
-        return response.body<SSESession>()
-            .incoming
-            .mapNotNull { event -> event.data.takeIf { it != "[DONE]" } }
-            .map { OpenAiJsonCodec.decodeFromString<ResponsesStreamEvent>(it) }
     }
 
     override suspend fun createRemoteCompactionV2Response(
@@ -158,11 +147,10 @@ public class OpenAiClient(
         windowId: String,
     ): RemoteCompactionV2Response =
         retryOpenAiStreamingTransport(config.retry) {
-            val response = httpClient.post {
+            httpClient.streamResponseEvents {
                 url {
                     appendPathSegments("responses")
                 }
-                accept(ContentType.Text.EventStream)
                 contentType(ContentType.Application.Json)
                 headers[HeaderCodexBetaFeatures] = RemoteCompactionV2Feature
                 installationId?.let { headers[HeaderCodexInstallationId] = it }
@@ -170,10 +158,6 @@ public class OpenAiClient(
                 headers[HeaderCodexWindowId] = windowId
                 setBody(request)
             }
-            response.body<SSESession>()
-                .incoming
-                .mapNotNull { event -> event.data.takeIf { it != "[DONE]" } }
-                .map { OpenAiJsonCodec.decodeFromString<ResponsesStreamEvent>(it) }
                 .throwIfFailure()
                 .collectRemoteCompactionV2Response()
         }
@@ -215,7 +199,7 @@ public class OpenAiClient(
         return response.openAiResponseResult(SearchResponse.serializer())
     }
 
-    override fun close(): Unit {
+    override fun close() {
         httpClient.close()
     }
 
@@ -226,6 +210,13 @@ private const val HeaderCodexBetaFeatures: String = "x-codex-beta-features"
 private const val HeaderCodexInstallationId: String = "x-codex-installation-id"
 private const val HeaderCodexTurnMetadata: String = "x-codex-turn-metadata"
 private const val HeaderCodexWindowId: String = "x-codex-window-id"
+
+private fun HttpClient.streamResponseEvents(
+    configureRequest: HttpRequestBuilder.() -> Unit,
+): Flow<ResponsesStreamEvent> =
+    postSseEvents(configureRequest)
+        .mapNotNull { event -> event.data?.takeIf { it != "[DONE]" } }
+        .map { data -> OpenAiJsonCodec.decodeFromString<ResponsesStreamEvent>(data) }
 
 internal suspend fun Flow<ResponsesStreamEvent>.collectRemoteCompactionV2Response(): RemoteCompactionV2Response {
     var outputItemCount = 0
@@ -314,7 +305,7 @@ internal suspend fun <T> retryOpenAiStreamingTransport(
             if (!cause.isRetryableOpenAiTransportException(retry) || retries >= retry.maxRetries) {
                 throw cause
             }
-            delay(retry.streamingRetryDelayMillis(retries))
+            delay(retry.streamingRetryDelayMillis(retries).milliseconds)
             retries += 1
         }
     }

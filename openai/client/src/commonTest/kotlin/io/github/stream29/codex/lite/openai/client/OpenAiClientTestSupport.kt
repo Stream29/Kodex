@@ -4,10 +4,12 @@ import io.github.stream29.codex.lite.openai.OpenAiErrorResponse
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.OpenAiResult
 import io.github.stream29.codex.lite.openai.MutableOpenAiSubscriptionAuthSession
+import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthSession
+import io.github.stream29.codex.lite.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
-import io.github.stream29.codex.lite.openai.codexclistorage.defaultCodexDirectory
 import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
+import io.github.stream29.codex.lite.utils.osenvironment.userHomeDirectory
 import kotlinx.io.files.Path
 import kotlin.test.fail
 
@@ -20,19 +22,29 @@ internal fun <T> OpenAiResult<T, OpenAiErrorResponse>.successOrFail(): T =
     }
 
 internal suspend fun codexAuthProvider(): OpenAiSubscriptionAuthSession =
-    MutableOpenAiSubscriptionAuthSession(testCodexStorage().readAuth())
+    MutableOpenAiSubscriptionAuthSession(
+        testCodexStorage().readAuthOrNull().toSubscriptionAuthStateOrThrow(),
+    )
+
+private fun CodexAuthJson?.toSubscriptionAuthStateOrThrow(): OpenAiSubscriptionAuthState {
+    val tokens = this?.tokens ?: error("Codex CLI auth tokens are required.")
+    return OpenAiSubscriptionAuthState(
+        accessToken = tokens.accessToken,
+        accountId = tokens.accountId?.takeIf(String::isNotBlank),
+    )
+}
 
 internal fun testCodexDirectory(): Path {
     val explicitCodexHome = environmentVariable("CODEX_HOME")?.takeIf(String::isNotBlank)
     if (explicitCodexHome != null) {
         return Path(explicitCodexHome)
     }
-    return defaultCodexDirectory()
+    return userHomeDirectory()?.let { home -> Path(home, ".codex") }
         ?: throw IllegalStateException("CODEX_HOME or a readable user home directory must be set for real OpenAI client tests.")
 }
 
 internal suspend fun testCodexClientVersion(): String =
-    testCodexStorage().readModelsCache().clientVersion
+    testCodexStorage().readModelsCacheOrNull()?.clientVersion
         ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
         ?: "0.1.0"
 
@@ -47,21 +59,14 @@ private fun testCodexStorage(): CodexCliStorage =
     CodexCliStorage(testCodexDirectory())
 
 private suspend fun configModel(): String? {
-    val modelLine = testCodexStorage()
-        .readConfigToml()
-        .lineSequence()
-        .firstOrNull { it.trimStart().startsWith("model = ") }
-        ?: return null
-    return modelLine.substringAfter("=")
-        .trim()
-        .removeSurrounding("\"")
-        .takeIf { it.isNotBlank() }
+    return testCodexStorage().readConfigTomlOrNull()?.model
 }
 
 private suspend fun cachedModels(): List<String> =
     testCodexStorage()
-        .readModelsCache()
-        .models
+        .readModelsCacheOrNull()
+        ?.models
+        .orEmpty()
         .map { it.slug.value }
 
 internal val png64x32DataUrl: String

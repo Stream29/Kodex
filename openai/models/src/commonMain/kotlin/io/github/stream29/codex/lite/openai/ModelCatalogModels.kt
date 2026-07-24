@@ -3,7 +3,6 @@ package io.github.stream29.codex.lite.openai
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.EncodeDefault
-import kotlinx.serialization.ExperimentalSerializationApi
 
 @Serializable
 public data class ModelsResponse(
@@ -21,6 +20,8 @@ public data class ModelsResponse(
  * @property supportedReasoningLevels Ordered reasoning efforts advertised by
  * the backend. An empty list means the backend did not expose discrete choices
  * for this model.
+ * @property serviceTiers Ordered service tiers advertised by the backend. An
+ * empty list means the model supports only standard routing.
  * @property contextWindow Nullable because older or provider-defined models may
  * omit their nominal context window; `null` means only
  * [maxContextWindow] may describe the available window.
@@ -40,17 +41,18 @@ public data class ModelInfo(
     public val displayName: String,
     @SerialName("default_reasoning_level")
     public val defaultReasoningLevel: ReasoningEffort? = null,
-    @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     @SerialName("supported_reasoning_levels")
     public val supportedReasoningLevels: List<ReasoningEffortPreset> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    @SerialName("service_tiers")
+    public val serviceTiers: List<ModelServiceTier> = emptyList(),
     @SerialName("context_window")
     public val contextWindow: Long? = null,
     @SerialName("max_context_window")
     public val maxContextWindow: Long? = null,
     @SerialName("auto_compact_token_limit")
     public val autoCompactionTokenLimit: Long? = null,
-    @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     @SerialName("effective_context_window_percent")
     public val effectiveContextWindowPercent: Long = DefaultEffectiveContextWindowPercent,
@@ -62,6 +64,26 @@ public data class ReasoningEffortPreset(
     public val effort: ReasoningEffort,
     public val description: String,
 )
+
+/** One backend-advertised service tier for a model. */
+@Serializable
+public data class ModelServiceTier(
+    public val id: String,
+    public val name: String,
+    public val description: String,
+)
+
+/**
+ * Returns the selectable tiers for this model.
+ *
+ * [ServiceTier.Default] is always present and means standard routing. Unknown
+ * backend tier ids remain represented in [serviceTiers], but cannot be sent by
+ * the typed Responses API until a corresponding [ServiceTier] is added.
+ */
+public fun ModelInfo.availableServiceTiers(): List<ServiceTier> =
+    ServiceTier.entries.filter { tier ->
+        tier == ServiceTier.Default || serviceTiers.any { it.id == tier.requestValue }
+    }
 
 /** Matches Codex's default effective fraction for model context windows. */
 public const val DefaultEffectiveContextWindowPercent: Long = 95L

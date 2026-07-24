@@ -7,8 +7,6 @@ import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.schema.json.AdditionalPropertiesConstraint
 import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.schema.json.StringPropertyDefinition
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -61,17 +59,33 @@ val openAiSubscriptionSerializationTest by testSuite {
             parallelToolCalls = true,
             serviceTier = ServiceTier.Flex,
             promptCacheKey = "cache-key",
-            clientMetadata = mapOf("client" to "test"),
+            clientMetadata = CodexResponsesClientMetadata(
+                installationId = "installation",
+                sessionId = "session",
+                threadId = "thread",
+                turnId = "turn",
+                windowId = "window",
+                turnMetadata = """{"request_kind":"turn"}""",
+            ),
         )
 
         val encoded = json.parseToJsonElement(json.encodeToString(request)).jsonObject
+        val clientMetadata = encoded["client_metadata"]?.jsonObject
 
         assertEquals(JsonPrimitive("resp_1"), encoded["previous_response_id"])
         assertEquals(JsonPrimitive("required"), encoded["tool_choice"])
         assertEquals(JsonPrimitive(true), encoded["parallel_tool_calls"])
         assertEquals(JsonPrimitive("flex"), encoded["service_tier"])
         assertEquals(JsonPrimitive("cache-key"), encoded["prompt_cache_key"])
-        assertEquals(JsonPrimitive("test"), encoded["client_metadata"]?.jsonObject?.get("client"))
+        assertEquals(JsonPrimitive("installation"), clientMetadata?.get("x-codex-installation-id"))
+        assertEquals(JsonPrimitive("session"), clientMetadata?.get("session_id"))
+        assertEquals(JsonPrimitive("thread"), clientMetadata?.get("thread_id"))
+        assertEquals(JsonPrimitive("turn"), clientMetadata?.get("turn_id"))
+        assertEquals(JsonPrimitive("window"), clientMetadata?.get("x-codex-window-id"))
+        assertEquals(
+            JsonPrimitive("""{"request_kind":"turn"}"""),
+            clientMetadata?.get("x-codex-turn-metadata"),
+        )
     }
 
     test("responses api request forces stream wire shape") {
@@ -107,6 +121,7 @@ val openAiSubscriptionSerializationTest by testSuite {
         assertFalse("reasoning" in encoded)
         assertFalse("service_tier" in encoded)
         assertFalse("text" in encoded)
+        assertFalse("client_metadata" in encoded)
     }
 
     test("function call output payload can be text") {
@@ -541,16 +556,18 @@ val openAiSubscriptionSerializationTest by testSuite {
         )
     }
 
-    test("function tool serializes output schema when present") {
+    test("function tool omits internal output schema from Responses wire") {
+        val outputSchema = ObjectPropertyDefinition(
+            properties = mapOf("image_url" to StringPropertyDefinition()),
+        )
         val tool = ResponsesApiTool(
             name = "view_image",
             description = "View an image",
             parameters = ObjectPropertyDefinition(),
-            outputSchema = ObjectPropertyDefinition(
-                properties = mapOf("image_url" to StringPropertyDefinition()),
-            ),
+            outputSchema = outputSchema,
         )
 
+        assertEquals(outputSchema, tool.outputSchema)
         assertEquals(
             json.parseToJsonElement(
                 """
@@ -559,13 +576,7 @@ val openAiSubscriptionSerializationTest by testSuite {
                       "name": "view_image",
                       "description": "View an image",
                       "strict": false,
-                      "parameters": { "type": "object" },
-                      "output_schema": {
-                        "type": "object",
-                        "properties": {
-                          "image_url": { "type": "string" }
-                        }
-                      }
+                      "parameters": { "type": "object" }
                     }
                 """.trimIndent(),
             ),

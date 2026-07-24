@@ -2,8 +2,6 @@ package io.github.stream29.codex.lite.openai
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -39,6 +37,31 @@ val modelCatalogModelsSerializationTest by testSuite {
                 ReasoningEffort.Custom("future"),
             ),
             model.supportedReasoningLevels.map(ReasoningEffortPreset::effort),
+        )
+    }
+
+    test("decodes service tiers and exposes only known selectable tiers") {
+        val response = json.decodeFromString<ModelsResponse>(
+            """
+            {
+              "models": [{
+                "slug": "gpt-test",
+                "display_name": "GPT Test",
+                "service_tiers": [
+                  {"id": "priority", "name": "Fast", "description": "Priority processing"},
+                  {"id": "flex", "name": "Flex", "description": "Flexible processing"},
+                  {"id": "future", "name": "Future", "description": "Future processing"}
+                ]
+              }]
+            }
+            """.trimIndent(),
+        )
+
+        val model = response.models.single()
+        assertEquals("future", model.serviceTiers.last().id)
+        assertEquals(
+            listOf(ServiceTier.Default, ServiceTier.Fast, ServiceTier.Flex),
+            model.availableServiceTiers(),
         )
     }
 

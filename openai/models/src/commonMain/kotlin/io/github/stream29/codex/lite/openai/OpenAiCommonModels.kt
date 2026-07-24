@@ -22,15 +22,17 @@ public value class OpenAiModelId(public val value: String) {
  *
  * [Default] is the request/config sentinel for explicit standard routing. It is
  * not a catalog service tier id.
+ *
+ * @property requestValue Wire value accepted by the Responses API.
  */
 @Serializable
-public enum class ServiceTier {
+public enum class ServiceTier(public val requestValue: String) {
     @SerialName("default")
-    Default,
+    Default("default"),
 
     @SerialName("priority")
-    Fast,
+    Fast("priority"),
 
     @SerialName("flex")
-    Flex,
+    Flex("flex"),
 }
