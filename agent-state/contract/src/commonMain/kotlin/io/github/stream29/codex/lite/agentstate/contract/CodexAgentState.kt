@@ -3,9 +3,9 @@ package io.github.stream29.codex.lite.agentstate.contract
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Phase
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Reason
-import io.github.stream29.codex.lite.openai.RemoteCompactionV2Trigger
+import io.github.stream29.codex.lite.openai.CompactionPhase
+import io.github.stream29.codex.lite.openai.CompactionReason
+import io.github.stream29.codex.lite.openai.CompactionTrigger
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
@@ -60,11 +60,15 @@ public sealed interface CodexAgentStateValue {
 /**
  * Observable atomic agent state.
  *
+ * One state operates on exactly one AgentStorage. Session trees, parent-child
+ * relationships, cross-Agent messages, and Agent scheduling belong to the
+ * multi-Agent coordinator above this interface.
+ *
  * This interface intentionally contains both observation and state-transition
  * operations while exposing [storage] only as read-only data.
  *
  * Implementations commit each storage transition before publishing its next
- * stable [state]. They publish [tokenCount] only when OpenAI reports it.
+ * stable [state]. They publish [CodexAgentStorage.tokenCount] only when OpenAI reports it.
  */
 public interface CodexAgentState {
     /**
@@ -90,6 +94,12 @@ public interface CodexAgentState {
      * Executes exactly one model request from the current state, commits each
      * completed output item, and returns that request's raw stream events.
      *
+     * The implementation resolves and renders its bound context-prefix
+     * provider, then prepends that prefix to persisted model input without
+     * writing it to storage or compaction history. It also derives the
+     * complete model-visible tool list from fixed Codex tools, current
+     * settings, and its dynamic tool-search source.
+     *
      * Automatic compaction and `end_turn == false` continuation belong to
      * AgentRuntime rather than this state-layer operation.
      */
@@ -99,17 +109,22 @@ public interface CodexAgentState {
      * Requests one server-side context compaction using the specified runtime
      * policy metadata and returns the index that publishes its checkpoint.
      *
-     * Runtime owns the decision to call this operation automatically.
+     * The request and committed checkpoint retain the current persisted turn
+     * identity. Runtime owns the decision to call this operation automatically.
      */
     public suspend fun compact(
-        trigger: RemoteCompactionV2Trigger,
-        reason: RemoteCompactionV2Reason,
-        phase: RemoteCompactionV2Phase,
+        trigger: CompactionTrigger,
+        reason: CompactionReason,
+        phase: CompactionPhase,
     ): Int
 
     /**
      * Injects model-visible host history without reopening a generic history
      * write API.
+     *
+     * A user-role item in [items] remains part of the current logical turn and
+     * does not rotate the persisted turn id. The item role alone does not
+     * define a turn boundary.
      *
      * An empty [items] list is a no-op and returns the current visible index.
      * Non-empty lists are persisted as one atomic state transition in the
@@ -118,13 +133,31 @@ public interface CodexAgentState {
     public suspend fun injectHistory(items: List<ResponseItem.HistoryItem>): Int
 
     /**
-     * Appends one user message and records its timestamp in the same state
-     * transition.
+     * Starts one logical user turn by appending its first user message.
      *
-     * This is valid for a new conversation or after a user or assistant
-     * message. Consecutive user messages are valid Responses API input.
+     * The first turn retains the id created with the initial settings. A later
+     * call allocates a new turn id because a new user submission after the
+     * preceding agent run has ended starts a new logical turn.
+     *
+     * A user-role context injection is not a turn boundary and must use
+     * [injectHistory]. A runtime admitting user input into an already active
+     * turn must retain that turn's id through the explicit overload.
      */
     public suspend fun appendUserMessage(content: List<ContentItem>): Int
+
+    /**
+     * Appends one user message and atomically persists the supplied [turnId].
+     *
+     * The caller owns the turn-boundary decision: a newly allocated id admits
+     * the message as the first input of a new logical turn, while the current
+     * id keeps accepted mid-turn input in the active turn. This overload lets
+     * an outer runtime run Hooks against the same identity that storage
+     * commits.
+     */
+    public suspend fun appendUserMessage(
+        content: List<ContentItem>,
+        turnId: String,
+    ): Int
 
     /**
      * Persists one output for a currently pending local tool call, including a
@@ -157,4 +190,13 @@ public interface CodexAgentState {
      * compaction requests, so callers cannot supply an arbitrary value here.
      */
     public suspend fun updateSettings(settings: CodexAgentSettings): Int
+
+    /**
+     * Destructively reverts to the snapshot immediately before [untilExclusive].
+     *
+     * The target must be the initial empty snapshot or a completed assistant
+     * turn. Implementations discard all later storage transitions, then publish
+     * the rebuilt state and latest index together.
+     */
+    public suspend fun revert(untilExclusive: Int): Int
 }
