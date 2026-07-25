@@ -12,7 +12,7 @@ public object ViewImageTools {
     public const val Name: String = "view_image"
 
     public const val Description: String =
-        "View a local image file and return a model-consumable image data URL."
+        "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk."
 
     public val spec: ResponsesApiTool = toolSpec()
 

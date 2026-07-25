@@ -7,8 +7,8 @@ import kotlinx.serialization.Serializable
 /**
  * Arguments accepted by the `exec_command` function tool.
  *
- * @property workdir Nullable because a command normally inherits the host
- * process directory; `null` means do not override that directory.
+ * @property workdir Nullable because a command normally uses the session
+ * working directory; `null` means use that directory.
  * @property shell Nullable because the host selects its normal shell when no
  * shell is given; `null` means use the platform default shell.
  */
@@ -18,8 +18,6 @@ public data class ExecCommandArguments(
     public val command: String,
     public val workdir: String? = null,
     public val shell: Shell? = null,
-    /** Whether the selected shell uses its login initialization behavior. */
-    public val login: Boolean = false,
     /** Whether to allocate a terminal rather than ordinary process pipes. */
     public val tty: Boolean = false,
     @SerialName("yield_time_ms")

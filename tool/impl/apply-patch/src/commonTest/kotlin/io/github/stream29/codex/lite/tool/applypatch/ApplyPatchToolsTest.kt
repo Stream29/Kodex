@@ -14,6 +14,10 @@ val applyPatchToolsTest by testSuite {
         val spec = assertIs<FreeformTool>(ApplyPatchTools.spec)
 
         assertEquals("apply_patch", spec.name)
+        assertEquals(
+            "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
+            spec.description,
+        )
         assertEquals("grammar", spec.format.type)
         assertEquals("lark", spec.format.syntax)
         assertTrue(spec.format.definition.contains("begin_patch"))

@@ -12,14 +12,14 @@ public object UnifiedExecTools {
     public const val WriteStdinName: String = "write_stdin"
 
     public const val ExecCommandDescription: String =
-        "Run a shell command and return incremental output. Use the returned session_id with write_stdin while the process is still running."
+        "Runs a command in a PTY, returning output or a session ID for ongoing interaction."
     public const val WriteStdinDescription: String =
-        "Write text to a process session or poll it with empty chars."
+        "Writes characters to an existing unified exec session and returns recent output."
 
     public val execCommandSpec: ResponsesApiTool =
         ResponsesApiTool(
             name = ExecCommandName,
-            description = ExecCommandDescription,
+            description = renderExecCommandDescription(execCommandHostPlatform),
             strict = false,
             parameters = ExecCommandParametersSchema,
             outputSchema = UnifiedExecOutputSchema,

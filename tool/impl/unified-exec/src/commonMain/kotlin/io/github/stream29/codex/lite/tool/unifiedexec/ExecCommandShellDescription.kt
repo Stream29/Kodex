@@ -1,8 +1,5 @@
 package io.github.stream29.codex.lite.tool.unifiedexec
 
-import io.github.stream29.codex.lite.utils.shellclient.Shell
-import io.github.stream29.codex.lite.utils.shellclient.ShellType
-
 internal enum class ExecCommandHostPlatform {
     Windows,
     Macos,
@@ -11,38 +8,17 @@ internal enum class ExecCommandHostPlatform {
 
 internal expect val execCommandHostPlatform: ExecCommandHostPlatform
 
-internal val execCommandShellDescription: String
-    get() = renderExecCommandShellDescription(execCommandHostPlatform, Shell.default)
+internal const val ExecCommandShellDescription: String =
+    "Shell binary to launch. Defaults to the user's default shell."
 
-internal fun renderExecCommandShellDescription(
-    platform: ExecCommandHostPlatform,
-    defaultShell: Shell,
-): String =
-    when (platform) {
-        ExecCommandHostPlatform.Windows ->
-            "Optional shell executable path or command name. Omit it to use the dynamically resolved Windows default `${defaultShell.path}` (${defaultShell.type.displayName}). Commands without `shell` must use ${defaultShell.type.syntaxName}. Set `shell` only to intentionally change command language: use `pwsh` or `powershell` for PowerShell, `cmd` for Command Prompt, or an installed POSIX shell such as `bash`."
-
-        ExecCommandHostPlatform.Macos ->
-            "Optional shell executable path or command name. Omit it to use the dynamically resolved macOS default `${defaultShell.path}` (${defaultShell.type.displayName}). Commands without `shell` must use ${defaultShell.type.syntaxName}. Set `shell` only to intentionally change command language; recognized shell names are `sh`, `bash`, `zsh`, `pwsh`/`powershell`, and `cmd`."
-
-        ExecCommandHostPlatform.Linux ->
-            "Optional shell executable path or command name. Omit it to use the dynamically resolved Linux default `${defaultShell.path}` (${defaultShell.type.displayName}). Commands without `shell` must use ${defaultShell.type.syntaxName}. Set `shell` only to intentionally change command language; recognized shell names are `sh`, `bash`, `zsh`, `pwsh`/`powershell`, and `cmd`."
+internal fun renderExecCommandDescription(platform: ExecCommandHostPlatform): String =
+    if (platform == ExecCommandHostPlatform.Windows) {
+        "${UnifiedExecTools.ExecCommandDescription}\n\n$WindowsShellGuidance"
+    } else {
+        UnifiedExecTools.ExecCommandDescription
     }
 
-private val ShellType.displayName: String
-    get() =
-        when (this) {
-            ShellType.Sh -> "POSIX sh"
-            ShellType.Bash -> "Bash"
-            ShellType.Zsh -> "Zsh"
-            ShellType.PowerShell -> "PowerShell"
-            ShellType.Cmd -> "Command Prompt"
-        }
-
-private val ShellType.syntaxName: String
-    get() =
-        when (this) {
-            ShellType.Sh, ShellType.Bash, ShellType.Zsh -> "POSIX shell syntax"
-            ShellType.PowerShell -> "PowerShell syntax"
-            ShellType.Cmd -> "cmd.exe syntax"
-        }
+private const val WindowsShellGuidance: String = """Windows safety rules:
+- Do not compose destructive filesystem commands across shells. Do not enumerate paths in PowerShell and then pass them to `cmd /c`, batch builtins, or another shell for deletion or moving. Use one shell end-to-end, prefer native PowerShell cmdlets such as `Remove-Item` / `Move-Item` with `-LiteralPath`, and avoid string-built shell commands for file operations.
+- Before any recursive delete or move on Windows, verify the resolved absolute target paths stay within the intended workspace or explicitly named target directory. Never issue a recursive delete or move against a computed path if the final target has not been checked.
+- When using `Start-Process` to launch a background helper or service, pass `-WindowStyle Hidden` unless the user explicitly asked for a visible interactive window. Use visible windows only for interactive tools the user needs to see or control."""
