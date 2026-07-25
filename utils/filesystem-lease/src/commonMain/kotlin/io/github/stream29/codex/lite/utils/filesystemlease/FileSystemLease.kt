@@ -42,13 +42,12 @@ public class FileSystemLease internal constructor(
     private val fileSystem: CoroutineFileSystem,
     parentScope: CoroutineScope,
     private val duration: Duration,
-) : AutoCloseable {
-    private val scope: CoroutineScope =
-        CoroutineScope(
-            parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]),
-        )
+) : AutoCloseable,
+    CoroutineScope by CoroutineScope(
+        parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]),
+    ) {
     init {
-        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 while (isActive) {
                     delay(duration / 3)
@@ -61,7 +60,7 @@ public class FileSystemLease internal constructor(
     }
 
     override fun close() {
-        scope.cancel()
+        cancel()
     }
 
     private suspend fun renew(): Boolean {
