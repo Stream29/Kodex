@@ -3,218 +3,219 @@ package io.github.stream29.codex.lite.tool.webrun
 import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.schema.json.PropertyBuilder
 
-/** JSON schema for the `web.run` command group. */
+private val ClickOperationSchema: ObjectPropertyDefinition =
+    PropertyBuilder().obj {
+        property("id") {
+            required = true
+            integer { description = "Numbered link id to open." }
+        }
+        property("ref_id") {
+            required = true
+            string { description = "Reference id containing the numbered link." }
+        }
+    }
+
+private val FinanceOperationSchema: ObjectPropertyDefinition =
+    PropertyBuilder().obj {
+        property("market") {
+            string { description = "ISO 3166-1 alpha-3 country code, \"OTC\", or \"\" for cryptocurrency." }
+        }
+        property("ticker") {
+            required = true
+            string { description = "Ticker symbol to look up." }
+        }
+        property("type") {
+            required = true
+            string {
+                description = "Asset type to look up."
+                enum = listOf("equity", "fund", "crypto", "index")
+            }
+        }
+    }
+
+private val FindOperationSchema: ObjectPropertyDefinition =
+    PropertyBuilder().obj {
+        property("pattern") {
+            required = true
+            string { description = "Text pattern to find." }
+        }
+        property("ref_id") {
+            required = true
+            string { description = "Reference id or URL to search within." }
+        }
+    }
+
+private val SearchQuerySchema: ObjectPropertyDefinition =
+    PropertyBuilder().obj {
+        property("domains") {
+            array {
+                description = "Whether to filter by a specific list of domains."
+                ofString()
+            }
+        }
+        property("q") {
+            required = true
+            string { description = "Search query." }
+        }
+        property("recency") {
+            integer { description = "Whether to filter by recency, as a number of recent days." }
+        }
+    }
+
+private val OpenOperationSchema: ObjectPropertyDefinition =
+    PropertyBuilder().obj {
+        property("lineno") {
+            integer { description = "Line number to position the page at." }
+        }
+        property("ref_id") {
+            required = true
+            string { description = "Reference id or URL to open." }
+        }
+    }
+
+private val ScreenshotOperationSchema: ObjectPropertyDefinition =
+    PropertyBuilder().obj {
+        property("pageno") {
+            required = true
+            integer { description = "Zero-indexed PDF page number." }
+        }
+        property("ref_id") {
+            required = true
+            string { description = "Reference id or URL to screenshot." }
+        }
+    }
+
+private val SportsOperationSchema: ObjectPropertyDefinition =
+    PropertyBuilder().obj {
+        property("date_from") {
+            string { description = "Start date in YYYY-MM-DD format." }
+        }
+        property("date_to") {
+            string { description = "End date in YYYY-MM-DD format." }
+        }
+        property("fn") {
+            required = true
+            string {
+                description = "Sports function to call."
+                enum = listOf("schedule", "standings")
+            }
+        }
+        property("league") {
+            required = true
+            string {
+                description = "League to look up."
+                enum = listOf("nba", "wnba", "nfl", "nhl", "mlb", "epl", "ncaamb", "ncaawb", "ipl")
+            }
+        }
+        property("locale") {
+            string { description = "Locale for the lookup." }
+        }
+        property("num_games") {
+            integer { description = "Number of games to return." }
+        }
+        property("opponent") {
+            string { description = "Opponent to use with `team` when narrowing the lookup." }
+        }
+        property("team") {
+            string { description = "Team to look up, using the common 3 or 4 letter alias used in broadcasts." }
+        }
+        property("tool") {
+            string {
+                description = "Tool name for sports requests."
+                enum = listOf("sports")
+            }
+        }
+    }
+
+private val TimeOperationSchema: ObjectPropertyDefinition =
+    PropertyBuilder().obj {
+        property("utc_offset") {
+            required = true
+            string { description = "UTC offset formatted like \"+03:00\"." }
+        }
+    }
+
+private val WeatherOperationSchema: ObjectPropertyDefinition =
+    PropertyBuilder().obj {
+        property("duration") {
+            integer { description = "Number of days to return. Defaults to 7." }
+        }
+        property("location") {
+            required = true
+            string { description = "Location in \"Country, Area, City\" format." }
+        }
+        property("start") {
+            string { description = "Start date in YYYY-MM-DD format. Defaults to today." }
+        }
+    }
+
+/** JSON schema for the `web.run` command group, aligned with Codex's reserved tool schema. */
 public val WebRunParametersSchema: ObjectPropertyDefinition =
     PropertyBuilder().obj {
-        additionalProperties = false
-        property("search_query") {
-            array {
-                description = "Search the internet for text queries."
-                maxItems = 4
-                ofObject {
-                    additionalProperties = false
-                    property("q") {
-                        required = true
-                        string { description = "Text query." }
-                    }
-                    property("recency") {
-                        integer { description = "Optional maximum age in days." }
-                    }
-                    property("domains") {
-                        array {
-                            description = "Optional domain allow-list."
-                            ofString()
-                        }
-                    }
-                }
-            }
-        }
-        property("image_query") {
-            array {
-                description = "Search the image index for text queries."
-                ofObject {
-                    additionalProperties = false
-                    property("q") {
-                        required = true
-                        string { description = "Image query." }
-                    }
-                    property("recency") {
-                        integer { description = "Optional maximum age in days." }
-                    }
-                    property("domains") {
-                        array {
-                            description = "Optional domain allow-list."
-                            ofString()
-                        }
-                    }
-                }
-            }
-        }
-        property("open") {
-            array {
-                description = "Open result references or URLs."
-                ofObject {
-                    additionalProperties = false
-                    property("ref_id") {
-                        required = true
-                        string { description = "Search result reference or URL." }
-                    }
-                    property("lineno") {
-                        integer { description = "Optional line number to position the page at." }
-                    }
-                }
-            }
-        }
         property("click") {
             array {
-                description = "Open a numbered link from an opened page."
-                ofObject {
-                    additionalProperties = false
-                    property("ref_id") {
-                        required = true
-                        string { description = "Opened page reference." }
-                    }
-                    property("id") {
-                        required = true
-                        integer { description = "Link identifier." }
-                    }
-                }
-            }
-        }
-        property("find") {
-            array {
-                description = "Find text in an opened page."
-                ofObject {
-                    additionalProperties = false
-                    property("ref_id") {
-                        required = true
-                        string { description = "Opened page reference." }
-                    }
-                    property("pattern") {
-                        required = true
-                        string { description = "Text pattern to find." }
-                    }
-                }
-            }
-        }
-        property("screenshot") {
-            array {
-                description = "Capture a page from an opened PDF."
-                ofObject {
-                    additionalProperties = false
-                    property("ref_id") {
-                        required = true
-                        string { description = "Opened PDF reference." }
-                    }
-                    property("pageno") {
-                        required = true
-                        integer { description = "Zero-indexed PDF page number." }
-                    }
-                }
+                description = "Open links from previously opened pages."
+                items { ClickOperationSchema }
             }
         }
         property("finance") {
             array {
-                description = "Look up financial instrument prices."
-                ofObject {
-                    additionalProperties = false
-                    property("ticker") {
-                        required = true
-                        string { description = "Ticker symbol." }
-                    }
-                    property("type") {
-                        required = true
-                        string {
-                            description = "Asset type."
-                            enum = listOf("equity", "fund", "crypto", "index")
-                        }
-                    }
-                    property("market") {
-                        string { description = "Optional ISO market or cryptocurrency market marker." }
-                    }
-                }
+                description = "Look up prices for the given stock symbols."
+                items { FinanceOperationSchema }
             }
         }
-        property("weather") {
+        property("find") {
             array {
-                description = "Look up weather forecasts."
-                ofObject {
-                    additionalProperties = false
-                    property("location") {
-                        required = true
-                        string { description = "Location in Country, Area, City form." }
-                    }
-                    property("start") {
-                        string { description = "Optional start date in YYYY-MM-DD format." }
-                    }
-                    property("duration") {
-                        integer { description = "Optional forecast duration in days." }
-                    }
-                }
+                description = "Find text patterns in pages."
+                items { FindOperationSchema }
+            }
+        }
+        property("image_query") {
+            array {
+                description = "Query the image search engine for a given list of queries."
+                items { SearchQuerySchema }
+            }
+        }
+        property("open") {
+            array {
+                description = "Open pages by reference id or URL."
+                items { OpenOperationSchema }
+            }
+        }
+        property("response_length") {
+            string {
+                description = "Set the length of the response to be returned."
+                enum = listOf("short", "medium", "long")
+            }
+        }
+        property("screenshot") {
+            array {
+                description = "Take screenshots of PDF pages."
+                items { ScreenshotOperationSchema }
+            }
+        }
+        property("search_query") {
+            array {
+                description = "Query the internet search engine for a given list of queries."
+                items { SearchQuerySchema }
             }
         }
         property("sports") {
             array {
                 description = "Look up sports schedules and standings."
-                ofObject {
-                    additionalProperties = false
-                    property("tool") {
-                        string {
-                            description = "Optional legacy sports tool discriminator."
-                            enum = listOf("sports")
-                        }
-                    }
-                    property("fn") {
-                        required = true
-                        string {
-                            description = "Sports operation."
-                            enum = listOf("schedule", "standings")
-                        }
-                    }
-                    property("league") {
-                        required = true
-                        string {
-                            description = "League identifier."
-                            enum = listOf("nba", "wnba", "nfl", "nhl", "mlb", "epl", "ncaamb", "ncaawb", "ipl")
-                        }
-                    }
-                    property("team") {
-                        string { description = "Optional team broadcast alias." }
-                    }
-                    property("opponent") {
-                        string { description = "Optional opponent broadcast alias." }
-                    }
-                    property("date_from") {
-                        string { description = "Optional lower date bound in YYYY-MM-DD format." }
-                    }
-                    property("date_to") {
-                        string { description = "Optional upper date bound in YYYY-MM-DD format." }
-                    }
-                    property("num_games") {
-                        integer { description = "Optional maximum number of games." }
-                    }
-                    property("locale") {
-                        string { description = "Optional locale." }
-                    }
-                }
+                items { SportsOperationSchema }
             }
         }
         property("time") {
             array {
-                description = "Look up time for UTC offsets."
-                ofObject {
-                    additionalProperties = false
-                    property("utc_offset") {
-                        required = true
-                        string { description = "UTC offset formatted as +03:00." }
-                    }
-                }
+                description = "Get time for the given UTC offsets."
+                items { TimeOperationSchema }
             }
         }
-        property("response_length") {
-            string {
-                description = "Requested response length."
-                enum = listOf("short", "medium", "long")
+        property("weather") {
+            array {
+                description = "Look up weather forecasts."
+                items { WeatherOperationSchema }
             }
         }
     }

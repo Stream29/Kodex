@@ -11,7 +11,7 @@ public val ExecCommandParametersSchema: ObjectPropertyDefinition =
             string { description = "Shell command to execute." }
         }
         property("workdir") {
-            string { description = "Working directory for the command. Defaults to the host process working directory." }
+            string { description = "Working directory for the command. Defaults to the turn cwd." }
         }
         property("tty") {
             boolean { description = "True allocates a PTY for the command; false or omitted uses plain pipes." }
@@ -23,10 +23,7 @@ public val ExecCommandParametersSchema: ObjectPropertyDefinition =
             integer { description = "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy." }
         }
         property("shell") {
-            string { description = execCommandShellDescription }
-        }
-        property("login") {
-            boolean { description = "True runs the shell with login semantics when the selected shell supports it." }
+            string { description = ExecCommandShellDescription }
         }
     }
 

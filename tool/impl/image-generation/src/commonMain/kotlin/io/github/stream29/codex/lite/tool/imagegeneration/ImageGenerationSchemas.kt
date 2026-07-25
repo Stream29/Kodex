@@ -8,17 +8,14 @@ public val ImageGenParametersSchema: ObjectPropertyDefinition =
         additionalProperties = false
         property("prompt") {
             required = true
-            string { description = "Prompt describing the image to generate or the edit to apply." }
+            string()
         }
         property("referenced_image_paths") {
             array {
-                description = "Local image paths to use as edit inputs. Provide at most $ImageGenMaxEditImages paths."
                 ofString()
             }
         }
         property("num_last_images_to_include") {
-            integer {
-                description = "Number of recent conversation images to edit. Must be between 1 and $ImageGenMaxEditImages."
-            }
+            integer()
         }
     }

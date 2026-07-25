@@ -29,9 +29,11 @@ public const val UnifiedExecMaximumSessionCount: Int = 64
  *
  * This client owns one [ShellClient], which owns every process session it
  * creates. Closing this client closes that shell client and cancels all active
- * sessions.
+ * sessions. Commands always use the selected shell's login initialization;
+ * model calls cannot disable it.
  */
 public class UnifiedExecToolClient(
+    private val workingDirectory: Path = Path("."),
     private val shellClient: ShellClient = ShellClient(),
 ) : AutoCloseable {
     private val registryMutex: Mutex = Mutex()
@@ -42,7 +44,7 @@ public class UnifiedExecToolClient(
         arguments.validate()
         val started = TimeSource.Monotonic.markNow()
         val session = runProcessOperation {
-            shellClient.start(arguments.toShellProcessCommand())
+            shellClient.start(arguments.toShellProcessCommand(workingDirectory))
         }
         val managed = try {
             registryMutex.withLock {
@@ -202,12 +204,18 @@ private fun WriteStdinArguments.validate() {
     if (maxOutputTokens < 0) throw UnifiedExecToolException("`max_output_tokens` must not be negative.")
 }
 
-private fun ExecCommandArguments.toShellProcessCommand(): ShellProcessCommand =
+private fun ExecCommandArguments.toShellProcessCommand(defaultWorkingDirectory: Path): ShellProcessCommand =
     ShellProcessCommand(
         command = command,
-        workingDirectory = workdir?.takeIf(String::isNotEmpty)?.let(::Path) ?: Path("."),
+        workingDirectory = workdir
+            ?.takeIf(String::isNotEmpty)
+            ?.let { value ->
+                val requested = Path(value)
+                if (requested.isAbsolute) requested else Path(defaultWorkingDirectory, value)
+            }
+            ?: defaultWorkingDirectory,
         shell = shell ?: Shell.default,
-        login = login,
+        login = true,
         tty = tty,
     )
 

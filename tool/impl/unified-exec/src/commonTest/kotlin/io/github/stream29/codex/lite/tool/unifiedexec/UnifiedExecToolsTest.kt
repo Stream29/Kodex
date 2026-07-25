@@ -12,14 +12,19 @@ import io.github.stream29.codex.lite.tool.contract.Tool
 import io.github.stream29.codex.lite.utils.shellclient.Shell
 import io.github.stream29.codex.lite.utils.shellclient.ShellType
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
+import kotlinx.io.files.SystemFileSystem
+import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.schema.json.StringPropertyDefinition
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
@@ -82,39 +87,26 @@ val unifiedExecToolsTest by testSuite {
         assertEquals(UnifiedExecOutputSchema, UnifiedExecTools.writeStdinSpec.outputSchema)
         assertTrue(UnifiedExecTools.execCommandSpec.parameters.required?.contains("cmd") == true)
         assertTrue(UnifiedExecTools.writeStdinSpec.parameters.required?.contains("session_id") == true)
+        assertFalse(UnifiedExecTools.execCommandSpec.parameters.properties?.containsKey("login") == true)
     }
 
-    test("exec_command describes the host shell in its schema") {
+    test("exec_command describes its shell parameter without host-specific state") {
         val shell = assertIs<StringPropertyDefinition>(
             requireNotNull(ExecCommandParametersSchema.properties?.get("shell")),
         )
-        val description = requireNotNull(shell.description)
 
-        assertEquals(execCommandShellDescription, description)
-        assertTrue(description.contains("dynamically resolved"))
-        assertTrue(description.contains("`${Shell.default.path}`"))
+        assertEquals(ExecCommandShellDescription, shell.description)
     }
 
-    test("exec_command shell guidance distinguishes host platforms") {
-        val windows = renderExecCommandShellDescription(
-            platform = ExecCommandHostPlatform.Windows,
-            defaultShell = Shell(ShellType.PowerShell, Path("C:\\Tools\\pwsh.exe")),
-        )
-        val macos = renderExecCommandShellDescription(
-            platform = ExecCommandHostPlatform.Macos,
-            defaultShell = Shell(ShellType.Zsh, Path("/bin/zsh")),
-        )
-        val linux = renderExecCommandShellDescription(
-            platform = ExecCommandHostPlatform.Linux,
-            defaultShell = Shell(ShellType.Bash, Path("/bin/bash")),
-        )
+    test("exec_command adds safety guidance only on Windows") {
+        val windows = renderExecCommandDescription(ExecCommandHostPlatform.Windows)
+        val macos = renderExecCommandDescription(ExecCommandHostPlatform.Macos)
+        val linux = renderExecCommandDescription(ExecCommandHostPlatform.Linux)
 
-        assertTrue("Windows default" in windows)
-        assertTrue("PowerShell syntax" in windows)
-        assertTrue("macOS default" in macos)
-        assertTrue("POSIX shell syntax" in macos)
-        assertTrue("Linux default" in linux)
-        assertTrue("POSIX shell syntax" in linux)
+        assertTrue(windows.startsWith(UnifiedExecTools.ExecCommandDescription))
+        assertTrue("Windows safety rules:" in windows)
+        assertEquals(UnifiedExecTools.ExecCommandDescription, macos)
+        assertEquals(UnifiedExecTools.ExecCommandDescription, linux)
     }
 
     test("exec_command decodes a shell string into a path-preserving shell") {
@@ -231,6 +223,48 @@ val unifiedExecToolsTest by testSuite {
         }
     }
 
+    test("tty sessions accept interactive input", testConfig = realIoTestConfig) {
+        val client = UnifiedExecToolClient()
+        try {
+            val tools = UnifiedExecTools.createTools(client)
+            val exec = tools.toolNamed(UnifiedExecTools.ExecCommandName)
+            val write = tools.toolNamed(UnifiedExecTools.WriteStdinName)
+            val initial = exec.exec(
+                ExecCommandArguments(
+                    command = interactiveExecCommand,
+                    shell = unifiedExecTestShell,
+                    tty = true,
+                    yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
+                ),
+            ).requireUnifiedExecOutput()
+
+            val sessionId = assertNotNull(initial.sessionId)
+            assertEquals(null, initial.exitCode)
+            assertTrue(initial.output.contains("ready"))
+
+            var completed = write.write(
+                WriteStdinArguments(
+                    sessionId = sessionId,
+                    chars = "hello from tty\n",
+                    yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
+                ),
+            ).requireUnifiedExecOutput()
+            val output = StringBuilder(initial.output).append(completed.output)
+            if (completed.exitCode == null) {
+                completed = write.write(
+                    WriteStdinArguments(sessionId = sessionId),
+                ).requireUnifiedExecOutput()
+                output.append(completed.output)
+            }
+
+            assertEquals(0, completed.exitCode)
+            assertEquals(null, completed.sessionId)
+            assertTrue(output.contains("received:hello from tty"))
+        } finally {
+            client.close()
+        }
+    }
+
     test("unsupported shell names report an explicit tool failure") {
         val client = UnifiedExecToolClient()
         try {
@@ -243,6 +277,42 @@ val unifiedExecToolsTest by testSuite {
             assertTrue((output.output.body as FunctionCallOutputBody.Text).text.contains("Unsupported shell"))
         } finally {
             client.close()
+        }
+    }
+
+    test(
+        "exec_command defaults to the client working directory",
+        testConfig = TestConfig.testScope(isEnabled = true, timeout = 10.seconds),
+    ) {
+        val fileName = "codex-lite-unified-exec-cwd-${Random.nextLong()}.txt"
+        val outputPath = Path(SystemTemporaryDirectory, fileName)
+        val client = UnifiedExecToolClient(workingDirectory = SystemTemporaryDirectory)
+        try {
+            var result = client.execCommand(
+                ExecCommandArguments(
+                    command = "echo session-cwd > $fileName; echo cwd-written",
+                    shell = unifiedExecTestShell,
+                ),
+            )
+            val output = StringBuilder(result.output)
+            withContext(Dispatchers.Default) {
+                repeat(100) {
+                    if (output.contains("cwd-written")) return@withContext
+                    val sessionId = result.sessionId ?: return@withContext
+                    delay(10.milliseconds)
+                    result = client.writeStdin(WriteStdinArguments(sessionId))
+                    output.append(result.output)
+                }
+            }
+
+            assertTrue(output.contains("cwd-written"), "Command output: $output")
+            assertTrue(
+                SystemFileSystem.metadataOrNull(outputPath)?.isRegularFile == true,
+                "Command output: $output",
+            )
+        } finally {
+            client.close()
+            SystemFileSystem.delete(outputPath, mustExist = false)
         }
     }
 

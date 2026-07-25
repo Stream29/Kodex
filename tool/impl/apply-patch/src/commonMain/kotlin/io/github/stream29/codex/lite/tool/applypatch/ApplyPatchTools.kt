@@ -61,7 +61,7 @@ public class ApplyPatchTool(
 }
 
 public const val ApplyPatchDescription: String =
-    "Use the `apply_patch` tool to edit files. The input must be one apply_patch patch."
+    "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON."
 
 public val ApplyPatchGrammar: String =
     """
