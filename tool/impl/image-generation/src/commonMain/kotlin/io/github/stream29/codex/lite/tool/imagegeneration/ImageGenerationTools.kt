@@ -1,12 +1,14 @@
 package io.github.stream29.codex.lite.tool.imagegeneration
 
+import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
+import io.github.stream29.codex.lite.openai.FunctionCallOutputContentItem
+import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
+import io.github.stream29.codex.lite.openai.ImageDetail
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ToolSpec
-import io.github.stream29.codex.lite.tool.builder.jsonTool
-import io.github.stream29.codex.lite.tool.builder.jsonToolFailure
-import io.github.stream29.codex.lite.tool.builder.jsonToolSuccess
+import io.github.stream29.codex.lite.tool.builder.functionOutputTool
 import io.github.stream29.codex.lite.tool.contract.Tool
 
 public const val ImageGenNamespace: String = "image_gen"
@@ -38,16 +40,42 @@ public object ImageGenerationTools {
             ),
         )
 
-    public fun createTool(client: ImageGenerationToolClient): Tool =
-        jsonTool(
+    /**
+     * @param transformOutput Host-owned processing such as artifact persistence.
+     * The default leaves generated API data unchanged.
+     */
+    public fun createTool(
+        client: ImageGenerationToolClient,
+        transformOutput: suspend (callId: String, output: GeneratedImageOutput) -> GeneratedImageOutput =
+            { _, output -> output },
+    ): Tool =
+        functionOutputTool(
             spec = spec,
             inputDeserializer = ImageGenToolArguments.serializer(),
-            outputSerializer = GeneratedImageOutput.serializer(),
-        ) { arguments ->
+        ) { callId, arguments ->
             try {
-                jsonToolSuccess(client.run(arguments))
+                transformOutput(callId, client.run(arguments)).toFunctionCallOutputPayload()
             } catch (error: ImageGenerationToolException) {
-                jsonToolFailure(error.message ?: "image_generation failed")
+                FunctionCallOutputPayload(
+                    body = FunctionCallOutputBody.Text(error.message ?: "image_generation failed"),
+                    success = false,
+                )
             }
         }
+
+    private fun GeneratedImageOutput.toFunctionCallOutputPayload(): FunctionCallOutputPayload =
+        FunctionCallOutputPayload(
+            body = FunctionCallOutputBody.ContentItems(
+                buildList {
+                    add(
+                        FunctionCallOutputContentItem.InputImage(
+                            imageUrl = "data:image/png;base64,$result",
+                            detail = ImageDetail.High,
+                        ),
+                    )
+                    outputHint?.let { add(FunctionCallOutputContentItem.InputText(it)) }
+                },
+            ),
+            success = true,
+        )
 }

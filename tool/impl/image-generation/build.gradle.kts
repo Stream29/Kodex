@@ -4,16 +4,6 @@ plugins {
 }
 
 kotlin {
-    js {
-        nodejs {
-            testTask {
-                useMocha {
-                    timeout = "360s"
-                }
-            }
-        }
-    }
-
     sourceSets {
         commonMain.dependencies {
             api(libs.kotlinx.serialization.json)

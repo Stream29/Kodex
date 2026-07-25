@@ -1,9 +1,11 @@
 package io.github.stream29.codex.lite.tool.viewimage
 
+import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
+import io.github.stream29.codex.lite.openai.FunctionCallOutputContentItem
+import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
+import io.github.stream29.codex.lite.openai.ImageDetail
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
-import io.github.stream29.codex.lite.tool.builder.jsonTool
-import io.github.stream29.codex.lite.tool.builder.jsonToolFailure
-import io.github.stream29.codex.lite.tool.builder.jsonToolSuccess
+import io.github.stream29.codex.lite.tool.builder.functionOutputTool
 import io.github.stream29.codex.lite.tool.contract.Tool
 
 public object ViewImageTools {
@@ -27,15 +29,31 @@ public object ViewImageTools {
         client: ViewImageToolClient = ViewImageToolClient(),
         options: ViewImageToolOptions = ViewImageToolOptions(),
     ): Tool =
-        jsonTool(
+        functionOutputTool(
             spec = toolSpec(options),
             inputDeserializer = ViewImageToolArguments.serializer(),
-            outputSerializer = ViewImageToolOutput.serializer(),
-        ) { arguments ->
+        ) { _, arguments ->
             try {
-                jsonToolSuccess(client.view(arguments))
+                val output = client.view(arguments)
+                FunctionCallOutputPayload(
+                    body = FunctionCallOutputBody.ContentItems(
+                        listOf(
+                            FunctionCallOutputContentItem.InputImage(
+                                imageUrl = output.imageUrl,
+                                detail = when (output.detail) {
+                                    ViewImageDetail.High -> ImageDetail.High
+                                    ViewImageDetail.Original -> ImageDetail.Original
+                                },
+                            ),
+                        ),
+                    ),
+                    success = true,
+                )
             } catch (error: ViewImageToolException) {
-                jsonToolFailure(error.message ?: "view_image failed")
+                FunctionCallOutputPayload(
+                    body = FunctionCallOutputBody.Text(error.message ?: "view_image failed"),
+                    success = false,
+                )
             }
         }
 }
