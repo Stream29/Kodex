@@ -2,12 +2,20 @@ package io.github.stream29.codex.lite.utils.filesystemlease
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
 private suspend fun temporaryDirectory(): Path =
@@ -34,13 +42,31 @@ val fileSystemLeaseTest by testSuite {
                     )
                 }
 
+                assertTrue(first.isActive)
                 first.close()
+                assertFalse(first.isActive)
+                assertTrue(currentCoroutineContext().isActive)
                 while (SystemCoroutineFileSystem.metadataOrNull(lock) != null) delay(1)
                 FileSystemLease(
                     lockPath = lock,
                     duration = 30.seconds,
                 ).close()
             }
+        }
+
+        test("releases when its parent scope is cancelled") { directory ->
+            val parentJob = SupervisorJob()
+            val parentScope = CoroutineScope(currentCoroutineContext() + parentJob)
+            val lock = Path(directory, "lock.json")
+            val lease = parentScope.FileSystemLease(
+                lockPath = lock,
+                duration = 30.seconds,
+            )
+
+            parentJob.cancelAndJoin()
+
+            assertFalse(lease.isActive)
+            assertNull(SystemCoroutineFileSystem.metadataOrNull(lock))
         }
     }
 }
