@@ -10,3 +10,6 @@ public actual fun userHomeDirectory(): Path? =
         ?.takeIf(String::isNotBlank)
         ?.let(::Path)
         ?: userHomeDirectoryFromEnvironment()
+
+public actual fun processId(): Long =
+    ProcessHandle.current().pid()
