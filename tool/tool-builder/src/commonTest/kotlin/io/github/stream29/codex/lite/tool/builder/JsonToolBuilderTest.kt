@@ -3,12 +3,13 @@ package io.github.stream29.codex.lite.tool.builder
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
+import io.github.stream29.codex.lite.openai.FunctionCallOutputContentItem
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
+import io.github.stream29.codex.lite.openai.ImageDetail
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ResponseItem
 import kotlinx.schema.json.PropertyBuilder
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlin.test.assertEquals
 
 @Serializable
@@ -122,5 +123,50 @@ val jsonToolBuilderTest by testSuite {
         }
 
         tool.close()
+    }
+
+    test("returns protocol-native rich function output") {
+        val tool = functionOutputTool(
+            spec = jsonToolTestSpec,
+            inputDeserializer = JsonToolInput.serializer(),
+        ) { callId, input ->
+            FunctionCallOutputPayload(
+                body = FunctionCallOutputBody.ContentItems(
+                    listOf(
+                        FunctionCallOutputContentItem.InputImage(
+                            imageUrl = "data:image/png;base64,${input.value}",
+                            detail = ImageDetail.High,
+                        ),
+                        FunctionCallOutputContentItem.InputText("saved from $callId"),
+                    ),
+                ),
+                success = true,
+            )
+        }
+
+        assertEquals(
+            ResponseItem.FunctionCallOutput(
+                callId = "call_1",
+                output = FunctionCallOutputPayload(
+                    body = FunctionCallOutputBody.ContentItems(
+                        listOf(
+                            FunctionCallOutputContentItem.InputImage(
+                                imageUrl = "data:image/png;base64,BASE64",
+                                detail = ImageDetail.High,
+                            ),
+                            FunctionCallOutputContentItem.InputText("saved from call_1"),
+                        ),
+                    ),
+                    success = true,
+                ),
+            ),
+            tool.handle(
+                ResponseItem.FunctionCall(
+                    name = "echo",
+                    arguments = """{"value":"BASE64"}""",
+                    callId = "call_1",
+                ),
+            ),
+        )
     }
 }

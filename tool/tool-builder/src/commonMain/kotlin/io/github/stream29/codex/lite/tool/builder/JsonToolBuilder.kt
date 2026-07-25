@@ -8,7 +8,6 @@ import io.github.stream29.codex.lite.tool.contract.Tool
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.SerializationStrategy
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 public val ToolBuilderJson: Json = Json {
@@ -42,7 +41,21 @@ public fun <Input, Output> jsonTool(
     json: Json = ToolBuilderJson,
     handler: suspend (Input) -> JsonToolHandlerResult<Output>,
 ): Tool =
-    JsonTool(spec, inputDeserializer, outputSerializer, json, handler)
+    FunctionOutputTool(spec, inputDeserializer, json) { _, input ->
+        when (val result = handler(input)) {
+            is JsonToolHandlerResult.Failure -> failedOutput(result.message)
+            is JsonToolHandlerResult.Success -> try {
+                FunctionCallOutputPayload(
+                    body = FunctionCallOutputBody.Text(
+                        json.encodeToString(outputSerializer, result.value),
+                    ),
+                    success = result.success,
+                )
+            } catch (error: SerializationException) {
+                failedOutput("failed to serialize tool output: ${error.message}")
+            }
+        }
+    }
 
 /**
  * Builds a normal JSON-input function tool whose successful result is sent as
@@ -63,95 +76,8 @@ public fun <Input> textTool(
     json: Json = ToolBuilderJson,
     handler: suspend (Input) -> JsonToolHandlerResult<String>,
 ): Tool =
-    TextTool(spec, inputDeserializer, json, handler)
-
-private class JsonTool<Input, Output>(
-    override val spec: ToolSpec,
-    private val inputDeserializer: DeserializationStrategy<Input>,
-    private val outputSerializer: SerializationStrategy<Output>,
-    private val json: Json,
-    private val handler: suspend (Input) -> JsonToolHandlerResult<Output>,
-) : Tool {
-    override fun close(): Unit = Unit
-
-    override suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput =
-        when (call) {
-            is ResponseItem.FunctionCall -> ResponseItem.FunctionCallOutput(
-                callId = call.callId,
-                output = handleFunctionCall(call.arguments),
-            )
-
-            is ResponseItem.CustomToolCall -> ResponseItem.CustomToolCallOutput(
-                callId = call.callId,
-                output = failedOutput("JSON tool received custom tool payload"),
-            )
-
-            is ResponseItem.ClientToolSearchCall ->
-                error("Client tool-search calls are handled by CodexToolRuntime.")
-        }
-
-    private suspend fun handleFunctionCall(argumentsJson: String): FunctionCallOutputPayload {
-        val input = try {
-            json.decodeFromString(inputDeserializer, argumentsJson)
-        } catch (error: SerializationException) {
-            return failedOutput("failed to parse function arguments: ${error.message}")
-        }
-
-        return when (val result = handler(input)) {
-            is JsonToolHandlerResult.Failure -> failedOutput(result.message)
-            is JsonToolHandlerResult.Success -> {
-                val value = try {
-                    json.encodeToString(outputSerializer, result.value)
-                } catch (error: SerializationException) {
-                    return failedOutput("failed to serialize tool output: ${error.message}")
-                }
-                FunctionCallOutputPayload(
-                    body = FunctionCallOutputBody.Text(value),
-                    success = result.success,
-                )
-            }
-        }
-    }
-
-    private fun failedOutput(message: String): FunctionCallOutputPayload =
-        FunctionCallOutputPayload(
-            body = FunctionCallOutputBody.Text(message),
-            success = false,
-        )
-}
-
-private class TextTool<Input>(
-    override val spec: ToolSpec,
-    private val inputDeserializer: DeserializationStrategy<Input>,
-    private val json: Json,
-    private val handler: suspend (Input) -> JsonToolHandlerResult<String>,
-) : Tool {
-    override fun close(): Unit = Unit
-
-    override suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput =
-        when (call) {
-            is ResponseItem.FunctionCall -> ResponseItem.FunctionCallOutput(
-                callId = call.callId,
-                output = handleFunctionCall(call.arguments),
-            )
-
-            is ResponseItem.CustomToolCall -> ResponseItem.CustomToolCallOutput(
-                callId = call.callId,
-                output = failedOutput("JSON tool received custom tool payload"),
-            )
-
-            is ResponseItem.ClientToolSearchCall ->
-                error("Client tool-search calls are handled by CodexToolRuntime.")
-        }
-
-    private suspend fun handleFunctionCall(argumentsJson: String): FunctionCallOutputPayload {
-        val input = try {
-            json.decodeFromString(inputDeserializer, argumentsJson)
-        } catch (error: SerializationException) {
-            return failedOutput("failed to parse function arguments: ${error.message}")
-        }
-
-        return when (val result = handler(input)) {
+    FunctionOutputTool(spec, inputDeserializer, json) { _, input ->
+        when (val result = handler(input)) {
             is JsonToolHandlerResult.Failure -> failedOutput(result.message)
             is JsonToolHandlerResult.Success -> FunctionCallOutputPayload(
                 body = FunctionCallOutputBody.Text(result.value),
@@ -160,9 +86,63 @@ private class TextTool<Input>(
         }
     }
 
-    private fun failedOutput(message: String): FunctionCallOutputPayload =
-        FunctionCallOutputPayload(
-            body = FunctionCallOutputBody.Text(message),
-            success = false,
-        )
+/**
+ * Builds a normal JSON-input function tool that returns a protocol-native
+ * [FunctionCallOutputPayload].
+ *
+ * Use this when a successful result contains rich Responses content such as
+ * images instead of plain or JSON-encoded text. The `callId` is supplied to the
+ * handler for host-owned artifact naming and other call-scoped work.
+ *
+ * This does not support custom-tool payloads such as `apply_patch`.
+ */
+public fun <Input> functionOutputTool(
+    spec: ToolSpec,
+    inputDeserializer: DeserializationStrategy<Input>,
+    json: Json = ToolBuilderJson,
+    handler: suspend (callId: String, input: Input) -> FunctionCallOutputPayload,
+): Tool =
+    FunctionOutputTool(spec, inputDeserializer, json, handler)
+
+private class FunctionOutputTool<Input>(
+    override val spec: ToolSpec,
+    private val inputDeserializer: DeserializationStrategy<Input>,
+    private val json: Json,
+    private val handler: suspend (callId: String, input: Input) -> FunctionCallOutputPayload,
+) : Tool {
+    override fun close(): Unit = Unit
+
+    override suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput =
+        when (call) {
+            is ResponseItem.FunctionCall -> ResponseItem.FunctionCallOutput(
+                callId = call.callId,
+                output = handleFunctionCall(call.callId, call.arguments),
+            )
+
+            is ResponseItem.CustomToolCall -> ResponseItem.CustomToolCallOutput(
+                callId = call.callId,
+                output = failedOutput("JSON tool received custom tool payload"),
+            )
+
+            is ResponseItem.ClientToolSearchCall ->
+                error("Client tool-search calls are handled by CodexToolRuntime.")
+        }
+
+    private suspend fun handleFunctionCall(
+        callId: String,
+        argumentsJson: String,
+    ): FunctionCallOutputPayload {
+        val input = try {
+            json.decodeFromString(inputDeserializer, argumentsJson)
+        } catch (error: SerializationException) {
+            return failedOutput("failed to parse function arguments: ${error.message}")
+        }
+        return handler(callId, input)
+    }
 }
+
+private fun failedOutput(message: String): FunctionCallOutputPayload =
+    FunctionCallOutputPayload(
+        body = FunctionCallOutputBody.Text(message),
+        success = false,
+    )
