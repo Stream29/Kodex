@@ -7,3 +7,6 @@ public actual fun environmentVariable(name: String): String? =
 
 public actual fun userHomeDirectory(): Path? =
     userHomeDirectoryFromEnvironment()
+
+public actual fun processId(): Long =
+    (js("process.pid") as Number).toLong()
