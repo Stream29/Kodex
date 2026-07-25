@@ -3,15 +3,27 @@
 package io.github.stream29.codex.lite.tool.imagegeneration
 
 import io.github.stream29.codex.lite.openai.MutableOpenAiSubscriptionAuthSession
+import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthSession
+import io.github.stream29.codex.lite.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
-import io.github.stream29.codex.lite.openai.codexclistorage.defaultCodexDirectory
 import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
+import io.github.stream29.codex.lite.utils.osenvironment.userHomeDirectory
 import kotlinx.io.files.Path
 import kotlin.io.encoding.Base64
 
 internal suspend fun codexAuthProvider(): OpenAiSubscriptionAuthSession =
-    MutableOpenAiSubscriptionAuthSession(CodexCliStorage(testCodexDirectory()).readAuth())
+    MutableOpenAiSubscriptionAuthSession(
+        CodexCliStorage(testCodexDirectory()).readAuthOrNull().toSubscriptionAuthStateOrThrow(),
+    )
+
+private fun CodexAuthJson?.toSubscriptionAuthStateOrThrow(): OpenAiSubscriptionAuthState {
+    val tokens = this?.tokens ?: error("Codex CLI auth tokens are required.")
+    return OpenAiSubscriptionAuthState(
+        accessToken = tokens.accessToken,
+        accountId = tokens.accountId?.takeIf(String::isNotBlank),
+    )
+}
 
 internal fun testCodexDirectory(): Path {
     val explicitCodexHome = environmentVariable("CODEX_HOME")?.takeIf(String::isNotBlank)
@@ -19,7 +31,7 @@ internal fun testCodexDirectory(): Path {
         return Path(explicitCodexHome)
     }
 
-    return defaultCodexDirectory()
+    return userHomeDirectory()?.let { home -> Path(home, ".codex") }
         ?: throw IllegalStateException("CODEX_HOME or a readable user home directory must be set for real OpenAI image tests.")
 }
 
