@@ -2,11 +2,24 @@ package io.github.stream29.codex.lite.hook.impl
 
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookHandler
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookLayer
-import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookState
+import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookMatcher
+import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookMatcherGroup
 
-/** One enabled Hook definition paired with its source execution environment. */
+/**
+ * One enabled command Hook with all source-dependent values resolved.
+ *
+ * @property statusMessage Nullable because a command may not provide a UI
+ * label; `null` means no custom label was configured.
+ * @property additionalContextLimit Nullable because omission uses the default
+ * output limit; `null` means no per-handler override was configured.
+ */
 internal data class ExecutableHook(
-    val definition: CodexCliHookHandler,
+    val id: String,
+    val matcher: CodexCliHookMatcher,
+    val command: String,
+    val timeoutSeconds: Long,
+    val statusMessage: String?,
+    val additionalContextLimit: Int?,
     val environment: Map<String, String>,
 )
 
@@ -24,34 +37,49 @@ internal data class ResolvedHooks(
 
 internal fun HookConfiguration.resolveHooks(): ResolvedHooks {
     if (!featureEnabled) return ResolvedHooks()
-    val states = buildMap {
-        sources.forEach { source -> putAll(source.states) }
-    }
     return ResolvedHooks(
-        preToolUse = sources.resolveHandlers(states) { source -> source.hooks.preToolUse },
-        permissionRequest = sources.resolveHandlers(states) { source -> source.hooks.permissionRequest },
-        postToolUse = sources.resolveHandlers(states) { source -> source.hooks.postToolUse },
-        preCompact = sources.resolveHandlers(states) { source -> source.hooks.preCompact },
-        postCompact = sources.resolveHandlers(states) { source -> source.hooks.postCompact },
-        sessionStart = sources.resolveHandlers(states) { source -> source.hooks.sessionStart },
-        sessionEnd = sources.resolveHandlers(states) { source -> source.hooks.sessionEnd },
-        userPromptSubmit = sources.resolveHandlers(states) { source -> source.hooks.userPromptSubmit },
-        stop = sources.resolveHandlers(states) { source -> source.hooks.stop },
+        preToolUse = sources.resolveHandlers { it.hooks.preToolUse },
+        permissionRequest = sources.resolveHandlers {
+            it.hooks.permissionRequest
+        },
+        postToolUse = sources.resolveHandlers { it.hooks.postToolUse },
+        preCompact = sources.resolveHandlers { it.hooks.preCompact },
+        postCompact = sources.resolveHandlers { it.hooks.postCompact },
+        sessionStart = sources.resolveHandlers { it.hooks.sessionStart },
+        sessionEnd = sources.resolveHandlers { it.hooks.sessionEnd },
+        userPromptSubmit = sources.resolveHandlers { it.hooks.userPromptSubmit },
+        stop = sources.resolveHandlers { it.hooks.stop },
     )
 }
 
 private inline fun List<CodexCliHookLayer>.resolveHandlers(
-    states: Map<String, CodexCliHookState>,
-    handlers: (CodexCliHookLayer) -> List<CodexCliHookHandler>,
+    groups: (CodexCliHookLayer) -> List<CodexCliHookMatcherGroup>,
 ): List<ExecutableHook> = flatMap { source ->
-    handlers(source)
-        .filter { handler ->
-            source.managed || states[handler.key]?.enabled != false
-        }
-        .map { handler ->
+    groups(source).flatMapIndexed { groupIndex, group ->
+        group.hooks.mapIndexedNotNull { handlerIndex, handler ->
+            val command = handler as? CodexCliHookHandler.Command
+                ?: return@mapIndexedNotNull null
+            val platformCommand = command.platformCommand
+            if (command.async || platformCommand.isBlank()) {
+                return@mapIndexedNotNull null
+            }
             ExecutableHook(
-                definition = handler,
+                id = "${source.sourcePath}:$groupIndex:$handlerIndex",
+                matcher = group.matcher,
+                command = platformCommand.substituteEnvironment(source.environment),
+                timeoutSeconds = (command.timeoutSeconds ?: DefaultHookTimeoutSeconds)
+                    .coerceAtLeast(1L),
+                statusMessage = command.statusMessage,
+                additionalContextLimit = command.additionalContextLimit,
                 environment = source.environment,
             )
         }
+    }
 }
+
+private fun String.substituteEnvironment(environment: Map<String, String>): String =
+    environment.entries.fold(this) { command, (key, value) ->
+        command.replace("\${$key}", value)
+    }
+
+private const val DefaultHookTimeoutSeconds: Long = 600L
