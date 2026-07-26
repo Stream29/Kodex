@@ -26,7 +26,7 @@ import kotlin.time.Duration.Companion.seconds
 
 private suspend fun realOpenAiClient(): OpenAiClient =
     RealOpenAiClient(
-        authProvider = codexAuthProvider(),
+        authStore = codexAuthStore(),
     )
 
 private suspend fun temporaryRoot(): Path {
