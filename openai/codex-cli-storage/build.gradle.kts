@@ -4,6 +4,10 @@ plugins {
 }
 
 kotlin {
+    compilerOptions {
+        freeCompilerArgs.add("-Xexpect-actual-classes")
+    }
+
     sourceSets {
         commonMain.dependencies {
             api(project(":openai-models"))
@@ -13,6 +17,9 @@ kotlin {
             implementation(project(":openai-json-codec"))
             implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(project(":utils-os-environment"))
+        }
+        jsMain.dependencies {
+            implementation(libs.kotlin.wrappers.node)
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)

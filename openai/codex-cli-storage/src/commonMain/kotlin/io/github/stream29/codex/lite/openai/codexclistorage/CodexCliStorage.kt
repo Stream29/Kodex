@@ -5,6 +5,7 @@ import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
+import kotlinx.serialization.json.Json
 
 public class CodexCliStorage(
     internal val directory: Path,
@@ -13,6 +14,7 @@ public class CodexCliStorage(
     private val authPath: Path = Path(directory, CodexAuthFileName)
     private val modelsCachePath: Path = Path(directory, CodexModelsCacheFileName)
     private val configPath: Path = Path(directory, CodexConfigFileName)
+    private val hooksPath: Path = Path(directory, CodexHooksFileName)
 
     /**
      * @return Nullable because Codex CLI may not be signed in; `null` means
@@ -42,6 +44,48 @@ public class CodexCliStorage(
         val text = configPath.readTextOrNull(fileSystem) ?: return null
         return CodexConfigToml.decodeFromString(CodexCliConfig.serializer(), text)
     }
+
+    /**
+     * Reads and fully decodes this directory's `hooks.json` and inline
+     * `config.toml` Hook layers.
+     *
+     * Returned declarations retain their source structure while sealed handler
+     * types and matchers are decoded into their final Kotlin models.
+     */
+    public suspend fun readHookLayers(
+        sourceKind: CodexCliHookSourceKind,
+        managed: Boolean = false,
+        environment: Map<String, String> = emptyMap(),
+    ): List<CodexCliHookLayer> {
+        val hooksJson = hooksPath.readTextOrNull(fileSystem)?.let { contents ->
+            val document = CodexHooksJson.decodeFromString(
+                CodexCliHooksDocument.serializer(),
+                contents,
+            )
+            CodexCliHookLayer(
+                sourcePath = hooksPath,
+                sourceKind = sourceKind,
+                managed = managed,
+                environment = environment,
+                description = document.description,
+                hooks = document.hooks,
+            )
+        }
+        val inlineToml = configPath.readTextOrNull(fileSystem)?.let { contents ->
+            val document = CodexConfigToml.decodeFromString(
+                CodexCliHooksDocument.serializer(),
+                contents,
+            )
+            CodexCliHookLayer(
+                sourcePath = configPath,
+                sourceKind = sourceKind,
+                managed = managed,
+                environment = environment,
+                hooks = document.hooks,
+            )
+        }
+        return listOfNotNull(hooksJson, inlineToml)
+    }
 }
 
 private suspend fun Path.readTextOrNull(fileSystem: CoroutineFileSystem): String? {
@@ -52,7 +96,12 @@ private suspend fun Path.readTextOrNull(fileSystem: CoroutineFileSystem): String
 private const val CodexAuthFileName: String = "auth.json"
 private const val CodexModelsCacheFileName: String = "models_cache.json"
 private const val CodexConfigFileName: String = "config.toml"
+private const val CodexHooksFileName: String = "hooks.json"
 
 private val CodexConfigToml: Toml = Toml {
     ignoreUnknownKeys = true
+}
+
+private val CodexHooksJson: Json = Json(OpenAiJsonCodec) {
+    ignoreUnknownKeys = false
 }
