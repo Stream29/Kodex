@@ -27,5 +27,6 @@ public suspend fun MutableCodexAgentStorage.initialize(initialSettings: CodexAge
         ),
     ) {
         settings[0] = initialSettings
+        tokenCount[0] = 0L
     }
 }
