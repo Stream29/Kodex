@@ -91,15 +91,13 @@ public enum class SubmitKey {
         }
 }
 
-/**
- * Holds [CodexGlobalSettings] in memory for the lifetime of the application.
- *
- * This intentionally performs no persistence. A durable settings backend can replace this class
- * later without changing the settings snapshot itself.
- */
+/** Provides the latest application-wide settings snapshot. */
 public interface CodexGlobalSettingsStore {
     /** Latest complete settings snapshot. */
     public val settings: StateFlow<CodexGlobalSettings>
+
+    /** Reloads external settings sources and publishes the resulting complete snapshot. */
+    public suspend fun reload(): CodexGlobalSettings
 
     /** Atomically transforms and publishes the current settings snapshot. */
     public suspend fun update(
@@ -107,12 +105,16 @@ public interface CodexGlobalSettingsStore {
     ): CodexGlobalSettings
 }
 
+/** Holds [CodexGlobalSettings] in memory for the lifetime of the application. */
 public class InMemoryCodexGlobalSettings(
     initialSettings: CodexGlobalSettings,
 ) : CodexGlobalSettingsStore {
     /** Latest complete settings snapshot. */
     override val settings: StateFlow<CodexGlobalSettings>
         field = MutableStateFlow(initialSettings)
+
+    /** Returns the current snapshot because this implementation has no external settings source. */
+    override suspend fun reload(): CodexGlobalSettings = settings.value
 
     /** Atomically transforms and publishes the current settings snapshot. */
     override suspend fun update(
