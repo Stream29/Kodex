@@ -1,6 +1,7 @@
 package io.github.stream29.codex.lite.hook.impl
 
 import io.github.stream29.codex.lite.hook.contract.CodexHooks
+import io.github.stream29.codex.lite.hook.contract.HookSettings
 import io.github.stream29.codex.lite.hook.contract.compaction.CompactionHookRequest
 import io.github.stream29.codex.lite.hook.contract.compaction.CompactionHookResult
 import io.github.stream29.codex.lite.hook.contract.tool.HookToolInvocation

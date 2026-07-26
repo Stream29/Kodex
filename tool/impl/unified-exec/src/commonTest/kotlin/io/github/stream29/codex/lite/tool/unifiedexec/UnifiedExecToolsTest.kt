@@ -10,6 +10,7 @@ import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.tool.builder.ToolBuilderJson
 import io.github.stream29.codex.lite.tool.contract.Tool
 import io.github.stream29.codex.lite.utils.shellclient.Shell
+import io.github.stream29.codex.lite.utils.shellclient.ShellSettings
 import io.github.stream29.codex.lite.utils.shellclient.ShellType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -44,13 +45,13 @@ private const val oneShotExecCommand: String = "echo codex-lite-unified-exec"
 private val realIoTestConfig: TestConfig =
     TestConfig.testScope(isEnabled = false, timeout = 10.seconds)
 
-private data class TestUnifiedExecSettings(
+private data class TestShellSettings(
     override val shell: Shell = unifiedExecTestShell,
-) : UnifiedExecSettings
+) : ShellSettings
 
 private suspend fun testUnifiedExecToolClient(
     workingDirectory: Path = Path("."),
-    settings: StateFlow<UnifiedExecSettings> = MutableStateFlow(TestUnifiedExecSettings()),
+    settings: StateFlow<ShellSettings> = MutableStateFlow(TestShellSettings()),
 ): UnifiedExecToolClient =
     CoroutineScope(currentCoroutineContext()).UnifiedExecToolClient(
         settings = settings,
@@ -299,8 +300,8 @@ val unifiedExecToolsTest by testSuite {
     }
 
     test("new processes use the current global shell", testConfig = realIoTestConfig) {
-        val settings = MutableStateFlow<UnifiedExecSettings>(
-            TestUnifiedExecSettings(
+        val settings = MutableStateFlow<ShellSettings>(
+            TestShellSettings(
                 shell = unifiedExecTestShell.copy(
                     path = Path("codex-lite-missing-shell-${Random.nextLong()}"),
                 ),
@@ -308,7 +309,7 @@ val unifiedExecToolsTest by testSuite {
         )
         val client = testUnifiedExecToolClient(settings = settings)
         try {
-            settings.value = TestUnifiedExecSettings()
+            settings.value = TestShellSettings()
             var output = client.execCommand(ExecCommandArguments(command = oneShotExecCommand))
             val text = StringBuilder(output.output)
             repeat(10) {
@@ -386,7 +387,7 @@ val unifiedExecToolsTest by testSuite {
             currentCoroutineContext() + SupervisorJob(currentCoroutineContext()[Job]),
         )
         val client = owner.UnifiedExecToolClient(
-            MutableStateFlow(TestUnifiedExecSettings()),
+            MutableStateFlow(TestShellSettings()),
         )
         owner.cancel()
 

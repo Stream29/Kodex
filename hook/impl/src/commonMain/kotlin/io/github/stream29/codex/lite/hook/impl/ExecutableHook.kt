@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.hook.impl
 
+import io.github.stream29.codex.lite.hook.contract.HookConfiguration
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookHandler
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookLayer
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookMatcher
