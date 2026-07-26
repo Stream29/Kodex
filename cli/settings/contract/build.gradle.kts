@@ -1,16 +1,17 @@
 plugins {
-    id("codexlite.kmp-host")
+    id("codexlite.kmp-cli")
     alias(libs.plugins.kotlin.serialization)
 }
 
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            api(project(":agent-context-prefix-contract"))
+            api(project(":hook-contract"))
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
-            api(libs.kotlinx.serialization.json)
             api(project(":openai-models"))
-            api(project(":openai-codex-cli-storage"))
+            api(project(":utils-shell-client"))
         }
     }
 }

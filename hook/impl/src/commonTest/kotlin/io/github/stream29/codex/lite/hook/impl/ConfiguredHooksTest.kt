@@ -2,8 +2,10 @@ package io.github.stream29.codex.lite.hook.impl
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.codex.lite.hook.contract.HookConfiguration
 import io.github.stream29.codex.lite.hook.contract.HookPermissionMode
 import io.github.stream29.codex.lite.hook.contract.HookSessionContext
+import io.github.stream29.codex.lite.hook.contract.HookSettings
 import io.github.stream29.codex.lite.hook.contract.tool.HookToolInvocation
 import io.github.stream29.codex.lite.hook.contract.HookTurnContext
 import io.github.stream29.codex.lite.hook.contract.tool.PreToolUseResult

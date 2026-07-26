@@ -1,6 +1,6 @@
 package io.github.stream29.codex.lite.agentcontext.prefix.contract
 
-import io.github.stream29.codex.lite.utils.shellclient.Shell
+import io.github.stream29.codex.lite.utils.shellclient.ShellSettings
 import kotlinx.io.files.Path
 
 /**
@@ -13,7 +13,6 @@ import kotlinx.io.files.Path
  * @property codexHome Root directory used for user-level AGENTS.md discovery.
  * @property shell Shell advertised in the Agent environment context.
  */
-public interface AgentContextSettings {
+public interface AgentContextSettings : ShellSettings {
     public val codexHome: Path
-    public val shell: Shell
 }

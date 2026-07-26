@@ -1,11 +1,11 @@
-package io.github.stream29.codex.lite.hook.impl
+package io.github.stream29.codex.lite.hook.contract
 
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookLayer
 import kotlinx.serialization.Serializable
 
-/** Narrow global-settings view required by the hook implementation. */
+/** Narrow global-settings view required by a configured Hook implementation. */
 public interface HookSettings {
-    /** Latest complete hook configuration snapshot. */
+    /** Latest complete Hook configuration snapshot. */
     public val hooks: HookConfiguration
 }
 

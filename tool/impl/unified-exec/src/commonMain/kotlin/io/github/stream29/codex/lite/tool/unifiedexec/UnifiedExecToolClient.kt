@@ -5,6 +5,7 @@ import io.github.stream29.codex.lite.utils.shellclient.ProcessSession
 import io.github.stream29.codex.lite.utils.shellclient.Shell
 import io.github.stream29.codex.lite.utils.shellclient.ShellClient
 import io.github.stream29.codex.lite.utils.shellclient.ShellProcessCommand
+import io.github.stream29.codex.lite.utils.shellclient.ShellSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
@@ -33,11 +34,11 @@ public const val UnifiedExecMaximumSessionCount: Int = 64
  * creates. Closing this client closes that shell client and cancels all active
  * sessions. Commands always use the selected shell's login initialization;
  * model calls cannot disable it. A command without an explicit shell captures
- * the current [UnifiedExecSettings.shell] value when its process starts.
+ * the current [ShellSettings.shell] value when its process starts.
  */
 public class UnifiedExecToolClient internal constructor(
     private val workingDirectory: Path = Path("."),
-    private val settings: StateFlow<UnifiedExecSettings>,
+    private val settings: StateFlow<ShellSettings>,
     private val shellClient: ShellClient,
 ) : AutoCloseable {
     private val registryMutex: Mutex = Mutex()
@@ -180,7 +181,7 @@ public class UnifiedExecToolClient internal constructor(
 
 /** Creates a unified-exec client with a dedicated shell client under this scope. */
 public fun CoroutineScope.UnifiedExecToolClient(
-    settings: StateFlow<UnifiedExecSettings>,
+    settings: StateFlow<ShellSettings>,
     workingDirectory: Path = Path("."),
 ): UnifiedExecToolClient =
     UnifiedExecToolClient(
