@@ -2,8 +2,8 @@ package io.github.stream29.codex.lite.agentstate.impl
 
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.codex.lite.agentcontext.collaboration.render.render as renderCollaborationMode
-import io.github.stream29.codex.lite.agentcontext.collaboration.render.renderMultiAgentMode
+import io.github.stream29.codex.lite.agentcontext.prefix.render.render as renderCollaborationMode
+import io.github.stream29.codex.lite.agentcontext.prefix.render.renderMultiAgentMode
 import io.github.stream29.codex.lite.agentcontext.prefix.render.render
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
