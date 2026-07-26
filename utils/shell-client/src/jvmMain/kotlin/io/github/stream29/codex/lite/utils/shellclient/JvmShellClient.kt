@@ -23,8 +23,10 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 
-public actual class ShellClient actual constructor() :
-    CoroutineScope by CoroutineScope(SupervisorJob() + Dispatchers.Default),
+public actual class ShellClient internal actual constructor(
+    scope: CoroutineScope,
+) :
+    CoroutineScope by scope,
     AutoCloseable {
 
     public actual suspend fun start(command: ShellProcessCommand): ProcessSession =

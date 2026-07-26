@@ -11,18 +11,23 @@ import io.github.stream29.codex.lite.tool.builder.ToolBuilderJson
 import io.github.stream29.codex.lite.tool.contract.Tool
 import io.github.stream29.codex.lite.utils.shellclient.Shell
 import io.github.stream29.codex.lite.utils.shellclient.ShellType
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.schema.json.StringPropertyDefinition
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.random.Random
 import kotlin.test.assertEquals
@@ -38,6 +43,19 @@ private const val oneShotExecCommand: String = "echo codex-lite-unified-exec"
 
 private val realIoTestConfig: TestConfig =
     TestConfig.testScope(isEnabled = false, timeout = 10.seconds)
+
+private data class TestUnifiedExecSettings(
+    override val shell: Shell = unifiedExecTestShell,
+) : UnifiedExecSettings
+
+private suspend fun testUnifiedExecToolClient(
+    workingDirectory: Path = Path("."),
+    settings: StateFlow<UnifiedExecSettings> = MutableStateFlow(TestUnifiedExecSettings()),
+): UnifiedExecToolClient =
+    CoroutineScope(currentCoroutineContext()).UnifiedExecToolClient(
+        settings = settings,
+        workingDirectory = workingDirectory,
+    )
 
 private fun List<Tool>.toolNamed(name: String): Tool =
     single { tool -> (tool.spec as ResponsesApiTool).name == name }
@@ -120,7 +138,7 @@ val unifiedExecToolsTest by testSuite {
         )
     }
 
-    testFixture { UnifiedExecToolClient() } closeWith { close() } asParameterForEach {
+    testFixture { testUnifiedExecToolClient() } closeWith { close() } asParameterForEach {
         test("exec_command returns JSON output from a real process", testConfig = realIoTestConfig) { client ->
             val tools = UnifiedExecTools.createTools(client)
             val exec = tools.toolNamed(UnifiedExecTools.ExecCommandName)
@@ -193,7 +211,7 @@ val unifiedExecToolsTest by testSuite {
     }
 
     test("tty requests run in a pseudoterminal", testConfig = realIoTestConfig) {
-        val client = UnifiedExecToolClient()
+        val client = testUnifiedExecToolClient()
         try {
             val tools = UnifiedExecTools.createTools(client)
             val exec = tools.toolNamed(UnifiedExecTools.ExecCommandName)
@@ -224,7 +242,7 @@ val unifiedExecToolsTest by testSuite {
     }
 
     test("tty sessions accept interactive input", testConfig = realIoTestConfig) {
-        val client = UnifiedExecToolClient()
+        val client = testUnifiedExecToolClient()
         try {
             val tools = UnifiedExecTools.createTools(client)
             val exec = tools.toolNamed(UnifiedExecTools.ExecCommandName)
@@ -266,7 +284,7 @@ val unifiedExecToolsTest by testSuite {
     }
 
     test("unsupported shell names report an explicit tool failure") {
-        val client = UnifiedExecToolClient()
+        val client = testUnifiedExecToolClient()
         try {
             val exec = UnifiedExecTools.createTools(client).toolNamed(UnifiedExecTools.ExecCommandName)
             val output = assertIs<ResponseItem.FunctionCallOutput>(
@@ -280,13 +298,41 @@ val unifiedExecToolsTest by testSuite {
         }
     }
 
+    test("new processes use the current global shell", testConfig = realIoTestConfig) {
+        val settings = MutableStateFlow<UnifiedExecSettings>(
+            TestUnifiedExecSettings(
+                shell = unifiedExecTestShell.copy(
+                    path = Path("codex-lite-missing-shell-${Random.nextLong()}"),
+                ),
+            ),
+        )
+        val client = testUnifiedExecToolClient(settings = settings)
+        try {
+            settings.value = TestUnifiedExecSettings()
+            var output = client.execCommand(ExecCommandArguments(command = oneShotExecCommand))
+            val text = StringBuilder(output.output)
+            repeat(10) {
+                if (output.exitCode != null) return@repeat
+                output = client.writeStdin(
+                    WriteStdinArguments(sessionId = assertNotNull(output.sessionId)),
+                )
+                text.append(output.output)
+            }
+
+            assertEquals(0, output.exitCode)
+            assertTrue(text.contains("codex-lite-unified-exec"))
+        } finally {
+            client.close()
+        }
+    }
+
     test(
         "exec_command defaults to the client working directory",
         testConfig = TestConfig.testScope(isEnabled = true, timeout = 10.seconds),
     ) {
         val fileName = "codex-lite-unified-exec-cwd-${Random.nextLong()}.txt"
         val outputPath = Path(SystemTemporaryDirectory, fileName)
-        val client = UnifiedExecToolClient(workingDirectory = SystemTemporaryDirectory)
+        val client = testUnifiedExecToolClient(workingDirectory = SystemTemporaryDirectory)
         try {
             var result = client.execCommand(
                 ExecCommandArguments(
@@ -317,7 +363,7 @@ val unifiedExecToolsTest by testSuite {
     }
 
     test("yield returns a session for a still-running command", testConfig = realIoTestConfig) {
-        val client = UnifiedExecToolClient()
+        val client = testUnifiedExecToolClient()
         try {
             val exec = UnifiedExecTools.createTools(client).toolNamed(UnifiedExecTools.ExecCommandName)
             val output = exec.exec(
@@ -335,8 +381,25 @@ val unifiedExecToolsTest by testSuite {
         }
     }
 
+    test("owner cancellation closes the dedicated shell client") {
+        val owner = CoroutineScope(
+            currentCoroutineContext() + SupervisorJob(currentCoroutineContext()[Job]),
+        )
+        val client = owner.UnifiedExecToolClient(
+            MutableStateFlow(TestUnifiedExecSettings()),
+        )
+        owner.cancel()
+
+        try {
+            client.execCommand(ExecCommandArguments(command = oneShotExecCommand))
+            fail("Cancelled owner left its unified-exec shell client usable.")
+        } catch (failure: UnifiedExecToolException) {
+            assertTrue(failure.message.orEmpty().contains("closed", ignoreCase = true))
+        }
+    }
+
     test("cancellation closes and unregisters a running session", testConfig = realIoTestConfig) {
-        val client = UnifiedExecToolClient()
+        val client = testUnifiedExecToolClient()
         try {
             coroutineScope {
                 val request = async(start = CoroutineStart.UNDISPATCHED) {

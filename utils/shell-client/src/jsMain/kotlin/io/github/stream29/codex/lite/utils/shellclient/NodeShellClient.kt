@@ -17,8 +17,6 @@ import node.os.platform
 import node.process.Process
 import node.process.ProcessEnv
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -83,8 +81,10 @@ private external interface NodePtyDisposable {
     fun dispose()
 }
 
-public actual class ShellClient actual constructor() :
-    CoroutineScope by CoroutineScope(SupervisorJob() + Dispatchers.Default),
+public actual class ShellClient internal actual constructor(
+    scope: CoroutineScope,
+) :
+    CoroutineScope by scope,
     AutoCloseable {
 
     public actual suspend fun start(command: ShellProcessCommand): ProcessSession {

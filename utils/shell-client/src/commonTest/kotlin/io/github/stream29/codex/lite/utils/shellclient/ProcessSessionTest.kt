@@ -3,17 +3,23 @@ package io.github.stream29.codex.lite.utils.shellclient
 import de.infix.testBalloon.framework.core.testSuite
 import de.infix.testBalloon.framework.core.TestCompartment
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -22,6 +28,9 @@ import kotlin.test.assertTrue
 import kotlin.test.fail
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+
+private suspend fun testShellClient(): ShellClient =
+    CoroutineScope(currentCoroutineContext()).ShellClient()
 
 private suspend fun ShellClient.startTestSession(
     command: TestShellCommand,
@@ -101,7 +110,7 @@ val processSessionTest by testSuite(
     }
 
     test("starts a shell command and returns its output") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.startTestSession(oneShotProcessCommand)
         try {
             val result = session.readUntilCompleted()
@@ -115,7 +124,7 @@ val processSessionTest by testSuite(
     }
 
     test("starts a command through the dynamically resolved default shell") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.start(ShellProcessCommand(command = "echo default-shell"))
         try {
             val result = session.readUntilCompleted()
@@ -129,7 +138,7 @@ val processSessionTest by testSuite(
     }
 
     test("preserves separate standard output and standard error streams") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.startTestSession(separatedOutputProcessCommand)
         try {
             assertEquals(0, withTimeout(3.seconds) { session.exitCode.await() })
@@ -151,7 +160,7 @@ val processSessionTest by testSuite(
     }
 
     test("applies command environment variables to pipes and pseudoterminals") {
-        val client = ShellClient()
+        val client = testShellClient()
         try {
             environmentProbeProcessCommands.forEach { command ->
                 listOf(false, true).forEach { tty ->
@@ -180,7 +189,7 @@ val processSessionTest by testSuite(
     }
 
     test("attaches a tty command to a pseudoterminal") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.startTestSession(ttyProbeProcessCommand, tty = true)
         try {
             val result = session.readUntilCompleted()
@@ -201,7 +210,7 @@ val processSessionTest by testSuite(
     }
 
     test("accepts interactive input through a pseudoterminal") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.startTestSession(interactiveProcessCommand, tty = true)
         try {
             assertTrue("ready" in session.readUntilContains("ready"))
@@ -224,7 +233,7 @@ val processSessionTest by testSuite(
     }
 
     test("closing a pseudoterminal session completes its lifecycle") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.startTestSession(delayedProcessCommand, tty = true)
         try {
             session.close()
@@ -241,7 +250,7 @@ val processSessionTest by testSuite(
     }
 
     test("keeps standard input open for a later send") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.startTestSession(interactiveProcessCommand)
         try {
             assertTrue("ready" in session.readUntilContains("ready"))
@@ -264,7 +273,7 @@ val processSessionTest by testSuite(
     }
 
     test("returns after the requested yield time for a running process") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.startTestSession(delayedProcessCommand)
         try {
             val result = session.stdout.read(25.milliseconds)
@@ -277,7 +286,7 @@ val processSessionTest by testSuite(
     }
 
     test("cancelling a session rejects later input") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.startTestSession(delayedProcessCommand)
         try {
             session.scope.cancel()
@@ -294,7 +303,7 @@ val processSessionTest by testSuite(
     }
 
     test("closing a session reports the terminated process exit code") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.startTestSession(delayedProcessCommand)
         try {
             session.close()
@@ -312,7 +321,7 @@ val processSessionTest by testSuite(
     }
 
     test("a completed process rejects later input") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.startTestSession(oneShotProcessCommand)
         try {
             assertEquals(0, session.readUntilCompleted().exitCode)
@@ -326,7 +335,7 @@ val processSessionTest by testSuite(
     }
 
     test("closing a shell client cancels its session") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.startTestSession(delayedProcessCommand)
         try {
             client.close()
@@ -342,8 +351,29 @@ val processSessionTest by testSuite(
         }
     }
 
+    test("cancelling the owner scope cancels its shell client") {
+        val owner = CoroutineScope(
+            currentCoroutineContext() + SupervisorJob(currentCoroutineContext()[Job]),
+        )
+        val client = owner.ShellClient()
+
+        assertTrue(client.isActive)
+        owner.cancel()
+        assertFalse(client.isActive)
+    }
+
+    test("shell client requires an owner job") {
+        val owner = object : CoroutineScope {
+            override val coroutineContext: CoroutineContext = EmptyCoroutineContext
+        }
+
+        assertFailsWith<IllegalArgumentException> {
+            owner.ShellClient()
+        }
+    }
+
     test("cancelling a pending read preserves later process output") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.startTestSession(interactiveProcessCommand)
         try {
             assertTrue("ready" in session.readUntilContains("ready"))
@@ -372,7 +402,7 @@ val processSessionTest by testSuite(
     }
 
     test("cancelling a blocked standard-input write releases the session") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.startTestSession(delayedProcessCommand)
         try {
             coroutineScope {
@@ -397,7 +427,7 @@ val processSessionTest by testSuite(
     }
 
     test("closing standard input sends EOF and rejects later input") {
-        val client = ShellClient()
+        val client = testShellClient()
         val session = client.startTestSession(interactiveProcessCommand)
         try {
             assertTrue("ready" in session.readUntilContains("ready"))
@@ -416,7 +446,7 @@ val processSessionTest by testSuite(
     }
 
     test("parallel processes do not retain another session's standard input") {
-        val client = ShellClient()
+        val client = testShellClient()
         val waiting = client.startTestSession(interactiveProcessCommand)
         val delayed = client.startTestSession(delayedProcessCommand)
         try {
