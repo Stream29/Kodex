@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.openai
 
+import kotlinx.io.files.Path
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -14,6 +15,9 @@ import kotlin.uuid.Uuid
  * the request-facing fields into a [ResponsesApiRequest].
  *
  * @property model Model identifier used for the next Responses API request.
+ * @property cwd Session working directory used to resolve project context and
+ * relative paths for local tools. `Path(".")` is retained only as the
+ * compatibility fallback for settings written before this field existed.
  * @property threadName Local user-facing thread title. Session repositories
  * ensure root snapshots use a non-empty title; an empty value is retained only
  * for legacy or independently initialized non-root Agent storage.
@@ -44,6 +48,9 @@ import kotlin.uuid.Uuid
 @Serializable
 public data class CodexAgentSettings(
     public val model: OpenAiModelId,
+    @Serializable(with = PathAsStringSerializer::class)
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    public val cwd: Path = Path("."),
     public val threadName: String = "",
     public val autoCompactionTokenLimit: Long? = null,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
