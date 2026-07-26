@@ -11,9 +11,10 @@ import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-
 
 
 private fun testCodexDirectory(): Path =
@@ -115,6 +116,135 @@ val codexCliStorageTest by testSuite {
             val tui = assertNotNull(config.tui)
             assertEquals(null, tui.keymap.global.submit)
             assertEquals(null, tui.keymap.editor.insertNewline)
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    test("fully decodes hook files into typed declaration layers") {
+        val root = Path(SystemTemporaryDirectory, "codex-hooks-${Random.nextLong()}")
+        try {
+            SystemCoroutineFileSystem.createDirectories(root)
+            SystemCoroutineFileSystem.writeString(
+                Path(root, "hooks.json"),
+                """
+                {
+                  "description":"project hooks",
+                  "hooks":{
+                    "PreToolUse":[{
+                      "matcher":"shell|Bash",
+                      "hooks":[{
+                        "type":"command",
+                        "command":"echo ${'$'}{HOOK_VALUE}",
+                        "commandWindows":"echo windows",
+                        "timeout":7,
+                        "statusMessage":"checking",
+                        "additionalContextLimit":1200
+                      },{
+                        "type":"prompt"
+                      },{
+                        "type":"agent"
+                      }]
+                    }]
+                  }
+                }
+                """.trimIndent(),
+            )
+            SystemCoroutineFileSystem.writeString(
+                Path(root, "config.toml"),
+                """
+                [[hooks.PreToolUse]]
+                matcher = "^mcp__.+${'$'}"
+
+                [[hooks.PreToolUse.hooks]]
+                type = "command"
+                command = "run-mcp"
+                command_windows = "run-mcp-windows"
+
+                [hooks.state."state-key"]
+                enabled = false
+                trusted_hash = "sha256:stored"
+                """.trimIndent(),
+            )
+
+            val layers = CodexCliStorage(root).readHookLayers(
+                sourceKind = CodexCliHookSourceKind.Project,
+                environment = mapOf("HOOK_VALUE" to "decoded"),
+            )
+
+            assertEquals(2, layers.size)
+            val jsonLayer = layers.first()
+            assertEquals("project hooks", jsonLayer.description)
+            val exactGroup = jsonLayer.hooks.preToolUse.single()
+            assertIs<CodexCliHookMatcher.Exact>(exactGroup.matcher)
+            assertTrue(exactGroup.matcher.matches(listOf("shell")))
+            assertFalse(exactGroup.matcher.matches(listOf("shell_output")))
+            val command = assertIs<CodexCliHookHandler.Command>(exactGroup.hooks[0])
+            assertEquals("echo ${'$'}{HOOK_VALUE}", command.command)
+            assertEquals("echo windows", command.windowsCommand)
+            assertEquals(7L, command.timeoutSeconds)
+            assertEquals("checking", command.statusMessage)
+            assertEquals(1200, command.additionalContextLimit)
+            assertIs<CodexCliHookHandler.Prompt>(exactGroup.hooks[1])
+            assertIs<CodexCliHookHandler.Agent>(exactGroup.hooks[2])
+
+            val tomlLayer = layers.last()
+            val tomlGroup = tomlLayer.hooks.preToolUse.single()
+            val regularExpression = tomlGroup.matcher
+            assertIs<CodexCliHookMatcher.RegularExpression>(regularExpression)
+            assertTrue(regularExpression.matches(listOf("mcp__docs")))
+            assertFalse(regularExpression.matches(listOf("shell")))
+            val tomlCommand = assertIs<CodexCliHookHandler.Command>(tomlGroup.hooks.single())
+            assertEquals("run-mcp-windows", tomlCommand.windowsCommand)
+            assertEquals(false, tomlLayer.states.getValue("state-key").enabled)
+            assertEquals("sha256:stored", tomlLayer.states.getValue("state-key").trustedHash)
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    test("rejects unknown hooks.json fields") {
+        val root = Path(SystemTemporaryDirectory, "codex-hook-unknown-${Random.nextLong()}")
+        try {
+            SystemCoroutineFileSystem.createDirectories(root)
+            SystemCoroutineFileSystem.writeString(
+                Path(root, "hooks.json"),
+                """{"hooks":{},"unknown":true}""",
+            )
+
+            assertFails {
+                CodexCliStorage(root).readHookLayers(CodexCliHookSourceKind.User)
+            }
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    test("invalid hook regular expressions remain nonmatching") {
+        val root = Path(SystemTemporaryDirectory, "codex-hook-regex-${Random.nextLong()}")
+        try {
+            SystemCoroutineFileSystem.createDirectories(root)
+            SystemCoroutineFileSystem.writeString(
+                Path(root, "hooks.json"),
+                """
+                {
+                  "hooks":{
+                    "PreToolUse":[{
+                      "matcher":"[",
+                      "hooks":[{"type":"command","command":"must-not-run"}]
+                    }]
+                  }
+                }
+                """.trimIndent(),
+            )
+
+            val layer = CodexCliStorage(root)
+                .readHookLayers(CodexCliHookSourceKind.User)
+                .single()
+
+            val matcher = layer.hooks.preToolUse.single().matcher
+            assertIs<CodexCliHookMatcher.Invalid>(matcher)
+            assertFalse(matcher.matches(listOf("anything")))
         } finally {
             deleteRecursively(root)
         }
