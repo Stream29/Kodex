@@ -25,6 +25,7 @@ val legacySettingsCompatibilityTest by testSuite {
             val storage = FileSystemAgentStorage(root)
 
             assertEquals(OpenAiModelId("test-model"), storage.settings[0].model)
+            assertEquals(Path("."), storage.settings[0].cwd)
         } finally {
             deleteRecursively(SystemCoroutineFileSystem, root)
         }
