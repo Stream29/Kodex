@@ -97,25 +97,6 @@ public sealed interface CodexCliHookMatcher {
     }
 }
 
-/** User-controlled state associated with a generated Hook handler key. */
-@Serializable
-public data class CodexCliHookState(
-    /**
-     * Nullable because omission leaves the handler enabled state unchanged;
-     * `null` means this layer contributes no enabled override.
-     */
-    public val enabled: Boolean? = null,
-    /**
-     * Nullable because a Hook may not have been approved by Codex CLI;
-     * `null` means Codex CLI has no persisted trusted hash.
-     *
-     * Codex Lite decodes this value for storage fidelity but deliberately does
-     * not use Codex's per-handler trust workflow.
-     */
-    @SerialName("trusted_hash")
-    public val trustedHash: String? = null,
-)
-
 /** One directly decoded Codex Hook handler declaration. */
 @Serializable
 public sealed interface CodexCliHookHandler {
@@ -211,7 +192,6 @@ public data class CodexCliHookDeclarations(
     public val subagentStop: List<CodexCliHookMatcherGroup> = emptyList(),
     @SerialName("Stop")
     public val stop: List<CodexCliHookMatcherGroup> = emptyList(),
-    public val state: Map<String, CodexCliHookState> = emptyMap(),
 )
 
 /**
@@ -225,7 +205,6 @@ public data class CodexCliHookLayer(
     @Serializable(with = CodexCliHookPathSerializer::class)
     public val sourcePath: Path,
     public val sourceKind: CodexCliHookSourceKind,
-    public val managed: Boolean = false,
     public val environment: Map<String, String> = emptyMap(),
     /**
      * Nullable because inline `config.toml` Hook tables have no description;
@@ -233,11 +212,7 @@ public data class CodexCliHookLayer(
      */
     public val description: String? = null,
     public val hooks: CodexCliHookDeclarations = CodexCliHookDeclarations(),
-) {
-    /** Persisted handler state declared by this source. */
-    public val states: Map<String, CodexCliHookState>
-        get() = hooks.state
-}
+)
 
 /**
  * Shared serial shape of `hooks.json` and the Hook portion of `config.toml`.

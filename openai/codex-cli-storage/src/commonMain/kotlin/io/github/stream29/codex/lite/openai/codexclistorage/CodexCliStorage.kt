@@ -54,7 +54,6 @@ public class CodexCliStorage(
      */
     public suspend fun readHookLayers(
         sourceKind: CodexCliHookSourceKind,
-        managed: Boolean = false,
         environment: Map<String, String> = emptyMap(),
     ): List<CodexCliHookLayer> {
         val hooksJson = hooksPath.readTextOrNull(fileSystem)?.let { contents ->
@@ -65,7 +64,6 @@ public class CodexCliStorage(
             CodexCliHookLayer(
                 sourcePath = hooksPath,
                 sourceKind = sourceKind,
-                managed = managed,
                 environment = environment,
                 description = document.description,
                 hooks = document.hooks,
@@ -79,7 +77,6 @@ public class CodexCliStorage(
             CodexCliHookLayer(
                 sourcePath = configPath,
                 sourceKind = sourceKind,
-                managed = managed,
                 environment = environment,
                 hooks = document.hooks,
             )
