@@ -13,12 +13,9 @@ import io.ktor.client.request.HttpRequestPipeline
 import io.ktor.client.request.ResponseAdapter
 import io.ktor.client.request.ResponseAdapterAttributeKey
 import io.ktor.client.request.takeFrom
-import io.ktor.http.ContentType
 import io.ktor.http.Headers
-import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
-import io.ktor.http.parseAndSortContentTypeHeader
 import io.ktor.util.AttributeKey
 import io.ktor.util.pipeline.PipelinePhase
 import io.ktor.utils.io.ByteReadChannel
@@ -29,18 +26,15 @@ import kotlin.time.Duration.Companion.seconds
 @OptIn(InternalAPI::class)
 public val SseCompatibility: ClientPlugin<Unit> = createClientPlugin("SseCompatibility") {
     on(AfterRender) { request, content ->
-        if (request.acceptsEventStream()) {
+        if (request.attributes.contains(SseCompatibilityRequestAttribute)) {
             request.attributes.put(ResponseAdapterAttributeKey, SseResponseAdapter(client))
         }
         content
     }
 }
 
-private fun HttpRequestBuilder.acceptsEventStream(): Boolean =
-    parseAndSortContentTypeHeader(headers[HttpHeaders.Accept])
-        .any { headerValue ->
-            ContentType.parse(headerValue.value).withoutParameters() == ContentType.Text.EventStream
-        }
+internal val SseCompatibilityRequestAttribute: AttributeKey<Unit> =
+    AttributeKey("SseCompatibilityRequest")
 
 @OptIn(InternalAPI::class)
 private class SseResponseAdapter(

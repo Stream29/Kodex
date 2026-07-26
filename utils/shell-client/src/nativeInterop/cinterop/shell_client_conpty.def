@@ -42,6 +42,7 @@ static inline int codexlite_spawn_windows_pty(
     HANDLE *output_read_out,
     wchar_t *command_line,
     const wchar_t *working_directory,
+    wchar_t *environment,
     SHORT columns,
     SHORT rows
 ) {
@@ -175,8 +176,10 @@ static inline int codexlite_spawn_windows_pty(
         NULL,
         NULL,
         FALSE,
-        EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED,
-        NULL,
+        EXTENDED_STARTUPINFO_PRESENT |
+            CREATE_SUSPENDED |
+            (environment == NULL ? 0 : CREATE_UNICODE_ENVIRONMENT),
+        environment,
         working_directory,
         &startup_info.StartupInfo,
         &process_info

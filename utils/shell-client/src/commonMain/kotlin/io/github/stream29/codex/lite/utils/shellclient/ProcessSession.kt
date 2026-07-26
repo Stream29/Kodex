@@ -19,7 +19,20 @@ public data class ShellProcessCommand(
     public val login: Boolean = false,
     /** Whether to attach the command to a pseudoterminal instead of ordinary pipes. */
     public val tty: Boolean = false,
-)
+    /** Environment variable overrides applied to the child process before its shell starts. */
+    public val environment: Map<String, String> = emptyMap(),
+) {
+    init {
+        require(environment.keys.all(EnvironmentVariableName::matches)) {
+            "Environment variable names must use portable shell identifier syntax."
+        }
+        require(environment.values.none { value -> '\u0000' in value }) {
+            "Environment variable values must not contain NUL."
+        }
+    }
+}
+
+private val EnvironmentVariableName: Regex = Regex("[A-Za-z_][A-Za-z0-9_]*")
 
 /** Initial terminal width used by every PTY backend. */
 internal const val DefaultPtyColumns: Int = 80
@@ -45,6 +58,20 @@ public interface ProcessSession : AutoCloseable {
 
     /** Destructive, merged standard output and standard error buffer. */
     public val stdout: StdoutBuffer
+
+    /**
+     * Destructive standard-output-only buffer for pipe sessions.
+     * PTY sessions expose their terminal stream here because a pseudoterminal
+     * does not preserve the stdout/stderr distinction.
+     */
+    public val standardOutput: StdoutBuffer
+
+    /**
+     * Destructive standard-error-only buffer for pipe sessions.
+     * PTY sessions leave this buffer empty because a pseudoterminal exposes one
+     * combined terminal stream.
+     */
+    public val standardError: StdoutBuffer
 
     /**
      * Completes with the final child-process exit code, including after

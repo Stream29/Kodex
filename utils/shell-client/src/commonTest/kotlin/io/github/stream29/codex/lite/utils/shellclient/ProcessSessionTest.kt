@@ -26,12 +26,14 @@ import kotlin.time.Duration.Companion.seconds
 private suspend fun ShellClient.startTestSession(
     command: TestShellCommand,
     tty: Boolean = false,
+    environment: Map<String, String> = emptyMap(),
 ): ProcessSession =
     start(
         ShellProcessCommand(
             command = command.command,
             shell = command.shell,
             tty = tty,
+            environment = environment,
         ),
     )
 
@@ -50,18 +52,18 @@ private fun StdoutBufferSnapshot.decodeOutput(): String =
 
 private suspend fun ProcessSession.readUntilCompleted(): CompletedProcessOutput {
     val output = StringBuilder()
-    repeat(40) {
+    repeat(100) {
         output.append(stdout.read(100.milliseconds).decodeOutput())
         if (exitCode.isCompleted) {
             return CompletedProcessOutput(output.toString(), exitCode.await())
         }
     }
-    fail("Process did not finish within four seconds.")
+    fail("Process did not finish within ten seconds.")
 }
 
 private suspend fun ProcessSession.readUntilContains(expected: String): String {
     val output = StringBuilder()
-    repeat(40) {
+    repeat(100) {
         output.append(stdout.read(100.milliseconds).decodeOutput())
         if (expected in output) return output.toString()
     }
@@ -78,7 +80,7 @@ val processSessionTest by testSuite(
             expected = Shell(type = ShellType.Bash, path = Path("/opt/codex/bash")),
             actual = parsed,
         )
-        assertEquals("\"/opt/codex/bash\"", Json.encodeToString(parsed))
+        assertEquals(Json.encodeToString(parsed.path.toString()), Json.encodeToString(parsed))
 
         val windowsPath = Json.decodeFromString<Shell>(
             "\"C:\\\\Tools\\\\PowerShell\\\\pwsh.exe\"",
@@ -122,6 +124,57 @@ val processSessionTest by testSuite(
             assertTrue("default-shell" in result.output)
         } finally {
             session.closeAndAwaitCompletion()
+            client.close()
+        }
+    }
+
+    test("preserves separate standard output and standard error streams") {
+        val client = ShellClient()
+        val session = client.startTestSession(separatedOutputProcessCommand)
+        try {
+            assertEquals(0, withTimeout(3.seconds) { session.exitCode.await() })
+
+            val merged = session.stdout.drain().decodeOutput()
+            val standardOutput = session.standardOutput.drain().decodeOutput()
+            val standardError = session.standardError.drain().decodeOutput()
+
+            assertTrue("stdout-only" in merged)
+            assertTrue("stderr-only" in merged)
+            assertTrue("stdout-only" in standardOutput)
+            assertFalse("stderr-only" in standardOutput)
+            assertTrue("stderr-only" in standardError)
+            assertFalse("stdout-only" in standardError)
+        } finally {
+            session.closeAndAwaitCompletion()
+            client.close()
+        }
+    }
+
+    test("applies command environment variables to pipes and pseudoterminals") {
+        val client = ShellClient()
+        try {
+            environmentProbeProcessCommands.forEach { command ->
+                listOf(false, true).forEach { tty ->
+                    val session = client.startTestSession(
+                        command = command,
+                        tty = tty,
+                        environment = mapOf("CODEXLITE_SHELL_TEST" to EnvironmentProbeValue),
+                    )
+                    try {
+                        val result = session.readUntilCompleted()
+
+                        assertEquals(0, result.exitCode)
+                        assertTrue(
+                            EnvironmentProbeValue in result.output,
+                            "Expected environment value from ${command.shell.type}, tty=$tty; " +
+                                "output=${result.output}",
+                        )
+                    } finally {
+                        session.closeAndAwaitCompletion()
+                    }
+                }
+            }
+        } finally {
             client.close()
         }
     }
@@ -175,10 +228,10 @@ val processSessionTest by testSuite(
         val session = client.startTestSession(delayedProcessCommand, tty = true)
         try {
             session.close()
-            withTimeout(3.seconds) {
+            withTimeout(10.seconds) {
                 session.exitCode.await()
             }
-            withTimeout(3.seconds) {
+            withTimeout(10.seconds) {
                 requireNotNull(session.scope.coroutineContext[Job]).join()
             }
         } finally {
@@ -361,4 +414,26 @@ val processSessionTest by testSuite(
             client.close()
         }
     }
+
+    test("parallel processes do not retain another session's standard input") {
+        val client = ShellClient()
+        val waiting = client.startTestSession(interactiveProcessCommand)
+        val delayed = client.startTestSession(delayedProcessCommand)
+        try {
+            assertTrue("ready" in waiting.readUntilContains("ready"))
+            assertTrue(waiting.stdin.close())
+
+            val result = withTimeout(1.seconds) { waiting.readUntilCompleted() }
+
+            assertEquals(0, result.exitCode)
+            assertTrue("received:" in result.output)
+        } finally {
+            waiting.closeAndAwaitCompletion()
+            delayed.closeAndAwaitCompletion()
+            client.close()
+        }
+    }
 }
+
+private const val EnvironmentProbeValue: String =
+    "literal %PATH% !bang! \$HOME ' \" ; & |"

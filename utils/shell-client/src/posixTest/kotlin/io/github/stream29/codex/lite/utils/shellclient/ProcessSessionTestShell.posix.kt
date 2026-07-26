@@ -21,6 +21,17 @@ internal actual val ttyProbeProcessCommand: TestShellCommand
         shell = testShell,
     )
 
+internal actual val separatedOutputProcessCommand: TestShellCommand
+    get() = TestShellCommand(
+        command = "printf 'stdout-only\\n'; printf 'stderr-only\\n' >&2",
+        shell = testShell,
+    )
+
+internal actual val environmentProbeProcessCommands: List<TestShellCommand>
+    get() = listOf(
+        TestShellCommand(command = "printf '%s' \"\$CODEXLITE_SHELL_TEST\"", shell = testShell),
+    )
+
 internal actual fun unicodeProbeProcessCommand(
     markerFileName: String,
     content: String,

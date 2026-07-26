@@ -13,10 +13,13 @@ import kotlinx.cinterop.UIntVar
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.allocArray
+import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.plus
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.set
 import kotlinx.cinterop.sizeOf
+import kotlinx.cinterop.toKStringFromUtf16
 import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
 import kotlinx.coroutines.CancellationException
@@ -41,12 +44,15 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import platform.windows.CREATE_NO_WINDOW
 import platform.windows.CREATE_SUSPENDED
+import platform.windows.CREATE_UNICODE_ENVIRONMENT
 import platform.windows.AssignProcessToJobObject
 import platform.windows.CloseHandle
 import platform.windows.CreateJobObjectW
 import platform.windows.CreatePipe
 import platform.windows.CreateProcessW
 import platform.windows.ERROR_BROKEN_PIPE
+import platform.windows.FreeEnvironmentStringsW
+import platform.windows.GetEnvironmentStringsW
 import platform.windows.GetExitCodeProcess
 import platform.windows.GetLastError
 import platform.windows.HANDLE_FLAG_INHERIT
@@ -100,90 +106,105 @@ private fun ShellProcessCommand.startWindowsPipeProcess(parentScope: CoroutineSc
         }
         withWindowsPipe(securityAttributes.ptr) { stdinRead, stdinWrite ->
             withWindowsPipe(securityAttributes.ptr) { outputRead, outputWrite ->
-                checkWindowsSuccess(
-                    SetHandleInformation(stdinWrite, HANDLE_FLAG_INHERIT.toUInt(), 0u),
-                    "make parent stdin handle non-inheritable",
-                )
-                checkWindowsSuccess(
-                    SetHandleInformation(outputRead, HANDLE_FLAG_INHERIT.toUInt(), 0u),
-                    "make parent output handle non-inheritable",
-                )
+                withWindowsPipe(securityAttributes.ptr) { errorRead, errorWrite ->
+                    checkWindowsSuccess(
+                        SetHandleInformation(stdinWrite, HANDLE_FLAG_INHERIT.toUInt(), 0u),
+                        "make parent stdin handle non-inheritable",
+                    )
+                    checkWindowsSuccess(
+                        SetHandleInformation(outputRead, HANDLE_FLAG_INHERIT.toUInt(), 0u),
+                        "make parent output handle non-inheritable",
+                    )
+                    checkWindowsSuccess(
+                        SetHandleInformation(errorRead, HANDLE_FLAG_INHERIT.toUInt(), 0u),
+                        "make parent error handle non-inheritable",
+                    )
 
-                val startupInfo = alloc<STARTUPINFOW>().apply {
-                    cb = sizeOf<STARTUPINFOW>().toUInt()
-                    lpReserved = null
-                    lpDesktop = null
-                    lpTitle = null
-                    dwX = 0u
-                    dwY = 0u
-                    dwXSize = 0u
-                    dwYSize = 0u
-                    dwXCountChars = 0u
-                    dwYCountChars = 0u
-                    dwFillAttribute = 0u
-                    dwFlags = STARTF_USESTDHANDLES.toUInt()
-                    wShowWindow = 0u
-                    cbReserved2 = 0u
-                    lpReserved2 = null
-                    hStdInput = stdinRead
-                    hStdOutput = outputWrite
-                    hStdError = outputWrite
-                }
-                val processInfo = alloc<PROCESS_INFORMATION>().apply {
-                    hProcess = null
-                    hThread = null
-                    dwProcessId = 0u
-                    dwThreadId = 0u
-                }
-                val commandLine = windowsCommandLine()
-                val currentDirectory = workingDirectory.windowsPath()
-                checkWindowsSuccess(
-                    CreateProcessW(
-                        null,
-                        windowsStringBuffer(commandLine),
-                        null,
-                        null,
-                        1,
-                        CREATE_NO_WINDOW.toUInt() or CREATE_SUSPENDED.toUInt(),
-                        null,
-                        currentDirectory,
-                        startupInfo.ptr,
-                        processInfo.ptr,
-                    ),
-                    "start process",
-                )
-                val process = requireNotNull(processInfo.hProcess)
-                val thread = requireNotNull(processInfo.hThread)
-                val job = try {
-                    // Attach the root process before it can create descendants.
-                    createWindowsProcessJob(process)
-                } catch (failure: Throwable) {
-                    TerminateProcess(process, 1u)
-                    closeWindowsHandle(process)
-                    closeWindowsHandle(thread)
-                    throw failure
-                }
-                try {
-                    if (ResumeThread(thread) == UInt.MAX_VALUE) {
-                        throw ProcessException("Failed to resume process: error ${GetLastError()}.")
+                    val startupInfo = alloc<STARTUPINFOW>().apply {
+                        cb = sizeOf<STARTUPINFOW>().toUInt()
+                        lpReserved = null
+                        lpDesktop = null
+                        lpTitle = null
+                        dwX = 0u
+                        dwY = 0u
+                        dwXSize = 0u
+                        dwYSize = 0u
+                        dwXCountChars = 0u
+                        dwYCountChars = 0u
+                        dwFillAttribute = 0u
+                        dwFlags = STARTF_USESTDHANDLES.toUInt()
+                        wShowWindow = 0u
+                        cbReserved2 = 0u
+                        lpReserved2 = null
+                        hStdInput = stdinRead
+                        hStdOutput = outputWrite
+                        hStdError = errorWrite
                     }
-                    WindowsPipeTransfer(
-                        value = WindowsProcess(
-                            processHandle = process,
-                            jobHandle = job,
-                            stdinHandle = stdinWrite,
-                            outputHandle = outputRead,
-                            parentScope = parentScope,
+                    val processInfo = alloc<PROCESS_INFORMATION>().apply {
+                        hProcess = null
+                        hThread = null
+                        dwProcessId = 0u
+                        dwThreadId = 0u
+                    }
+                    val commandLine = windowsCommandLine()
+                    val currentDirectory = workingDirectory.windowsPath()
+                    val environmentBlock = windowsEnvironmentBlock(environment)
+                    checkWindowsSuccess(
+                        CreateProcessW(
+                            null,
+                            windowsStringBuffer(commandLine),
+                            null,
+                            null,
+                            1,
+                            CREATE_NO_WINDOW.toUInt() or
+                                CREATE_SUSPENDED.toUInt() or
+                                if (environmentBlock == null) 0u else CREATE_UNICODE_ENVIRONMENT.toUInt(),
+                            environmentBlock,
+                            currentDirectory,
+                            startupInfo.ptr,
+                            processInfo.ptr,
                         ),
+                        "start process",
+                    )
+                    val process = requireNotNull(processInfo.hProcess)
+                    val thread = requireNotNull(processInfo.hThread)
+                    val job = try {
+                        // Attach the root process before it can create descendants.
+                        createWindowsProcessJob(process)
+                    } catch (failure: Throwable) {
+                        TerminateProcess(process, 1u)
+                        closeWindowsHandle(process)
+                        closeWindowsHandle(thread)
+                        throw failure
+                    }
+                    try {
+                        if (ResumeThread(thread) == UInt.MAX_VALUE) {
+                            throw ProcessException("Failed to resume process: error ${GetLastError()}.")
+                        }
+                        WindowsPipeTransfer(
+                            value = WindowsProcess(
+                                processHandle = process,
+                                jobHandle = job,
+                                stdinHandle = stdinWrite,
+                                outputHandle = outputRead,
+                                errorHandle = errorRead,
+                                parentScope = parentScope,
+                            ),
+                            transferRead = true,
+                        )
+                    } catch (failure: Throwable) {
+                        terminateWindowsProcessTree(job, process)
+                        closeWindowsHandle(job)
+                        closeWindowsHandle(process)
+                        throw failure
+                    } finally {
+                        closeWindowsHandle(thread)
+                    }
+                }.let { session ->
+                    WindowsPipeTransfer(
+                        value = session,
                         transferRead = true,
                     )
-                } catch (failure: Throwable) {
-                    terminateWindowsProcessTree(job, process)
-                    closeWindowsHandle(job)
-                    closeWindowsHandle(process)
-                    throw failure
-                } finally {
-                    closeWindowsHandle(thread)
                 }
             }.let { session ->
                 WindowsPipeTransfer(
@@ -209,6 +230,7 @@ private fun ShellProcessCommand.startWindowsPtyProcess(parentScope: CoroutineSco
         output_read_out = output.ptr,
         command_line = windowsStringBuffer(windowsCommandLine()),
         working_directory = windowsStringBuffer(workingDirectory.windowsPath()),
+        environment = windowsEnvironmentBlock(environment),
         columns = DefaultPtyColumns.toShort(),
         rows = DefaultPtyRows.toShort(),
     )
@@ -242,6 +264,7 @@ private fun ShellProcessCommand.startWindowsPtyProcess(parentScope: CoroutineSco
             jobHandle = job,
             stdinHandle = stdinHandle,
             outputHandle = outputHandle,
+            errorHandle = null,
             pseudoConsole = pseudoConsoleHandle,
             tty = true,
             parentScope = parentScope,
@@ -298,6 +321,7 @@ private class WindowsProcess(
     private val jobHandle: CPointer<out CPointed>?,
     private val stdinHandle: CPointer<out CPointed>,
     private val outputHandle: CPointer<out CPointed>,
+    private val errorHandle: CPointer<out CPointed>?,
     private val pseudoConsole: COpaquePointer? = null,
     private val tty: Boolean = false,
     parentScope: CoroutineScope,
@@ -310,6 +334,10 @@ private class WindowsProcess(
     override val stdin: SendChannel<String>
         field = StdinChannel(scope, sessionJob)
     override val stdout: StdoutBuffer
+        field = MutableStdoutBuffer(scope)
+    override val standardOutput: StdoutBuffer
+        field = MutableStdoutBuffer(scope)
+    override val standardError: StdoutBuffer
         field = MutableStdoutBuffer(scope)
     override val exitCode: Deferred<Int>
         field = CompletableDeferred()
@@ -337,13 +365,23 @@ private class WindowsProcess(
         scope.launch(WindowsProcessIoDispatcher) {
             try {
                 while (true) {
-                    for (chunk in readAvailableOutput()) {
-                        emitOutput(chunk)
+                    for (chunk in readAvailableOutput(outputHandle)) {
+                        emitOutput(chunk, standardOutput)
+                    }
+                    errorHandle?.let { handle ->
+                        for (chunk in readAvailableOutput(handle)) {
+                            emitOutput(chunk, standardError)
+                        }
                     }
                     val exitCode = exitCodeOrNull()
                     if (exitCode != null) {
-                        for (chunk in readAvailableOutput()) {
-                            emitOutput(chunk)
+                        for (chunk in readAvailableOutput(outputHandle)) {
+                            emitOutput(chunk, standardOutput)
+                        }
+                        errorHandle?.let { handle ->
+                            for (chunk in readAvailableOutput(handle)) {
+                                emitOutput(chunk, standardError)
+                            }
                         }
                         complete(exitCode)
                         return@launch
@@ -373,19 +411,27 @@ private class WindowsProcess(
         }
     }
 
-    private suspend fun emitOutput(bytes: ByteArray) {
+    private suspend fun emitOutput(bytes: ByteArray, stream: MutableStdoutBuffer) {
         if (bytes.isEmpty()) return
         sessionJob.ensureActive()
         stdout.send(bytes)
+        stream.send(bytes)
     }
 
     private suspend fun complete(exitCode: Int) {
         stdout.close()
+        standardOutput.close()
+        standardError.close()
         stdout.flush()
+        standardOutput.flush()
+        standardError.flush()
+        stdin.close()
         if (!this.exitCode.complete(exitCode)) return
 
         stdout.signalTerminal()
-        stdin.close()
+        standardOutput.signalTerminal()
+        standardError.signalTerminal()
+
         scope.launch {
             stdinWriter.join()
             cancellationGuard.cancel()
@@ -431,6 +477,8 @@ private class WindowsProcess(
         withContext(NonCancellable) {
             if (exitCode.isCompleted && !exitCode.isCancelled) {
                 stdout.finish()
+                standardOutput.finish()
+                standardError.finish()
             } else {
                 val cancellation: CancellationException = processCancellation()
                 exitCode.completeExceptionally(cancellation)
@@ -441,6 +489,8 @@ private class WindowsProcess(
                     // Resource release below is still required after a failed termination request.
                 }
                 stdout.abort(cancellation)
+                standardOutput.abort(cancellation)
+                standardError.abort(cancellation)
             }
             try {
                 releaseResources()
@@ -498,6 +548,7 @@ private class WindowsProcess(
             closeInputLocked(closeHandle = true)
             closeWindowsPseudoConsole(pseudoConsole)
             closeWindowsHandle(outputHandle)
+            closeWindowsHandle(errorHandle)
             closeWindowsHandle(processHandle)
             closeWindowsHandle(jobHandle)
         }
@@ -513,8 +564,9 @@ private class WindowsProcess(
         }
     }
 
-    private suspend fun readAvailableOutput(): List<ByteArray> = resourceMutex.withLock {
-        val output = outputHandle
+    private suspend fun readAvailableOutput(
+        output: CPointer<out CPointed>,
+    ): List<ByteArray> = resourceMutex.withLock {
         val chunks: MutableList<ByteArray> = mutableListOf()
         while (true) {
             val available = availableOutputByteCount(output)
@@ -597,6 +649,52 @@ private fun kotlinx.cinterop.MemScope.windowsStringBuffer(value: String): CPoint
     value.forEachIndexed { index, character -> buffer[index] = character.code.toUShort() }
     buffer[value.length] = 0u
     return buffer
+}
+
+private fun kotlinx.cinterop.MemScope.windowsEnvironmentBlock(
+    overrides: Map<String, String>,
+): CPointer<UShortVar>? {
+    if (overrides.isEmpty()) return null
+    val entriesByName = currentWindowsEnvironment()
+        .associateByTo(linkedMapOf()) { entry -> entry.windowsEnvironmentName().lowercase() }
+    overrides.forEach { (name, value) ->
+        entriesByName[name.lowercase()] = "$name=$value"
+    }
+    val entries = entriesByName.values.sortedWith(
+        Comparator { left, right ->
+            left.windowsEnvironmentName().compareTo(right.windowsEnvironmentName(), ignoreCase = true)
+        },
+    )
+    val buffer = allocArray<UShortVar>(entries.sumOf { entry -> entry.length + 1 } + 1)
+    var offset = 0
+    entries.forEach { entry ->
+        entry.forEach { character -> buffer[offset++] = character.code.toUShort() }
+        buffer[offset++] = 0u
+    }
+    buffer[offset] = 0u
+    return buffer
+}
+
+private fun currentWindowsEnvironment(): List<String> {
+    val block = GetEnvironmentStringsW()
+        ?: throw ProcessException("Failed to read process environment: error ${GetLastError()}.")
+    return try {
+        buildList {
+            var cursor = block
+            while (cursor[0] != 0.toUShort()) {
+                val entry = cursor.toKStringFromUtf16()
+                add(entry)
+                cursor = (cursor + entry.length + 1)!!
+            }
+        }
+    } finally {
+        FreeEnvironmentStringsW(block)
+    }
+}
+
+private fun String.windowsEnvironmentName(): String {
+    val separator = indexOf('=', startIndex = if (startsWith('=')) 1 else 0)
+    return if (separator == -1) this else substring(0, separator)
 }
 
 private fun checkWindowsSuccess(success: Int, operation: String) {

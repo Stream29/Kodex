@@ -8,6 +8,7 @@ import kotlinx.io.files.FileNotFoundException
 import kotlinx.io.files.Path
 import kotlinx.io.readByteArray
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import js.objects.unsafeJso
 import js.typedarrays.Uint8Array
@@ -45,7 +46,7 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
         } catch (error: ErrnoException) {
             if (error.code == "ENOENT") false else throw IOException("Stat failed for $path", error)
         } catch (error: Throwable) {
-            throw IOException("Stat failed for $path", error)
+            throw error.asFileSystemIOException("Stat failed for $path")
         }
 
     override suspend fun delete(path: Path, mustExist: Boolean) {
@@ -63,7 +64,7 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
                 rm(path.toString())
             }
         } catch (error: Throwable) {
-            throw IOException("Delete failed for $path", error)
+            throw error.asFileSystemIOException("Delete failed for $path")
         }
     }
 
@@ -81,7 +82,7 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
         try {
             mkdir(path.toString(), unsafeJso<MkdirAsyncOptions> { recursive = true })
         } catch (error: Throwable) {
-            throw IOException("Create directories failed for $path", error)
+            throw error.asFileSystemIOException("Create directories failed for $path")
         }
     }
 
@@ -92,7 +93,7 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
         try {
             rename(source.toString(), destination.toString())
         } catch (error: Throwable) {
-            throw IOException("Move failed from $source to $destination", error)
+            throw error.asFileSystemIOException("Move failed from $source to $destination")
         }
     }
 
@@ -103,13 +104,29 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
             if (error.code == "ENOENT") return null
             throw IOException("Stat failed for $path", error)
         } catch (error: Throwable) {
-            throw IOException("Stat failed for $path", error)
+            throw error.asFileSystemIOException("Stat failed for $path")
         }
         val isFile = stats.isFile()
         return FileMetadata(
             isRegularFile = isFile,
             isDirectory = stats.isDirectory(),
             size = if (isFile) stats.size.toLong() else -1L,
+        )
+    }
+
+    override suspend fun fingerprintOrNull(path: Path): FileFingerprint? {
+        val stats = try {
+            stat(path.toString())
+        } catch (error: ErrnoException) {
+            if (error.code == "ENOENT") return null
+            throw IOException("Stat failed for $path", error)
+        } catch (error: Throwable) {
+            throw error.asFileSystemIOException("Stat failed for $path")
+        }
+        return FileFingerprint(
+            size = if (stats.isDirectory()) -1L else stats.size.toLong(),
+            lastModifiedAtNanoseconds = (stats.mtimeMs * NanosecondsPerMillisecond).toLong(),
+            fileKey = "${stats.dev}:${stats.ino}",
         )
     }
 
@@ -120,7 +137,7 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
         return try {
             Path(realpath(path.toString()))
         } catch (error: Throwable) {
-            throw IOException("Resolve failed for $path", error)
+            throw error.asFileSystemIOException("Resolve failed for $path")
         }
     }
 
@@ -134,7 +151,7 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
                 .toList()
                 .map { Path(directory, it) }
         } catch (error: Throwable) {
-            throw IOException("List failed for $directory", error)
+            throw error.asFileSystemIOException("List failed for $directory")
         }
     }
 
@@ -147,14 +164,20 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
             }
             throw IOException("Open source failed for $path", error)
         } catch (error: Throwable) {
-            throw IOException("Open source failed for $path", error)
+            throw error.asFileSystemIOException("Open source failed for $path")
         }
 
-    override suspend fun sink(path: Path, append: Boolean): CoroutineRawSink =
+    override suspend fun sink(path: Path, append: Boolean, mustCreate: Boolean): CoroutineRawSink =
         try {
-            NodeCoroutineRawSink(openFile(path.toString(), if (append) "a" else "w"))
+            val flags = when {
+                mustCreate && append -> "ax"
+                mustCreate -> "wx"
+                append -> "a"
+                else -> "w"
+            }
+            NodeCoroutineRawSink(openFile(path.toString(), flags))
         } catch (error: Throwable) {
-            throw IOException("Open sink failed for $path", error)
+            throw error.asFileSystemIOException("Open sink failed for $path")
         }
 
     override suspend fun readString(path: Path): String =
@@ -166,10 +189,24 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
             }
             throw IOException("Read failed for $path", error)
         } catch (error: Throwable) {
-            throw IOException("Read failed for $path", error)
+            throw error.asFileSystemIOException("Read failed for $path")
         }
 
-    override suspend fun writeString(path: Path, content: String, append: Boolean) {
+    override suspend fun writeString(
+        path: Path,
+        content: String,
+        append: Boolean,
+        mustCreate: Boolean,
+    ) {
+        if (mustCreate) {
+            sink(path, append, mustCreate = true).use { sink ->
+                val bytes = content.encodeToByteArray()
+                val buffer = Buffer().apply { write(bytes) }
+                sink.write(buffer, bytes.size.toLong())
+                sink.flush()
+            }
+            return
+        }
         try {
             if (append) {
                 appendFileNode(path.toString(), content, BufferEncoding.utf8)
@@ -177,7 +214,7 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
                 writeFileNode(path.toString(), content, BufferEncoding.utf8)
             }
         } catch (error: Throwable) {
-            throw IOException("Write failed for $path", error)
+            throw error.asFileSystemIOException("Write failed for $path")
         }
     }
 }
@@ -196,7 +233,7 @@ private class NodeCoroutineRawSource(
         val result = try {
             handle.read(nodeBuffer, 0.0, readByteCount.toDouble(), null)
         } catch (error: Throwable) {
-            throw IOException("Read failed", error)
+            throw error.asFileSystemIOException("Read failed")
         }
         val bytesRead = result.bytesRead.toInt()
         if (bytesRead == 0) return -1L
@@ -210,7 +247,7 @@ private class NodeCoroutineRawSource(
         try {
             handle.close()
         } catch (error: Throwable) {
-            throw IOException("Close source failed", error)
+            throw error.asFileSystemIOException("Close source failed")
         }
     }
 }
@@ -232,7 +269,7 @@ private class NodeCoroutineRawSink(
                 val result = try {
                     handle.write(nodeBuffer, offset.toDouble(), (chunkByteCount - offset).toDouble(), null)
                 } catch (error: Throwable) {
-                    throw IOException("Write failed", error)
+                    throw error.asFileSystemIOException("Write failed")
                 }
                 val bytesWritten = result.bytesWritten.toInt()
                 if (bytesWritten <= 0) {
@@ -246,6 +283,11 @@ private class NodeCoroutineRawSink(
 
     override suspend fun flush() {
         check(!closed) { "Sink is closed." }
+        try {
+            handle.sync()
+        } catch (error: Throwable) {
+            throw error.asFileSystemIOException("Flush sink failed")
+        }
     }
 
     override suspend fun close() {
@@ -254,7 +296,14 @@ private class NodeCoroutineRawSink(
         try {
             handle.close()
         } catch (error: Throwable) {
-            throw IOException("Close sink failed", error)
+            throw error.asFileSystemIOException("Close sink failed")
         }
     }
 }
+
+private fun Throwable.asFileSystemIOException(message: String): IOException {
+    if (this is CancellationException) throw this
+    return IOException(message, this)
+}
+
+private const val NanosecondsPerMillisecond: Double = 1_000_000.0

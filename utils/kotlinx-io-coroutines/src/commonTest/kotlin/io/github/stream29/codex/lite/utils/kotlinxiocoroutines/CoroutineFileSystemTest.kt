@@ -8,6 +8,7 @@ import kotlin.random.Random
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFails
 import kotlin.test.assertTrue
 
 private suspend fun temporaryRoot(): Path =
@@ -28,15 +29,16 @@ private suspend fun deleteRecursively(path: Path) {
 val coroutineFileSystemTest by testSuite {
     testFixture { temporaryRoot() } closeWith { deleteRecursively(this) } asParameterForEach {
         test("reads writes lists and deletes files") { root ->
-            val child = Path(root, "dir/file.txt")
-            SystemCoroutineFileSystem.createDirectories(child.parent!!)
+            val directory = Path(root, "dir")
+            val child = Path(directory, "file.txt")
+            SystemCoroutineFileSystem.createDirectories(directory)
             SystemCoroutineFileSystem.writeString(child, "hello\n")
             SystemCoroutineFileSystem.writeString(child, "world\n", append = true)
 
             assertTrue(SystemCoroutineFileSystem.exists(child))
             assertEquals("hello\nworld\n", SystemCoroutineFileSystem.readString(child))
             assertEquals(true, SystemCoroutineFileSystem.metadataOrNull(child)?.isRegularFile)
-            assertEquals(listOf(child), SystemCoroutineFileSystem.list(child.parent!!))
+            assertEquals(listOf(child), SystemCoroutineFileSystem.list(directory))
 
             SystemCoroutineFileSystem.delete(child)
             assertFalse(SystemCoroutineFileSystem.exists(child))
@@ -83,6 +85,18 @@ val coroutineFileSystemTest by testSuite {
             assertFalse(SystemCoroutineFileSystem.exists(sourceFile))
             assertEquals(content, SystemCoroutineFileSystem.readString(destinationFile))
             assertEquals(listOf(destinationFile), SystemCoroutineFileSystem.list(directory))
+        }
+
+        test("mustCreate publishes exactly one file") { root ->
+            val file = Path(root, "exclusive.txt")
+            SystemCoroutineFileSystem.createDirectories(root)
+
+            SystemCoroutineFileSystem.writeString(file, "first", mustCreate = true)
+
+            assertFails {
+                SystemCoroutineFileSystem.writeString(file, "second", mustCreate = true)
+            }
+            assertEquals("first", SystemCoroutineFileSystem.readString(file))
         }
     }
 }

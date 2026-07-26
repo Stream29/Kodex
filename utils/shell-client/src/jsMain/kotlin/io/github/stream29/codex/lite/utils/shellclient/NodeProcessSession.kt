@@ -31,6 +31,10 @@ internal class NodeProcessSession(
         field = StdinChannel(scope, sessionJob)
     override val stdout: StdoutBuffer
         field = MutableStdoutBuffer(scope)
+    override val standardOutput: StdoutBuffer
+        field = MutableStdoutBuffer(scope)
+    override val standardError: StdoutBuffer
+        field = MutableStdoutBuffer(scope)
     override val exitCode: Deferred<Int>
         field = CompletableDeferred()
     private val terminationRequested: CompletableDeferred<Unit> = CompletableDeferred()
@@ -70,7 +74,11 @@ internal class NodeProcessSession(
     }
 
     /** Accepts one Node output event and resumes its source after buffering settles. */
-    internal fun acceptOutput(bytes: ByteArray, resumeSource: () -> Unit) {
+    internal fun acceptOutput(
+        bytes: ByteArray,
+        stream: NodeProcessOutputStream,
+        resumeSource: () -> Unit,
+    ) {
         if (!scope.isActive) {
             resumeSource()
             return
@@ -80,6 +88,10 @@ internal class NodeProcessSession(
                 if (bytes.isNotEmpty()) {
                     sessionJob.ensureActive()
                     stdout.send(bytes)
+                    when (stream) {
+                        NodeProcessOutputStream.StandardOutput -> standardOutput.send(bytes)
+                        NodeProcessOutputStream.StandardError -> standardError.send(bytes)
+                    }
                 }
             } catch (failure: CancellationException) {
                 throw failure
@@ -114,11 +126,18 @@ internal class NodeProcessSession(
 
     private suspend fun complete(exitCode: Int) {
         stdout.close()
+        standardOutput.close()
+        standardError.close()
         stdout.flush()
+        standardOutput.flush()
+        standardError.flush()
+        stdin.close()
         if (!this.exitCode.complete(exitCode)) return
 
         stdout.signalTerminal()
-        stdin.close()
+        standardOutput.signalTerminal()
+        standardError.signalTerminal()
+
         scope.launch {
             stdinWriter.join()
             cancellationGuard.cancel()
@@ -164,6 +183,8 @@ internal class NodeProcessSession(
         withContext(NonCancellable) {
             if (exitCode.isCompleted && !exitCode.isCancelled) {
                 stdout.finish()
+                standardOutput.finish()
+                standardError.finish()
             } else {
                 val cancellation = processCancellation()
                 exitCode.completeExceptionally(cancellation)
@@ -174,6 +195,8 @@ internal class NodeProcessSession(
                     // Resource release below is still required after a failed termination request.
                 }
                 stdout.abort(cancellation)
+                standardOutput.abort(cancellation)
+                standardError.abort(cancellation)
             }
             try {
                 release()
@@ -185,4 +208,9 @@ internal class NodeProcessSession(
 
     private fun processCancellation(cause: Throwable? = null): CancellationException =
         CancellationException(cause?.message ?: "Process session is closed.")
+}
+
+internal enum class NodeProcessOutputStream {
+    StandardOutput,
+    StandardError,
 }
