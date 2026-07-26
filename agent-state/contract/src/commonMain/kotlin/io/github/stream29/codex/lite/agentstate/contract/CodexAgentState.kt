@@ -94,11 +94,12 @@ public interface CodexAgentState {
      * Executes exactly one model request from the current state, commits each
      * completed output item, and returns that request's raw stream events.
      *
-     * The implementation resolves and renders its bound context-prefix
-     * provider, then prepends that prefix to persisted model input without
-     * writing it to storage or compaction history. It also derives the
-     * complete model-visible tool list from fixed Codex tools, current
-     * settings, and its dynamic tool-search source.
+     * The implementation passes the settings visible at the request snapshot
+     * to its bound context-prefix provider, renders the result, then prepends
+     * that prefix to persisted model input without writing it to storage or
+     * compaction history. It also derives the complete model-visible tool list
+     * from fixed Codex tools, current settings, and its dynamic tool-search
+     * source.
      *
      * Automatic compaction and `end_turn == false` continuation belong to
      * AgentRuntime rather than this state-layer operation.
@@ -140,7 +141,7 @@ public interface CodexAgentState {
      * preceding agent run has ended starts a new logical turn.
      *
      * A user-role context injection is not a turn boundary and must use
-     * [injectHistory]. A runtime admitting user input into an already active
+     * [injectHistory]. A runtime inserting user input into an already active
      * turn must retain that turn's id through the explicit overload.
      */
     public suspend fun appendUserMessage(content: List<ContentItem>): Int
@@ -148,11 +149,9 @@ public interface CodexAgentState {
     /**
      * Appends one user message and atomically persists the supplied [turnId].
      *
-     * The caller owns the turn-boundary decision: a newly allocated id admits
-     * the message as the first input of a new logical turn, while the current
-     * id keeps accepted mid-turn input in the active turn. This overload lets
-     * an outer runtime run Hooks against the same identity that storage
-     * commits.
+     * The caller owns the turn-boundary decision: a newly allocated id starts
+     * a new logical turn, while the current id keeps accepted mid-turn input
+     * in the active turn.
      */
     public suspend fun appendUserMessage(
         content: List<ContentItem>,

@@ -1,20 +1,18 @@
 package io.github.stream29.codex.lite.agentstate.test
 
-import io.github.stream29.codex.lite.agentcontext.environment.contract.EnvironmentContext
+import io.github.stream29.codex.lite.agentcontext.prefix.agentsmd.contract.AgentsMdInstructions
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefix
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
-import kotlinx.datetime.LocalDate
-import kotlinx.datetime.TimeZone
+import io.github.stream29.codex.lite.utils.shellclient.Shell
+import io.github.stream29.codex.lite.utils.shellclient.ShellType
+import kotlinx.io.files.Path
 
-/** Fixed empty host context for tests that do not exercise context projection. */
-public val TestContextPrefixProvider: AgentContextPrefixProvider = AgentContextPrefixProvider {
+/** Fixed host context for tests that do not exercise context projection. */
+public val TestContextPrefixProvider: AgentContextPrefixProvider = { _ ->
     AgentContextPrefix(
-        environmentContext = EnvironmentContext(
-            environments = emptyList(),
-            currentDate = LocalDate(2026, 7, 15),
-            timeZone = TimeZone.UTC,
-        ),
-        agentMd = emptyList(),
+        cwd = Path("."),
+        shell = Shell(ShellType.Sh, Path("sh")),
+        agentMd = AgentsMdInstructions(),
         availableSkills = emptyList(),
     )
 }

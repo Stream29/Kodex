@@ -1,7 +1,7 @@
 package io.github.stream29.codex.lite.agentstate.impl
 
-import io.github.stream29.codex.lite.agentcontext.collaboration.render.render as renderCollaborationMode
-import io.github.stream29.codex.lite.agentcontext.collaboration.render.renderMultiAgentMode
+import io.github.stream29.codex.lite.agentcontext.prefix.render.render as renderCollaborationMode
+import io.github.stream29.codex.lite.agentcontext.prefix.render.renderMultiAgentMode
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
 import io.github.stream29.codex.lite.agentcontext.prefix.render.render
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
@@ -122,7 +122,7 @@ private class CodexAgentStateImpl(
                 role = MessageRole.Developer,
                 content = listOf(ContentItem.InputText(settings.reasoning.effort.renderMultiAgentMode())),
             )
-            val contextPrefix = contextPrefixProvider.resolve().render()
+            val contextPrefix = contextPrefixProvider(settings).render()
             val checkpoint = storage.compaction[snapshotIndex]
             val threadId = storage.id.toCodexThreadId()
             val windowId = checkpoint.codexRequestWindowId(threadId)

@@ -1,16 +1,15 @@
 package io.github.stream29.codex.lite.agentstate.impl
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.agentcontext.collaboration.render.render as renderCollaborationMode
-import io.github.stream29.codex.lite.agentcontext.collaboration.render.renderMultiAgentMode
+import io.github.stream29.codex.lite.agentcontext.prefix.render.render as renderCollaborationMode
+import io.github.stream29.codex.lite.agentcontext.prefix.render.renderMultiAgentMode
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefix
 import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
-import io.github.stream29.codex.lite.agentcontext.environment.contract.AgentEnvironment
-import io.github.stream29.codex.lite.agentcontext.agentsmd.contract.AgentsMdInstruction
-import io.github.stream29.codex.lite.agentcontext.skill.contract.AvailableSkill
-import io.github.stream29.codex.lite.agentcontext.skill.contract.SkillScope
-import io.github.stream29.codex.lite.agentcontext.skill.contract.SkillSource
-import io.github.stream29.codex.lite.agentcontext.environment.contract.EnvironmentContext
+import io.github.stream29.codex.lite.agentcontext.prefix.agentsmd.contract.AgentsMdInstruction
+import io.github.stream29.codex.lite.agentcontext.prefix.agentsmd.contract.AgentsMdInstructions
+import io.github.stream29.codex.lite.agentcontext.prefix.skill.contract.AvailableSkill
+import io.github.stream29.codex.lite.agentcontext.prefix.skill.contract.SkillScope
+import io.github.stream29.codex.lite.agentcontext.prefix.skill.contract.SkillSource
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
@@ -34,28 +33,31 @@ import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchSourceInfo
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
+import io.github.stream29.codex.lite.utils.shellclient.Shell
+import io.github.stream29.codex.lite.utils.shellclient.ShellType
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
-import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.io.files.Path
 import kotlin.test.assertEquals
+import kotlin.time.Clock
 
 val agentContextProjectionTest by testSuite {
     test("projects AGENTS.md into a request without persisting it") {
         val storage = InMemoryCodexAgentStorage(settings())
         val requests = mutableListOf<ResponsesApiRequest>()
         val contextPrefixProvider = contextPrefixProvider(
-            agentMd = listOf(
-                AgentsMdInstruction.User(
+            agentMd = AgentsMdInstructions(
+                userInstruction = AgentsMdInstruction(
                     source = Path("/home/stream/AGENTS.md"),
                     text = "user instructions",
                 ),
-                AgentsMdInstruction.Project(
-                    source = Path("/workspace/AGENTS.md"),
-                    environmentId = "local",
-                    cwd = Path("/workspace"),
-                    text = "project instructions",
+                projectInstructions = listOf(
+                    AgentsMdInstruction(
+                        source = Path("/workspace/AGENTS.md"),
+                        text = "project instructions",
+                    ),
                 ),
             ),
         )
@@ -127,23 +129,9 @@ val agentContextProjectionTest by testSuite {
                 ),
             ),
         )
-        val currentDate = LocalDate(2026, 7, 15)
-        val timeZone = TimeZone.UTC
-        val environment = EnvironmentContext(
-            environments = listOf(
-                AgentEnvironment(
-                    id = "local",
-                    cwd = Path("/workspace"),
-                    shell = "bash",
-                ),
-            ),
-            currentDate = currentDate,
-            timeZone = timeZone,
-        )
         val contextPrefixProvider = contextPrefixProvider(
-            environmentContext = environment,
             skills = skillCatalog,
-            agentMd = listOf(AgentsMdInstruction.Internal(text = "agent instructions")),
+            agentMd = userAgentsMd("agent instructions"),
         )
         val agent = CodexAgentState(
             client = mockOpenAiClient {
@@ -170,12 +158,7 @@ val agentContextProjectionTest by testSuite {
                 ),
                 contextualUserMessage(
                     agentMd("agent instructions"),
-                    environmentContext(
-                        cwd = Path("/workspace"),
-                        shell = "bash",
-                        currentDate = currentDate,
-                        timeZone = timeZone,
-                    ),
+                    environmentContext(),
                 ),
                 user,
             ),
@@ -196,7 +179,7 @@ val agentContextProjectionTest by testSuite {
         )
         var currentToolSearchSpec = firstToolSearchSpec
         val contextPrefixProvider = contextPrefixProvider(
-            agentMd = listOf(AgentsMdInstruction.Internal(text = "agent instructions")),
+            agentMd = userAgentsMd("agent instructions"),
         )
         val agent = CodexAgentState(
             client = mockOpenAiClient {
@@ -242,10 +225,13 @@ val agentContextProjectionTest by testSuite {
     }
 
     test("resolves the bound context prefix for each response request") {
-        val storage = InMemoryCodexAgentStorage(settings())
+        val initialSettings = settings()
+        val updatedSettings = initialSettings.copy(cwd = Path("/updated-workspace"))
+        val storage = InMemoryCodexAgentStorage(initialSettings)
         val requests = mutableListOf<ResponsesApiRequest>()
+        val resolvedSettings = mutableListOf<CodexAgentSettings>()
         var currentPrefix = contextPrefix(
-            agentMd = listOf(AgentsMdInstruction.Internal("agent instructions 1")),
+            agentMd = userAgentsMd("agent instructions 1"),
         )
         val agent = CodexAgentState(
             client = mockOpenAiClient {
@@ -255,15 +241,19 @@ val agentContextProjectionTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = AgentContextPrefixProvider { currentPrefix },
+            contextPrefixProvider = { settings ->
+                resolvedSettings += settings
+                currentPrefix
+            },
             toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
         )
         val user = userMessage("continue")
 
         agent.appendUserMessage(user.content)
         agent.requestResponseApi().toList()
+        agent.updateSettings(updatedSettings)
         currentPrefix = contextPrefix(
-            agentMd = listOf(AgentsMdInstruction.Internal("agent instructions 2")),
+            agentMd = userAgentsMd("agent instructions 2"),
         )
         agent.requestResponseApi().toList()
 
@@ -284,6 +274,7 @@ val agentContextProjectionTest by testSuite {
             ),
             requests.map(ResponsesApiRequest::input),
         )
+        assertEquals(listOf(initialSettings, updatedSettings), resolvedSettings)
         assertEquals(user, storage.history[1])
         assertEquals(1, storage.history.latestIndex())
     }
@@ -306,7 +297,7 @@ val agentContextProjectionTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = AgentContextPrefixProvider {
+            contextPrefixProvider = { _ ->
                 prefixResolutionCount += 1
                 contextPrefix()
             },
@@ -332,33 +323,24 @@ val agentContextProjectionTest by testSuite {
         )
     }
 
-    test("renders raw project AGENTS.md sources per environment") {
+    test("renders raw project AGENTS.md sources in discovery order") {
         val storage = InMemoryCodexAgentStorage(settings())
         val requests = mutableListOf<ResponsesApiRequest>()
         val contextPrefixProvider = contextPrefixProvider(
-            agentMd = listOf(
-                AgentsMdInstruction.User(
+            agentMd = AgentsMdInstructions(
+                userInstruction = AgentsMdInstruction(
                     source = Path("/home/stream/AGENTS.md"),
                     text = "user instructions",
                 ),
-                AgentsMdInstruction.Project(
-                    source = Path("/workspace/AGENTS.md"),
-                    environmentId = "local",
-                    cwd = Path("/workspace"),
-                    text = "workspace instructions",
-                ),
-                AgentsMdInstruction.Project(
-                    source = Path("/workspace/nested/AGENTS.md"),
-                    environmentId = "local",
-                    cwd = Path("/workspace"),
-                    text = "nested workspace instructions",
-                ),
-                AgentsMdInstruction.Internal(text = "internal instructions"),
-                AgentsMdInstruction.Project(
-                    source = Path("/remote/AGENTS.md"),
-                    environmentId = "remote",
-                    cwd = Path("/remote"),
-                    text = "remote instructions",
+                projectInstructions = listOf(
+                    AgentsMdInstruction(
+                        source = Path("/workspace/AGENTS.md"),
+                        text = "workspace instructions",
+                    ),
+                    AgentsMdInstruction(
+                        source = Path("/workspace/nested/AGENTS.md"),
+                        text = "nested workspace instructions",
+                    ),
                 ),
             ),
         )
@@ -383,22 +365,17 @@ val agentContextProjectionTest by testSuite {
                 collaborationMessage(ModeKind.Default),
                 multiAgentMessage(),
                 contextualUserMessage(
-                    agentMd(
+                    agentMdForDirectory(
                         """
                         user instructions
 
-                        for `local` with root /workspace
+                        --- project-doc ---
 
                         workspace instructions
 
                         nested workspace instructions
-
-                        internal instructions
-
-                        for `remote` with root /remote
-
-                        remote instructions
                         """.trimIndent(),
+                        directory = "/workspace",
                     ),
                     environmentContext(),
                 ),
@@ -409,38 +386,36 @@ val agentContextProjectionTest by testSuite {
     }
 }
 
-private val testCurrentDate: LocalDate = LocalDate(2026, 7, 15)
-
-private val testEnvironmentContext: EnvironmentContext =
-    EnvironmentContext(
-        environments = listOf(
-            AgentEnvironment(
-                id = "local",
-                cwd = Path("/workspace"),
-                shell = "bash",
-            ),
-        ),
-        currentDate = testCurrentDate,
-        timeZone = TimeZone.UTC,
-    )
+private val testShell: Shell = Shell(ShellType.Bash, Path("/bin/bash"))
 
 private fun contextPrefixProvider(
-    environmentContext: EnvironmentContext = testEnvironmentContext,
+    cwd: Path = Path("/workspace"),
+    shell: Shell = testShell,
     skills: List<AvailableSkill> = emptyList(),
-    agentMd: List<AgentsMdInstruction> = emptyList(),
-): AgentContextPrefixProvider = AgentContextPrefixProvider {
-    contextPrefix(environmentContext, skills, agentMd)
+    agentMd: AgentsMdInstructions = AgentsMdInstructions(),
+): AgentContextPrefixProvider = { _ ->
+    contextPrefix(cwd, shell, skills, agentMd)
 }
 
 private fun contextPrefix(
-    environmentContext: EnvironmentContext = testEnvironmentContext,
+    cwd: Path = Path("/workspace"),
+    shell: Shell = testShell,
     skills: List<AvailableSkill> = emptyList(),
-    agentMd: List<AgentsMdInstruction> = emptyList(),
+    agentMd: AgentsMdInstructions = AgentsMdInstructions(),
 ): AgentContextPrefix = AgentContextPrefix(
-    environmentContext = environmentContext,
+    cwd = cwd,
+    shell = shell,
     agentMd = agentMd,
     availableSkills = skills,
 )
+
+private fun userAgentsMd(text: String): AgentsMdInstructions =
+    AgentsMdInstructions(
+        userInstruction = AgentsMdInstruction(
+            source = Path("/home/stream/AGENTS.md"),
+            text = text,
+        ),
+    )
 
 private fun settings(
     collaborationMode: ModeKind = ModeKind.Default,
@@ -501,13 +476,15 @@ private fun availableSkills(skills: List<AvailableSkill>): String = buildString 
 private fun environmentContext(
     cwd: Path = Path("/workspace"),
     shell: String = "bash",
-    currentDate: LocalDate = testCurrentDate,
-    timeZone: TimeZone = TimeZone.UTC,
-): String = buildString {
-    append("<environment_context>\n")
-    append("  <cwd>$cwd</cwd>\n")
-    append("  <shell>$shell</shell>\n")
-    append("  <current_date>$currentDate</current_date>\n")
-    append("  <timezone>$timeZone</timezone>\n")
-    append("</environment_context>")
+): String {
+    val timeZone = TimeZone.currentSystemDefault()
+    val currentDate = Clock.System.now().toLocalDateTime(timeZone).date
+    return buildString {
+        append("<environment_context>\n")
+        append("  <cwd>$cwd</cwd>\n")
+        append("  <shell>$shell</shell>\n")
+        append("  <current_date>$currentDate</current_date>\n")
+        append("  <timezone>$timeZone</timezone>\n")
+        append("</environment_context>")
+    }
 }
