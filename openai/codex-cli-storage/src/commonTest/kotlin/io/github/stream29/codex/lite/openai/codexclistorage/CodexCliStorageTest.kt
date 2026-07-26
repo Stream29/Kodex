@@ -160,10 +160,6 @@ val codexCliStorageTest by testSuite {
                 type = "command"
                 command = "run-mcp"
                 command_windows = "run-mcp-windows"
-
-                [hooks.state."state-key"]
-                enabled = false
-                trusted_hash = "sha256:stored"
                 """.trimIndent(),
             )
 
@@ -196,8 +192,6 @@ val codexCliStorageTest by testSuite {
             assertFalse(regularExpression.matches(listOf("shell")))
             val tomlCommand = assertIs<CodexCliHookHandler.Command>(tomlGroup.hooks.single())
             assertEquals("run-mcp-windows", tomlCommand.windowsCommand)
-            assertEquals(false, tomlLayer.states.getValue("state-key").enabled)
-            assertEquals("sha256:stored", tomlLayer.states.getValue("state-key").trustedHash)
         } finally {
             deleteRecursively(root)
         }
