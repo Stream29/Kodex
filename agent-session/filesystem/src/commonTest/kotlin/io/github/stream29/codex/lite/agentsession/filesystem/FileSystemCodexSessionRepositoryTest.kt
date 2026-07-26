@@ -32,8 +32,11 @@ private suspend fun temporaryRepositoryRoot(): Path =
         SystemCoroutineFileSystem.createDirectories(root)
     }
 
-private fun settings(name: String = ""): CodexAgentSettings =
-    CodexAgentSettings(model = OpenAiModelId("test-model"), threadName = name)
+private fun settings(
+    name: String = "",
+    cwd: Path = Path("."),
+): CodexAgentSettings =
+    CodexAgentSettings(model = OpenAiModelId("test-model"), cwd = cwd, threadName = name)
 
 private fun userMessage(text: String): ResponseItem.Message =
     ResponseItem.Message(
@@ -67,13 +70,16 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
             assertEquals(-1, session.storage.latestIndex())
             session.storage.initialize(settings("root"))
             assertEquals(0, session.storage.latestIndex())
+            assertEquals(0L, session.storage.tokenCount[0])
             repository.closeAndJoin()
         }
 
         test("persists canonical root layout and lightweight entries") { root ->
             val repository = FileSystemCodexSessionRepository(root)
-            val index = repository.createInitialized(settings())
+            val cwd = Path(root, "workspace")
+            val index = repository.createInitialized(settings(cwd = cwd))
             val session = repository.open(index)
+            val storageId = session.storage.id
             val timestamp = Instant.parse("2026-07-22T00:00:00Z")
             session.storage.history[1] = userMessage("persisted")
             session.storage.timestamp[1] = timestamp
@@ -92,8 +98,9 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
 
             val reopened = FileSystemCodexSessionRepository(root)
             val reopenedSession = reopened.open(index)
-            assertEquals(session.storage.id, reopenedSession.storage.id)
+            assertEquals(storageId, reopenedSession.storage.id)
             assertEquals(userMessage("persisted"), reopenedSession.storage.history[1])
+            assertEquals(cwd, reopenedSession.storage.settings[0].cwd)
             reopened.closeAndJoin()
         }
 
@@ -172,7 +179,8 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
 
         test("fork is a downstream operation and does not copy descendants") { root ->
             val sourceRepository = InMemoryCodexSessionRepository()
-            val sourceIndex = sourceRepository.createInitialized(settings("Source"))
+            val sourceCwd = Path(root, "source-workspace")
+            val sourceIndex = sourceRepository.createInitialized(settings("Source", sourceCwd))
             val source = sourceRepository.open(sourceIndex)
             source.storage.history[1] = userMessage("copied")
             source.spawnInitialized("child")
@@ -187,8 +195,10 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
             assertEquals(listOf(1), target.storage.history.indexes().toList())
             assertEquals(userMessage("copied"), target.storage.history[1])
             assertEquals("[fork] Source", target.storage.settings[2].threadName)
+            assertEquals(sourceCwd, target.storage.settings[2].cwd)
             assertEquals(emptyList(), target.subagents.list())
             repository.closeAndJoin()
+            sourceRepository.closeAndJoin()
         }
 
     }
@@ -202,7 +212,7 @@ private suspend fun deleteRecursively(path: Path) {
     SystemCoroutineFileSystem.delete(path, mustExist = false)
 }
 
-private suspend fun FileSystemCodexSessionRepository.closeAndJoin() {
+private suspend fun CodexSessionRepository.closeAndJoin() {
     cancel()
     coroutineContext[Job]?.join()
 }
