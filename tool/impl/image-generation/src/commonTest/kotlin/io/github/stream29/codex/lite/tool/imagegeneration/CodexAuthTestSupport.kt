@@ -2,9 +2,9 @@
 
 package io.github.stream29.codex.lite.tool.imagegeneration
 
-import io.github.stream29.codex.lite.openai.MutableOpenAiSubscriptionAuthSession
+import io.github.stream29.codex.lite.cli.auth.CodexAuthStore
+import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthState
-import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthSession
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
@@ -12,8 +12,8 @@ import io.github.stream29.codex.lite.utils.osenvironment.userHomeDirectory
 import kotlinx.io.files.Path
 import kotlin.io.encoding.Base64
 
-internal suspend fun codexAuthProvider(): OpenAiSubscriptionAuthSession =
-    MutableOpenAiSubscriptionAuthSession(
+internal suspend fun codexAuthStore(): CodexAuthStore =
+    InMemoryCodexAuthStore(
         CodexCliStorage(testCodexDirectory()).readAuthOrNull().toSubscriptionAuthStateOrThrow(),
     )
 

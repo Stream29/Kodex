@@ -4,12 +4,12 @@ import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 
+import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
 import io.github.stream29.codex.lite.openai.ClickOperation
 import io.github.stream29.codex.lite.openai.FindOperation
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.FinanceAssetType
 import io.github.stream29.codex.lite.openai.FinanceOperation
-import io.github.stream29.codex.lite.openai.MutableOpenAiSubscriptionAuthSession
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.OpenAiResult
@@ -50,7 +50,7 @@ private suspend fun realWebRunClient(): OpenAiClient {
         ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
         ?: "0.1.0"
     return OpenAiClient(
-        authProvider = MutableOpenAiSubscriptionAuthSession(storage.readAuthOrNull().toSubscriptionAuthStateOrThrow()),
+        authStore = InMemoryCodexAuthStore(storage.readAuthOrNull().toSubscriptionAuthStateOrThrow()),
         config = OpenAiClientConfig(clientVersion = clientVersion),
     )
 }

@@ -5,30 +5,29 @@ import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentruntime.compact.compactionRuntime
+import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
 import io.github.stream29.codex.lite.agentruntime.plan.planRuntime
-import io.github.stream29.codex.lite.agentruntime.tool.ToolExposure
-import io.github.stream29.codex.lite.agentruntime.tool.ToolRuntimeEntry
+import io.github.stream29.codex.lite.agentruntime.requestuserinput.requestUserInputRuntime
 import io.github.stream29.codex.lite.agentruntime.tool.toolRuntime
-import io.github.stream29.codex.lite.agentruntime.tool.toolRuntimePlan
-import io.github.stream29.codex.lite.agentcontext.collaboration.render.render as renderCollaborationMode
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentsMdInstruction
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.EnvironmentContext
-import io.github.stream29.codex.lite.agentcontext.skill.contract.AvailableSkill
+import io.github.stream29.codex.lite.agentcontext.prefix.render.render as renderCollaborationMode
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.contract.forcedCompact
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
+import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
+import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
 import io.github.stream29.codex.lite.openai.ContentItem
+import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
+import io.github.stream29.codex.lite.openai.FunctionCallOutputContentItem
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
 import io.github.stream29.codex.lite.openai.ImageData
+import io.github.stream29.codex.lite.openai.ImageDetail
 import io.github.stream29.codex.lite.openai.ImageResponse
-import io.github.stream29.codex.lite.openai.MutableOpenAiSubscriptionAuthSession
+import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
@@ -40,6 +39,7 @@ import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
+import io.github.stream29.codex.lite.openai.SearchCommands
 import io.github.stream29.codex.lite.openai.StepStatus
 import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.openai.ToolChoice
@@ -49,30 +49,47 @@ import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.client.OpenAiClient as RealOpenAiClient
 import io.github.stream29.codex.lite.openai.client.OpenAiClientConfig
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
-import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorageException
-import io.github.stream29.codex.lite.openai.codexclistorage.defaultCodexDirectory
+import io.github.stream29.codex.lite.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchTools
 import io.github.stream29.codex.lite.tool.contract.Tool
+import io.github.stream29.codex.lite.tool.currenttime.CurrentTimeTools
+import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenNamespace
+import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenToolArguments
+import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenToolName
 import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationToolClient
 import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationTools
 import io.github.stream29.codex.lite.tool.plan.PlanTools
+import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputAnswer
+import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputResponse
+import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchCatalog
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchSourceInfo
+import io.github.stream29.codex.lite.tool.toolsearch.toToolSearchDocuments
+import io.github.stream29.codex.lite.tool.viewimage.ViewImageToolArguments
+import io.github.stream29.codex.lite.tool.viewimage.ViewImageToolClient
 import io.github.stream29.codex.lite.tool.viewimage.ViewImageTools
+import io.github.stream29.codex.lite.tool.webrun.WebRunNamespace
+import io.github.stream29.codex.lite.tool.webrun.WebRunToolClient
+import io.github.stream29.codex.lite.tool.webrun.WebRunToolName
+import io.github.stream29.codex.lite.tool.webrun.WebRunTools
+import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
+import io.github.stream29.codex.lite.utils.osenvironment.userHomeDirectory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withContext
-import kotlinx.datetime.LocalDate
-import kotlinx.datetime.TimeZone
 import kotlinx.io.files.Path
-import kotlinx.serialization.encodeToString
+import kotlin.io.encoding.Base64
+import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
@@ -136,40 +153,13 @@ private class RecordingTool(
     }
 }
 
-private val testContextPrefixProvider: AgentContextPrefixProvider =
-    object : AgentContextPrefixProvider {
-        override val environmentContext: EnvironmentContext =
-            EnvironmentContext(
-            environments = listOf(
-                AgentEnvironment(
-                    id = "test",
-                    cwd = Path("/workspace"),
-                    shell = "bash",
-                ),
-            ),
-            currentDate = LocalDate(2026, 7, 15),
-            timeZone = TimeZone.UTC,
-            )
-
-        override val availableSkills: List<AvailableSkill> = emptyList()
-
-        override val agentMd: List<AgentsMdInstruction> = emptyList()
+private class RequestOnlyRuntime(
+    private val delegate: CodexAgentStateContract,
+) : CodexAgentRuntime, CodexAgentStateContract by delegate {
+    override fun resume(): Flow<ResponsesStreamEvent> = flow {
+        emitAll(requestResponseApi())
     }
-
-private val testContextInput: ResponseItem.Message =
-    ResponseItem.Message(
-        role = MessageRole.User,
-        content = listOf(
-            ContentItem.InputText(
-                "<environment_context>\n" +
-                    "  <cwd>/workspace</cwd>\n" +
-                    "  <shell>bash</shell>\n" +
-                    "  <current_date>2026-07-15</current_date>\n" +
-                    "  <timezone>UTC</timezone>\n" +
-                    "</environment_context>",
-            ),
-        ),
-    )
+}
 
 private val defaultCollaborationInput: ResponseItem.Message =
     ResponseItem.Message(
@@ -178,7 +168,7 @@ private val defaultCollaborationInput: ResponseItem.Message =
     )
 
 private fun requestInput(vararg durableItems: ResponseItem): List<ResponseItem> =
-    listOf(defaultCollaborationInput, testContextInput, *durableItems)
+    listOf(defaultCollaborationInput, *durableItems)
 
 private suspend fun OpenAiClient.collectResponseProbe(input: List<ResponseItem>): List<ResponsesStreamEvent> =
     createResponse(
@@ -191,11 +181,21 @@ private suspend fun OpenAiClient.collectResponseProbe(input: List<ResponseItem>)
 
 private suspend fun realOpenAiClient(): RealOpenAiClient =
     RealOpenAiClient(
-        authProvider = MutableOpenAiSubscriptionAuthSession(testCodexStorage().readAuth()),
+        authStore = InMemoryCodexAuthStore(
+            testCodexStorage().readAuthOrNull().toSubscriptionAuthStateOrThrow(),
+        ),
         config = OpenAiClientConfig(
             clientVersion = testCodexClientVersion(),
         ),
     )
+
+private fun CodexAuthJson?.toSubscriptionAuthStateOrThrow(): OpenAiSubscriptionAuthState {
+    val tokens = this?.tokens ?: error("Codex CLI auth tokens are required.")
+    return OpenAiSubscriptionAuthState(
+        accessToken = tokens.accessToken,
+        accountId = tokens.accountId?.takeIf(String::isNotBlank),
+    )
+}
 
 private fun List<ResponsesStreamEvent>.completedResponseOrFail(probeName: String): Response {
     filterIsInstance<ResponsesStreamEvent.Failed>().firstOrNull()?.let { event ->
@@ -253,7 +253,7 @@ private fun testCodexDirectory(): Path {
     if (explicitCodexHome != null) {
         return Path(explicitCodexHome)
     }
-    return defaultCodexDirectory()
+    return userHomeDirectory()?.let { home -> Path(home, ".codex") }
         ?: throw IllegalStateException("CODEX_HOME or a readable user home directory must be set for real OpenAI integration tests.")
 }
 
@@ -261,25 +261,16 @@ private fun testCodexStorage(): CodexCliStorage =
     CodexCliStorage(testCodexDirectory())
 
 private suspend fun testCodexClientVersion(): String =
-    testCodexStorage().readModelsCache().clientVersion
+    testCodexStorage().readModelsCacheOrNull()?.clientVersion
         ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
         ?: "0.1.0"
 
 private suspend fun testCodexModel(): OpenAiModelId {
     val storage = testCodexStorage()
-    val configuredModel = try {
-        storage.readConfigToml()
-            .lineSequence()
-            .firstOrNull { it.trimStart().startsWith("model = ") }
-            ?.substringAfter("=")
-            ?.trim()
-            ?.removeSurrounding("\"")
-            ?.takeIf(String::isNotBlank)
-    } catch (_: CodexCliStorageException) {
-        null
-    }
-    val cachedModels = storage.readModelsCache()
-        .models
+    val configuredModel = storage.readConfigTomlOrNull()?.model
+    val cachedModels = storage.readModelsCacheOrNull()
+        ?.models
+        .orEmpty()
         .map { model -> model.slug.value }
     return OpenAiModelId(
         configuredModel
@@ -303,6 +294,9 @@ private suspend fun InMemoryCodexAgentStorage.lastAssistantMessage(): String? {
     return message
 }
 
+private suspend fun InMemoryCodexAgentStorage.historyItems(): List<ResponseItem.HistoryItem> =
+    history.indexes().toList().map { index -> history[index] }
+
 private fun userMessage(text: String): ResponseItem.Message =
     ResponseItem.Message(
         role = MessageRole.User,
@@ -322,6 +316,36 @@ private fun assistantMessage(text: String): ResponseItem.Message =
         role = MessageRole.Assistant,
         content = listOf(ContentItem.OutputText(text)),
     )
+
+private const val ViewImageProbeFileName: String = "runtime-probe.png"
+private const val ViewImageProbeMarker: String = "VIEW_IMAGE_RUNTIME_COMPLETED"
+private const val ViewImageProbePngBase64: String =
+    "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAgCAYAAACinX6EAAAAgklEQVR4Xu3QoRHDABADQeNgY+MUkf6rcC82XxKskcASgZ/5Oz7n9TQ7HNosgEObBXBoswAObf4GuH/faP6jBXCQB9P4jxbAQR5M4z9aAAd5MI3/aAEc5ME0/qMFcJAH0/iPFsBBHkzjP1oAB3kwjf9oARzaLIBDmwVwaLMADm3qA7y8LuS12WzThwAAAABJRU5ErkJggg=="
+private const val ImageGenerationProbeMarker: String = "IMAGE_GENERATION_RUNTIME_COMPLETED"
+private const val WebRunProbeMarker: String = "WEB_RUN_RUNTIME_COMPLETED"
+private const val RequestUserInputProbeMarker: String = "REQUEST_USER_INPUT_RUNTIME_COMPLETED"
+
+private suspend fun createViewImageProbeRoot(): Path {
+    val root = Path(
+        "build/tmp/view-image-agent-runtime-${Random.nextLong().toString().replace('-', '0')}",
+    )
+    SystemCoroutineFileSystem.createDirectories(root)
+    SystemCoroutineFileSystem.writeBytes(
+        Path(root, ViewImageProbeFileName),
+        Base64.decode(ViewImageProbePngBase64),
+    )
+    return root
+}
+
+private suspend fun deleteViewImageProbeRoot(path: Path) {
+    val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
+    if (metadata.isDirectory) {
+        for (child in SystemCoroutineFileSystem.list(path)) {
+            deleteViewImageProbeRoot(child)
+        }
+    }
+    SystemCoroutineFileSystem.delete(path, mustExist = false)
+}
 
 private fun ResponseItem.Message.text(): String =
     content.joinToString(separator = "") { item ->
@@ -379,7 +403,8 @@ val minimalAgentConversationTest by testSuite {
         val testAgent = CodexAgentState(
             client = testClient,
             storage = testStorage,
-            contextPrefixProvider = testContextPrefixProvider,
+            contextPrefixProvider = TestContextPrefixProvider,
+            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
         )
         object {
             val storage = testStorage
@@ -415,7 +440,6 @@ val minimalAgentConversationTest by testSuite {
             assertIs<ResponseItem.Message>(storage.history[2])
             assertIs<ResponseItem.Message>(storage.history[3])
             assertEquals(OpenAiModelId("test-model"), storage.settings[2].model)
-            assertEquals(emptyList(), storage.settings[2].tools)
             assertEquals(0, storage.compaction[3].historyBaseIndex)
             assertTrue(storage.timestamp[3] > Instant.fromEpochSeconds(0))
             assertEquals(-1, storage.tokenCount.latestIndex())
@@ -428,7 +452,8 @@ val toolRuntimeCompositionTest by testSuite {
         val state = CodexAgentState(
             client = mockOpenAiClient(),
             storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model"))),
-            contextPrefixProvider = testContextPrefixProvider,
+            contextPrefixProvider = TestContextPrefixProvider,
+            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
         )
 
         assertFailsWith<IllegalArgumentException> {
@@ -456,7 +481,6 @@ val toolRuntimeCompositionTest by testSuite {
         val storage = InMemoryCodexAgentStorage(
             CodexAgentSettings(
                 model = OpenAiModelId("test-model"),
-                tools = listOf(ViewImageTools.spec),
             ),
         )
         val state = CodexAgentState(
@@ -471,15 +495,19 @@ val toolRuntimeCompositionTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
+            contextPrefixProvider = TestContextPrefixProvider,
+            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
         )
         val viewTool = RecordingTool(ViewImageTools.spec, "image viewed")
 
         state.appendUserMessage(userMessage("Inspect the image.").content)
-        state.compactionRuntime(testModelCatalog()).toolRuntime(listOf(viewTool)).resume().toList()
+        state
+            .compactionRuntime(testModelCatalog())
+            .toolRuntime(listOf(viewTool))
+            .resume()
+            .toList()
 
         assertEquals(1, requests.size)
-        assertEquals(listOf(ViewImageTools.spec), requests.single().tools)
         assertEquals(listOf<ResponseItem.ToolCall>(configuredCall), viewTool.calls)
         assertEquals(
             listOf<ResponseItem.ToolCall>(unconfiguredCall),
@@ -514,16 +542,13 @@ val toolRuntimeCompositionTest by testSuite {
             callId = "call_image",
         )
         val requests = mutableListOf<ResponsesApiRequest>()
-        val toolSpecs = listOf(
-            PlanTools.spec,
-            ApplyPatchTools.spec,
-            ViewImageTools.spec,
-            ImageGenerationTools.spec,
+        val toolSearchCatalog = ToolSearchCatalog(
+            listOf(ViewImageTools.spec, ImageGenerationTools.spec)
+                .flatMap { spec -> spec.toToolSearchDocuments() },
         )
         val storage = InMemoryCodexAgentStorage(
             CodexAgentSettings(
                 model = OpenAiModelId("test-model"),
-                tools = toolSpecs,
             ),
         )
         val state = CodexAgentState(
@@ -549,7 +574,8 @@ val toolRuntimeCompositionTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
+            toolSearchToolSpec = toolSearchCatalog::currentSpec,
+            contextPrefixProvider = TestContextPrefixProvider,
         )
         val patchTool = RecordingTool(ApplyPatchTools.spec, "patch applied")
         val viewTool = RecordingTool(ViewImageTools.spec, "image viewed")
@@ -571,14 +597,14 @@ val toolRuntimeCompositionTest by testSuite {
         val runtime = state
             .compactionRuntime(testModelCatalog())
             .planRuntime()
-            .toolRuntime(listOf(patchTool, viewTool, imageTool))
+            .toolRuntime(listOf(patchTool, viewTool, imageTool), toolSearchCatalog)
 
         state.appendUserMessage(userMessage("Use every local tool.").content)
         runtime.resume().toList()
 
         assertEquals(2, requests.size)
-        assertEquals(toolSpecs, requests.first().tools)
-        assertEquals(toolSpecs, requests[1].tools)
+        assertEquals(requests.first().tools, requests[1].tools)
+        assertEquals(toolSearchCatalog.currentSpec(), requests.first().tools.last())
         assertEquals(listOf<ResponseItem.ToolCall>(patchCall), patchTool.calls)
         assertEquals(listOf<ResponseItem.ToolCall>(viewCall), viewTool.calls)
         assertEquals(listOf("draw a square"), imagePrompts)
@@ -601,24 +627,18 @@ val toolRuntimeCompositionTest by testSuite {
             callId = "call_view",
         )
         val viewTool = RecordingTool(ViewImageTools.spec, "image viewed")
-        val plan = toolRuntimePlan(
-            entries = listOf(
-                ToolRuntimeEntry(
-                    tool = viewTool,
-                    exposure = ToolExposure.Deferred,
-                    sourceInfo = ToolSearchSourceInfo(
-                        name = "Workspace tools",
-                        description = "Tools that inspect the current workspace.",
-                    ),
+        val toolSearchCatalog = ToolSearchCatalog(
+            viewTool.spec.toToolSearchDocuments(
+                ToolSearchSourceInfo(
+                    name = "Workspace tools",
+                    description = "Tools that inspect the current workspace.",
                 ),
             ),
-            toolSearchEnabled = true,
         )
         val requests = mutableListOf<ResponsesApiRequest>()
         val storage = InMemoryCodexAgentStorage(
             CodexAgentSettings(
                 model = OpenAiModelId("test-model"),
-                tools = plan.modelVisibleSpecs,
             ),
         )
         val state = CodexAgentState(
@@ -646,14 +666,20 @@ val toolRuntimeCompositionTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
+            toolSearchToolSpec = toolSearchCatalog::currentSpec,
+            contextPrefixProvider = TestContextPrefixProvider,
         )
 
         state.appendUserMessage(userMessage("Inspect the diagram.").content)
-        state.compactionRuntime(testModelCatalog()).toolRuntime(plan).resume().toList()
+        state
+            .compactionRuntime(testModelCatalog())
+            .toolRuntime(listOf(viewTool), toolSearchCatalog)
+            .resume()
+            .toList()
 
         assertEquals(3, requests.size)
-        assertEquals(List(3) { plan.modelVisibleSpecs }, requests.map { request -> request.tools })
+        assertTrue(requests.all { request -> request.tools == requests.first().tools })
+        assertEquals(toolSearchCatalog.currentSpec(), requests.first().tools.last())
         val searchOutput = assertIs<ResponseItem.ClientToolSearchOutput>(requests[1].input.last())
         assertEquals("call_search", searchOutput.callId)
         assertEquals(listOf(ViewImageTools.spec.copy(deferLoading = true)), searchOutput.tools)
@@ -674,18 +700,17 @@ val openAiStoryContinuationProbeTest by testSuite {
             val agent = CodexAgentState(
                 client = client,
                 storage = storage,
-                contextPrefixProvider = testContextPrefixProvider,
+                contextPrefixProvider = TestContextPrefixProvider,
+                toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
             )
-            val firstStory = withContext(Dispatchers.Default) {
-                agent.appendUserMessage("请用中文讲一个两句以内的微型故事，只讲故事本身。")
-                agent.requestResponseApi().collect()
-                storage.lastAssistantMessage()
-            } ?: fail("Expected the first response to contain an assistant story.")
-            val continuation = withContext(Dispatchers.Default) {
-                agent.appendUserMessage("请基于上一段故事继续写两句以内，不要重讲开头。")
-                agent.requestResponseApi().collect()
-                storage.lastAssistantMessage()
-            } ?: fail("Expected the second response to contain a continuation.")
+            agent.appendUserMessage("请用中文讲一个两句以内的微型故事，只讲故事本身。")
+            agent.requestResponseApi().collect()
+            val firstStory = storage.lastAssistantMessage()
+                ?: fail("Expected the first response to contain an assistant story.")
+            agent.appendUserMessage("请基于上一段故事继续写两句以内，不要重讲开头。")
+            agent.requestResponseApi().collect()
+            val continuation = storage.lastAssistantMessage()
+                ?: fail("Expected the second response to contain a continuation.")
 
             println("story probe first response: $firstStory")
             println("story probe continuation: $continuation")
@@ -705,6 +730,389 @@ val openAiStoryContinuationProbeTest by testSuite {
                 },
                 "Expected the second request to include the first assistant story from storage.",
             )
+        }
+    }
+}
+
+val openAiCurrentTimeToolRoundTripProbeTest by testSuite {
+    testFixture {
+        RecordingOpenAiClient(realOpenAiClient())
+    } asParameterForEach {
+        test(
+            "real runtime replays a namespaced current-time tool round trip",
+            testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
+        ) { client ->
+            val currentTimeTool = CurrentTimeTools.createTool()
+            val modelCatalog = testModelCatalog()
+            try {
+                val storage = InMemoryCodexAgentStorage(
+                    CodexAgentSettings(
+                        model = testCodexModel(),
+                        instructions =
+                            "When the user asks you to inspect the system time, call " +
+                                "clock.curr_time exactly once before answering.",
+                    ),
+                )
+                val state = CodexAgentState(
+                    client = client,
+                    storage = storage,
+                    contextPrefixProvider = TestContextPrefixProvider,
+                    toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+                )
+                val runtime = state
+                    .compactionRuntime(modelCatalog)
+                    .toolRuntime(listOf(currentTimeTool))
+
+                listOf(
+                    "hello",
+                    "今天的日期是？",
+                    "你看看系统时间",
+                ).forEach { message ->
+                    state.appendUserMessage(message)
+                    runtime.resume().collect()
+                }
+
+                val history = storage.historyItems()
+                assertTrue(
+                    history.any { item ->
+                        item is ResponseItem.FunctionCall &&
+                            item.namespace == "clock" &&
+                            item.name == "curr_time"
+                    },
+                    "Expected the model to call clock.curr_time.",
+                )
+                assertTrue(
+                    history.any { item -> item is ResponseItem.FunctionCallOutput },
+                    "Expected the current-time result to be persisted before the follow-up request.",
+                )
+                assertIs<CodexAgentStateValue.AssistantMessage>(state.state.value)
+                assertTrue(
+                    client.requests.size >= 4,
+                    "Expected the tool result to trigger a follow-up Responses request.",
+                )
+            } finally {
+                currentTimeTool.close()
+                modelCatalog.close()
+            }
+        }
+    }
+}
+
+val openAiViewImageToolRuntimeProbeTest by testSuite {
+    testFixture {
+        val root = createViewImageProbeRoot()
+        val client = RecordingOpenAiClient(realOpenAiClient())
+        object {
+            val imageRoot = root
+            val openAiClient = client
+        }
+    } closeWith {
+        try {
+            openAiClient.close()
+        } finally {
+            deleteViewImageProbeRoot(imageRoot)
+        }
+    } asContextForEach {
+        test(
+            "real tool runtime discovers view_image and reads a local image",
+            testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
+        ) {
+            val viewImageTool = ViewImageTools.createTool(ViewImageToolClient(root = imageRoot))
+            val toolSearchCatalog = ToolSearchCatalog(
+                viewImageTool.spec.toToolSearchDocuments(
+                    ToolSearchSourceInfo(
+                        name = "Local image tools",
+                        description = "Tools for reading image files in the current workspace.",
+                    ),
+                ),
+            )
+            try {
+                val storage = InMemoryCodexAgentStorage(
+                    CodexAgentSettings(model = testCodexModel()),
+                )
+                val state = CodexAgentState(
+                    client = openAiClient,
+                    storage = storage,
+                    contextPrefixProvider = TestContextPrefixProvider,
+                    toolSearchToolSpec = toolSearchCatalog::currentSpec,
+                )
+                val runtime = RequestOnlyRuntime(state)
+                    .toolRuntime(listOf(viewImageTool), toolSearchCatalog)
+
+                state.appendUserMessage(
+                    "Use the available image-viewing tool named `view_image` to inspect the local " +
+                        "image at relative path `$ViewImageProbeFileName`. You must read the image " +
+                        "with that tool before answering. Then reply with exactly $ViewImageProbeMarker.",
+                )
+                withContext(Dispatchers.Default) {
+                    runtime.resume().collect()
+                }
+
+                val history = storage.historyItems()
+                assertTrue(
+                    history.any { item -> item is ResponseItem.ClientToolSearchCall },
+                    "Expected the model to discover the deferred view_image tool.",
+                )
+                val viewImageCall = history
+                    .filterIsInstance<ResponseItem.FunctionCall>()
+                    .single { call -> call.namespace == null && call.name == ViewImageTools.Name }
+                val arguments = OpenAiJsonCodec.decodeFromString(
+                    ViewImageToolArguments.serializer(),
+                    viewImageCall.arguments,
+                )
+                assertEquals(ViewImageProbeFileName, arguments.path)
+
+                val output = history
+                    .filterIsInstance<ResponseItem.FunctionCallOutput>()
+                    .single { item -> item.callId == viewImageCall.callId }
+                assertEquals(true, output.output.success)
+                val body = assertIs<FunctionCallOutputBody.ContentItems>(output.output.body)
+                val image = assertIs<FunctionCallOutputContentItem.InputImage>(body.items.single())
+                assertTrue(image.imageUrl.startsWith("data:image/png;base64,"))
+                assertEquals(ImageDetail.High, image.detail)
+                assertTrue(
+                    openAiClient.requests.any { request -> output in request.request.input },
+                    "Expected the image output to be sent back to the model.",
+                )
+                assertTrue(
+                    storage.lastAssistantMessage().orEmpty().contains(ViewImageProbeMarker),
+                    "Expected a final assistant response after the image tool result.",
+                )
+                assertIs<CodexAgentStateValue.AssistantMessage>(state.state.value)
+            } finally {
+                viewImageTool.close()
+            }
+        }
+    }
+}
+
+val openAiImageGenerationToolRuntimeProbeTest by testSuite {
+    testFixture {
+        RecordingOpenAiClient(realOpenAiClient())
+    } closeWith {
+        close()
+    } asParameterForEach {
+        test(
+            "real tool runtime discovers image_gen and generates an image",
+            testConfig = TestConfig.testScope(isEnabled = true, timeout = 300.seconds),
+        ) { client ->
+            val imageGenerationTool = ImageGenerationTools.createTool(
+                ImageGenerationToolClient(client = client),
+            )
+            val toolSearchCatalog = ToolSearchCatalog(
+                imageGenerationTool.spec.toToolSearchDocuments(
+                    ToolSearchSourceInfo(
+                        name = "OpenAI image tools",
+                        description = "Tools for generating and editing images.",
+                    ),
+                ),
+            )
+            try {
+                val storage = InMemoryCodexAgentStorage(
+                    CodexAgentSettings(model = testCodexModel()),
+                )
+                val state = CodexAgentState(
+                    client = client,
+                    storage = storage,
+                    contextPrefixProvider = TestContextPrefixProvider,
+                    toolSearchToolSpec = toolSearchCatalog::currentSpec,
+                )
+                val runtime = RequestOnlyRuntime(state)
+                    .toolRuntime(listOf(imageGenerationTool), toolSearchCatalog)
+
+                state.appendUserMessage(
+                    "Use `image_gen.imagegen` to generate a new minimal image of one black circle " +
+                        "on a plain white background. Do not use referenced images. After the generated " +
+                        "image is returned, reply with exactly $ImageGenerationProbeMarker.",
+                )
+                withContext(Dispatchers.Default) {
+                    runtime.resume().collect()
+                }
+
+                val history = storage.historyItems()
+                assertTrue(
+                    history.any { item -> item is ResponseItem.ClientToolSearchCall },
+                    "Expected the model to discover the deferred image_gen tool.",
+                )
+                val call = history
+                    .filterIsInstance<ResponseItem.FunctionCall>()
+                    .single { item ->
+                        item.namespace == ImageGenNamespace && item.name == ImageGenToolName
+                    }
+                val arguments = OpenAiJsonCodec.decodeFromString(
+                    ImageGenToolArguments.serializer(),
+                    call.arguments,
+                )
+                assertTrue(arguments.prompt.isNotBlank())
+                assertEquals(null, arguments.referencedImagePaths)
+                assertEquals(null, arguments.numLastImagesToInclude)
+
+                val output = history
+                    .filterIsInstance<ResponseItem.FunctionCallOutput>()
+                    .single { item -> item.callId == call.callId }
+                assertEquals(true, output.output.success)
+                val body = assertIs<FunctionCallOutputBody.ContentItems>(output.output.body)
+                val image = assertIs<FunctionCallOutputContentItem.InputImage>(body.items.first())
+                val prefix = "data:image/png;base64,"
+                assertTrue(image.imageUrl.startsWith(prefix))
+                assertTrue(image.imageUrl.length > prefix.length)
+                assertEquals(ImageDetail.High, image.detail)
+                assertTrue(
+                    client.requests.any { request -> output in request.request.input },
+                    "Expected the generated image output to be sent back to the model.",
+                )
+                assertTrue(
+                    storage.lastAssistantMessage().orEmpty().contains(ImageGenerationProbeMarker),
+                    "Expected a final assistant response after image generation.",
+                )
+                assertIs<CodexAgentStateValue.AssistantMessage>(state.state.value)
+            } finally {
+                imageGenerationTool.close()
+            }
+        }
+    }
+}
+
+val openAiWebRunToolRuntimeProbeTest by testSuite {
+    testFixture {
+        RecordingOpenAiClient(realOpenAiClient())
+    } closeWith {
+        close()
+    } asParameterForEach {
+        test(
+            "real tool runtime executes web.run search",
+            testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
+        ) { client ->
+            val webRunTool = WebRunTools.createTool(
+                WebRunToolClient(
+                    client = client,
+                    sessionId = "codex-lite-web-run-runtime-${Random.nextLong().toString().replace('-', '0')}",
+                    model = testCodexModel(),
+                ),
+            )
+            try {
+                val storage = InMemoryCodexAgentStorage(
+                    CodexAgentSettings(model = testCodexModel()),
+                )
+                val state = CodexAgentState(
+                    client = client,
+                    storage = storage,
+                    contextPrefixProvider = TestContextPrefixProvider,
+                    toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+                )
+                val runtime = RequestOnlyRuntime(state).toolRuntime(listOf(webRunTool))
+
+                state.appendUserMessage(
+                    "Use `web.run` with one search_query operation to search for the official OpenAI " +
+                        "Codex page. After the tool result is returned, reply with exactly $WebRunProbeMarker.",
+                )
+                withContext(Dispatchers.Default) {
+                    runtime.resume().collect()
+                }
+
+                val history = storage.historyItems()
+                val call = history
+                    .filterIsInstance<ResponseItem.FunctionCall>()
+                    .single { item ->
+                        item.namespace == WebRunNamespace && item.name == WebRunToolName
+                    }
+                val commands = OpenAiJsonCodec.decodeFromString(
+                    SearchCommands.serializer(),
+                    call.arguments,
+                )
+                assertTrue(commands.searchQuery.orEmpty().isNotEmpty())
+
+                val output = history
+                    .filterIsInstance<ResponseItem.FunctionCallOutput>()
+                    .single { item -> item.callId == call.callId }
+                assertEquals(true, output.output.success)
+                assertTrue(assertIs<FunctionCallOutputBody.Text>(output.output.body).text.isNotBlank())
+                assertTrue(
+                    client.requests.any { request -> output in request.request.input },
+                    "Expected the web.run output to be sent back to the model.",
+                )
+                assertTrue(
+                    storage.lastAssistantMessage().orEmpty().contains(WebRunProbeMarker),
+                    "Expected a final assistant response after web.run.",
+                )
+                assertIs<CodexAgentStateValue.AssistantMessage>(state.state.value)
+            } finally {
+                webRunTool.close()
+            }
+        }
+    }
+}
+
+val openAiRequestUserInputRuntimeProbeTest by testSuite {
+    testFixture {
+        RecordingOpenAiClient(realOpenAiClient())
+    } closeWith {
+        close()
+    } asParameterForEach {
+        test(
+            "real request_user_input runtime pauses for and consumes a host answer",
+            testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
+        ) { client ->
+            val storage = InMemoryCodexAgentStorage(
+                CodexAgentSettings(model = testCodexModel()),
+            )
+            val state = CodexAgentState(
+                client = client,
+                storage = storage,
+                contextPrefixProvider = TestContextPrefixProvider,
+                toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            )
+            val runtime = RequestOnlyRuntime(state).requestUserInputRuntime()
+
+            state.appendUserMessage(
+                "Before answering, use `request_user_input` to ask whether this integration test " +
+                    "should continue. Ask exactly one question with Yes and No options. After the host " +
+                    "answers Yes, reply with exactly $RequestUserInputProbeMarker.",
+            )
+            withContext(Dispatchers.Default) {
+                runtime.resume().collect()
+            }
+
+            val pending = runtime.pendingRequests.value.single()
+            val question = pending.arguments.questions.single()
+            assertTrue(question.options.orEmpty().size >= 2)
+            assertTrue(question.isOther)
+            assertIs<CodexAgentStateValue.ToolPending>(state.state.value)
+
+            val response = RequestUserInputResponse(
+                answers = mapOf(
+                    question.id to RequestUserInputAnswer(listOf("Yes")),
+                ),
+            )
+            runtime.complete(pending.callId, response)
+            assertEquals(emptyList(), runtime.pendingRequests.value)
+            withContext(Dispatchers.Default) {
+                runtime.resume().collect()
+            }
+
+            val history = storage.historyItems()
+            val call = history
+                .filterIsInstance<ResponseItem.FunctionCall>()
+                .single { item -> item.namespace == null && item.name == "request_user_input" }
+            assertEquals(pending.callId, call.callId)
+            val output = history
+                .filterIsInstance<ResponseItem.FunctionCallOutput>()
+                .single { item -> item.callId == call.callId }
+            assertEquals(true, output.output.success)
+            val outputText = assertIs<FunctionCallOutputBody.Text>(output.output.body).text
+            assertEquals(
+                response,
+                OpenAiJsonCodec.decodeFromString(RequestUserInputResponse.serializer(), outputText),
+            )
+            assertTrue(
+                client.requests.any { request -> output in request.request.input },
+                "Expected the host answer to be sent back to the model.",
+            )
+            assertTrue(
+                storage.lastAssistantMessage().orEmpty().contains(RequestUserInputProbeMarker),
+                "Expected a final assistant response after request_user_input.",
+            )
+            assertIs<CodexAgentStateValue.AssistantMessage>(state.state.value)
         }
     }
 }
@@ -732,19 +1140,19 @@ val openAiForcedCompactProbeTest by testSuite {
             val agent = CodexAgentState(
                 client = client,
                 storage = storage,
-                contextPrefixProvider = testContextPrefixProvider,
+                contextPrefixProvider = TestContextPrefixProvider,
+                toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
             )
 
-            val compactIndex = withContext(Dispatchers.Default) {
-                agent.forcedCompact()
-            }
+            val compactIndex = agent.forcedCompact()
 
             val checkpoint = storage.compaction[compactIndex]
             assertEquals(1, client.remoteCompactionV2Requests.size)
             val request = client.remoteCompactionV2Requests.single()
             assertEquals(model, request.request.model)
-            assertTrue(
-                request.request.input.last() == ResponseItem.CompactionTrigger,
+            assertEquals(
+                ResponseItem.CompactionTrigger,
+                request.request.input.last(),
                 "AgentState should project the remote-compaction trigger into the wire request.",
             )
             assertTrue(checkpoint.prefix.isNotEmpty(), "Expected server compaction output to become checkpoint prefix.")
@@ -762,14 +1170,12 @@ val openAiModelInputProjectionProbeTest by testSuite {
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
         ) { client ->
             val marker = "EMPTY_REASONING_INPUT_ACCEPTED"
-            val events = withContext(Dispatchers.Default) {
-                client.collectResponseProbe(
-                    input = listOf(
-                        ResponseItem.Reasoning(summary = emptyList()),
-                        userMessage("Reply with exactly this marker and nothing else: $marker"),
-                    ),
-                )
-            }
+            val events = client.collectResponseProbe(
+                input = listOf(
+                    ResponseItem.Reasoning(summary = emptyList()),
+                    userMessage("Reply with exactly this marker and nothing else: $marker"),
+                ),
+            )
             val outputText = events.assistantText()
 
             println("empty reasoning input probe output: $outputText")
@@ -790,13 +1196,11 @@ val openAiCompactionItemProbeTest by testSuite {
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
         ) { client ->
             val marker = "NORMAL_RESPONSE_WITHOUT_COMPACTION_ITEM"
-            val events = withContext(Dispatchers.Default) {
-                client.collectResponseProbe(
-                    input = listOf(
-                        userMessage("Reply with exactly this marker and nothing else: $marker"),
-                    ),
-                )
-            }
+            val events = client.collectResponseProbe(
+                input = listOf(
+                    userMessage("Reply with exactly this marker and nothing else: $marker"),
+                ),
+            )
             val outputItems = events.outputItems()
 
             println("normal response output item types: ${outputItems.typeNames()}")
@@ -821,21 +1225,19 @@ val openAiHostedWebSearchProbeTest by testSuite {
             "real client executes hosted web search",
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
         ) { client ->
-            val events = withContext(Dispatchers.Default) {
-                client.createResponse(
-                    ResponsesApiRequest(
-                        model = testCodexModel(),
-                        input = listOf(
-                            userMessage(
-                                "Search the web for the current official Kotlin release, then reply with its version.",
-                            ),
+            val events = client.createResponse(
+                ResponsesApiRequest(
+                    model = testCodexModel(),
+                    input = listOf(
+                        userMessage(
+                            "Search the web for the current official Kotlin release, then reply with its version.",
                         ),
-                        tools = listOf(ToolSpec.WebSearch(externalWebAccess = true)),
-                        toolChoice = ToolChoice.Required,
-                        store = false,
                     ),
-                ).toList()
-            }
+                    tools = listOf(ToolSpec.WebSearch(externalWebAccess = true)),
+                    toolChoice = ToolChoice.Required,
+                    store = false,
+                ),
+            ).toList()
             val outputItems = events.outputItems()
 
             println("hosted web search output item types: ${outputItems.typeNames()}")
