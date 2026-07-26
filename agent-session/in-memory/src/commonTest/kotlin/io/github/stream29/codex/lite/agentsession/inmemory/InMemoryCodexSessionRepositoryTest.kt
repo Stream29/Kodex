@@ -49,6 +49,7 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         assertEquals(-1, session.storage.latestIndex())
         session.storage.initialize(settings("root"))
         assertEquals(0, session.storage.latestIndex())
+        assertEquals(0L, session.storage.tokenCount[0])
     }
 
     test("creates zero-based root entries") {
