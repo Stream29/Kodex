@@ -2,17 +2,11 @@
 
 import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
-import org.jetbrains.kotlin.gradle.targets.js.yarn.YarnRootExtension
 import org.jetbrains.kotlin.konan.target.Family
 
 plugins {
     id("codexlite.kmp-host")
     alias(libs.plugins.kotlin.serialization)
-}
-
-rootProject.extensions.configure<YarnRootExtension> {
-    // node-pty builds its Linux native binding during its pinned npm install.
-    ignoreScripts = false
 }
 
 kotlin {
@@ -37,12 +31,12 @@ kotlin {
             api(libs.kotlinx.serialization.core)
             implementation(project(":utils-os-environment"))
         }
+        jvmMain.dependencies {
+            implementation(libs.pty4j)
+        }
         jsMain.dependencies {
             implementation(libs.kotlin.wrappers.node)
             implementation(npm("node-pty", libs.versions.node.pty.get()))
-        }
-        jvmMain.dependencies {
-            implementation(libs.pty4j)
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)

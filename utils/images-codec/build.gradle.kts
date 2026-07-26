@@ -7,6 +7,12 @@ plugins {
 }
 
 kotlin {
+    jvm {
+        testRuns["test"].executionTask.configure {
+            systemProperty("java.awt.headless", "true")
+        }
+    }
+
     applyHierarchyTemplate(KotlinHierarchyTemplate.default) {
         common {
             group("skikoNative") {

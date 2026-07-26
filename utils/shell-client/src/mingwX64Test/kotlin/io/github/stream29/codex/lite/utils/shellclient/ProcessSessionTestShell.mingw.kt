@@ -15,6 +15,21 @@ internal actual val delayedProcessCommand: TestShellCommand
 internal actual val ttyProbeProcessCommand: TestShellCommand
     get() = TestShellCommand(command = PowerShellTtyProbeProcessCommand, shell = testShell)
 
+internal actual val separatedOutputProcessCommand: TestShellCommand
+    get() = TestShellCommand(
+        command = "Write-Output stdout-only; [Console]::Error.WriteLine('stderr-only')",
+        shell = testShell,
+    )
+
+internal actual val environmentProbeProcessCommands: List<TestShellCommand>
+    get() = listOf(
+        TestShellCommand(command = "Write-Output \$env:CODEXLITE_SHELL_TEST", shell = testShell),
+        TestShellCommand(
+            command = "set CODEXLITE_SHELL_TEST",
+            shell = requireNotNull(Shell.resolve(ShellType.Cmd)),
+        ),
+    )
+
 internal actual fun unicodeProbeProcessCommand(
     markerFileName: String,
     content: String,

@@ -3,6 +3,8 @@
 package io.github.stream29.codex.lite.utils.shellclient
 
 import js.array.toJsArray
+import js.objects.Object
+import js.objects.set
 import js.objects.unsafeJso
 import js.typedarrays.toByteArray
 import node.buffer.Buffer
@@ -13,6 +15,7 @@ import node.events.EventListener
 import node.events.EventType
 import node.os.platform
 import node.process.Process
+import node.process.ProcessEnv
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,9 +39,7 @@ private val isWindowsNode: Boolean
 @JsName("process")
 private external val currentNodeProcess: Process
 
-@JsModule("node-pty")
-@JsNonModule
-private external object NodePty {
+private external interface NodePty {
     fun spawn(
         file: String,
         args: Array<String>,
@@ -46,11 +47,16 @@ private external object NodePty {
     ): NodePseudoTerminal
 }
 
+private val nodePty: NodePty by lazy {
+    js("require('node-pty')")
+}
+
 private external interface NodePtySpawnOptions {
     var name: String
     var cols: Int
     var rows: Int
     var cwd: String
+    var env: ProcessEnv?
 }
 
 private external interface NodePseudoTerminal {
@@ -87,11 +93,13 @@ public actual class ShellClient actual constructor() :
             throw ProcessException("Process command must not be blank.")
         }
         val invocation = command.shell.invocation(command.command, command.login)
+        val environment = command.environment.toNodeEnvironmentOrNull()
         return try {
             if (command.tty) {
                 NodePtyTransport(
                     invocation = invocation,
                     workingDirectory = command.workingDirectory.toString(),
+                    environment = environment,
                 ).createSession(this@ShellClient)
             } else {
                 NodePipeTransport(
@@ -103,6 +111,7 @@ public actual class ShellClient actual constructor() :
                             shell = false
                             windowsHide = true
                             detached = !isWindowsNode
+                            this.env = environment
                         },
                     ),
                 ).createSession(this@ShellClient)
@@ -128,8 +137,8 @@ private class NodePipeTransport(
             terminate = ::terminateProcessTree,
             release = ::releaseResources,
         )
-        process.requiredStdout.collectOutput(session)
-        process.requiredStderr.collectOutput(session)
+        process.requiredStdout.collectOutput(session, NodeProcessOutputStream.StandardOutput)
+        process.requiredStderr.collectOutput(session, NodeProcessOutputStream.StandardError)
         process.on(EventType("error"), EventListener { error: Any? ->
             session.acceptFailure(ProcessException("Node.js child process failed: $error"))
         })
@@ -192,8 +201,9 @@ private class NodePipeTransport(
 private class NodePtyTransport(
     invocation: ShellInvocation,
     workingDirectory: String,
+    environment: ProcessEnv?,
 ) {
-    private val terminal: NodePseudoTerminal = NodePty.spawn(
+    private val terminal: NodePseudoTerminal = nodePty.spawn(
         file = invocation.executable,
         args = buildList {
             addAll(invocation.argumentsBeforeCommand)
@@ -204,6 +214,7 @@ private class NodePtyTransport(
             cols = DefaultPtyColumns
             rows = DefaultPtyRows
             cwd = workingDirectory
+            env = environment
         },
     )
 
@@ -215,11 +226,18 @@ private class NodePtyTransport(
             // Closing a PTY master would hang up its output. EOF remains an explicit terminal input.
             closeInput = {},
             terminate = ::terminateProcessTree,
-            release = { subscriptions.forEach(NodePtyDisposable::dispose) },
+            release = {
+                subscriptions.forEach(NodePtyDisposable::dispose)
+                if (isWindowsNode) terminal.kill()
+            },
         )
         subscriptions += terminal.onData { output ->
             terminal.pause()
-            session.acceptOutput(output.encodeToByteArray(), terminal::resume)
+            session.acceptOutput(
+                output.encodeToByteArray(),
+                NodeProcessOutputStream.StandardOutput,
+                terminal::resume,
+            )
         }
         subscriptions += terminal.onExit { exit ->
             session.acceptExit(exit.exitCode)
@@ -229,7 +247,11 @@ private class NodePtyTransport(
 
     private suspend fun terminateProcessTree() {
         terminateNodeProcessTree(terminal.pid.toDouble()) {
-            terminal.kill("SIGKILL")
+            if (isWindowsNode) {
+                terminal.kill()
+            } else {
+                terminal.kill("SIGKILL")
+            }
         }
     }
 }
@@ -273,7 +295,10 @@ private suspend fun terminateWindowsProcessTree(pid: Double, fallback: () -> Uni
         }
     }
 
-private fun node.stream.Readable.collectOutput(session: NodeProcessSession) {
+private fun node.stream.Readable.collectOutput(
+    session: NodeProcessSession,
+    stream: NodeProcessOutputStream,
+) {
     on(EventType("data"), EventListener { chunk: Any? ->
         val bytes: ByteArray = when (chunk) {
             is String -> chunk.encodeToByteArray()
@@ -281,7 +306,7 @@ private fun node.stream.Readable.collectOutput(session: NodeProcessSession) {
             else -> chunk.toString().encodeToByteArray()
         }
         pause()
-        session.acceptOutput(bytes, ::resume)
+        session.acceptOutput(bytes, stream, ::resume)
     })
 }
 
@@ -291,3 +316,19 @@ private fun String.normalizedForNodePty(): String =
     } else {
         this
     }
+
+private fun Map<String, String>.toNodeEnvironmentOrNull(): ProcessEnv? {
+    if (isEmpty()) return null
+    val result = Object.assign(unsafeJso<ProcessEnv>(), currentNodeProcess.env)
+    val inheritedNames = if (isWindowsNode) {
+        @Suppress("UNCHECKED_CAST")
+        val names = js("Object.keys(result)") as Array<String>
+        names.associateBy(String::lowercase)
+    } else {
+        emptyMap()
+    }
+    forEach { (name, value) ->
+        result[inheritedNames[name.lowercase()] ?: name] = value
+    }
+    return result
+}

@@ -10,6 +10,8 @@ import kotlinx.io.files.Path
 
 internal class BlockingCoroutineFileSystem(
     private val delegate: FileSystem,
+    private val exclusiveSink: (Path, Boolean) -> CoroutineRawSink,
+    private val fingerprint: (Path) -> FileFingerprint?,
 ) : CoroutineFileSystem {
     override suspend fun exists(path: Path): Boolean =
         withContext(IoDispatcher) { delegate.exists(path) }
@@ -26,6 +28,9 @@ internal class BlockingCoroutineFileSystem(
     override suspend fun metadataOrNull(path: Path): FileMetadata? =
         withContext(IoDispatcher) { delegate.metadataOrNull(path) }
 
+    override suspend fun fingerprintOrNull(path: Path): FileFingerprint? =
+        withContext(IoDispatcher) { fingerprint(path) }
+
     override suspend fun resolve(path: Path): Path =
         withContext(IoDispatcher) { delegate.resolve(path) }
 
@@ -35,8 +40,11 @@ internal class BlockingCoroutineFileSystem(
     override suspend fun source(path: Path): CoroutineRawSource =
         withContext(IoDispatcher) { BlockingCoroutineRawSource(delegate.source(path)) }
 
-    override suspend fun sink(path: Path, append: Boolean): CoroutineRawSink =
-        withContext(IoDispatcher) { BlockingCoroutineRawSink(delegate.sink(path, append)) }
+    override suspend fun sink(path: Path, append: Boolean, mustCreate: Boolean): CoroutineRawSink =
+        withContext(IoDispatcher) {
+            if (mustCreate) exclusiveSink(path, append)
+            else BlockingCoroutineRawSink(delegate.sink(path, append))
+        }
 }
 
 private class BlockingCoroutineRawSource(
@@ -54,7 +62,7 @@ private class BlockingCoroutineRawSource(
         withContext(IoDispatcher) { delegate.close() }
 }
 
-private class BlockingCoroutineRawSink(
+internal class BlockingCoroutineRawSink(
     private val delegate: RawSink,
 ) : CoroutineRawSink {
     override suspend fun write(source: Buffer, byteCount: Long) {

@@ -22,6 +22,8 @@ import kotlinx.io.files.FileNotFoundException
 import kotlinx.io.files.Path
 import kotlinx.io.readByteArray
 import platform.windows.CREATE_ALWAYS
+import platform.windows.CREATE_NEW
+import platform.windows.BY_HANDLE_FILE_INFORMATION
 import platform.windows.CreateFileW
 import platform.windows.CreateDirectoryW
 import platform.windows.DeleteFileW
@@ -45,6 +47,7 @@ import platform.windows.FlushFileBuffers
 import platform.windows.GENERIC_READ
 import platform.windows.GENERIC_WRITE
 import platform.windows.GetFinalPathNameByHandleW
+import platform.windows.GetFileInformationByHandle
 import platform.windows.GetLastError
 import platform.windows.INVALID_HANDLE_VALUE
 import platform.windows.MOVEFILE_REPLACE_EXISTING
@@ -124,6 +127,9 @@ private object MingwCoroutineFileSystem : CoroutineFileSystem {
     override suspend fun metadataOrNull(path: Path): FileMetadata? =
         withContext(IoDispatcher) { windowsMetadataOrNull(path) }
 
+    override suspend fun fingerprintOrNull(path: Path): FileFingerprint? =
+        withContext(IoDispatcher) { windowsFingerprintOrNull(path) }
+
     override suspend fun resolve(path: Path): Path =
         withContext(IoDispatcher) {
             val handle = openHandle(
@@ -156,13 +162,17 @@ private object MingwCoroutineFileSystem : CoroutineFileSystem {
             )
         }
 
-    override suspend fun sink(path: Path, append: Boolean): CoroutineRawSink =
+    override suspend fun sink(path: Path, append: Boolean, mustCreate: Boolean): CoroutineRawSink =
         withContext(IoDispatcher) {
             MingwCoroutineRawSink(
                 openHandle(
                     path = path,
                     desiredAccess = if (append) FILE_APPEND_DATA.toUInt() else GENERIC_WRITE.toUInt(),
-                    creationDisposition = if (append) OPEN_ALWAYS.toUInt() else CREATE_ALWAYS.toUInt(),
+                    creationDisposition = when {
+                        mustCreate -> CREATE_NEW.toUInt()
+                        append -> OPEN_ALWAYS.toUInt()
+                        else -> CREATE_ALWAYS.toUInt()
+                    },
                     flagsAndAttributes = FILE_ATTRIBUTE_NORMAL.toUInt(),
                     operation = "Open sink",
                 ),
@@ -188,6 +198,50 @@ private fun windowsMetadataOrNull(path: Path): FileMetadata? = memScoped {
     }
 }
 
+private fun windowsFingerprintOrNull(path: Path): FileFingerprint? = memScoped {
+    val findData = alloc<WIN32_FIND_DATAW>()
+    val findHandle = FindFirstFileW(path.windowsPath(), findData.ptr)
+    if (findHandle == null || findHandle == INVALID_HANDLE_VALUE) {
+        val error = GetLastError().toInt()
+        if (error.isMissingPathError()) return@memScoped null
+        throw pathFailure("Read fingerprint", path, error)
+    }
+    FindClose(findHandle)
+
+    val handle = openHandle(
+        path = path,
+        desiredAccess = FILE_READ_ATTRIBUTES.toUInt(),
+        creationDisposition = OPEN_EXISTING.toUInt(),
+        flagsAndAttributes = FILE_FLAG_BACKUP_SEMANTICS.toUInt(),
+        operation = "Read fingerprint",
+    )
+    try {
+        val information = alloc<BY_HANDLE_FILE_INFORMATION>()
+        if (GetFileInformationByHandle(handle, information.ptr) == 0) {
+            throw handleFailure("Read fingerprint", GetLastError().toInt())
+        }
+        val directory = findData.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY.toUInt() != 0u
+        val size = (findData.nFileSizeHigh.toLong() shl Int.SIZE_BITS) or findData.nFileSizeLow.toLong()
+        val modifiedTicks =
+            (findData.ftLastWriteTime.dwHighDateTime.toULong() shl Int.SIZE_BITS) or
+                findData.ftLastWriteTime.dwLowDateTime.toULong()
+        FileFingerprint(
+            size = if (directory) -1L else size,
+            lastModifiedAtNanoseconds =
+                ((modifiedTicks - WindowsToUnixEpochTicks) * NanosecondsPerWindowsTick).toLong(),
+            fileKey = buildString {
+                append(information.dwVolumeSerialNumber.toString(16))
+                append(':')
+                append(information.nFileIndexHigh.toString(16))
+                append(':')
+                append(information.nFileIndexLow.toString(16))
+            },
+        )
+    } finally {
+        closeHandle(handle, "Close fingerprint handle")
+    }
+}
+
 private fun WIN32_FIND_DATAW.toFileMetadata(): FileMetadata {
     val directory = dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY.toUInt() != 0u
     val size = (nFileSizeHigh.toLong() shl Int.SIZE_BITS) or nFileSizeLow.toLong()
@@ -197,6 +251,9 @@ private fun WIN32_FIND_DATAW.toFileMetadata(): FileMetadata {
         size = if (directory) -1L else size,
     )
 }
+
+private const val WindowsToUnixEpochTicks: ULong = 116_444_736_000_000_000uL
+private const val NanosecondsPerWindowsTick: ULong = 100uL
 
 private fun listDirectory(directory: Path): List<Path> = memScoped {
     val metadata = windowsMetadataOrNull(directory) ?: throw missingFile(directory)

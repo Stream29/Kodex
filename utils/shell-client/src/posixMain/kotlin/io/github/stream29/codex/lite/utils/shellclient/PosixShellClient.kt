@@ -4,6 +4,9 @@ package io.github.stream29.codex.lite.utils.shellclient
 
 import io.github.stream29.codex.lite.utils.shellclient.cinterop.codexlite_spawn_shell
 import io.github.stream29.codex.lite.utils.shellclient.cinterop.codexlite_spawn_pty_shell
+import kotlinx.cinterop.ByteVar
+import kotlinx.cinterop.CPointer
+import kotlinx.cinterop.CPointerVar
 import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
@@ -11,6 +14,7 @@ import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
+import kotlinx.cinterop.set
 import kotlinx.cinterop.value
 import kotlinx.cinterop.usePinned
 import kotlinx.coroutines.CoroutineDispatcher
@@ -37,7 +41,10 @@ import platform.posix.EAGAIN
 import platform.posix.ECHILD
 import platform.posix.EIO
 import platform.posix.EINTR
+import platform.posix.FD_CLOEXEC
+import platform.posix.F_GETFD
 import platform.posix.F_GETFL
+import platform.posix.F_SETFD
 import platform.posix.F_SETFL
 import platform.posix.O_NONBLOCK
 import platform.posix.SIGKILL
@@ -79,38 +86,55 @@ private fun ShellProcessCommand.startPosixProcess(parentScope: CoroutineScope): 
         workingDirectory = workingDirectory,
         login = login,
     )
-    if (tty) return startPosixPtyProcess(invocation, parentScope)
+    if (tty) return startPosixPtyProcess(invocation, environment, parentScope)
 
     return withPosixPipe { stdinRead, stdinWrite ->
         withPosixPipe { outputRead, outputWrite ->
-            stdinWrite.setNonBlocking()
-            outputRead.setNonBlocking()
-            memScoped {
-                val pid = alloc<IntVar>()
-                val processGroup = alloc<IntVar>()
-                val result = codexlite_spawn_shell(
-                    pid = pid.ptr,
-                    process_group = processGroup.ptr,
-                    stdin_read = stdinRead,
-                    stdin_write = stdinWrite,
-                    output_read = outputRead,
-                    output_write = outputWrite,
-                    shell = invocation.executable,
-                    first_argument = invocation.argumentsBeforeCommand.getOrNull(0),
-                    second_argument = invocation.argumentsBeforeCommand.getOrNull(1),
-                    command = invocation.command,
-                )
-                if (result != 0) {
-                    throw ProcessException("Failed to start process with ${invocation.executable}: error $result.")
+            withPosixPipe { errorRead, errorWrite ->
+                stdinWrite.setNonBlocking()
+                outputRead.setNonBlocking()
+                errorRead.setNonBlocking()
+                environment.withPosixEnvironmentOverrides { environmentOverrides, environmentOverrideCount ->
+                    memScoped {
+                        val pid = alloc<IntVar>()
+                        val processGroup = alloc<IntVar>()
+                        val result = codexlite_spawn_shell(
+                            pid = pid.ptr,
+                            process_group = processGroup.ptr,
+                            stdin_read = stdinRead,
+                            stdin_write = stdinWrite,
+                            output_read = outputRead,
+                            output_write = outputWrite,
+                            error_read = errorRead,
+                            error_write = errorWrite,
+                            environment_overrides = environmentOverrides,
+                            environment_override_count = environmentOverrideCount,
+                            shell = invocation.executable,
+                            first_argument = invocation.argumentsBeforeCommand.getOrNull(0),
+                            second_argument = invocation.argumentsBeforeCommand.getOrNull(1),
+                            command = invocation.command,
+                        )
+                        if (result != 0) {
+                            throw ProcessException(
+                                "Failed to start process with ${invocation.executable}: error $result.",
+                            )
+                        }
+                        PosixPipeTransfer(
+                            value = PosixProcess(
+                                pid = pid.value,
+                                ownsProcessGroup = processGroup.value != 0,
+                                stdinFd = stdinWrite,
+                                outputFd = outputRead,
+                                errorFd = errorRead,
+                                parentScope = parentScope,
+                            ),
+                            transferRead = true,
+                        )
+                    }
                 }
+            }.let { session ->
                 PosixPipeTransfer(
-                    value = PosixProcess(
-                        pid = pid.value,
-                        ownsProcessGroup = processGroup.value != 0,
-                        stdinFd = stdinWrite,
-                        outputFd = outputRead,
-                        parentScope = parentScope,
-                    ),
+                    value = session,
                     transferRead = true,
                 )
             }
@@ -125,36 +149,60 @@ private fun ShellProcessCommand.startPosixProcess(parentScope: CoroutineScope): 
 
 private fun startPosixPtyProcess(
     invocation: ShellInvocation,
+    environment: Map<String, String>,
     parentScope: CoroutineScope,
-): ProcessSession = memScoped {
-    val pid = alloc<IntVar>()
-    val masterFd = alloc<IntVar>()
-    val result = codexlite_spawn_pty_shell(
-        pid = pid.ptr,
-        master_fd = masterFd.ptr,
-        shell = invocation.executable,
-        first_argument = invocation.argumentsBeforeCommand.getOrNull(0),
-        second_argument = invocation.argumentsBeforeCommand.getOrNull(1),
-        command = invocation.command,
-    )
-    if (result != 0) {
-        throw ProcessException("Failed to start PTY with ${invocation.executable}: error $result.")
+): ProcessSession =
+    environment.withPosixEnvironmentOverrides { environmentOverrides, environmentOverrideCount ->
+        memScoped {
+            val pid = alloc<IntVar>()
+            val masterFd = alloc<IntVar>()
+            val result = codexlite_spawn_pty_shell(
+                pid = pid.ptr,
+                master_fd = masterFd.ptr,
+                environment_overrides = environmentOverrides,
+                environment_override_count = environmentOverrideCount,
+                shell = invocation.executable,
+                first_argument = invocation.argumentsBeforeCommand.getOrNull(0),
+                second_argument = invocation.argumentsBeforeCommand.getOrNull(1),
+                command = invocation.command,
+            )
+            if (result != 0) {
+                throw ProcessException("Failed to start PTY with ${invocation.executable}: error $result.")
+            }
+
+            val descriptor = masterFd.value
+            try {
+                descriptor.setNonBlocking()
+                PosixProcess(
+                    pid = pid.value,
+                    ownsProcessGroup = true,
+                    stdinFd = descriptor,
+                    outputFd = descriptor,
+                    errorFd = null,
+                    tty = true,
+                    parentScope = parentScope,
+                )
+            } catch (failure: Throwable) {
+                close(descriptor)
+                throw failure
+            }
+        }
     }
 
-    val descriptor = masterFd.value
-    try {
-        descriptor.setNonBlocking()
-        PosixProcess(
-            pid = pid.value,
-            ownsProcessGroup = true,
-            stdinFd = descriptor,
-            outputFd = descriptor,
-            tty = true,
-            parentScope = parentScope,
-        )
-    } catch (failure: Throwable) {
-        close(descriptor)
-        throw failure
+private inline fun <T> Map<String, String>.withPosixEnvironmentOverrides(
+    block: (overrides: CPointer<CPointerVar<ByteVar>>?, count: ULong) -> T,
+): T {
+    if (isEmpty()) return block(null, 0uL)
+    return memScoped {
+        val overrides = allocArray<CPointerVar<ByteVar>>(size)
+        entries.forEachIndexed { index, (name, value) ->
+            val encoded = "$name=$value".encodeToByteArray()
+            val entry = allocArray<ByteVar>(encoded.size + 1)
+            encoded.forEachIndexed { byteIndex, byte -> entry[byteIndex] = byte }
+            entry[encoded.size] = 0
+            overrides[index] = entry
+        }
+        block(overrides, size.toULong())
     }
 }
 
@@ -170,6 +218,8 @@ private fun <T> withPosixPipe(block: (read: Int, write: Int) -> PosixPipeTransfe
     val read = descriptors[0]
     val write = descriptors[1]
     try {
+        read.setCloseOnExec()
+        write.setCloseOnExec()
         val transfer = block(read, write)
         if (!transfer.transferRead) close(read)
         if (!transfer.transferWrite) close(write)
@@ -186,17 +236,23 @@ private class PosixProcess(
     private val ownsProcessGroup: Boolean,
     private val stdinFd: Int,
     private val outputFd: Int,
+    private val errorFd: Int?,
     private val tty: Boolean = false,
     parentScope: CoroutineScope,
 ) : ProcessSession {
     private val resourceMutex: Mutex = Mutex()
     private val stdinClosed: CompletableDeferred<Unit> = CompletableDeferred()
     private val outputClosed: CompletableDeferred<Unit> = CompletableDeferred()
+    private val errorClosed: CompletableDeferred<Unit> = CompletableDeferred()
     private val sessionJob: CompletableJob = SupervisorJob(parentScope.coroutineContext[Job])
     override val scope: CoroutineScope = CoroutineScope(parentScope.coroutineContext + sessionJob)
     override val stdin: SendChannel<String>
         field = StdinChannel(scope, sessionJob)
     override val stdout: StdoutBuffer
+        field = MutableStdoutBuffer(scope)
+    override val standardOutput: StdoutBuffer
+        field = MutableStdoutBuffer(scope)
+    override val standardError: StdoutBuffer
         field = MutableStdoutBuffer(scope)
     override val exitCode: Deferred<Int>
         field = CompletableDeferred()
@@ -224,13 +280,23 @@ private class PosixProcess(
         scope.launch(PosixProcessIoDispatcher) {
             try {
                 while (true) {
-                    for (chunk in readAvailableOutput()) {
-                        emitOutput(chunk)
+                    for (chunk in readAvailableOutput(outputFd, tty)) {
+                        emitOutput(chunk, standardOutput)
+                    }
+                    errorFd?.let { descriptor ->
+                        for (chunk in readAvailableOutput(descriptor, isTerminal = false)) {
+                            emitOutput(chunk, standardError)
+                        }
                     }
                     val exitCode = exitCodeOrNull()
                     if (exitCode != null) {
-                        for (chunk in readAvailableOutput()) {
-                            emitOutput(chunk)
+                        for (chunk in readAvailableOutput(outputFd, tty)) {
+                            emitOutput(chunk, standardOutput)
+                        }
+                        errorFd?.let { descriptor ->
+                            for (chunk in readAvailableOutput(descriptor, isTerminal = false)) {
+                                emitOutput(chunk, standardError)
+                            }
                         }
                         complete(exitCode)
                         return@launch
@@ -260,19 +326,27 @@ private class PosixProcess(
         }
     }
 
-    private suspend fun emitOutput(bytes: ByteArray) {
+    private suspend fun emitOutput(bytes: ByteArray, stream: MutableStdoutBuffer) {
         if (bytes.isEmpty()) return
         sessionJob.ensureActive()
         stdout.send(bytes)
+        stream.send(bytes)
     }
 
     private suspend fun complete(exitCode: Int) {
         stdout.close()
+        standardOutput.close()
+        standardError.close()
         stdout.flush()
+        standardOutput.flush()
+        standardError.flush()
+        stdin.close()
         if (!this.exitCode.complete(exitCode)) return
 
         stdout.signalTerminal()
-        stdin.close()
+        standardOutput.signalTerminal()
+        standardError.signalTerminal()
+
         scope.launch {
             stdinWriter.join()
             cancellationGuard.cancel()
@@ -318,6 +392,8 @@ private class PosixProcess(
         withContext(NonCancellable) {
             if (exitCode.isCompleted && !exitCode.isCancelled) {
                 stdout.finish()
+                standardOutput.finish()
+                standardError.finish()
             } else {
                 val cancellation: CancellationException = processCancellation()
                 exitCode.completeExceptionally(cancellation)
@@ -328,6 +404,8 @@ private class PosixProcess(
                     // Resource release below is still required after a failed termination request.
                 }
                 stdout.abort(cancellation)
+                standardOutput.abort(cancellation)
+                standardError.abort(cancellation)
             }
             try {
                 releaseResources()
@@ -395,10 +473,16 @@ private class PosixProcess(
         if (outputClosed.complete(Unit)) {
             close(outputFd)
         }
+        val error = errorFd
+        if (error != null && errorClosed.complete(Unit)) {
+            close(error)
+        }
     }
 
-    private suspend fun readAvailableOutput(): List<ByteArray> = resourceMutex.withLock {
-        val output = outputFd
+    private suspend fun readAvailableOutput(
+        output: Int,
+        isTerminal: Boolean,
+    ): List<ByteArray> = resourceMutex.withLock {
         val chunks: MutableList<ByteArray> = mutableListOf()
         val bytes = ByteArray(8_192)
         while (true) {
@@ -410,7 +494,7 @@ private class PosixProcess(
                 count > 0 -> chunks += bytes.copyOf(count.toInt())
                 count == 0L -> break
                 error == EAGAIN || error == EINTR -> break
-                error == EIO && tty -> break
+                error == EIO && isTerminal -> break
                 else -> throw ProcessException("Failed to read process output: errno $error.")
             }
         }
@@ -458,6 +542,14 @@ private class PosixProcess(
         }
     }
 
+}
+
+private fun Int.setCloseOnExec() {
+    val flags = fcntl(this, F_GETFD)
+    if (flags == -1) {
+        throw ProcessException("Failed to read process descriptor flags: errno $errno.")
+    }
+    checkPlatformResult(fcntl(this, F_SETFD, flags or FD_CLOEXEC), "set process descriptor close-on-exec")
 }
 
 private fun Int.setNonBlocking() {

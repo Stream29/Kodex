@@ -6,12 +6,10 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(libs.ktor.client.core)
+            api(libs.ktor.sse)
         }
         jvmMain.dependencies {
             api(libs.bundles.ktor.client.jvm.engines)
-        }
-        jsMain.dependencies {
-            api(libs.bundles.ktor.client.js.engines)
         }
         linuxX64Main.dependencies {
             api(libs.bundles.ktor.client.linux.engines)

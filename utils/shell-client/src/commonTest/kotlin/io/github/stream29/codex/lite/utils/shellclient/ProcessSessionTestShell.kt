@@ -13,6 +13,10 @@ internal expect val delayedProcessCommand: TestShellCommand
 
 internal expect val ttyProbeProcessCommand: TestShellCommand
 
+internal expect val separatedOutputProcessCommand: TestShellCommand
+
+internal expect val environmentProbeProcessCommands: List<TestShellCommand>
+
 internal expect fun unicodeProbeProcessCommand(
     markerFileName: String,
     content: String,
