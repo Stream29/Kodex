@@ -1,33 +1,34 @@
 package io.github.stream29.codex.lite.agentcontext.prefix.render
 
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentsMdInstruction
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.EnvironmentContext
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefix
+import io.github.stream29.codex.lite.agentcontext.prefix.agentsmd.contract.AgentsMdInstructions
 import io.github.stream29.codex.lite.agentcontext.promptdsl.PromptXmlBuilder
 import io.github.stream29.codex.lite.agentcontext.promptdsl.promptXml
-import io.github.stream29.codex.lite.agentcontext.skill.render.render
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.ResponseItem
-import kotlin.jvm.JvmName
+import io.github.stream29.codex.lite.utils.shellclient.Shell
+import io.github.stream29.codex.lite.utils.shellclient.ShellType
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import kotlinx.io.files.Path
+import kotlin.time.Clock
 
 /**
  * Renders current host context into the transient prefix of one Responses request.
  *
  * The returned items are intentionally never written to agent storage.
  */
-public fun AgentContextPrefixProvider.render(): List<ResponseItem> {
-    val currentAvailableSkills = availableSkills
-    val currentAgentMd = agentMd
-    val currentEnvironmentContext = environmentContext
+public fun AgentContextPrefix.render(): List<ResponseItem.HistoryItem> {
     val developerSections = listOfNotNull(
-        currentAvailableSkills.takeIf { it.isNotEmpty() }?.render(),
+        availableSkills.takeIf { it.isNotEmpty() }?.render(),
     )
-    val contextualUserSections = listOfNotNull(
-        currentAgentMd.takeIf { it.isNotEmpty() }?.render(),
-        currentEnvironmentContext.render(),
-    )
+    val contextualUserSections = buildList {
+        if (agentMd.isNotEmpty()) {
+            add(agentMd.render(cwd))
+        }
+        add(renderEnvironmentContext())
+    }
 
     return buildList {
         if (developerSections.isNotEmpty()) {
@@ -52,25 +53,20 @@ public fun AgentContextPrefixProvider.render(): List<ResponseItem> {
 private const val AgentsMdOpeningMarker: String = "# AGENTS.md instructions"
 private const val ProjectDocSeparator: String = "\n\n--- project-doc ---\n\n"
 
-@JvmName("renderAgentsMd")
-private fun List<AgentsMdInstruction>.render(): String {
-    val entries = this
-    val projectEntries = filterIsInstance<AgentsMdInstruction.Project>()
-    val hasMultipleProjectEnvironments = projectEntries
-        .map { entry -> entry.environmentId to entry.cwd }
-        .distinct()
-        .size > 1
+private fun AgentsMdInstructions.render(cwd: Path): String {
     val heading = buildString {
         append(AgentsMdOpeningMarker)
-        if (!hasMultipleProjectEnvironments) {
-            projectEntries.firstOrNull()?.cwd?.let { value ->
-                append(" for ")
-                append(value)
-            }
+        if (projectInstructions.isNotEmpty()) {
+            append(" for ")
+            append(cwd)
         }
     }
     val instructions = buildString {
-        appendAgentsMdEntries(entries, hasMultipleProjectEnvironments)
+        userInstruction?.let { instruction -> append(instruction.text) }
+        if (projectInstructions.isNotEmpty()) {
+            if (userInstruction != null) append(ProjectDocSeparator)
+            append(projectInstructions.joinToString(separator = "\n\n") { instruction -> instruction.text })
+        }
     }
 
     return promptXml(indented = false) {
@@ -84,65 +80,35 @@ private fun List<AgentsMdInstruction>.render(): String {
     }
 }
 
-private fun StringBuilder.appendAgentsMdEntries(
-    entries: List<AgentsMdInstruction>,
-    hasMultipleProjectEnvironments: Boolean,
-): Unit {
-    var hasPrevious = false
-    var previousWasProject = false
-    var previousProjectEnvironment: AgentsMdInstruction.Project? = null
+private fun AgentsMdInstructions.isNotEmpty(): Boolean =
+    userInstruction != null || projectInstructions.isNotEmpty()
 
-    entries.forEach { entry ->
-        if (hasPrevious) {
-            append(
-                if (!hasMultipleProjectEnvironments && entry is AgentsMdInstruction.Project && !previousWasProject) {
-                    ProjectDocSeparator
-                } else {
-                    "\n\n"
-                },
-            )
-        }
-        if (hasMultipleProjectEnvironments && entry is AgentsMdInstruction.Project) {
-            val sameEnvironment = previousProjectEnvironment?.let { previous ->
-                previous.environmentId == entry.environmentId && previous.cwd == entry.cwd
-            } == true
-            if (!sameEnvironment) {
-                append("for `")
-                append(entry.environmentId)
-                append("` with root ")
-                append(entry.cwd)
-                append("\n\n")
-            }
-            previousProjectEnvironment = entry
-        } else {
-            previousProjectEnvironment = null
-        }
-        append(entry.text)
-        previousWasProject = entry is AgentsMdInstruction.Project
-        hasPrevious = true
-    }
-}
-
-private fun EnvironmentContext.render(): String = promptXml {
+private fun AgentContextPrefix.renderEnvironmentContext(): String = promptXml {
     tag("environment_context") {
-        when {
-            environments.size == 1 -> appendEnvironment(environments.single())
-            environments.isNotEmpty() -> {
-                tag("environments") {
-                    environments.forEach { environment ->
-                        tag("environment", attributes = mapOf("id" to environment.id)) {
-                            appendEnvironment(environment)
-                        }
-                    }
-                }
-            }
-        }
-        tag("current_date") { text(currentDate.toString()) }
-        tag("timezone") { text(timeZone.toString()) }
+        render(cwd)
+        render(shell)
+        render(TimeZone.currentSystemDefault())
     }
 }
 
-private fun PromptXmlBuilder.appendEnvironment(environment: AgentEnvironment): Unit {
-    tag("cwd") { text(environment.cwd.toString()) }
-    tag("shell") { text(environment.shell) }
+private fun PromptXmlBuilder.render(cwd: Path) {
+    tag("cwd") { text(cwd.toString()) }
+}
+
+private fun PromptXmlBuilder.render(shell: Shell) {
+    val name = when (shell.type) {
+        ShellType.Sh -> "sh"
+        ShellType.Bash -> "bash"
+        ShellType.Zsh -> "zsh"
+        ShellType.PowerShell -> "powershell"
+        ShellType.Cmd -> "cmd"
+    }
+    tag("shell") { text(name) }
+}
+
+private fun PromptXmlBuilder.render(timeZone: TimeZone) {
+    tag("current_date") {
+        text(Clock.System.now().toLocalDateTime(timeZone).date.toString())
+    }
+    tag("timezone") { text(timeZone.toString()) }
 }
