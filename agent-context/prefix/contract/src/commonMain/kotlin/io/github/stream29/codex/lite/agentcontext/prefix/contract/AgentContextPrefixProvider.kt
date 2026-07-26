@@ -1,24 +1,40 @@
 package io.github.stream29.codex.lite.agentcontext.prefix.contract
 
-import io.github.stream29.codex.lite.agentcontext.skill.contract.AvailableSkill
+import io.github.stream29.codex.lite.agentcontext.prefix.agentsmd.contract.AgentsMdInstructions
+import io.github.stream29.codex.lite.agentcontext.prefix.skill.contract.AvailableSkill
+import io.github.stream29.codex.lite.openai.CodexAgentSettings
+import io.github.stream29.codex.lite.utils.shellclient.Shell
+import kotlinx.io.files.Path
 
 /**
- * Supplies structured host context for the transient prefix of normal Responses
- * requests.
+ * Structured request prefix captured for one logical user turn.
  *
- * AgentState reads every property when it projects a request, so an
- * implementation's getters may reflect later runtime, filesystem,
- * configuration, or capability changes. This provider neither reads agent
- * state, storage, or history nor constructs OpenAI history items.
- *
- * @property environmentContext Current host environment data visible to the model.
- * @property availableSkills Current catalog of skills exposed to the model.
+ * @property cwd Agent working directory captured from its current settings.
+ * @property shell Application-wide shell captured with this prefix.
  * @property agentMd Current AGENTS.md-derived instruction sources.
+ * @property availableSkills Current skill metadata catalog visible to the model.
  */
-public interface AgentContextPrefixProvider {
-    public val environmentContext: EnvironmentContext
+public data class AgentContextPrefix(
+    public val cwd: Path,
+    public val shell: Shell,
+    public val agentMd: AgentsMdInstructions,
+    public val availableSkills: List<AvailableSkill>,
+)
 
-    public val availableSkills: List<AvailableSkill>
-
-    public val agentMd: List<AgentsMdInstruction>
-}
+/**
+ * Supplies the complete structured prefix for normal Responses requests.
+ *
+ * This provider is the abstraction boundary between AgentState and the
+ * concrete host environment and application settings. An implementation
+ * observes and combines those external sources, while AgentState only supplies
+ * its current Agent settings and consumes the resulting [AgentContextPrefix].
+ * AgentState therefore does not depend on a frontend settings model,
+ * environment APIs, or their observation and persistence mechanisms.
+ *
+ * AgentState invokes the provider with the settings visible at the projected
+ * storage index. A turn-aware provider may return the same frozen value for
+ * every request in one logical user turn. A provider neither reads agent
+ * state, storage, or history nor constructs OpenAI items.
+ */
+public typealias AgentContextPrefixProvider =
+    suspend (settings: CodexAgentSettings) -> AgentContextPrefix

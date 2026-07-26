@@ -1,94 +1,65 @@
 package io.github.stream29.codex.lite.agentcontext.prefix.render
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentsMdInstruction
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.EnvironmentContext
-import io.github.stream29.codex.lite.agentcontext.skill.contract.AvailableSkill
+import io.github.stream29.codex.lite.agentcontext.prefix.agentsmd.contract.AgentsMdInstruction
+import io.github.stream29.codex.lite.agentcontext.prefix.agentsmd.contract.AgentsMdInstructions
+import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefix
+import io.github.stream29.codex.lite.agentcontext.prefix.skill.contract.AvailableSkill
+import io.github.stream29.codex.lite.agentcontext.prefix.skill.contract.SkillScope
+import io.github.stream29.codex.lite.agentcontext.prefix.skill.contract.SkillSource
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.ResponseItem
-import kotlinx.datetime.LocalDate
+import io.github.stream29.codex.lite.utils.shellclient.Shell
+import io.github.stream29.codex.lite.utils.shellclient.ShellType
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.io.files.Path
 import kotlin.test.assertEquals
+import kotlin.time.Clock
 
 val agentContextPrefixRendererTest by testSuite {
     test("renders every injection source") {
-        val skills = listOf(
-            AvailableSkill(
-                name = "test-skill",
-                description = "test description",
-                path = Path("/skills/test-skill/SKILL.md"),
-            ),
-        )
-        val context = EnvironmentContext(
-            environments = listOf(
-                AgentEnvironment(
-                    id = "local",
-                    cwd = Path("/workspace"),
-                    shell = "bash",
+        val skills = listOf(testSkill(1))
+        val rendered = contextPrefix(
+            agentMd = AgentsMdInstructions(
+                userInstruction = AgentsMdInstruction(
+                    source = Path("/home/stream/AGENTS.md"),
+                    text = "agent instructions",
                 ),
             ),
-            currentDate = LocalDate(2026, 7, 15),
-            timeZone = TimeZone.UTC,
-        )
-
-        val rendered = contextPrefixProvider(
             availableSkills = skills,
-            agentMd = listOf(
-                AgentsMdInstruction.Internal(text = "agent instructions"),
-            ),
-            environmentContext = context,
         ).render()
 
         assertEquals(
             listOf(
-                message(
-                    MessageRole.Developer,
-                    availableSkills(skills),
-                ),
+                message(MessageRole.Developer, availableSkills(skills)),
                 message(
                     MessageRole.User,
                     agentMd("agent instructions"),
-                    environmentContext(
-                        cwd = Path("/workspace"),
-                        shell = "bash",
-                        currentDate = LocalDate(2026, 7, 15),
-                        timeZone = TimeZone.UTC,
-                    ),
+                    environmentContext(),
                 ),
             ),
             rendered,
         )
     }
 
-    test("renders raw project AGENTS.md sources per environment") {
-        val rendered = contextPrefixProvider(
-            agentMd = listOf(
-                AgentsMdInstruction.User(
-                    source = Path("/home/stream/AGENTS.md"),
-                    text = "user instructions",
+    test("renders raw project AGENTS.md sources in discovery order") {
+        val rendered = contextPrefix(
+            agentMd = AgentsMdInstructions(
+                userInstruction = AgentsMdInstruction(
+                    Path("/home/stream/AGENTS.md"),
+                    "user instructions",
                 ),
-                AgentsMdInstruction.Project(
-                    source = Path("/workspace/AGENTS.md"),
-                    environmentId = "local",
-                    cwd = Path("/workspace"),
-                    text = "workspace instructions",
-                ),
-                AgentsMdInstruction.Project(
-                    source = Path("/workspace/nested/AGENTS.md"),
-                    environmentId = "local",
-                    cwd = Path("/workspace"),
-                    text = "nested workspace instructions",
-                ),
-                AgentsMdInstruction.Internal(text = "internal instructions"),
-                AgentsMdInstruction.Project(
-                    source = Path("/remote/AGENTS.md"),
-                    environmentId = "remote",
-                    cwd = Path("/remote"),
-                    text = "remote instructions",
+                projectInstructions = listOf(
+                    AgentsMdInstruction(
+                        Path("/workspace/AGENTS.md"),
+                        "workspace instructions",
+                    ),
+                    AgentsMdInstruction(
+                        Path("/workspace/nested/AGENTS.md"),
+                        "nested workspace instructions",
+                    ),
                 ),
             ),
         ).render()
@@ -97,144 +68,67 @@ val agentContextPrefixRendererTest by testSuite {
             listOf(
                 message(
                     MessageRole.User,
-                    agentMd(
+                    agentMdForDirectory(
                         """
                         user instructions
 
-                        for `local` with root /workspace
+                        --- project-doc ---
 
                         workspace instructions
 
                         nested workspace instructions
-
-                        internal instructions
-
-                        for `remote` with root /remote
-
-                        remote instructions
                         """.trimIndent(),
+                        directory = "/workspace",
                     ),
-                    environmentContext(
-                        cwd = Path("/workspace"),
-                        shell = "bash",
-                        currentDate = LocalDate(2026, 7, 15),
-                        timeZone = TimeZone.UTC,
-                    ),
+                    environmentContext(),
                 ),
             ),
             rendered,
         )
     }
 
-    test("renders an environment when optional sources are empty") {
+    test("renders the explicitly supplied catalog without shared provider state") {
         assertEquals(
             listOf(
-                message(
-                    MessageRole.User,
-                    environmentContext(
-                        cwd = Path("/workspace"),
-                        shell = "bash",
-                        currentDate = LocalDate(2026, 7, 15),
-                        timeZone = TimeZone.UTC,
-                    ),
-                ),
+                message(MessageRole.Developer, availableSkills(listOf(testSkill(2)))),
+                message(MessageRole.User, environmentContext()),
             ),
-            contextPrefixProvider().render(),
-        )
-    }
-
-    test("reads current values from the provider for every render") {
-        var revision = 0
-        fun skill(revision: Int): AvailableSkill =
-            AvailableSkill(
-                name = "skill-$revision",
-                description = "description $revision",
-                path = Path("/skills/$revision/SKILL.md"),
-            )
-
-        val provider = object : AgentContextPrefixProvider {
-            override val environmentContext: EnvironmentContext
-                get() = testEnvironmentContext()
-
-            override val availableSkills: List<AvailableSkill>
-                get() = listOf(skill(++revision))
-
-            override val agentMd: List<AgentsMdInstruction>
-                get() = emptyList()
-        }
-
-        assertEquals(
-            listOf(
-                message(MessageRole.Developer, availableSkills(listOf(skill(1)))),
-                message(
-                    MessageRole.User,
-                    environmentContext(
-                        cwd = Path("/workspace"),
-                        shell = "bash",
-                        currentDate = LocalDate(2026, 7, 15),
-                        timeZone = TimeZone.UTC,
-                    ),
-                ),
-            ),
-            provider.render(),
-        )
-        assertEquals(
-            listOf(
-                message(MessageRole.Developer, availableSkills(listOf(skill(2)))),
-                message(
-                    MessageRole.User,
-                    environmentContext(
-                        cwd = Path("/workspace"),
-                        shell = "bash",
-                        currentDate = LocalDate(2026, 7, 15),
-                        timeZone = TimeZone.UTC,
-                    ),
-                ),
-            ),
-            provider.render(),
+            contextPrefix(availableSkills = listOf(testSkill(2))).render(),
         )
     }
 }
 
-private fun contextPrefixProvider(
-    environmentContext: EnvironmentContext = testEnvironmentContext(),
+private val testSkillSource = SkillSource(
+    authorityId = "test",
+    scope = SkillScope.User,
+    root = Path("/skills"),
+)
+
+private fun testSkill(revision: Int): AvailableSkill = AvailableSkill(
+    name = "skill-$revision",
+    description = "description $revision",
+    path = Path("/skills/$revision/SKILL.md"),
+    source = testSkillSource,
+)
+
+private fun contextPrefix(
+    agentMd: AgentsMdInstructions = AgentsMdInstructions(),
     availableSkills: List<AvailableSkill> = emptyList(),
-    agentMd: List<AgentsMdInstruction> = emptyList(),
-): AgentContextPrefixProvider {
-    val fixedEnvironmentContext = environmentContext
-    val fixedAvailableSkills = availableSkills
-    val fixedAgentMd = agentMd
-
-    return object : AgentContextPrefixProvider {
-        override val environmentContext: EnvironmentContext = fixedEnvironmentContext
-
-        override val availableSkills: List<AvailableSkill> = fixedAvailableSkills
-
-        override val agentMd: List<AgentsMdInstruction> = fixedAgentMd
-    }
-}
-
-private fun testEnvironmentContext(): EnvironmentContext =
-    EnvironmentContext(
-        environments = listOf(
-            AgentEnvironment(
-                id = "local",
-                cwd = Path("/workspace"),
-                shell = "bash",
-            ),
-        ),
-        currentDate = LocalDate(2026, 7, 15),
-        timeZone = TimeZone.UTC,
-    )
+): AgentContextPrefix = AgentContextPrefix(
+    cwd = Path("/workspace"),
+    shell = Shell(ShellType.Bash, Path("/bin/bash")),
+    agentMd = agentMd,
+    availableSkills = availableSkills,
+)
 
 private fun message(role: MessageRole, vararg sections: String): ResponseItem.Message =
-    ResponseItem.Message(
-        role = role,
-        content = sections.map(ContentItem::InputText),
-    )
+    ResponseItem.Message(role = role, content = sections.map(ContentItem::InputText))
 
 private fun agentMd(contents: String): String =
     "# AGENTS.md instructions\n\n<INSTRUCTIONS>\n$contents\n</INSTRUCTIONS>"
+
+private fun agentMdForDirectory(contents: String, directory: String): String =
+    "# AGENTS.md instructions for $directory\n\n<INSTRUCTIONS>\n$contents\n</INSTRUCTIONS>"
 
 private fun availableSkills(skills: List<AvailableSkill>): String = buildString {
     append("<skills_instructions>\n")
@@ -242,27 +136,22 @@ private fun availableSkills(skills: List<AvailableSkill>): String = buildString 
     append("A skill is a set of local instructions stored in a `SKILL.md` file. Below is the list of skills available to the agent. Each entry includes a name, description, and path.\n")
     append("### Available skills\n")
     skills.forEach { skill ->
-        append("- name: ")
-        append(skill.name)
-        append("\n  description: ")
-        append(skill.description)
-        append("\n  path: ")
-        append(skill.path)
-        append('\n')
+        append("- name: ${skill.name}\n")
+        append("  description: ${skill.description}\n")
+        append("  path: ${skill.path}\n")
     }
     append("</skills_instructions>")
 }
 
-private fun environmentContext(
-    cwd: Path,
-    shell: String,
-    currentDate: LocalDate,
-    timeZone: TimeZone,
-): String = buildString {
-    append("<environment_context>\n")
-    append("  <cwd>$cwd</cwd>\n")
-    append("  <shell>$shell</shell>\n")
-    append("  <current_date>$currentDate</current_date>\n")
-    append("  <timezone>$timeZone</timezone>\n")
-    append("</environment_context>")
+private fun environmentContext(): String {
+    val timeZone = TimeZone.currentSystemDefault()
+    val currentDate = Clock.System.now().toLocalDateTime(timeZone).date
+    return """
+    <environment_context>
+      <cwd>/workspace</cwd>
+      <shell>bash</shell>
+      <current_date>$currentDate</current_date>
+      <timezone>$timeZone</timezone>
+    </environment_context>
+    """.trimIndent()
 }

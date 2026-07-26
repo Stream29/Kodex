@@ -5,8 +5,10 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-context-skill-contract"))
-            api(libs.kotlinx.datetime)
+            api(project(":agent-context-prefix-agents-md-contract"))
+            api(project(":agent-context-prefix-skill-contract"))
+            api(project(":openai-models"))
+            api(project(":utils-shell-client"))
             api(libs.kotlinx.io.core)
         }
     }
