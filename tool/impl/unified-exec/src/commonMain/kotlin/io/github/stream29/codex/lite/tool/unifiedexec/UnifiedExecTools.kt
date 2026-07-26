@@ -35,7 +35,7 @@ public object UnifiedExecTools {
         )
 
     /** Creates both tools around one shared [UnifiedExecToolClient]. */
-    public fun createTools(client: UnifiedExecToolClient = UnifiedExecToolClient()): List<Tool> =
+    public fun createTools(client: UnifiedExecToolClient): List<Tool> =
         listOf(
             CloseableUnifiedExecTool(
                 delegate = jsonTool(

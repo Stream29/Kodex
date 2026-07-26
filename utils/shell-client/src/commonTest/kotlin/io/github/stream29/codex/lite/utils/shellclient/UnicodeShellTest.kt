@@ -3,7 +3,9 @@ package io.github.stream29.codex.lite.utils.shellclient
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
@@ -12,6 +14,9 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
+
+private suspend fun testShellClient(): ShellClient =
+    CoroutineScope(currentCoroutineContext()).ShellClient()
 
 private suspend fun unicodeShellTestRoot(): Path =
     Path(SystemTemporaryDirectory, "codex-lite-shell-${Random.nextLong()}").also {
@@ -54,7 +59,7 @@ val unicodeShellTest by testSuite(
 
             for (tty in listOf(false, true)) {
                 val probe = unicodeProbeProcessCommand(markerFileName, content)
-                val client = ShellClient()
+                val client = testShellClient()
                 try {
                     val session = withTimeout(10.seconds) {
                         client.start(

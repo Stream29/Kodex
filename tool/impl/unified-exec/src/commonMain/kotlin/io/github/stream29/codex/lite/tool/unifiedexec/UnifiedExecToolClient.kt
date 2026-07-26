@@ -5,6 +5,8 @@ import io.github.stream29.codex.lite.utils.shellclient.ProcessSession
 import io.github.stream29.codex.lite.utils.shellclient.Shell
 import io.github.stream29.codex.lite.utils.shellclient.ShellClient
 import io.github.stream29.codex.lite.utils.shellclient.ShellProcessCommand
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -30,11 +32,13 @@ public const val UnifiedExecMaximumSessionCount: Int = 64
  * This client owns one [ShellClient], which owns every process session it
  * creates. Closing this client closes that shell client and cancels all active
  * sessions. Commands always use the selected shell's login initialization;
- * model calls cannot disable it.
+ * model calls cannot disable it. A command without an explicit shell captures
+ * the current [UnifiedExecSettings.shell] value when its process starts.
  */
-public class UnifiedExecToolClient(
+public class UnifiedExecToolClient internal constructor(
     private val workingDirectory: Path = Path("."),
-    private val shellClient: ShellClient = ShellClient(),
+    private val settings: StateFlow<UnifiedExecSettings>,
+    private val shellClient: ShellClient,
 ) : AutoCloseable {
     private val registryMutex: Mutex = Mutex()
     private val sessions: MutableMap<Int, ManagedProcessSession> = mutableMapOf()
@@ -44,7 +48,7 @@ public class UnifiedExecToolClient(
         arguments.validate()
         val started = TimeSource.Monotonic.markNow()
         val session = runProcessOperation {
-            shellClient.start(arguments.toShellProcessCommand(workingDirectory))
+            shellClient.start(arguments.toShellProcessCommand(workingDirectory, settings.value.shell))
         }
         val managed = try {
             registryMutex.withLock {
@@ -174,6 +178,17 @@ public class UnifiedExecToolClient(
         }
 }
 
+/** Creates a unified-exec client with a dedicated shell client under this scope. */
+public fun CoroutineScope.UnifiedExecToolClient(
+    settings: StateFlow<UnifiedExecSettings>,
+    workingDirectory: Path = Path("."),
+): UnifiedExecToolClient =
+    UnifiedExecToolClient(
+        workingDirectory = workingDirectory,
+        settings = settings,
+        shellClient = ShellClient(),
+    )
+
 private class ManagedProcessSession(
     val sessionId: Int,
     val session: ProcessSession,
@@ -204,7 +219,10 @@ private fun WriteStdinArguments.validate() {
     if (maxOutputTokens < 0) throw UnifiedExecToolException("`max_output_tokens` must not be negative.")
 }
 
-private fun ExecCommandArguments.toShellProcessCommand(defaultWorkingDirectory: Path): ShellProcessCommand =
+private fun ExecCommandArguments.toShellProcessCommand(
+    defaultWorkingDirectory: Path,
+    defaultShell: Shell,
+): ShellProcessCommand =
     ShellProcessCommand(
         command = command,
         workingDirectory = workdir
@@ -214,7 +232,7 @@ private fun ExecCommandArguments.toShellProcessCommand(defaultWorkingDirectory: 
                 if (requested.isAbsolute) requested else Path(defaultWorkingDirectory, value)
             }
             ?: defaultWorkingDirectory,
-        shell = shell ?: Shell.default,
+        shell = shell ?: defaultShell,
         login = true,
         tty = tty,
     )
