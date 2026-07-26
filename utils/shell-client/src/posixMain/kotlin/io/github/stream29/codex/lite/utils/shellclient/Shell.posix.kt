@@ -16,6 +16,16 @@ internal actual val shellHostPlatform: ShellHostPlatform
 
 internal fun Shell.invocation(
     command: String,
+    login: Boolean,
+): ShellInvocation =
+    ShellInvocation(
+        executable = path.toString(),
+        argumentsBeforeCommand = type.argumentsBeforeCommand(login),
+        command = command,
+    )
+
+internal fun Shell.invocation(
+    command: String,
     workingDirectory: Path,
     login: Boolean,
 ): ShellInvocation =
