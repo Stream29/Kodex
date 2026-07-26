@@ -4,6 +4,7 @@ package io.github.stream29.codex.lite.utils.shellclient
 
 import io.github.stream29.codex.lite.utils.shellclient.conpty.codexlite_close_windows_pseudo_console
 import io.github.stream29.codex.lite.utils.shellclient.conpty.codexlite_spawn_windows_pty
+import io.github.stream29.codex.lite.utils.processclient.ProcessClient
 import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.COpaquePointerVar
 import kotlinx.cinterop.CPointed
@@ -18,7 +19,6 @@ import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.plus
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.set
-import kotlinx.cinterop.sizeOf
 import kotlinx.cinterop.toKStringFromUtf16
 import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
@@ -42,28 +42,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import platform.windows.CREATE_NO_WINDOW
-import platform.windows.CREATE_SUSPENDED
-import platform.windows.CREATE_UNICODE_ENVIRONMENT
 import platform.windows.AssignProcessToJobObject
 import platform.windows.CloseHandle
 import platform.windows.CreateJobObjectW
-import platform.windows.CreatePipe
-import platform.windows.CreateProcessW
 import platform.windows.ERROR_BROKEN_PIPE
 import platform.windows.FreeEnvironmentStringsW
 import platform.windows.GetEnvironmentStringsW
 import platform.windows.GetExitCodeProcess
 import platform.windows.GetLastError
-import platform.windows.HANDLE_FLAG_INHERIT
-import platform.windows.PROCESS_INFORMATION
 import platform.windows.PeekNamedPipe
 import platform.windows.ReadFile
 import platform.windows.ResumeThread
-import platform.windows.SECURITY_ATTRIBUTES
-import platform.windows.STARTF_USESTDHANDLES
-import platform.windows.STARTUPINFOW
-import platform.windows.SetHandleInformation
 import platform.windows.TerminateProcess
 import platform.windows.TerminateJobObject
 import platform.windows.WAIT_OBJECT_0
@@ -77,11 +66,12 @@ public actual class ShellClient internal actual constructor(
 ) :
     CoroutineScope by scope,
     AutoCloseable {
+    private val processClient = scope.ProcessClient()
 
     public actual suspend fun start(command: ShellProcessCommand): ProcessSession =
         withContext(WindowsProcessIoDispatcher) {
             this@ShellClient.requireOpen()
-            command.startWindowsProcess(this@ShellClient)
+            command.startWindowsProcess(processClient, this@ShellClient)
         }
 
     public actual override fun close() {
@@ -92,130 +82,21 @@ public actual class ShellClient internal actual constructor(
 private val WindowsProcessIoDispatcher: CoroutineDispatcher =
     Dispatchers.Default.limitedParallelism(64, "CodexLite.ProcessIO")
 
-private fun ShellProcessCommand.startWindowsProcess(parentScope: CoroutineScope): ProcessSession {
+private suspend fun ShellProcessCommand.startWindowsProcess(
+    processClient: ProcessClient,
+    parentScope: CoroutineScope,
+): ProcessSession {
     if (command.isBlank()) {
         throw ProcessException("Process command must not be blank.")
     }
-    return if (tty) startWindowsPtyProcess(parentScope) else startWindowsPipeProcess(parentScope)
-}
-
-private fun ShellProcessCommand.startWindowsPipeProcess(parentScope: CoroutineScope): ProcessSession {
-    return memScoped {
-        val securityAttributes = alloc<SECURITY_ATTRIBUTES>().apply {
-            nLength = sizeOf<SECURITY_ATTRIBUTES>().toUInt()
-            lpSecurityDescriptor = null
-            bInheritHandle = 1
-        }
-        withWindowsPipe(securityAttributes.ptr) { stdinRead, stdinWrite ->
-            withWindowsPipe(securityAttributes.ptr) { outputRead, outputWrite ->
-                withWindowsPipe(securityAttributes.ptr) { errorRead, errorWrite ->
-                    checkWindowsSuccess(
-                        SetHandleInformation(stdinWrite, HANDLE_FLAG_INHERIT.toUInt(), 0u),
-                        "make parent stdin handle non-inheritable",
-                    )
-                    checkWindowsSuccess(
-                        SetHandleInformation(outputRead, HANDLE_FLAG_INHERIT.toUInt(), 0u),
-                        "make parent output handle non-inheritable",
-                    )
-                    checkWindowsSuccess(
-                        SetHandleInformation(errorRead, HANDLE_FLAG_INHERIT.toUInt(), 0u),
-                        "make parent error handle non-inheritable",
-                    )
-
-                    val startupInfo = alloc<STARTUPINFOW>().apply {
-                        cb = sizeOf<STARTUPINFOW>().toUInt()
-                        lpReserved = null
-                        lpDesktop = null
-                        lpTitle = null
-                        dwX = 0u
-                        dwY = 0u
-                        dwXSize = 0u
-                        dwYSize = 0u
-                        dwXCountChars = 0u
-                        dwYCountChars = 0u
-                        dwFillAttribute = 0u
-                        dwFlags = STARTF_USESTDHANDLES.toUInt()
-                        wShowWindow = 0u
-                        cbReserved2 = 0u
-                        lpReserved2 = null
-                        hStdInput = stdinRead
-                        hStdOutput = outputWrite
-                        hStdError = errorWrite
-                    }
-                    val processInfo = alloc<PROCESS_INFORMATION>().apply {
-                        hProcess = null
-                        hThread = null
-                        dwProcessId = 0u
-                        dwThreadId = 0u
-                    }
-                    val commandLine = windowsCommandLine()
-                    val currentDirectory = workingDirectory.windowsPath()
-                    val environmentBlock = windowsEnvironmentBlock(environment)
-                    checkWindowsSuccess(
-                        CreateProcessW(
-                            null,
-                            windowsStringBuffer(commandLine),
-                            null,
-                            null,
-                            1,
-                            CREATE_NO_WINDOW.toUInt() or
-                                CREATE_SUSPENDED.toUInt() or
-                                if (environmentBlock == null) 0u else CREATE_UNICODE_ENVIRONMENT.toUInt(),
-                            environmentBlock,
-                            currentDirectory,
-                            startupInfo.ptr,
-                            processInfo.ptr,
-                        ),
-                        "start process",
-                    )
-                    val process = requireNotNull(processInfo.hProcess)
-                    val thread = requireNotNull(processInfo.hThread)
-                    val job = try {
-                        // Attach the root process before it can create descendants.
-                        createWindowsProcessJob(process)
-                    } catch (failure: Throwable) {
-                        TerminateProcess(process, 1u)
-                        closeWindowsHandle(process)
-                        closeWindowsHandle(thread)
-                        throw failure
-                    }
-                    try {
-                        if (ResumeThread(thread) == UInt.MAX_VALUE) {
-                            throw ProcessException("Failed to resume process: error ${GetLastError()}.")
-                        }
-                        WindowsPipeTransfer(
-                            value = WindowsProcess(
-                                processHandle = process,
-                                jobHandle = job,
-                                stdinHandle = stdinWrite,
-                                outputHandle = outputRead,
-                                errorHandle = errorRead,
-                                parentScope = parentScope,
-                            ),
-                            transferRead = true,
-                        )
-                    } catch (failure: Throwable) {
-                        terminateWindowsProcessTree(job, process)
-                        closeWindowsHandle(job)
-                        closeWindowsHandle(process)
-                        throw failure
-                    } finally {
-                        closeWindowsHandle(thread)
-                    }
-                }.let { session ->
-                    WindowsPipeTransfer(
-                        value = session,
-                        transferRead = true,
-                    )
-                }
-            }.let { session ->
-                WindowsPipeTransfer(
-                    value = session,
-                    transferWrite = true,
-                )
-            }
-        }
+    if (!tty) {
+        return parentScope.startPipeProcess(
+            client = processClient,
+            invocation = shell.invocation(command, login),
+            command = this,
+        )
     }
+    return startWindowsPtyProcess(parentScope)
 }
 
 private fun ShellProcessCommand.startWindowsPtyProcess(parentScope: CoroutineScope): ProcessSession = memScoped {
@@ -281,36 +162,6 @@ private fun ShellProcessCommand.startWindowsPtyProcess(parentScope: CoroutineSco
         throw failure
     } finally {
         closeWindowsHandle(threadHandle)
-    }
-}
-
-private data class WindowsPipeTransfer<T>(
-    val value: T,
-    val transferRead: Boolean = false,
-    val transferWrite: Boolean = false,
-)
-
-private fun <T> withWindowsPipe(
-    securityAttributes: CPointer<SECURITY_ATTRIBUTES>,
-    block: (
-        read: CPointer<out CPointed>,
-        write: CPointer<out CPointed>,
-    ) -> WindowsPipeTransfer<T>,
-): T = memScoped {
-    val read = alloc<COpaquePointerVar>()
-    val write = alloc<COpaquePointerVar>()
-    checkWindowsSuccess(CreatePipe(read.ptr, write.ptr, securityAttributes, 0u), "create process pipe")
-    val readHandle = requireNotNull(read.value)
-    val writeHandle = requireNotNull(write.value)
-    try {
-        val transfer = block(readHandle, writeHandle)
-        if (!transfer.transferRead) closeWindowsHandle(readHandle)
-        if (!transfer.transferWrite) closeWindowsHandle(writeHandle)
-        transfer.value
-    } catch (failure: Throwable) {
-        closeWindowsHandle(readHandle)
-        closeWindowsHandle(writeHandle)
-        throw failure
     }
 }
 

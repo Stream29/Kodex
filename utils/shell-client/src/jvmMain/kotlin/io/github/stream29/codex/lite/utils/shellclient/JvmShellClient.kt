@@ -2,6 +2,7 @@ package io.github.stream29.codex.lite.utils.shellclient
 
 import com.pty4j.PtyProcess
 import com.pty4j.PtyProcessBuilder
+import io.github.stream29.codex.lite.utils.processclient.ProcessClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CompletableJob
@@ -19,7 +20,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.io.IOException
 import java.io.InputStream
 
@@ -28,11 +28,23 @@ public actual class ShellClient internal actual constructor(
 ) :
     CoroutineScope by scope,
     AutoCloseable {
+    private val processClient = scope.ProcessClient()
 
     public actual suspend fun start(command: ShellProcessCommand): ProcessSession =
         withContext(Dispatchers.IO) {
             this@ShellClient.requireOpen()
-            JvmProcess(command.startProcess(), command.tty, this@ShellClient)
+            if (command.command.isBlank()) {
+                throw ProcessException("Process command must not be blank.")
+            }
+            val invocation = command.shell.invocation(command.command, command.login)
+            if (!command.tty) {
+                return@withContext this@ShellClient.startPipeProcess(
+                    client = processClient,
+                    invocation = invocation,
+                    command = command,
+                )
+            }
+            JvmProcess(command.startPtyProcess(invocation), this@ShellClient)
         }
 
     public actual override fun close() {
@@ -40,36 +52,22 @@ public actual class ShellClient internal actual constructor(
     }
 }
 
-private fun ShellProcessCommand.startProcess(): Process {
-    if (command.isBlank()) {
-        throw ProcessException("Process command must not be blank.")
-    }
-    val invocation = shell.invocation(command, login)
+private fun ShellProcessCommand.startPtyProcess(invocation: ShellInvocation): Process {
     return try {
         val processCommand = listOf(invocation.executable) + invocation.argumentsBeforeCommand + invocation.command
-        if (tty) {
-            PtyProcessBuilder(processCommand.toTypedArray())
-                .setDirectory(workingDirectory.toString())
-                .setEnvironment(
-                    System.getenv().toMutableMap().apply {
-                        putAll(environment)
-                        putIfAbsent("TERM", "xterm-256color")
-                    },
-                )
-                .setInitialColumns(DefaultPtyColumns)
-                .setInitialRows(DefaultPtyRows)
-                .setRedirectErrorStream(true)
-                .setUseWinConPty(true)
-                .start()
-        } else {
-            ProcessBuilder(processCommand)
-                .redirectErrorStream(false)
-                .directory(File(workingDirectory.toString()))
-                .apply {
-                    environment().putAll(this@startProcess.environment)
-                }
-                .start()
-        }
+        PtyProcessBuilder(processCommand.toTypedArray())
+            .setDirectory(workingDirectory.toString())
+            .setEnvironment(
+                System.getenv().toMutableMap().apply {
+                    putAll(environment)
+                    putIfAbsent("TERM", "xterm-256color")
+                },
+            )
+            .setInitialColumns(DefaultPtyColumns)
+            .setInitialRows(DefaultPtyRows)
+            .setRedirectErrorStream(true)
+            .setUseWinConPty(true)
+            .start()
     } catch (error: IOException) {
         throw ProcessException("Failed to start process with ${invocation.executable}.", error)
     }
@@ -77,7 +75,6 @@ private fun ShellProcessCommand.startProcess(): Process {
 
 private class JvmProcess(
     private val process: Process,
-    private val tty: Boolean,
     parentScope: CoroutineScope,
 ) : ProcessSession {
     private val sessionJob: CompletableJob = SupervisorJob(parentScope.coroutineContext[Job])
@@ -249,12 +246,8 @@ private class JvmProcess(
     private suspend fun writeStdin(text: String): Unit =
         withContext(Dispatchers.IO) {
             try {
-                val input = if (tty) {
-                    val enter = (process as PtyProcess).enterKeyCode.toInt().toChar()
-                    text.replace("\r\n", enter.toString()).replace('\n', enter)
-                } else {
-                    text
-                }
+                val enter = (process as PtyProcess).enterKeyCode.toInt().toChar()
+                val input = text.replace("\r\n", enter.toString()).replace('\n', enter)
                 process.outputStream.write(input.encodeToByteArray())
                 process.outputStream.flush()
             } catch (error: IOException) {
@@ -287,12 +280,7 @@ private class JvmProcess(
 
     private suspend fun closeStdin(): Unit =
         withContext(Dispatchers.IO) {
-            if (tty) return@withContext
-            try {
-                process.outputStream.close()
-            } catch (error: IOException) {
-                throw ProcessException("Failed to close process standard input.", error)
-            }
+            // A PTY remains interactive until the process exits or the session is closed.
         }
 
     private suspend fun terminateProcessTree(): Unit = withContext(Dispatchers.IO) {

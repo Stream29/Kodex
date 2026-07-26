@@ -2,8 +2,8 @@
 
 package io.github.stream29.codex.lite.utils.shellclient
 
-import io.github.stream29.codex.lite.utils.shellclient.cinterop.codexlite_spawn_shell
 import io.github.stream29.codex.lite.utils.shellclient.cinterop.codexlite_spawn_pty_shell
+import io.github.stream29.codex.lite.utils.processclient.ProcessClient
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.CPointerVar
@@ -11,7 +11,6 @@ import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.allocArray
-import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.set
@@ -41,10 +40,7 @@ import platform.posix.EAGAIN
 import platform.posix.ECHILD
 import platform.posix.EIO
 import platform.posix.EINTR
-import platform.posix.FD_CLOEXEC
-import platform.posix.F_GETFD
 import platform.posix.F_GETFL
-import platform.posix.F_SETFD
 import platform.posix.F_SETFL
 import platform.posix.O_NONBLOCK
 import platform.posix.SIGKILL
@@ -53,7 +49,6 @@ import platform.posix.close
 import platform.posix.errno
 import platform.posix.fcntl
 import platform.posix.kill
-import platform.posix.pipe
 import platform.posix.read
 import platform.posix.waitpid
 import platform.posix.write
@@ -64,11 +59,12 @@ public actual class ShellClient internal actual constructor(
 ) :
     CoroutineScope by scope,
     AutoCloseable {
+    private val processClient = scope.ProcessClient()
 
     public actual suspend fun start(command: ShellProcessCommand): ProcessSession =
         withContext(PosixProcessIoDispatcher) {
             this@ShellClient.requireOpen()
-            command.startPosixProcess(this@ShellClient)
+            command.startPosixProcess(processClient, this@ShellClient)
         }
 
     public actual override fun close() {
@@ -79,74 +75,26 @@ public actual class ShellClient internal actual constructor(
 private val PosixProcessIoDispatcher: CoroutineDispatcher =
     Dispatchers.Default.limitedParallelism(64, "CodexLite.ProcessIO")
 
-private fun ShellProcessCommand.startPosixProcess(parentScope: CoroutineScope): ProcessSession {
+private suspend fun ShellProcessCommand.startPosixProcess(
+    processClient: ProcessClient,
+    parentScope: CoroutineScope,
+): ProcessSession {
     if (command.isBlank()) {
         throw ProcessException("Process command must not be blank.")
+    }
+    if (!tty) {
+        return parentScope.startPipeProcess(
+            client = processClient,
+            invocation = shell.invocation(command, login),
+            command = this,
+        )
     }
     val invocation = shell.invocation(
         command = command,
         workingDirectory = workingDirectory,
         login = login,
     )
-    if (tty) return startPosixPtyProcess(invocation, environment, parentScope)
-
-    return withPosixPipe { stdinRead, stdinWrite ->
-        withPosixPipe { outputRead, outputWrite ->
-            withPosixPipe { errorRead, errorWrite ->
-                stdinWrite.setNonBlocking()
-                outputRead.setNonBlocking()
-                errorRead.setNonBlocking()
-                environment.withPosixEnvironmentOverrides { environmentOverrides, environmentOverrideCount ->
-                    memScoped {
-                        val pid = alloc<IntVar>()
-                        val processGroup = alloc<IntVar>()
-                        val result = codexlite_spawn_shell(
-                            pid = pid.ptr,
-                            process_group = processGroup.ptr,
-                            stdin_read = stdinRead,
-                            stdin_write = stdinWrite,
-                            output_read = outputRead,
-                            output_write = outputWrite,
-                            error_read = errorRead,
-                            error_write = errorWrite,
-                            environment_overrides = environmentOverrides,
-                            environment_override_count = environmentOverrideCount,
-                            shell = invocation.executable,
-                            first_argument = invocation.argumentsBeforeCommand.getOrNull(0),
-                            second_argument = invocation.argumentsBeforeCommand.getOrNull(1),
-                            command = invocation.command,
-                        )
-                        if (result != 0) {
-                            throw ProcessException(
-                                "Failed to start process with ${invocation.executable}: error $result.",
-                            )
-                        }
-                        PosixPipeTransfer(
-                            value = PosixProcess(
-                                pid = pid.value,
-                                ownsProcessGroup = processGroup.value != 0,
-                                stdinFd = stdinWrite,
-                                outputFd = outputRead,
-                                errorFd = errorRead,
-                                parentScope = parentScope,
-                            ),
-                            transferRead = true,
-                        )
-                    }
-                }
-            }.let { session ->
-                PosixPipeTransfer(
-                    value = session,
-                    transferRead = true,
-                )
-            }
-        }.let { session ->
-            PosixPipeTransfer(
-                value = session,
-                transferWrite = true,
-            )
-        }
-    }
+    return startPosixPtyProcess(invocation, environment, parentScope)
 }
 
 private fun startPosixPtyProcess(
@@ -205,31 +153,6 @@ private inline fun <T> Map<String, String>.withPosixEnvironmentOverrides(
             overrides[index] = entry
         }
         block(overrides, size.toULong())
-    }
-}
-
-private data class PosixPipeTransfer<T>(
-    val value: T,
-    val transferRead: Boolean = false,
-    val transferWrite: Boolean = false,
-)
-
-private fun <T> withPosixPipe(block: (read: Int, write: Int) -> PosixPipeTransfer<T>): T = memScoped {
-    val descriptors = allocArray<IntVar>(2)
-    checkPlatformResult(pipe(descriptors), "create process pipe")
-    val read = descriptors[0]
-    val write = descriptors[1]
-    try {
-        read.setCloseOnExec()
-        write.setCloseOnExec()
-        val transfer = block(read, write)
-        if (!transfer.transferRead) close(read)
-        if (!transfer.transferWrite) close(write)
-        transfer.value
-    } catch (failure: Throwable) {
-        close(read)
-        close(write)
-        throw failure
     }
 }
 
@@ -544,14 +467,6 @@ private class PosixProcess(
         }
     }
 
-}
-
-private fun Int.setCloseOnExec() {
-    val flags = fcntl(this, F_GETFD)
-    if (flags == -1) {
-        throw ProcessException("Failed to read process descriptor flags: errno $errno.")
-    }
-    checkPlatformResult(fcntl(this, F_SETFD, flags or FD_CLOEXEC), "set process descriptor close-on-exec")
 }
 
 private fun Int.setNonBlocking() {

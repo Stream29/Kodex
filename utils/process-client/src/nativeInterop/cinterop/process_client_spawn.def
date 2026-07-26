@@ -1,0 +1,297 @@
+package = io.github.stream29.codex.lite.utils.processclient.cinterop
+
+headers = signal.h unistd.h
+
+---
+
+#ifdef __APPLE__
+#include <crt_externs.h>
+#define CODEXLITE_ENVIRON (*_NSGetEnviron())
+#else
+extern char **environ;
+#define CODEXLITE_ENVIRON environ
+#endif
+
+#include <errno.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
+
+static inline size_t codexlite_process_environment_name_length(const char *entry) {
+    const char *separator = strchr(entry, '=');
+    return separator == NULL ? strlen(entry) : (size_t)(separator - entry);
+}
+
+static inline int codexlite_process_environment_names_equal(const char *first, const char *second) {
+    size_t first_length = codexlite_process_environment_name_length(first);
+    size_t second_length = codexlite_process_environment_name_length(second);
+    return first_length == second_length && strncmp(first, second, first_length) == 0;
+}
+
+static inline char **codexlite_process_merge_environment(
+    const char *const *overrides,
+    size_t override_count
+) {
+    size_t inherited_count = 0;
+    size_t output_count = 0;
+    size_t inherited_index;
+    size_t override_index;
+    char **merged;
+
+    while (CODEXLITE_ENVIRON[inherited_count] != NULL) inherited_count++;
+    merged = (char **)malloc((inherited_count + override_count + 1) * sizeof(char *));
+    if (merged == NULL) return NULL;
+
+    for (inherited_index = 0; inherited_index < inherited_count; inherited_index++) {
+        int overridden = 0;
+        for (override_index = 0; override_index < override_count; override_index++) {
+            if (codexlite_process_environment_names_equal(
+                CODEXLITE_ENVIRON[inherited_index],
+                overrides[override_index]
+            )) {
+                overridden = 1;
+                break;
+            }
+        }
+        if (!overridden) merged[output_count++] = CODEXLITE_ENVIRON[inherited_index];
+    }
+    for (override_index = 0; override_index < override_count; override_index++) {
+        merged[output_count++] = (char *)overrides[override_index];
+    }
+    merged[output_count] = NULL;
+    return merged;
+}
+
+static inline const char *codexlite_process_environment_value(
+    char *const *environment,
+    const char *name
+) {
+    size_t name_length = strlen(name);
+    size_t index = 0;
+    while (environment[index] != NULL) {
+        if (
+            strncmp(environment[index], name, name_length) == 0 &&
+            environment[index][name_length] == '='
+        ) {
+            return environment[index] + name_length + 1;
+        }
+        index++;
+    }
+    return NULL;
+}
+
+static inline char *codexlite_process_join_path(
+    const char *first,
+    size_t first_length,
+    const char *second,
+    size_t second_length,
+    const char *file
+) {
+    size_t file_length = strlen(file);
+    size_t length = first_length + second_length + file_length + 3;
+    char *path = (char *)malloc(length);
+    size_t offset = 0;
+    if (path == NULL) return NULL;
+
+    if (first_length > 0) {
+        memcpy(path + offset, first, first_length);
+        offset += first_length;
+        if (path[offset - 1] != '/') path[offset++] = '/';
+    }
+    if (second_length > 0) {
+        memcpy(path + offset, second, second_length);
+        offset += second_length;
+        if (path[offset - 1] != '/') path[offset++] = '/';
+    }
+    memcpy(path + offset, file, file_length);
+    path[offset + file_length] = '\0';
+    return path;
+}
+
+static inline char *codexlite_process_resolve_executable(
+    const char *executable,
+    const char *working_directory,
+    char *const *environment
+) {
+    if (strchr(executable, '/') != NULL) {
+        char *candidate = executable[0] == '/'
+            ? strdup(executable)
+            : codexlite_process_join_path(
+                working_directory,
+                strlen(working_directory),
+                "",
+                0,
+                executable
+            );
+        char *resolved;
+        if (candidate == NULL) return NULL;
+        resolved = realpath(candidate, NULL);
+        free(candidate);
+        return resolved;
+    }
+
+    {
+        const char *path = codexlite_process_environment_value(environment, "PATH");
+        const char *cursor = path == NULL ? "/bin:/usr/bin" : path;
+        while (1) {
+            const char *separator = strchr(cursor, ':');
+            size_t directory_length = separator == NULL
+                ? strlen(cursor)
+                : (size_t)(separator - cursor);
+            int absolute_directory = directory_length > 0 && cursor[0] == '/';
+            char *candidate = codexlite_process_join_path(
+                absolute_directory ? "" : working_directory,
+                absolute_directory ? 0 : strlen(working_directory),
+                cursor,
+                directory_length,
+                executable
+            );
+            if (candidate == NULL) return NULL;
+            if (access(candidate, X_OK) == 0) {
+                char *resolved = realpath(candidate, NULL);
+                free(candidate);
+                if (resolved != NULL) return resolved;
+            } else {
+                free(candidate);
+            }
+            if (separator == NULL) break;
+            cursor = separator + 1;
+        }
+    }
+    return NULL;
+}
+
+static inline int codexlite_spawn_process(
+    pid_t *pid,
+    int *process_group,
+    int stdin_read,
+    int stdin_write,
+    int output_read,
+    int output_write,
+    int error_read,
+    int error_write,
+    const char *executable,
+    const char *const *arguments,
+    size_t argument_count,
+    const char *const *environment_overrides,
+    size_t environment_override_count,
+    const char *working_directory
+) {
+    char **argv = NULL;
+    char **merged_environment = NULL;
+    char *const *child_environment = CODEXLITE_ENVIRON;
+    char *resolved_executable = NULL;
+    pid_t child;
+    int result = 0;
+    size_t argument_index;
+
+#ifdef __APPLE__
+    if (fcntl(stdin_write, F_SETNOSIGPIPE, 1) != 0) {
+        return errno;
+    }
+#endif
+
+    if (environment_override_count > 0) {
+        merged_environment = codexlite_process_merge_environment(
+            environment_overrides,
+            environment_override_count
+        );
+        if (merged_environment == NULL) {
+            result = ENOMEM;
+        } else {
+            child_environment = merged_environment;
+        }
+    }
+
+    if (result == 0) {
+        argv = (char **)malloc((argument_count + 2) * sizeof(char *));
+        if (argv == NULL) {
+            result = ENOMEM;
+        } else {
+            argv[0] = (char *)executable;
+            for (argument_index = 0; argument_index < argument_count; argument_index++) {
+                argv[argument_index + 1] = (char *)arguments[argument_index];
+            }
+            argv[argument_count + 1] = NULL;
+            resolved_executable = codexlite_process_resolve_executable(
+                executable,
+                working_directory,
+                child_environment
+            );
+        }
+    }
+
+    if (result == 0) {
+        child = fork();
+        if (child < 0) {
+            result = errno;
+        } else if (child == 0) {
+            if (
+                setpgid(0, 0) != 0 ||
+                dup2(stdin_read, STDIN_FILENO) < 0 ||
+                dup2(output_write, STDOUT_FILENO) < 0 ||
+                dup2(error_write, STDERR_FILENO) < 0
+            ) {
+                _exit(127);
+            }
+            if (stdin_read > STDERR_FILENO) close(stdin_read);
+            if (stdin_write > STDERR_FILENO) close(stdin_write);
+            if (output_read > STDERR_FILENO) close(output_read);
+            if (output_write > STDERR_FILENO) close(output_write);
+            if (error_read > STDERR_FILENO) close(error_read);
+            if (error_write > STDERR_FILENO) close(error_write);
+            if (chdir(working_directory) != 0 || resolved_executable == NULL) {
+                _exit(127);
+            }
+            execve(resolved_executable, argv, child_environment);
+            _exit(127);
+        } else {
+            int group_result = setpgid(child, child);
+            *pid = child;
+            *process_group = group_result == 0 || errno == EACCES;
+        }
+    }
+
+    free(resolved_executable);
+    free(argv);
+    free(merged_environment);
+    return result;
+}
+
+static inline ssize_t codexlite_process_write(
+    int descriptor,
+    const void *bytes,
+    size_t byte_count
+) {
+    sigset_t blocked_signals;
+    sigset_t previous_signals;
+    sigset_t pending_signals;
+    int had_pending_sigpipe = 0;
+    int write_errno;
+    ssize_t result;
+
+    sigemptyset(&blocked_signals);
+    sigaddset(&blocked_signals, SIGPIPE);
+    if (pthread_sigmask(SIG_BLOCK, &blocked_signals, &previous_signals) != 0) {
+        return write(descriptor, bytes, byte_count);
+    }
+    if (sigpending(&pending_signals) == 0) {
+        had_pending_sigpipe = sigismember(&pending_signals, SIGPIPE) == 1;
+    }
+
+    result = write(descriptor, bytes, byte_count);
+    write_errno = errno;
+    if (result < 0 && write_errno == EPIPE && !had_pending_sigpipe) {
+        int signal_number;
+        if (
+            sigpending(&pending_signals) == 0 &&
+            sigismember(&pending_signals, SIGPIPE) == 1
+        ) {
+            sigwait(&blocked_signals, &signal_number);
+        }
+    }
+    pthread_sigmask(SIG_SETMASK, &previous_signals, NULL);
+    errno = write_errno;
+    return result;
+}

@@ -16,10 +16,14 @@ kotlin {
 
     applyHierarchyTemplate(KotlinHierarchyTemplate.default) {
         common {
-            group("posix") {
-                withLinuxX64()
-                withLinuxArm64()
-                withMacosArm64()
+            group("processClient") {
+                withJvm()
+                withMingwX64()
+                group("posix") {
+                    withLinuxX64()
+                    withLinuxArm64()
+                    withMacosArm64()
+                }
             }
         }
     }
@@ -30,6 +34,9 @@ kotlin {
             api(libs.kotlinx.io.core)
             api(libs.kotlinx.serialization.core)
             implementation(project(":utils-os-environment"))
+        }
+        named("processClientMain").dependencies {
+            implementation(project(":utils-process-client"))
         }
         jvmMain.dependencies {
             implementation(libs.pty4j)
