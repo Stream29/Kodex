@@ -12,13 +12,12 @@ internal suspend fun ShellClient.runHook(
     inputJson: String,
     cwd: Path,
 ): HookRawResult {
-    val definition = hook.definition
     return runHook(
-        command = definition.command,
+        command = hook.command,
         inputJson = inputJson,
         cwd = cwd,
         environment = hook.environment,
-        timeout = definition.timeoutSeconds.seconds,
+        timeout = hook.timeoutSeconds.seconds,
     )
 }
 
@@ -43,4 +42,4 @@ internal suspend fun ShellClient.runHooks(
 internal fun List<ExecutableHook>.matching(
     matcherInputs: List<String>,
 ): List<ExecutableHook> =
-    filter { hook -> hook.definition.matcher.matches(matcherInputs) }
+    filter { hook -> hook.matcher.matches(matcherInputs) }

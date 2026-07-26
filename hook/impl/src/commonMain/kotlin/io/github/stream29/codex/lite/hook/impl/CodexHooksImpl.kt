@@ -101,7 +101,7 @@ public class CodexHooksImpl internal constructor(
         val hooks = currentHooks()
         val context = request.context
         shellClient.runHooks(
-            hooks = hooks.sessionEnd.matching(emptyList()),
+            hooks = hooks.sessionEnd.matching(listOf(request.reason.wireName)),
             inputJson = HookJson.encodeToString(
                 SessionEndCommandInputWire(
                     sessionId = context.sessionId,
@@ -123,7 +123,7 @@ public class CodexHooksImpl internal constructor(
         val context = request.context
         val session = context.session
         val completed = shellClient.runHooks(
-            hooks = hooks.userPromptSubmit.matching(emptyList()),
+            hooks = hooks.userPromptSubmit,
             inputJson = HookJson.encodeToString(
                 UserPromptSubmitCommandInputWire(
                     sessionId = session.sessionId,
@@ -150,9 +150,9 @@ public class CodexHooksImpl internal constructor(
         val hooks = currentHooks()
         val context = request.context
         val session = context.session
-        val matchedHooks = hooks.stop.matching(emptyList())
+        val matchedHooks = hooks.stop
         val hookRunId = matchedHooks.joinToString(separator = "|") { hook ->
-            hook.definition.key
+            hook.id
         }
         val completed = shellClient.runHooks(
             hooks = matchedHooks,

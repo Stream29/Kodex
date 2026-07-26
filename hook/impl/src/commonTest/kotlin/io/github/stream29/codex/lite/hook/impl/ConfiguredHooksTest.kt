@@ -23,11 +23,11 @@ import io.github.stream29.codex.lite.hook.impl.projection.looksLikeJson
 import io.github.stream29.codex.lite.hook.impl.projection.toPreToolUseResult
 import io.github.stream29.codex.lite.hook.impl.projection.toStopResult
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookHandler
-import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookHandlers
+import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookDeclarations
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookLayer
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookMatcher
+import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookMatcherGroup
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookSourceKind
-import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookState
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.codex.lite.utils.shellclient.Shell
 import io.github.stream29.codex.lite.utils.shellclient.ShellType
@@ -78,29 +78,26 @@ private suspend fun codexHooks(configuration: HookConfiguration): CodexHooksImpl
 private fun hookConfiguration(
     commands: List<String>,
     sourcePath: Path,
-    groupHandlers: (List<CodexCliHookHandler>) -> CodexCliHookHandlers,
+    groupHandlers: (List<CodexCliHookMatcherGroup>) -> CodexCliHookDeclarations,
     environment: Map<String, String> = emptyMap(),
     timeoutSeconds: Long = 5L,
     additionalContextLimit: Int? = null,
 ): HookConfiguration {
-    val path = sourcePath.toString()
-    val handlers = commands.mapIndexed { index, command ->
-        CodexCliHookHandler(
-            key = "$path:$index",
-            matcher = CodexCliHookMatcher.All,
+    val handlers = commands.map { command ->
+        CodexCliHookHandler.Command(
             command = command,
             timeoutSeconds = timeoutSeconds,
             additionalContextLimit = additionalContextLimit,
         )
     }
+    val groups = listOf(CodexCliHookMatcherGroup(hooks = handlers))
     return HookConfiguration(
         sources = listOf(
             CodexCliHookLayer(
                 sourcePath = sourcePath,
                 sourceKind = CodexCliHookSourceKind.Project,
-                managed = true,
                 environment = environment,
-                hooks = groupHandlers(handlers),
+                hooks = groupHandlers(groups),
             ),
         ),
     )
@@ -339,35 +336,17 @@ val configuredHooksTest by testSuite(
         assertNull(rejected.updatedInput)
     }
 
-    test("resolver executes unmanaged hooks without trust state and honors enabled state") {
+    test("resolver assigns branch-local handler identities") {
         val source = hookConfiguration(
             commands = listOf(emitCommand("")),
             sourcePath = Path("codex-lite-hooks.json"),
-            groupHandlers = { handlers -> CodexCliHookHandlers(stop = handlers) },
+            groupHandlers = { groups -> CodexCliHookDeclarations(stop = groups) },
         ).sources.single()
-        val enabled = HookConfiguration(sources = listOf(source.copy(managed = false)))
+        val resolved = HookConfiguration(sources = listOf(source))
             .resolveHooks()
             .stop
             .single()
-        assertEquals(source.hooks.stop.single(), enabled.definition)
-
-        val disabled = HookConfiguration(
-            sources = listOf(
-                source.copy(managed = false),
-                CodexCliHookLayer(
-                    sourcePath = Path("codex-lite-hook-state.toml"),
-                    sourceKind = CodexCliHookSourceKind.Session,
-                    states = mapOf(
-                        enabled.definition.key to CodexCliHookState(
-                            enabled = false,
-                            trustedHash = "sha256:ignored",
-                        ),
-                    ),
-                ),
-            ),
-        ).resolveHooks()
-
-        assertTrue(disabled.stop.isEmpty())
+        assertEquals("${source.sourcePath}:0:0", resolved.id)
     }
 
     test("command hooks receive per-handler environment and produce context") {
@@ -376,7 +355,7 @@ val configuredHooksTest by testSuite(
             hookConfiguration(
                 commands = listOf(environmentCommand("CODEXLITE_HOOK_VALUE")),
                 sourcePath = Path(root, "hooks.json"),
-                groupHandlers = { handlers -> CodexCliHookHandlers(userPromptSubmit = handlers) },
+                groupHandlers = { groups -> CodexCliHookDeclarations(userPromptSubmit = groups) },
                 environment = mapOf("CODEXLITE_HOOK_VALUE" to "environment-context"),
             ),
         )
@@ -404,7 +383,7 @@ val configuredHooksTest by testSuite(
                     exitTwoCommand("continue from second hook"),
                 ),
                 sourcePath = Path(root, "hooks.json"),
-                groupHandlers = { handlers -> CodexCliHookHandlers(stop = handlers) },
+                groupHandlers = { groups -> CodexCliHookDeclarations(stop = groups) },
             ),
         )
         try {
@@ -423,8 +402,9 @@ val configuredHooksTest by testSuite(
                 result.fragments.map { it.text },
             )
             val sourcePath = Path(root, "hooks.json")
+            val hookRunId = "$sourcePath:0:0|$sourcePath:0:1"
             assertEquals(
-                listOf("$sourcePath:0|$sourcePath:1", "$sourcePath:0|$sourcePath:1"),
+                listOf(hookRunId, hookRunId),
                 result.fragments.map { it.hookRunId },
             )
         } finally {
@@ -449,7 +429,7 @@ val configuredHooksTest by testSuite(
                     ),
                 ),
                 sourcePath = Path(root, "hooks.json"),
-                groupHandlers = { handlers -> CodexCliHookHandlers(preToolUse = handlers) },
+                groupHandlers = { groups -> CodexCliHookDeclarations(preToolUse = groups) },
             ),
         )
         try {
@@ -477,7 +457,7 @@ val configuredHooksTest by testSuite(
             hookConfiguration(
                 commands = listOf(delayedCommand(1_500)),
                 sourcePath = Path(root, "hooks.json"),
-                groupHandlers = { handlers -> CodexCliHookHandlers(userPromptSubmit = handlers) },
+                groupHandlers = { groups -> CodexCliHookDeclarations(userPromptSubmit = groups) },
                 timeoutSeconds = 1,
             ),
         )
@@ -509,7 +489,7 @@ val configuredHooksTest by testSuite(
                 hookConfiguration(
                     commands = listOf(emitCommand("updated-context")),
                     sourcePath = Path(root, "hooks.json"),
-                    groupHandlers = { handlers -> CodexCliHookHandlers(userPromptSubmit = handlers) },
+                    groupHandlers = { groups -> CodexCliHookDeclarations(userPromptSubmit = groups) },
                 ),
             )
             hooks.resolvedHooks.first { resolved -> resolved.userPromptSubmit.isNotEmpty() }
@@ -556,7 +536,7 @@ val configuredHooksTest by testSuite(
             hookConfiguration(
                 commands = listOf(emitCommand(context)),
                 sourcePath = Path(root, "hooks.json"),
-                groupHandlers = { handlers -> CodexCliHookHandlers(userPromptSubmit = handlers) },
+                groupHandlers = { groups -> CodexCliHookDeclarations(userPromptSubmit = groups) },
                 additionalContextLimit = 1,
             ),
         )
