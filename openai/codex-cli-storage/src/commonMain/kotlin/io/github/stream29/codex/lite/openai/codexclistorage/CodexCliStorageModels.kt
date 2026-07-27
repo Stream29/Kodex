@@ -1,7 +1,11 @@
 package io.github.stream29.codex.lite.openai.codexclistorage
 
+import dev.eav.tomlkt.TomlContentPolymorphicSerializer
+import dev.eav.tomlkt.TomlElement
+import dev.eav.tomlkt.asTomlTable
 import io.github.stream29.codex.lite.openai.ModelInfo
 import io.github.stream29.codex.lite.openai.ReasoningEffort
+import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.time.Instant
@@ -63,16 +67,41 @@ public data class CodexCliEditorKeymap(
     public val insertNewline: String? = null,
 )
 
-/** One native Codex MCP server declaration. */
-@Serializable
-public data class CodexCliMcpServer(
-    /** Nullable because stdio MCP servers do not have a URL. */
-    public val url: String? = null,
-    @SerialName("http_headers")
-    public val headers: Map<String, String> = emptyMap(),
-    /** Nullable because a server is enabled unless the layer says otherwise. */
-    public val enabled: Boolean? = null,
-)
+/** One native Codex MCP server declaration, decoded from its untagged TOML transport shape. */
+@Serializable(with = CodexCliMcpServerSerializer::class)
+public sealed interface CodexCliMcpServer {
+    public val enabled: Boolean
+
+    /** A server reached through MCP Streamable HTTP. */
+    @Serializable
+    public data class StreamableHttp(
+        public val url: String,
+        @SerialName("http_headers")
+        public val headers: Map<String, String> = emptyMap(),
+        override val enabled: Boolean = true,
+    ) : CodexCliMcpServer
+
+    /** A local MCP server launched as a direct child process. */
+    @Serializable
+    public data class Stdio(
+        public val command: String,
+        public val args: List<String> = emptyList(),
+        public val env: Map<String, String> = emptyMap(),
+        public val cwd: String = ".",
+        override val enabled: Boolean = true,
+    ) : CodexCliMcpServer
+}
+
+/** Selects Codex's untagged MCP transport from its required transport field. */
+public object CodexCliMcpServerSerializer :
+    TomlContentPolymorphicSerializer<CodexCliMcpServer>(CodexCliMcpServer::class) {
+    override fun selectDeserializer(element: TomlElement): DeserializationStrategy<CodexCliMcpServer> =
+        if ("command" in element.asTomlTable()) {
+            CodexCliMcpServer.Stdio.serializer()
+        } else {
+            CodexCliMcpServer.StreamableHttp.serializer()
+        }
+}
 
 /**
  * Read-only snapshot written by Codex CLI to `models_cache.json`.
@@ -96,14 +125,23 @@ public data class CodexModelsCache(
 )
 
 /**
+ * @property openAiApiKey Nullable because subscription authentication does not
+ * store an API key; `null` means this file has no API-key credential.
  * @property authMode Nullable because Codex CLI may omit the auth mode.
  * @property tokens Nullable because only token-backed modes store this object.
+ * @property lastRefresh Nullable because older or externally managed Codex
+ * auth files may omit refresh metadata; `null` means no refresh time was
+ * persisted.
  */
 @Serializable
 public data class CodexAuthJson(
+    @SerialName("OPENAI_API_KEY")
+    public val openAiApiKey: String? = null,
     @SerialName("auth_mode")
     public val authMode: CodexAuthMode? = null,
     public val tokens: CodexAuthTokens? = null,
+    @SerialName("last_refresh")
+    public val lastRefresh: Instant? = null,
 )
 
 /** All Rust `AuthMode` wire variants accepted by Codex CLI. */

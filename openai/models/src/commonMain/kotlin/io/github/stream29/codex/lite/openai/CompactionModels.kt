@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.openai
 
+import io.github.stream29.codex.lite.utils.kotlinxioserialization.PathAsStringSerializer
 import kotlinx.io.files.Path
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName

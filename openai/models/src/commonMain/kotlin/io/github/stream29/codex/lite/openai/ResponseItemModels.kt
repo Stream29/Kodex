@@ -187,9 +187,6 @@ public sealed interface ResponseItem {
 
     /**
      * Mirrors Rust `ResponseInputItem::McpToolCallOutput`.
-     *
-     * `llm-provider:api` converts this to `function_call_output` before sending
-     * Responses API requests.
      */
     @Serializable
     @SerialName("mcp_tool_call_output")
