@@ -8,7 +8,6 @@ import io.github.stream29.codex.lite.hook.contract.tool.HookToolInvocation
 import io.github.stream29.codex.lite.hook.contract.approval.PermissionRequest
 import io.github.stream29.codex.lite.hook.contract.approval.PermissionRequestResult
 import io.github.stream29.codex.lite.hook.contract.tool.PostToolUseRequest
-import io.github.stream29.codex.lite.hook.contract.tool.PostToolUseResult
 import io.github.stream29.codex.lite.hook.contract.tool.PreToolUseResult
 import io.github.stream29.codex.lite.hook.contract.session.SessionEndRequest
 import io.github.stream29.codex.lite.hook.contract.session.SessionStartRequest
@@ -29,7 +28,6 @@ import io.github.stream29.codex.lite.hook.impl.projection.UserPromptSubmitComman
 import io.github.stream29.codex.lite.hook.impl.projection.toCompactionResult
 import io.github.stream29.codex.lite.hook.impl.projection.toPostCompactCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.toPermissionRequestResult
-import io.github.stream29.codex.lite.hook.impl.projection.toPostToolUseResult
 import io.github.stream29.codex.lite.hook.impl.projection.toPreCompactCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.toPreToolUseResult
 import io.github.stream29.codex.lite.hook.impl.projection.toSessionStartResult
@@ -185,50 +183,36 @@ public class CodexHooksImpl internal constructor(
         val context = invocation.context
         val session = context.session
         val matcherInputs = invocation.matcherInputs()
-        var effectiveInput = invocation.input
-        var wasUpdated = false
-        val contexts = mutableListOf<String>()
+        val inputJson = HookJson.encodeToString(
+            PreToolUseCommandInputWire(
+                sessionId = session.sessionId,
+                turnId = context.turnId,
+                transcriptPath = null,
+                cwd = session.cwd.toString(),
+                model = session.model,
+                permissionMode = session.permissionMode.wireName,
+                toolName = invocation.toolName,
+                toolInput = invocation.input,
+                toolUseId = invocation.toolUseId,
+            ),
+        )
         for (hook in hooks.preToolUse.matching(matcherInputs)) {
             val result = shellClient.runHook(
                 hook = hook,
-                inputJson = HookJson.encodeToString(
-                    PreToolUseCommandInputWire(
-                        sessionId = session.sessionId,
-                        turnId = context.turnId,
-                        transcriptPath = null,
-                        cwd = session.cwd.toString(),
-                        model = session.model,
-                        permissionMode = session.permissionMode.wireName,
-                        toolName = invocation.toolName,
-                        toolInput = effectiveInput,
-                        toolUseId = invocation.toolUseId,
-                    ),
-                ),
+                inputJson = inputJson,
                 cwd = session.cwd,
             ).toPreToolUseResult()
-            contexts += result.additionalContexts
-            when (result) {
-                is PreToolUseResult.Block ->
-                    return PreToolUseResult.Block(result.reason, contexts)
-
-                is PreToolUseResult.Continue -> result.updatedInput?.let { updatedInput ->
-                    effectiveInput = updatedInput
-                    wasUpdated = true
-                }
-            }
+            if (result is PreToolUseResult.Block) return result
         }
-        return PreToolUseResult.Continue(
-            updatedInput = if (wasUpdated) effectiveInput else null,
-            additionalContexts = contexts,
-        )
+        return PreToolUseResult.Continue
     }
 
-    override suspend fun onPostToolUse(request: PostToolUseRequest): PostToolUseResult {
+    override suspend fun onPostToolUse(request: PostToolUseRequest) {
         val hooks = currentHooks()
         val invocation = request.invocation
         val context = invocation.context
         val session = context.session
-        val completed = shellClient.runHooks(
+        shellClient.runHooks(
             hooks = hooks.postToolUse.matching(invocation.matcherInputs()),
             inputJson = HookJson.encodeToString(
                 PostToolUseCommandInputWire(
@@ -245,20 +229,7 @@ public class CodexHooksImpl internal constructor(
                 ),
             ),
             cwd = session.cwd,
-        ).map(HookRawResult::toPostToolUseResult)
-        val contexts = completed.flatMap { result -> result.additionalContexts }
-        val feedback = completed
-            .mapNotNull { result -> result.feedback }
-            .takeIf(List<String>::isNotEmpty)
-            ?.joinToString("\n\n")
-        return if (completed.any { result -> result is PostToolUseResult.Block }) {
-            PostToolUseResult.Block(
-                feedback = feedback ?: "PostToolUse hook blocked the tool result",
-                additionalContexts = contexts,
-            )
-        } else {
-            PostToolUseResult.Continue(additionalContexts = contexts, feedback = feedback)
-        }
+        )
     }
 
     override suspend fun onPermissionRequest(request: PermissionRequest): PermissionRequestResult {
