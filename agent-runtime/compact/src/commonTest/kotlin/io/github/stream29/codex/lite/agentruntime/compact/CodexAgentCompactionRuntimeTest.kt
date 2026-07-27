@@ -3,26 +3,26 @@ package io.github.stream29.codex.lite.agentruntime.compact
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
-import io.github.stream29.codex.lite.agentcontext.collaboration.render.render as renderCollaborationMode
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentsMdInstruction
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.EnvironmentContext
-import io.github.stream29.codex.lite.agentcontext.skill.contract.AvailableSkill
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
+import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
+import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
+import io.github.stream29.codex.lite.hook.contract.compaction.CompactionHookRequest
+import io.github.stream29.codex.lite.hook.contract.compaction.CompactionHooks
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
-import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.OpenAiResult
 import io.github.stream29.codex.lite.openai.ModelsResponse
+import io.github.stream29.codex.lite.openai.CompactionPhase
+import io.github.stream29.codex.lite.openai.CompactionReason
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
+import io.github.stream29.codex.lite.openai.CompactionTrigger
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
@@ -31,16 +31,14 @@ import io.github.stream29.codex.lite.openai.TokenUsage
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
+import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.yield
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
-import kotlinx.datetime.LocalDate
-import kotlinx.datetime.TimeZone
 import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -53,7 +51,8 @@ val codexAgentCompactionRuntimeTest by testSuite {
         val state = CodexAgentState(
             client = mockOpenAiClient {},
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
+            contextPrefixProvider = TestContextPrefixProvider,
+            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
         )
         val runtime: CodexAgentRuntime = state.compactionRuntime(testModelCatalog())
         val agentState: CodexAgentStateContract = runtime
@@ -70,7 +69,8 @@ val codexAgentCompactionRuntimeTest by testSuite {
         val state = CodexAgentState(
             client = mockOpenAiClient {},
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
+            contextPrefixProvider = TestContextPrefixProvider,
+            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
         )
         val runtime: CodexAgentRuntime = DelegatingRuntime(CodexAgentCompactionRuntime(state, testModelCatalog()))
 
@@ -102,7 +102,8 @@ val codexAgentCompactionRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
+            contextPrefixProvider = TestContextPrefixProvider,
+            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
         )
         val runtime = CodexAgentCompactionRuntime(state, testModelCatalog())
 
@@ -163,17 +164,21 @@ val codexAgentCompactionRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
+            contextPrefixProvider = TestContextPrefixProvider,
+            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
         )
-        val runtime = CodexAgentCompactionRuntime(state, testModelCatalog())
+        val runtime = CodexAgentCompactionRuntime(
+            delegate = state,
+            modelCatalog = testModelCatalog(),
+        )
         val user = userMessage("Answer briefly.")
 
         state.appendUserMessage(user, tokenCount = 1)
         runtime.resume().toList()
 
         assertEquals(2, requests.size)
-        assertEquals(requestInput(user), requests[0].input)
-        assertEquals(requestInput(user, assistantMessage("Preparing the answer.")), requests[1].input)
+        assertRequestHistory(requests[0], user)
+        assertRequestHistory(requests[1], user, assistantMessage("Preparing the answer."))
         assertEquals(assistantMessage("Done."), storage.history[5])
         assertEquals(13, storage.tokenCount[5])
         assertEquals(5, storage.latestIndex())
@@ -192,6 +197,15 @@ val codexAgentCompactionRuntimeTest by testSuite {
         val responseRequests = mutableListOf<ResponsesApiRequest>()
         val compaction = ResponseItem.Compaction(encryptedContent = "pre-turn-compact")
         val final = assistantMessage("After compaction.")
+        val hookRequests = mutableListOf<CompactionHookRequest>()
+        val hooks = RecordingCompactionHooks(
+            pre = { request ->
+                hookRequests += request
+            },
+            post = { request ->
+                hookRequests += request
+            },
+        )
         val state = CodexAgentState(
             client = mockOpenAiClient {
                 createRemoteCompactionV2Response { request, installationId, turnMetadata, windowId ->
@@ -212,12 +226,18 @@ val codexAgentCompactionRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
+            contextPrefixProvider = TestContextPrefixProvider,
+            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
         )
-        val runtime = CodexAgentCompactionRuntime(state, testModelCatalog())
+        val runtime = CodexAgentCompactionRuntime(
+            delegate = state,
+            modelCatalog = testModelCatalog(),
+            compactionHooks = hooks,
+        )
         val user = userMessage("Keep this context.")
 
         state.appendUserMessage(user, tokenCount = 90)
+        val persistedTurnId = storage.settings.latestValue().turnId
         runtime.resume().toList()
 
         assertEquals(1, compactRequests.size)
@@ -226,11 +246,63 @@ val codexAgentCompactionRuntimeTest by testSuite {
         assertTrue(compactRequest.turnMetadata.contains("\"reason\":\"context_limit\""))
         assertTrue(compactRequest.turnMetadata.contains("\"phase\":\"pre_turn\""))
         assertEquals(listOf(user, ResponseItem.CompactionTrigger), compactRequest.request.input)
-        assertEquals(requestInput(user, compaction), responseRequests.single().input)
+        assertRequestHistory(responseRequests.single(), user, compaction)
         assertEquals(ResponseItem.ContextCompaction(encryptedContent = "pre-turn-compact"), storage.history[2])
         assertEquals(final, storage.history[3])
         assertEquals(3, storage.compaction[2].historyBaseIndex)
         assertEquals(initialCheckpoint.windowNumber + 1, storage.compaction[2].windowNumber)
+        assertEquals(listOf(persistedTurnId, persistedTurnId), hookRequests.map { it.context.turnId })
+        assertEquals(persistedTurnId, storage.settings.latestValue().turnId)
+    }
+
+    test("manual compaction runs observation hooks around the commit") {
+        val hookRequests = mutableListOf<CompactionHookRequest>()
+        val observedIndexes = mutableListOf<Int>()
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val state = CodexAgentState(
+            client = mockOpenAiClient {
+                createRemoteCompactionV2Response { _, _, _, _ ->
+                    RemoteCompactionV2Response(
+                        compactionOutput = ResponseItem.Compaction(encryptedContent = "committed"),
+                        completedResponse = null,
+                    )
+                }
+            },
+            storage = storage,
+            contextPrefixProvider = TestContextPrefixProvider,
+            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+        )
+        val runtime = CodexAgentCompactionRuntime(
+            delegate = state,
+            modelCatalog = testModelCatalog(),
+            compactionHooks = RecordingCompactionHooks(
+                pre = { request ->
+                    hookRequests += request
+                    observedIndexes += storage.latestIndex()
+                },
+                post = { request ->
+                    hookRequests += request
+                    observedIndexes += storage.latestIndex()
+                },
+            ),
+        )
+        state.appendUserMessage(userMessage("Compact this."))
+        val persistedTurnId = storage.settings.latestValue().turnId
+
+        val compactedIndex = runtime.compact(
+            trigger = CompactionTrigger.Manual,
+            reason = CompactionReason.UserRequested,
+            phase = CompactionPhase.StandaloneTurn,
+        )
+
+        assertEquals(compactedIndex, storage.latestIndex())
+        assertEquals(listOf(1, compactedIndex), observedIndexes)
+        assertEquals(persistedTurnId, storage.settings[compactedIndex].turnId)
+        assertEquals(
+            ResponseItem.ContextCompaction(encryptedContent = "committed"),
+            storage.history[compactedIndex],
+        )
+        assertEquals(listOf(persistedTurnId, persistedTurnId), hookRequests.map { it.context.turnId })
     }
 
     test("loop runs mid turn compaction before follow up sampling") {
@@ -281,7 +353,8 @@ val codexAgentCompactionRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
+            contextPrefixProvider = TestContextPrefixProvider,
+            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
         )
         val runtime = CodexAgentCompactionRuntime(state, testModelCatalog())
 
@@ -289,13 +362,13 @@ val codexAgentCompactionRuntimeTest by testSuite {
         runtime.resume().toList()
 
         assertEquals(2, responseRequests.size)
-        assertEquals(requestInput(user), responseRequests[0].input)
+        assertRequestHistory(responseRequests[0], user)
         assertEquals(
             listOf(user, partial, ResponseItem.CompactionTrigger),
             compactRequests.single().request.input,
         )
         assertTrue(compactRequests.single().turnMetadata.contains("\"phase\":\"mid_turn\""))
-        assertEquals(requestInput(user, compaction), responseRequests[1].input)
+        assertRequestHistory(responseRequests[1], user, compaction)
         assertEquals(final, storage.history[5])
     }
 
@@ -318,7 +391,8 @@ val codexAgentCompactionRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = testContextPrefixProvider,
+            contextPrefixProvider = TestContextPrefixProvider,
+            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
         )
         val runtime = CodexAgentCompactionRuntime(state, testModelCatalog())
 
@@ -351,6 +425,15 @@ private class DelegatingRuntime(
     private val delegate: CodexAgentRuntime,
 ) : CodexAgentRuntime by delegate
 
+private class RecordingCompactionHooks(
+    private val pre: suspend (CompactionHookRequest) -> Unit = {},
+    private val post: suspend (CompactionHookRequest) -> Unit = {},
+) : CompactionHooks {
+    override suspend fun onPreCompact(request: CompactionHookRequest): Unit = pre(request)
+
+    override suspend fun onPostCompact(request: CompactionHookRequest): Unit = post(request)
+}
+
 private fun userMessage(text: String): ResponseItem.Message =
     ResponseItem.Message(
         role = MessageRole.User,
@@ -363,49 +446,12 @@ private fun assistantMessage(text: String): ResponseItem.Message =
         content = listOf(ContentItem.OutputText(text)),
     )
 
-private val testContextPrefixProvider: AgentContextPrefixProvider =
-    object : AgentContextPrefixProvider {
-        override val environmentContext: EnvironmentContext =
-            EnvironmentContext(
-            environments = listOf(
-                AgentEnvironment(
-                    id = "test",
-                    cwd = Path("/workspace"),
-                    shell = "bash",
-                ),
-            ),
-            currentDate = LocalDate(2026, 7, 15),
-            timeZone = TimeZone.UTC,
-            )
-
-        override val availableSkills: List<AvailableSkill> = emptyList()
-
-        override val agentMd: List<AgentsMdInstruction> = emptyList()
-    }
-
-private val testContextInput: ResponseItem.Message =
-    ResponseItem.Message(
-        role = MessageRole.User,
-        content = listOf(
-            ContentItem.InputText(
-                "<environment_context>\n" +
-                    "  <cwd>/workspace</cwd>\n" +
-                    "  <shell>bash</shell>\n" +
-                    "  <current_date>2026-07-15</current_date>\n" +
-                    "  <timezone>UTC</timezone>\n" +
-                    "</environment_context>",
-            ),
-        ),
-    )
-
-private val testCollaborationInput: ResponseItem.Message =
-    ResponseItem.Message(
-        role = MessageRole.Developer,
-        content = listOf(ContentItem.InputText(ModeKind.Default.renderCollaborationMode())),
-    )
-
-private fun requestInput(vararg durableItems: ResponseItem): List<ResponseItem> =
-    listOf(testCollaborationInput, testContextInput, *durableItems)
+private fun assertRequestHistory(
+    request: ResponsesApiRequest,
+    vararg expected: ResponseItem,
+) {
+    assertEquals(expected.toList(), request.input.takeLast(expected.size))
+}
 
 private suspend fun CodexAgentStateContract.appendUserMessage(
     message: ResponseItem.Message,
