@@ -65,6 +65,14 @@ val codexCliStorageTest by testSuite {
                 [mcp_servers.docs.http_headers]
                 Authorization = "Bearer test"
 
+                [mcp_servers.browser]
+                command = "browser-mcp"
+                args = ["--headless"]
+                cwd = "/workspace/browser"
+
+                [mcp_servers.browser.env]
+                MCP_TOKEN = "test-token"
+
                 [projects."/workspace"]
                 trust_level = "trusted"
                 """.trimIndent(),
@@ -77,9 +85,15 @@ val codexCliStorageTest by testSuite {
             assertEquals("fast", config.serviceTier)
             assertEquals("enter", config.tui?.keymap?.composer?.submit)
             assertEquals("shift-enter", config.tui?.keymap?.editor?.insertNewline)
-            assertEquals("https://docs.example.test/mcp", config.mcpServers.getValue("docs").url)
-            assertEquals("Bearer test", config.mcpServers.getValue("docs").headers["Authorization"])
-            assertEquals(false, config.mcpServers.getValue("docs").enabled)
+            val docs = assertIs<CodexCliMcpServer.StreamableHttp>(config.mcpServers.getValue("docs"))
+            assertEquals("https://docs.example.test/mcp", docs.url)
+            assertEquals("Bearer test", docs.headers["Authorization"])
+            assertEquals(false, docs.enabled)
+            val browser = assertIs<CodexCliMcpServer.Stdio>(config.mcpServers.getValue("browser"))
+            assertEquals("browser-mcp", browser.command)
+            assertEquals(listOf("--headless"), browser.args)
+            assertEquals("/workspace/browser", browser.cwd)
+            assertEquals("test-token", browser.env["MCP_TOKEN"])
         } finally {
             deleteRecursively(root)
         }

@@ -1,8 +1,5 @@
 package io.github.stream29.codex.lite.openai
 
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-
 /**
  * @property accountId Nullable because Codex auth files may omit the account id;
  * `null` means no account header should be sent.
@@ -42,16 +39,4 @@ public enum class OpenAiSubscriptionPlan(public val rawValue: String) {
                 else -> entries.firstOrNull { plan -> plan.rawValue == normalized }
             }
     }
-}
-
-public interface OpenAiSubscriptionAuthSession {
-    public val stateFlow: StateFlow<OpenAiSubscriptionAuthState>
-}
-
-public data class MutableOpenAiSubscriptionAuthSession(
-    override val stateFlow: MutableStateFlow<OpenAiSubscriptionAuthState>,
-) : OpenAiSubscriptionAuthSession {
-    public constructor(
-        authState: OpenAiSubscriptionAuthState,
-    ) : this(MutableStateFlow(authState))
 }

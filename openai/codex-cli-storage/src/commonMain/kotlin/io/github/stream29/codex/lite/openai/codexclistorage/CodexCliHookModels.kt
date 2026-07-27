@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.openai.codexclistorage
 
+import io.github.stream29.codex.lite.utils.kotlinxioserialization.PathAsStringSerializer
 import kotlinx.io.files.Path
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
@@ -202,7 +203,7 @@ public data class CodexCliHookDeclarations(
  */
 @Serializable
 public data class CodexCliHookLayer(
-    @Serializable(with = CodexCliHookPathSerializer::class)
+    @Serializable(with = PathAsStringSerializer::class)
     public val sourcePath: Path,
     public val sourceKind: CodexCliHookSourceKind,
     public val environment: Map<String, String> = emptyMap(),
@@ -242,18 +243,6 @@ internal object CodexCliHookMatcherSerializer : KSerializer<CodexCliHookMatcher>
 
     override fun deserialize(decoder: Decoder): CodexCliHookMatcher =
         CodexCliHookMatcher.parse(decoder.decodeString())
-}
-
-internal object CodexCliHookPathSerializer : KSerializer<Path> {
-    override val descriptor: SerialDescriptor =
-        PrimitiveSerialDescriptor("kotlinx.io.files.Path", PrimitiveKind.STRING)
-
-    override fun serialize(encoder: Encoder, value: Path) {
-        encoder.encodeString(value.toString())
-    }
-
-    override fun deserialize(decoder: Decoder): Path =
-        Path(decoder.decodeString())
 }
 
 internal expect object CodexCliStoragePlatform {

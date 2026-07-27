@@ -3,9 +3,9 @@ package io.github.stream29.codex.lite.openai.modelcatalog
 import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
 import io.github.stream29.codex.lite.openai.ModelInfo
 import io.github.stream29.codex.lite.openai.ModelsResponse
-import io.github.stream29.codex.lite.openai.MutableOpenAiSubscriptionAuthSession
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.OpenAiResult
@@ -87,7 +87,7 @@ private fun testCodexDirectory(): Path =
 private suspend fun liveCatalog(): LiveCatalogFixture {
     val storage = CodexCliStorage(testCodexDirectory())
     val client = OpenAiClient(
-        authProvider = MutableOpenAiSubscriptionAuthSession(storage.readAuthOrNull().toSubscriptionAuthStateOrThrow()),
+        authStore = InMemoryCodexAuthStore(storage.readAuthOrNull().toSubscriptionAuthStateOrThrow()),
         config = OpenAiClientConfig(
             clientVersion = storage.readModelsCacheOrNull()?.clientVersion
                 ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }

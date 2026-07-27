@@ -11,6 +11,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":openai-models"))
+            api(project(":utils-kotlinx-io-serialization"))
             api(libs.kotlinx.io.core)
             api(libs.kotlinx.coroutines.core)
             implementation(libs.tomlkt)
