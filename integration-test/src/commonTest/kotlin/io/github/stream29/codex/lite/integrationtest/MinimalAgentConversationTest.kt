@@ -18,6 +18,7 @@ import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
+import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
 import io.github.stream29.codex.lite.openai.ContentItem
@@ -608,7 +609,7 @@ val toolRuntimeCompositionTest by testSuite {
         assertEquals(listOf<ResponseItem.ToolCall>(patchCall), patchTool.calls)
         assertEquals(listOf<ResponseItem.ToolCall>(viewCall), viewTool.calls)
         assertEquals(listOf("draw a square"), imagePrompts)
-        assertEquals(plan, storage.settings[storage.latestIndex()].plan)
+        assertEquals(plan, storage.settings.latestValue().plan)
         assertIs<ResponseItem.FunctionCallOutput>(storage.history[6])
         assertIs<ResponseItem.CustomToolCallOutput>(storage.history[7])
         assertIs<ResponseItem.FunctionCallOutput>(storage.history[8])

@@ -3,7 +3,6 @@ package io.github.stream29.codex.lite.integrationtest
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentruntime.compact.compactionRuntime
-import io.github.stream29.codex.lite.agentruntime.sessionhook.SessionHookCoordinator
 import io.github.stream29.codex.lite.agentruntime.sessionhook.sessionHookRuntime
 import io.github.stream29.codex.lite.agentruntime.turnhook.turnHookRuntime
 import io.github.stream29.codex.lite.agentsession.filesystem.FileSystemCodexSessionRepository
@@ -13,11 +12,9 @@ import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
 import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
 import io.github.stream29.codex.lite.hook.contract.HookConfiguration
-import io.github.stream29.codex.lite.hook.contract.HookSessionContext
 import io.github.stream29.codex.lite.hook.contract.HookSettings
 import io.github.stream29.codex.lite.hook.contract.session.SessionEndReason
 import io.github.stream29.codex.lite.hook.contract.session.SessionStartSource
-import io.github.stream29.codex.lite.hook.contract.toHookSessionContext
 import io.github.stream29.codex.lite.hook.impl.CodexHooksImpl
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
@@ -123,14 +120,6 @@ private suspend fun runFreshSessionHookIntegration() {
         assertEquals(0L, session.storage.tokenCount[0])
 
         val hookSessionId = session.storage.id
-        val hookSessionContext: suspend () -> HookSessionContext = {
-            settings.toHookSessionContext(hookSessionId)
-        }
-        val sessionHooks = SessionHookCoordinator(
-            hooks = hooks,
-            sessionContext = hookSessionContext,
-            initialSources = listOf(SessionStartSource.Startup),
-        )
         val state = CodexAgentState(
             client = client,
             storage = session.storage,
@@ -141,10 +130,9 @@ private suspend fun runFreshSessionHookIntegration() {
             .compactionRuntime(
                 modelCatalog = modelCatalog,
                 compactionHooks = hooks,
-                onCompactionCommitted = sessionHooks::onCompactionCommitted,
             )
             .turnHookRuntime(hooks)
-            .sessionHookRuntime(sessionHooks)
+            .sessionHookRuntime(hooks, SessionStartSource.Startup)
 
         val prompt = "Reply with exactly $HookIntegrationMarker and no other text."
         runtime.appendUserMessage(listOf(ContentItem.InputText(prompt)))
@@ -152,8 +140,7 @@ private suspend fun runFreshSessionHookIntegration() {
         assertTrue(events.any { event -> event is ResponsesStreamEvent.Completed })
         assertIs<CodexAgentStateValue.AssistantMessage>(state.state.value)
 
-        sessionHooks.end(SessionEndReason.Shutdown)
-        sessionHooks.end(SessionEndReason.Shutdown)
+        runtime.end(SessionEndReason.Shutdown)
 
         val requests = readHookRequests(hookLog)
         assertEquals(

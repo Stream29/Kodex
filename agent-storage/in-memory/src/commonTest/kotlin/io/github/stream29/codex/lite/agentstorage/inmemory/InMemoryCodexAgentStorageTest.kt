@@ -9,6 +9,7 @@ import io.github.stream29.codex.lite.agentstorage.contract.forkTo
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.indexesDescending
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
+import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.contract.nextIndex
 import io.github.stream29.codex.lite.agentstorage.contract.prevIndex
 import io.github.stream29.codex.lite.agentstorage.contract.revert
@@ -99,6 +100,7 @@ val inMemoryCodexAgentStorageTest by testSuite {
 
         assertEquals(0, storage.latestIndex())
         assertEquals(settings("initial-model"), storage.settings[0])
+        assertEquals(settings("initial-model"), storage.settings.latestValue())
         assertEquals(emptyList(), storage.compaction[0].prefix)
         assertEquals(0, storage.compaction[0].historyBaseIndex)
         assertEquals(0L, storage.compaction[0].windowNumber)
@@ -313,6 +315,7 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(initialSettings, storage.settings[2])
         assertEquals(updatedSettings, storage.settings[3])
         assertEquals(updatedSettings, storage.settings[8])
+        assertEquals(updatedSettings, storage.settings.latestValue())
         assertEquals(listOf(0, 3), storage.settings.indexes().toList())
         assertEquals(listOf(3), storage.settings.indexes(from = 1).toList())
         assertFailsWith<IllegalArgumentException> {

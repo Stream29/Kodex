@@ -38,7 +38,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
         jvmTest.dependencies {
-            implementation(project(":agent-runtime-mcp"))
+            implementation(project(":agent-runtime-tool"))
             implementation(project(":mcp-impl"))
             implementation(libs.kotlinx.schema.json)
             implementation(libs.ktor.server.cio)

@@ -4,7 +4,7 @@ import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
-import io.github.stream29.codex.lite.agentruntime.mcp.mcpToolRuntime
+import io.github.stream29.codex.lite.agentruntime.tool.toolRuntime
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
@@ -90,11 +90,11 @@ val openAiMcpToolRoundTripProbeTest by testSuite {
                     contextPrefixProvider = TestContextPrefixProvider,
                     toolSearchToolSpec = toolSearchCatalog::currentSpec,
                 )
-                val runtime = McpRequestOnlyRuntime(state).mcpToolRuntime(
+                val runtime = McpRequestOnlyRuntime(state).toolRuntime(
                     tools = emptyList(),
+                    dynamicTools = service.tools,
                     localToolSearchDocuments = emptyList(),
                     toolSearchCatalog = toolSearchCatalog,
-                    service = service,
                 )
 
                 state.appendUserMessage(

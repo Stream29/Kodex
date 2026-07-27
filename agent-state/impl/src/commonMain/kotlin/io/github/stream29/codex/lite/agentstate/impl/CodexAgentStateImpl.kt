@@ -11,6 +11,7 @@ import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStor
 import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
+import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.contract.prevIndex
 import io.github.stream29.codex.lite.agentstorage.contract.revert
 import io.github.stream29.codex.lite.agentstorage.contract.revertWithTransaction
@@ -345,7 +346,7 @@ private class CodexAgentStateImpl(
             require(pendingCall is ResponseItem.FunctionCall && pendingCall.name == "update_plan") {
                 "Plan updates can complete only a pending update_plan function call."
             }
-            val currentSettings = storage.settings[storage.latestIndex()]
+            val currentSettings = storage.settings.latestValue()
             require(currentSettings.collaborationMode != ModeKind.Plan) {
                 "update_plan is a TODO/checklist tool and is not allowed in Plan mode."
             }
@@ -367,7 +368,7 @@ private class CodexAgentStateImpl(
             validate = {},
             inFlight = CodexAgentStateValue.ExternalWrite,
         ) {
-            val currentSettings = storage.settings[storage.latestIndex()]
+            val currentSettings = storage.settings.latestValue()
             val index = storage.latestIndex() + 1
             require(index > 0) { "Settings updates require an existing state index." }
             storage.settings.setWithTransaction(index, settings.copy(turnId = currentSettings.turnId)) {

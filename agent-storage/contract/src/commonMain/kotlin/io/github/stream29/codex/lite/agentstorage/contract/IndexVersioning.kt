@@ -54,6 +54,17 @@ public interface IndexVersioned<T> {
 }
 
 /**
+ * Returns the newest value published by this timeline.
+ *
+ * Use this when only this timeline's current value is needed. Reads requiring
+ * one consistent snapshot across several timelines must capture and use their
+ * shared storage index instead. Calling this on an empty timeline follows
+ * [get]'s invalid-index behavior.
+ */
+public suspend fun <T> IndexVersioned<T>.latestValue(): T =
+    this[latestIndex()]
+
+/**
  * Returns the first stored index strictly after [index].
  */
 public suspend fun <T> IndexVersioned<T>.nextIndex(index: Int): Int? {
