@@ -2,12 +2,11 @@ package io.github.stream29.codex.lite.hook.contract.session
 
 import io.github.stream29.codex.lite.hook.contract.HookSessionContext
 
-/** Source exposed to SessionStart matcher selection. */
+/** Logical session boundary exposed to SessionStart matcher selection. */
 public enum class SessionStartSource(public val wireName: String) {
     Startup("startup"),
     Resume("resume"),
     Clear("clear"),
-    Compact("compact"),
 }
 
 public data class SessionStartRequest(
@@ -15,7 +14,7 @@ public data class SessionStartRequest(
     public val source: SessionStartSource,
 )
 
-/** Result of running one pending SessionStart lifecycle event. */
+/** Result of running the initial SessionStart lifecycle event. */
 public sealed interface SessionStartResult {
     public val additionalContexts: List<String>
 
