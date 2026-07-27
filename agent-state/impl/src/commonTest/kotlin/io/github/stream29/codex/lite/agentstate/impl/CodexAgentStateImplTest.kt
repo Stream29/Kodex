@@ -58,6 +58,7 @@ import kotlinx.serialization.json.put
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
@@ -142,6 +143,7 @@ val codexAgentStateImplTest by testSuite {
             client = mockOpenAiClient(),
             storage = storage,
         )
+        val turnId = storage.settings[0].turnId
         val context = userMessage("# AGENTS.md instructions")
         val userInput = userMessage("Implement the change.")
 
@@ -150,7 +152,30 @@ val codexAgentStateImplTest by testSuite {
 
         assertEquals(context, storage.history[1])
         assertEquals(userInput, storage.history[2])
+        assertEquals(turnId, storage.settings[2].turnId)
         assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
+    }
+
+    test("mark new turn rotates turn id independently from user messages") {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+        val initialTurnId = storage.settings[0].turnId
+
+        assertEquals(0, agent.markNewTurn())
+        assertEquals(initialTurnId, storage.settings[0].turnId)
+        assertEquals(1, agent.appendUserMessage(userMessage("First turn.").content))
+        assertEquals(initialTurnId, storage.settings[1].turnId)
+
+        assertEquals(2, agent.markNewTurn())
+        val nextTurnId = storage.settings[2].turnId
+        assertNotEquals(initialTurnId, nextTurnId)
+        assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
+
+        assertEquals(3, agent.appendUserMessage(userMessage("Second turn.").content))
+        assertEquals(nextTurnId, storage.settings[3].turnId)
     }
 
     test("agent messages are requestable user-side history") {
