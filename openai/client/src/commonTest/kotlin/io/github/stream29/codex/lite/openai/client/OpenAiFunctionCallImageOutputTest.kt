@@ -42,7 +42,7 @@ private val imageInspectionTool: ResponsesApiTool =
 val openAiFunctionCallImageOutputTest by testSuite {
     testFixture {
         OpenAiClient(
-            authProvider = codexAuthProvider(),
+            authStore = codexAuthStore(),
             config = OpenAiClientConfig(clientVersion = testCodexClientVersion()),
         )
     } asParameterForEach {

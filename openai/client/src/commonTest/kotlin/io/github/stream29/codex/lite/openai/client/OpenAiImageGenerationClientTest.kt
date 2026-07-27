@@ -18,7 +18,7 @@ import kotlin.time.Duration.Companion.seconds
 val openAiClientImageGenerationTest by testSuite {
     testFixture {
         OpenAiClient(
-            authProvider = codexAuthProvider(),
+            authStore = codexAuthStore(),
         )
     } asParameterForEach {
         test(

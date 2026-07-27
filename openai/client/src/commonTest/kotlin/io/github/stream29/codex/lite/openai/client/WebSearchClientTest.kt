@@ -20,7 +20,7 @@ private fun testSearchSessionId(): String =
 val openAiClientWebSearchTest by testSuite {
     testFixture {
         OpenAiClient(
-            authProvider = codexAuthProvider(),
+            authStore = codexAuthStore(),
             config = OpenAiClientConfig(clientVersion = testCodexClientVersion()),
         )
     } asParameterForEach {

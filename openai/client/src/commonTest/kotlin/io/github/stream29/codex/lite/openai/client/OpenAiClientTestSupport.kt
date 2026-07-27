@@ -1,11 +1,11 @@
 package io.github.stream29.codex.lite.openai.client
 
+import io.github.stream29.codex.lite.cli.auth.CodexAuthStore
+import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
 import io.github.stream29.codex.lite.openai.OpenAiErrorResponse
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.OpenAiResult
-import io.github.stream29.codex.lite.openai.MutableOpenAiSubscriptionAuthSession
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthState
-import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthSession
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
@@ -21,8 +21,8 @@ internal fun <T> OpenAiResult<T, OpenAiErrorResponse>.successOrFail(): T =
         is OpenAiResult.Failure -> fail("OpenAI request failed: ${error.messageText ?: error}")
     }
 
-internal suspend fun codexAuthProvider(): OpenAiSubscriptionAuthSession =
-    MutableOpenAiSubscriptionAuthSession(
+internal suspend fun codexAuthStore(): CodexAuthStore =
+    InMemoryCodexAuthStore(
         testCodexStorage().readAuthOrNull().toSubscriptionAuthStateOrThrow(),
     )
 
