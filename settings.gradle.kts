@@ -21,11 +21,6 @@ includeBuild("Mosaic")
 includeBuild("KotlinMcpSdk") {
     name = "kotlin-mcp-sdk"
 }
-includeBuild("TomlKt") {
-    dependencySubstitution {
-        substitute(module("dev.eav.tomlkt:tomlkt")).using(project(":core"))
-    }
-}
 
 fun includeModuleDir(path: String) {
     val projectPath = ":${path.replace('/', '-')}"
