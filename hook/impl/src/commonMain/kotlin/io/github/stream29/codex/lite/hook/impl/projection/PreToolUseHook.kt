@@ -44,8 +44,10 @@ internal data class PreToolUseCommandOutputWire(
 /**
  * @property permissionDecision `null` means this output makes no permission decision.
  * @property permissionDecisionReason `null` means no decision explanation was supplied.
- * @property updatedInput `null` means the original tool input remains in effect.
- * @property additionalContext `null` means no model-visible context was produced.
+ * @property updatedInput Decoded for wire compatibility but ignored because
+ * Codex Lite does not allow PreToolUse to rewrite tool calls.
+ * @property additionalContext Decoded for wire compatibility but intentionally
+ * ignored because Codex Lite Tool Hooks cannot inject persistent context.
  */
 @Serializable
 internal data class PreToolUseHookSpecificOutputWire(
@@ -71,68 +73,38 @@ internal enum class PreToolUsePermissionDecisionWire {
 
 internal fun HookRawResult.toPreToolUseResult(): PreToolUseResult {
     if (exitCode == 2) {
-        return stderr.trimmedNonEmpty()
-            ?.let { reason -> PreToolUseResult.Block(reason) }
-            ?: PreToolUseResult.Continue()
+        return PreToolUseResult.Block(stderr.trimmedNonEmpty())
     }
-    if (exitCode != 0 || stdout.isBlank()) return PreToolUseResult.Continue()
+    if (exitCode != 0 || stdout.isBlank()) return PreToolUseResult.Continue
 
     val wire = decodeHookOutputOrNull<PreToolUseCommandOutputWire>(stdout)
-        ?: return PreToolUseResult.Continue()
+        ?: return PreToolUseResult.Continue
+    if (!wire.continueProcessing || wire.stopReason != null || wire.suppressOutput) {
+        return PreToolUseResult.Continue
+    }
     val specific = wire.hookSpecificOutput
     val usesSpecificDecision = specific?.let { output ->
         output.permissionDecision != null ||
-            output.permissionDecisionReason != null ||
-            output.updatedInput != null
+            output.permissionDecisionReason != null
     } == true
-    if (!wire.supportsPreToolUse(usesSpecificDecision)) return PreToolUseResult.Continue()
 
-    val contexts = specific?.additionalContext?.let(::listOf).orEmpty()
     if (usesSpecificDecision) {
         return when (specific.permissionDecision) {
-            PreToolUsePermissionDecisionWire.Allow ->
-                PreToolUseResult.Continue(requireNotNull(specific.updatedInput), contexts)
-
             PreToolUsePermissionDecisionWire.Deny ->
-                PreToolUseResult.Block(specific.permissionDecisionReason?.trim(), contexts)
+                PreToolUseResult.Block(specific.permissionDecisionReason?.trimmedNonEmpty())
 
+            PreToolUsePermissionDecisionWire.Allow,
             PreToolUsePermissionDecisionWire.Ask,
             null,
-                -> PreToolUseResult.Continue(additionalContexts = contexts)
+                -> PreToolUseResult.Continue
         }
     }
     return when (wire.decision) {
-        PreToolUseDecisionWire.Block -> PreToolUseResult.Block(wire.reason?.trim(), contexts)
+        PreToolUseDecisionWire.Block ->
+            PreToolUseResult.Block(wire.reason?.trimmedNonEmpty())
+
         PreToolUseDecisionWire.Approve,
         null,
-            -> PreToolUseResult.Continue(additionalContexts = contexts)
-    }
-}
-
-private fun PreToolUseCommandOutputWire.supportsPreToolUse(usesSpecificDecision: Boolean): Boolean {
-    if (!continueProcessing || stopReason != null || suppressOutput) return false
-    val specific = hookSpecificOutput
-    return if (usesSpecificDecision) {
-        when {
-            specific == null -> false
-            specific.updatedInput != null &&
-                specific.permissionDecision != PreToolUsePermissionDecisionWire.Allow -> false
-
-            specific.permissionDecision == PreToolUsePermissionDecisionWire.Allow &&
-                specific.updatedInput == null -> false
-
-            specific.permissionDecision == PreToolUsePermissionDecisionWire.Ask -> false
-            specific.permissionDecision == PreToolUsePermissionDecisionWire.Deny &&
-                specific.permissionDecisionReason?.trimmedNonEmpty() == null -> false
-
-            specific.permissionDecision == null && specific.permissionDecisionReason != null -> false
-            else -> true
-        }
-    } else {
-        when (decision) {
-            PreToolUseDecisionWire.Approve -> false
-            PreToolUseDecisionWire.Block -> reason?.trimmedNonEmpty() != null
-            null -> reason == null
-        }
+            -> PreToolUseResult.Continue
     }
 }

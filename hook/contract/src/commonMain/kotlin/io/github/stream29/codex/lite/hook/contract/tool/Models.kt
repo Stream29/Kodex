@@ -12,18 +12,10 @@ public data class HookToolInvocation(
     public val input: JsonElement,
 )
 
-/** Result of running matching PreToolUse hooks as a configured-order pipeline. */
+/** Result of authorizing a tool call through matching PreToolUse hooks. */
 public sealed interface PreToolUseResult {
-    public val additionalContexts: List<String>
-
-    /**
-     * @property updatedInput Nullable because the complete pipeline may accept
-     * the original invocation; otherwise this is the pipeline's final effective input.
-     */
-    public data class Continue(
-        public val updatedInput: JsonElement? = null,
-        override val additionalContexts: List<String> = emptyList(),
-    ) : PreToolUseResult
+    /** The original tool call may proceed unchanged. */
+    public data object Continue : PreToolUseResult
 
     /**
      * @property reason Nullable because a valid deny result may omit feedback;
@@ -31,7 +23,6 @@ public sealed interface PreToolUseResult {
      */
     public data class Block(
         public val reason: String?,
-        override val additionalContexts: List<String> = emptyList(),
     ) : PreToolUseResult
 }
 
@@ -40,23 +31,3 @@ public data class PostToolUseRequest(
     public val invocation: HookToolInvocation,
     public val response: JsonElement,
 )
-
-/** Result of running matching PostToolUse hooks. */
-public sealed interface PostToolUseResult {
-    public val additionalContexts: List<String>
-    public val feedback: String?
-
-    /**
-     * @property feedback Nullable because a successful PostToolUse hook need
-     * not replace the model-visible tool result; `null` preserves it unchanged.
-     */
-    public data class Continue(
-        override val additionalContexts: List<String> = emptyList(),
-        override val feedback: String? = null,
-    ) : PostToolUseResult
-
-    public data class Block(
-        override val feedback: String,
-        override val additionalContexts: List<String> = emptyList(),
-    ) : PostToolUseResult
-}

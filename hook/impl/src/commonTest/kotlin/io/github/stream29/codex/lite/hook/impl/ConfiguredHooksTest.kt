@@ -27,7 +27,6 @@ import io.github.stream29.codex.lite.hook.impl.projection.toStopResult
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookHandler
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookDeclarations
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookLayer
-import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookMatcher
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookMatcherGroup
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookSourceKind
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -44,6 +43,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.coroutines.CoroutineContext
@@ -53,7 +53,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private suspend fun temporaryRoot(): Path =
@@ -213,7 +212,7 @@ val configuredHooksTest by testSuite(
             ).toStopResult("hook-run"),
         )
         assertEquals(
-            PreToolUseResult.Continue(),
+            PreToolUseResult.Continue,
             HookRawResult(exitCode = 0, stdout = "[]", stderr = "").toPreToolUseResult(),
         )
         assertTrue("  [1]".looksLikeJson())
@@ -318,24 +317,31 @@ val configuredHooksTest by testSuite(
         }
     }
 
-    test("pre tool use accepts updated input only with permission allow") {
-        val accepted = assertIs<PreToolUseResult.Continue>(
+    test("pre tool use ignores updated input and preserves deny") {
+        assertEquals(
+            PreToolUseResult.Continue,
             HookRawResult(
                 exitCode = 0,
-                stdout = """{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"command":"echo changed"}}}""",
+                stdout = """{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"command":"echo changed"},"additionalContext":"ignored"}}""",
                 stderr = "",
             ).toPreToolUseResult(),
         )
-        val rejected = assertIs<PreToolUseResult.Continue>(
+        assertEquals(
+            PreToolUseResult.Block("denied"),
             HookRawResult(
                 exitCode = 0,
-                stdout = """{"hookSpecificOutput":{"hookEventName":"PreToolUse","updatedInput":{"command":"echo changed"}}}""",
+                stdout = """{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"denied","updatedInput":{"command":"echo changed"}}}""",
                 stderr = "",
             ).toPreToolUseResult(),
         )
-
-        assertEquals("echo changed", accepted.updatedInput?.jsonObject?.get("command")?.jsonPrimitive?.content)
-        assertNull(rejected.updatedInput)
+        assertEquals(
+            PreToolUseResult.Block(null),
+            HookRawResult(
+                exitCode = 0,
+                stdout = """{"decision":"block"}""",
+                stderr = "",
+            ).toPreToolUseResult(),
+        )
     }
 
     test("resolver assigns branch-local handler identities") {
@@ -415,18 +421,18 @@ val configuredHooksTest by testSuite(
         }
     }
 
-    test("pre tool rewrites form a configured-order pipeline") {
+    test("pre tool hooks receive original input in order and stop on block") {
         val root = temporaryRoot()
         val first =
             """{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"stage":"first"}}}"""
         val second =
-            """{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"stage":"second"}}}"""
+            """{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"denied"}}"""
         val hooks = codexHooks(
             hookConfiguration(
                 commands = listOf(
                     emitCommand(first, delayMilliseconds = 250),
                     requireInputAndEmitCommand(
-                        requiredInput = "\"stage\":\"first\"",
+                        requiredInput = "\"stage\":\"original\"",
                         stdout = second,
                     ),
                 ),
@@ -435,18 +441,17 @@ val configuredHooksTest by testSuite(
             ),
         )
         try {
-            val result = assertIs<PreToolUseResult.Continue>(
+            assertEquals(
+                PreToolUseResult.Block("denied"),
                 hooks.onPreToolUse(
                     HookToolInvocation(
                         context = hookContext(root),
                         toolName = "shell",
                         toolUseId = "call-1",
-                        input = JsonObject(emptyMap()),
+                        input = JsonObject(mapOf("stage" to JsonPrimitive("original"))),
                     ),
                 ),
             )
-
-            assertEquals("second", result.updatedInput?.jsonObject?.get("stage")?.jsonPrimitive?.content)
         } finally {
             hooks.cancel()
             deleteRecursively(root)
