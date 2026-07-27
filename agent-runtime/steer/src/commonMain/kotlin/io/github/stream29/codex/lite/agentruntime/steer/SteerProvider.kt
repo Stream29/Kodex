@@ -1,0 +1,13 @@
+package io.github.stream29.codex.lite.agentruntime.steer
+
+import io.github.stream29.codex.lite.openai.ContentItem
+
+/** Provides merged user input waiting to steer the active logical turn. */
+public fun interface SteerProvider {
+    /**
+     * Atomically claims the current pending steer.
+     *
+     * @return the claimed content, or `null` when no steer is pending.
+     */
+    public suspend fun take(): List<ContentItem>?
+}
