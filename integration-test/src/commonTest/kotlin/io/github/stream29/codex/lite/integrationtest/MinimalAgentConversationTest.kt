@@ -179,7 +179,7 @@ private suspend fun OpenAiClient.collectResponseProbe(input: List<ResponseItem>)
         ),
     ).toList()
 
-private suspend fun realOpenAiClient(): RealOpenAiClient =
+internal suspend fun realOpenAiClient(): RealOpenAiClient =
     RealOpenAiClient(
         authStore = InMemoryCodexAuthStore(
             testCodexStorage().readAuthOrNull().toSubscriptionAuthStateOrThrow(),
@@ -265,7 +265,7 @@ private suspend fun testCodexClientVersion(): String =
         ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
         ?: "0.1.0"
 
-private suspend fun testCodexModel(): OpenAiModelId {
+internal suspend fun testCodexModel(): OpenAiModelId {
     val storage = testCodexStorage()
     val configuredModel = storage.readConfigTomlOrNull()?.model
     val cachedModels = storage.readModelsCacheOrNull()
