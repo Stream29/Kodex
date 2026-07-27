@@ -18,6 +18,7 @@ import io.github.stream29.codex.lite.openai.FailedResponse
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.openai.AgentMessageInputContent
+import io.github.stream29.codex.lite.openai.CallToolResult
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.CodexResponsesMetadata
 import io.github.stream29.codex.lite.openai.CodexResponsesRequestKind
@@ -41,6 +42,7 @@ import io.github.stream29.codex.lite.openai.TokenUsage
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.codexRequestWindowId
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
+import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
@@ -97,6 +99,41 @@ val codexAgentStateImplTest by testSuite {
         )
 
         assertEquals(ServiceTier.Fast, request.serviceTier)
+    }
+
+    test("request projection converts MCP results to function call outputs") {
+        val metadata = CodexResponsesMetadata(
+            threadId = "thread_1",
+            turnId = "turn_1",
+            windowId = "window_1",
+            requestKind = CodexResponsesRequestKind.Turn,
+        )
+        val output = ResponseItem.McpToolCallOutput(
+            callId = "call_1",
+            output = CallToolResult(
+                content = listOf(
+                    buildJsonObject {
+                        put("type", "text")
+                        put("text", "result")
+                    },
+                ),
+            ),
+        )
+        val request = CodexAgentSettings(
+            model = OpenAiModelId("test-model"),
+        ).toResponsesApiRequest(
+            input = listOf(output),
+            clientMetadata = metadata.toCodexClientMetadata(),
+            tools = emptyList(),
+        )
+
+        assertEquals(
+            ResponseItem.FunctionCallOutput(
+                callId = output.callId,
+                output = output.output.toFunctionCallOutputPayload(OpenAiJsonCodec),
+            ),
+            request.input.single(),
+        )
     }
 
     test("append user message allows consecutive user messages") {
