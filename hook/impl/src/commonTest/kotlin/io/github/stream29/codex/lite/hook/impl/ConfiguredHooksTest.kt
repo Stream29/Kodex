@@ -335,7 +335,7 @@ val configuredHooksTest by testSuite(
             ).toPreToolUseResult(),
         )
         assertEquals(
-            PreToolUseResult.Block(null),
+            PreToolUseResult.Block("PreToolUse hook blocked this tool call."),
             HookRawResult(
                 exitCode = 0,
                 stdout = """{"decision":"block"}""",

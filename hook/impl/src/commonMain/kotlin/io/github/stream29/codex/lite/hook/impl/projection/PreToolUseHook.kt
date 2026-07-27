@@ -73,7 +73,7 @@ internal enum class PreToolUsePermissionDecisionWire {
 
 internal fun HookRawResult.toPreToolUseResult(): PreToolUseResult {
     if (exitCode == 2) {
-        return PreToolUseResult.Block(stderr.trimmedNonEmpty())
+        return stderr.toPreToolUseBlock()
     }
     if (exitCode != 0 || stdout.isBlank()) return PreToolUseResult.Continue
 
@@ -91,7 +91,7 @@ internal fun HookRawResult.toPreToolUseResult(): PreToolUseResult {
     if (usesSpecificDecision) {
         return when (specific.permissionDecision) {
             PreToolUsePermissionDecisionWire.Deny ->
-                PreToolUseResult.Block(specific.permissionDecisionReason?.trimmedNonEmpty())
+                specific.permissionDecisionReason.toPreToolUseBlock()
 
             PreToolUsePermissionDecisionWire.Allow,
             PreToolUsePermissionDecisionWire.Ask,
@@ -101,10 +101,13 @@ internal fun HookRawResult.toPreToolUseResult(): PreToolUseResult {
     }
     return when (wire.decision) {
         PreToolUseDecisionWire.Block ->
-            PreToolUseResult.Block(wire.reason?.trimmedNonEmpty())
+            wire.reason.toPreToolUseBlock()
 
         PreToolUseDecisionWire.Approve,
         null,
             -> PreToolUseResult.Continue
     }
 }
+
+private fun String?.toPreToolUseBlock(): PreToolUseResult.Block =
+    this?.trimmedNonEmpty()?.let(PreToolUseResult::Block) ?: PreToolUseResult.Block()
