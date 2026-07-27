@@ -21,6 +21,7 @@ import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
+import io.github.stream29.codex.lite.hook.contract.tool.NoOpToolHooks
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.FunctionCallOutputContentItem
@@ -281,8 +282,10 @@ internal suspend fun testCodexModel(): OpenAiModelId {
     )
 }
 
-private suspend fun CodexAgentStateContract.appendUserMessage(text: String): Int =
-    appendUserMessage(listOf(ContentItem.InputText(text)))
+private suspend fun CodexAgentStateContract.appendUserMessage(text: String): Int {
+    markNewTurn()
+    return appendUserMessage(listOf(ContentItem.InputText(text)))
+}
 
 private suspend fun InMemoryCodexAgentStorage.lastAssistantMessage(): String? {
     var message: String? = null
@@ -463,6 +466,7 @@ val toolRuntimeCompositionTest by testSuite {
                     RecordingTool(ViewImageTools.spec, "first handler"),
                     RecordingTool(ViewImageTools.spec, "second handler"),
                 ),
+                NoOpToolHooks,
             )
         }
     }
@@ -504,7 +508,7 @@ val toolRuntimeCompositionTest by testSuite {
         state.appendUserMessage(userMessage("Inspect the image.").content)
         state
             .compactionRuntime(testModelCatalog())
-            .toolRuntime(listOf(viewTool))
+            .toolRuntime(listOf(viewTool), NoOpToolHooks)
             .resume()
             .toList()
 
@@ -597,8 +601,12 @@ val toolRuntimeCompositionTest by testSuite {
         val imageTool = ImageGenerationTools.createTool(imageClient)
         val runtime = state
             .compactionRuntime(testModelCatalog())
-            .planRuntime()
-            .toolRuntime(listOf(patchTool, viewTool, imageTool), toolSearchCatalog)
+            .planRuntime(NoOpToolHooks)
+            .toolRuntime(
+                listOf(patchTool, viewTool, imageTool),
+                toolSearchCatalog,
+                NoOpToolHooks,
+            )
 
         state.appendUserMessage(userMessage("Use every local tool.").content)
         runtime.resume().toList()
@@ -674,7 +682,7 @@ val toolRuntimeCompositionTest by testSuite {
         state.appendUserMessage(userMessage("Inspect the diagram.").content)
         state
             .compactionRuntime(testModelCatalog())
-            .toolRuntime(listOf(viewTool), toolSearchCatalog)
+            .toolRuntime(listOf(viewTool), toolSearchCatalog, NoOpToolHooks)
             .resume()
             .toList()
 
@@ -762,7 +770,7 @@ val openAiCurrentTimeToolRoundTripProbeTest by testSuite {
                 )
                 val runtime = state
                     .compactionRuntime(modelCatalog)
-                    .toolRuntime(listOf(currentTimeTool))
+                    .toolRuntime(listOf(currentTimeTool), NoOpToolHooks)
 
                 listOf(
                     "hello",
@@ -838,7 +846,7 @@ val openAiViewImageToolRuntimeProbeTest by testSuite {
                     toolSearchToolSpec = toolSearchCatalog::currentSpec,
                 )
                 val runtime = RequestOnlyRuntime(state)
-                    .toolRuntime(listOf(viewImageTool), toolSearchCatalog)
+                    .toolRuntime(listOf(viewImageTool), toolSearchCatalog, NoOpToolHooks)
 
                 state.appendUserMessage(
                     "Use the available image-viewing tool named `view_image` to inspect the local " +
@@ -919,7 +927,7 @@ val openAiImageGenerationToolRuntimeProbeTest by testSuite {
                     toolSearchToolSpec = toolSearchCatalog::currentSpec,
                 )
                 val runtime = RequestOnlyRuntime(state)
-                    .toolRuntime(listOf(imageGenerationTool), toolSearchCatalog)
+                    .toolRuntime(listOf(imageGenerationTool), toolSearchCatalog, NoOpToolHooks)
 
                 state.appendUserMessage(
                     "Use `image_gen.imagegen` to generate a new minimal image of one black circle " +
@@ -1001,7 +1009,7 @@ val openAiWebRunToolRuntimeProbeTest by testSuite {
                     contextPrefixProvider = TestContextPrefixProvider,
                     toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
                 )
-                val runtime = RequestOnlyRuntime(state).toolRuntime(listOf(webRunTool))
+                val runtime = RequestOnlyRuntime(state).toolRuntime(listOf(webRunTool), NoOpToolHooks)
 
                 state.appendUserMessage(
                     "Use `web.run` with one search_query operation to search for the official OpenAI " +
@@ -1063,7 +1071,7 @@ val openAiRequestUserInputRuntimeProbeTest by testSuite {
                 contextPrefixProvider = TestContextPrefixProvider,
                 toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
             )
-            val runtime = RequestOnlyRuntime(state).requestUserInputRuntime()
+            val runtime = RequestOnlyRuntime(state).requestUserInputRuntime(NoOpToolHooks)
 
             state.appendUserMessage(
                 "Before answering, use `request_user_input` to ask whether this integration test " +

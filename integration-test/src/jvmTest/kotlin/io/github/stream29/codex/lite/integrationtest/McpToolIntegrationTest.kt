@@ -11,6 +11,7 @@ import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
+import io.github.stream29.codex.lite.hook.contract.tool.NoOpToolHooks
 import io.github.stream29.codex.lite.mcp.contract.McpServerConfiguration
 import io.github.stream29.codex.lite.mcp.contract.McpSettings
 import io.github.stream29.codex.lite.mcp.impl.McpServiceImpl
@@ -95,6 +96,7 @@ val openAiMcpToolRoundTripProbeTest by testSuite {
                     dynamicTools = service.tools,
                     localToolSearchDocuments = emptyList(),
                     toolSearchCatalog = toolSearchCatalog,
+                    toolHooks = NoOpToolHooks,
                 )
 
                 state.appendUserMessage(
