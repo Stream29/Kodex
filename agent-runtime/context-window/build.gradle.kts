@@ -9,7 +9,7 @@ kotlin {
             api(project(":openai-model-catalog"))
         }
         commonTest.dependencies {
-            implementation(project(":agent-state-impl"))
+            implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-in-memory"))
             implementation(project(":openai-client-test"))
         }
