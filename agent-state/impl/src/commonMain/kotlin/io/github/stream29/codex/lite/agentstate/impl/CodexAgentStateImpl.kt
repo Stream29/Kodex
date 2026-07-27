@@ -6,6 +6,11 @@ import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPr
 import io.github.stream29.codex.lite.agentcontext.prefix.render.render
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
+import io.github.stream29.codex.lite.agentstate.contract.canAppendUserMessage
+import io.github.stream29.codex.lite.agentstate.contract.canCompact
+import io.github.stream29.codex.lite.agentstate.contract.canMarkNewTurn
+import io.github.stream29.codex.lite.agentstate.contract.canRequestResponseApi
+import io.github.stream29.codex.lite.agentstate.contract.canRevert
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
@@ -258,50 +263,48 @@ private class CodexAgentStateImpl(
     }
 
     @OptIn(ExperimentalUuidApi::class)
-    override suspend fun appendUserMessage(content: List<ContentItem>): Int =
-        appendUserMessage(content) { snapshotIndex, currentSettings ->
-            if (storage.stateAt(snapshotIndex) == CodexAgentStateValue.Empty) {
-                currentSettings.turnId
-            } else {
-                Uuid.generateV7().toString()
+    override suspend fun markNewTurn(): Int {
+        var isEmpty = false
+        return mutate(
+            validate = { value ->
+                value.requireCanMarkNewTurn()
+                isEmpty = value == CodexAgentStateValue.Empty
+            },
+            inFlight = CodexAgentStateValue.ExternalWrite,
+        ) {
+            val currentIndex = storage.latestIndex()
+            if (isEmpty) {
+                return@mutate currentIndex
             }
+            val index = currentIndex + 1
+            val settings = storage.settings.latestValue().copy(
+                turnId = Uuid.generateV7().toString(),
+            )
+            storage.settings.setWithTransaction(index, settings) {
+                storage.timestamp.setWithTransaction(index, now()) { index }
+            }
+            latestIndex.value = index
+            index
         }
-
-    override suspend fun appendUserMessage(
-        content: List<ContentItem>,
-        turnId: String,
-    ): Int {
-        require(turnId.isNotBlank()) { "Turn id must not be blank." }
-        return appendUserMessage(content) { _, _ -> turnId }
     }
 
-    private suspend inline fun appendUserMessage(
-        content: List<ContentItem>,
-        turnId: (snapshotIndex: Int, currentSettings: CodexAgentSettings) -> String,
-    ): Int =
+    override suspend fun appendUserMessage(content: List<ContentItem>): Int =
         mutate(
             validate = CodexAgentStateValue::requireCanAppendUserMessage,
             inFlight = CodexAgentStateValue.ExternalWrite,
         ) {
             val snapshotIndex = storage.latestIndex()
-            val currentSettings = storage.settings[snapshotIndex]
-            val settings = currentSettings.copy(turnId = turnId(snapshotIndex, currentSettings))
             val item = ResponseItem.Message(
                 role = MessageRole.User,
                 content = content,
             )
             val firstIndex = snapshotIndex + 1
             val timestamp = now()
-            val index = storage.settings.revertWithTransaction(firstIndex) {
-                if (settings != currentSettings) {
-                    storage.settings[firstIndex] = settings
-                }
-                storage.history.revertWithTransaction(firstIndex) {
-                    storage.timestamp.revertWithTransaction(firstIndex) {
-                        storage.history[firstIndex] = item
-                        storage.timestamp[firstIndex] = timestamp
-                        firstIndex
-                    }
+            val index = storage.history.revertWithTransaction(firstIndex) {
+                storage.timestamp.revertWithTransaction(firstIndex) {
+                    storage.history[firstIndex] = item
+                    storage.timestamp[firstIndex] = timestamp
+                    firstIndex
                 }
             }
             latestIndex.value = index
@@ -471,38 +474,31 @@ private val CodexAgentStateValue.isStable: Boolean
     }
 
 private fun CodexAgentStateValue.requireCanRequestResponseApi() {
-    if (
-        this != CodexAgentStateValue.UserMessage &&
-        this != CodexAgentStateValue.AssistantMessage &&
-        this != CodexAgentStateValue.ToolCompleted
-    ) {
+    if (!canRequestResponseApi) {
         throw CodexAgentStateInvalidTransitionException("request a response", this)
     }
 }
 
 private fun CodexAgentStateValue.requireCanCompact() {
-    if (
-        this != CodexAgentStateValue.UserMessage &&
-        this != CodexAgentStateValue.AssistantMessage &&
-        this != CodexAgentStateValue.ToolCompleted
-    ) {
+    if (!canCompact) {
         throw CodexAgentStateInvalidTransitionException("compact context", this)
     }
 }
 
 private fun CodexAgentStateValue.requireCanAppendUserMessage() {
-    if (
-        this != CodexAgentStateValue.Empty &&
-        this != CodexAgentStateValue.UserMessage &&
-        this != CodexAgentStateValue.AssistantMessage &&
-        this != CodexAgentStateValue.ToolCompleted
-    ) {
+    if (!canAppendUserMessage) {
         throw CodexAgentStateInvalidTransitionException("append a user message", this)
     }
 }
 
+private fun CodexAgentStateValue.requireCanMarkNewTurn() {
+    if (!canMarkNewTurn) {
+        throw CodexAgentStateInvalidTransitionException("mark a new turn", this)
+    }
+}
+
 private fun CodexAgentStateValue.requireCanRevert() {
-    if (this != CodexAgentStateValue.Empty && this != CodexAgentStateValue.AssistantMessage) {
+    if (!canRevert) {
         throw CodexAgentStateInvalidTransitionException("revert history", this)
     }
 }

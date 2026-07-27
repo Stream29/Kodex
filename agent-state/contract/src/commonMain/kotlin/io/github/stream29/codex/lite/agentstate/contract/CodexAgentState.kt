@@ -57,6 +57,34 @@ public sealed interface CodexAgentStateValue {
     public data object Compacting : CodexAgentStateValue
 }
 
+/** Whether appending a user message is a legal next atomic operation. */
+public val CodexAgentStateValue.canAppendUserMessage: Boolean
+    get() = this == CodexAgentStateValue.Empty ||
+        this == CodexAgentStateValue.UserMessage ||
+        this == CodexAgentStateValue.AssistantMessage ||
+        this == CodexAgentStateValue.ToolCompleted
+
+/** Whether marking the start of a new logical turn is legal. */
+public val CodexAgentStateValue.canMarkNewTurn: Boolean
+    get() = canAppendUserMessage
+
+/** Whether requesting a Responses API continuation is legal. */
+public val CodexAgentStateValue.canRequestResponseApi: Boolean
+    get() = this == CodexAgentStateValue.UserMessage ||
+        this == CodexAgentStateValue.AssistantMessage ||
+        this == CodexAgentStateValue.ToolCompleted
+
+/** Whether compacting the current model context is legal. */
+public val CodexAgentStateValue.canCompact: Boolean
+    get() = this == CodexAgentStateValue.UserMessage ||
+        this == CodexAgentStateValue.AssistantMessage ||
+        this == CodexAgentStateValue.ToolCompleted
+
+/** Whether reverting the current history is legal. */
+public val CodexAgentStateValue.canRevert: Boolean
+    get() = this == CodexAgentStateValue.Empty ||
+        this == CodexAgentStateValue.AssistantMessage
+
 /**
  * Observable atomic agent state.
  *
@@ -134,29 +162,22 @@ public interface CodexAgentState {
     public suspend fun injectHistory(items: List<ResponseItem.HistoryItem>): Int
 
     /**
-     * Starts one logical user turn by appending its first user message.
+     * Marks the next user message as the start of a new logical turn.
      *
-     * The first turn retains the id created with the initial settings. A later
-     * call allocates a new turn id because a new user submission after the
-     * preceding agent run has ended starts a new logical turn.
-     *
-     * A user-role context injection is not a turn boundary and must use
-     * [injectHistory]. A runtime inserting user input into an already active
-     * turn must retain that turn's id through the explicit overload.
+     * An empty agent already owns the initial turn id, so this is a no-op in
+     * [CodexAgentStateValue.Empty]. Other legal states atomically persist a new
+     * UUIDv7 turn id without changing conversation state.
      */
-    public suspend fun appendUserMessage(content: List<ContentItem>): Int
+    public suspend fun markNewTurn(): Int
 
     /**
-     * Appends one user message and atomically persists the supplied [turnId].
+     * Appends one user message without changing the persisted turn id.
      *
-     * The caller owns the turn-boundary decision: a newly allocated id starts
-     * a new logical turn, while the current id keeps accepted mid-turn input
-     * in the active turn.
+     * A formal user submission starts with [markNewTurn], while a runtime
+     * inserting user input into the current turn calls this operation directly.
+     * A user-role context injection must use [injectHistory].
      */
-    public suspend fun appendUserMessage(
-        content: List<ContentItem>,
-        turnId: String,
-    ): Int
+    public suspend fun appendUserMessage(content: List<ContentItem>): Int
 
     /**
      * Persists one output for a currently pending local tool call, including a
