@@ -13,14 +13,3 @@ public data class CompactionHookRequest(
     public val context: HookTurnContext,
     public val trigger: HookCompactionTrigger,
 )
-
-/** Control result for either side of a compaction operation. */
-public sealed interface CompactionHookResult {
-    public data object Continue : CompactionHookResult
-
-    /**
-     * @property reason Nullable because `continue:false` may omit a reason;
-     * `null` means compaction control stopped without hook feedback.
-     */
-    public data class Stop(public val reason: String?) : CompactionHookResult
-}

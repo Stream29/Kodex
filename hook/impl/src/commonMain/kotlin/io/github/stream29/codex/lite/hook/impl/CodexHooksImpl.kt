@@ -3,7 +3,6 @@ package io.github.stream29.codex.lite.hook.impl
 import io.github.stream29.codex.lite.hook.contract.CodexHooks
 import io.github.stream29.codex.lite.hook.contract.HookSettings
 import io.github.stream29.codex.lite.hook.contract.compaction.CompactionHookRequest
-import io.github.stream29.codex.lite.hook.contract.compaction.CompactionHookResult
 import io.github.stream29.codex.lite.hook.contract.tool.HookToolInvocation
 import io.github.stream29.codex.lite.hook.contract.approval.PermissionRequest
 import io.github.stream29.codex.lite.hook.contract.approval.PermissionRequestResult
@@ -25,7 +24,6 @@ import io.github.stream29.codex.lite.hook.impl.projection.SessionEndCommandInput
 import io.github.stream29.codex.lite.hook.impl.projection.SessionStartCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.StopCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.UserPromptSubmitCommandInputWire
-import io.github.stream29.codex.lite.hook.impl.projection.toCompactionResult
 import io.github.stream29.codex.lite.hook.impl.projection.toPostCompactCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.toPermissionRequestResult
 import io.github.stream29.codex.lite.hook.impl.projection.toPreCompactCommandInputWire
@@ -263,32 +261,32 @@ public class CodexHooksImpl internal constructor(
         }
     }
 
-    override suspend fun onPreCompact(request: CompactionHookRequest): CompactionHookResult =
+    override suspend fun onPreCompact(request: CompactionHookRequest) {
         runCompactionHooks(
             hooks = currentHooks().preCompact,
             request = request,
             input = request.toPreCompactCommandInputWire(),
         )
+    }
 
-    override suspend fun onPostCompact(request: CompactionHookRequest): CompactionHookResult =
+    override suspend fun onPostCompact(request: CompactionHookRequest) {
         runCompactionHooks(
             hooks = currentHooks().postCompact,
             request = request,
             input = request.toPostCompactCommandInputWire(),
         )
+    }
 
     private suspend fun runCompactionHooks(
         hooks: List<ExecutableHook>,
         request: CompactionHookRequest,
         input: CompactCommandInputWire,
-    ): CompactionHookResult {
-        val completed = shellClient.runHooks(
+    ) {
+        shellClient.runHooks(
             hooks = hooks.matching(listOf(request.trigger.wireName)),
             inputJson = HookJson.encodeToString(input),
             cwd = request.context.session.cwd,
-        ).map(HookRawResult::toCompactionResult)
-        return completed.firstNotNullOfOrNull { result -> result as? CompactionHookResult.Stop }
-            ?: CompactionHookResult.Continue
+        )
     }
 
     private fun currentHooks(): ResolvedHooks {
