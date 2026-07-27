@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.openai.client
 
+import io.github.stream29.codex.lite.cli.auth.CodexAuthStore
 import io.github.stream29.codex.lite.openai.ImageEditRequest
 import io.github.stream29.codex.lite.openai.ImageGenerationRequest
 import io.github.stream29.codex.lite.openai.ImageResponse
@@ -8,7 +9,6 @@ import io.github.stream29.codex.lite.openai.OpenAiErrorResponse
 import io.github.stream29.codex.lite.openai.OpenAiResult
 import io.github.stream29.codex.lite.openai.OpenAiResultSerializer
 import io.github.stream29.codex.lite.openai.OpenAiResponseResult
-import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthSession
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
@@ -61,7 +61,7 @@ import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
 
 public class OpenAiClient(
-    private val authProvider: OpenAiSubscriptionAuthSession,
+    private val authStore: CodexAuthStore,
     private val config: OpenAiClientConfig = OpenAiClientConfig(),
 ) : OpenAiClientContract {
     private val httpClient: HttpClient = HttpClient {
@@ -95,7 +95,7 @@ public class OpenAiClient(
             headers[HttpHeaders.CodexOriginator] = config.originator
             headers[HttpHeaders.UserAgent] = config.userAgent
             headers.addAll(config.defaultHeaders)
-            val (accessToken, accountId) = authProvider.stateFlow.value
+            val (accessToken, accountId) = authStore.auth.value
             bearerAuth(accessToken)
             headers[HttpHeaders.ChatGptAccountId] = accountId
         }

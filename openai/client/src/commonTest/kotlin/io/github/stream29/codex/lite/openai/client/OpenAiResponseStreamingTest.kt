@@ -22,7 +22,7 @@ private const val StreamingProbePrompt: String =
 val openAiResponseStreamingTest by testSuite {
     testFixture {
         OpenAiClient(
-            authProvider = codexAuthProvider(),
+            authStore = codexAuthStore(),
             config = OpenAiClientConfig(clientVersion = testCodexClientVersion()),
         )
     } asParameterForEach {

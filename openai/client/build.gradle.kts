@@ -7,6 +7,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(libs.kotlinx.coroutines.core)
+            api(project(":cli-auth-contract"))
             api(project(":openai-client-contract"))
             api(project(":openai-models"))
             implementation(project(":openai-json-codec"))
