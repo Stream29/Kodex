@@ -1,12 +1,8 @@
 package io.github.stream29.codex.lite.agentruntime.contextwindow
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentsMdInstruction
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.EnvironmentContext
-import io.github.stream29.codex.lite.agentcontext.skill.contract.AvailableSkill
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
+import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
@@ -16,31 +12,10 @@ import io.github.stream29.codex.lite.openai.ModelsResponse
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
-import kotlinx.datetime.LocalDate
-import kotlinx.datetime.TimeZone
+import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
 import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
-
-private val contextWindowTestPrefixProvider: AgentContextPrefixProvider =
-    object : AgentContextPrefixProvider {
-        override val environmentContext: EnvironmentContext =
-            EnvironmentContext(
-                environments = listOf(
-                    AgentEnvironment(
-                        id = "test",
-                        cwd = Path("/workspace"),
-                        shell = "bash",
-                    ),
-                ),
-                currentDate = LocalDate(2026, 7, 18),
-                timeZone = TimeZone.UTC,
-            )
-
-        override val availableSkills: List<AvailableSkill> = emptyList()
-
-        override val agentMd: List<AgentsMdInstruction> = emptyList()
-    }
 
 private fun testCatalog(): OpenAiModelCatalog =
     OpenAiModelCatalog(
@@ -54,7 +29,8 @@ private suspend fun testState(storage: MutableCodexAgentStorage) =
     CodexAgentState(
         client = mockOpenAiClient(),
         storage = storage,
-        contextPrefixProvider = contextWindowTestPrefixProvider,
+        contextPrefixProvider = TestContextPrefixProvider,
+        toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
     )
 
 val contextWindowTokenBudgetTest by testSuite {
