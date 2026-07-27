@@ -4,3 +4,6 @@
 [submodule "TomlKt"]
 	path = TomlKt
 	url = git@github.com:Stream29/tomlkt.git
+[submodule "KotlinMcpSdk"]
+	path = KotlinMcpSdk
+	url = git@github.com:Stream29/kotlin-mcp-sdk.git

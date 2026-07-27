@@ -14,7 +14,17 @@ skiko = "0.9.18"
 twelvemonkeys-imageio = "3.13.1"
 test-balloon = "1.0.1-K2.4.0"
 pty4j = "0.13.12"
-node-pty = "1.1.0"
+node-pty = "1.2.0-beta.12"
+mosaic = "0.19.0-SNAPSHOT"
+koin = "4.2.2"
+poko = "0.22.1"
+mcp-kotlin-sdk = "0.14.0"
+unicode-kotlin = "0.1.1"
+kaml = "0.104.0"
+tomlkt = "0.6.0"
+kotlin-logging = "8.0.4"
+kermit = "2.1.0"
+cache4k = "0.14.0"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
@@ -34,6 +44,9 @@ ktor-client-curl = { module = "io.ktor:ktor-client-curl", version.ref = "ktor" }
 ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }
 ktor-client-js = { module = "io.ktor:ktor-client-js", version.ref = "ktor" }
 ktor-client-winhttp = { module = "io.ktor:ktor-client-winhttp", version.ref = "ktor" }
+ktor-utils = { module = "io.ktor:ktor-utils", version.ref = "ktor" }
+ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
+ktor-server-cio = { module = "io.ktor:ktor-server-cio", version.ref = "ktor" }
 lucene-kmp-core = { module = "org.gnit.lucene-kmp:lucene-kmp-core", version.ref = "lucene-kmp" }
 kotlin-wrappers-node = { module = "org.jetbrains.kotlin-wrappers:kotlin-node", version.ref = "kotlin-wrappers-node" }
 korim = { module = "com.soywiz.korlibs.korim:korim", version.ref = "korim" }
@@ -42,6 +55,18 @@ twelvemonkeys-imageio-jpeg = { module = "com.twelvemonkeys.imageio:imageio-jpeg"
 test-balloon-framework-core = { module = "de.infix.testBalloon:testBalloon-framework-core", version.ref = "test-balloon" }
 test-balloon-gradle-plugin = { module = "de.infix.testBalloon:de.infix.testBalloon.gradle.plugin", version.ref = "test-balloon" }
 pty4j = { module = "org.jetbrains.pty4j:pty4j", version.ref = "pty4j" }
+mosaic-runtime = { module = "com.jakewharton.mosaic:mosaic-runtime", version.ref = "mosaic" }
+mosaic-testing = { module = "com.jakewharton.mosaic:mosaic-testing", version.ref = "mosaic" }
+koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
+mcp-kotlin-sdk-client = { module = "io.modelcontextprotocol:kotlin-sdk-client", version.ref = "mcp-kotlin-sdk" }
+unicode-segmentation-kotlin = { module = "io.github.kotlinmania:unicode-segmentation-kotlin", version.ref = "unicode-kotlin" }
+unicode-width-kotlin = { module = "io.github.kotlinmania:unicode-width-kotlin", version.ref = "unicode-kotlin" }
+kaml = { module = "com.charleskorn.kaml:kaml", version.ref = "kaml" }
+tomlkt = { module = "dev.eav.tomlkt:tomlkt", version.ref = "tomlkt" }
+kotlin-logging = { module = "io.github.oshai:kotlin-logging", version.ref = "kotlin-logging" }
+kermit-io = { module = "co.touchlab:kermit-io", version.ref = "kermit" }
+kermit-core = { module = "co.touchlab:kermit", version.ref = "kermit" }
+cache4k = { module = "io.github.reactivecircus.cache4k:cache4k", version.ref = "cache4k" }
 
 [bundles]
 ktor-client-jvm-engines = ["ktor-client-cio"]
@@ -53,3 +78,5 @@ ktor-client-mingw-engines = ["ktor-client-winhttp"]
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+poko = { id = "dev.drewhamilton.poko", version.ref = "poko" }
