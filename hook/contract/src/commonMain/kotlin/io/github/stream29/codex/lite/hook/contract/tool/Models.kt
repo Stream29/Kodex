@@ -17,12 +17,9 @@ public sealed interface PreToolUseResult {
     /** The original tool call may proceed unchanged. */
     public data object Continue : PreToolUseResult
 
-    /**
-     * @property reason Nullable because a valid deny result may omit feedback;
-     * `null` means the call is blocked without a model-facing reason.
-     */
+    /** @property reason Model-facing explanation for the blocked call. */
     public data class Block(
-        public val reason: String?,
+        public val reason: String = "PreToolUse hook blocked this tool call.",
     ) : PreToolUseResult
 }
 
