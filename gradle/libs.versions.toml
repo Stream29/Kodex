@@ -59,6 +59,7 @@ mosaic-runtime = { module = "com.jakewharton.mosaic:mosaic-runtime", version.ref
 mosaic-testing = { module = "com.jakewharton.mosaic:mosaic-testing", version.ref = "mosaic" }
 koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
 mcp-kotlin-sdk-client = { module = "io.modelcontextprotocol:kotlin-sdk-client", version.ref = "mcp-kotlin-sdk" }
+mcp-kotlin-sdk-server = { module = "io.modelcontextprotocol:kotlin-sdk-server", version.ref = "mcp-kotlin-sdk" }
 unicode-segmentation-kotlin = { module = "io.github.kotlinmania:unicode-segmentation-kotlin", version.ref = "unicode-kotlin" }
 unicode-width-kotlin = { module = "io.github.kotlinmania:unicode-width-kotlin", version.ref = "unicode-kotlin" }
 kaml = { module = "com.charleskorn.kaml:kaml", version.ref = "kaml" }
