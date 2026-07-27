@@ -17,6 +17,16 @@ dependencyResolutionManagement {
 
 rootProject.name = "CodexLite"
 
+includeBuild("Mosaic")
+includeBuild("KotlinMcpSdk") {
+    name = "kotlin-mcp-sdk"
+}
+includeBuild("TomlKt") {
+    dependencySubstitution {
+        substitute(module("dev.eav.tomlkt:tomlkt")).using(project(":core"))
+    }
+}
+
 fun includeModuleDir(path: String) {
     val projectPath = ":${path.replace('/', '-')}"
     include(projectPath)
@@ -35,11 +45,14 @@ fun includeModuleTree(rootPath: String) {
 }
 
 includeModuleTree("integration-test")
-includeModuleTree("llm-provider")
+includeModuleTree("cli")
+includeModuleTree("mcp")
 includeModuleTree("openai")
 includeModuleTree("agent-state")
 includeModuleTree("agent-context")
 includeModuleTree("agent-runtime")
+includeModuleTree("agent-session")
 includeModuleTree("agent-storage")
+includeModuleTree("hook")
 includeModuleTree("tool")
 includeModuleTree("utils")
