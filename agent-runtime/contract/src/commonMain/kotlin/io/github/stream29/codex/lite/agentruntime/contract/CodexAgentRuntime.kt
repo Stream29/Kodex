@@ -13,6 +13,13 @@ import kotlinx.coroutines.flow.Flow
  * [resume] is the multi-step orchestration entry point.
  */
 public interface CodexAgentRuntime : CodexAgentState {
-    /** Executes this runtime layer's resume operation and exposes raw stream events. */
+    /**
+     * Executes this runtime layer's resume operation and exposes raw stream
+     * events.
+     *
+     * Each runtime layer may perform work before or after delegating to the
+     * next layer. This call is the composable execution boundary; no separate
+     * turn runner or admission callback participates in control flow.
+     */
     public fun resume(): Flow<ResponsesStreamEvent>
 }
