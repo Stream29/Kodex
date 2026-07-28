@@ -39,7 +39,10 @@ import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.codexRequestWindowId
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,7 +56,7 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * Loads a state-layer implementation from [storage].
+ * Loads a state-layer implementation from [storage] as a child of this scope.
  *
  * Construction is suspend because storage reads may be asynchronous. The
  * initial phase is reconstructed from persisted history rather than assumed
@@ -68,21 +71,28 @@ import kotlin.uuid.Uuid
  * catalogs change without moving complete request-tool assembly outside the
  * state layer.
  */
-public suspend fun CodexAgentState(
+public suspend fun CoroutineScope.CodexAgentState(
     client: OpenAiClient,
     storage: MutableCodexAgentStorage,
     contextPrefixProvider: AgentContextPrefixProvider,
     toolSearchToolSpec: suspend () -> ToolSpec.ToolSearch,
 ): CodexAgentState {
-    val loadedLatestIndex = storage.latestIndex()
-    return CodexAgentStateImpl(
-        client = client,
-        storage = storage,
-        contextPrefixProvider = contextPrefixProvider,
-        toolSearchToolSpec = toolSearchToolSpec,
-        loadedLatestIndex = loadedLatestIndex,
-        initialState = storage.stateAt(loadedLatestIndex),
-    )
+    val stateScope = supervisorChildScope()
+    try {
+        val loadedLatestIndex = storage.latestIndex()
+        return CodexAgentStateImpl(
+            scope = stateScope,
+            client = client,
+            storage = storage,
+            contextPrefixProvider = contextPrefixProvider,
+            toolSearchToolSpec = toolSearchToolSpec,
+            loadedLatestIndex = loadedLatestIndex,
+            initialState = storage.stateAt(loadedLatestIndex),
+        )
+    } catch (failure: Throwable) {
+        stateScope.cancel()
+        throw failure
+    }
 }
 
 /**
@@ -94,13 +104,14 @@ public suspend fun CodexAgentState(
  * responsibilities.
  */
 private class CodexAgentStateImpl(
+    scope: CoroutineScope,
     private val client: OpenAiClient,
     override val storage: MutableCodexAgentStorage,
     private val contextPrefixProvider: AgentContextPrefixProvider,
     private val toolSearchToolSpec: suspend () -> ToolSpec.ToolSearch,
     loadedLatestIndex: Int,
     initialState: CodexAgentStateValue,
-) : CodexAgentState {
+) : CodexAgentState, CoroutineScope by scope {
     override val state: StateFlow<CodexAgentStateValue>
         field = MutableStateFlow(initialState)
 

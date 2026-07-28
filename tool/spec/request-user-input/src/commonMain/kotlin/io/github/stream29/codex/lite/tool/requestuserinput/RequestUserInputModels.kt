@@ -16,7 +16,7 @@ public data class RequestUserInputArgs(
     public val autoResolutionMs: Long? = null,
 )
 
-/** One multiple-choice question rendered by the host runtime. */
+/** One multiple-choice question rendered by the host UI. */
 @Serializable
 public data class RequestUserInputQuestion(
     public val id: String,

@@ -8,6 +8,7 @@ import io.github.stream29.codex.lite.mcp.stdio.openMcpStdioTransport
 import io.github.stream29.codex.lite.mcp.streamablehttp.McpStreamableHttpClient
 import io.github.stream29.codex.lite.mcp.streamablehttp.openMcpStreamableHttpTransport
 import io.github.stream29.codex.lite.utils.coroutines.runCatchingCancellable
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import io.github.stream29.codex.lite.utils.processclient.ProcessClient
 import io.ktor.client.HttpClient
 import io.modelcontextprotocol.kotlin.sdk.client.Client
@@ -19,10 +20,7 @@ import io.modelcontextprotocol.kotlin.sdk.types.PaginatedRequestParams
 import io.modelcontextprotocol.kotlin.sdk.types.ToolListChangedNotification
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.ensureActive
@@ -31,7 +29,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.newCoroutineContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -235,14 +232,10 @@ public class McpServiceImpl internal constructor(
 }
 
 /** Creates an independently cancellable MCP service under this scope. */
-@OptIn(ExperimentalCoroutinesApi::class)
 public fun CoroutineScope.McpServiceImpl(
     settings: StateFlow<McpSettings>,
 ): McpServiceImpl {
-    val parentJob = requireNotNull(coroutineContext[Job]) {
-        "McpServiceImpl requires an owning CoroutineScope with a Job."
-    }
-    val serviceScope = CoroutineScope(newCoroutineContext(SupervisorJob(parentJob)))
+    val serviceScope = supervisorChildScope()
     return try {
         McpServiceImpl(
             scope = serviceScope,

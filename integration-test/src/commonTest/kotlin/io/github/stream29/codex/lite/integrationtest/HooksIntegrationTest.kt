@@ -3,7 +3,7 @@ package io.github.stream29.codex.lite.integrationtest
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentruntime.compact.compactionRuntime
-import io.github.stream29.codex.lite.agentruntime.sessionhook.sessionHookRuntime
+import io.github.stream29.codex.lite.agentruntime.sessionhook.installSessionHooks
 import io.github.stream29.codex.lite.agentruntime.turnhook.turnHookRuntime
 import io.github.stream29.codex.lite.agentsession.filesystem.FileSystemCodexSessionRepository
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
@@ -35,6 +35,7 @@ import io.github.stream29.codex.lite.utils.shellclient.ShellType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.toList
@@ -87,6 +88,7 @@ private suspend fun runFreshSessionHookIntegration() {
     var modelCatalog: OpenAiModelCatalog? = null
     var hooks: CodexHooksImpl? = null
     var sessionRepository: FileSystemCodexSessionRepository? = null
+    var stateJob: Job? = null
     try {
         SystemCoroutineFileSystem.createDirectories(codexHome)
         SystemCoroutineFileSystem.createDirectories(codexLiteHome)
@@ -120,7 +122,7 @@ private suspend fun runFreshSessionHookIntegration() {
         assertEquals(0L, session.storage.tokenCount[0])
 
         val hookSessionId = session.storage.id
-        val state = CodexAgentState(
+        val state = session.CodexAgentState(
             client = client,
             storage = session.storage,
             contextPrefixProvider = TestContextPrefixProvider,
@@ -132,7 +134,12 @@ private suspend fun runFreshSessionHookIntegration() {
                 compactionHooks = hooks,
             )
             .turnHookRuntime(hooks)
-            .sessionHookRuntime(hooks, SessionStartSource.Startup)
+        stateJob = state.coroutineContext[Job]
+        runtime.installSessionHooks(
+            hooks = hooks,
+            source = SessionStartSource.Startup,
+            endReason = { SessionEndReason.Shutdown },
+        )
 
         val prompt = "Reply with exactly $HookIntegrationMarker and no other text."
         runtime.appendUserMessage(listOf(ContentItem.InputText(prompt)))
@@ -140,7 +147,7 @@ private suspend fun runFreshSessionHookIntegration() {
         assertTrue(events.any { event -> event is ResponsesStreamEvent.Completed })
         assertIs<CodexAgentStateValue.AssistantMessage>(state.state.value)
 
-        runtime.end(SessionEndReason.Shutdown)
+        requireNotNull(stateJob).cancelAndJoin()
 
         val requests = readHookRequests(hookLog)
         assertEquals(
@@ -159,6 +166,7 @@ private suspend fun runFreshSessionHookIntegration() {
         )
         assertEquals("shutdown", requests[3].getValue("reason").jsonPrimitive.content)
     } finally {
+        stateJob?.cancelAndJoin()
         hooks?.cancel()
         sessionRepository?.closeAndJoin()
         modelCatalog?.close()

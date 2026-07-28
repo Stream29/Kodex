@@ -31,11 +31,9 @@ import io.github.stream29.codex.lite.hook.impl.projection.toPreToolUseResult
 import io.github.stream29.codex.lite.hook.impl.projection.toSessionStartResult
 import io.github.stream29.codex.lite.hook.impl.projection.toStopResult
 import io.github.stream29.codex.lite.hook.impl.projection.toUserPromptSubmitResult
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import io.github.stream29.codex.lite.utils.shellclient.ShellClient
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.SharingStarted
@@ -43,7 +41,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.newCoroutineContext
 
 /**
  * [CodexHooks] implementation using a resolved view of global settings.
@@ -296,16 +293,10 @@ public class CodexHooksImpl internal constructor(
 }
 
 /** Creates configured hooks as a child of this scope. */
-@OptIn(ExperimentalCoroutinesApi::class)
 public fun CoroutineScope.CodexHooksImpl(
     settings: StateFlow<HookSettings>,
 ): CodexHooksImpl {
-    val parentJob = requireNotNull(coroutineContext[Job]) {
-        "CodexHooksImpl requires an owning CoroutineScope with a Job."
-    }
-    val hooksScope = CoroutineScope(
-        newCoroutineContext(SupervisorJob(parentJob)),
-    )
+    val hooksScope = supervisorChildScope()
     return try {
         CodexHooksImpl(
             scope = hooksScope,

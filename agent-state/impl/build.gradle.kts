@@ -18,6 +18,7 @@ kotlin {
             implementation(project(":tool-spec-request-user-input"))
             implementation(project(":tool-impl-unified-exec"))
             implementation(project(":tool-impl-web-run"))
+            implementation(project(":utils-coroutines"))
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {

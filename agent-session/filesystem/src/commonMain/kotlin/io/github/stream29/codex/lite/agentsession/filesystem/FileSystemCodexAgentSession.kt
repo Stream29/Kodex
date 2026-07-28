@@ -1,19 +1,16 @@
-@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-
 package io.github.stream29.codex.lite.agentsession.filesystem
 
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.filesystem.FileSystemAgentStorage
+import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import io.github.stream29.codex.lite.utils.filesystemlease.FileSystemLease
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.CoroutineFileSystem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.newCoroutineContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -30,7 +27,7 @@ internal class FileSystemCodexAgentSession(
         directory = Path(directory, SubagentsDirectory),
         fileSystem = fileSystem,
         valueCacheSize = valueCacheSize,
-        scope = CoroutineScope(scope.newCoroutineContext(SupervisorJob(scope.coroutineContext[Job]))),
+        scope = scope.supervisorChildScope(),
     )
 }
 
@@ -61,7 +58,7 @@ private class FileSystemSubagentRepository(
         require(fileSystem.metadataOrNull(agentDirectory)?.isDirectory == true) {
             "Agent entry does not exist: $entryIndex"
         }
-        val agentScope = CoroutineScope(newCoroutineContext(SupervisorJob(coroutineContext[Job])))
+        val agentScope = supervisorChildScope()
         FileSystemCodexAgentSession(
             directory = agentDirectory,
             fileSystem = fileSystem,
@@ -94,7 +91,7 @@ internal suspend fun CoroutineScope.FileSystemCodexAgentSession(
     fileSystem: CoroutineFileSystem,
     valueCacheSize: Int,
 ): CodexAgentSession {
-    val scope = CoroutineScope(newCoroutineContext(SupervisorJob(coroutineContext[Job])))
+    val scope = supervisorChildScope()
     val lease = try {
         scope.FileSystemLease(
             lockPath = Path(directory, LockFile),
@@ -102,7 +99,7 @@ internal suspend fun CoroutineScope.FileSystemCodexAgentSession(
             duration = SessionLeaseDuration,
         )
     } catch (failure: Throwable) {
-        scope.coroutineContext[Job]?.cancelAndJoin()
+        scope.cancelAndJoin()
         throw failure
     }
     try {
@@ -117,7 +114,7 @@ internal suspend fun CoroutineScope.FileSystemCodexAgentSession(
         return session
     } catch (failure: Throwable) {
         withContext(NonCancellable) {
-            scope.coroutineContext[Job]?.cancelAndJoin()
+            scope.cancelAndJoin()
             lease.close()
         }
         throw failure

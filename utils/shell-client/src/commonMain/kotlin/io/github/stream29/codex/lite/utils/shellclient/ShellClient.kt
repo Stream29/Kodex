@@ -1,11 +1,8 @@
 package io.github.stream29.codex.lite.utils.shellclient
 
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.newCoroutineContext
 import kotlin.coroutines.CoroutineContext
 
 /**
@@ -27,14 +24,8 @@ public expect class ShellClient internal constructor(
 }
 
 /** Creates an independently cancellable shell client under this scope. */
-@OptIn(ExperimentalCoroutinesApi::class)
 public fun CoroutineScope.ShellClient(): ShellClient {
-    val parentJob = requireNotNull(coroutineContext[Job]) {
-        "ShellClient requires an owning CoroutineScope with a Job."
-    }
-    return ShellClient(
-        CoroutineScope(newCoroutineContext(SupervisorJob(parentJob))),
-    )
+    return ShellClient(supervisorChildScope())
 }
 
 internal fun CoroutineScope.requireOpen() {

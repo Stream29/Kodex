@@ -13,12 +13,19 @@ import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.WebSearchAction
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
+import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 val hostedWebSearchTest by testSuite {
+    testFixture {
+        testSuiteCoroutineScope.supervisorChildScope()
+    } closeWith {
+        cancelAndJoin()
+    } asContextForEach {
     test("hosted web search response items stay in history without a local tool runtime") {
         val webSearchCall = ResponseItem.WebSearchCall(
             status = "completed",
@@ -56,5 +63,6 @@ val hostedWebSearchTest by testSuite {
         assertEquals(assistantMessage, storage.history[3])
         assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
         assertIs<ResponseItem.WebSearchCall>(storage.history[2])
+    }
     }
 }

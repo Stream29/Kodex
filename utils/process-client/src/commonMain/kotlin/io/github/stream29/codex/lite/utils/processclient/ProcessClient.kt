@@ -1,15 +1,13 @@
 package io.github.stream29.codex.lite.utils.processclient
 
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.newCoroutineContext
 import kotlinx.io.RawSink
 import kotlinx.io.RawSource
 import kotlinx.io.files.Path
@@ -33,14 +31,8 @@ public expect class ProcessClient internal constructor(
 }
 
 /** Creates an independently cancellable direct-process client under this scope. */
-@OptIn(ExperimentalCoroutinesApi::class)
 public fun CoroutineScope.ProcessClient(): ProcessClient {
-    val parentJob = requireNotNull(coroutineContext[Job]) {
-        "ProcessClient requires an owning CoroutineScope with a Job."
-    }
-    return ProcessClient(
-        CoroutineScope(newCoroutineContext(SupervisorJob(parentJob))),
-    )
+    return ProcessClient(supervisorChildScope())
 }
 
 /** One direct executable invocation. */

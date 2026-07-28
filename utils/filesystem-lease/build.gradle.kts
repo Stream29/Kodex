@@ -7,6 +7,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":utils-kotlinx-io-coroutines"))
+            implementation(project(":utils-coroutines"))
             implementation(project(":utils-os-environment"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
