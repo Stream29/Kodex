@@ -7,7 +7,9 @@ import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as Code
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
 import io.github.stream29.codex.lite.agentstate.test.TestMcpService
+import io.github.stream29.codex.lite.agentstate.tool.toDeferredToolSearchDocuments
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
+import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.hook.contract.tool.HookToolInvocation
 import io.github.stream29.codex.lite.hook.contract.tool.NoOpToolHooks
@@ -22,20 +24,29 @@ import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
 import io.github.stream29.codex.lite.openai.MessageRole
-import io.github.stream29.codex.lite.openai.ModelsResponse
+import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
-import io.github.stream29.codex.lite.openai.OpenAiResult
+import io.github.stream29.codex.lite.openai.PlanItemArg
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
+import io.github.stream29.codex.lite.openai.StepStatus
 import io.github.stream29.codex.lite.openai.ToolSpec
+import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
-import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
-import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
+import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
+import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchToolClient
+import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchTools
+import io.github.stream29.codex.lite.tool.contract.Tool
+import io.github.stream29.codex.lite.tool.plan.PlanTools
+import io.github.stream29.codex.lite.tool.plan.updatePlanTool
+import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchEngine
+import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecToolClient
+import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecTools
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -43,11 +54,15 @@ import io.github.stream29.codex.lite.utils.shellclient.Shell
 import io.github.stream29.codex.lite.utils.shellclient.ShellSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.job
 import kotlinx.schema.json.PropertyBuilder
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
@@ -63,10 +78,8 @@ val codexToolRuntimeTest by testSuite {
     testFixture {
         ToolRuntimeTestContext(
             scope = testSuiteCoroutineScope.supervisorChildScope(),
-            modelCatalog = testModelCatalog(),
         )
     } closeWith {
-        modelCatalog.close()
         cancelAndJoin()
     } asContextForEach {
     test("request tool search spec is projected without writing settings") {
@@ -90,7 +103,7 @@ val codexToolRuntimeTest by testSuite {
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Use a tool.")))
         val runtime = RequestOnlyRuntime(state)
-            .testToolRuntime(client, mcpService, NoOpToolHooks)
+            .testToolRuntime(mcpService, NoOpToolHooks)
 
         runtime.resume().toList()
 
@@ -148,7 +161,7 @@ val codexToolRuntimeTest by testSuite {
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Find and use the dynamic tool.")))
         val runtime = RequestOnlyRuntime(state)
-            .testToolRuntime(client, mcpService, NoOpToolHooks)
+            .testToolRuntime(mcpService, NoOpToolHooks)
 
         runtime.resume().toList()
 
@@ -202,7 +215,7 @@ val codexToolRuntimeTest by testSuite {
             mcpService = mcpService,
         )
         val runtime = RequestOnlyRuntime(state)
-            .testToolRuntime(client, mcpService, NoOpToolHooks)
+            .testToolRuntime(mcpService, NoOpToolHooks)
 
         state.appendUserMessage(listOf(ContentItem.InputText("Use alpha.")))
         runtime.resume().toList()
@@ -253,7 +266,7 @@ val codexToolRuntimeTest by testSuite {
         state.requestResponseApi().toList()
 
         RequestOnlyRuntime(state)
-            .testToolRuntime(client, mcpService, NoOpToolHooks)
+            .testToolRuntime(mcpService, NoOpToolHooks)
             .resume()
             .toList()
 
@@ -304,7 +317,7 @@ val codexToolRuntimeTest by testSuite {
         state.appendUserMessage(listOf(ContentItem.InputText("Use MCP.")))
 
         RequestOnlyRuntime(state)
-            .testToolRuntime(client, mcpService, NoOpToolHooks)
+            .testToolRuntime(mcpService, NoOpToolHooks)
             .resume()
             .toList()
 
@@ -369,7 +382,7 @@ val codexToolRuntimeTest by testSuite {
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Use the tool.")))
         val runtime = RequestOnlyRuntime(state)
-            .testToolRuntime(client, mcpService, hooks)
+            .testToolRuntime(mcpService, hooks)
             .turnHookRuntime(NoOpTurnHooks)
 
         runtime.resume().toList()
@@ -438,7 +451,7 @@ val codexToolRuntimeTest by testSuite {
         state.appendUserMessage(listOf(ContentItem.InputText("Use the tool.")))
 
         RequestOnlyRuntime(state)
-            .testToolRuntime(client, mcpService, hooks)
+            .testToolRuntime(mcpService, hooks)
             .turnHookRuntime(NoOpTurnHooks)
             .resume()
             .toList()
@@ -494,7 +507,7 @@ val codexToolRuntimeTest by testSuite {
         )
         try {
             val runtime = RequestOnlyRuntime(fixture.state)
-                .testToolRuntime(fixture.client, mcpService, hooks)
+                .testToolRuntime(mcpService, hooks)
                 .turnHookRuntime(NoOpTurnHooks)
             fixture.state.updateSettings(initialSettings.copy(cwd = updatedRoot))
 
@@ -546,7 +559,7 @@ val codexToolRuntimeTest by testSuite {
         val fixture = testStateWithCalls(mcpService, calls = arrayOf(execCall, writeCall))
 
         RequestOnlyRuntime(fixture.state)
-            .testToolRuntime(fixture.client, mcpService, hooks)
+            .testToolRuntime(mcpService, hooks)
             .turnHookRuntime(NoOpTurnHooks)
             .resume()
             .toList()
@@ -569,25 +582,124 @@ val codexToolRuntimeTest by testSuite {
         )
         assertTrue(postRequests.all { request -> request.response is JsonPrimitive })
     }
+
+    test("update plan is handled by the ordinary tool runtime") {
+        val plan = UpdatePlanArgs(
+            explanation = "Start implementation.",
+            plan = listOf(PlanItemArg("Implement runtime", StepStatus.InProgress)),
+        )
+        val call = ResponseItem.FunctionCall(
+            name = PlanTools.Name,
+            arguments = OpenAiJsonCodec.encodeToString(plan),
+            callId = "call_plan",
+        )
+        val mcpService = TestMcpService()
+        val fixture = testStateWithCalls(mcpService, calls = arrayOf(call))
+
+        RequestOnlyRuntime(fixture.state)
+            .testToolRuntime(mcpService, NoOpToolHooks)
+            .resume()
+            .toList()
+
+        assertEquals(plan, fixture.state.storage.settings.latestValue().plan)
+        val output = fixture.state.storage.history.indexes().toList()
+            .map { index -> fixture.state.storage.history[index] }
+            .filterIsInstance<ResponseItem.FunctionCallOutput>()
+            .single()
+        assertEquals(true, output.output.success)
+        assertEquals(FunctionCallOutputBody.Text("Plan updated"), output.output.body)
+    }
+
+    test("update plan remains unavailable in plan mode") {
+        val originalPlan = UpdatePlanArgs(plan = emptyList())
+        val call = ResponseItem.FunctionCall(
+            name = PlanTools.Name,
+            arguments = OpenAiJsonCodec.encodeToString(
+                UpdatePlanArgs(
+                    plan = listOf(PlanItemArg("Do not store", StepStatus.Pending)),
+                ),
+            ),
+            callId = "call_plan",
+        )
+        val mcpService = TestMcpService()
+        val fixture = testStateWithCalls(
+            mcpService = mcpService,
+            settings = CodexAgentSettings(
+                model = OpenAiModelId("test-model"),
+                turnId = "turn_started",
+                collaborationMode = ModeKind.Plan,
+                plan = originalPlan,
+            ),
+            calls = arrayOf(call),
+        )
+
+        RequestOnlyRuntime(fixture.state)
+            .testToolRuntime(mcpService, NoOpToolHooks)
+            .resume()
+            .toList()
+
+        assertEquals(originalPlan, fixture.state.storage.settings.latestValue().plan)
+        val output = fixture.state.storage.history.indexes().toList()
+            .map { index -> fixture.state.storage.history[index] }
+            .filterIsInstance<ResponseItem.FunctionCallOutput>()
+            .single()
+        assertEquals(false, output.output.success)
+        assertTrue(
+            (output.output.body as FunctionCallOutputBody.Text).text
+                .contains("not allowed in Plan mode"),
+        )
+    }
     }
 }
 
 private class ToolRuntimeTestContext(
     scope: CoroutineScope,
-    val modelCatalog: OpenAiModelCatalog,
 ) : CoroutineScope by scope {
     suspend fun CodexAgentRuntime.testToolRuntime(
-        client: OpenAiClient,
         mcpService: McpService,
         hooks: ToolHooks,
-    ): CodexToolRuntime =
-        toolRuntime(
-            client = client,
-            modelCatalog = modelCatalog,
-            shellSettings = MutableStateFlow(TestShellSettings()),
-            mcpService = mcpService,
+    ): CodexToolRuntime {
+        val workingDirectory = MutableStateFlow(storage.settings.latestValue().cwd)
+        val fixedTools = buildList {
+            add(ApplyPatchTools.createTool(ApplyPatchToolClient(workingDirectory)))
+            add(updatePlanTool())
+            addAll(
+                UnifiedExecTools.createTools(
+                    UnifiedExecToolClient(
+                        settings = MutableStateFlow(TestShellSettings()),
+                        workingDirectory = workingDirectory,
+                    ),
+                ),
+            )
+        }.map { tool ->
+            object : Tool by tool {
+                override suspend fun handle(
+                    call: ResponseItem.ToolCall,
+                ): ResponseItem.ToolCallOutput {
+                    workingDirectory.value = storage.settings.latestValue().cwd
+                    return tool.handle(call)
+                }
+            }
+        }
+        coroutineContext.job.invokeOnCompletion {
+            fixedTools.asReversed().forEach { tool -> runCatching { tool.close() } }
+        }
+        val toolSearch = mcpService.tools
+            .map { tools -> ToolSearchEngine(tools.toDeferredToolSearchDocuments()) }
+            .stateIn(
+                scope = this@ToolRuntimeTestContext,
+                started = SharingStarted.Eagerly,
+                initialValue = ToolSearchEngine(
+                    mcpService.tools.value.toDeferredToolSearchDocuments(),
+                ),
+            )
+        return toolRuntime(
+            fixedTools = fixedTools,
+            dynamicTools = mcpService.tools,
+            toolSearch = toolSearch,
             toolHooks = hooks,
         )
+    }
 }
 
 private class RequestOnlyRuntime(
@@ -723,16 +835,6 @@ private fun assistantResponse(responseId: String): Flow<ResponsesStreamEvent> = 
     ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = assistantMessage()),
     ResponsesStreamEvent.Completed(Response(id = responseId, endTurn = true)),
 )
-
-private fun testModelCatalog(): OpenAiModelCatalog =
-    OpenAiModelCatalog(
-        client = mockOpenAiClient {
-            listModels { OpenAiResult.Success(ModelsResponse()) }
-        },
-        codexCliStorage = CodexCliStorage(
-            Path(SystemTemporaryDirectory, "codex-tool-runtime-models-${Random.nextLong()}"),
-        ),
-    )
 
 private suspend fun deleteRecursively(path: Path) {
     val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return

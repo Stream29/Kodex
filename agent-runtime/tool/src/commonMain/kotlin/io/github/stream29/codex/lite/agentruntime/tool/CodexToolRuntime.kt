@@ -2,15 +2,11 @@ package io.github.stream29.codex.lite.agentruntime.tool
 
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
-import io.github.stream29.codex.lite.agentstate.tool.toDeferredToolSearchDocuments
-import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.hook.contract.tool.PreToolUseResult
 import io.github.stream29.codex.lite.hook.contract.tool.ToolHooks
 import io.github.stream29.codex.lite.hook.toolutils.runPreToolUse
 import io.github.stream29.codex.lite.hook.toolutils.runPostToolUse
 import io.github.stream29.codex.lite.hook.toolutils.toHookBlockedOutput
-import io.github.stream29.codex.lite.mcp.contract.McpService
-import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.FreeformTool
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
 import io.github.stream29.codex.lite.openai.ResponseItem
@@ -18,121 +14,37 @@ import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.ToolSpec
-import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
-import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
-import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchToolClient
-import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchTools
 import io.github.stream29.codex.lite.tool.contract.Tool
 import io.github.stream29.codex.lite.tool.contract.ToolName
-import io.github.stream29.codex.lite.tool.currenttime.CurrentTimeTools
-import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationToolClient
-import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationTools
 import io.github.stream29.codex.lite.tool.toolsearch.SearchToolCallParams
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchEngine
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchResult
-import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecToolClient
-import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecTools
-import io.github.stream29.codex.lite.tool.viewimage.ViewImageToolClient
-import io.github.stream29.codex.lite.tool.viewimage.ViewImageTools
-import io.github.stream29.codex.lite.tool.webrun.WebRunToolClient
-import io.github.stream29.codex.lite.tool.webrun.WebRunTools
-import io.github.stream29.codex.lite.utils.codexlitehome.CodexLiteHome
-import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
-import io.github.stream29.codex.lite.utils.shellclient.ShellSettings
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.job
-import kotlinx.io.files.Path
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.decodeFromJsonElement
 
 /**
- * Executes Codex Lite's fixed local tools, current MCP tools, and client
- * tool-search calls.
+ * Executes borrowed fixed and dynamic tools plus client tool-search calls.
  *
- * Fixed tools and the search catalog are owned by this runtime. [mcpService]
- * remains application-owned; this runtime only reads its current tool
- * snapshot and never closes it.
+ * Tool construction, dynamic catalog updates, and resource ownership remain
+ * outside this decorator. It only samples the supplied state, routes calls,
+ * runs hooks, and persists outputs.
  */
 public class CodexToolRuntime internal constructor(
     private val delegate: CodexAgentRuntime,
-    private val resourceScope: CoroutineScope,
-    client: OpenAiClient,
-    modelCatalog: OpenAiModelCatalog,
-    shellSettings: StateFlow<ShellSettings>,
-    private val mcpService: McpService,
+    fixedTools: List<Tool>,
+    private val dynamicTools: StateFlow<List<Tool>>,
+    private val toolSearch: StateFlow<ToolSearchEngine>,
     private val toolHooks: ToolHooks,
-) : CodexAgentRuntime by delegate, AutoCloseable {
-    private val toolSearchEngine: StateFlow<ToolSearchEngine> = mcpService.tools
-        .map { tools ->
-            ToolSearchEngine(tools.toDeferredToolSearchDocuments())
-        }
-        .stateIn(
-            scope = resourceScope,
-            started = SharingStarted.Eagerly,
-            initialValue = ToolSearchEngine(
-                mcpService.tools.value.toDeferredToolSearchDocuments(),
-            ),
-        )
-    private lateinit var initialSettings: CodexAgentSettings
-    private val workingDirectory: MutableStateFlow<Path> by lazy {
-        MutableStateFlow(initialSettings.cwd)
-    }
-    private val fixedToolsDelegate = lazy {
-        val imageOutputDirectory = MutableStateFlow(
-            ImageGenerationTools.outputDirectory(CodexLiteHome, storage.id),
-        )
-        val unifiedExecClient = resourceScope.UnifiedExecToolClient(
-            settings = shellSettings,
-            workingDirectory = workingDirectory,
-        )
-        buildList {
-            add(ApplyPatchTools.createTool(ApplyPatchToolClient(root = workingDirectory)))
-            add(CurrentTimeTools.createTool())
-            add(getContextRemainingTool(modelCatalog))
-            addAll(UnifiedExecTools.createTools(unifiedExecClient))
-            add(
-                WebRunTools.createTool(
-                    WebRunToolClient(
-                        client = client,
-                        sessionId = storage.id,
-                        model = initialSettings.model,
-                    ),
-                ),
-            )
-            add(ViewImageTools.createTool(ViewImageToolClient(root = workingDirectory)))
-            add(
-                ImageGenerationTools.createTool(
-                    ImageGenerationToolClient(client = client, root = workingDirectory),
-                    outputDirectory = imageOutputDirectory,
-                ),
-            )
-        }
-    }
-    private val fixedTools: List<Tool> by fixedToolsDelegate
-
-    init {
-        resourceScope.coroutineContext.job.invokeOnCompletion {
-            if (fixedToolsDelegate.isInitialized()) {
-                fixedTools.asReversed().forEach { tool ->
-                    runCatching { tool.close() }
-                }
-            }
-        }
-    }
+) : CodexAgentRuntime by delegate {
+    private val fixedToolsByName: Map<ToolName, Tool> = fixedTools.toToolMap()
 
     override fun resume(): Flow<ResponsesStreamEvent> = channelFlow {
-        val mcpTools = mcpService.tools.value.toList()
         while (true) {
             var pending = state.value as? CodexAgentStateValue.ToolPending
             if (pending == null) {
@@ -140,31 +52,33 @@ public class CodexToolRuntime internal constructor(
                 pending = state.value as? CodexAgentStateValue.ToolPending
                     ?: return@channelFlow
             }
-            val settings = storage.settings.latestValue()
-            if (!::initialSettings.isInitialized) {
-                initialSettings = settings
-            }
-            workingDirectory.value = settings.cwd
-            val toolsByName = (fixedTools + mcpTools).toToolMap()
+            val toolsByName = fixedToolsByName.merge(dynamicTools.value.toToolMap())
             var handledCall = false
             for (call in pending.calls) {
-                val output = when (call) {
-                    is ResponseItem.ClientToolSearchCall -> toolSearchEngine.value.handle(call)
+                when (call) {
+                    is ResponseItem.ClientToolSearchCall -> {
+                        completeToolCall(toolSearch.value.handle(call))
+                        handledCall = true
+                    }
+
                     is ResponseItem.FunctionCall,
                     is ResponseItem.CustomToolCall,
                     -> {
                         val tool = toolsByName[call.toolName]
                         if (tool == null && call.toolName.namespace?.startsWith("mcp__") == true) {
-                            call.unavailable("The MCP tool is no longer available in the current catalog.")
+                            completeToolCall(
+                                call.unavailable(
+                                    "The MCP tool is no longer available in the current catalog.",
+                                ),
+                            )
                         } else if (tool == null) {
                             continue
                         } else {
                             handleToolCall(tool, call)
                         }
+                        handledCall = true
                     }
                 }
-                completeToolCall(output)
-                handledCall = true
             }
             if (!handledCall) {
                 return@channelFlow
@@ -178,10 +92,11 @@ public class CodexToolRuntime internal constructor(
     private suspend fun handleToolCall(
         tool: Tool,
         call: ResponseItem.ToolCall,
-    ): ResponseItem.ToolCallOutput {
+    ) {
         when (val result = toolHooks.runPreToolUse(delegate.storage, call)) {
             is PreToolUseResult.Block -> {
-                return call.toHookBlockedOutput(result.reason)
+                completeToolCall(call.toHookBlockedOutput(result.reason))
+                return
             }
 
             PreToolUseResult.Continue -> Unit
@@ -192,46 +107,35 @@ public class CodexToolRuntime internal constructor(
             call = call,
             output = output,
         )
-        return output
-    }
-
-    /** Releases runtime-owned tool resources without closing [mcpService]. */
-    override fun close() {
-        resourceScope.cancel()
+        // State-bound tools may atomically persist their own specialized output.
+        val remainsPending = (state.value as? CodexAgentStateValue.ToolPending)
+            ?.calls
+            ?.any { pendingCall -> pendingCall.callId == call.callId }
+            ?: false
+        if (remainsPending) {
+            completeToolCall(output)
+        }
     }
 }
 
 /**
- * Adds the complete ordinary Codex tool layer.
+ * Adds a tool-execution layer over externally owned tool state.
  *
- * Fixed tools are constructed from this runtime's current Agent settings.
- * [shellSettings] remains live for shell selection. Generated images are
- * persisted below the process-wide Codex Lite home. [mcpService] supplies the
- * only externally owned tools.
+ * This runtime neither creates nor closes any supplied tool or state flow.
  */
 public fun CodexAgentRuntime.toolRuntime(
-    client: OpenAiClient,
-    modelCatalog: OpenAiModelCatalog,
-    shellSettings: StateFlow<ShellSettings>,
-    mcpService: McpService,
+    fixedTools: List<Tool>,
+    dynamicTools: StateFlow<List<Tool>>,
+    toolSearch: StateFlow<ToolSearchEngine>,
     toolHooks: ToolHooks,
-): CodexToolRuntime {
-    val resourceScope = supervisorChildScope()
-    return try {
-        CodexToolRuntime(
-            delegate = this,
-            resourceScope = resourceScope,
-            client = client,
-            modelCatalog = modelCatalog,
-            shellSettings = shellSettings,
-            mcpService = mcpService,
-            toolHooks = toolHooks,
-        )
-    } catch (failure: Throwable) {
-        resourceScope.cancel()
-        throw failure
-    }
-}
+): CodexToolRuntime =
+    CodexToolRuntime(
+        delegate = this,
+        fixedTools = fixedTools,
+        dynamicTools = dynamicTools,
+        toolSearch = toolSearch,
+        toolHooks = toolHooks,
+    )
 
 private fun List<Tool>.toToolMap(): Map<ToolName, Tool> {
     val routes = flatMap { tool ->
@@ -245,6 +149,14 @@ private fun List<Tool>.toToolMap(): Map<ToolName, Tool> {
         "Multiple tools handle the same name: ${duplicateNames.joinToString()}"
     }
     return routes.toMap()
+}
+
+private fun Map<ToolName, Tool>.merge(dynamic: Map<ToolName, Tool>): Map<ToolName, Tool> {
+    val duplicateNames = keys intersect dynamic.keys
+    require(duplicateNames.isEmpty()) {
+        "Fixed and dynamic tools handle the same name: ${duplicateNames.joinToString()}"
+    }
+    return this + dynamic
 }
 
 private fun Tool.routingNames(): List<ToolName> {
