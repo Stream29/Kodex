@@ -66,7 +66,7 @@ import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputAnswe
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputTools
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchCatalog
+import io.github.stream29.codex.lite.tool.toolsearch.MutableToolSearchCatalog
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchSourceInfo
 import io.github.stream29.codex.lite.tool.toolsearch.toToolSearchDocuments
 import io.github.stream29.codex.lite.tool.viewimage.ViewImageToolArguments
@@ -554,7 +554,7 @@ val toolRuntimeCompositionTest by testSuite {
             callId = "call_image",
         )
         val requests = mutableListOf<ResponsesApiRequest>()
-        val toolSearchCatalog = ToolSearchCatalog(
+        val toolSearchCatalog = MutableToolSearchCatalog(
             listOf(ViewImageTools.spec, ImageGenerationTools.spec)
                 .flatMap { spec -> spec.toToolSearchDocuments() },
         )
@@ -643,7 +643,7 @@ val toolRuntimeCompositionTest by testSuite {
             callId = "call_view",
         )
         val viewTool = RecordingTool(ViewImageTools.spec, "image viewed")
-        val toolSearchCatalog = ToolSearchCatalog(
+        val toolSearchCatalog = MutableToolSearchCatalog(
             viewTool.spec.toToolSearchDocuments(
                 ToolSearchSourceInfo(
                     name = "Workspace tools",
@@ -836,7 +836,7 @@ val openAiViewImageToolRuntimeProbeTest by testSuite {
             val viewImageTool = ViewImageTools.createTool(
                 ViewImageToolClient(root = MutableStateFlow(imageRoot)),
             )
-            val toolSearchCatalog = ToolSearchCatalog(
+            val toolSearchCatalog = MutableToolSearchCatalog(
                 viewImageTool.spec.toToolSearchDocuments(
                     ToolSearchSourceInfo(
                         name = "Local image tools",
@@ -923,7 +923,7 @@ val openAiImageGenerationToolRuntimeProbeTest by testSuite {
             val imageGenerationTool = ImageGenerationTools.createTool(
                 ImageGenerationToolClient(client = client),
             )
-            val toolSearchCatalog = ToolSearchCatalog(
+            val toolSearchCatalog = MutableToolSearchCatalog(
                 imageGenerationTool.spec.toToolSearchDocuments(
                     ToolSearchSourceInfo(
                         name = "OpenAI image tools",

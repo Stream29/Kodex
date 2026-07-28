@@ -1,15 +1,28 @@
 package io.github.stream29.codex.lite.agentruntime.tool
 
 import io.github.stream29.codex.lite.agentruntime.contextwindow.tokensUntilCompaction
-import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
+import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
+import io.github.stream29.codex.lite.tool.builder.jsonToolSuccess
+import io.github.stream29.codex.lite.tool.builder.textTool
 import io.github.stream29.codex.lite.tool.contract.Tool
 import io.github.stream29.codex.lite.tool.getcontextremaining.GetContextRemainingTools
+import kotlinx.serialization.builtins.serializer
 
-/** Creates `get_context_remaining` bound to this runtime's current snapshot. */
-public fun CodexAgentRuntime.getContextRemainingTool(
+/** Creates `get_context_remaining` bound to this agent's current snapshot. */
+public fun CodexAgentState.getContextRemainingTool(
     modelCatalog: OpenAiModelCatalog,
-): Tool =
-    GetContextRemainingTools.createTool {
-        tokensUntilCompaction(modelCatalog)
-    }
+): Tool = textTool(
+    spec = GetContextRemainingTools.spec,
+    inputDeserializer = Unit.serializer(),
+) {
+    jsonToolSuccess(
+        tokensUntilCompaction(modelCatalog).let { tokens ->
+            if (tokens == null) {
+                "You have unknown tokens left in this context window."
+            } else {
+                "You have $tokens tokens left in this context window."
+            }
+        },
+    )
+}

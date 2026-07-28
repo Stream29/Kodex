@@ -23,7 +23,7 @@ import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchCatalog
+import io.github.stream29.codex.lite.tool.toolsearch.MutableToolSearchCatalog
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
@@ -78,7 +78,7 @@ val openAiMcpToolRoundTripProbeTest by testSuite {
                 withTimeout(20.seconds) {
                     service.tools.first { tools -> tools.isNotEmpty() }
                 }
-                val toolSearchCatalog = ToolSearchCatalog(emptyList())
+                val toolSearchCatalog = MutableToolSearchCatalog(emptyList())
                 val storage = InMemoryCodexAgentStorage(
                     CodexAgentSettings(
                         model = testCodexModel(),
