@@ -5,9 +5,9 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentsession.composition.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentsession.filesystem.FileSystemCodexSessionRepository
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
+import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
 import io.github.stream29.codex.lite.agentstate.test.TestMcpService
-import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
 import io.github.stream29.codex.lite.hook.contract.HookConfiguration
 import io.github.stream29.codex.lite.hook.contract.HookSettings
@@ -118,7 +118,7 @@ private suspend fun runFreshSessionHookIntegration() {
             cwd = workingDirectory,
             instructions = "Do not call tools. Reply with only the exact marker requested by the user.",
         )
-        session.storage.initialize(settings)
+        session.runtime.modify { storage -> storage.initialize(settings) }
         assertEquals(0, session.storage.tokenCount.latestIndex())
         assertEquals(0L, session.storage.tokenCount[0])
 

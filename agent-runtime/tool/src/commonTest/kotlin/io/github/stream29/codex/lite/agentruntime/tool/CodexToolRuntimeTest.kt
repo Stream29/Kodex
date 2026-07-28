@@ -41,7 +41,6 @@ import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchToolClient
 import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchTools
-import io.github.stream29.codex.lite.tool.contract.Tool
 import io.github.stream29.codex.lite.tool.plan.PlanTools
 import io.github.stream29.codex.lite.tool.plan.updatePlanTool
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchEngine
@@ -58,7 +57,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.toList
@@ -659,27 +657,23 @@ private class ToolRuntimeTestContext(
         mcpService: McpService,
         hooks: ToolHooks,
     ): CodexToolRuntime {
-        val workingDirectory = MutableStateFlow(storage.settings.latestValue().cwd)
         val fixedTools = buildList {
-            add(ApplyPatchTools.createTool(ApplyPatchToolClient(workingDirectory)))
+            add(
+                ApplyPatchTools.createTool(
+                    ApplyPatchToolClient(
+                        workingDirectoryProvider = { storage.settings.latestValue().cwd },
+                    ),
+                ),
+            )
             add(updatePlanTool())
             addAll(
                 UnifiedExecTools.createTools(
                     UnifiedExecToolClient(
-                        settings = MutableStateFlow(TestShellSettings()),
-                        workingDirectory = workingDirectory,
+                        settingsProvider = { TestShellSettings() },
+                        workingDirectoryProvider = { storage.settings.latestValue().cwd },
                     ),
                 ),
             )
-        }.map { tool ->
-            object : Tool by tool {
-                override suspend fun handle(
-                    call: ResponseItem.ToolCall,
-                ): ResponseItem.ToolCallOutput {
-                    workingDirectory.value = storage.settings.latestValue().cwd
-                    return tool.handle(call)
-                }
-            }
         }
         coroutineContext.job.invokeOnCompletion {
             fixedTools.asReversed().forEach { tool -> runCatching { tool.close() } }

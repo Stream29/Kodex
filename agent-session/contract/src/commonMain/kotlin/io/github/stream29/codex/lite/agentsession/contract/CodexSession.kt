@@ -12,8 +12,9 @@ import kotlinx.coroutines.CoroutineScope
  * session is opened and remains owned by the session's coroutine lifecycle.
  *
  * A newly created Agent is deliberately uninitialized. Its runtime initially
- * observes an empty state; the caller must copy or publish the snapshot-zero
- * settings and compaction checkpoint before requesting a model response.
+ * observes an empty state; the caller must initialize [runtime] before
+ * requesting a model response. Directly initializing [storage] would bypass
+ * the runtime's observable index and state publication.
  */
 public interface CodexAgentSession : CoroutineScope {
     public val storage: MutableCodexAgentStorage
@@ -41,7 +42,11 @@ public interface CodexSessionRepository : CoroutineScope {
     /** Returns direct Agent entry indices in stable repository order. */
     public suspend fun list(): List<Int>
 
-    /** Creates one uninitialized direct Agent, then returns its entry index. */
+    /**
+     * Creates one uninitialized direct Agent, then returns its entry index.
+     *
+     * After [open], initialize the returned session through its runtime.
+     */
     public suspend fun create(): Int
 
     /** Opens one direct Agent entry. */

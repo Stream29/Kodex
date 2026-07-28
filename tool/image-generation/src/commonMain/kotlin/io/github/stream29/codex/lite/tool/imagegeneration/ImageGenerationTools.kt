@@ -11,7 +11,6 @@ import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.tool.builder.functionOutputTool
 import io.github.stream29.codex.lite.tool.contract.Tool
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
 
 public const val ImageGenNamespace: String = "image_gen"
@@ -58,13 +57,11 @@ public object ImageGenerationTools {
     /**
      * Creates the complete image-generation tool, including artifact persistence.
      *
-     * @param outputDirectory Current session-specific output directory. Its
-     * latest value is read for every call so a settings change applies without
-     * rebuilding the runtime.
+     * @param outputDirectory Session-specific output directory.
      */
     public fun createTool(
         client: ImageGenerationToolClient,
-        outputDirectory: StateFlow<Path>,
+        outputDirectory: Path,
     ): Tool =
         functionOutputTool(
             spec = spec,
@@ -74,7 +71,7 @@ public object ImageGenerationTools {
                 val output = client.run(arguments)
                 val persistedOutput = try {
                     output.persistGeneratedImage(
-                        outputDirectory = outputDirectory.value,
+                        outputDirectory = outputDirectory,
                         callId = callId,
                     )
                 } catch (cancellation: CancellationException) {

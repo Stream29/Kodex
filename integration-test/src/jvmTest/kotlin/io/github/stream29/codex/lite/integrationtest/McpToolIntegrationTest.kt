@@ -4,15 +4,12 @@ import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
-import io.github.stream29.codex.lite.agentruntime.tool.toolRuntime
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
-import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
-import io.github.stream29.codex.lite.hook.contract.tool.NoOpToolHooks
 import io.github.stream29.codex.lite.mcp.contract.McpServerConfiguration
 import io.github.stream29.codex.lite.mcp.contract.McpSettings
 import io.github.stream29.codex.lite.mcp.impl.McpServiceImpl
@@ -24,7 +21,7 @@ import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchEngine
+import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
@@ -75,32 +72,29 @@ val openAiMcpToolRoundTripProbeTest by testSuite {
                 ),
             )
             val client = McpRecordingOpenAiClient(realOpenAiClient())
+            val modelCatalog = testModelCatalog()
+            var state: CodexAgentStateContract? = null
             try {
                 withTimeout(20.seconds) {
                     service.tools.first { tools -> tools.isNotEmpty() }
                 }
-                val toolSearchEngine = ToolSearchEngine(emptyList())
                 val storage = InMemoryCodexAgentStorage(
                     CodexAgentSettings(
                         model = testCodexModel(),
                         instructions = McpProbeInstructions,
                     ),
                 )
-                val state = CodexAgentState(
+                val createdState = CodexAgentState(
                     client = client,
                     storage = storage,
                     contextSettings = TestAgentContextSettings,
                     mcpService = service,
                 )
-                val runtime = McpRequestOnlyRuntime(state).toolRuntime(
-                    tools = emptyList(),
-                    dynamicTools = service.tools,
-                    localToolSearchDocuments = emptyList(),
-                    toolSearchCatalog = toolSearchEngine,
-                    toolHooks = NoOpToolHooks,
-                )
+                state = createdState
+                val runtime = McpRequestOnlyRuntime(createdState)
+                    .integrationToolRuntime(client, modelCatalog, service)
 
-                state.appendUserMessage(
+                createdState.appendUserMessage(
                     listOf(
                         ContentItem.InputText(
                             "Resolve key `$McpProbeKey` with the MCP marker tool. " +
@@ -147,12 +141,17 @@ val openAiMcpToolRoundTripProbeTest by testSuite {
                     ?.mcpProbeText()
                     ?: fail("Expected a final assistant response.")
                 assertTrue(assistantText.contains(McpAssistantMarker))
-                assertIs<CodexAgentStateValue.AssistantMessage>(state.state.value)
+                assertIs<CodexAgentStateValue.AssistantMessage>(createdState.state.value)
             } finally {
-                client.close()
-                service.close()
-                service.coroutineContext.job.join()
-                fixture.stop()
+                try {
+                    state?.cancelAndJoin()
+                } finally {
+                    modelCatalog.close()
+                    client.close()
+                    service.close()
+                    service.coroutineContext.job.join()
+                    fixture.stop()
+                }
             }
         }
     }

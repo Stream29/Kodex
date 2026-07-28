@@ -7,8 +7,6 @@ import io.github.stream29.codex.lite.utils.shellclient.ShellClient
 import io.github.stream29.codex.lite.utils.shellclient.ShellProcessCommand
 import io.github.stream29.codex.lite.utils.shellclient.ShellSettings
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -38,8 +36,8 @@ public const val UnifiedExecMaximumSessionCount: Int = 64
  * the current [ShellSettings.shell] value when its process starts.
  */
 public class UnifiedExecToolClient internal constructor(
-    private val workingDirectory: StateFlow<Path>,
-    private val settings: StateFlow<ShellSettings>,
+    private val workingDirectoryProvider: suspend () -> Path,
+    private val settingsProvider: suspend () -> ShellSettings,
     private val shellClient: ShellClient,
 ) : AutoCloseable {
     private val registryMutex: Mutex = Mutex()
@@ -50,7 +48,12 @@ public class UnifiedExecToolClient internal constructor(
         arguments.validate()
         val started = TimeSource.Monotonic.markNow()
         val session = runProcessOperation {
-            shellClient.start(arguments.toShellProcessCommand(workingDirectory.value, settings.value.shell))
+            shellClient.start(
+                arguments.toShellProcessCommand(
+                    workingDirectoryProvider(),
+                    settingsProvider().shell,
+                ),
+            )
         }
         val managed = try {
             registryMutex.withLock {
@@ -182,12 +185,12 @@ public class UnifiedExecToolClient internal constructor(
 
 /** Creates a unified-exec client with a dedicated shell client under this scope. */
 public fun CoroutineScope.UnifiedExecToolClient(
-    settings: StateFlow<ShellSettings>,
-    workingDirectory: StateFlow<Path> = MutableStateFlow(Path(".")),
+    settingsProvider: suspend () -> ShellSettings,
+    workingDirectoryProvider: suspend () -> Path = { Path(".") },
 ): UnifiedExecToolClient =
     UnifiedExecToolClient(
-        workingDirectory = workingDirectory,
-        settings = settings,
+        workingDirectoryProvider = workingDirectoryProvider,
+        settingsProvider = settingsProvider,
         shellClient = ShellClient(),
     )
 

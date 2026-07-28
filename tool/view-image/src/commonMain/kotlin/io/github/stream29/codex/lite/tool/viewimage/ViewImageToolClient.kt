@@ -7,12 +7,10 @@ import io.github.stream29.codex.lite.utils.images.codec.readPromptImage
 import io.github.stream29.codex.lite.utils.images.toDataUrl
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
 
 public class ViewImageToolClient(
-    private val root: StateFlow<Path> = MutableStateFlow(Path(".")),
+    private val workingDirectoryProvider: suspend () -> Path = { Path(".") },
     private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     private val transformer: PromptImageTransformer = HostPromptImageTransformer,
     private val canRequestOriginalImageDetail: Boolean = false,
@@ -42,8 +40,8 @@ public class ViewImageToolClient(
         )
     }
 
-    private fun resolvePath(path: String): Path {
+    private suspend fun resolvePath(path: String): Path {
         val candidate = Path(path)
-        return if (candidate.isAbsolute) candidate else Path(root.value, path)
+        return if (candidate.isAbsolute) candidate else Path(workingDirectoryProvider(), path)
     }
 }

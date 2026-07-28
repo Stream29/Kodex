@@ -14,7 +14,6 @@ import io.github.stream29.codex.lite.openai.client.OpenAiClient as RealOpenAiCli
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlin.random.Random
@@ -103,7 +102,7 @@ val imageGenerationToolClientTest by testSuite {
             SystemCoroutineFileSystem.writeBytes(imagePath, png64x32)
             val toolClient = ImageGenerationToolClient(
                 client = client,
-                root = MutableStateFlow(root),
+                workingDirectoryProvider = { root },
             )
             val output = withContext(Dispatchers.Default) {
                 toolClient.run(

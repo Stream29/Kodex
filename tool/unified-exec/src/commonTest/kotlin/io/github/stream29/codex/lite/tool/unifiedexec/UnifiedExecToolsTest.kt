@@ -23,7 +23,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
@@ -51,11 +50,11 @@ private data class TestShellSettings(
 
 private suspend fun testUnifiedExecToolClient(
     workingDirectory: Path = Path("."),
-    settings: StateFlow<ShellSettings> = MutableStateFlow(TestShellSettings()),
+    settings: suspend () -> ShellSettings = { TestShellSettings() },
 ): UnifiedExecToolClient =
     CoroutineScope(currentCoroutineContext()).UnifiedExecToolClient(
-        settings = settings,
-        workingDirectory = MutableStateFlow(workingDirectory),
+        settingsProvider = settings,
+        workingDirectoryProvider = { workingDirectory },
     )
 
 private fun List<Tool>.toolNamed(name: String): Tool =
@@ -307,7 +306,7 @@ val unifiedExecToolsTest by testSuite {
                 ),
             ),
         )
-        val client = testUnifiedExecToolClient(settings = settings)
+        val client = testUnifiedExecToolClient(settings = { settings.value })
         try {
             settings.value = TestShellSettings()
             var output = client.execCommand(ExecCommandArguments(command = oneShotExecCommand))
@@ -387,7 +386,7 @@ val unifiedExecToolsTest by testSuite {
             currentCoroutineContext() + SupervisorJob(currentCoroutineContext()[Job]),
         )
         val client = owner.UnifiedExecToolClient(
-            MutableStateFlow(TestShellSettings()),
+            settingsProvider = { TestShellSettings() },
         )
         owner.cancel()
 
