@@ -8,21 +8,15 @@ import io.github.stream29.codex.lite.hook.contract.approval.PermissionRequest
 import io.github.stream29.codex.lite.hook.contract.approval.PermissionRequestResult
 import io.github.stream29.codex.lite.hook.contract.tool.PostToolUseRequest
 import io.github.stream29.codex.lite.hook.contract.tool.PreToolUseResult
-import io.github.stream29.codex.lite.hook.contract.session.SessionEndRequest
-import io.github.stream29.codex.lite.hook.contract.session.SessionStartRequest
 import io.github.stream29.codex.lite.hook.contract.turn.StopRequest
 import io.github.stream29.codex.lite.hook.contract.turn.StopResult
 import io.github.stream29.codex.lite.hook.contract.turn.UserPromptSubmitRequest
 import io.github.stream29.codex.lite.hook.contract.turn.UserPromptSubmitResult
 import io.github.stream29.codex.lite.hook.impl.projection.CompactCommandInputWire
-import io.github.stream29.codex.lite.hook.impl.projection.CloseSessionEndReason
 import io.github.stream29.codex.lite.hook.impl.projection.HookJson
 import io.github.stream29.codex.lite.hook.impl.projection.PermissionRequestCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.PostToolUseCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.PreToolUseCommandInputWire
-import io.github.stream29.codex.lite.hook.impl.projection.ResumeSessionStartSource
-import io.github.stream29.codex.lite.hook.impl.projection.SessionEndCommandInputWire
-import io.github.stream29.codex.lite.hook.impl.projection.SessionStartCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.StopCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.UserPromptSubmitCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.toPostCompactCommandInputWire
@@ -64,42 +58,6 @@ public class CodexHooksImpl internal constructor(
             started = SharingStarted.Eagerly,
             initialValue = settings.value.hooks.resolveHooks(),
         )
-
-    override suspend fun onSessionStart(request: SessionStartRequest) {
-        val hooks = currentHooks()
-        val context = request.context
-        shellClient.runHooks(
-            hooks = hooks.sessionStart.matching(listOf(ResumeSessionStartSource)),
-            inputJson = HookJson.encodeToString(
-                SessionStartCommandInputWire(
-                    sessionId = context.sessionId,
-                    transcriptPath = null,
-                    cwd = context.cwd.toString(),
-                    model = context.model,
-                    permissionMode = context.permissionMode.wireName,
-                ),
-            ),
-            cwd = context.cwd,
-        )
-    }
-
-    override suspend fun onSessionEnd(request: SessionEndRequest) {
-        val hooks = currentHooks()
-        val context = request.context
-        shellClient.runHooks(
-            hooks = hooks.sessionEnd.matching(listOf(CloseSessionEndReason)),
-            inputJson = HookJson.encodeToString(
-                SessionEndCommandInputWire(
-                    sessionId = context.sessionId,
-                    transcriptPath = null,
-                    cwd = context.cwd.toString(),
-                    model = context.model,
-                    permissionMode = context.permissionMode.wireName,
-                ),
-            ),
-            cwd = context.cwd,
-        )
-    }
 
     override suspend fun onUserPromptSubmit(
         request: UserPromptSubmitRequest,

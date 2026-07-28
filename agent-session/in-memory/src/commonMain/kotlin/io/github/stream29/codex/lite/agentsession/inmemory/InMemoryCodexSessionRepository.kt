@@ -1,7 +1,11 @@
 package io.github.stream29.codex.lite.agentsession.inmemory
 
+import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
+import io.github.stream29.codex.lite.agentsession.composition.CodexAgentDependencies
+import io.github.stream29.codex.lite.agentsession.composition.createMasterAgentRuntime
+import io.github.stream29.codex.lite.agentsession.composition.createSubagentRuntime
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
@@ -18,6 +22,7 @@ import kotlinx.coroutines.withContext
 /** Process-local recursive session repository for tests and transient hosts. */
 public class InMemoryCodexSessionRepository internal constructor(
     scope: CoroutineScope,
+    private val dependencies: CodexAgentDependencies,
 ) :
     CodexSessionRepository,
     CoroutineScope by scope {
@@ -54,6 +59,7 @@ public class InMemoryCodexSessionRepository internal constructor(
         InMemoryCodexAgentSession.openRoot(
             node = root,
             parentScope = this@InMemoryCodexSessionRepository,
+            dependencies = dependencies,
         ).also { session ->
             openRoots[entryIndex] = session
         }
@@ -88,23 +94,57 @@ public class InMemoryCodexSessionRepository internal constructor(
     private class InMemoryCodexAgentSession(
         node: SessionNode,
         scope: CoroutineScope,
+        dependencies: CodexAgentDependencies,
+        override val storage: MutableCodexAgentStorage,
+        override val runtime: CodexAgentRuntime,
     ) : CodexAgentSession, CoroutineScope by scope {
-        override val storage: MutableCodexAgentStorage =
-            SessionAgentStorage(scope, node.storage)
         override val subagents: CodexSessionRepository = InMemorySubagentRepository(
             children = node.children,
             scope = scope.supervisorChildScope(),
+            dependencies = dependencies,
         )
 
         companion object {
-            fun openRoot(
+            suspend fun openRoot(
                 node: SessionNode,
                 parentScope: CoroutineScope,
+                dependencies: CodexAgentDependencies,
             ): InMemoryCodexAgentSession {
-                return InMemoryCodexAgentSession(
-                    node = node,
-                    scope = parentScope.supervisorChildScope(),
-                )
+                val scope = parentScope.supervisorChildScope()
+                val storage = SessionAgentStorage(scope, node.storage)
+                return try {
+                    InMemoryCodexAgentSession(
+                        node = node,
+                        scope = scope,
+                        dependencies = dependencies,
+                        storage = storage,
+                        runtime = scope.createMasterAgentRuntime(storage, dependencies),
+                    )
+                } catch (failure: Throwable) {
+                    withContext(NonCancellable) { scope.cancelAndJoin() }
+                    throw failure
+                }
+            }
+
+            suspend fun openSubagent(
+                node: SessionNode,
+                parentScope: CoroutineScope,
+                dependencies: CodexAgentDependencies,
+            ): InMemoryCodexAgentSession {
+                val scope = parentScope.supervisorChildScope()
+                val storage = SessionAgentStorage(scope, node.storage)
+                return try {
+                    InMemoryCodexAgentSession(
+                        node = node,
+                        scope = scope,
+                        dependencies = dependencies,
+                        storage = storage,
+                        runtime = scope.createSubagentRuntime(storage, dependencies),
+                    )
+                } catch (failure: Throwable) {
+                    withContext(NonCancellable) { scope.cancelAndJoin() }
+                    throw failure
+                }
             }
         }
     }
@@ -112,6 +152,7 @@ public class InMemoryCodexSessionRepository internal constructor(
     private class InMemorySubagentRepository(
         private val children: MutableMap<Int, SessionNode>,
         scope: CoroutineScope,
+        private val dependencies: CodexAgentDependencies,
     ) : CodexSessionRepository, CoroutineScope by scope {
         private val entriesMutex: Mutex = Mutex()
         private val openSessions: MutableMap<Int, InMemoryCodexAgentSession> = mutableMapOf()
@@ -142,9 +183,10 @@ public class InMemoryCodexSessionRepository internal constructor(
                 if (session.coroutineContext[Job]?.isActive == true) return@withLock session
                 openSessions.remove(entryIndex)
             }
-            InMemoryCodexAgentSession(
+            InMemoryCodexAgentSession.openSubagent(
                 node = node,
-                scope = supervisorChildScope(),
+                parentScope = this@InMemorySubagentRepository,
+                dependencies = dependencies,
             ).also { session ->
                 openSessions[entryIndex] = session
             }
@@ -169,9 +211,12 @@ public class InMemoryCodexSessionRepository internal constructor(
 }
 
 /** Creates an in-memory session repository owned by this scope. */
-public fun CoroutineScope.InMemoryCodexSessionRepository(): InMemoryCodexSessionRepository {
+public fun CoroutineScope.InMemoryCodexSessionRepository(
+    dependencies: CodexAgentDependencies,
+): InMemoryCodexSessionRepository {
     return InMemoryCodexSessionRepository(
         scope = supervisorChildScope(),
+        dependencies = dependencies,
     )
 }
 

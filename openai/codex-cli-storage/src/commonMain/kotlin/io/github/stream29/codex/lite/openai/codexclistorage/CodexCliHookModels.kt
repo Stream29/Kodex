@@ -2,6 +2,7 @@ package io.github.stream29.codex.lite.openai.codexclistorage
 
 import io.github.stream29.codex.lite.utils.kotlinxioserialization.PathAsStringSerializer
 import kotlinx.io.files.Path
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -11,6 +12,7 @@ import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonIgnoreUnknownKeys
 
 /** Provenance of one Codex Hook configuration layer. */
 @Serializable
@@ -169,7 +171,9 @@ public data class CodexCliHookMatcherGroup(
 )
 
 /** Hook declarations grouped by their Codex invocation boundary. */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
+@JsonIgnoreUnknownKeys
 public data class CodexCliHookDeclarations(
     @SerialName("PreToolUse")
     public val preToolUse: List<CodexCliHookMatcherGroup> = emptyList(),
@@ -181,10 +185,6 @@ public data class CodexCliHookDeclarations(
     public val preCompact: List<CodexCliHookMatcherGroup> = emptyList(),
     @SerialName("PostCompact")
     public val postCompact: List<CodexCliHookMatcherGroup> = emptyList(),
-    @SerialName("SessionStart")
-    public val sessionStart: List<CodexCliHookMatcherGroup> = emptyList(),
-    @SerialName("SessionEnd")
-    public val sessionEnd: List<CodexCliHookMatcherGroup> = emptyList(),
     @SerialName("UserPromptSubmit")
     public val userPromptSubmit: List<CodexCliHookMatcherGroup> = emptyList(),
     @SerialName("SubagentStart")
@@ -198,8 +198,8 @@ public data class CodexCliHookDeclarations(
 /**
  * One decoded Hook source, ordered as a configuration layer.
  *
- * [hooks] preserves all declarations from the source. The Hook implementation
- * later selects the command handlers it supports.
+ * [hooks] preserves declarations supported by Codex Lite. Unsupported event
+ * declarations are ignored while decoding the source.
  */
 @Serializable
 public data class CodexCliHookLayer(

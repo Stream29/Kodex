@@ -5,6 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            api(project(":agent-session-composition"))
             api(project(":agent-session-contract"))
             implementation(project(":agent-storage-filesystem"))
             implementation(project(":utils-coroutines"))
@@ -16,6 +17,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(project(":agent-session-in-memory"))
+            implementation(project(":agent-session-test"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

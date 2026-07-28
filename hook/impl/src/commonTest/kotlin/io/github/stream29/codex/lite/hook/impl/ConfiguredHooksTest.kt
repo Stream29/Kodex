@@ -17,8 +17,6 @@ import io.github.stream29.codex.lite.hook.impl.projection.HookJson
 import io.github.stream29.codex.lite.hook.impl.projection.PermissionRequestCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.PostToolUseCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.PreToolUseCommandInputWire
-import io.github.stream29.codex.lite.hook.impl.projection.SessionEndCommandInputWire
-import io.github.stream29.codex.lite.hook.impl.projection.SessionStartCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.StopCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.UserPromptSubmitCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.looksLikeJson
@@ -261,24 +259,6 @@ val configuredHooksTest by testSuite(
                     toolUseId = "call-1",
                 ),
             ),
-            "SessionStart" to HookJson.encodeToString(
-                SessionStartCommandInputWire(
-                    sessionId = session.sessionId,
-                    transcriptPath = null,
-                    cwd = session.cwd.toString(),
-                    model = session.model,
-                    permissionMode = session.permissionMode.wireName,
-                ),
-            ),
-            "SessionEnd" to HookJson.encodeToString(
-                SessionEndCommandInputWire(
-                    sessionId = session.sessionId,
-                    transcriptPath = null,
-                    cwd = session.cwd.toString(),
-                    model = session.model,
-                    permissionMode = session.permissionMode.wireName,
-                ),
-            ),
             "UserPromptSubmit" to HookJson.encodeToString(
                 UserPromptSubmitCommandInputWire(
                     sessionId = session.sessionId,
@@ -310,25 +290,9 @@ val configuredHooksTest by testSuite(
                 HookJson.parseToJsonElement(json).jsonObject
                     .getValue("hook_event_name")
                     .jsonPrimitive
-                    .content,
+                .content,
             )
         }
-        assertEquals(
-            "resume",
-            HookJson.parseToJsonElement(encoded.toMap().getValue("SessionStart"))
-                .jsonObject
-                .getValue("source")
-                .jsonPrimitive
-                .content,
-        )
-        assertEquals(
-            "close",
-            HookJson.parseToJsonElement(encoded.toMap().getValue("SessionEnd"))
-                .jsonObject
-                .getValue("reason")
-                .jsonPrimitive
-                .content,
-        )
     }
 
     test("pre tool use ignores updated input and preserves deny") {

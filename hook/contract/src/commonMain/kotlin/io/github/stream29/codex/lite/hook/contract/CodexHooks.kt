@@ -4,8 +4,6 @@ import io.github.stream29.codex.lite.hook.contract.approval.ApprovalHooks
 import io.github.stream29.codex.lite.hook.contract.approval.NoOpApprovalHooks
 import io.github.stream29.codex.lite.hook.contract.compaction.CompactionHooks
 import io.github.stream29.codex.lite.hook.contract.compaction.NoOpCompactionHooks
-import io.github.stream29.codex.lite.hook.contract.session.NoOpSessionLifecycleHooks
-import io.github.stream29.codex.lite.hook.contract.session.SessionLifecycleHooks
 import io.github.stream29.codex.lite.hook.contract.tool.NoOpToolHooks
 import io.github.stream29.codex.lite.hook.contract.tool.ToolHooks
 import io.github.stream29.codex.lite.hook.contract.turn.NoOpTurnHooks
@@ -20,7 +18,6 @@ public interface CodexHooks :
     TurnHooks,
     ToolHooks,
     CompactionHooks,
-    SessionLifecycleHooks,
     ApprovalHooks
 
 /** Complete hook capability with no configured behavior. */
@@ -29,7 +26,6 @@ public data object NoOpCodexHooks :
     TurnHooks by NoOpTurnHooks,
     ToolHooks by NoOpToolHooks,
     CompactionHooks by NoOpCompactionHooks,
-    SessionLifecycleHooks by NoOpSessionLifecycleHooks,
     ApprovalHooks by NoOpApprovalHooks {
     override val coroutineContext: CoroutineContext = EmptyCoroutineContext
 }

@@ -12,11 +12,12 @@ kotlin {
             api(project(":openai-client-contract"))
             api(project(":openai-model-catalog-contract"))
             api(project(":openai-models"))
+            api(project(":agent-storage-contract"))
             api(project(":utils-shell-client"))
             api(libs.kotlinx.coroutines.core)
+            implementation(project(":agent-state-impl"))
             implementation(project(":agent-runtime-compact"))
             implementation(project(":agent-runtime-plan"))
-            implementation(project(":agent-runtime-session-hook"))
             implementation(project(":agent-runtime-tool"))
             implementation(project(":agent-runtime-turn-hook"))
         }

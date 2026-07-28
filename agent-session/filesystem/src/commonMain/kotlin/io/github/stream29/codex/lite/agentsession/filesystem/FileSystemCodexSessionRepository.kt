@@ -2,6 +2,7 @@ package io.github.stream29.codex.lite.agentsession.filesystem
 
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
+import io.github.stream29.codex.lite.agentsession.composition.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.codex.lite.agentstorage.filesystem.ofEmpty
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
@@ -24,9 +25,10 @@ import kotlin.time.Duration.Companion.seconds
 /** Filesystem-backed recursive session repository. */
 public class FileSystemCodexSessionRepository internal constructor(
     scope: CoroutineScope,
-    private val root: Path,
+    root: Path,
     private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     private val valueCacheSize: Int = 256,
+    private val dependencies: CodexAgentDependencies,
 ) :
     CodexSessionRepository,
     CoroutineScope by scope {
@@ -70,6 +72,7 @@ public class FileSystemCodexSessionRepository internal constructor(
                 directory = directory,
                 fileSystem = fileSystem,
                 valueCacheSize = valueCacheSize,
+                dependencies = dependencies,
             ).also { root ->
                 openRoots[entryIndex] = root
             }
@@ -198,6 +201,7 @@ internal suspend fun deleteRecursively(
 /** Creates a filesystem session repository, initializing its root layout when needed. */
 public suspend fun CoroutineScope.FileSystemCodexSessionRepository(
     root: Path,
+    dependencies: CodexAgentDependencies,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     valueCacheSize: Int = 256,
 ): FileSystemCodexSessionRepository {
@@ -208,6 +212,7 @@ public suspend fun CoroutineScope.FileSystemCodexSessionRepository(
         root = root,
         fileSystem = fileSystem,
         valueCacheSize = valueCacheSize,
+        dependencies = dependencies,
     )
 }
 
