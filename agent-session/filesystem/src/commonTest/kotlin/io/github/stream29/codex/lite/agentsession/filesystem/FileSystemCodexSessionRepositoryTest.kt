@@ -6,8 +6,8 @@ import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepositor
 import io.github.stream29.codex.lite.agentsession.inmemory.InMemoryCodexSessionRepository
 import io.github.stream29.codex.lite.agentsession.test.testCodexAgentDependencies
 import io.github.stream29.codex.lite.agentstorage.contract.forkTo
-import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
+import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
@@ -48,15 +48,17 @@ private fun userMessage(text: String): ResponseItem.Message =
 
 private suspend fun CodexAgentSession.spawnInitialized(name: String): CodexAgentSession =
     subagents.open(subagents.create()).also { child ->
-        storage.forkTo(until = 1, target = child.storage)
-        child.storage.settings[1] = settings(name)
+        child.runtime.modify { target -> storage.forkTo(1, target) }
+        child.runtime.updateSettings(settings(name))
     }
 
 private suspend fun CodexSessionRepository.createInitialized(
     settings: CodexAgentSettings,
 ): Int {
     val index = create()
-    open(index).storage.initialize(settings.copy(threadName = settings.threadName.ifEmpty { "Session $index" }))
+    open(index).runtime.modify { storage ->
+        storage.initialize(settings.copy(threadName = settings.threadName.ifEmpty { "Session $index" }))
+    }
     return index
 }
 
@@ -70,7 +72,7 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
             val session = repository.open(index)
 
             assertEquals(-1, session.storage.latestIndex())
-            session.storage.initialize(settings("root"))
+            session.runtime.modify { storage -> storage.initialize(settings("root")) }
             assertEquals(0, session.storage.latestIndex())
             assertEquals(0L, session.storage.tokenCount[0])
             repository.closeAndJoin()
@@ -184,15 +186,19 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
             val sourceCwd = Path(root, "source-workspace")
             val sourceIndex = sourceRepository.createInitialized(settings("Source", sourceCwd))
             val source = sourceRepository.open(sourceIndex)
-            source.storage.history[1] = userMessage("copied")
+            source.runtime.injectHistory(listOf(userMessage("copied")))
             source.spawnInitialized("child")
 
             val repository = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
-            val targetIndex = repository.createInitialized(settings("temporary"))
+            val targetIndex = repository.create()
             val target = repository.open(targetIndex)
-            source.storage.forkTo(until = 2, target = target.storage)
-            val latest = target.storage.settings.indexes().toList().last()
-            target.storage.settings[latest + 1] = target.storage.settings[latest].copy(threadName = "[fork] Source")
+            val latest = target.runtime.modify { storage ->
+                source.storage.forkTo(2, storage)
+                storage.latestIndex()
+            }
+            target.runtime.updateSettings(
+                target.storage.settings[latest].copy(threadName = "[fork] Source"),
+            )
 
             assertEquals(listOf(1), target.storage.history.indexes().toList())
             assertEquals(userMessage("copied"), target.storage.history[1])

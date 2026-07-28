@@ -16,19 +16,17 @@ import io.github.stream29.codex.lite.utils.images.codec.readPromptImage
 import io.github.stream29.codex.lite.utils.images.toDataUrl
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
 
 public class ImageGenerationToolClient(
     private val client: OpenAiClient,
-    private val root: StateFlow<Path> = MutableStateFlow(Path(".")),
+    private val workingDirectoryProvider: suspend () -> Path = { Path(".") },
     private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     private val transformer: PromptImageTransformer = HostPromptImageTransformer,
     private val model: OpenAiModelId = ImageGenDefaultModel,
 ) {
     public suspend fun run(arguments: ImageGenToolArguments): GeneratedImageOutput {
-        val request = requestFor(arguments, root.value)
+        val request = requestFor(arguments)
         val response = when (request) {
             is ImageToolRequest.Generate -> client.generateImage(request.value)
             is ImageToolRequest.Edit -> client.editImage(request.value)
@@ -46,7 +44,6 @@ public class ImageGenerationToolClient(
 
     private suspend fun requestFor(
         arguments: ImageGenToolArguments,
-        root: Path,
     ): ImageToolRequest {
         if (arguments.prompt.isBlank()) {
             throw ImageGenerationToolException("`prompt` must not be blank")
@@ -71,9 +68,10 @@ public class ImageGenerationToolClient(
                 )
             }
             paths.isNotEmpty() && arguments.numLastImagesToInclude == null -> {
+                val workingDirectory = workingDirectoryProvider()
                 ImageToolRequest.Edit(
                     ImageEditRequest(
-                        images = paths.map { ImageUrl(loadReferencedImage(it, root)) },
+                        images = paths.map { ImageUrl(loadReferencedImage(it, workingDirectory)) },
                         prompt = arguments.prompt,
                         background = ImageBackground.Auto,
                         model = model,

@@ -13,7 +13,6 @@ import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.serialization.json.jsonArray
@@ -99,7 +98,7 @@ val imageGenerationToolsTest by testSuite {
                         }
                     },
                 ),
-                outputDirectory = MutableStateFlow(Path(root, "session")),
+                outputDirectory = Path(root, "session"),
             )
 
             val result = tool.handle(

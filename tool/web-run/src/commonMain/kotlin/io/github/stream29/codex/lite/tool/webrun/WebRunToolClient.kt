@@ -7,7 +7,6 @@ import io.github.stream29.codex.lite.openai.SearchRequest
 import io.github.stream29.codex.lite.openai.SearchResponse
 import io.github.stream29.codex.lite.openai.SearchSettings
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
-import kotlinx.coroutines.flow.StateFlow
 
 public const val WebRunDefaultMaxOutputTokens: Long = 10_000L
 
@@ -15,7 +14,7 @@ public const val WebRunDefaultMaxOutputTokens: Long = 10_000L
 public class WebRunToolClient(
     private val client: OpenAiClient,
     private val sessionId: String,
-    private val model: StateFlow<OpenAiModelId>,
+    private val modelProvider: suspend () -> OpenAiModelId,
     private val settings: SearchSettings = SearchSettings(),
     private val maxOutputTokens: Long = WebRunDefaultMaxOutputTokens,
 ) {
@@ -23,7 +22,7 @@ public class WebRunToolClient(
         client.search(
             SearchRequest(
                 id = sessionId,
-                model = model.value,
+                model = modelProvider(),
                 commands = commands,
                 settings = settings,
                 maxOutputTokens = maxOutputTokens,

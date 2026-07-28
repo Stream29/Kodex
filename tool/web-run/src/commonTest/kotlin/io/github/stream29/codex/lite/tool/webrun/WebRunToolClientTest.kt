@@ -32,7 +32,6 @@ import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
 import io.github.stream29.codex.lite.utils.osenvironment.userHomeDirectory
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlinx.serialization.encodeToString
@@ -90,7 +89,7 @@ private suspend fun OpenAiClient.webRunClient(): WebRunToolClient =
     WebRunToolClient(
         client = this,
         sessionId = testSessionId(),
-        model = MutableStateFlow(testModel()),
+        modelProvider = { testModel() },
     )
 
 private suspend fun WebRunToolClient.runOutputOrFail(commands: SearchCommands): String {
@@ -289,7 +288,7 @@ val webRunToolClientTest by testSuite {
                 WebRunToolClient(
                     client = client,
                     sessionId = testSessionId(),
-                    model = MutableStateFlow(testModel()),
+                    modelProvider = { testModel() },
                 ),
             )
             val output = withContext(Dispatchers.Default) {

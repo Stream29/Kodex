@@ -1,11 +1,14 @@
 package io.github.stream29.codex.lite.agentsession.filesystem
 
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
+import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
 import io.github.stream29.codex.lite.agentsession.composition.CodexAgentDependencies
-import io.github.stream29.codex.lite.agentsession.composition.createMasterAgentRuntime
-import io.github.stream29.codex.lite.agentsession.composition.createSubagentRuntime
+import io.github.stream29.codex.lite.agentsession.composition.buildAgentRuntime
+import io.github.stream29.codex.lite.agentsession.multiagent.AgentPathResolverImpl
+import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
+import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
@@ -27,16 +30,25 @@ internal class FileSystemCodexAgentSession(
     scope: CoroutineScope,
     override val storage: MutableCodexAgentStorage,
     dependencies: CodexAgentDependencies,
-    override val runtime: CodexAgentRuntime,
+    state: CodexAgentStateContract,
+    createAgentPathResolver: (CodexAgentSession) -> AgentPathResolver,
 ) : CodexAgentSession, CoroutineScope by scope {
+    private val agentPathResolver: AgentPathResolver =
+        createAgentPathResolver(this)
+
     override val subagents: CodexSessionRepository = FileSystemSubagentRepository(
         directory = Path(directory, SubagentsDirectory),
         fileSystem = fileSystem,
         valueCacheSize = valueCacheSize,
         scope = scope.supervisorChildScope(),
         dependencies = dependencies,
+        agentPathResolver = agentPathResolver,
     )
 
+    override val runtime: CodexAgentRuntime = state.buildAgentRuntime(
+        dependencies = dependencies,
+        agentPathResolver = agentPathResolver,
+    )
 }
 
 private class FileSystemSubagentRepository(
@@ -45,6 +57,7 @@ private class FileSystemSubagentRepository(
     private val valueCacheSize: Int,
     scope: CoroutineScope,
     private val dependencies: CodexAgentDependencies,
+    private val agentPathResolver: AgentPathResolver,
 ) : CodexSessionRepository, CoroutineScope by scope {
     private val entriesMutex: Mutex = Mutex()
     private val openSessions: MutableMap<Int, FileSystemCodexAgentSession> = mutableMapOf()
@@ -87,7 +100,13 @@ private class FileSystemSubagentRepository(
                 scope = agentScope,
                 storage = storage,
                 dependencies = dependencies,
-                runtime = agentScope.createSubagentRuntime(storage, dependencies),
+                state = agentScope.CodexAgentState(
+                    client = dependencies.client,
+                    storage = storage,
+                    contextSettings = dependencies.contextSettings,
+                    mcpService = dependencies.mcpService,
+                ),
+                createAgentPathResolver = { agentPathResolver },
             )
         } catch (failure: Throwable) {
             withContext(NonCancellable) { agentScope.cancelAndJoin() }
@@ -143,7 +162,15 @@ internal suspend fun CoroutineScope.FileSystemCodexAgentSession(
             scope = scope,
             storage = storage,
             dependencies = dependencies,
-            runtime = scope.createMasterAgentRuntime(storage, dependencies),
+            state = scope.CodexAgentState(
+                client = dependencies.client,
+                storage = storage,
+                contextSettings = dependencies.contextSettings,
+                mcpService = dependencies.mcpService,
+            ),
+            createAgentPathResolver = { rootSession ->
+                AgentPathResolverImpl(rootSession)
+            },
         )
         scope.coroutineContext[Job]?.invokeOnCompletion { lease.close() }
         return session

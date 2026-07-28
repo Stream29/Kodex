@@ -4,23 +4,43 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
 import io.github.stream29.codex.lite.agentsession.test.testCodexAgentDependencies
+import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstorage.contract.forkTo
-import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
+import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.OpenAiModelId
+import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.openai.ResponsesApiRequest
+import io.github.stream29.codex.lite.openai.ResponsesApiTool
+import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
+import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
+import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
+import io.github.stream29.codex.lite.tool.multiagent.MultiAgentTools
+import io.github.stream29.codex.lite.tool.multiagent.SpawnAgentArgs
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.encodeToString
+import kotlin.time.Duration.Companion.seconds
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 private fun settings(name: String = ""): CodexAgentSettings =
     CodexAgentSettings(model = OpenAiModelId("test-model"), threadName = name)
@@ -33,15 +53,17 @@ private fun userMessage(text: String): ResponseItem.Message =
 
 private suspend fun CodexAgentSession.spawnInitialized(name: String): CodexAgentSession =
     subagents.open(subagents.create()).also { child ->
-        storage.forkTo(until = 1, target = child.storage)
-        child.storage.settings[1] = settings(name)
+        child.runtime.modify { target -> storage.forkTo(1, target) }
+        child.runtime.updateSettings(settings(name))
     }
 
 private suspend fun CodexSessionRepository.createInitialized(
     settings: CodexAgentSettings,
 ): Int {
     val index = create()
-    open(index).storage.initialize(settings.copy(threadName = settings.threadName.ifEmpty { "Session $index" }))
+    open(index).runtime.modify { storage ->
+        storage.initialize(settings.copy(threadName = settings.threadName.ifEmpty { "Session $index" }))
+    }
     return index
 }
 
@@ -57,7 +79,7 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         val session = repository.open(index)
 
         assertEquals(-1, session.storage.latestIndex())
-        session.storage.initialize(settings("root"))
+        session.runtime.modify { storage -> storage.initialize(settings("root")) }
         assertEquals(0, session.storage.latestIndex())
         assertEquals(0L, session.storage.tokenCount[0])
     }
@@ -118,14 +140,18 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         val repository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
         val sourceIndex = repository.createInitialized(settings("Source"))
         val source = repository.open(sourceIndex)
-        source.storage.history[1] = userMessage("copied")
+        source.runtime.injectHistory(listOf(userMessage("copied")))
         source.spawnInitialized("child")
 
-        val targetIndex = repository.createInitialized(settings("temporary"))
+        val targetIndex = repository.create()
         val target = repository.open(targetIndex)
-        source.storage.forkTo(until = 2, target = target.storage)
-        val latest = target.storage.latestIndex()
-        target.storage.settings[latest + 1] = target.storage.settings[latest].copy(threadName = "[fork] Source")
+        val latest = target.runtime.modify { storage ->
+            source.storage.forkTo(2, storage)
+            storage.latestIndex()
+        }
+        target.runtime.updateSettings(
+            target.storage.settings[latest].copy(threadName = "[fork] Source"),
+        )
 
         assertEquals(listOf(1), target.storage.history.indexes().toList())
         assertEquals(userMessage("copied"), target.storage.history[1])
@@ -146,5 +172,96 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         assertFalse(root.runtime.coroutineContext[Job]?.isActive ?: true)
         assertFalse(child.runtime.coroutineContext[Job]?.isActive ?: true)
     }
+
+    test("session runtime executes Multi-agent calls through ordinary tools") {
+        val requestMutex = Mutex()
+        var rootWindowId = ""
+        var rootRequestCount = 0
+        val rootToolNames = mutableSetOf<String>()
+        val client = mockOpenAiClient {
+            createResponse { request, _, _, windowId ->
+                val response = requestMutex.withLock {
+                    if (rootWindowId.isEmpty()) rootWindowId = windowId
+                    if (windowId != rootWindowId) {
+                        assistantResponse("Worker complete.", "worker_complete")
+                    } else {
+                        rootToolNames += request.toolNames()
+                        when (rootRequestCount++) {
+                            0 -> spawnResponse()
+                            1 -> assistantResponse("Root complete.", "root_complete")
+                            else -> error("Unexpected root request $rootRequestCount")
+                        }
+                    }
+                }
+                response
+            }
+        }
+        val repository = InMemoryCodexSessionRepository(
+            testCodexAgentDependencies(client),
+        )
+        val root = repository.open(repository.createInitialized(settings("root")))
+
+        root.runtime.appendUserMessage(listOf(ContentItem.InputText("Delegate this task.")))
+        root.runtime.resume().toList()
+
+        val child = root.subagents.open(root.subagents.list().single())
+        withContext(Dispatchers.Default.limitedParallelism(1)) {
+            withTimeout(10.seconds) {
+                child.runtime.state.first { state -> state == CodexAgentStateValue.AssistantMessage }
+                while (
+                    root.storage.history.indexes().toList().none { index ->
+                        root.storage.history[index] is ResponseItem.AgentMessage
+                    }
+                ) {
+                    delay(10)
+                }
+            }
+        }
+        assertEquals("/root/worker", child.storage.settings[child.storage.latestIndex()].threadName)
+        assertTrue(MultiAgentTools.specs.all { spec -> spec.name in rootToolNames })
+        assertTrue(
+            root.storage.history.indexes().toList().any { index ->
+                val item = root.storage.history[index]
+                item is ResponseItem.FunctionCallOutput &&
+                    item.callId == "call_spawn" &&
+                    item.output.success == true
+            },
+        )
+    }
     }
 }
+
+private fun ResponsesApiRequest.toolNames(): List<String> =
+    tools.filterIsInstance<ResponsesApiTool>().map(ResponsesApiTool::name)
+
+private fun spawnResponse() = flowOf(
+    ResponsesStreamEvent.OutputItemDone(
+        outputIndex = 0,
+        item = ResponseItem.FunctionCall(
+            name = MultiAgentTools.SpawnAgentName,
+            arguments = OpenAiJsonCodec.encodeToString(
+                SpawnAgentArgs(
+                    taskName = "worker",
+                    message = "Complete one background turn.",
+                    forkTurns = "none",
+                ),
+            ),
+            callId = "call_spawn",
+        ),
+    ),
+    ResponsesStreamEvent.Completed(Response(id = "spawn_response", endTurn = false)),
+)
+
+private fun assistantResponse(
+    text: String,
+    responseId: String,
+) = flowOf(
+    ResponsesStreamEvent.OutputItemDone(
+        outputIndex = 0,
+        item = ResponseItem.Message(
+            role = MessageRole.Assistant,
+            content = listOf(ContentItem.OutputText(text)),
+        ),
+    ),
+    ResponsesStreamEvent.Completed(Response(id = responseId, endTurn = true)),
+)

@@ -6,8 +6,9 @@ import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentruntime.compact.compactionRuntime
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
-import io.github.stream29.codex.lite.agentruntime.plan.planRuntime
-import io.github.stream29.codex.lite.agentruntime.tool.toolRuntime
+import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
+import io.github.stream29.codex.lite.agentsession.composition.CodexAgentDependencies
+import io.github.stream29.codex.lite.agentsession.composition.buildAgentRuntime
 import io.github.stream29.codex.lite.agentcontext.prefix.render.render as renderCollaborationMode
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
@@ -21,31 +22,27 @@ import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
-import io.github.stream29.codex.lite.hook.contract.tool.NoOpToolHooks
+import io.github.stream29.codex.lite.hook.contract.NoOpCodexHooks
+import io.github.stream29.codex.lite.mcp.contract.McpService
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.FunctionCallOutputContentItem
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
-import io.github.stream29.codex.lite.openai.ImageData
 import io.github.stream29.codex.lite.openai.ImageDetail
-import io.github.stream29.codex.lite.openai.ImageResponse
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.OpenAiResult
 import io.github.stream29.codex.lite.openai.ModelsResponse
-import io.github.stream29.codex.lite.openai.PlanItemArg
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.SearchCommands
-import io.github.stream29.codex.lite.openai.StepStatus
 import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.openai.ToolChoice
-import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.client.OpenAiClient as RealOpenAiClient
@@ -54,36 +51,23 @@ import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
-import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchTools
-import io.github.stream29.codex.lite.tool.contract.Tool
-import io.github.stream29.codex.lite.tool.currenttime.CurrentTimeTools
 import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenNamespace
 import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenToolName
-import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationToolClient
-import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationTools
-import io.github.stream29.codex.lite.tool.plan.PlanTools
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputTools
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchEngine
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchSourceInfo
-import io.github.stream29.codex.lite.tool.toolsearch.toToolSearchDocuments
 import io.github.stream29.codex.lite.tool.viewimage.ViewImageToolArguments
-import io.github.stream29.codex.lite.tool.viewimage.ViewImageToolClient
 import io.github.stream29.codex.lite.tool.viewimage.ViewImageTools
 import io.github.stream29.codex.lite.tool.webrun.WebRunNamespace
-import io.github.stream29.codex.lite.tool.webrun.WebRunToolClient
 import io.github.stream29.codex.lite.tool.webrun.WebRunToolName
-import io.github.stream29.codex.lite.tool.webrun.WebRunTools
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
 import io.github.stream29.codex.lite.utils.osenvironment.userHomeDirectory
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
+import io.github.stream29.codex.lite.utils.shellclient.Shell
+import io.github.stream29.codex.lite.utils.shellclient.ShellSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.emitAll
@@ -139,32 +123,33 @@ private data class RecordedCodexResponse(
     val windowId: String,
 )
 
-private class RecordingTool(
-    override val spec: ToolSpec,
-    private val resultText: String,
-) : Tool {
-    val calls: MutableList<ResponseItem.ToolCall> = mutableListOf()
-
-    override fun close(): Unit = Unit
-
-    override suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput {
-        calls += call
-        val output = FunctionCallOutputPayload.fromText(resultText).copy(success = true)
-        return when (call) {
-            is ResponseItem.FunctionCall -> ResponseItem.FunctionCallOutput(callId = call.callId, output = output)
-            is ResponseItem.CustomToolCall -> ResponseItem.CustomToolCallOutput(callId = call.callId, output = output)
-            is ResponseItem.ClientToolSearchCall ->
-                error("Client tool-search calls are handled by CodexToolRuntime.")
-        }
-    }
-}
-
 private class RequestOnlyRuntime(
     private val delegate: CodexAgentStateContract,
 ) : CodexAgentRuntime, CodexAgentStateContract by delegate {
     override fun resume(): Flow<ResponsesStreamEvent> = flow {
         emitAll(requestResponseApi())
     }
+}
+
+internal fun CodexAgentStateContract.integrationAgentRuntime(
+    client: OpenAiClient,
+    modelCatalog: OpenAiModelCatalog,
+    mcpService: McpService,
+): CodexAgentRuntime =
+    buildAgentRuntime(
+        dependencies = CodexAgentDependencies(
+            client = client,
+            modelCatalog = modelCatalog,
+            contextSettings = TestAgentContextSettings,
+            shellSettings = MutableStateFlow(IntegrationShellSettings),
+            mcpService = mcpService,
+            hooks = NoOpCodexHooks,
+        ),
+        agentPathResolver = AgentPathResolver { null },
+    )
+
+private data object IntegrationShellSettings : ShellSettings {
+    override val shell: Shell = Shell.default
 }
 
 private val defaultCollaborationInput: ResponseItem.Message =
@@ -311,7 +296,7 @@ private fun userMessage(text: String): ResponseItem.Message =
         content = listOf(ContentItem.InputText(text)),
     )
 
-private fun testModelCatalog(): OpenAiModelCatalog =
+internal fun testModelCatalog(): OpenAiModelCatalog =
     OpenAiModelCatalog(
         client = mockOpenAiClient {
             listModels { OpenAiResult.Success(ModelsResponse()) }
@@ -459,260 +444,6 @@ val minimalAgentConversationTest by testSuite {
     }
 }
 
-val toolRuntimeCompositionTest by testSuite {
-    test("tool runtime rejects duplicate tool names") {
-        val state = CodexAgentState(
-            client = mockOpenAiClient(),
-            storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model"))),
-            contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
-        )
-
-        assertFailsWith<IllegalArgumentException> {
-            state.compactionRuntime(testModelCatalog()).toolRuntime(
-                listOf(
-                    RecordingTool(ViewImageTools.spec, "first handler"),
-                    RecordingTool(ViewImageTools.spec, "second handler"),
-                ),
-                NoOpToolHooks,
-            )
-        }
-    }
-
-    test("tool runtime leaves unconfigured calls pending") {
-        val configuredCall = ResponseItem.FunctionCall(
-            name = ViewImageTools.Name,
-            arguments = "{\"path\":\"diagram.png\"}",
-            callId = "call_view",
-        )
-        val unconfiguredCall = ResponseItem.FunctionCall(
-            name = "unconfigured_tool",
-            arguments = "{}",
-            callId = "call_unconfigured",
-        )
-        val requests = mutableListOf<ResponsesApiRequest>()
-        val storage = InMemoryCodexAgentStorage(
-            CodexAgentSettings(
-                model = OpenAiModelId("test-model"),
-            ),
-        )
-        val state = CodexAgentState(
-            client = mockOpenAiClient {
-                createResponse { request ->
-                    requests += request
-                    flowOf(
-                        ResponsesStreamEvent.OutputItemDone(0, configuredCall),
-                        ResponsesStreamEvent.OutputItemDone(1, unconfiguredCall),
-                        ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
-                    )
-                }
-            },
-            storage = storage,
-            contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
-        )
-        val viewTool = RecordingTool(ViewImageTools.spec, "image viewed")
-
-        state.appendUserMessage(userMessage("Inspect the image.").content)
-        state
-            .compactionRuntime(testModelCatalog())
-            .toolRuntime(listOf(viewTool), NoOpToolHooks)
-            .resume()
-            .toList()
-
-        assertEquals(1, requests.size)
-        assertEquals(listOf<ResponseItem.ToolCall>(configuredCall), viewTool.calls)
-        assertEquals(
-            listOf<ResponseItem.ToolCall>(unconfiguredCall),
-            assertIs<CodexAgentStateValue.ToolPending>(state.state.value).calls,
-        )
-        assertIs<ResponseItem.FunctionCallOutput>(storage.history[4])
-    }
-
-    test("tool runtime completes its configured calls and continues the response") {
-        val plan = UpdatePlanArgs(
-            plan = listOf(PlanItemArg("Handle local tools", StepStatus.InProgress)),
-        )
-        val planCall = ResponseItem.FunctionCall(
-            name = PlanTools.Name,
-            arguments = OpenAiJsonCodec.encodeToString(plan),
-            callId = "call_plan",
-        )
-        val patchCall = ResponseItem.CustomToolCall(
-            name = ApplyPatchTools.Name,
-            input = "*** Begin Patch",
-            callId = "call_patch",
-        )
-        val viewCall = ResponseItem.FunctionCall(
-            name = ViewImageTools.Name,
-            arguments = "{\"path\":\"diagram.png\"}",
-            callId = "call_view",
-        )
-        val imageCall = ResponseItem.FunctionCall(
-            namespace = "image_gen",
-            name = "imagegen",
-            arguments = "{\"prompt\":\"draw a square\"}",
-            callId = "call_image",
-        )
-        val requests = mutableListOf<ResponsesApiRequest>()
-        val toolSearchDocuments = listOf(ViewImageTools.spec, ImageGenerationTools.spec)
-            .flatMap { spec -> spec.toToolSearchDocuments() }
-        val toolSearchEngine = ToolSearchEngine(toolSearchDocuments)
-        val storage = InMemoryCodexAgentStorage(
-            CodexAgentSettings(
-                model = OpenAiModelId("test-model"),
-            ),
-        )
-        val state = CodexAgentState(
-            client = mockOpenAiClient {
-                createResponse { request ->
-                    requests += request
-                    when (requests.size) {
-                        1 -> flowOf(
-                            ResponsesStreamEvent.OutputItemDone(0, planCall),
-                            ResponsesStreamEvent.OutputItemDone(1, patchCall),
-                            ResponsesStreamEvent.OutputItemDone(2, viewCall),
-                            ResponsesStreamEvent.OutputItemDone(3, imageCall),
-                            ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
-                        )
-
-                        2 -> flowOf(
-                            ResponsesStreamEvent.OutputItemDone(0, assistantMessage("All tools completed.")),
-                            ResponsesStreamEvent.Completed(Response(id = "response_2", endTurn = true)),
-                        )
-
-                        else -> fail("Unexpected request count ${requests.size}.")
-                    }
-                }
-            },
-            storage = storage,
-            mcpService = TestMcpService(),
-            contextSettings = TestAgentContextSettings,
-        )
-        val patchTool = RecordingTool(ApplyPatchTools.spec, "patch applied")
-        val viewTool = RecordingTool(ViewImageTools.spec, "image viewed")
-        val imagePrompts = mutableListOf<String>()
-        val imageClient = ImageGenerationToolClient(
-            client = mockOpenAiClient {
-                generateImage { request ->
-                    imagePrompts += request.prompt
-                    OpenAiResult.Success(
-                        ImageResponse(
-                            created = 1,
-                            data = listOf(ImageData("generated-image")),
-                        ),
-                    )
-                }
-            },
-        )
-        val imageTool = ImageGenerationTools.createTool(imageClient)
-        val runtime = state
-            .compactionRuntime(testModelCatalog())
-            .planRuntime(NoOpToolHooks)
-            .toolRuntime(
-                listOf(patchTool, viewTool, imageTool),
-                toolSearchEngine,
-                NoOpToolHooks,
-            )
-
-        state.appendUserMessage(userMessage("Use every local tool.").content)
-        runtime.resume().toList()
-
-        assertEquals(2, requests.size)
-        assertEquals(requests.first().tools, requests[1].tools)
-        assertEquals(
-            ToolSearchTools.createToolSearchSpec(
-                toolSearchDocuments.mapNotNull { document -> document.sourceInfo },
-            ),
-            requests.first().tools.last(),
-        )
-        assertEquals(listOf<ResponseItem.ToolCall>(patchCall), patchTool.calls)
-        assertEquals(listOf<ResponseItem.ToolCall>(viewCall), viewTool.calls)
-        assertEquals(listOf("draw a square"), imagePrompts)
-        assertEquals(plan, storage.settings.latestValue().plan)
-        assertIs<ResponseItem.FunctionCallOutput>(storage.history[6])
-        assertIs<ResponseItem.CustomToolCallOutput>(storage.history[7])
-        assertIs<ResponseItem.FunctionCallOutput>(storage.history[8])
-        assertIs<ResponseItem.FunctionCallOutput>(storage.history[9])
-        assertEquals("All tools completed.", storage.lastAssistantMessage())
-    }
-
-    test("tool runtime discovers a deferred tool through history without changing settings") {
-        val searchCall = ResponseItem.ClientToolSearchCall(
-            callId = "call_search",
-            arguments = buildJsonObject { put("query", "view image") },
-        )
-        val viewCall = ResponseItem.FunctionCall(
-            name = ViewImageTools.Name,
-            arguments = "{\"path\":\"diagram.png\"}",
-            callId = "call_view",
-        )
-        val viewTool = RecordingTool(ViewImageTools.spec, "image viewed")
-        val toolSearchDocuments = viewTool.spec.toToolSearchDocuments(
-            ToolSearchSourceInfo(
-                name = "Workspace tools",
-                description = "Tools that inspect the current workspace.",
-            ),
-        )
-        val toolSearchEngine = ToolSearchEngine(toolSearchDocuments)
-        val requests = mutableListOf<ResponsesApiRequest>()
-        val storage = InMemoryCodexAgentStorage(
-            CodexAgentSettings(
-                model = OpenAiModelId("test-model"),
-            ),
-        )
-        val state = CodexAgentState(
-            client = mockOpenAiClient {
-                createResponse { request ->
-                    requests += request
-                    when (requests.size) {
-                        1 -> flowOf(
-                            ResponsesStreamEvent.OutputItemDone(0, searchCall),
-                            ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
-                        )
-
-                        2 -> flowOf(
-                            ResponsesStreamEvent.OutputItemDone(0, viewCall),
-                            ResponsesStreamEvent.Completed(Response(id = "response_2", endTurn = false)),
-                        )
-
-                        3 -> flowOf(
-                            ResponsesStreamEvent.OutputItemDone(0, assistantMessage("Image inspected.")),
-                            ResponsesStreamEvent.Completed(Response(id = "response_3", endTurn = true)),
-                        )
-
-                        else -> fail("Unexpected request count ${requests.size}.")
-                    }
-                }
-            },
-            storage = storage,
-            mcpService = TestMcpService(),
-            contextSettings = TestAgentContextSettings,
-        )
-
-        state.appendUserMessage(userMessage("Inspect the diagram.").content)
-        state
-            .compactionRuntime(testModelCatalog())
-            .toolRuntime(listOf(viewTool), toolSearchEngine, NoOpToolHooks)
-            .resume()
-            .toList()
-
-        assertEquals(3, requests.size)
-        assertTrue(requests.all { request -> request.tools == requests.first().tools })
-        assertEquals(
-            ToolSearchTools.createToolSearchSpec(
-                toolSearchDocuments.mapNotNull { document -> document.sourceInfo },
-            ),
-            requests.first().tools.last(),
-        )
-        val searchOutput = assertIs<ResponseItem.ClientToolSearchOutput>(requests[1].input.last())
-        assertEquals("call_search", searchOutput.callId)
-        assertEquals(listOf(ViewImageTools.spec.copy(deferLoading = true)), searchOutput.tools)
-        assertEquals(listOf<ResponseItem.ToolCall>(viewCall), viewTool.calls)
-        assertEquals("Image inspected.", storage.lastAssistantMessage())
-    }
-}
-
 val openAiStoryContinuationProbeTest by testSuite {
     testFixture {
         RecordingOpenAiClient(realOpenAiClient())
@@ -767,26 +498,24 @@ val openAiCurrentTimeToolRoundTripProbeTest by testSuite {
             "real runtime replays a namespaced current-time tool round trip",
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
         ) { client ->
-            val currentTimeTool = CurrentTimeTools.createTool()
             val modelCatalog = testModelCatalog()
+            val mcpService = TestMcpService()
+            val storage = InMemoryCodexAgentStorage(
+                CodexAgentSettings(
+                    model = testCodexModel(),
+                    instructions =
+                        "When the user asks you to inspect the system time, call " +
+                            "clock.curr_time exactly once before answering.",
+                ),
+            )
+            val state = CodexAgentState(
+                client = client,
+                storage = storage,
+                contextSettings = TestAgentContextSettings,
+                mcpService = mcpService,
+            )
             try {
-                val storage = InMemoryCodexAgentStorage(
-                    CodexAgentSettings(
-                        model = testCodexModel(),
-                        instructions =
-                            "When the user asks you to inspect the system time, call " +
-                                "clock.curr_time exactly once before answering.",
-                    ),
-                )
-                val state = CodexAgentState(
-                    client = client,
-                    storage = storage,
-                    contextSettings = TestAgentContextSettings,
-                    mcpService = TestMcpService(),
-                )
-                val runtime = state
-                    .compactionRuntime(modelCatalog)
-                    .toolRuntime(listOf(currentTimeTool), NoOpToolHooks)
+                val runtime = state.integrationAgentRuntime(client, modelCatalog, mcpService)
 
                 listOf(
                     "hello",
@@ -816,8 +545,11 @@ val openAiCurrentTimeToolRoundTripProbeTest by testSuite {
                     "Expected the tool result to trigger a follow-up Responses request.",
                 )
             } finally {
-                currentTimeTool.close()
-                modelCatalog.close()
+                try {
+                    state.cancelAndJoin()
+                } finally {
+                    modelCatalog.close()
+                }
             }
         }
     }
@@ -842,31 +574,24 @@ val openAiViewImageToolRuntimeProbeTest by testSuite {
             "real tool runtime discovers view_image and reads a local image",
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
         ) { testScope ->
-            val viewImageTool = ViewImageTools.createTool(
-                ViewImageToolClient(root = MutableStateFlow(imageRoot)),
-            )
-            val toolSearchEngine = ToolSearchEngine(
-                viewImageTool.spec.toToolSearchDocuments(
-                    ToolSearchSourceInfo(
-                        name = "Local image tools",
-                        description = "Tools for reading image files in the current workspace.",
-                    ),
-                ),
-            )
+            val mcpService = TestMcpService()
+            val modelCatalog = testModelCatalog()
             var state: CodexAgentStateContract? = null
             try {
                 val storage = InMemoryCodexAgentStorage(
-                    CodexAgentSettings(model = testCodexModel()),
+                    CodexAgentSettings(
+                        model = testCodexModel(),
+                        cwd = imageRoot,
+                    ),
                 )
                 val createdState = testScope.CodexAgentState(
                     client = openAiClient,
                     storage = storage,
                     contextSettings = TestAgentContextSettings,
-                    mcpService = TestMcpService(),
+                    mcpService = mcpService,
                 )
                 state = createdState
-                val runtime = RequestOnlyRuntime(createdState)
-                    .toolRuntime(listOf(viewImageTool), toolSearchEngine, NoOpToolHooks)
+                val runtime = createdState.integrationAgentRuntime(openAiClient, modelCatalog, mcpService)
 
                 createdState.appendUserMessage(
                     "Use the available image-viewing tool named `view_image` to inspect the local " +
@@ -912,7 +637,7 @@ val openAiViewImageToolRuntimeProbeTest by testSuite {
                 try {
                     state?.cancelAndJoin()
                 } finally {
-                    viewImageTool.close()
+                    modelCatalog.close()
                 }
             }
         }
@@ -929,29 +654,19 @@ val openAiImageGenerationToolRuntimeProbeTest by testSuite {
             "real tool runtime discovers image_gen and generates an image",
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 300.seconds),
         ) { client ->
-            val imageGenerationTool = ImageGenerationTools.createTool(
-                ImageGenerationToolClient(client = client),
+            val mcpService = TestMcpService()
+            val modelCatalog = testModelCatalog()
+            val storage = InMemoryCodexAgentStorage(
+                CodexAgentSettings(model = testCodexModel()),
             )
-            val toolSearchEngine = ToolSearchEngine(
-                imageGenerationTool.spec.toToolSearchDocuments(
-                    ToolSearchSourceInfo(
-                        name = "OpenAI image tools",
-                        description = "Tools for generating and editing images.",
-                    ),
-                ),
+            val state = CodexAgentState(
+                client = client,
+                storage = storage,
+                contextSettings = TestAgentContextSettings,
+                mcpService = mcpService,
             )
             try {
-                val storage = InMemoryCodexAgentStorage(
-                    CodexAgentSettings(model = testCodexModel()),
-                )
-                val state = CodexAgentState(
-                    client = client,
-                    storage = storage,
-                    contextSettings = TestAgentContextSettings,
-                    mcpService = TestMcpService(),
-                )
-                val runtime = RequestOnlyRuntime(state)
-                    .toolRuntime(listOf(imageGenerationTool), toolSearchEngine, NoOpToolHooks)
+                val runtime = state.integrationAgentRuntime(client, modelCatalog, mcpService)
 
                 state.appendUserMessage(
                     "Use `image_gen.imagegen` to generate a new minimal image of one black circle " +
@@ -1000,7 +715,11 @@ val openAiImageGenerationToolRuntimeProbeTest by testSuite {
                 )
                 assertIs<CodexAgentStateValue.AssistantMessage>(state.state.value)
             } finally {
-                imageGenerationTool.close()
+                try {
+                    state.cancelAndJoin()
+                } finally {
+                    modelCatalog.close()
+                }
             }
         }
     }
@@ -1016,24 +735,19 @@ val openAiWebRunToolRuntimeProbeTest by testSuite {
             "real tool runtime executes web.run search",
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
         ) { client ->
-            val webRunTool = WebRunTools.createTool(
-                WebRunToolClient(
-                    client = client,
-                    sessionId = "codex-lite-web-run-runtime-${Random.nextLong().toString().replace('-', '0')}",
-                    model = testCodexModel(),
-                ),
+            val mcpService = TestMcpService()
+            val modelCatalog = testModelCatalog()
+            val storage = InMemoryCodexAgentStorage(
+                CodexAgentSettings(model = testCodexModel()),
+            )
+            val state = CodexAgentState(
+                client = client,
+                storage = storage,
+                contextSettings = TestAgentContextSettings,
+                mcpService = mcpService,
             )
             try {
-                val storage = InMemoryCodexAgentStorage(
-                    CodexAgentSettings(model = testCodexModel()),
-                )
-                val state = CodexAgentState(
-                    client = client,
-                    storage = storage,
-                    contextSettings = TestAgentContextSettings,
-                    mcpService = TestMcpService(),
-                )
-                val runtime = RequestOnlyRuntime(state).toolRuntime(listOf(webRunTool), NoOpToolHooks)
+                val runtime = state.integrationAgentRuntime(client, modelCatalog, mcpService)
 
                 state.appendUserMessage(
                     "Use `web.run` with one search_query operation to search for the official OpenAI " +
@@ -1070,7 +784,11 @@ val openAiWebRunToolRuntimeProbeTest by testSuite {
                 )
                 assertIs<CodexAgentStateValue.AssistantMessage>(state.state.value)
             } finally {
-                webRunTool.close()
+                try {
+                    state.cancelAndJoin()
+                } finally {
+                    modelCatalog.close()
+                }
             }
         }
     }

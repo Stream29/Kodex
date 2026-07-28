@@ -10,7 +10,6 @@ import io.github.stream29.codex.lite.utils.images.ImageMimeType
 import io.github.stream29.codex.lite.utils.images.detectImageInfo
 import io.github.stream29.codex.lite.utils.images.decodePromptImageDataUrlBytes
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.io.files.Path
 import kotlin.io.encoding.Base64
 import kotlin.random.Random
@@ -46,7 +45,7 @@ val viewImageToolClientTest by testSuite {
             val imagePath = Path(root, "image.png")
             SystemCoroutineFileSystem.writeBytes(imagePath, png64x32)
 
-            val output = ViewImageToolClient(root = MutableStateFlow(root)).view(
+            val output = ViewImageToolClient(workingDirectoryProvider = { root }).view(
                 ViewImageToolArguments(path = "image.png"),
             )
 
@@ -60,7 +59,7 @@ val viewImageToolClientTest by testSuite {
             SystemCoroutineFileSystem.writeBytes(imagePath, png64x32)
 
             val result = assertIs<ResponseItem.FunctionCallOutput>(
-                ViewImageTools.createTool(ViewImageToolClient(root = MutableStateFlow(root))).handle(
+                ViewImageTools.createTool(ViewImageToolClient(workingDirectoryProvider = { root })).handle(
                     ResponseItem.FunctionCall(
                         callId = "view_1",
                         name = ViewImageTools.Name,
@@ -78,7 +77,7 @@ val viewImageToolClientTest by testSuite {
 
         test("tool returns a failure output for a missing image") { root ->
             val result = assertIs<ResponseItem.FunctionCallOutput>(
-                ViewImageTools.createTool(ViewImageToolClient(root = MutableStateFlow(root))).handle(
+                ViewImageTools.createTool(ViewImageToolClient(workingDirectoryProvider = { root })).handle(
                     ResponseItem.FunctionCall(
                         callId = "view_1",
                         name = ViewImageTools.Name,
@@ -99,7 +98,7 @@ val viewImageToolClientTest by testSuite {
             SystemCoroutineFileSystem.writeBytes(imagePath, png64x32)
 
             val output = ViewImageToolClient(
-                root = MutableStateFlow(root),
+                workingDirectoryProvider = { root },
                 canRequestOriginalImageDetail = false,
             ).view(
                 ViewImageToolArguments(path = "image.png", detail = ViewImageDetail.Original),
@@ -110,7 +109,7 @@ val viewImageToolClientTest by testSuite {
 
         test("missing file returns tool exception") { root ->
             assertFailsWith<ViewImageToolException> {
-                ViewImageToolClient(root = MutableStateFlow(root))
+                ViewImageToolClient(workingDirectoryProvider = { root })
                     .view(ViewImageToolArguments(path = "missing.png"))
             }
         }

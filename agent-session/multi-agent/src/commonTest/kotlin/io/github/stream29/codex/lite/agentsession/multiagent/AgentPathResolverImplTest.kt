@@ -40,10 +40,9 @@ val agentPathResolverImplTest by testSuite {
             val resolver = AgentPathResolverImpl(root)
 
             assertSame(child, resolver.resolveOrNull("/root/worker"))
-            val settingsIndex = child.storage.settings.latestIndex() + 1
-            child.storage.settings[settingsIndex] = child.storage.settings.latestValue().copy(
+            child.runtime.updateSettings(child.storage.settings.latestValue().copy(
                 threadName = "/root/reviewer",
-            )
+            ))
 
             assertSame(child, resolver.resolveOrNull("/root/reviewer"))
             assertNull(resolver.resolveOrNull("/root/worker"))
@@ -77,12 +76,14 @@ private suspend fun CodexSessionRepository.initializedSession(
     threadName: String,
 ): CodexAgentSession =
     open(entryIndex).also { session ->
-        session.storage.initialize(
-            CodexAgentSettings(
-                model = OpenAiModelId("test-model"),
-                threadName = threadName,
-            ),
-        )
+        session.runtime.modify { storage ->
+            storage.initialize(
+                CodexAgentSettings(
+                    model = OpenAiModelId("test-model"),
+                    threadName = threadName,
+                ),
+            )
+        }
     }
 
 private suspend fun CodexSessionRepository.initializedSession(
