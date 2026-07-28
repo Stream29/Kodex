@@ -1,6 +1,5 @@
 package io.github.stream29.codex.lite.agentruntime.tool
 
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextSettings
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
@@ -40,19 +39,17 @@ import io.github.stream29.codex.lite.tool.viewimage.ViewImageToolClient
 import io.github.stream29.codex.lite.tool.viewimage.ViewImageTools
 import io.github.stream29.codex.lite.tool.webrun.WebRunToolClient
 import io.github.stream29.codex.lite.tool.webrun.WebRunTools
+import io.github.stream29.codex.lite.utils.codexlitehome.CodexLiteHome
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
+import io.github.stream29.codex.lite.utils.shellclient.ShellSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.job
 import kotlinx.io.files.Path
 import kotlinx.serialization.SerializationException
@@ -156,13 +153,14 @@ public class CodexToolRuntime internal constructor(
  * Adds the complete ordinary Codex tool layer.
  *
  * Fixed tools are constructed from this runtime's current Agent settings.
- * [contextSettings] remains live for shell selection and generated-image
- * artifact placement. [mcpService] supplies the only externally owned tools.
+ * [shellSettings] remains live for shell selection. Generated images are
+ * persisted below the process-wide Codex Lite home. [mcpService] supplies the
+ * only externally owned tools.
  */
 public suspend fun CodexAgentRuntime.toolRuntime(
     client: OpenAiClient,
     modelCatalog: OpenAiModelCatalog,
-    contextSettings: StateFlow<AgentContextSettings>,
+    shellSettings: StateFlow<ShellSettings>,
     mcpService: McpService,
     toolHooks: ToolHooks,
 ): CodexToolRuntime {
@@ -170,21 +168,11 @@ public suspend fun CodexAgentRuntime.toolRuntime(
     val resourceScope = supervisorChildScope()
     return try {
         val workingDirectory = MutableStateFlow(settings.cwd)
-        val imageOutputDirectory = contextSettings
-            .map { context ->
-                ImageGenerationTools.outputDirectory(context.codexHome, storage.id)
-            }
-            .distinctUntilChanged()
-            .stateIn(
-                scope = resourceScope,
-                started = SharingStarted.Eagerly,
-                initialValue = ImageGenerationTools.outputDirectory(
-                    contextSettings.value.codexHome,
-                    storage.id,
-                ),
-            )
+        val imageOutputDirectory = MutableStateFlow(
+            ImageGenerationTools.outputDirectory(CodexLiteHome, storage.id),
+        )
         val unifiedExecClient = resourceScope.UnifiedExecToolClient(
-            settings = contextSettings,
+            settings = shellSettings,
             workingDirectory = workingDirectory,
         )
         val fixedTools = buildList {

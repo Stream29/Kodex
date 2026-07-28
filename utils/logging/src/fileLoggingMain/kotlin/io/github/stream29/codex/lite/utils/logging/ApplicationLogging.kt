@@ -13,8 +13,8 @@ import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFi
 import kotlinx.io.files.Path
 
 /** Configures process-wide logging before application services are created. */
-public suspend fun initializeLogging(codexHome: Path) {
-    val logDirectory = Path(codexHome, LogDirectoryName)
+public suspend fun initializeLogging(codexLiteHome: Path) {
+    val logDirectory = Path(codexLiteHome, LogDirectoryName)
     SystemCoroutineFileSystem.createDirectories(logDirectory)
     val appender = KermitAppender(
         RollingFileLogWriter(rollingFileLogWriterConfig(logDirectory)),

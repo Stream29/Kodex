@@ -1,7 +1,6 @@
 package io.github.stream29.codex.lite.agentruntime.tool
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextSettings
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
 import io.github.stream29.codex.lite.agentruntime.turnhook.turnHookRuntime
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
@@ -40,6 +39,7 @@ import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.codex.lite.utils.shellclient.Shell
+import io.github.stream29.codex.lite.utils.shellclient.ShellSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
@@ -581,14 +581,7 @@ private class ToolRuntimeTestContext(
         toolRuntime(
             client = client,
             modelCatalog = modelCatalog,
-            contextSettings = MutableStateFlow(
-                TestAgentContextSettings(
-                    codexHome = Path(
-                        SystemTemporaryDirectory,
-                        "codex-tool-runtime-home-${Random.nextLong()}",
-                    ),
-                ),
-            ),
+            shellSettings = MutableStateFlow(TestShellSettings()),
             mcpService = mcpService,
             toolHooks = hooks,
         )
@@ -617,10 +610,9 @@ private class TestMcpService(
     override fun close(): Unit = Unit
 }
 
-private data class TestAgentContextSettings(
-    override val codexHome: Path,
+private data class TestShellSettings(
     override val shell: Shell = Shell.default,
-) : AgentContextSettings
+) : ShellSettings
 
 private class RuntimeTestTool(
     namespace: String,

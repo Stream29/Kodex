@@ -5,7 +5,6 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-context-prefix-contract"))
             api(project(":agent-runtime-contract"))
             api(project(":agent-runtime-context-window"))
             api(project(":hook-contract"))
@@ -14,6 +13,7 @@ kotlin {
             api(project(":openai-model-catalog"))
             api(project(":tool-contract"))
             api(project(":tool-impl-tool-search"))
+            api(project(":utils-shell-client"))
             implementation(project(":hook-tool-utils"))
             implementation(project(":tool-impl-apply-patch"))
             implementation(project(":tool-impl-current-time"))
@@ -24,6 +24,7 @@ kotlin {
             implementation(project(":tool-spec-get-context-remaining"))
             implementation(project(":tool-tool-builder"))
             implementation(project(":openai-json-codec"))
+            implementation(project(":utils-codex-lite-home"))
             implementation(project(":utils-coroutines"))
             implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(libs.kotlinx.coroutines.core)

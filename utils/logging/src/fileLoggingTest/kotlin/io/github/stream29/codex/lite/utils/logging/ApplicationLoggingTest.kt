@@ -16,7 +16,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-private suspend fun temporaryCodexHome(): Path =
+private suspend fun temporaryCodexLiteHome(): Path =
     Path(Path(Path("build"), "tmp"), "codex-lite-logging-${Random.nextLong()}").also {
         SystemCoroutineFileSystem.createDirectories(it)
     }
@@ -24,11 +24,11 @@ private suspend fun temporaryCodexHome(): Path =
 public val applicationLoggingTest by testSuite {
     // RollingFileLogWriter owns its file for the test process lifetime, so Windows
     // cannot remove it during fixture teardown. Keep it in Gradle's build output.
-    testFixture { temporaryCodexHome() } asParameterForEach {
-        test("initializes direct logging and writes mapped events to the rolling file") { codexHome ->
-            initializeLogging(codexHome)
+    testFixture { temporaryCodexLiteHome() } asParameterForEach {
+        test("initializes direct logging and writes mapped events to the rolling file") { codexLiteHome ->
+            initializeLogging(codexLiteHome)
 
-            val config = rollingFileLogWriterConfig(Path(codexHome, LogDirectoryName))
+            val config = rollingFileLogWriterConfig(Path(codexLiteHome, LogDirectoryName))
             assertEquals(LogFileBaseName, config.logFileName)
             assertEquals(RollOnSizeBytes, config.rollOnSize)
             assertEquals(MaxLogFiles, config.maxLogFiles)
@@ -58,7 +58,7 @@ public val applicationLoggingTest by testSuite {
                 payload = mapOf("server" to "local")
             }
 
-            val logFile = Path(codexHome, "$LogDirectoryName/$LogFileBaseName.log")
+            val logFile = Path(codexLiteHome, "$LogDirectoryName/$LogFileBaseName.log")
             val text = withContext(Dispatchers.Default.limitedParallelism(1)) {
                 withTimeout(5.seconds) {
                     var current = ""
