@@ -91,9 +91,9 @@ public object ImageGenerationTools {
             }
         }
 
-    /** Resolves the session-specific output directory under [codexHome]. */
-    public fun outputDirectory(codexHome: Path, sessionId: String): Path =
-        Path(codexHome, "generated_images", sessionId.toImageArtifactPathSegment())
+    /** Resolves the session-specific output directory under [codexLiteHome]. */
+    public fun outputDirectory(codexLiteHome: Path, sessionId: String): Path =
+        Path(codexLiteHome, "generated_images", sessionId.toImageArtifactPathSegment())
 
     private fun GeneratedImageOutput.toFunctionCallOutputPayload(): FunctionCallOutputPayload =
         FunctionCallOutputPayload(
