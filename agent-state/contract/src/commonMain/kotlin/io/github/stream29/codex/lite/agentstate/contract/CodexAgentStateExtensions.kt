@@ -7,10 +7,10 @@ import io.github.stream29.codex.lite.openai.CompactionTrigger
 /**
  * Replaces the thread name in the latest settings snapshot.
  */
-public suspend fun CodexAgentState.renameThread(threadName: String): Int =
-    updateSettings(
-        storage.settings[latestIndex.value].copy(threadName = threadName),
-    )
+public suspend fun CodexAgentState.renameThread(threadName: String): Int {
+    val settings = storage.settings[latestIndex.value]
+    return updateSettings(settings.copy(threadName = threadName))
+}
 
 /**
  * Requests an explicit user-initiated server-side context compaction.

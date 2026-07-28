@@ -11,7 +11,6 @@ import io.github.stream29.codex.lite.agentstate.contract.canAppendUserMessage
 import io.github.stream29.codex.lite.agentstate.contract.canCompact
 import io.github.stream29.codex.lite.agentstate.contract.canMarkNewTurn
 import io.github.stream29.codex.lite.agentstate.contract.canRequestResponseApi
-import io.github.stream29.codex.lite.agentstate.contract.canRevert
 import io.github.stream29.codex.lite.agentstate.tool.visibleToolSpecs
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
@@ -20,7 +19,6 @@ import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.contract.prevIndex
-import io.github.stream29.codex.lite.agentstorage.contract.revert
 import io.github.stream29.codex.lite.agentstorage.contract.revertWithTransaction
 import io.github.stream29.codex.lite.agentstorage.contract.setWithTransaction
 import io.github.stream29.codex.lite.mcp.contract.McpService
@@ -120,6 +118,24 @@ private class CodexAgentStateImpl(
 
     override val latestIndex: StateFlow<Int>
         field = MutableStateFlow(loadedLatestIndex)
+
+    override suspend fun <T> modify(
+        block: suspend (MutableCodexAgentStorage) -> T,
+    ): T =
+        mutate(
+            validate = {},
+            inFlight = CodexAgentStateValue.ExternalWrite,
+        ) {
+            try {
+                block(storage)
+            } finally {
+                withContext(NonCancellable) {
+                    val index = storage.latestIndex()
+                    latestIndex.value = index
+                    state.value = storage.stateAt(index)
+                }
+            }
+        }
 
     override fun requestResponseApi(): Flow<ResponsesStreamEvent> = flow {
         val previousState = state.value
@@ -395,25 +411,6 @@ private class CodexAgentStateImpl(
             index
         }
 
-    override suspend fun revert(untilExclusive: Int): Int =
-        mutate(
-            validate = CodexAgentStateValue::requireCanRevert,
-            inFlight = CodexAgentStateValue.ExternalWrite,
-        ) {
-            val currentLatestIndex = storage.latestIndex()
-            require(untilExclusive in 1..(currentLatestIndex + 1)) {
-                "Revert boundary $untilExclusive must retain a visible agent snapshot."
-            }
-            val targetState = storage.stateAt(untilExclusive - 1)
-            targetState.requireRevertTarget()
-
-            storage.revert(untilExclusive)
-            val revertedIndex = storage.latestIndex()
-            latestIndex.value = revertedIndex
-            state.value = storage.stateAt(revertedIndex)
-            revertedIndex
-        }
-
     private suspend fun appendHistoryItem(
         item: ResponseItem.HistoryItem,
         timestamp: Instant,
@@ -508,18 +505,6 @@ private fun CodexAgentStateValue.requireCanAppendUserMessage() {
 private fun CodexAgentStateValue.requireCanMarkNewTurn() {
     if (!canMarkNewTurn) {
         throw CodexAgentStateInvalidTransitionException("mark a new turn", this)
-    }
-}
-
-private fun CodexAgentStateValue.requireCanRevert() {
-    if (!canRevert) {
-        throw CodexAgentStateInvalidTransitionException("revert history", this)
-    }
-}
-
-private fun CodexAgentStateValue.requireRevertTarget() {
-    if (this != CodexAgentStateValue.Empty && this != CodexAgentStateValue.AssistantMessage) {
-        throw IllegalArgumentException("Revert target must be an empty or completed assistant snapshot, got $this.")
     }
 }
 

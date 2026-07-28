@@ -9,6 +9,8 @@ import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as Code
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstate.contract.forcedCompact
 import io.github.stream29.codex.lite.agentstate.contract.renameThread
+import io.github.stream29.codex.lite.agentstorage.contract.forkTo
+import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.agentstorage.contract.nextIndex
 import io.github.stream29.codex.lite.agentstorage.contract.revert
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
@@ -97,6 +99,79 @@ val codexAgentStateImplTest by testSuite {
         owner.cancelAndJoin()
 
         assertFalse(state.coroutineContext.job.isActive)
+    }
+
+    test("initialization publishes storage and observable state together") {
+        val storage = InMemoryCodexAgentStorage.empty()
+        val state = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+        val settings = CodexAgentSettings(OpenAiModelId("test-model"))
+
+        assertEquals(-1, state.latestIndex.value)
+        assertEquals(CodexAgentStateValue.Empty, state.state.value)
+
+        assertEquals(
+            0,
+            state.modify { mutableStorage ->
+                mutableStorage.initialize(settings)
+                mutableStorage.latestIndex()
+            },
+        )
+
+        assertEquals(0, state.latestIndex.value)
+        assertEquals(CodexAgentStateValue.Empty, state.state.value)
+        assertEquals(settings, storage.settings[0])
+        assertEquals(0L, storage.tokenCount[0])
+        assertFailsWith<IllegalArgumentException> {
+            state.modify { mutableStorage -> mutableStorage.initialize(settings) }
+        }
+    }
+
+    test("fork initialization reconstructs the copied state") {
+        val settings = CodexAgentSettings(OpenAiModelId("test-model"))
+        val source = InMemoryCodexAgentStorage(settings).apply {
+            history[1] = userMessage("Question")
+            history[2] = assistantMessage("Answer")
+        }
+        val target = InMemoryCodexAgentStorage.empty()
+        val state = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = target,
+        )
+
+        assertEquals(
+            2,
+            state.modify { mutableStorage ->
+                source.forkTo(3, mutableStorage)
+                mutableStorage.latestIndex()
+            },
+        )
+
+        assertEquals(2, state.latestIndex.value)
+        assertEquals(CodexAgentStateValue.AssistantMessage, state.state.value)
+        assertEquals(userMessage("Question"), target.history[1])
+        assertEquals(assistantMessage("Answer"), target.history[2])
+    }
+
+    test("modify refreshes observable state after a failed storage write") {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val state = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+
+        assertFailsWith<IllegalStateException> {
+            state.modify { mutableStorage ->
+                mutableStorage.history[1] = userMessage("Persisted before failure.")
+                error("Stop after the write.")
+            }
+        }
+
+        assertEquals(1, state.latestIndex.value)
+        assertEquals(CodexAgentStateValue.UserMessage, state.state.value)
+        assertEquals(userMessage("Persisted before failure."), storage.history[1])
     }
 
     test("request projection maps Codex ultra reasoning to Responses max") {
@@ -296,7 +371,13 @@ val codexAgentStateImplTest by testSuite {
         assertEquals(5, agent.latestIndex.value)
         assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
 
-        assertEquals(2, agent.revert(untilExclusive = 3))
+        assertEquals(
+            2,
+            agent.modify { mutableStorage ->
+                mutableStorage.revert(untilExclusive = 3)
+                mutableStorage.latestIndex()
+            },
+        )
 
         assertEquals(2, agent.latestIndex.value)
         assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
@@ -311,7 +392,7 @@ val codexAgentStateImplTest by testSuite {
         assertEquals(null, storage.tokenCount.nextIndex(2))
     }
 
-    test("revert rejects a non-completed target without changing storage") {
+    test("modify publishes the storage state selected by revert") {
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         storage.history[1] = userMessage("First turn.")
         storage.history[2] = assistantMessage("First answer.")
@@ -322,13 +403,14 @@ val codexAgentStateImplTest by testSuite {
             storage = storage,
         )
 
-        assertFailsWith<IllegalArgumentException> {
-            agent.revert(untilExclusive = 2)
+        agent.modify { mutableStorage ->
+            mutableStorage.revert(untilExclusive = 2)
         }
 
-        assertEquals(4, agent.latestIndex.value)
-        assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
-        assertEquals(assistantMessage("Second answer."), storage.history[4])
+        assertEquals(1, agent.latestIndex.value)
+        assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
+        assertEquals(userMessage("First turn."), storage.history[1])
+        assertEquals(null, storage.history.nextIndex(1))
     }
 
     test("state tracks pending tool calls and rejects mismatched results") {

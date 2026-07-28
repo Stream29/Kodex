@@ -7,17 +7,17 @@ kotlin {
         commonMain.dependencies {
             api(project(":mcp-contract"))
             api(project(":openai-models"))
-            api(project(":tool-impl-tool-search"))
-            implementation(project(":tool-impl-apply-patch"))
-            implementation(project(":tool-impl-current-time"))
-            implementation(project(":tool-impl-image-generation"))
-            implementation(project(":tool-impl-view-image"))
-            implementation(project(":tool-spec-get-context-remaining"))
-            implementation(project(":tool-spec-multi-agent"))
-            implementation(project(":tool-spec-plan"))
-            implementation(project(":tool-spec-request-user-input"))
-            implementation(project(":tool-impl-unified-exec"))
-            implementation(project(":tool-impl-web-run"))
+            api(project(":tool-tool-search"))
+            implementation(project(":tool-apply-patch"))
+            implementation(project(":tool-current-time"))
+            implementation(project(":tool-image-generation"))
+            implementation(project(":tool-view-image"))
+            implementation(project(":tool-get-context-remaining"))
+            implementation(project(":tool-multi-agent"))
+            implementation(project(":tool-plan"))
+            implementation(project(":tool-request-user-input"))
+            implementation(project(":tool-unified-exec"))
+            implementation(project(":tool-web-run"))
         }
     }
 }
