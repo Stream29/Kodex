@@ -10,6 +10,9 @@ import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.tool.builder.functionOutputTool
 import io.github.stream29.codex.lite.tool.contract.Tool
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.io.files.Path
 
 public const val ImageGenNamespace: String = "image_gen"
 public const val ImageGenToolName: String = "imagegen"
@@ -53,20 +56,33 @@ public object ImageGenerationTools {
         )
 
     /**
-     * @param transformOutput Host-owned processing such as artifact persistence.
-     * The default leaves generated API data unchanged.
+     * Creates the complete image-generation tool, including artifact persistence.
+     *
+     * @param outputDirectory Current session-specific output directory. Its
+     * latest value is read for every call so a settings change applies without
+     * rebuilding the runtime.
      */
     public fun createTool(
         client: ImageGenerationToolClient,
-        transformOutput: suspend (callId: String, output: GeneratedImageOutput) -> GeneratedImageOutput =
-            { _, output -> output },
+        outputDirectory: StateFlow<Path>,
     ): Tool =
         functionOutputTool(
             spec = spec,
             inputDeserializer = ImageGenToolArguments.serializer(),
         ) { callId, arguments ->
             try {
-                transformOutput(callId, client.run(arguments)).toFunctionCallOutputPayload()
+                val output = client.run(arguments)
+                val persistedOutput = try {
+                    output.persistGeneratedImage(
+                        outputDirectory = outputDirectory.value,
+                        callId = callId,
+                    )
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    output
+                }
+                persistedOutput.toFunctionCallOutputPayload()
             } catch (error: ImageGenerationToolException) {
                 FunctionCallOutputPayload(
                     body = FunctionCallOutputBody.Text(error.message ?: "image_generation failed"),
@@ -74,6 +90,10 @@ public object ImageGenerationTools {
                 )
             }
         }
+
+    /** Resolves the session-specific output directory under [codexHome]. */
+    public fun outputDirectory(codexHome: Path, sessionId: String): Path =
+        Path(codexHome, "generated_images", sessionId.toImageArtifactPathSegment())
 
     private fun GeneratedImageOutput.toFunctionCallOutputPayload(): FunctionCallOutputPayload =
         FunctionCallOutputPayload(
@@ -91,3 +111,14 @@ public object ImageGenerationTools {
             success = true,
         )
 }
+
+internal fun String.toImageArtifactPathSegment(): String =
+    map { character ->
+        if (character.isLetterOrDigit() && character.code < 128 || character == '-' || character == '_') {
+            character
+        } else {
+            '_'
+        }
+    }
+        .joinToString(separator = "")
+        .ifEmpty { "generated_image" }

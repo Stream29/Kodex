@@ -16,17 +16,19 @@ import io.github.stream29.codex.lite.utils.images.codec.readPromptImage
 import io.github.stream29.codex.lite.utils.images.toDataUrl
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
 
 public class ImageGenerationToolClient(
     private val client: OpenAiClient,
-    private val root: Path = Path("."),
+    private val root: StateFlow<Path> = MutableStateFlow(Path(".")),
     private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     private val transformer: PromptImageTransformer = HostPromptImageTransformer,
     private val model: OpenAiModelId = ImageGenDefaultModel,
 ) {
     public suspend fun run(arguments: ImageGenToolArguments): GeneratedImageOutput {
-        val request = requestFor(arguments)
+        val request = requestFor(arguments, root.value)
         val response = when (request) {
             is ImageToolRequest.Generate -> client.generateImage(request.value)
             is ImageToolRequest.Edit -> client.editImage(request.value)
@@ -42,7 +44,10 @@ public class ImageGenerationToolClient(
         return GeneratedImageOutput(result = result)
     }
 
-    private suspend fun requestFor(arguments: ImageGenToolArguments): ImageToolRequest {
+    private suspend fun requestFor(
+        arguments: ImageGenToolArguments,
+        root: Path,
+    ): ImageToolRequest {
         if (arguments.prompt.isBlank()) {
             throw ImageGenerationToolException("`prompt` must not be blank")
         }
@@ -68,7 +73,7 @@ public class ImageGenerationToolClient(
             paths.isNotEmpty() && arguments.numLastImagesToInclude == null -> {
                 ImageToolRequest.Edit(
                     ImageEditRequest(
-                        images = paths.map { ImageUrl(loadReferencedImage(it)) },
+                        images = paths.map { ImageUrl(loadReferencedImage(it, root)) },
                         prompt = arguments.prompt,
                         background = ImageBackground.Auto,
                         model = model,
@@ -96,15 +101,15 @@ public class ImageGenerationToolClient(
         }
     }
 
-    private suspend fun loadReferencedImage(path: String): String {
+    private suspend fun loadReferencedImage(path: String, root: Path): String {
         if (path.isBlank()) {
             throw ImageGenerationToolException("`referenced_image_paths` must not contain blank paths")
         }
-        val image = fileSystem.readPromptImage(resolvePath(path), PromptImageMode.Original, transformer)
+        val image = fileSystem.readPromptImage(resolvePath(path, root), PromptImageMode.Original, transformer)
         return image.toDataUrl()
     }
 
-    private fun resolvePath(path: String): Path {
+    private fun resolvePath(path: String, root: Path): Path {
         val candidate = Path(path)
         return if (candidate.isAbsolute) candidate else Path(root, path)
     }
