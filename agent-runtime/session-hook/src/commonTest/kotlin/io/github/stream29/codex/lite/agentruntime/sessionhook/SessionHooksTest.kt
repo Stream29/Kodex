@@ -4,7 +4,8 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentruntime.compact.compactionRuntime
 import io.github.stream29.codex.lite.agentruntime.turnhook.turnHookRuntime
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
-import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
+import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
+import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
@@ -58,8 +59,8 @@ val sessionHooksTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         val runtime = state
             .compactionRuntime(testModelCatalog())
@@ -111,8 +112,8 @@ val sessionHooksTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         val runtime = state
             .compactionRuntime(
@@ -172,8 +173,8 @@ val sessionHooksTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         val runtime = state.compactionRuntime(testModelCatalog())
         runtime.installSessionHooks(lifecycle)

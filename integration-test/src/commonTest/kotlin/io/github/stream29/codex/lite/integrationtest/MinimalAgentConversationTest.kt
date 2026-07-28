@@ -13,7 +13,8 @@ import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as Code
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.contract.forcedCompact
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
-import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
+import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
+import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
@@ -410,8 +411,8 @@ val minimalAgentConversationTest by testSuite {
         val testAgent = testSuiteCoroutineScope.CodexAgentState(
             client = testClient,
             storage = testStorage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         object {
             val storage = testStorage
@@ -463,8 +464,8 @@ val toolRuntimeCompositionTest by testSuite {
         val state = CodexAgentState(
             client = mockOpenAiClient(),
             storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model"))),
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
 
         assertFailsWith<IllegalArgumentException> {
@@ -507,8 +508,8 @@ val toolRuntimeCompositionTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         val viewTool = RecordingTool(ViewImageTools.spec, "image viewed")
 
@@ -586,8 +587,8 @@ val toolRuntimeCompositionTest by testSuite {
                 }
             },
             storage = storage,
-            toolSearchToolSpec = toolSearchCatalog::currentSpec,
-            contextPrefixProvider = TestContextPrefixProvider,
+            mcpService = TestMcpService(),
+            contextSettings = TestAgentContextSettings,
         )
         val patchTool = RecordingTool(ApplyPatchTools.spec, "patch applied")
         val viewTool = RecordingTool(ViewImageTools.spec, "image viewed")
@@ -682,8 +683,8 @@ val toolRuntimeCompositionTest by testSuite {
                 }
             },
             storage = storage,
-            toolSearchToolSpec = toolSearchCatalog::currentSpec,
-            contextPrefixProvider = TestContextPrefixProvider,
+            mcpService = TestMcpService(),
+            contextSettings = TestAgentContextSettings,
         )
 
         state.appendUserMessage(userMessage("Inspect the diagram.").content)
@@ -716,8 +717,8 @@ val openAiStoryContinuationProbeTest by testSuite {
             val agent = CodexAgentState(
                 client = client,
                 storage = storage,
-                contextPrefixProvider = TestContextPrefixProvider,
-                toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+                contextSettings = TestAgentContextSettings,
+                mcpService = TestMcpService(),
             )
             agent.appendUserMessage("请用中文讲一个两句以内的微型故事，只讲故事本身。")
             agent.requestResponseApi().collect()
@@ -772,8 +773,8 @@ val openAiCurrentTimeToolRoundTripProbeTest by testSuite {
                 val state = CodexAgentState(
                     client = client,
                     storage = storage,
-                    contextPrefixProvider = TestContextPrefixProvider,
-                    toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+                    contextSettings = TestAgentContextSettings,
+                    mcpService = TestMcpService(),
                 )
                 val runtime = state
                     .compactionRuntime(modelCatalog)
@@ -852,8 +853,8 @@ val openAiViewImageToolRuntimeProbeTest by testSuite {
                 val createdState = testScope.CodexAgentState(
                     client = openAiClient,
                     storage = storage,
-                    contextPrefixProvider = TestContextPrefixProvider,
-                    toolSearchToolSpec = toolSearchCatalog::currentSpec,
+                    contextSettings = TestAgentContextSettings,
+                    mcpService = TestMcpService(),
                 )
                 state = createdState
                 val runtime = RequestOnlyRuntime(createdState)
@@ -938,8 +939,8 @@ val openAiImageGenerationToolRuntimeProbeTest by testSuite {
                 val state = CodexAgentState(
                     client = client,
                     storage = storage,
-                    contextPrefixProvider = TestContextPrefixProvider,
-                    toolSearchToolSpec = toolSearchCatalog::currentSpec,
+                    contextSettings = TestAgentContextSettings,
+                    mcpService = TestMcpService(),
                 )
                 val runtime = RequestOnlyRuntime(state)
                     .toolRuntime(listOf(imageGenerationTool), toolSearchCatalog, NoOpToolHooks)
@@ -1021,8 +1022,8 @@ val openAiWebRunToolRuntimeProbeTest by testSuite {
                 val state = CodexAgentState(
                     client = client,
                     storage = storage,
-                    contextPrefixProvider = TestContextPrefixProvider,
-                    toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+                    contextSettings = TestAgentContextSettings,
+                    mcpService = TestMcpService(),
                 )
                 val runtime = RequestOnlyRuntime(state).toolRuntime(listOf(webRunTool), NoOpToolHooks)
 
@@ -1083,8 +1084,8 @@ val openAiRequestUserInputProbeTest by testSuite {
             val state = CodexAgentState(
                 client = client,
                 storage = storage,
-                contextPrefixProvider = TestContextPrefixProvider,
-                toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+                contextSettings = TestAgentContextSettings,
+                mcpService = TestMcpService(),
             )
             val runtime = RequestOnlyRuntime(state)
 
@@ -1178,8 +1179,8 @@ val openAiForcedCompactProbeTest by testSuite {
             val agent = CodexAgentState(
                 client = client,
                 storage = storage,
-                contextPrefixProvider = TestContextPrefixProvider,
-                toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+                contextSettings = TestAgentContextSettings,
+                mcpService = TestMcpService(),
             )
 
             val compactIndex = agent.forcedCompact()

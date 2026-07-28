@@ -7,7 +7,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-runtime-contract"))
             api(project(":hook-contract"))
-            api(project(":openai-model-catalog"))
+            api(project(":openai-model-catalog-contract"))
             implementation(project(":agent-runtime-context-window"))
             implementation(libs.kotlinx.coroutines.core)
         }
@@ -16,6 +16,7 @@ kotlin {
             implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-in-memory"))
             implementation(project(":openai-client-test"))
+            implementation(project(":openai-model-catalog-impl"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

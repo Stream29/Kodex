@@ -2,7 +2,8 @@ package io.github.stream29.codex.lite.agentstate.impl
 
 import io.github.stream29.codex.lite.agentcontext.prefix.render.render as renderCollaborationMode
 import io.github.stream29.codex.lite.agentcontext.prefix.render.renderMultiAgentMode
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
+import io.github.stream29.codex.lite.agentcontext.contract.AgentContextSettings
+import io.github.stream29.codex.lite.agentcontext.prefix.impl.AgentContextPrefixResolver
 import io.github.stream29.codex.lite.agentcontext.prefix.render.render
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
@@ -11,6 +12,7 @@ import io.github.stream29.codex.lite.agentstate.contract.canCompact
 import io.github.stream29.codex.lite.agentstate.contract.canMarkNewTurn
 import io.github.stream29.codex.lite.agentstate.contract.canRequestResponseApi
 import io.github.stream29.codex.lite.agentstate.contract.canRevert
+import io.github.stream29.codex.lite.agentstate.tool.visibleToolSpecs
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
@@ -21,6 +23,7 @@ import io.github.stream29.codex.lite.agentstorage.contract.prevIndex
 import io.github.stream29.codex.lite.agentstorage.contract.revert
 import io.github.stream29.codex.lite.agentstorage.contract.revertWithTransaction
 import io.github.stream29.codex.lite.agentstorage.contract.setWithTransaction
+import io.github.stream29.codex.lite.mcp.contract.McpService
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.CodexResponsesMetadata
 import io.github.stream29.codex.lite.openai.CodexResponsesRequestKind
@@ -35,7 +38,6 @@ import io.github.stream29.codex.lite.openai.CompactionReason
 import io.github.stream29.codex.lite.openai.CompactionTrigger
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
-import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.codexRequestWindowId
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
@@ -62,20 +64,19 @@ import kotlin.uuid.Uuid
  * initial phase is reconstructed from persisted history rather than assumed
  * from the newest global index, which may belong to another timeline.
  *
- * [contextPrefixProvider] supplies the complete structured request prefix.
- * It is resolved for every normal Responses request and is never persisted or
- * included in remote compaction input.
+ * [contextSettings] is observed for every normal Responses request. This state
+ * resolves the complete context prefix internally; the prefix is never
+ * persisted or included in remote compaction input.
  *
- * [toolSearchToolSpec] is required and evaluated once for every normal
- * Responses request and remote compaction request. This lets dynamic MCP
- * catalogs change without moving complete request-tool assembly outside the
- * state layer.
+ * [mcpService] is sampled once for every normal Responses request and remote
+ * compaction request. AgentState derives the matching tool-search definition
+ * internally and never closes the application-owned service.
  */
 public suspend fun CoroutineScope.CodexAgentState(
     client: OpenAiClient,
     storage: MutableCodexAgentStorage,
-    contextPrefixProvider: AgentContextPrefixProvider,
-    toolSearchToolSpec: suspend () -> ToolSpec.ToolSearch,
+    contextSettings: StateFlow<AgentContextSettings>,
+    mcpService: McpService,
 ): CodexAgentState {
     val stateScope = supervisorChildScope()
     try {
@@ -84,8 +85,8 @@ public suspend fun CoroutineScope.CodexAgentState(
             scope = stateScope,
             client = client,
             storage = storage,
-            contextPrefixProvider = contextPrefixProvider,
-            toolSearchToolSpec = toolSearchToolSpec,
+            contextSettings = contextSettings,
+            mcpService = mcpService,
             loadedLatestIndex = loadedLatestIndex,
             initialState = storage.stateAt(loadedLatestIndex),
         )
@@ -107,11 +108,13 @@ private class CodexAgentStateImpl(
     scope: CoroutineScope,
     private val client: OpenAiClient,
     override val storage: MutableCodexAgentStorage,
-    private val contextPrefixProvider: AgentContextPrefixProvider,
-    private val toolSearchToolSpec: suspend () -> ToolSpec.ToolSearch,
+    contextSettings: StateFlow<AgentContextSettings>,
+    private val mcpService: McpService,
     loadedLatestIndex: Int,
     initialState: CodexAgentStateValue,
 ) : CodexAgentState, CoroutineScope by scope {
+    private val contextPrefixResolver = AgentContextPrefixResolver(contextSettings)
+
     override val state: StateFlow<CodexAgentStateValue>
         field = MutableStateFlow(initialState)
 
@@ -139,7 +142,7 @@ private class CodexAgentStateImpl(
                 role = MessageRole.Developer,
                 content = listOf(ContentItem.InputText(settings.reasoning.effort.renderMultiAgentMode())),
             )
-            val contextPrefix = contextPrefixProvider(settings).render()
+            val contextPrefix = contextPrefixResolver.resolve(settings).render()
             val checkpoint = storage.compaction[snapshotIndex]
             val threadId = storage.id.toCodexThreadId()
             val windowId = checkpoint.codexRequestWindowId(threadId)
@@ -157,7 +160,7 @@ private class CodexAgentStateImpl(
                 request = settings.toResponsesApiRequest(
                     input = listOf(collaborationContext, multiAgentContext) + contextPrefix + durableInput,
                     clientMetadata = clientMetadata,
-                    tools = codexRequestToolSpecs(settings, toolSearchToolSpec()),
+                    tools = mcpService.visibleToolSpecs(settings),
                 ),
                 installationId = clientMetadata.installationId,
                 turnMetadata = clientMetadata.turnMetadata,
@@ -227,7 +230,7 @@ private class CodexAgentStateImpl(
                 request = settings.toResponsesApiRequest(
                     input = input + ResponseItem.CompactionTrigger,
                     clientMetadata = clientMetadata,
-                    tools = codexRequestToolSpecs(settings, toolSearchToolSpec()),
+                    tools = mcpService.visibleToolSpecs(settings),
                 ),
                 installationId = clientMetadata.installationId,
                 turnMetadata = clientMetadata.turnMetadata,

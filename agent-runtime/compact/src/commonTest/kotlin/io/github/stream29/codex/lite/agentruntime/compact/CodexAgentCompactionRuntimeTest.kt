@@ -6,7 +6,8 @@ import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
-import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
+import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
+import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
@@ -57,8 +58,8 @@ val codexAgentCompactionRuntimeTest by testSuite {
         val state = CodexAgentState(
             client = mockOpenAiClient {},
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         val runtime: CodexAgentRuntime = state.compactionRuntime(testModelCatalog())
         val agentState: CodexAgentStateContract = runtime
@@ -75,8 +76,8 @@ val codexAgentCompactionRuntimeTest by testSuite {
         val state = CodexAgentState(
             client = mockOpenAiClient {},
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         val runtime: CodexAgentRuntime = DelegatingRuntime(CodexAgentCompactionRuntime(state, testModelCatalog()))
 
@@ -108,8 +109,8 @@ val codexAgentCompactionRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         val runtime = CodexAgentCompactionRuntime(state, testModelCatalog())
 
@@ -169,8 +170,8 @@ val codexAgentCompactionRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         val runtime = CodexAgentCompactionRuntime(
             delegate = state,
@@ -231,8 +232,8 @@ val codexAgentCompactionRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         val runtime = CodexAgentCompactionRuntime(
             delegate = state,
@@ -274,8 +275,8 @@ val codexAgentCompactionRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         val runtime = CodexAgentCompactionRuntime(
             delegate = state,
@@ -358,8 +359,8 @@ val codexAgentCompactionRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         val runtime = CodexAgentCompactionRuntime(state, testModelCatalog())
 
@@ -396,8 +397,8 @@ val codexAgentCompactionRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         val runtime = CodexAgentCompactionRuntime(state, testModelCatalog())
 

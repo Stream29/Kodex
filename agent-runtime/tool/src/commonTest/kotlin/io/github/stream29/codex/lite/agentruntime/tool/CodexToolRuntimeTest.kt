@@ -5,7 +5,8 @@ import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
 import io.github.stream29.codex.lite.agentruntime.turnhook.turnHookRuntime
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
-import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
+import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
+import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.hook.contract.tool.HookToolInvocation
@@ -15,6 +16,7 @@ import io.github.stream29.codex.lite.hook.contract.tool.PostToolUseRequest
 import io.github.stream29.codex.lite.hook.contract.tool.PreToolUseResult
 import io.github.stream29.codex.lite.hook.contract.tool.ToolHooks
 import io.github.stream29.codex.lite.mcp.contract.McpService
+import io.github.stream29.codex.lite.mcp.contract.McpTool
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
@@ -34,7 +36,6 @@ import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
-import io.github.stream29.codex.lite.tool.contract.Tool
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -46,7 +47,6 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.toList
 import kotlinx.schema.json.PropertyBuilder
 import kotlinx.io.files.Path
@@ -85,8 +85,8 @@ val codexToolRuntimeTest by testSuite {
         val state = CodexAgentState(
             client = client,
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { mcpService.currentToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = mcpService,
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Use a tool.")))
         val runtime = RequestOnlyRuntime(state)
@@ -95,7 +95,10 @@ val codexToolRuntimeTest by testSuite {
         runtime.resume().toList()
 
         assertEquals(1, requests.size)
-        assertEquals(mcpService.currentToolSearchSpec(), requests.single().tools.last())
+        val toolSearchSpec = assertIs<ToolSpec.ToolSearch>(requests.single().tools.last())
+        assertTrue(toolSearchSpec.description.contains("- shared: Tools exposed by shared."))
+        assertTrue(toolSearchSpec.description.contains("Codex Lite local tools").not())
+        assertTrue(toolSearchSpec.description.contains("MCP servers").not())
         assertEquals(listOf(0), storage.settings.indexes().toList())
     }
 
@@ -140,8 +143,8 @@ val codexToolRuntimeTest by testSuite {
         val state = CodexAgentState(
             client = client,
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { mcpService.currentToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = mcpService,
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Find and use the dynamic tool.")))
         val runtime = RequestOnlyRuntime(state)
@@ -195,15 +198,15 @@ val codexToolRuntimeTest by testSuite {
         val state = CodexAgentState(
             client = client,
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { mcpService.currentToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = mcpService,
         )
         val runtime = RequestOnlyRuntime(state)
             .testToolRuntime(client, mcpService, NoOpToolHooks)
 
         state.appendUserMessage(listOf(ContentItem.InputText("Use alpha.")))
         runtime.resume().toList()
-        mcpService.update(listOf(beta))
+        mcpService.tools.value = listOf(beta)
         state.appendUserMessage(listOf(ContentItem.InputText("Use beta.")))
         runtime.resume().toList()
 
@@ -243,8 +246,8 @@ val codexToolRuntimeTest by testSuite {
         val state = CodexAgentState(
             client = client,
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { mcpService.currentToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = mcpService,
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Use the tool.")))
         state.requestResponseApi().toList()
@@ -295,8 +298,8 @@ val codexToolRuntimeTest by testSuite {
         val state = CodexAgentState(
             client = client,
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { mcpService.currentToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = mcpService,
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Use MCP.")))
 
@@ -361,8 +364,8 @@ val codexToolRuntimeTest by testSuite {
         val state = CodexAgentState(
             client = client,
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { mcpService.currentToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = mcpService,
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Use the tool.")))
         val runtime = RequestOnlyRuntime(state)
@@ -429,8 +432,8 @@ val codexToolRuntimeTest by testSuite {
         val state = CodexAgentState(
             client = client,
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { mcpService.currentToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = mcpService,
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Use the tool.")))
 
@@ -595,21 +598,6 @@ private class RequestOnlyRuntime(
     }
 }
 
-private class TestMcpService(
-    initialTools: List<Tool> = emptyList(),
-) : McpService {
-    override val tools: StateFlow<List<Tool>>
-        field = MutableStateFlow(initialTools)
-
-    fun update(nextTools: List<Tool>) {
-        tools.value = nextTools
-    }
-
-    override suspend fun refresh(): Unit = Unit
-
-    override fun close(): Unit = Unit
-}
-
 private data class TestShellSettings(
     override val shell: Shell = Shell.default,
 ) : ShellSettings
@@ -623,7 +611,9 @@ private class RuntimeTestTool(
             output = FunctionCallOutputPayload.fromText("done"),
         )
     },
-) : Tool {
+) : McpTool {
+    override val serverName: String = namespace.removePrefix("mcp__")
+    override val serverInstructions: String = "Tools exposed by $serverName."
     override val spec: ToolSpec = runtimeNamespace(namespace, name)
 
     override suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput {
@@ -686,8 +676,8 @@ private suspend fun CoroutineScope.testStateWithCalls(
     val state = CodexAgentState(
         client = client,
         storage = InMemoryCodexAgentStorage(settings),
-        contextPrefixProvider = TestContextPrefixProvider,
-        toolSearchToolSpec = { mcpService.currentToolSearchSpec() },
+        contextSettings = TestAgentContextSettings,
+        mcpService = mcpService,
     )
     state.appendUserMessage(listOf(ContentItem.InputText("Use the tool.")))
     return ToolCallTestState(state, client)

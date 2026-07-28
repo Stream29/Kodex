@@ -94,6 +94,8 @@ val mcpServiceImplIoTest by testSuite(
                 namespace.name == "mcp__alpha" &&
                     assertIs<ResponsesApiTool>(namespace.tools.single()).name == "echo"
             }
+            assertEquals("alpha", alphaTool.serverName)
+            assertEquals("alpha tools", alphaTool.serverInstructions)
             val output = assertIs<ResponseItem.McpToolCallOutput>(
                 alphaTool.handle(
                     ResponseItem.FunctionCall(

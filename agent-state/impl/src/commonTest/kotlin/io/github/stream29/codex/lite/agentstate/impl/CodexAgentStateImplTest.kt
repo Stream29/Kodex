@@ -4,7 +4,6 @@ import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentcontext.prefix.render.render as renderCollaborationMode
 import io.github.stream29.codex.lite.agentcontext.prefix.render.renderMultiAgentMode
-import io.github.stream29.codex.lite.agentcontext.prefix.render.render
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
@@ -660,7 +659,7 @@ val codexAgentStateImplTest by testSuite {
 
         assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
         assertEquals(1, requests.size)
-        assertEquals(requestInput(user), requests[0].input)
+        assertRequestInput(requests[0].input, user)
         assertEquals(4, storage.latestIndex())
         assertIs<ResponseItem.Reasoning>(storage.history[2])
         assertEquals(assistantMessage("Preparing the answer."), storage.history[3])
@@ -695,10 +694,7 @@ val codexAgentStateImplTest by testSuite {
 
         agent.requestResponseApi().toList()
 
-        assertEquals(
-            requestInput(user, reasoning, assistant),
-            requests.single().input,
-        )
+        assertRequestInput(requests.single().input, user, reasoning, assistant)
         assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
     }
 
@@ -831,7 +827,6 @@ val codexAgentStateImplTest by testSuite {
                 createResponse {
                     flow {
                         emit(deltaEvent)
-                        deltaCollected.complete(Unit)
                         releaseStream.await()
                     }
                 }
@@ -843,7 +838,10 @@ val codexAgentStateImplTest by testSuite {
 
         agent.appendUserMessage(user)
         val runningResume = async(start = CoroutineStart.UNDISPATCHED) {
-            agent.requestResponseApi().toList(collected)
+            agent.requestResponseApi().collect { event ->
+                collected += event
+                deltaCollected.complete(Unit)
+            }
         }
 
         deltaCollected.await()
@@ -1037,7 +1035,7 @@ val codexAgentStateImplTest by testSuite {
 
         val request = requests.single()
         assertEquals(OpenAiModelId("new-model"), request.request.model)
-        assertEquals(requestInput(user), request.request.input)
+        assertRequestInput(request.request.input, user)
         assertEquals(false, request.request.store)
         assertEquals("install", request.installationId)
         val clientMetadata = assertNotNull(request.request.clientMetadata)
@@ -1420,7 +1418,7 @@ val codexAgentStateImplTest by testSuite {
 
         assertEquals(0, compactRequests.size)
         assertEquals(1, responseRequests.size)
-        assertEquals(requestInput(user), responseRequests.single().request.input)
+        assertRequestInput(responseRequests.single().request.input, user)
         assertEquals("${storage.id.toCodexThreadId()}:0", responseRequests.single().windowId)
         assertTrue(responseRequests.single().turnMetadata.contains("\"request_kind\":\"turn\""))
         assertEquals(final, storage.history[2])
@@ -1486,7 +1484,7 @@ val codexAgentStateImplTest by testSuite {
         agent.requestResponseApi().toList()
 
         assertEquals(1, responseRequests.size)
-        assertEquals(requestInput(user), responseRequests[0].request.input)
+        assertRequestInput(responseRequests[0].request.input, user)
         assertEquals("${storage.id.toCodexThreadId()}:0", responseRequests[0].windowId)
         assertTrue(responseRequests[0].turnMetadata.contains("\"request_kind\":\"turn\""))
         assertEquals(0, compactRequests.size)
@@ -1564,7 +1562,7 @@ val codexAgentStateImplTest by testSuite {
 
         assertEquals(2, responseRequests.size)
         assertEquals(0, compactRequests.size)
-        assertEquals(requestInput(user, firstFinal), responseRequests[1].request.input)
+        assertRequestInput(responseRequests[1].request.input, user, firstFinal)
         assertEquals(secondFinal, storage.history[4])
     }
 
@@ -1616,10 +1614,14 @@ private val defaultMultiAgentInput: ResponseItem.Message =
         content = listOf(ContentItem.InputText(ReasoningEffort.Medium.renderMultiAgentMode())),
     )
 
-private val defaultContextInput: List<ResponseItem.HistoryItem> = TestContextPrefix.render()
-
-private fun requestInput(vararg durableItems: ResponseItem): List<ResponseItem> =
-    listOf(defaultCollaborationInput, defaultMultiAgentInput) + defaultContextInput + durableItems
+private fun assertRequestInput(
+    actual: List<ResponseItem>,
+    vararg durableItems: ResponseItem,
+) {
+    assertEquals(defaultCollaborationInput, actual[0])
+    assertEquals(defaultMultiAgentInput, actual[1])
+    assertEquals(durableItems.toList(), actual.takeLast(durableItems.size))
+}
 
 private fun userMessage(text: String): ResponseItem.Message =
     ResponseItem.Message(

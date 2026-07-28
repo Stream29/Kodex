@@ -20,7 +20,12 @@ public interface CodexAgentSession : CoroutineScope {
     public val subagents: CodexSessionRepository
 }
 
-/** One collection of direct Agent entries in a recursive Codex session tree. */
+/**
+ * One collection of direct Agent entries in a recursive Codex session tree.
+ *
+ * Repeatedly opening the same active entry returns the same [CodexAgentSession]
+ * instance.
+ */
 public interface CodexSessionRepository : CoroutineScope {
     /** Returns direct Agent entry indices in stable repository order. */
     public suspend fun list(): List<Int>
