@@ -40,7 +40,7 @@ public val SpawnAgentOutputSchema: ObjectPropertyDefinition =
         additionalProperties = false
         property("task_name") {
             required = true
-            string { description = "Canonical task name for the spawned agent." }
+            string { description = "Full canonical Agent path for the spawned Agent." }
         }
         property("nickname") {
             required = true
@@ -53,12 +53,12 @@ public val SpawnAgentOutputSchema: ObjectPropertyDefinition =
     }
 
 public val SendMessageParametersSchema: ObjectPropertyDefinition = messageParametersSchema(
-    targetDescription = "Relative or canonical task name to message (from spawn_agent).",
+    targetDescription = "Canonical Agent path to message (from spawn_agent).",
     messageDescription = "Message text to queue on the target agent.",
 )
 
 public val FollowupTaskParametersSchema: ObjectPropertyDefinition = messageParametersSchema(
-    targetDescription = "Agent id or canonical task name to send a follow-up task to (from spawn_agent).",
+    targetDescription = "Canonical Agent path to send a follow-up task to (from spawn_agent).",
     messageDescription = "Message text to send to the target agent.",
 )
 
@@ -92,7 +92,7 @@ public val InterruptAgentParametersSchema: ObjectPropertyDefinition =
         additionalProperties = false
         property("target") {
             required = true
-            string { description = "Agent id or canonical task name to interrupt (from spawn_agent)." }
+            string { description = "Canonical Agent path to interrupt (from spawn_agent)." }
         }
     }
 
@@ -110,7 +110,7 @@ public val ListAgentsParametersSchema: ObjectPropertyDefinition =
         additionalProperties = false
         property("path_prefix") {
             string {
-                description = "Task-path prefix filter without a trailing slash. Omit to list all live agents."
+                description = "Canonical Agent-path prefix without a trailing slash. Omit to list all live agents."
             }
         }
     }
@@ -126,7 +126,7 @@ public val ListAgentsOutputSchema: ObjectPropertyDefinition =
                     additionalProperties = false
                     property("agent_name") {
                         required = true
-                        string { description = "Canonical task name for the agent." }
+                        string { description = "Full canonical Agent path for the Agent." }
                     }
                     property("agent_status") {
                         required = true

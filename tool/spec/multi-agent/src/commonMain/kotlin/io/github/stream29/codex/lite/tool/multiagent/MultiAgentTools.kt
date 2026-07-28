@@ -17,7 +17,7 @@ public object MultiAgentTools {
 
     public val spawnAgentSpec: ResponsesApiTool = ResponsesApiTool(
         name = SpawnAgentName,
-        description = "Spawns an agent to work on a concrete, bounded task. The child receives a canonical task name and can use the same Multi-agent tools as its parent. It inherits the current model by default; use fork_turns to select none, all, or a positive number of recent turns.",
+        description = "Spawns an agent to work on a concrete, bounded task. The child receives its full canonical Agent path and can use the same Multi-agent tools as its parent. It inherits the current model by default; use fork_turns to select none, all, or a positive number of recent turns.",
         parameters = SpawnAgentParametersSchema,
         outputSchema = SpawnAgentOutputSchema,
     )

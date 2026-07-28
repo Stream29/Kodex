@@ -48,7 +48,7 @@ public data class SpawnAgentArgs(
  * Successful `spawn_agent` result.
  *
  * @property nickname Nullable because Codex Lite does not require a separate nickname;
- * `null` means the canonical [taskName] is the only display identity.
+ * `null` means the canonical full Agent path in [taskName] is the only display identity.
  */
 @Serializable
 public data class SpawnAgentResult(
