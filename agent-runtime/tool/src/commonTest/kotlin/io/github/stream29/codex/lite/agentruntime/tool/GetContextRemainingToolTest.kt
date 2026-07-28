@@ -2,12 +2,8 @@ package io.github.stream29.codex.lite.agentruntime.tool
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentruntime.compact.compactionRuntime
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextPrefixProvider
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentEnvironment
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentsMdInstruction
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.EnvironmentContext
-import io.github.stream29.codex.lite.agentcontext.skill.contract.AvailableSkill
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
+import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
@@ -19,30 +15,11 @@ import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.codex.lite.tool.getcontextremaining.GetContextRemainingTools
-import kotlinx.datetime.LocalDate
-import kotlinx.datetime.TimeZone
+import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
+import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.io.files.Path
 import kotlin.test.assertEquals
-
-private val getContextRemainingTestPrefixProvider: AgentContextPrefixProvider =
-    object : AgentContextPrefixProvider {
-        override val environmentContext: EnvironmentContext =
-            EnvironmentContext(
-                environments = listOf(
-                    AgentEnvironment(
-                        id = "test",
-                        cwd = Path("/workspace"),
-                        shell = "bash",
-                    ),
-                ),
-                currentDate = LocalDate(2026, 7, 18),
-                timeZone = TimeZone.UTC,
-            )
-
-        override val availableSkills: List<AvailableSkill> = emptyList()
-
-        override val agentMd: List<AgentsMdInstruction> = emptyList()
-    }
 
 private fun getContextRemainingTestCatalog(): OpenAiModelCatalog =
     OpenAiModelCatalog(
@@ -53,6 +30,11 @@ private fun getContextRemainingTestCatalog(): OpenAiModelCatalog =
     )
 
 val getContextRemainingToolTest by testSuite {
+    testFixture {
+        testSuiteCoroutineScope.supervisorChildScope()
+    } closeWith {
+        cancelAndJoin()
+    } asContextForEach {
     test("reads the same current budget used by the compaction runtime") {
         val storage = InMemoryCodexAgentStorage(
             CodexAgentSettings(
@@ -64,7 +46,8 @@ val getContextRemainingToolTest by testSuite {
         val state = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = getContextRemainingTestPrefixProvider,
+            contextPrefixProvider = TestContextPrefixProvider,
+            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
         )
         val catalog = getContextRemainingTestCatalog()
         val runtime = state.compactionRuntime(catalog)
@@ -81,5 +64,6 @@ val getContextRemainingToolTest by testSuite {
             "You have 40 tokens left in this context window.",
             (output.output.body as FunctionCallOutputBody.Text).text,
         )
+    }
     }
 }

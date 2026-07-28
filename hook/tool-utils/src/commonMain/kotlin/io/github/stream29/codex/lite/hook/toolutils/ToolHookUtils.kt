@@ -55,6 +55,22 @@ public suspend fun ToolHooks.runPostToolUse(
     )
 }
 
+/** Projects a PreToolUse rejection into the corresponding model-visible tool output. */
+public fun ResponseItem.ToolCall.toHookBlockedOutput(reason: String): ResponseItem.ToolCallOutput =
+    when (this) {
+        is ResponseItem.FunctionCall -> ResponseItem.FunctionCallOutput(
+            callId = callId,
+            output = FunctionCallOutputPayload.fromText(reason).copy(success = false),
+        )
+
+        is ResponseItem.CustomToolCall -> ResponseItem.CustomToolCallOutput(
+            callId = callId,
+            output = FunctionCallOutputPayload.fromText(reason).copy(success = false),
+        )
+
+        is ResponseItem.ClientToolSearchCall -> error("Client tool search does not run Tool Hooks.")
+    }
+
 private data class ToolHookDescriptor(
     val toolName: String,
     val input: JsonElement,

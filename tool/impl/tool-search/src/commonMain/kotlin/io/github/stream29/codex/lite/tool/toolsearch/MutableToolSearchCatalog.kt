@@ -11,7 +11,7 @@ import kotlinx.coroutines.sync.withLock
  * [replaceDocuments] publishes a complete ordered snapshot. The BM25 index is
  * rebuilt lazily only when that snapshot changes.
  */
-public class ToolSearchCatalog(
+public class MutableToolSearchCatalog(
     initialDocuments: List<ToolSearchDocument>,
 ) {
     private val documents = MutableStateFlow(initialDocuments.toList())

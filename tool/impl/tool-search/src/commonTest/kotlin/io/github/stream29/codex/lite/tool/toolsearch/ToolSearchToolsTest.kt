@@ -24,7 +24,7 @@ private fun tool(name: String, description: String): ResponsesApiTool =
 
 val toolSearchToolsTest by testSuite {
     test("empty catalog still exposes a client tool search spec") {
-        val spec = ToolSearchCatalog(emptyList()).currentSpec()
+        val spec = MutableToolSearchCatalog(emptyList()).currentSpec()
 
         assertEquals("client", spec.execution)
         assertTrue(spec.description.contains("None currently enabled."))
@@ -176,7 +176,7 @@ val toolSearchToolsTest by testSuite {
         val first = tool("first_tool", "First tool")
         val second = tool("second_tool", "Second tool")
         var documents = first.toToolSearchDocuments()
-        val catalog = ToolSearchCatalog(documents)
+        val catalog = MutableToolSearchCatalog(documents)
 
         assertIs<ToolSpec.ToolSearch>(catalog.currentSpec())
         catalog.search(SearchToolCallParams(query = "first"))
