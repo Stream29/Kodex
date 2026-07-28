@@ -10,16 +10,17 @@ import io.github.stream29.codex.lite.hook.contract.tool.PostToolUseRequest
 import io.github.stream29.codex.lite.hook.contract.tool.PreToolUseResult
 import io.github.stream29.codex.lite.hook.contract.session.SessionEndRequest
 import io.github.stream29.codex.lite.hook.contract.session.SessionStartRequest
-import io.github.stream29.codex.lite.hook.contract.session.SessionStartResult
 import io.github.stream29.codex.lite.hook.contract.turn.StopRequest
 import io.github.stream29.codex.lite.hook.contract.turn.StopResult
 import io.github.stream29.codex.lite.hook.contract.turn.UserPromptSubmitRequest
 import io.github.stream29.codex.lite.hook.contract.turn.UserPromptSubmitResult
 import io.github.stream29.codex.lite.hook.impl.projection.CompactCommandInputWire
+import io.github.stream29.codex.lite.hook.impl.projection.CloseSessionEndReason
 import io.github.stream29.codex.lite.hook.impl.projection.HookJson
 import io.github.stream29.codex.lite.hook.impl.projection.PermissionRequestCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.PostToolUseCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.PreToolUseCommandInputWire
+import io.github.stream29.codex.lite.hook.impl.projection.ResumeSessionStartSource
 import io.github.stream29.codex.lite.hook.impl.projection.SessionEndCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.SessionStartCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.StopCommandInputWire
@@ -28,7 +29,6 @@ import io.github.stream29.codex.lite.hook.impl.projection.toPostCompactCommandIn
 import io.github.stream29.codex.lite.hook.impl.projection.toPermissionRequestResult
 import io.github.stream29.codex.lite.hook.impl.projection.toPreCompactCommandInputWire
 import io.github.stream29.codex.lite.hook.impl.projection.toPreToolUseResult
-import io.github.stream29.codex.lite.hook.impl.projection.toSessionStartResult
 import io.github.stream29.codex.lite.hook.impl.projection.toStopResult
 import io.github.stream29.codex.lite.hook.impl.projection.toUserPromptSubmitResult
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
@@ -65,11 +65,11 @@ public class CodexHooksImpl internal constructor(
             initialValue = settings.value.hooks.resolveHooks(),
         )
 
-    override suspend fun onSessionStart(request: SessionStartRequest): SessionStartResult {
+    override suspend fun onSessionStart(request: SessionStartRequest) {
         val hooks = currentHooks()
         val context = request.context
-        val completed = shellClient.runHooks(
-            hooks = hooks.sessionStart.matching(listOf(request.source.wireName)),
+        shellClient.runHooks(
+            hooks = hooks.sessionStart.matching(listOf(ResumeSessionStartSource)),
             inputJson = HookJson.encodeToString(
                 SessionStartCommandInputWire(
                     sessionId = context.sessionId,
@@ -77,25 +77,17 @@ public class CodexHooksImpl internal constructor(
                     cwd = context.cwd.toString(),
                     model = context.model,
                     permissionMode = context.permissionMode.wireName,
-                    source = request.source.wireName,
                 ),
             ),
             cwd = context.cwd,
-        ).map(HookRawResult::toSessionStartResult)
-        val contexts = completed.flatMap { result -> result.additionalContexts }
-        val stopped = completed.firstNotNullOfOrNull { result -> result as? SessionStartResult.Stop }
-        return if (stopped == null) {
-            SessionStartResult.Continue(contexts)
-        } else {
-            SessionStartResult.Stop(stopped.reason, contexts)
-        }
+        )
     }
 
     override suspend fun onSessionEnd(request: SessionEndRequest) {
         val hooks = currentHooks()
         val context = request.context
         shellClient.runHooks(
-            hooks = hooks.sessionEnd.matching(listOf(request.reason.wireName)),
+            hooks = hooks.sessionEnd.matching(listOf(CloseSessionEndReason)),
             inputJson = HookJson.encodeToString(
                 SessionEndCommandInputWire(
                     sessionId = context.sessionId,
@@ -103,7 +95,6 @@ public class CodexHooksImpl internal constructor(
                     cwd = context.cwd.toString(),
                     model = context.model,
                     permissionMode = context.permissionMode.wireName,
-                    reason = request.reason.wireName,
                 ),
             ),
             cwd = context.cwd,

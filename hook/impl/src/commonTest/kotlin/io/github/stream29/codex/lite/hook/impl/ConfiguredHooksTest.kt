@@ -268,7 +268,6 @@ val configuredHooksTest by testSuite(
                     cwd = session.cwd.toString(),
                     model = session.model,
                     permissionMode = session.permissionMode.wireName,
-                    source = "startup",
                 ),
             ),
             "SessionEnd" to HookJson.encodeToString(
@@ -278,7 +277,6 @@ val configuredHooksTest by testSuite(
                     cwd = session.cwd.toString(),
                     model = session.model,
                     permissionMode = session.permissionMode.wireName,
-                    reason = "shutdown",
                 ),
             ),
             "UserPromptSubmit" to HookJson.encodeToString(
@@ -315,6 +313,22 @@ val configuredHooksTest by testSuite(
                     .content,
             )
         }
+        assertEquals(
+            "resume",
+            HookJson.parseToJsonElement(encoded.toMap().getValue("SessionStart"))
+                .jsonObject
+                .getValue("source")
+                .jsonPrimitive
+                .content,
+        )
+        assertEquals(
+            "close",
+            HookJson.parseToJsonElement(encoded.toMap().getValue("SessionEnd"))
+                .jsonObject
+                .getValue("reason")
+                .jsonPrimitive
+                .content,
+        )
     }
 
     test("pre tool use ignores updated input and preserves deny") {

@@ -13,8 +13,6 @@ import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
 import io.github.stream29.codex.lite.hook.contract.HookConfiguration
 import io.github.stream29.codex.lite.hook.contract.HookSettings
-import io.github.stream29.codex.lite.hook.contract.session.SessionEndReason
-import io.github.stream29.codex.lite.hook.contract.session.SessionStartSource
 import io.github.stream29.codex.lite.hook.impl.CodexHooksImpl
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
@@ -135,11 +133,7 @@ private suspend fun runFreshSessionHookIntegration() {
             )
             .turnHookRuntime(hooks)
         stateJob = state.coroutineContext[Job]
-        runtime.installSessionHooks(
-            hooks = hooks,
-            source = SessionStartSource.Startup,
-            endReason = { SessionEndReason.Shutdown },
-        )
+        runtime.installSessionHooks(hooks)
 
         val prompt = "Reply with exactly $HookIntegrationMarker and no other text."
         runtime.appendUserMessage(listOf(ContentItem.InputText(prompt)))
@@ -158,13 +152,13 @@ private suspend fun runFreshSessionHookIntegration() {
             setOf(hookSessionId),
             requests.map { request -> request.getValue("session_id").jsonPrimitive.content }.toSet(),
         )
-        assertEquals("startup", requests[0].getValue("source").jsonPrimitive.content)
+        assertEquals("resume", requests[0].getValue("source").jsonPrimitive.content)
         assertEquals(prompt, requests[1].getValue("prompt").jsonPrimitive.content)
         assertEquals(false, requests[2].getValue("stop_hook_active").jsonPrimitive.boolean)
         assertTrue(
             requests[2].getValue("last_assistant_message").jsonPrimitive.content.contains(HookIntegrationMarker),
         )
-        assertEquals("shutdown", requests[3].getValue("reason").jsonPrimitive.content)
+        assertEquals("close", requests[3].getValue("reason").jsonPrimitive.content)
     } finally {
         stateJob?.cancelAndJoin()
         hooks?.cancel()

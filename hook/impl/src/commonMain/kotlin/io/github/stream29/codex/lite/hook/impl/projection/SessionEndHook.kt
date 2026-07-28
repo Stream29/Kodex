@@ -14,5 +14,9 @@ internal data class SessionEndCommandInputWire(
     @SerialName("hook_event_name") val hookEventName: String = "SessionEnd",
     val model: String,
     @SerialName("permission_mode") val permissionMode: String,
-    val reason: String,
-)
+) {
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    val reason: String = CloseSessionEndReason
+}
+
+internal const val CloseSessionEndReason: String = "close"
