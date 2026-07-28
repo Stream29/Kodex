@@ -55,7 +55,7 @@ private suspend fun testUnifiedExecToolClient(
 ): UnifiedExecToolClient =
     CoroutineScope(currentCoroutineContext()).UnifiedExecToolClient(
         settings = settings,
-        workingDirectory = workingDirectory,
+        workingDirectory = MutableStateFlow(workingDirectory),
     )
 
 private fun List<Tool>.toolNamed(name: String): Tool =

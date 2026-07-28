@@ -87,6 +87,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
@@ -832,7 +833,9 @@ val openAiViewImageToolRuntimeProbeTest by testSuite {
             "real tool runtime discovers view_image and reads a local image",
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
         ) { testScope ->
-            val viewImageTool = ViewImageTools.createTool(ViewImageToolClient(root = imageRoot))
+            val viewImageTool = ViewImageTools.createTool(
+                ViewImageToolClient(root = MutableStateFlow(imageRoot)),
+            )
             val toolSearchCatalog = ToolSearchCatalog(
                 viewImageTool.spec.toToolSearchDocuments(
                     ToolSearchSourceInfo(

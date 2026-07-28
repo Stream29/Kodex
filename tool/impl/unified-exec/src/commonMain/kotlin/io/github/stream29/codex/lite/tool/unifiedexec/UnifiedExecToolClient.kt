@@ -7,6 +7,7 @@ import io.github.stream29.codex.lite.utils.shellclient.ShellClient
 import io.github.stream29.codex.lite.utils.shellclient.ShellProcessCommand
 import io.github.stream29.codex.lite.utils.shellclient.ShellSettings
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
@@ -37,7 +38,7 @@ public const val UnifiedExecMaximumSessionCount: Int = 64
  * the current [ShellSettings.shell] value when its process starts.
  */
 public class UnifiedExecToolClient internal constructor(
-    private val workingDirectory: Path = Path("."),
+    private val workingDirectory: StateFlow<Path>,
     private val settings: StateFlow<ShellSettings>,
     private val shellClient: ShellClient,
 ) : AutoCloseable {
@@ -49,7 +50,7 @@ public class UnifiedExecToolClient internal constructor(
         arguments.validate()
         val started = TimeSource.Monotonic.markNow()
         val session = runProcessOperation {
-            shellClient.start(arguments.toShellProcessCommand(workingDirectory, settings.value.shell))
+            shellClient.start(arguments.toShellProcessCommand(workingDirectory.value, settings.value.shell))
         }
         val managed = try {
             registryMutex.withLock {
@@ -182,7 +183,7 @@ public class UnifiedExecToolClient internal constructor(
 /** Creates a unified-exec client with a dedicated shell client under this scope. */
 public fun CoroutineScope.UnifiedExecToolClient(
     settings: StateFlow<ShellSettings>,
-    workingDirectory: Path = Path("."),
+    workingDirectory: StateFlow<Path> = MutableStateFlow(Path(".")),
 ): UnifiedExecToolClient =
     UnifiedExecToolClient(
         workingDirectory = workingDirectory,
