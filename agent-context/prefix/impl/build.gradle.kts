@@ -5,6 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            api(project(":agent-context-contract"))
             api(project(":agent-context-prefix-contract"))
             api(project(":agent-context-skill-contract"))
             api(libs.kotlinx.coroutines.core)

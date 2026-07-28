@@ -2,7 +2,8 @@ package io.github.stream29.codex.lite.agentruntime.contextwindow
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
-import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
+import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
+import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
@@ -32,8 +33,8 @@ private suspend fun CoroutineScope.testState(storage: MutableCodexAgentStorage) 
     CodexAgentState(
         client = mockOpenAiClient(),
         storage = storage,
-        contextPrefixProvider = TestContextPrefixProvider,
-        toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+        contextSettings = TestAgentContextSettings,
+        mcpService = TestMcpService(),
     )
 
 val contextWindowTokenBudgetTest by testSuite {

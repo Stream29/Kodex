@@ -5,7 +5,8 @@ import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState as createCodexAgentState
-import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
+import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
+import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
@@ -44,8 +45,8 @@ val steerRuntimeTest by testSuite {
         val state = createCodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         assertEquals(CodexAgentStateValue.Empty, state.state.value)
         val pendingSteer = MutableStateFlow<List<ContentItem>?>(textContent("first"))
@@ -65,8 +66,8 @@ val steerRuntimeTest by testSuite {
         val state = createCodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         state.appendUserMessage(textContent("initial"))
         val turnId = storage.settings.latestValue().turnId
@@ -103,8 +104,8 @@ val steerRuntimeTest by testSuite {
         val state = createCodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         state.injectHistory(
             listOf(
@@ -132,8 +133,8 @@ val steerRuntimeTest by testSuite {
         val state = createCodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         val call = ResponseItem.FunctionCall(
             name = "test_tool",
@@ -172,8 +173,8 @@ val steerRuntimeTest by testSuite {
         val state = createCodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         state.appendUserMessage(textContent("initial"))
         val interruptingInput = textContent("interrupt instead")
@@ -193,8 +194,8 @@ val steerRuntimeTest by testSuite {
         val state = createCodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         state.appendUserMessage(textContent("initial"))
         state.injectHistory(

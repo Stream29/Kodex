@@ -4,6 +4,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.codex.lite.mcp.contract.McpServerConfiguration
 import io.github.stream29.codex.lite.mcp.contract.McpService
 import io.github.stream29.codex.lite.mcp.contract.McpSettings
+import io.github.stream29.codex.lite.mcp.contract.McpTool
 import io.github.stream29.codex.lite.mcp.stdio.openMcpStdioTransport
 import io.github.stream29.codex.lite.mcp.streamablehttp.McpStreamableHttpClient
 import io.github.stream29.codex.lite.mcp.streamablehttp.openMcpStreamableHttpTransport
@@ -49,7 +50,7 @@ public class McpServiceImpl internal constructor(
     private val processClient: ProcessClient = scope.ProcessClient()
     private var state: McpServiceState = McpServiceState()
 
-    override val tools: StateFlow<List<io.github.stream29.codex.lite.tool.contract.Tool>>
+    override val tools: StateFlow<List<McpTool>>
         field = MutableStateFlow(emptyList())
 
     init {

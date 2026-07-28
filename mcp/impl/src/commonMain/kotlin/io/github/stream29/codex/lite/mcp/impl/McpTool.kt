@@ -1,12 +1,12 @@
 package io.github.stream29.codex.lite.mcp.impl
 
 import io.github.stream29.codex.lite.mcp.contract.McpServerConfiguration
+import io.github.stream29.codex.lite.mcp.contract.McpTool
 import io.github.stream29.codex.lite.openai.CallToolResult
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ToolSpec
-import io.github.stream29.codex.lite.tool.contract.Tool
 import io.github.stream29.codex.lite.utils.coroutines.runCatchingCancellable
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpError
@@ -26,7 +26,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.put
 import io.modelcontextprotocol.kotlin.sdk.types.Tool as SdkTool
 
 internal data class ActiveMcpClient(
@@ -37,17 +36,20 @@ internal data class ActiveMcpClient(
     val tools: List<SdkTool>,
 )
 
-internal fun Map<String, ActiveMcpClient>.toMcpTools(): List<Tool> =
+internal fun Map<String, ActiveMcpClient>.toMcpTools(): List<McpTool> =
     values.flatMap { activeClient ->
         activeClient.tools
             .distinctBy(SdkTool::name)
-            .map { tool -> McpTool(activeClient, tool) }
+            .map { tool -> McpToolImpl(activeClient, tool) }
     }
 
-private class McpTool(
+private class McpToolImpl(
     private val activeClient: ActiveMcpClient,
     private val tool: SdkTool,
-) : Tool {
+) : McpTool {
+    override val serverName: String = activeClient.name
+    override val serverInstructions: String = activeClient.instructions
+
     override val spec: ToolSpec = ResponsesApiNamespace(
         name = "mcp__${activeClient.name.toModelToolName()}",
         description = activeClient.instructions,

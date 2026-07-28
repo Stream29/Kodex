@@ -38,6 +38,11 @@ private class FileSystemSubagentRepository(
     scope: CoroutineScope,
 ) : CodexSessionRepository, CoroutineScope by scope {
     private val entriesMutex: Mutex = Mutex()
+    private val openSessions: MutableMap<Int, FileSystemCodexAgentSession> = mutableMapOf()
+
+    init {
+        coroutineContext[Job]?.invokeOnCompletion { openSessions.clear() }
+    }
 
     override suspend fun list(): List<Int> = entriesMutex.withLock {
         requireActive()
@@ -58,6 +63,10 @@ private class FileSystemSubagentRepository(
         require(fileSystem.metadataOrNull(agentDirectory)?.isDirectory == true) {
             "Agent entry does not exist: $entryIndex"
         }
+        openSessions[entryIndex]?.let { session ->
+            if (session.coroutineContext[Job]?.isActive == true) return@withLock session
+            openSessions.remove(entryIndex)
+        }
         val agentScope = supervisorChildScope()
         FileSystemCodexAgentSession(
             directory = agentDirectory,
@@ -66,7 +75,9 @@ private class FileSystemSubagentRepository(
             scope = agentScope,
             storage = FileSystemAgentStorage(agentDirectory, fileSystem)
                 .cached(agentScope, valueCacheSize),
-        )
+        ).also { session ->
+            openSessions[entryIndex] = session
+        }
     }
 
     override suspend fun delete(entryIndex: Int) {
@@ -77,7 +88,10 @@ private class FileSystemSubagentRepository(
             require(fileSystem.metadataOrNull(agentDirectory)?.isDirectory == true) {
                 "Agent entry does not exist: $entryIndex"
             }
-            deleteRecursively(agentDirectory, fileSystem)
+            withContext(NonCancellable) {
+                openSessions.remove(entryIndex)?.cancelAndJoin()
+                deleteRecursively(agentDirectory, fileSystem)
+            }
         }
     }
 

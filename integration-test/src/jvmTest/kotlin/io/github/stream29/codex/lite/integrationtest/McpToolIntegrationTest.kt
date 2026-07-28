@@ -8,7 +8,8 @@ import io.github.stream29.codex.lite.agentruntime.tool.toolRuntime
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
-import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
+import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
+import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.hook.contract.tool.NoOpToolHooks
@@ -88,8 +89,8 @@ val openAiMcpToolRoundTripProbeTest by testSuite {
                 val state = CodexAgentState(
                     client = client,
                     storage = storage,
-                    contextPrefixProvider = TestContextPrefixProvider,
-                    toolSearchToolSpec = toolSearchCatalog::currentSpec,
+                    contextSettings = TestAgentContextSettings,
+                    mcpService = service,
                 )
                 val runtime = McpRequestOnlyRuntime(state).toolRuntime(
                     tools = emptyList(),

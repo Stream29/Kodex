@@ -22,7 +22,7 @@ kotlin {
             implementation(project(":openai-client-test"))
             implementation(project(":openai-codex-cli-storage"))
             implementation(project(":openai-json-codec"))
-            implementation(project(":openai-model-catalog"))
+            implementation(project(":openai-model-catalog-impl"))
             implementation(project(":tool-impl-apply-patch"))
             implementation(project(":tool-impl-current-time"))
             implementation(project(":tool-impl-image-generation"))

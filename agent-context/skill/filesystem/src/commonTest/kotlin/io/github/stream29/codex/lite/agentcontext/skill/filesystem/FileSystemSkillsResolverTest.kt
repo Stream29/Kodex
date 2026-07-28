@@ -1,7 +1,7 @@
 package io.github.stream29.codex.lite.agentcontext.skill.filesystem
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextSettings
+import io.github.stream29.codex.lite.agentcontext.contract.AgentContextSettings
 import io.github.stream29.codex.lite.agentcontext.skill.contract.SkillResourceResult
 import io.github.stream29.codex.lite.agentcontext.prefix.skill.contract.SkillScope
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.CoroutineFileSystem

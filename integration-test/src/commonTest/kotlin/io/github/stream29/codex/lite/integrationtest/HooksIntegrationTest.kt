@@ -8,7 +8,8 @@ import io.github.stream29.codex.lite.agentruntime.turnhook.turnHookRuntime
 import io.github.stream29.codex.lite.agentsession.filesystem.FileSystemCodexSessionRepository
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
-import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
+import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
+import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
 import io.github.stream29.codex.lite.hook.contract.HookConfiguration
@@ -123,8 +124,8 @@ private suspend fun runFreshSessionHookIntegration() {
         val state = session.CodexAgentState(
             client = client,
             storage = session.storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
         val runtime = state
             .compactionRuntime(

@@ -47,11 +47,15 @@ public class InMemoryCodexSessionRepository internal constructor(
         requireOpen()
         require(entryIndex >= 0) { "Session entry index must be non-negative." }
         val root = requireSession(entryIndex)
-        return openRoots.getOrPut(entryIndex) {
-            InMemoryCodexAgentSession.openRoot(
-                node = root,
-                parentScope = this@InMemoryCodexSessionRepository,
-            )
+        openRoots[entryIndex]?.let { session ->
+            if (session.coroutineContext[Job]?.isActive == true) return@withLock session
+            openRoots.remove(entryIndex)
+        }
+        InMemoryCodexAgentSession.openRoot(
+            node = root,
+            parentScope = this@InMemoryCodexSessionRepository,
+        ).also { session ->
+            openRoots[entryIndex] = session
         }
     }
 
@@ -110,6 +114,11 @@ public class InMemoryCodexSessionRepository internal constructor(
         scope: CoroutineScope,
     ) : CodexSessionRepository, CoroutineScope by scope {
         private val entriesMutex: Mutex = Mutex()
+        private val openSessions: MutableMap<Int, InMemoryCodexAgentSession> = mutableMapOf()
+
+        init {
+            coroutineContext[Job]?.invokeOnCompletion { openSessions.clear() }
+        }
 
         override suspend fun list(): List<Int> = entriesMutex.withLock {
             requireActive()
@@ -129,20 +138,28 @@ public class InMemoryCodexSessionRepository internal constructor(
             val node = requireNotNull(children[entryIndex]) {
                 "No Agent entry exists at index $entryIndex."
             }
+            openSessions[entryIndex]?.let { session ->
+                if (session.coroutineContext[Job]?.isActive == true) return@withLock session
+                openSessions.remove(entryIndex)
+            }
             InMemoryCodexAgentSession(
                 node = node,
                 scope = supervisorChildScope(),
-            )
+            ).also { session ->
+                openSessions[entryIndex] = session
+            }
         }
 
         override suspend fun delete(entryIndex: Int) {
-            entriesMutex.withLock {
+            val openSession = entriesMutex.withLock {
                 requireActive()
                 require(entryIndex >= 0) { "Session entry index must be non-negative." }
                 requireNotNull(children.remove(entryIndex)) {
                     "No Agent entry exists at index $entryIndex."
                 }
+                openSessions.remove(entryIndex)
             }
+            withContext(NonCancellable) { openSession?.cancelAndJoin() }
         }
 
         private fun requireActive() {

@@ -5,7 +5,8 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentruntime.compact.compactionRuntime
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
-import io.github.stream29.codex.lite.agentstate.test.TestContextPrefixProvider
+import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
+import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.hook.contract.tool.HookToolInvocation
@@ -87,8 +88,8 @@ val planRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
 
         state.appendUserMessage(listOf(ContentItem.InputText("Make a plan.")))
@@ -148,8 +149,8 @@ val planRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
 
         state.appendUserMessage(listOf(ContentItem.InputText("Make a plan.")))
@@ -192,8 +193,8 @@ val planRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
 
         state.appendUserMessage(listOf(ContentItem.InputText("Make a plan.")))
@@ -229,8 +230,8 @@ val planRuntimeTest by testSuite {
                 }
             },
             storage = storage,
-            contextPrefixProvider = TestContextPrefixProvider,
-            toolSearchToolSpec = { ToolSearchTools.createToolSearchSpec() },
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
         )
 
         state.appendUserMessage(listOf(ContentItem.InputText("Call another tool.")))

@@ -2,6 +2,7 @@ package io.github.stream29.codex.lite.agentruntime.tool
 
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
+import io.github.stream29.codex.lite.agentstate.tool.toDeferredToolSearchDocuments
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.hook.contract.tool.PreToolUseResult
 import io.github.stream29.codex.lite.hook.contract.tool.ToolHooks
@@ -28,11 +29,7 @@ import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationToolCli
 import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationTools
 import io.github.stream29.codex.lite.tool.toolsearch.SearchToolCallParams
 import io.github.stream29.codex.lite.tool.toolsearch.MutableToolSearchCatalog
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchDocument
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchResult
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchSourceInfo
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
-import io.github.stream29.codex.lite.tool.toolsearch.toToolSearchDocuments
 import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecToolClient
 import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecTools
 import io.github.stream29.codex.lite.tool.viewimage.ViewImageToolClient
@@ -71,7 +68,7 @@ public class CodexToolRuntime internal constructor(
     private val toolHooks: ToolHooks,
     private val workingDirectory: MutableStateFlow<Path>,
     private val toolSearchCatalog: MutableToolSearchCatalog = MutableToolSearchCatalog(
-        deferredToolSearchDocuments(mcpService.tools.value),
+        mcpService.tools.value.toDeferredToolSearchDocuments(),
     ),
 ) : CodexAgentRuntime by delegate, AutoCloseable {
     init {
@@ -84,7 +81,7 @@ public class CodexToolRuntime internal constructor(
 
     override fun resume(): Flow<ResponsesStreamEvent> = channelFlow {
         val mcpTools = mcpService.tools.value.toList()
-        toolSearchCatalog.replaceDocuments(deferredToolSearchDocuments(mcpTools))
+        toolSearchCatalog.replaceDocuments(mcpTools.toDeferredToolSearchDocuments())
         val toolsByName = (fixedTools + mcpTools).toToolMap()
         while (true) {
             var pending = state.value as? CodexAgentStateValue.ToolPending
@@ -210,37 +207,6 @@ public suspend fun CodexAgentRuntime.toolRuntime(
         throw failure
     }
 }
-
-/**
- * Returns the model-visible tool-search spec for the current MCP snapshot.
- *
- * The runtime builds its private search index from the same fixed documents
- * and [McpService.tools] source when a resume starts.
- */
-public fun McpService.currentToolSearchSpec(): ToolSpec.ToolSearch =
-    ToolSearchTools.createToolSearchSpec(
-        searchableSources = deferredToolSearchDocuments(tools.value)
-            .mapNotNull(ToolSearchDocument::sourceInfo),
-    )
-
-private val LocalToolSearchSource = ToolSearchSourceInfo(
-    name = "Codex Lite local tools",
-    description = "Tools available in the current local Codex Lite session.",
-)
-
-private val McpToolSearchSource = ToolSearchSourceInfo(
-    name = "MCP servers",
-    description = "Tools exposed by the currently configured MCP servers.",
-)
-
-private val LocalDeferredToolSearchDocuments: List<ToolSearchDocument> =
-    listOf(ViewImageTools.spec, ImageGenerationTools.spec)
-        .flatMap { spec -> spec.toToolSearchDocuments(LocalToolSearchSource) }
-
-private fun deferredToolSearchDocuments(mcpTools: List<Tool>): List<ToolSearchDocument> =
-    LocalDeferredToolSearchDocuments + mcpTools.flatMap { tool ->
-        tool.spec.toToolSearchDocuments(McpToolSearchSource)
-    }
 
 private fun List<Tool>.toToolMap(): Map<ToolName, Tool> {
     val routes = flatMap { tool ->
