@@ -32,10 +32,11 @@ import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
+import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
-import kotlinx.coroutines.yield
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
@@ -46,6 +47,11 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 val codexAgentCompactionRuntimeTest by testSuite {
+    testFixture {
+        testSuiteCoroutineScope.supervisorChildScope()
+    } closeWith {
+        cancelAndJoin()
+    } asContextForEach {
     test("runtime delegates the complete AgentState contract") {
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val state = CodexAgentState(
@@ -116,8 +122,7 @@ val codexAgentCompactionRuntimeTest by testSuite {
         }
 
         firstEventCollected.await()
-        yield()
-        assertEquals(true, productionCompleted.isCompleted)
+        productionCompleted.await()
 
         releaseConsumer.complete(Unit)
         runningResume.await()
@@ -403,6 +408,7 @@ val codexAgentCompactionRuntimeTest by testSuite {
         assertEquals(1, requests.size)
         assertEquals(CodexAgentStateValue.ToolPending(listOf(toolCall)), state.state.value)
         assertIs<ResponseItem.FunctionCall>(storage.history[2])
+    }
     }
 }
 

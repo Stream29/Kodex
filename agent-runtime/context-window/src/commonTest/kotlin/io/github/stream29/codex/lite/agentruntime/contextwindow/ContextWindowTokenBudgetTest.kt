@@ -13,6 +13,9 @@ import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
+import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -25,7 +28,7 @@ private fun testCatalog(): OpenAiModelCatalog =
         codexCliStorage = CodexCliStorage(Path(".codex-lite-test-model-catalog")),
     )
 
-private suspend fun testState(storage: MutableCodexAgentStorage) =
+private suspend fun CoroutineScope.testState(storage: MutableCodexAgentStorage) =
     CodexAgentState(
         client = mockOpenAiClient(),
         storage = storage,
@@ -34,6 +37,11 @@ private suspend fun testState(storage: MutableCodexAgentStorage) =
     )
 
 val contextWindowTokenBudgetTest by testSuite {
+    testFixture {
+        testSuiteCoroutineScope.supervisorChildScope()
+    } closeWith {
+        cancelAndJoin()
+    } asContextForEach {
     test("uses one storage snapshot to calculate remaining budget") {
         val storage = InMemoryCodexAgentStorage(
             CodexAgentSettings(
@@ -50,5 +58,6 @@ val contextWindowTokenBudgetTest by testSuite {
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
 
         assertNull(testState(storage).tokensUntilCompaction(testCatalog()))
+    }
     }
 }

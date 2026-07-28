@@ -28,6 +28,8 @@ import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
+import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.io.files.Path
@@ -36,6 +38,11 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 
 val turnHookRuntimeTest by testSuite {
+    testFixture {
+        testSuiteCoroutineScope.supervisorChildScope()
+    } closeWith {
+        cancelAndJoin()
+    } asContextForEach {
     test("user prompt hook runs before delegated resume and stores additional context") {
         val requests = mutableListOf<ResponsesApiRequest>()
         val hookRequests = mutableListOf<UserPromptSubmitRequest>()
@@ -267,6 +274,7 @@ val turnHookRuntimeTest by testSuite {
         assertEquals(2, turnIds.size)
         assertNotEquals(turnIds[0], turnIds[1])
         assertEquals(turnIds[1], storage.settings.latestValue().turnId)
+    }
     }
 }
 
