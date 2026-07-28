@@ -4,7 +4,9 @@ import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
+import io.github.stream29.codex.lite.agentstorage.contract.forkTo
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
+import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.contract.prevIndex
@@ -580,14 +582,20 @@ private suspend fun initializeSpawnStorage(
     val childSettings = sourceStorage.settings.latestValue().forSpawn(args, childPath)
     val forkBoundary = caller.forkBoundary()
     when (forkMode) {
-        SpawnForkMode.None -> child.runtime.initialize(childSettings)
+        SpawnForkMode.None -> child.runtime.modify { storage ->
+            storage.initialize(childSettings)
+        }
         SpawnForkMode.All -> {
-            child.runtime.initialize(sourceStorage, forkBoundary)
+            child.runtime.modify { storage ->
+                sourceStorage.forkTo(forkBoundary, storage)
+            }
             child.runtime.updateSettings(childSettings)
         }
 
         is SpawnForkMode.Recent -> {
-            child.runtime.initialize(childSettings)
+            child.runtime.modify { storage ->
+                storage.initialize(childSettings)
+            }
             child.runtime.injectHistory(caller.activeHistory(forkBoundary, forkMode.turns))
         }
     }

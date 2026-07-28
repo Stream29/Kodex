@@ -20,7 +20,7 @@ kotlin {
             implementation(project(":agent-context-prefix-render"))
             implementation(project(":agent-storage-in-memory"))
             implementation(project(":openai-client-test"))
-            implementation(project(":tool-impl-current-time"))
+            implementation(project(":tool-current-time"))
             implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(libs.kotlinx.coroutines.test)
         }

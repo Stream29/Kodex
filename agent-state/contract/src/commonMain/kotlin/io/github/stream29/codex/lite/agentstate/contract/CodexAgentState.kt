@@ -3,6 +3,7 @@ package io.github.stream29.codex.lite.agentstate.contract
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
+import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.openai.CompactionPhase
 import io.github.stream29.codex.lite.openai.CompactionReason
 import io.github.stream29.codex.lite.openai.CompactionTrigger
@@ -81,17 +82,12 @@ public val CodexAgentStateValue.canCompact: Boolean
         this == CodexAgentStateValue.AssistantMessage ||
         this == CodexAgentStateValue.ToolCompleted
 
-/** Whether reverting the current history is legal. */
-public val CodexAgentStateValue.canRevert: Boolean
-    get() = this == CodexAgentStateValue.Empty ||
-        this == CodexAgentStateValue.AssistantMessage
-
 /**
  * Observable atomic agent state.
  *
  * One state operates on exactly one AgentStorage. Session trees, parent-child
  * relationships, cross-Agent messages, and Agent scheduling belong to the
- * multi-Agent coordinator above this interface.
+ * ordinary Multi-agent tools installed by the runtime layer.
  *
  * This interface intentionally contains both observation and state-transition
  * operations while exposing [storage] only as read-only data.
@@ -123,6 +119,21 @@ public interface CodexAgentState : CoroutineScope {
      * Read-only persisted agent data.
      */
     public val storage: CodexAgentStorage
+
+    /**
+     * Runs one caller-defined storage mutation as an atomic AgentState write.
+     *
+     * The implementation exposes mutable storage only for [block]'s lifetime.
+     * After [block] exits, normally or exceptionally, it reloads [latestIndex]
+     * and [state] from the actual storage contents before releasing the write.
+     *
+     * Storage-level operations such as initialization, fork, and revert remain
+     * defined by the AgentStorage contract and should be invoked through this
+     * boundary when the storage belongs to a live AgentState.
+     */
+    public suspend fun <T> modify(
+        block: suspend (MutableCodexAgentStorage) -> T,
+    ): T
 
     /**
      * Executes exactly one model request from the current state, commits each
@@ -217,12 +228,4 @@ public interface CodexAgentState : CoroutineScope {
      */
     public suspend fun updateSettings(settings: CodexAgentSettings): Int
 
-    /**
-     * Destructively reverts to the snapshot immediately before [untilExclusive].
-     *
-     * The target must be the initial empty snapshot or a completed assistant
-     * turn. Implementations discard all later storage transitions, then publish
-     * the rebuilt state and latest index together.
-     */
-    public suspend fun revert(untilExclusive: Int): Int
 }
