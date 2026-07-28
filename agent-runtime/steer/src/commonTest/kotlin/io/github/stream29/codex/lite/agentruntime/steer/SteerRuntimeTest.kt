@@ -18,6 +18,8 @@ import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
+import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -32,6 +34,11 @@ import kotlin.test.assertIs
 import kotlin.test.assertNull
 
 val steerRuntimeTest by testSuite {
+    testFixture {
+        testSuiteCoroutineScope.supervisorChildScope()
+    } closeWith {
+        cancelAndJoin()
+    } asContextForEach {
     test("empty state accepts the first pending input") {
         val storage = InMemoryCodexAgentStorage(testSettings())
         val state = createCodexAgentState(
@@ -238,6 +245,7 @@ val steerRuntimeTest by testSuite {
             assertEquals(listOf(input), claims.filterNotNull())
             assertNull(pendingSteer.value)
         }
+    }
     }
 }
 

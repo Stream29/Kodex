@@ -34,6 +34,8 @@ import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.codex.lite.tool.plan.PlanTools
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
+import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.io.files.Path
@@ -43,6 +45,11 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 val planRuntimeTest by testSuite {
+    testFixture {
+        testSuiteCoroutineScope.supervisorChildScope()
+    } closeWith {
+        cancelAndJoin()
+    } asContextForEach {
     test("runtime persists a parsed plan with its tool output") {
         val plan = UpdatePlanArgs(
             explanation = "Start implementation.",
@@ -239,6 +246,7 @@ val planRuntimeTest by testSuite {
             listOf(call),
             assertIs<CodexAgentStateValue.ToolPending>(state.state.value).calls,
         )
+    }
     }
 }
 
