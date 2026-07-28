@@ -2,7 +2,7 @@ package io.github.stream29.codex.lite.tool.requestuserinput
 
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 
-/** Static model-facing schema for the runtime-owned `request_user_input` tool. */
+/** Static model-facing schema for the host-owned `request_user_input` tool. */
 public object RequestUserInputTools {
     public const val Name: String = "request_user_input"
 

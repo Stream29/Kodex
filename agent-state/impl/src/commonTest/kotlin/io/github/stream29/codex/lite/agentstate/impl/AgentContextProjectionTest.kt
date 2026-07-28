@@ -35,6 +35,8 @@ import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchSourceInfo
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
 import io.github.stream29.codex.lite.utils.shellclient.Shell
 import io.github.stream29.codex.lite.utils.shellclient.ShellType
+import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.datetime.TimeZone
@@ -44,6 +46,11 @@ import kotlin.test.assertEquals
 import kotlin.time.Clock
 
 val agentContextProjectionTest by testSuite {
+    testFixture {
+        testSuiteCoroutineScope.supervisorChildScope()
+    } closeWith {
+        cancelAndJoin()
+    } asContextForEach {
     test("projects AGENTS.md into a request without persisting it") {
         val storage = InMemoryCodexAgentStorage(settings())
         val requests = mutableListOf<ResponsesApiRequest>()
@@ -383,6 +390,7 @@ val agentContextProjectionTest by testSuite {
             ),
             requests.single().input,
         )
+    }
     }
 }
 

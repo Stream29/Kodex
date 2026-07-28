@@ -7,6 +7,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-session-contract"))
             implementation(project(":agent-storage-filesystem"))
+            implementation(project(":utils-coroutines"))
             implementation(project(":utils-filesystem-lease"))
             implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(project(":utils-read-write-mutex"))

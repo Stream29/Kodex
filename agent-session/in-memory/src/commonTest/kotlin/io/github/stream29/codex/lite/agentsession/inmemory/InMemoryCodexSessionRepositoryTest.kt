@@ -12,6 +12,8 @@ import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.flow.toList
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -41,6 +43,11 @@ private suspend fun CodexSessionRepository.createInitialized(
 }
 
 val inMemoryCodexSessionRepositoryTest by testSuite {
+    testFixture {
+        testSuiteCoroutineScope.supervisorChildScope()
+    } closeWith {
+        cancelAndJoin()
+    } asContextForEach {
     test("creates an uninitialized root storage") {
         val repository = InMemoryCodexSessionRepository()
         val index = repository.create()
@@ -121,5 +128,6 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         assertEquals(userMessage("copied"), target.storage.history[1])
         assertEquals("[fork] Source", target.storage.settings[2].threadName)
         assertEquals(emptyList(), target.subagents.list())
+    }
     }
 }

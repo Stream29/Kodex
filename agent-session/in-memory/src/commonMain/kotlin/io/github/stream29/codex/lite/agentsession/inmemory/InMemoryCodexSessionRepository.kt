@@ -1,5 +1,3 @@
-@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-
 package io.github.stream29.codex.lite.agentsession.inmemory
 
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
@@ -7,13 +5,12 @@ import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepositor
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
+import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.newCoroutineContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -66,7 +63,7 @@ public class InMemoryCodexSessionRepository internal constructor(
             sessions.remove(entryIndex)
             openRoots.remove(entryIndex)
         }
-        withContext(NonCancellable) { openRoot?.coroutineContext?.get(Job)?.cancelAndJoin() }
+        withContext(NonCancellable) { openRoot?.cancelAndJoin() }
     }
 
     private fun nextSessionIndex(): Int {
@@ -92,7 +89,7 @@ public class InMemoryCodexSessionRepository internal constructor(
             SessionAgentStorage(scope, node.storage)
         override val subagents: CodexSessionRepository = InMemorySubagentRepository(
             children = node.children,
-            scope = CoroutineScope(scope.newCoroutineContext(SupervisorJob(scope.coroutineContext[Job]))),
+            scope = scope.supervisorChildScope(),
         )
 
         companion object {
@@ -102,9 +99,7 @@ public class InMemoryCodexSessionRepository internal constructor(
             ): InMemoryCodexAgentSession {
                 return InMemoryCodexAgentSession(
                     node = node,
-                    scope = CoroutineScope(
-                        parentScope.newCoroutineContext(SupervisorJob(parentScope.coroutineContext[Job])),
-                    ),
+                    scope = parentScope.supervisorChildScope(),
                 )
             }
         }
@@ -136,7 +131,7 @@ public class InMemoryCodexSessionRepository internal constructor(
             }
             InMemoryCodexAgentSession(
                 node = node,
-                scope = CoroutineScope(newCoroutineContext(SupervisorJob(coroutineContext[Job]))),
+                scope = supervisorChildScope(),
             )
         }
 
@@ -159,7 +154,7 @@ public class InMemoryCodexSessionRepository internal constructor(
 /** Creates an in-memory session repository owned by this scope. */
 public fun CoroutineScope.InMemoryCodexSessionRepository(): InMemoryCodexSessionRepository {
     return InMemoryCodexSessionRepository(
-        scope = CoroutineScope(newCoroutineContext(SupervisorJob(coroutineContext[Job]))),
+        scope = supervisorChildScope(),
     )
 }
 
@@ -192,9 +187,7 @@ private class SessionIndexVersioned<T>(
     private val delegate: MutableIndexVersioned<T>,
 ) :
     MutableIndexVersioned<T>,
-    CoroutineScope by CoroutineScope(
-        parentScope.newCoroutineContext(SupervisorJob(parentScope.coroutineContext[Job])),
-    ),
+    CoroutineScope by parentScope.supervisorChildScope(),
     AutoCloseable {
 
     override suspend fun latestIndex(): Int {

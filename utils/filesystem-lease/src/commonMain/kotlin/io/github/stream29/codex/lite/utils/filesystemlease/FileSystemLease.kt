@@ -3,11 +3,10 @@ package io.github.stream29.codex.lite.utils.filesystemlease
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.codex.lite.utils.osenvironment.processId
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -43,9 +42,7 @@ public class FileSystemLease internal constructor(
     parentScope: CoroutineScope,
     private val duration: Duration,
 ) : AutoCloseable,
-    CoroutineScope by CoroutineScope(
-        parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]),
-    ) {
+    CoroutineScope by parentScope.supervisorChildScope() {
     init {
         launch(start = CoroutineStart.UNDISPATCHED) {
             try {

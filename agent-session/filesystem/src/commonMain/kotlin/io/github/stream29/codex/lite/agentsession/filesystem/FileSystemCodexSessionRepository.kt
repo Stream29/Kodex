@@ -1,21 +1,17 @@
-@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-
 package io.github.stream29.codex.lite.agentsession.filesystem
 
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
 import io.github.stream29.codex.lite.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.codex.lite.agentstorage.filesystem.ofEmpty
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.codex.lite.utils.filesystemlease.FileSystemLease
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.newCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -208,7 +204,7 @@ public suspend fun CoroutineScope.FileSystemCodexSessionRepository(
     fileSystem.createDirectories(root)
     fileSystem.createDirectories(Path(root, SessionsDirectory))
     return FileSystemCodexSessionRepository(
-        scope = CoroutineScope(newCoroutineContext(SupervisorJob(coroutineContext[Job]))),
+        scope = supervisorChildScope(),
         root = root,
         fileSystem = fileSystem,
         valueCacheSize = valueCacheSize,

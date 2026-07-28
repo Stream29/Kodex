@@ -33,6 +33,7 @@ kotlin {
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
             api(libs.kotlinx.serialization.core)
+            implementation(project(":utils-coroutines"))
             implementation(project(":utils-os-environment"))
         }
         named("processClientMain").dependencies {

@@ -43,13 +43,16 @@ import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.codexRequestWindowId
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
+import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
+import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.yield
+import kotlinx.coroutines.job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
@@ -57,6 +60,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
@@ -64,6 +68,38 @@ import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 val codexAgentStateImplTest by testSuite {
+    testFixture {
+        testSuiteCoroutineScope.supervisorChildScope()
+    } closeWith {
+        cancelAndJoin()
+    } asContextForEach {
+    test("state scope is an independently cancellable child of its owner") {
+        val owner = supervisorChildScope()
+        val state = owner.CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model"))),
+        )
+
+        assertNotEquals(owner.coroutineContext.job, state.coroutineContext.job)
+        state.cancelAndJoin()
+
+        assertTrue(owner.coroutineContext.job.isActive)
+        assertFalse(state.coroutineContext.job.isActive)
+        owner.cancelAndJoin()
+    }
+
+    test("owner cancellation propagates to the state scope") {
+        val owner = supervisorChildScope()
+        val state = owner.CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model"))),
+        )
+
+        owner.cancelAndJoin()
+
+        assertFalse(state.coroutineContext.job.isActive)
+    }
+
     test("request projection maps Codex ultra reasoning to Responses max") {
         val metadata = CodexResponsesMetadata(
             threadId = "thread_1",
@@ -768,8 +804,8 @@ val codexAgentStateImplTest by testSuite {
         }
 
         firstEventCollected.await()
-        yield()
-        assertTrue(productionCompleted.isCompleted)
+        productionCompleted.await()
+        agent.state.first { it != CodexAgentStateValue.RequestResponse }
         assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
         assertEquals(2, storage.latestIndex())
         assertEquals(9, storage.tokenCount[2])
@@ -1550,6 +1586,7 @@ val codexAgentStateImplTest by testSuite {
         }
         assertEquals(1, storage.latestIndex())
         assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
+    }
     }
 }
 

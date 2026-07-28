@@ -9,6 +9,7 @@ import io.github.stream29.codex.lite.openai.CompactionTrigger
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -95,10 +96,15 @@ public val CodexAgentStateValue.canRevert: Boolean
  * This interface intentionally contains both observation and state-transition
  * operations while exposing [storage] only as read-only data.
  *
+ * Its [CoroutineScope] is the lifecycle root for every runtime decorator and
+ * background task belonging to this Agent. Implementations must attach it as
+ * a child of the owning AgentSession scope so Session cancellation propagates
+ * through the complete State and Runtime chain.
+ *
  * Implementations commit each storage transition before publishing its next
  * stable [state]. They publish [CodexAgentStorage.tokenCount] only when OpenAI reports it.
  */
-public interface CodexAgentState {
+public interface CodexAgentState : CoroutineScope {
     /**
      * Current atomic state value.
      */

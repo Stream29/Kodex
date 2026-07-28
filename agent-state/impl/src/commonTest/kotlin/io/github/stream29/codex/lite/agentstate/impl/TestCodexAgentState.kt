@@ -9,9 +9,10 @@ import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
 import io.github.stream29.codex.lite.utils.shellclient.Shell
 import io.github.stream29.codex.lite.utils.shellclient.ShellType
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.io.files.Path
 
-internal suspend fun CodexAgentState(
+internal suspend fun CoroutineScope.CodexAgentState(
     client: OpenAiClient,
     storage: MutableCodexAgentStorage,
 ): CodexAgentStateContract =
