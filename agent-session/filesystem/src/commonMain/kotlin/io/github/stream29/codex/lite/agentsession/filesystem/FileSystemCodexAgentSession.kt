@@ -1,7 +1,11 @@
 package io.github.stream29.codex.lite.agentsession.filesystem
 
+import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
+import io.github.stream29.codex.lite.agentsession.composition.CodexAgentDependencies
+import io.github.stream29.codex.lite.agentsession.composition.createMasterAgentRuntime
+import io.github.stream29.codex.lite.agentsession.composition.createSubagentRuntime
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
@@ -22,13 +26,17 @@ internal class FileSystemCodexAgentSession(
     valueCacheSize: Int,
     scope: CoroutineScope,
     override val storage: MutableCodexAgentStorage,
+    dependencies: CodexAgentDependencies,
+    override val runtime: CodexAgentRuntime,
 ) : CodexAgentSession, CoroutineScope by scope {
     override val subagents: CodexSessionRepository = FileSystemSubagentRepository(
         directory = Path(directory, SubagentsDirectory),
         fileSystem = fileSystem,
         valueCacheSize = valueCacheSize,
         scope = scope.supervisorChildScope(),
+        dependencies = dependencies,
     )
+
 }
 
 private class FileSystemSubagentRepository(
@@ -36,6 +44,7 @@ private class FileSystemSubagentRepository(
     private val fileSystem: CoroutineFileSystem,
     private val valueCacheSize: Int,
     scope: CoroutineScope,
+    private val dependencies: CodexAgentDependencies,
 ) : CodexSessionRepository, CoroutineScope by scope {
     private val entriesMutex: Mutex = Mutex()
     private val openSessions: MutableMap<Int, FileSystemCodexAgentSession> = mutableMapOf()
@@ -68,16 +77,24 @@ private class FileSystemSubagentRepository(
             openSessions.remove(entryIndex)
         }
         val agentScope = supervisorChildScope()
-        FileSystemCodexAgentSession(
-            directory = agentDirectory,
-            fileSystem = fileSystem,
-            valueCacheSize = valueCacheSize,
-            scope = agentScope,
-            storage = FileSystemAgentStorage(agentDirectory, fileSystem)
-                .cached(agentScope, valueCacheSize),
-        ).also { session ->
-            openSessions[entryIndex] = session
+        val storage = FileSystemAgentStorage(agentDirectory, fileSystem)
+            .cached(agentScope, valueCacheSize)
+        val session = try {
+            FileSystemCodexAgentSession(
+                directory = agentDirectory,
+                fileSystem = fileSystem,
+                valueCacheSize = valueCacheSize,
+                scope = agentScope,
+                storage = storage,
+                dependencies = dependencies,
+                runtime = agentScope.createSubagentRuntime(storage, dependencies),
+            )
+        } catch (failure: Throwable) {
+            withContext(NonCancellable) { agentScope.cancelAndJoin() }
+            throw failure
         }
+        openSessions[entryIndex] = session
+        session
     }
 
     override suspend fun delete(entryIndex: Int) {
@@ -104,6 +121,7 @@ internal suspend fun CoroutineScope.FileSystemCodexAgentSession(
     directory: Path,
     fileSystem: CoroutineFileSystem,
     valueCacheSize: Int,
+    dependencies: CodexAgentDependencies,
 ): CodexAgentSession {
     val scope = supervisorChildScope()
     val lease = try {
@@ -117,12 +135,15 @@ internal suspend fun CoroutineScope.FileSystemCodexAgentSession(
         throw failure
     }
     try {
+        val storage = FileSystemAgentStorage(directory, fileSystem).cached(scope, valueCacheSize)
         val session = FileSystemCodexAgentSession(
             directory = directory,
             fileSystem = fileSystem,
             valueCacheSize = valueCacheSize,
             scope = scope,
-            storage = FileSystemAgentStorage(directory, fileSystem).cached(scope, valueCacheSize),
+            storage = storage,
+            dependencies = dependencies,
+            runtime = scope.createMasterAgentRuntime(storage, dependencies),
         )
         scope.coroutineContext[Job]?.invokeOnCompletion { lease.close() }
         return session

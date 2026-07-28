@@ -24,7 +24,7 @@ private fun tool(name: String, description: String): ResponsesApiTool =
 
 val toolSearchToolsTest by testSuite {
     test("empty catalog still exposes a client tool search spec") {
-        val spec = MutableToolSearchCatalog(emptyList()).currentSpec()
+        val spec = ToolSearchTools.createToolSearchSpec(emptyList())
 
         assertEquals("client", spec.execution)
         assertTrue(spec.description.contains("None currently enabled."))
@@ -172,24 +172,4 @@ val toolSearchToolsTest by testSuite {
         assertEquals("limit must be greater than zero", invalidLimit.message)
     }
 
-    test("dynamic catalog reuses and invalidates its search index") {
-        val first = tool("first_tool", "First tool")
-        val second = tool("second_tool", "Second tool")
-        var documents = first.toToolSearchDocuments()
-        val catalog = MutableToolSearchCatalog(documents)
-
-        assertIs<ToolSpec.ToolSearch>(catalog.currentSpec())
-        catalog.search(SearchToolCallParams(query = "first"))
-        val firstIndexedSnapshot = catalog.indexedDocumentSnapshot
-        catalog.search(SearchToolCallParams(query = "first"))
-        assertEquals(firstIndexedSnapshot, catalog.indexedDocumentSnapshot)
-
-        documents = second.toToolSearchDocuments()
-        catalog.replaceDocuments(documents)
-        val result = assertIs<ToolSearchResult.Success>(
-            catalog.search(SearchToolCallParams(query = "second")),
-        )
-        assertEquals(second.copy(deferLoading = true), result.tools.single())
-        assertEquals(documents, catalog.indexedDocumentSnapshot)
-    }
 }

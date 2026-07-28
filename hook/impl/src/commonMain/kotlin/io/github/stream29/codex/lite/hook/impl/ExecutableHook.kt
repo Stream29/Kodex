@@ -30,8 +30,6 @@ internal data class ResolvedHooks(
     val postToolUse: List<ExecutableHook> = emptyList(),
     val preCompact: List<ExecutableHook> = emptyList(),
     val postCompact: List<ExecutableHook> = emptyList(),
-    val sessionStart: List<ExecutableHook> = emptyList(),
-    val sessionEnd: List<ExecutableHook> = emptyList(),
     val userPromptSubmit: List<ExecutableHook> = emptyList(),
     val stop: List<ExecutableHook> = emptyList(),
 )
@@ -46,8 +44,6 @@ internal fun HookConfiguration.resolveHooks(): ResolvedHooks {
         postToolUse = sources.resolveHandlers { it.hooks.postToolUse },
         preCompact = sources.resolveHandlers { it.hooks.preCompact },
         postCompact = sources.resolveHandlers { it.hooks.postCompact },
-        sessionStart = sources.resolveHandlers { it.hooks.sessionStart },
-        sessionEnd = sources.resolveHandlers { it.hooks.sessionEnd },
         userPromptSubmit = sources.resolveHandlers { it.hooks.userPromptSubmit },
         stop = sources.resolveHandlers { it.hooks.stop },
     )

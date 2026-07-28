@@ -67,7 +67,7 @@ import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputAnswe
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputTools
-import io.github.stream29.codex.lite.tool.toolsearch.MutableToolSearchCatalog
+import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchEngine
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchSourceInfo
 import io.github.stream29.codex.lite.tool.toolsearch.toToolSearchDocuments
 import io.github.stream29.codex.lite.tool.viewimage.ViewImageToolArguments
@@ -555,10 +555,9 @@ val toolRuntimeCompositionTest by testSuite {
             callId = "call_image",
         )
         val requests = mutableListOf<ResponsesApiRequest>()
-        val toolSearchCatalog = MutableToolSearchCatalog(
-            listOf(ViewImageTools.spec, ImageGenerationTools.spec)
-                .flatMap { spec -> spec.toToolSearchDocuments() },
-        )
+        val toolSearchDocuments = listOf(ViewImageTools.spec, ImageGenerationTools.spec)
+            .flatMap { spec -> spec.toToolSearchDocuments() }
+        val toolSearchEngine = ToolSearchEngine(toolSearchDocuments)
         val storage = InMemoryCodexAgentStorage(
             CodexAgentSettings(
                 model = OpenAiModelId("test-model"),
@@ -612,7 +611,7 @@ val toolRuntimeCompositionTest by testSuite {
             .planRuntime(NoOpToolHooks)
             .toolRuntime(
                 listOf(patchTool, viewTool, imageTool),
-                toolSearchCatalog,
+                toolSearchEngine,
                 NoOpToolHooks,
             )
 
@@ -621,7 +620,12 @@ val toolRuntimeCompositionTest by testSuite {
 
         assertEquals(2, requests.size)
         assertEquals(requests.first().tools, requests[1].tools)
-        assertEquals(toolSearchCatalog.currentSpec(), requests.first().tools.last())
+        assertEquals(
+            ToolSearchTools.createToolSearchSpec(
+                toolSearchDocuments.mapNotNull { document -> document.sourceInfo },
+            ),
+            requests.first().tools.last(),
+        )
         assertEquals(listOf<ResponseItem.ToolCall>(patchCall), patchTool.calls)
         assertEquals(listOf<ResponseItem.ToolCall>(viewCall), viewTool.calls)
         assertEquals(listOf("draw a square"), imagePrompts)
@@ -644,14 +648,13 @@ val toolRuntimeCompositionTest by testSuite {
             callId = "call_view",
         )
         val viewTool = RecordingTool(ViewImageTools.spec, "image viewed")
-        val toolSearchCatalog = MutableToolSearchCatalog(
-            viewTool.spec.toToolSearchDocuments(
-                ToolSearchSourceInfo(
-                    name = "Workspace tools",
-                    description = "Tools that inspect the current workspace.",
-                ),
+        val toolSearchDocuments = viewTool.spec.toToolSearchDocuments(
+            ToolSearchSourceInfo(
+                name = "Workspace tools",
+                description = "Tools that inspect the current workspace.",
             ),
         )
+        val toolSearchEngine = ToolSearchEngine(toolSearchDocuments)
         val requests = mutableListOf<ResponsesApiRequest>()
         val storage = InMemoryCodexAgentStorage(
             CodexAgentSettings(
@@ -690,13 +693,18 @@ val toolRuntimeCompositionTest by testSuite {
         state.appendUserMessage(userMessage("Inspect the diagram.").content)
         state
             .compactionRuntime(testModelCatalog())
-            .toolRuntime(listOf(viewTool), toolSearchCatalog, NoOpToolHooks)
+            .toolRuntime(listOf(viewTool), toolSearchEngine, NoOpToolHooks)
             .resume()
             .toList()
 
         assertEquals(3, requests.size)
         assertTrue(requests.all { request -> request.tools == requests.first().tools })
-        assertEquals(toolSearchCatalog.currentSpec(), requests.first().tools.last())
+        assertEquals(
+            ToolSearchTools.createToolSearchSpec(
+                toolSearchDocuments.mapNotNull { document -> document.sourceInfo },
+            ),
+            requests.first().tools.last(),
+        )
         val searchOutput = assertIs<ResponseItem.ClientToolSearchOutput>(requests[1].input.last())
         assertEquals("call_search", searchOutput.callId)
         assertEquals(listOf(ViewImageTools.spec.copy(deferLoading = true)), searchOutput.tools)
@@ -837,7 +845,7 @@ val openAiViewImageToolRuntimeProbeTest by testSuite {
             val viewImageTool = ViewImageTools.createTool(
                 ViewImageToolClient(root = MutableStateFlow(imageRoot)),
             )
-            val toolSearchCatalog = MutableToolSearchCatalog(
+            val toolSearchEngine = ToolSearchEngine(
                 viewImageTool.spec.toToolSearchDocuments(
                     ToolSearchSourceInfo(
                         name = "Local image tools",
@@ -858,7 +866,7 @@ val openAiViewImageToolRuntimeProbeTest by testSuite {
                 )
                 state = createdState
                 val runtime = RequestOnlyRuntime(createdState)
-                    .toolRuntime(listOf(viewImageTool), toolSearchCatalog, NoOpToolHooks)
+                    .toolRuntime(listOf(viewImageTool), toolSearchEngine, NoOpToolHooks)
 
                 createdState.appendUserMessage(
                     "Use the available image-viewing tool named `view_image` to inspect the local " +
@@ -924,7 +932,7 @@ val openAiImageGenerationToolRuntimeProbeTest by testSuite {
             val imageGenerationTool = ImageGenerationTools.createTool(
                 ImageGenerationToolClient(client = client),
             )
-            val toolSearchCatalog = MutableToolSearchCatalog(
+            val toolSearchEngine = ToolSearchEngine(
                 imageGenerationTool.spec.toToolSearchDocuments(
                     ToolSearchSourceInfo(
                         name = "OpenAI image tools",
@@ -943,7 +951,7 @@ val openAiImageGenerationToolRuntimeProbeTest by testSuite {
                     mcpService = TestMcpService(),
                 )
                 val runtime = RequestOnlyRuntime(state)
-                    .toolRuntime(listOf(imageGenerationTool), toolSearchCatalog, NoOpToolHooks)
+                    .toolRuntime(listOf(imageGenerationTool), toolSearchEngine, NoOpToolHooks)
 
                 state.appendUserMessage(
                     "Use `image_gen.imagegen` to generate a new minimal image of one black circle " +

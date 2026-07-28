@@ -4,6 +4,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
 import io.github.stream29.codex.lite.agentsession.inmemory.InMemoryCodexSessionRepository
+import io.github.stream29.codex.lite.agentsession.test.testCodexAgentDependencies
 import io.github.stream29.codex.lite.agentstorage.contract.forkTo
 import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
@@ -18,6 +19,7 @@ import io.github.stream29.codex.lite.utils.filesystemlease.FileSystemLeaseInUseE
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
@@ -63,7 +65,7 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
         deleteRecursively(this)
     } asParameterForEach {
         test("creates an uninitialized root storage") { root ->
-            val repository = FileSystemCodexSessionRepository(root)
+            val repository = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
             val index = repository.create()
             val session = repository.open(index)
 
@@ -75,7 +77,7 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
         }
 
         test("persists canonical root layout and lightweight entries") { root ->
-            val repository = FileSystemCodexSessionRepository(root)
+            val repository = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
             val cwd = Path(root, "workspace")
             val index = repository.createInitialized(settings(cwd = cwd))
             val session = repository.open(index)
@@ -96,7 +98,7 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
             assertEquals(listOf(index), repository.list())
             repository.closeAndJoin()
 
-            val reopened = FileSystemCodexSessionRepository(root)
+            val reopened = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
             val reopenedSession = reopened.open(index)
             assertEquals(storageId, reopenedSession.storage.id)
             assertEquals(userMessage("persisted"), reopenedSession.storage.history[1])
@@ -105,7 +107,7 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
         }
 
         test("returns one cached root instance and keeps children in numeric order") { root ->
-            val repository = FileSystemCodexSessionRepository(root)
+            val repository = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
             val index = repository.createInitialized(settings("root"))
             val session = repository.open(index)
             val children = buildList {
@@ -126,7 +128,7 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
         }
 
         test("each Agent manages its direct entries") { root ->
-            val repository = FileSystemCodexSessionRepository(root)
+            val repository = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
             val rootSession = repository.open(repository.createInitialized(settings("root")))
             val first = rootSession.subagents.create()
             val second = rootSession.subagents.create()
@@ -142,7 +144,7 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
         }
 
         test("allocates the next slot when an earlier root directory already exists") { root ->
-            val repository = FileSystemCodexSessionRepository(root)
+            val repository = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
 
             assertEquals(0, repository.createInitialized(settings("first")))
             assertEquals(1, repository.createInitialized(settings("second")))
@@ -151,8 +153,8 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
         }
 
         test("a root lease excludes another repository until shutdown") { root ->
-            val first = FileSystemCodexSessionRepository(root)
-            val second = FileSystemCodexSessionRepository(root)
+            val first = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
+            val second = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
             val index = first.createInitialized(settings())
             first.open(index)
 
@@ -164,7 +166,7 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
         }
 
         test("delete invalidates the cached root and releases its slot") { root ->
-            val repository = FileSystemCodexSessionRepository(root)
+            val repository = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
             val index = repository.createInitialized(settings())
             val session = repository.open(index)
             val child = session.spawnInitialized("child")
@@ -178,14 +180,14 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
         }
 
         test("fork is a downstream operation and does not copy descendants") { root ->
-            val sourceRepository = InMemoryCodexSessionRepository()
+            val sourceRepository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
             val sourceCwd = Path(root, "source-workspace")
             val sourceIndex = sourceRepository.createInitialized(settings("Source", sourceCwd))
             val source = sourceRepository.open(sourceIndex)
             source.storage.history[1] = userMessage("copied")
             source.spawnInitialized("child")
 
-            val repository = FileSystemCodexSessionRepository(root)
+            val repository = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
             val targetIndex = repository.createInitialized(settings("temporary"))
             val target = repository.open(targetIndex)
             source.storage.forkTo(until = 2, target = target.storage)
@@ -199,6 +201,21 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
             assertEquals(emptyList(), target.subagents.list())
             repository.closeAndJoin()
             sourceRepository.closeAndJoin()
+        }
+
+        test("owns each runtime for the complete Agent session lifecycle") { root ->
+            val repository = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
+            val session = repository.open(repository.createInitialized(settings("root")))
+            val child = session.spawnInitialized("child")
+
+            assertSame(session.storage, session.runtime.storage)
+            assertSame(child.storage, child.runtime.storage)
+
+            session.coroutineContext[Job]?.cancelAndJoin()
+
+            assertFalse(session.runtime.coroutineContext[Job]?.isActive ?: true)
+            assertFalse(child.runtime.coroutineContext[Job]?.isActive ?: true)
+            repository.closeAndJoin()
         }
 
     }

@@ -2,12 +2,9 @@ package io.github.stream29.codex.lite.integrationtest
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.agentruntime.compact.compactionRuntime
-import io.github.stream29.codex.lite.agentruntime.sessionhook.installSessionHooks
-import io.github.stream29.codex.lite.agentruntime.turnhook.turnHookRuntime
+import io.github.stream29.codex.lite.agentsession.composition.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentsession.filesystem.FileSystemCodexSessionRepository
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
-import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
 import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.agentstorage.contract.initialize
@@ -25,7 +22,6 @@ import io.github.stream29.codex.lite.openai.client.OpenAiClientConfig
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookSourceKind
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
 import io.github.stream29.codex.lite.utils.osenvironment.userHomeDirectory
@@ -34,7 +30,6 @@ import io.github.stream29.codex.lite.utils.shellclient.ShellType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.toList
@@ -87,7 +82,6 @@ private suspend fun runFreshSessionHookIntegration() {
     var modelCatalog: OpenAiModelCatalog? = null
     var hooks: CodexHooksImpl? = null
     var sessionRepository: FileSystemCodexSessionRepository? = null
-    var stateJob: Job? = null
     try {
         SystemCoroutineFileSystem.createDirectories(codexHome)
         SystemCoroutineFileSystem.createDirectories(codexLiteHome)
@@ -106,9 +100,17 @@ private suspend fun runFreshSessionHookIntegration() {
         client = realOpenAiClient(codexStorage)
         modelCatalog = OpenAiModelCatalog(client, codexStorage)
         hooks = codexHooks(loadHookConfiguration(codexHome))
+        val dependencies = CodexAgentDependencies(
+            client = client,
+            modelCatalog = modelCatalog,
+            contextSettings = TestAgentContextSettings,
+            shellSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
+            hooks = hooks,
+        )
 
         sessionRepository = CoroutineScope(currentCoroutineContext())
-            .FileSystemCodexSessionRepository(codexLiteHome)
+            .FileSystemCodexSessionRepository(codexLiteHome, dependencies)
         val sessionIndex = sessionRepository.create()
         val session = sessionRepository.open(sessionIndex)
         val settings = CodexAgentSettings(
@@ -121,47 +123,29 @@ private suspend fun runFreshSessionHookIntegration() {
         assertEquals(0L, session.storage.tokenCount[0])
 
         val hookSessionId = session.storage.id
-        val state = session.CodexAgentState(
-            client = client,
-            storage = session.storage,
-            contextSettings = TestAgentContextSettings,
-            mcpService = TestMcpService(),
-        )
-        val runtime = state
-            .compactionRuntime(
-                modelCatalog = modelCatalog,
-                compactionHooks = hooks,
-            )
-            .turnHookRuntime(hooks)
-        stateJob = state.coroutineContext[Job]
-        runtime.installSessionHooks(hooks)
+        val runtime = session.runtime
 
         val prompt = "Reply with exactly $HookIntegrationMarker and no other text."
         runtime.appendUserMessage(listOf(ContentItem.InputText(prompt)))
         val events = runtime.resume().toList()
         assertTrue(events.any { event -> event is ResponsesStreamEvent.Completed })
-        assertIs<CodexAgentStateValue.AssistantMessage>(state.state.value)
-
-        requireNotNull(stateJob).cancelAndJoin()
+        assertIs<CodexAgentStateValue.AssistantMessage>(runtime.state.value)
 
         val requests = readHookRequests(hookLog)
         assertEquals(
-            listOf("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"),
+            listOf("UserPromptSubmit", "Stop"),
             requests.map { request -> request.getValue("hook_event_name").jsonPrimitive.content },
         )
         assertEquals(
             setOf(hookSessionId),
             requests.map { request -> request.getValue("session_id").jsonPrimitive.content }.toSet(),
         )
-        assertEquals("resume", requests[0].getValue("source").jsonPrimitive.content)
-        assertEquals(prompt, requests[1].getValue("prompt").jsonPrimitive.content)
-        assertEquals(false, requests[2].getValue("stop_hook_active").jsonPrimitive.boolean)
+        assertEquals(prompt, requests[0].getValue("prompt").jsonPrimitive.content)
+        assertEquals(false, requests[1].getValue("stop_hook_active").jsonPrimitive.boolean)
         assertTrue(
-            requests[2].getValue("last_assistant_message").jsonPrimitive.content.contains(HookIntegrationMarker),
+            requests[1].getValue("last_assistant_message").jsonPrimitive.content.contains(HookIntegrationMarker),
         )
-        assertEquals("close", requests[3].getValue("reason").jsonPrimitive.content)
     } finally {
-        stateJob?.cancelAndJoin()
         hooks?.cancel()
         sessionRepository?.closeAndJoin()
         modelCatalog?.close()
@@ -229,7 +213,7 @@ private suspend fun installHooks(
     val hooksPath = Path(codexHome, "hooks.json")
     val contents = buildJsonObject {
         put("hooks", buildJsonObject {
-            listOf("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd").forEach { eventName ->
+            listOf("UserPromptSubmit", "Stop").forEach { eventName ->
                 put(eventName, buildJsonArray {
                     add(buildJsonObject {
                         put("hooks", buildJsonArray {

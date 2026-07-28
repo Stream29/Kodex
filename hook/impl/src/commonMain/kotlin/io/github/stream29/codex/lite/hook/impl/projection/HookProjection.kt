@@ -14,8 +14,6 @@ internal enum class HookEventNameWire {
     @SerialName("PostToolUse") PostToolUse,
     @SerialName("PreCompact") PreCompact,
     @SerialName("PostCompact") PostCompact,
-    @SerialName("SessionStart") SessionStart,
-    @SerialName("SessionEnd") SessionEnd,
     @SerialName("UserPromptSubmit") UserPromptSubmit,
     @SerialName("Stop") Stop,
 }

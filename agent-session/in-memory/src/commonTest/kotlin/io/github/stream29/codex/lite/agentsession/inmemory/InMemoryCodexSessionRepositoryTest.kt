@@ -3,6 +3,7 @@ package io.github.stream29.codex.lite.agentsession.inmemory
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
+import io.github.stream29.codex.lite.agentsession.test.testCodexAgentDependencies
 import io.github.stream29.codex.lite.agentstorage.contract.forkTo
 import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
@@ -14,9 +15,11 @@ import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.toList
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertSame
 
 private fun settings(name: String = ""): CodexAgentSettings =
@@ -49,7 +52,7 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         cancelAndJoin()
     } asContextForEach {
     test("creates an uninitialized root storage") {
-        val repository = InMemoryCodexSessionRepository()
+        val repository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
         val index = repository.create()
         val session = repository.open(index)
 
@@ -60,7 +63,7 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
     }
 
     test("creates zero-based root entries") {
-        val repository = InMemoryCodexSessionRepository()
+        val repository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
         val first = repository.createInitialized(settings())
         val second = repository.createInitialized(settings("Named"))
 
@@ -71,7 +74,7 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
     }
 
     test("returns one cached root instance and persists its recursive tree") {
-        val repository = InMemoryCodexSessionRepository()
+        val repository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
         val index = repository.createInitialized(settings())
         val root = repository.open(index)
         val first = root.spawnInitialized("first")
@@ -84,7 +87,7 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
     }
 
     test("each Agent manages its direct entries") {
-        val repository = InMemoryCodexSessionRepository()
+        val repository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
         val root = repository.open(repository.createInitialized(settings("root")))
         val first = root.subagents.create()
         val second = root.subagents.create()
@@ -99,7 +102,7 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
     }
 
     test("delete invalidates cached nodes and releases the numeric slot") {
-        val repository = InMemoryCodexSessionRepository()
+        val repository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
         val index = repository.createInitialized(settings())
         val root = repository.open(index)
         val child = root.spawnInitialized("child")
@@ -112,7 +115,7 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
     }
 
     test("fork is a downstream operation and does not copy descendants") {
-        val repository = InMemoryCodexSessionRepository()
+        val repository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
         val sourceIndex = repository.createInitialized(settings("Source"))
         val source = repository.open(sourceIndex)
         source.storage.history[1] = userMessage("copied")
@@ -128,6 +131,20 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         assertEquals(userMessage("copied"), target.storage.history[1])
         assertEquals("[fork] Source", target.storage.settings[2].threadName)
         assertEquals(emptyList(), target.subagents.list())
+    }
+
+    test("owns each runtime for the complete Agent session lifecycle") {
+        val repository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
+        val root = repository.open(repository.createInitialized(settings("root")))
+        val child = root.spawnInitialized("child")
+
+        assertSame(root.storage, root.runtime.storage)
+        assertSame(child.storage, child.runtime.storage)
+
+        root.cancelAndJoin()
+
+        assertFalse(root.runtime.coroutineContext[Job]?.isActive ?: true)
+        assertFalse(child.runtime.coroutineContext[Job]?.isActive ?: true)
     }
     }
 }

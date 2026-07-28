@@ -145,6 +145,9 @@ val codexCliStorageTest by testSuite {
                 {
                   "description":"project hooks",
                   "hooks":{
+                    "SessionStart":[{
+                      "hooks":[]
+                    }],
                     "PreToolUse":[{
                       "matcher":"shell|Bash",
                       "hooks":[{
