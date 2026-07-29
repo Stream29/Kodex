@@ -34,6 +34,7 @@ import io.github.stream29.codex.lite.openai.ReasoningEffort
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseError
 import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.openai.ResponseItemId
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiRequest
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
@@ -832,6 +833,114 @@ val codexAgentStateImplTest by testSuite {
         assertEquals(9, storage.tokenCount[3])
     }
 
+    test("request state replays each active message output independently") {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val item = ResponseItem.Message(
+            id = ResponseItemId("message_1"),
+            role = MessageRole.Assistant,
+            content = emptyList(),
+        )
+        val added = ResponsesStreamEvent.OutputItemAdded(outputIndex = 0, item = item)
+        val delta = ResponsesStreamEvent.OutputTextDelta(
+            itemId = "message_1",
+            outputIndex = 0,
+            contentIndex = 0,
+            delta = "hello",
+        )
+        val done = ResponsesStreamEvent.OutputItemDone(
+            outputIndex = 0,
+            item = item.copy(content = listOf(ContentItem.OutputText("hello"))),
+        )
+        val release = CompletableDeferred<Unit>()
+        val agent = CodexAgentState(
+            client = mockOpenAiClient {
+                createResponse {
+                    flow {
+                        emit(added)
+                        emit(delta)
+                        release.await()
+                        emit(done)
+                        emit(ResponsesStreamEvent.Completed(Response(id = "response_1")))
+                    }
+                }
+            },
+            storage = storage,
+        )
+
+        agent.appendUserMessage(userMessage("Stream a message."))
+        val request = async { agent.requestResponseApi().toList() }
+        val active = agent.state.first { it is CodexAgentStateValue.RequestResponse.Message }
+        val output = assertIs<CodexAgentStateValue.RequestResponse.Message>(active)
+        assertEquals(listOf(added, delta), output.events.replayCache)
+
+        release.complete(Unit)
+        request.await()
+
+        assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
+        assertEquals(listOf(added, delta, done), output.events.replayCache)
+    }
+
+    test("request state exposes agent messages separately") {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val item = ResponseItem.AgentMessage(
+            id = ResponseItemId("agent_message_1"),
+            author = "/root",
+            recipient = "/root/worker",
+            content = listOf(AgentMessageInputContent.InputText("Inspect storage.")),
+        )
+        val added = ResponsesStreamEvent.OutputItemAdded(outputIndex = 0, item = item)
+        val release = CompletableDeferred<Unit>()
+        val agent = CodexAgentState(
+            client = mockOpenAiClient {
+                createResponse {
+                    flow {
+                        emit(added)
+                        release.await()
+                        emit(ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = item))
+                    }
+                }
+            },
+            storage = storage,
+        )
+
+        agent.appendUserMessage(userMessage("Delegate the inspection."))
+        val request = async { agent.requestResponseApi().toList() }
+        val active = agent.state.first { it is CodexAgentStateValue.RequestResponse.AgentMessage }
+        val output = assertIs<CodexAgentStateValue.RequestResponse.AgentMessage>(active)
+        assertEquals(listOf(added), output.events.replayCache)
+
+        release.complete(Unit)
+        request.await()
+    }
+
+    test("request state aggregates hosted tool calls") {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val item = ResponseItem.WebSearchCall(status = "in_progress")
+        val added = ResponsesStreamEvent.OutputItemAdded(outputIndex = 0, item = item)
+        val release = CompletableDeferred<Unit>()
+        val agent = CodexAgentState(
+            client = mockOpenAiClient {
+                createResponse {
+                    flow {
+                        emit(added)
+                        release.await()
+                        emit(ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = item))
+                    }
+                }
+            },
+            storage = storage,
+        )
+
+        agent.appendUserMessage(userMessage("Search for documentation."))
+        val request = async { agent.requestResponseApi().toList() }
+        val active = agent.state.first { it is CodexAgentStateValue.RequestResponse.ToolCall }
+        val output = assertIs<CodexAgentStateValue.RequestResponse.ToolCall>(active)
+        assertEquals(listOf(added), output.events.replayCache)
+
+        release.complete(Unit)
+        request.await()
+    }
+
     test("resume does not wait for slow stream event collector") {
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
         val deltaEvent = ResponsesStreamEvent.OutputTextDelta(
@@ -883,7 +992,7 @@ val codexAgentStateImplTest by testSuite {
 
         firstEventCollected.await()
         productionCompleted.await()
-        agent.state.first { it != CodexAgentStateValue.RequestResponse }
+        agent.state.first { it !is CodexAgentStateValue.RequestResponse }
         assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
         assertEquals(2, storage.latestIndex())
         assertEquals(9, storage.tokenCount[2])
@@ -1222,7 +1331,7 @@ val codexAgentStateImplTest by testSuite {
         val exception = assertFailsWith<CodexAgentStateInvalidTransitionException> {
             agent.appendUserMessage(userMessage("Concurrent input."))
         }
-        assertEquals(CodexAgentStateValue.RequestResponse, exception.currentState)
+        assertIs<CodexAgentStateValue.RequestResponse>(exception.currentState)
 
         releaseResponse.complete(Unit)
         runningResume.await()

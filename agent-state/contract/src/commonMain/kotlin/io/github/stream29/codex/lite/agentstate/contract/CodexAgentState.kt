@@ -12,6 +12,7 @@ import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -53,7 +54,35 @@ public sealed interface CodexAgentStateValue {
     public data object ExternalWrite : CodexAgentStateValue
 
     /** A single Responses API request is in flight. */
-    public data object RequestResponse : CodexAgentStateValue
+    public sealed interface RequestResponse : CodexAgentStateValue {
+        /** The request has started but has no active output item. */
+        public data object Started : RequestResponse
+
+        /** A currently streaming message output item. */
+        public data class Message(
+            public val events: SharedFlow<ResponsesStreamEvent>,
+        ) : RequestResponse
+
+        /** A currently streaming inter-Agent message output item. */
+        public data class AgentMessage(
+            public val events: SharedFlow<ResponsesStreamEvent>,
+        ) : RequestResponse
+
+        /** A currently streaming reasoning output item. */
+        public data class Reasoning(
+            public val events: SharedFlow<ResponsesStreamEvent>,
+        ) : RequestResponse
+
+        /** A currently streaming tool-call output item of any tool kind. */
+        public data class ToolCall(
+            public val events: SharedFlow<ResponsesStreamEvent>,
+        ) : RequestResponse
+
+        /** A currently streaming protocol item without a modeled semantic kind. */
+        public data class Unknown(
+            public val events: SharedFlow<ResponsesStreamEvent>,
+        ) : RequestResponse
+    }
 
     /** A single server-side context compaction request is in flight. */
     public data object Compacting : CodexAgentStateValue
