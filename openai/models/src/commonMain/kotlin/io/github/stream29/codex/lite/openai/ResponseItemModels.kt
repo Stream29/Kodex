@@ -19,6 +19,12 @@ public sealed interface ResponseItem {
     public sealed interface HistoryItem : Known
 
     /**
+     * Persisted items that can be delivered as pending turn steering input.
+     */
+    @Serializable
+    public sealed interface Steerable : HistoryItem
+
+    /**
      * Model-issued local tool call that awaits one matching [ToolCallOutput].
      */
     @Serializable
@@ -69,7 +75,7 @@ public sealed interface ResponseItem {
         public val role: MessageRole,
         public val content: List<ContentItem>,
         public val phase: MessagePhase? = null,
-    ) : HistoryItem
+    ) : Steerable
 
     /**
      * @property id Nullable because providers may omit agent-message ids; `null`
@@ -82,7 +88,7 @@ public sealed interface ResponseItem {
         public val author: String,
         public val recipient: String,
         public val content: List<AgentMessageInputContent>,
-    ) : HistoryItem
+    ) : Steerable
 
     /**
      * @property id Nullable because providers may omit reasoning ids; `null`

@@ -4,7 +4,6 @@ import io.github.stream29.codex.lite.agentruntime.contract.ConcurrentAgentRuntim
 import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.listChild
-import io.github.stream29.codex.lite.agentsession.contract.parentOf
 import io.github.stream29.codex.lite.agentsession.contract.pathOf
 import io.github.stream29.codex.lite.agentsession.contract.rootSession
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
@@ -14,10 +13,8 @@ import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
-import io.github.stream29.codex.lite.agentstorage.contract.prevIndex
 import io.github.stream29.codex.lite.openai.AgentMessageInputContent
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
-import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.tool.builder.ToolBuilderJson
@@ -72,14 +69,14 @@ public fun CodexAgentState.spawnAgentTool(
                 val child = caller.subagents.open(entryIndex)
                 initializeSpawnStorage(caller, child, args, childPath, forkMode)
                 child.enqueue(
-                    AgentCommunication(
+                    agentMessage(
                         author = callerPath,
                         recipient = childPath,
-                        message = args.message,
-                        kind = AgentMessageKind.NewTask,
+                        payload = args.message,
+                        type = AgentMessageType.NewTask,
                     ),
                 )
-                child.resumeIfIdle(agentPathResolver)
+                child.resumeIfIdle()
                 SpawnAgentResult(taskName = childPath, nickname = null)
             } catch (failure: Throwable) {
                 caller.subagents.delete(entryIndex)
@@ -113,11 +110,11 @@ public fun CodexAgentState.sendMessageTool(
                 "Agent path not found: ${args.target}"
             }
             target.enqueue(
-                AgentCommunication(
+                agentMessage(
                     author = agentPathResolver.pathOf(caller),
                     recipient = agentPathResolver.pathOf(target),
-                    message = args.message,
-                    kind = AgentMessageKind.Message,
+                    payload = args.message,
+                    type = AgentMessageType.Message,
                 ),
             )
             jsonToolSuccess("")
@@ -151,14 +148,14 @@ public fun CodexAgentState.followupTaskTool(
                 "Follow-up tasks can't target the root agent."
             }
             target.enqueue(
-                AgentCommunication(
+                agentMessage(
                     author = agentPathResolver.pathOf(caller),
                     recipient = agentPathResolver.pathOf(target),
-                    message = args.message,
-                    kind = AgentMessageKind.NewTask,
+                    payload = args.message,
+                    type = AgentMessageType.NewTask,
                 ),
             )
-            target.resumeIfIdle(agentPathResolver)
+            target.resumeIfIdle()
             jsonToolSuccess("")
         } catch (cancellation: CancellationException) {
             throw cancellation
@@ -172,7 +169,7 @@ public fun CodexAgentState.followupTaskTool(
 
 /** Creates a `wait_agent` tool that observes the owning runtime's pending steer. */
 public fun waitAgentTool(
-    pendingSteer: StateFlow<List<ContentItem>>,
+    pendingSteer: StateFlow<List<ResponseItem.Steerable>>,
 ): Tool =
     jsonTool(
         spec = MultiAgentTools.waitAgentSpec,
@@ -283,70 +280,23 @@ private suspend fun CodexAgentSession.listAgents(
 }
 
 /** Starts exactly one direct runtime collection when no turn is already running. */
-private fun CodexAgentSession.resumeIfIdle(
-    agentPathResolver: AgentPathResolver,
-) {
+private fun CodexAgentSession.resumeIfIdle() {
     if (runtime.runningTurn.value != null) return
     launch(start = CoroutineStart.UNDISPATCHED) {
         try {
             runtime.resume().collect {}
-            if (runtime.state.value !is CodexAgentStateValue.ToolPending) {
-                notifyParent(agentPathResolver, latestAssistantText())
-            }
         } catch (_: ConcurrentAgentRuntimeResumeException) {
             // Another follow-up (or direct caller) won the runtime CAS and will consume the steer.
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (failure: Throwable) {
-            notifyParent(
-                agentPathResolver,
-                "Agent errored: ${failure.message ?: failure::class.simpleName ?: "Agent turn failed"}\n\n" +
-                    "This agent's turn failed. If you still need this agent, give it another task.",
-            )
         }
     }
-}
-
-private suspend fun CodexAgentSession.notifyParent(
-    agentPathResolver: AgentPathResolver,
-    message: String?,
-) {
-    val path = agentPathResolver.pathOf(this)
-    val parent = agentPathResolver.parentOf(this) ?: return
-    parent.enqueue(
-        AgentCommunication(
-            author = path,
-            recipient = agentPathResolver.pathOf(parent),
-            message = message.orEmpty(),
-            kind = AgentMessageKind.FinalAnswer,
-        ),
-    )
 }
 
 private fun CodexAgentSession.enqueue(
-    communication: AgentCommunication,
+    message: ResponseItem.AgentMessage,
 ) {
     runtime.pendingSteer.update { pending ->
-        pending + communication.steerContent
+        pending + message
     }
-}
-
-private suspend fun CodexAgentSession.latestAssistantText(): String? {
-    var index: Int? = storage.history.latestIndex().takeIf { it >= 0 }
-    while (index != null) {
-        val item = storage.history[index]
-        if (item is ResponseItem.Message && item.role == MessageRole.Assistant) {
-            return item.content.joinToString("") { content ->
-                when (content) {
-                    is ContentItem.InputText -> content.text
-                    is ContentItem.OutputText -> content.text
-                    is ContentItem.InputImage -> ""
-                }
-            }.ifEmpty { null }
-        }
-        index = storage.history.prevIndex(index)
-    }
-    return null
 }
 
 private fun CodexAgentState.callerSessionProvider(
@@ -373,28 +323,29 @@ private fun CodexAgentState.callerSessionProvider(
 private fun CodexAgentSession.status(): MultiAgentStatus =
     if (runtime.runningTurn.value != null) MultiAgentStatus.Running else MultiAgentStatus.Idle
 
-private enum class AgentMessageKind(val wireName: String) {
+private enum class AgentMessageType(val wireName: String) {
     NewTask("NEW_TASK"),
     Message("MESSAGE"),
-    FinalAnswer("FINAL_ANSWER"),
 }
 
-private data class AgentCommunication(
-    val author: String,
-    val recipient: String,
-    val message: String,
-    val kind: AgentMessageKind,
-) {
-    val steerContent: List<ContentItem>
-        get() = listOf(
-            ContentItem.InputText(
-                "Message Type: ${kind.wireName}\n" +
+private fun agentMessage(
+    author: String,
+    recipient: String,
+    payload: String,
+    type: AgentMessageType,
+): ResponseItem.AgentMessage =
+    ResponseItem.AgentMessage(
+        author = author,
+        recipient = recipient,
+        content = listOf(
+            AgentMessageInputContent.InputText(
+                "Message Type: ${type.wireName}\n" +
                     "Task name: $recipient\n" +
                     "Sender: $author\n" +
-                    "Payload:\n$message",
+                    "Payload:\n$payload",
             ),
-        )
-}
+        ),
+    )
 
 private suspend fun initializeSpawnStorage(
     caller: CodexAgentSession,

@@ -10,12 +10,15 @@ import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
+import io.github.stream29.codex.lite.openai.AgentMessageInputContent
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
+import io.github.stream29.codex.lite.openai.MessagePhase
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.openai.ResponseItemId
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
@@ -48,7 +51,7 @@ val steerRuntimeTest by testSuite {
             mcpService = TestMcpService(),
         )
         assertEquals(CodexAgentStateValue.Empty, state.state.value)
-        val pendingSteer = MutableStateFlow(textContent("first"))
+        val pendingSteer = MutableStateFlow(userSteer("first"))
         val runtime = TestRuntime(state).steerRuntime {
             pendingSteer.getAndUpdate { emptyList() }
         }
@@ -60,7 +63,7 @@ val steerRuntimeTest by testSuite {
         assertTrue(pendingSteer.value.isEmpty())
     }
 
-    test("one resume delivers merged pending input without rotating turn id") {
+    test("one resume delivers each pending input without rotating turn id") {
         val storage = InMemoryCodexAgentStorage(testSettings())
         val state = createCodexAgentState(
             client = mockOpenAiClient(),
@@ -70,29 +73,36 @@ val steerRuntimeTest by testSuite {
         )
         state.appendUserMessage(textContent("initial"))
         val turnId = storage.settings.latestValue().turnId
-        val pendingSteer = MutableStateFlow(emptyList<ContentItem>())
+        val pendingSteer = MutableStateFlow(emptyList<ResponseItem.Steerable>())
         val runtime = TestRuntime(state).steerRuntime {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
-        pendingSteer.update { content -> content + textContent("first") }
-        pendingSteer.update { content -> content + textContent("second") }
+        pendingSteer.update { inputs -> inputs + userMessage("first") }
+        pendingSteer.update { inputs -> inputs + userMessage("second") }
         assertEquals(
-            textContent("first") + textContent("second"),
+            listOf(
+                userMessage("first"),
+                userMessage("second"),
+            ),
             pendingSteer.value,
         )
 
         runtime.resume().toList()
         assertEquals(
-            listOf(listOf("initial"), listOf("first", "second")),
+            listOf(listOf("initial"), listOf("first"), listOf("second")),
             storage.userTextBatches(),
+        )
+        assertEquals(
+            listOf(userMessage("first"), userMessage("second")),
+            storage.history.indexes().toList().takeLast(2).map { index -> storage.history[index] },
         )
         assertEquals(turnId, storage.settings.latestValue().turnId)
         assertTrue(pendingSteer.value.isEmpty())
 
         runtime.resume().toList()
         assertEquals(
-            listOf(listOf("initial"), listOf("first", "second")),
+            listOf(listOf("initial"), listOf("first"), listOf("second")),
             storage.userTextBatches(),
         )
         assertEquals(turnId, storage.settings.latestValue().turnId)
@@ -115,7 +125,7 @@ val steerRuntimeTest by testSuite {
             ),
         )
         assertEquals(CodexAgentStateValue.AssistantMessage, state.state.value)
-        val pendingSteer = MutableStateFlow(textContent("continue"))
+        val pendingSteer = MutableStateFlow(userSteer("continue"))
         val runtime = TestRuntime(state).steerRuntime {
             pendingSteer.getAndUpdate { emptyList() }
         }
@@ -124,6 +134,62 @@ val steerRuntimeTest by testSuite {
 
         assertEquals(CodexAgentStateValue.UserMessage, state.state.value)
         assertEquals(listOf(listOf("continue")), storage.userTextBatches())
+        assertTrue(pendingSteer.value.isEmpty())
+    }
+
+    test("agent-message steer is persisted without becoming a user message") {
+        val storage = InMemoryCodexAgentStorage(testSettings())
+        val state = createCodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
+        )
+        val message = ResponseItem.AgentMessage(
+            author = "/root/worker",
+            recipient = "/root",
+            content = listOf(
+                AgentMessageInputContent.InputText(
+                    "Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/worker\nPayload:\ndone",
+                ),
+            ),
+        )
+        val pendingSteer = MutableStateFlow(listOf<ResponseItem.Steerable>(message))
+        val runtime = TestRuntime(state).steerRuntime {
+            pendingSteer.getAndUpdate { emptyList() }
+        }
+
+        runtime.resume().toList()
+
+        val index = storage.history.indexes().toList().single()
+        assertEquals(message, storage.history[index])
+        assertEquals(CodexAgentStateValue.UserMessage, state.state.value)
+        assertTrue(pendingSteer.value.isEmpty())
+    }
+
+    test("structured message steer is persisted unchanged") {
+        val storage = InMemoryCodexAgentStorage(testSettings())
+        val state = createCodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
+        )
+        val message = ResponseItem.Message(
+            id = ResponseItemId("message_1"),
+            role = MessageRole.User,
+            content = textContent("continue"),
+            phase = MessagePhase.Commentary,
+        )
+        val pendingSteer = MutableStateFlow(listOf<ResponseItem.Steerable>(message))
+        val runtime = TestRuntime(state).steerRuntime {
+            pendingSteer.getAndUpdate { emptyList() }
+        }
+
+        runtime.resume().toList()
+
+        val index = storage.history.indexes().toList().single()
+        assertEquals(message, storage.history[index])
         assertTrue(pendingSteer.value.isEmpty())
     }
 
@@ -150,9 +216,7 @@ val steerRuntimeTest by testSuite {
             ),
         )
         assertEquals(CodexAgentStateValue.ToolCompleted, state.state.value)
-        val pendingSteer = MutableStateFlow(
-            textContent("adjust the next step"),
-        )
+        val pendingSteer = MutableStateFlow(userSteer("adjust the next step"))
         val runtime = TestRuntime(state).steerRuntime {
             pendingSteer.getAndUpdate { emptyList() }
         }
@@ -176,7 +240,7 @@ val steerRuntimeTest by testSuite {
             mcpService = TestMcpService(),
         )
         state.appendUserMessage(textContent("initial"))
-        val interruptingInput = textContent("interrupt instead")
+        val interruptingInput = userSteer("interrupt instead")
         val pendingSteer = MutableStateFlow(interruptingInput)
         val runtime = TestRuntime(state).steerRuntime {
             pendingSteer.getAndUpdate { emptyList() }
@@ -207,7 +271,7 @@ val steerRuntimeTest by testSuite {
             ),
         )
         assertIs<CodexAgentStateValue.ToolPending>(state.state.value)
-        val input = textContent("wait until the tool finishes")
+        val input = userSteer("wait until the tool finishes")
         val pendingSteer = MutableStateFlow(input)
         val runtime = TestRuntime(state).steerRuntime {
             pendingSteer.getAndUpdate { emptyList() }
@@ -222,7 +286,7 @@ val steerRuntimeTest by testSuite {
 
     test("runtime delivery and interrupt retraction cannot claim the same steer") {
         repeat(100) { iteration ->
-            val input = textContent("race $iteration")
+            val input = userSteer("race $iteration")
             val pendingSteer = MutableStateFlow(input)
             val steerProvider = SteerProvider {
                 pendingSteer.getAndUpdate { emptyList() }
@@ -257,6 +321,15 @@ private class TestRuntime(
 
 private fun textContent(text: String): List<ContentItem> =
     listOf(ContentItem.InputText(text))
+
+private fun userSteer(text: String): List<ResponseItem.Steerable> =
+    listOf(userMessage(text))
+
+private fun userMessage(text: String): ResponseItem.Message =
+    ResponseItem.Message(
+        role = MessageRole.User,
+        content = textContent(text),
+    )
 
 private suspend fun InMemoryCodexAgentStorage.userTextBatches(): List<List<String>> =
     history.indexes().toList().mapNotNull { index ->

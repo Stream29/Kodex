@@ -5,12 +5,13 @@ import io.github.stream29.codex.lite.agentruntime.contract.AgentRuntime
 import io.github.stream29.codex.lite.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.codex.lite.agentruntime.decorator.steer.steerRuntime
+import io.github.stream29.codex.lite.agentruntime.decorator.subagent.subagentParentNotificationRuntime
 import io.github.stream29.codex.lite.agentruntime.decorator.tool.toolRuntime
 import io.github.stream29.codex.lite.agentruntime.decorator.turnhook.turnHookRuntime
 import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
-import io.github.stream29.codex.lite.openai.ContentItem
+import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.tool.contract.Tool
 import kotlinx.coroutines.Job
@@ -22,23 +23,27 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.getAndUpdate
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
 
-/**
- * Builds the canonical runtime stack for one Agent.
- *
- * The returned runtime delegates to this state and remains inside its
- * coroutine lifecycle. The owning AgentSession controls that lifecycle.
- */
-public fun CodexAgentState.buildAgentRuntime(
+/** Builds the root Agent runtime. */
+public fun CodexAgentState.buildMasterAgentRuntime(
     dependencies: CodexAgentDependencies,
     agentPathResolver: AgentPathResolver,
-): AgentRuntime {
+): AgentRuntime =
+    buildAgentRuntime { pendingSteer ->
+        masterRuntimeLayer(dependencies, agentPathResolver, pendingSteer)
+    }
+
+private fun CodexAgentState.masterRuntimeLayer(
+    dependencies: CodexAgentDependencies,
+    agentPathResolver: AgentPathResolver,
+    pendingSteer: MutableStateFlow<List<ResponseItem.Steerable>>,
+): ResumableAgentLayer {
     val toolSearch = toolSearchState(dependencies.mcpService)
-    val pendingSteer = MutableStateFlow(emptyList<ContentItem>())
     val fixedTools = fixedTools(dependencies, agentPathResolver, pendingSteer)
     return fixedTools.closeOnFailure {
-        val runtime = compactionRuntime(
+        compactionRuntime(
             modelCatalog = dependencies.modelCatalog,
             compactionHooks = dependencies.hooks,
         )
@@ -57,13 +62,65 @@ public fun CodexAgentState.buildAgentRuntime(
                     fixedTools.closeAll()
                 }
             }
-        AgentRuntimeImpl(runtime, pendingSteer)
     }
+}
+
+/** Builds a spawned Agent runtime. */
+public fun CodexAgentState.buildSubagentRuntime(
+    dependencies: CodexAgentDependencies,
+    agentPathResolver: AgentPathResolver,
+): AgentRuntime =
+    buildAgentRuntime { pendingSteer ->
+        subagentRuntimeLayer(dependencies, agentPathResolver, pendingSteer)
+    }
+
+private fun CodexAgentState.subagentRuntimeLayer(
+    dependencies: CodexAgentDependencies,
+    agentPathResolver: AgentPathResolver,
+    pendingSteer: MutableStateFlow<List<ResponseItem.Steerable>>,
+): ResumableAgentLayer {
+    val toolSearch = toolSearchState(dependencies.mcpService)
+    val fixedTools = fixedTools(dependencies, agentPathResolver, pendingSteer)
+    return fixedTools.closeOnFailure {
+        compactionRuntime(
+            modelCatalog = dependencies.modelCatalog,
+            compactionHooks = dependencies.hooks,
+        )
+            .steerRuntime {
+                pendingSteer.getAndUpdate { emptyList() }
+            }
+            .toolRuntime(
+                fixedTools = fixedTools,
+                dynamicTools = dependencies.mcpService.tools,
+                toolSearch = toolSearch,
+                toolHooks = dependencies.hooks,
+            )
+            .turnHookRuntime(dependencies.hooks)
+            .also {
+                coroutineContext.job.invokeOnCompletion {
+                    fixedTools.closeAll()
+                }
+            }
+            .subagentParentNotificationRuntime { message ->
+                agentPathResolver.resolveOrNull(message.recipient)?.let { parent ->
+                    parent.runtime.pendingSteer.update { pending ->
+                        pending + message
+                    }
+                }
+            }
+    }
+}
+
+private fun CodexAgentState.buildAgentRuntime(
+    buildLayer: (MutableStateFlow<List<ResponseItem.Steerable>>) -> ResumableAgentLayer,
+): AgentRuntime {
+    val pendingSteer = MutableStateFlow(emptyList<ResponseItem.Steerable>())
+    return AgentRuntimeImpl(buildLayer(pendingSteer), pendingSteer)
 }
 
 private class AgentRuntimeImpl(
     private val delegate: ResumableAgentLayer,
-    override val pendingSteer: MutableStateFlow<List<ContentItem>>,
+    override val pendingSteer: MutableStateFlow<List<ResponseItem.Steerable>>,
 ) : AgentRuntime, ResumableAgentLayer by delegate {
     private val runningTurnSlot: MutableStateFlow<Job?> = MutableStateFlow(null)
 

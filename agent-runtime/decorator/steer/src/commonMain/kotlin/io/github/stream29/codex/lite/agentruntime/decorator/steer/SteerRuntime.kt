@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 
 /**
- * Delivers user input that belongs to the current logical turn.
+ * Delivers pending input that belongs to the current logical turn.
  *
  * Install this directly outside the compaction runtime and inside tool
  * handling. Each collected [resume] requests at most one message from
@@ -21,9 +21,9 @@ public class SteerRuntime internal constructor(
 ) : ResumableAgentLayer by delegate {
     override fun resume(): Flow<ResponsesStreamEvent> = flow {
         if (state.value.canAppendUserMessage) {
-            val content = steerProvider.take()
-            if (content.isNotEmpty()) {
-                delegate.appendUserMessage(content)
+            val inputs = steerProvider.take()
+            if (inputs.isNotEmpty()) {
+                delegate.injectHistory(inputs)
             }
         }
         emitAll(delegate.resume())
@@ -31,7 +31,7 @@ public class SteerRuntime internal constructor(
 }
 
 /**
- * Adds delivery for merged user input inserted into the current logical turn.
+ * Adds delivery for typed input inserted into the current logical turn.
  *
  * Compose this after the compaction runtime and before tool handling.
  */

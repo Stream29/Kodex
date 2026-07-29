@@ -1,7 +1,8 @@
 package io.github.stream29.codex.lite.agentsession.filesystem
 
 import io.github.stream29.codex.lite.agentruntime.contract.AgentRuntime
-import io.github.stream29.codex.lite.agentruntime.impl.buildAgentRuntime
+import io.github.stream29.codex.lite.agentruntime.impl.buildMasterAgentRuntime
+import io.github.stream29.codex.lite.agentruntime.impl.buildSubagentRuntime
 import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
@@ -23,6 +24,12 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 
+private typealias AgentRuntimeBuilder = (
+    CodexAgentStateContract,
+    CodexAgentDependencies,
+    AgentPathResolver,
+) -> AgentRuntime
+
 internal class FileSystemCodexAgentSession(
     directory: Path,
     fileSystem: CoroutineFileSystem,
@@ -32,6 +39,7 @@ internal class FileSystemCodexAgentSession(
     dependencies: CodexAgentDependencies,
     state: CodexAgentStateContract,
     createAgentPathResolver: (CodexAgentSession) -> AgentPathResolver,
+    runtimeBuilder: AgentRuntimeBuilder,
 ) : CodexAgentSession, CoroutineScope by scope {
     private val agentPathResolver: AgentPathResolver =
         createAgentPathResolver(this)
@@ -45,10 +53,7 @@ internal class FileSystemCodexAgentSession(
         agentPathResolver = agentPathResolver,
     )
 
-    override val runtime: AgentRuntime = state.buildAgentRuntime(
-        dependencies = dependencies,
-        agentPathResolver = agentPathResolver,
-    )
+    override val runtime: AgentRuntime = runtimeBuilder(state, dependencies, agentPathResolver)
 }
 
 private class FileSystemSubagentRepository(
@@ -107,6 +112,9 @@ private class FileSystemSubagentRepository(
                     mcpService = dependencies.mcpService,
                 ),
                 createAgentPathResolver = { agentPathResolver },
+                runtimeBuilder = { state, dependencies, agentPathResolver ->
+                    state.buildSubagentRuntime(dependencies, agentPathResolver)
+                },
             )
         } catch (failure: Throwable) {
             withContext(NonCancellable) { agentScope.cancelAndJoin() }
@@ -170,6 +178,9 @@ internal suspend fun CoroutineScope.FileSystemCodexAgentSession(
             ),
             createAgentPathResolver = { rootSession ->
                 AgentPathResolverImpl(rootSession)
+            },
+            runtimeBuilder = { state, dependencies, agentPathResolver ->
+                state.buildMasterAgentRuntime(dependencies, agentPathResolver)
             },
         )
         scope.coroutineContext[Job]?.invokeOnCompletion { lease.close() }

@@ -240,10 +240,11 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
 
         assertTrue(output.output.success == true)
         assertTrue(
-            root.runtime.pendingSteer.value.any { content ->
-                content is ContentItem.InputText &&
-                    "Sender: /root/worker" in content.text &&
-                    "Caller is the worker." in content.text
+            root.runtime.pendingSteer.value.any { input ->
+                input is ResponseItem.AgentMessage &&
+                    input.author == "/root/worker" &&
+                    input.recipient == "/root" &&
+                    input.containsText("Caller is the worker.")
             },
         )
     }
@@ -277,13 +278,29 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         withContext(Dispatchers.Default.limitedParallelism(1)) {
             withTimeout(10.seconds) {
                 child.runtime.state.first { state -> state == CodexAgentStateValue.AssistantMessage }
-                root.runtime.pendingSteer.first { content ->
-                    content.any { item ->
-                        item is ContentItem.InputText && "Follow-up complete." in item.text
+                root.runtime.pendingSteer.first { inputs ->
+                    inputs.any { input ->
+                        input is ResponseItem.AgentMessage &&
+                            input.containsText("Follow-up complete.")
                     }
                 }
             }
         }
+        assertEquals(1, root.runtime.pendingSteer.value.size)
+        assertTrue(
+            root.storage.history.indexes().toList().none { index ->
+                root.storage.history[index] is ResponseItem.AgentMessage
+            },
+        )
+
+        root.runtime.resume().toList()
+
+        assertTrue(
+            root.storage.history.indexes().toList().any { index ->
+                (root.storage.history[index] as? ResponseItem.AgentMessage)
+                    ?.containsText("Follow-up complete.") == true
+            },
+        )
     }
 
     test("session runtime executes Multi-agent calls through ordinary tools") {
@@ -323,9 +340,10 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
                 child.runtime.state.first { state -> state == CodexAgentStateValue.AssistantMessage }
                 while (
                     root.storage.history.indexes().toList().none { index ->
-                        root.storage.history[index].containsWorkerCompletion()
-                    } && root.runtime.pendingSteer.value.none { content ->
-                        content is ContentItem.InputText && "Worker complete." in content.text
+                    root.storage.history[index].containsWorkerCompletion()
+                    } && root.runtime.pendingSteer.value.none { input ->
+                        input is ResponseItem.AgentMessage &&
+                            input.containsText("Worker complete.")
                     }
                 ) {
                     delay(10)
@@ -360,6 +378,10 @@ private fun ResponseItem.HistoryItem.containsWorkerCompletion(): Boolean = when 
 
     else -> false
 }
+
+private fun ResponseItem.AgentMessage.containsText(text: String): Boolean =
+    content.filterIsInstance<AgentMessageInputContent.InputText>()
+        .any { content -> text in content.text }
 
 private fun spawnResponse() = flowOf(
     ResponsesStreamEvent.OutputItemDone(
