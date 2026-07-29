@@ -83,7 +83,7 @@ public val WaitAgentOutputSchema: ObjectPropertyDefinition =
         }
         property("timed_out") {
             required = true
-            boolean { description = "Whether no mailbox update arrived before the timeout." }
+            boolean { description = "Whether no pending steering message arrived before the timeout." }
         }
     }
 

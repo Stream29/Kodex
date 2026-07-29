@@ -3,12 +3,15 @@ package io.github.stream29.codex.lite.agentsession.inmemory
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
+import io.github.stream29.codex.lite.agentsession.multiagent.AgentPathResolverImpl
 import io.github.stream29.codex.lite.agentsession.test.testCodexAgentDependencies
+import io.github.stream29.codex.lite.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstorage.contract.forkTo
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
+import io.github.stream29.codex.lite.openai.AgentMessageInputContent
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
@@ -21,13 +24,23 @@ import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.tool.multiagent.MultiAgentTools
+import io.github.stream29.codex.lite.tool.multiagent.FollowupTaskArgs
+import io.github.stream29.codex.lite.tool.multiagent.SendMessageArgs
 import io.github.stream29.codex.lite.tool.multiagent.SpawnAgentArgs
+import io.github.stream29.codex.lite.tool.multiagent.followupTaskTool
+import io.github.stream29.codex.lite.tool.multiagent.sendMessageTool
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin as cancelJobAndJoin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.sync.Mutex
@@ -39,6 +52,8 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -173,6 +188,103 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         assertFalse(child.runtime.coroutineContext[Job]?.isActive ?: true)
     }
 
+    test("runtime rejects concurrent resume collectors") {
+        val entered = CompletableDeferred<Unit>()
+        val client = mockOpenAiClient {
+            createResponse { _, _, _, _ ->
+                flow<ResponsesStreamEvent> {
+                    entered.complete(Unit)
+                    awaitCancellation()
+                }
+            }
+        }
+        val repository = InMemoryCodexSessionRepository(
+            testCodexAgentDependencies(client),
+        )
+        val root = repository.open(repository.createInitialized(settings("root")))
+        root.runtime.appendUserMessage(listOf(ContentItem.InputText("Start a turn.")))
+
+        val first = async(start = CoroutineStart.UNDISPATCHED) {
+            root.runtime.resume().toList()
+        }
+        entered.await()
+        assertSame(first, root.runtime.runningTurn.value)
+
+        assertFailsWith<ConcurrentAgentRuntimeResumeException> {
+            root.runtime.resume().toList()
+        }
+        assertSame(first, root.runtime.runningTurn.value)
+
+        first.cancelJobAndJoin()
+        assertNull(root.runtime.runningTurn.value)
+    }
+
+    test("a child tool resolves its caller through the shared path resolver") {
+        val repository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
+        val root = repository.open(repository.createInitialized(settings("root")))
+        val child = root.spawnInitialized("/root/worker")
+        val sendMessageTool = child.runtime.sendMessageTool(AgentPathResolverImpl(root))
+
+        val output = assertIs<ResponseItem.FunctionCallOutput>(
+            sendMessageTool.handle(
+                ResponseItem.FunctionCall(
+                    name = MultiAgentTools.SendMessageName,
+                    arguments = OpenAiJsonCodec.encodeToString(
+                        SendMessageArgs("/root", "Caller is the worker."),
+                    ),
+                    callId = "call_send",
+                ),
+            ),
+        )
+
+        assertTrue(output.output.success == true)
+        assertTrue(
+            root.runtime.pendingSteer.value.any { content ->
+                content is ContentItem.InputText &&
+                    "Sender: /root/worker" in content.text &&
+                    "Caller is the worker." in content.text
+            },
+        )
+    }
+
+    test("follow-up steers and resumes an idle Agent directly") {
+        val client = mockOpenAiClient {
+            createResponse { _, _, _, _ ->
+                assistantResponse("Follow-up complete.", "followup_complete")
+            }
+        }
+        val repository = InMemoryCodexSessionRepository(
+            testCodexAgentDependencies(client),
+        )
+        val root = repository.open(repository.createInitialized(settings("root")))
+        val child = root.spawnInitialized("/root/worker")
+        val followupTool = root.runtime.followupTaskTool(AgentPathResolverImpl(root))
+
+        val output = assertIs<ResponseItem.FunctionCallOutput>(
+            followupTool.handle(
+                ResponseItem.FunctionCall(
+                    name = MultiAgentTools.FollowupTaskName,
+                    arguments = OpenAiJsonCodec.encodeToString(
+                        FollowupTaskArgs("/root/worker", "Continue this task."),
+                    ),
+                    callId = "call_followup",
+                ),
+            ),
+        )
+
+        assertTrue(output.output.success == true)
+        withContext(Dispatchers.Default.limitedParallelism(1)) {
+            withTimeout(10.seconds) {
+                child.runtime.state.first { state -> state == CodexAgentStateValue.AssistantMessage }
+                root.runtime.pendingSteer.first { content ->
+                    content.any { item ->
+                        item is ContentItem.InputText && "Follow-up complete." in item.text
+                    }
+                }
+            }
+        }
+    }
+
     test("session runtime executes Multi-agent calls through ordinary tools") {
         val requestMutex = Mutex()
         var rootWindowId = ""
@@ -210,7 +322,9 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
                 child.runtime.state.first { state -> state == CodexAgentStateValue.AssistantMessage }
                 while (
                     root.storage.history.indexes().toList().none { index ->
-                        root.storage.history[index] is ResponseItem.AgentMessage
+                        root.storage.history[index].containsWorkerCompletion()
+                    } && root.runtime.pendingSteer.value.none { content ->
+                        content is ContentItem.InputText && "Worker complete." in content.text
                     }
                 ) {
                     delay(10)
@@ -233,6 +347,18 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
 
 private fun ResponsesApiRequest.toolNames(): List<String> =
     tools.filterIsInstance<ResponsesApiTool>().map(ResponsesApiTool::name)
+
+private fun ResponseItem.HistoryItem.containsWorkerCompletion(): Boolean = when (this) {
+    is ResponseItem.AgentMessage -> content
+        .filterIsInstance<AgentMessageInputContent.InputText>()
+        .any { content -> "Worker complete." in content.text }
+
+    is ResponseItem.Message -> content
+        .filterIsInstance<ContentItem.InputText>()
+        .any { content -> "Worker complete." in content.text }
+
+    else -> false
+}
 
 private fun spawnResponse() = flowOf(
     ResponsesStreamEvent.OutputItemDone(

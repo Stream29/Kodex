@@ -2,6 +2,7 @@ package io.github.stream29.codex.lite.agentruntime.impl
 
 import io.github.stream29.codex.lite.agentruntime.decorator.compact.compactionRuntime
 import io.github.stream29.codex.lite.agentruntime.contract.AgentRuntime
+import io.github.stream29.codex.lite.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.codex.lite.agentruntime.decorator.steer.steerRuntime
 import io.github.stream29.codex.lite.agentruntime.decorator.tool.toolRuntime
@@ -10,8 +11,16 @@ import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
 import io.github.stream29.codex.lite.openai.ContentItem
+import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.tool.contract.Tool
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.job
 
@@ -53,9 +62,25 @@ public fun CodexAgentState.buildAgentRuntime(
 }
 
 private class AgentRuntimeImpl(
-    delegate: ResumableAgentLayer,
+    private val delegate: ResumableAgentLayer,
     override val pendingSteer: MutableStateFlow<List<ContentItem>>,
-) : AgentRuntime, ResumableAgentLayer by delegate
+) : AgentRuntime, ResumableAgentLayer by delegate {
+    private val runningTurnSlot: MutableStateFlow<Job?> = MutableStateFlow(null)
+
+    override val runningTurn: StateFlow<Job?> = runningTurnSlot.asStateFlow()
+
+    override fun resume(): Flow<ResponsesStreamEvent> = flow {
+        val turn = currentCoroutineContext().job
+        if (!runningTurnSlot.compareAndSet(null, turn)) {
+            throw ConcurrentAgentRuntimeResumeException()
+        }
+        try {
+            emitAll(delegate.resume())
+        } finally {
+            runningTurnSlot.compareAndSet(turn, null)
+        }
+    }
+}
 
 private fun List<Tool>.closeAll() {
     asReversed().forEach { tool ->
