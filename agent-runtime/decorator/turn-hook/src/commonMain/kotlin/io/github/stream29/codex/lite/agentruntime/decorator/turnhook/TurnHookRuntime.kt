@@ -90,9 +90,11 @@ public class TurnHookRuntime internal constructor(
                     ),
                 )
             ) {
-                StopResult.Finish,
-                is StopResult.Stop,
-                -> return@channelFlow
+                // Keep the object case separate: Kotlin/Native may otherwise cast Finish to Stop
+                // while lowering this combined sealed-type branch.
+                StopResult.Finish -> return@channelFlow
+
+                is StopResult.Stop -> return@channelFlow
 
                 is StopResult.Continue -> {
                     if (result.fragments.isEmpty()) return@channelFlow
