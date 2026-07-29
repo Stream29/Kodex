@@ -12,6 +12,7 @@ import io.github.stream29.codex.lite.openai.AgentMessageInputContent
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.FailedResponse
+import io.github.stream29.codex.lite.openai.IncompleteResponse
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.Response
@@ -80,21 +81,55 @@ val subagentParentNotificationRuntimeTest by testSuite {
             )
         }
 
-        test("failed response does not notify the parent") {
+        test("a failed response event still reports the newest persisted assistant message") {
             val notifications = mutableListOf<ResponseItem.AgentMessage>()
+            val assistant = assistantMessage("partial result")
             val failed = ResponsesStreamEvent.Failed(
                 FailedResponse(ResponseError(message = "upstream disconnected")),
             )
-            val state = stateFor(failed)
+            val state = stateFor(
+                ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = assistant),
+                failed,
+            )
             val runtime = RequestRuntime(state).subagentParentNotificationRuntime(
                 notifyParent = notifications::add,
             )
 
             state.injectHistory(listOf(assistantMessage("previous turn")))
             runtime.appendUserMessage(listOf(ContentItem.InputText("do the work")))
-            assertEquals(listOf(failed), runtime.resume().toList())
+            assertEquals(
+                listOf(
+                    ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = assistant),
+                    failed,
+                ),
+                runtime.resume().toList(),
+            )
 
-            assertTrue(notifications.isEmpty())
+            assertEquals(listOf(parentMessage("partial result")), notifications)
+        }
+
+        test("an incomplete response event still reports the newest persisted assistant message") {
+            val notifications = mutableListOf<ResponseItem.AgentMessage>()
+            val assistant = assistantMessage("partial result")
+            val incomplete = ResponsesStreamEvent.Incomplete(IncompleteResponse())
+            val state = stateFor(
+                ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = assistant),
+                incomplete,
+            )
+            val runtime = RequestRuntime(state).subagentParentNotificationRuntime(
+                notifyParent = notifications::add,
+            )
+
+            runtime.appendUserMessage(listOf(ContentItem.InputText("do the work")))
+            assertEquals(
+                listOf(
+                    ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = assistant),
+                    incomplete,
+                ),
+                runtime.resume().toList(),
+            )
+
+            assertEquals(listOf(parentMessage("partial result")), notifications)
         }
 
         test("a completed response with pending tools does not notify the parent") {
@@ -142,7 +177,13 @@ val subagentParentNotificationRuntimeTest by testSuite {
 
         test("an upstream runtime failure is rethrown without notifying the parent") {
             val notifications = mutableListOf<ResponseItem.AgentMessage>()
-            val state = stateFor(flow = flow { error("network failure") })
+            val assistant = assistantMessage("partial result")
+            val state = stateFor(
+                flow = flow {
+                    emit(ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = assistant))
+                    error("network failure")
+                },
+            )
             val runtime = RequestRuntime(state).subagentParentNotificationRuntime(
                 notifyParent = notifications::add,
             )
@@ -210,8 +251,18 @@ private fun assistantMessage(text: String): ResponseItem.Message =
         content = listOf(ContentItem.OutputText(text)),
     )
 
-private fun ResponseItem.AgentMessage.inputText(): String =
-    content.filterIsInstance<AgentMessageInputContent.InputText>()
-        .joinToString(separator = "", transform = AgentMessageInputContent.InputText::text)
+private fun parentMessage(text: String): ResponseItem.AgentMessage =
+    ResponseItem.AgentMessage(
+        author = "/root/worker",
+        recipient = "/root",
+        content = listOf(
+            AgentMessageInputContent.InputText(
+                "Message Type: FINAL_ANSWER\n" +
+                    "Task name: /root\n" +
+                    "Sender: /root/worker\n" +
+                    "Payload:\n$text",
+            ),
+        ),
+    )
 
 private class CollectorFailure : IllegalStateException()

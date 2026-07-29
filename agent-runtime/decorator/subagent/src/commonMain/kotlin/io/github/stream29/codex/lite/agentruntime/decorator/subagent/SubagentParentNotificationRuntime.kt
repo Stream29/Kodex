@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flow
 
 /**
- * Reports a spawned Agent's terminal resume result to its direct parent.
+ * Reports a spawned Agent's resume result to its direct parent.
  *
  * The layer has no Session-tree dependency. It reads its own canonical path
  * from the persisted `threadName`; its caller owns delivery of the protocol
@@ -58,12 +58,12 @@ public class SubagentParentNotificationRuntime internal constructor(
 }
 
 /**
- * Adds terminal parent notification to a spawned Agent runtime.
+ * Adds parent notification to a spawned Agent runtime.
  *
- * The child path is read from this runtime's persisted settings when a terminal
- * result is observed. [notifyParent] receives a plaintext [ResponseItem.AgentMessage]
- * with the standard `FINAL_ANSWER` envelope; no encrypted-content projection or
- * parent-turn scheduling occurs here.
+ * The child path is read from this runtime's persisted settings after its resume
+ * flow returns normally. [notifyParent] receives a plaintext
+ * [ResponseItem.AgentMessage] with the standard `FINAL_ANSWER` envelope; no
+ * encrypted-content projection or parent-turn scheduling occurs here.
  */
 public fun ResumableAgentLayer.subagentParentNotificationRuntime(
     notifyParent: suspend (ResponseItem.AgentMessage) -> Unit,

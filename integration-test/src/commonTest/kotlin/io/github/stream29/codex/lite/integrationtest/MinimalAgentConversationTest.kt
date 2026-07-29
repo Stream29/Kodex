@@ -6,7 +6,7 @@ import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentruntime.decorator.compact.compactionRuntime
 import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
-import io.github.stream29.codex.lite.agentruntime.impl.buildAgentRuntime
+import io.github.stream29.codex.lite.agentruntime.impl.buildMasterAgentRuntime
 import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentcontext.prefix.render.render as renderCollaborationMode
@@ -134,7 +134,7 @@ internal fun CodexAgentStateContract.integrationResumableAgent(
     modelCatalog: OpenAiModelCatalog,
     mcpService: McpService,
 ): ResumableAgentLayer =
-    buildAgentRuntime(
+    buildMasterAgentRuntime(
         dependencies = CodexAgentDependencies(
             client = client,
             modelCatalog = modelCatalog,

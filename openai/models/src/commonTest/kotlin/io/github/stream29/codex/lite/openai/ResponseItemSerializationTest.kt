@@ -98,6 +98,32 @@ val responseItemSerializationTest by testSuite {
         }
     }
 
+    test("history item serializer preserves steerable items") {
+        val items = listOf<ResponseItem.HistoryItem>(
+            ResponseItem.Message(
+                id = ResponseItemId("message_1"),
+                role = MessageRole.User,
+                content = listOf(ContentItem.InputText("continue")),
+            ),
+            ResponseItem.AgentMessage(
+                id = ResponseItemId("agent_message_1"),
+                author = "/root/worker",
+                recipient = "/root",
+                content = listOf(AgentMessageInputContent.InputText("done")),
+            ),
+        )
+
+        items.forEach { item ->
+            assertEquals(
+                item,
+                json.decodeFromString(
+                    ResponseItem.HistoryItem.serializer(),
+                    json.encodeToString(ResponseItem.HistoryItem.serializer(), item),
+                ),
+            )
+        }
+    }
+
     test("tool search execution selects a concrete response item type") {
         val clientCall = ResponseItem.ClientToolSearchCall(
             callId = "call_client",

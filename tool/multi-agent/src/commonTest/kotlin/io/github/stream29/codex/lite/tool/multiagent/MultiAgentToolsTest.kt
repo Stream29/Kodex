@@ -1,9 +1,10 @@
 package io.github.stream29.codex.lite.tool.multiagent
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ContentItem
+import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
+import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.tool.builder.ToolBuilderJson
@@ -109,7 +110,14 @@ val multiAgentToolsTest by testSuite {
 
     test("wait_agent observes its injected pending steer") {
         val tool = waitAgentTool(
-            MutableStateFlow(listOf(ContentItem.InputText("agent update"))),
+            MutableStateFlow(
+                listOf<ResponseItem.Steerable>(
+                    ResponseItem.Message(
+                        role = MessageRole.User,
+                        content = listOf(ContentItem.InputText("agent update")),
+                    ),
+                ),
+            ),
         )
 
         val output = tool.handle(

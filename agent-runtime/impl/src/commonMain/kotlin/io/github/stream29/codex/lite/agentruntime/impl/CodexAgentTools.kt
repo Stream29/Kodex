@@ -7,8 +7,8 @@ import io.github.stream29.codex.lite.agentstate.tool.toDeferredToolSearchDocumen
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.mcp.contract.McpService
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
-import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.OpenAiModelId
+import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchToolClient
 import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchTools
 import io.github.stream29.codex.lite.tool.contract.Tool
@@ -40,7 +40,7 @@ import kotlinx.io.files.Path
 internal fun CodexAgentState.fixedTools(
     dependencies: CodexAgentDependencies,
     agentPathResolver: AgentPathResolver,
-    pendingSteer: StateFlow<List<ContentItem>>,
+    pendingSteer: StateFlow<List<ResponseItem.Steerable>>,
 ): List<Tool> {
     val agentSettingsProvider: suspend () -> CodexAgentSettings = {
         storage.settings.latestValue()

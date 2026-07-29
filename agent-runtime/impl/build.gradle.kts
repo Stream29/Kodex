@@ -10,6 +10,7 @@ kotlin {
             api(project(":agent-state-contract"))
             implementation(project(":agent-runtime-decorator-compact"))
             implementation(project(":agent-runtime-decorator-steer"))
+            implementation(project(":agent-runtime-decorator-subagent"))
             implementation(project(":agent-runtime-decorator-tool"))
             implementation(project(":agent-runtime-decorator-turn-hook"))
             implementation(project(":agent-state-tool"))

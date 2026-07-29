@@ -1,7 +1,8 @@
 package io.github.stream29.codex.lite.agentsession.inmemory
 
 import io.github.stream29.codex.lite.agentruntime.contract.AgentRuntime
-import io.github.stream29.codex.lite.agentruntime.impl.buildAgentRuntime
+import io.github.stream29.codex.lite.agentruntime.impl.buildMasterAgentRuntime
+import io.github.stream29.codex.lite.agentruntime.impl.buildSubagentRuntime
 import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
@@ -21,6 +22,12 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+
+private typealias AgentRuntimeBuilder = (
+    CodexAgentStateContract,
+    CodexAgentDependencies,
+    AgentPathResolver,
+) -> AgentRuntime
 
 /** Process-local recursive session repository for tests and transient hosts. */
 public class InMemoryCodexSessionRepository internal constructor(
@@ -101,6 +108,7 @@ public class InMemoryCodexSessionRepository internal constructor(
         override val storage: MutableCodexAgentStorage,
         state: CodexAgentStateContract,
         createAgentPathResolver: (CodexAgentSession) -> AgentPathResolver,
+        runtimeBuilder: AgentRuntimeBuilder,
     ) : CodexAgentSession, CoroutineScope by scope {
         private val agentPathResolver: AgentPathResolver =
             createAgentPathResolver(this)
@@ -112,10 +120,7 @@ public class InMemoryCodexSessionRepository internal constructor(
             agentPathResolver = agentPathResolver,
         )
 
-        override val runtime: AgentRuntime = state.buildAgentRuntime(
-            dependencies = dependencies,
-            agentPathResolver = agentPathResolver,
-        )
+        override val runtime: AgentRuntime = runtimeBuilder(state, dependencies, agentPathResolver)
 
         companion object {
             suspend fun openRoot(
@@ -139,6 +144,9 @@ public class InMemoryCodexSessionRepository internal constructor(
                         ),
                         createAgentPathResolver = { rootSession ->
                             AgentPathResolverImpl(rootSession)
+                        },
+                        runtimeBuilder = { state, dependencies, agentPathResolver ->
+                            state.buildMasterAgentRuntime(dependencies, agentPathResolver)
                         },
                     )
                 } catch (failure: Throwable) {
@@ -168,6 +176,9 @@ public class InMemoryCodexSessionRepository internal constructor(
                             mcpService = dependencies.mcpService,
                         ),
                         createAgentPathResolver = { agentPathResolver },
+                        runtimeBuilder = { state, dependencies, agentPathResolver ->
+                            state.buildSubagentRuntime(dependencies, agentPathResolver)
+                        },
                     )
                 } catch (failure: Throwable) {
                     withContext(NonCancellable) { scope.cancelAndJoin() }
