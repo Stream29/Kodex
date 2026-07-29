@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.Flow
  * The inherited operations remain the single-step atomic API; [resume] is the
  * multi-step orchestration entry point.
  */
-public interface ResumableAgent : CodexAgentState {
+public interface ResumableAgentLayer : CodexAgentState {
     /**
      * Executes this layer's resume operation and exposes raw stream events.
      *

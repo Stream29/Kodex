@@ -1,6 +1,6 @@
 package io.github.stream29.codex.lite.agentruntime.decorator.tool
 
-import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgent
+import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.hook.contract.tool.PreToolUseResult
 import io.github.stream29.codex.lite.hook.contract.tool.ToolHooks
@@ -36,12 +36,12 @@ import kotlinx.serialization.json.decodeFromJsonElement
  * runs hooks, and persists outputs.
  */
 public class CodexToolRuntime internal constructor(
-    private val delegate: ResumableAgent,
+    private val delegate: ResumableAgentLayer,
     fixedTools: List<Tool>,
     private val dynamicTools: StateFlow<List<Tool>>,
     private val toolSearch: StateFlow<ToolSearchEngine>,
     private val toolHooks: ToolHooks,
-) : ResumableAgent by delegate {
+) : ResumableAgentLayer by delegate {
     private val fixedToolsByName: Map<ToolName, Tool> = fixedTools.toToolMap()
 
     override fun resume(): Flow<ResponsesStreamEvent> = channelFlow {
@@ -123,7 +123,7 @@ public class CodexToolRuntime internal constructor(
  *
  * This runtime neither creates nor closes any supplied tool or state flow.
  */
-public fun ResumableAgent.toolRuntime(
+public fun ResumableAgentLayer.toolRuntime(
     fixedTools: List<Tool>,
     dynamicTools: StateFlow<List<Tool>>,
     toolSearch: StateFlow<ToolSearchEngine>,

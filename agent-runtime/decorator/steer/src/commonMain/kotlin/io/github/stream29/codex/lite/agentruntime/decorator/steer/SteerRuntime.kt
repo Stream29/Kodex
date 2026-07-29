@@ -1,6 +1,6 @@
 package io.github.stream29.codex.lite.agentruntime.decorator.steer
 
-import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgent
+import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.codex.lite.agentstate.contract.canAppendUserMessage
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import kotlinx.coroutines.flow.Flow
@@ -16,9 +16,9 @@ import kotlinx.coroutines.flow.flow
  * delivery boundary.
  */
 public class SteerRuntime internal constructor(
-    private val delegate: ResumableAgent,
+    private val delegate: ResumableAgentLayer,
     private val steerProvider: SteerProvider,
-) : ResumableAgent by delegate {
+) : ResumableAgentLayer by delegate {
     override fun resume(): Flow<ResponsesStreamEvent> = flow {
         if (state.value.canAppendUserMessage) {
             val content = steerProvider.take()
@@ -35,6 +35,6 @@ public class SteerRuntime internal constructor(
  *
  * Compose this after the compaction runtime and before tool handling.
  */
-public fun ResumableAgent.steerRuntime(
+public fun ResumableAgentLayer.steerRuntime(
     steerProvider: SteerProvider,
 ): SteerRuntime = SteerRuntime(this, steerProvider)

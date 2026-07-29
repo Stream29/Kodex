@@ -1,6 +1,6 @@
 package io.github.stream29.codex.lite.agentruntime.decorator.compact
 
-import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgent
+import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.codex.lite.agentstate.contextwindow.tokensUntilCompaction
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
@@ -32,7 +32,7 @@ public class CodexAgentCompactionRuntime(
     private val delegate: CodexAgentState,
     private val modelCatalog: OpenAiModelCatalog,
     private val compactionHooks: CompactionHooks? = null,
-) : ResumableAgent, CodexAgentState by delegate {
+) : ResumableAgentLayer, CodexAgentState by delegate {
 
     public override fun resume(): Flow<ResponsesStreamEvent> = channelFlow {
         if (state.value is CodexAgentStateValue.ToolPending) {
@@ -102,7 +102,7 @@ public class CodexAgentCompactionRuntime(
 public fun CodexAgentState.compactionRuntime(
     modelCatalog: OpenAiModelCatalog,
     compactionHooks: CompactionHooks? = null,
-): ResumableAgent =
+): ResumableAgentLayer =
     CodexAgentCompactionRuntime(
         delegate = this,
         modelCatalog = modelCatalog,

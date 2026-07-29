@@ -2,7 +2,7 @@ package io.github.stream29.codex.lite.agentruntime.impl
 
 import io.github.stream29.codex.lite.agentruntime.decorator.compact.compactionRuntime
 import io.github.stream29.codex.lite.agentruntime.contract.AgentRuntime
-import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgent
+import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.codex.lite.agentruntime.decorator.steer.steerRuntime
 import io.github.stream29.codex.lite.agentruntime.decorator.tool.toolRuntime
 import io.github.stream29.codex.lite.agentruntime.decorator.turnhook.turnHookRuntime
@@ -53,9 +53,9 @@ public fun CodexAgentState.buildAgentRuntime(
 }
 
 private class AgentRuntimeImpl(
-    delegate: ResumableAgent,
+    delegate: ResumableAgentLayer,
     override val pendingSteer: MutableStateFlow<List<ContentItem>>,
-) : AgentRuntime, ResumableAgent by delegate
+) : AgentRuntime, ResumableAgentLayer by delegate
 
 private fun List<Tool>.closeAll() {
     asReversed().forEach { tool ->

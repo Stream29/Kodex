@@ -3,7 +3,7 @@ package io.github.stream29.codex.lite.integrationtest
 import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgent
+import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
@@ -175,7 +175,7 @@ private class McpRecordingOpenAiClient(
 
 private class McpRequestOnlyRuntime(
     private val delegate: CodexAgentStateContract,
-) : ResumableAgent, CodexAgentStateContract by delegate {
+) : ResumableAgentLayer, CodexAgentStateContract by delegate {
     override fun resume(): Flow<ResponsesStreamEvent> = flow {
         emitAll(requestResponseApi())
     }
