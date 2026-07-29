@@ -23,7 +23,7 @@ kotlin {
         val mosaicMain by creating {
             dependsOn(commonMain)
             dependencies {
-                api(project(":cli-action"))
+                api(libs.mosaic.runtime)
                 implementation(project(":utils-terminal-text"))
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.mosaic.animation)

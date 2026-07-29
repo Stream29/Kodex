@@ -10,12 +10,12 @@ import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import com.jakewharton.mosaic.ui.unit.IntSize
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.cli.action.TuiActionHost
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -127,7 +127,7 @@ val tuiPopupTest by testSuite {
     test("popup content overlays the host at its measured anchor position") {
         runMosaicTest(snapshotStrategy = popupAnsiSnapshots) {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupHarness()
                 }
             }
@@ -148,7 +148,7 @@ val tuiPopupTest by testSuite {
     test("popup positioning is relative to its host rather than the terminal surface") {
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     Column {
                         Text("header")
                         PopupHarness()
@@ -171,7 +171,7 @@ val tuiPopupTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupHarness(
                         expanded = expanded,
                         onDismissRequest = { expanded = false },
@@ -192,7 +192,7 @@ val tuiPopupTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupHarness(
                         onDismissRequest = { dismissed = true },
                         onSelect = { selectedIndex = it },
@@ -217,7 +217,7 @@ val tuiPopupTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     CascadingPopupHarness(
                         onDismissRequest = { dismissed = true },
                         onChildSelect = { childSelected = true },

@@ -21,6 +21,7 @@ import com.jakewharton.mosaic.layout.MeasurePolicy
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.onPointerEvent
+import com.jakewharton.mosaic.layout.onPreviewKeyEvent
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.ui.Box
@@ -34,9 +35,6 @@ import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.isSpecifiedColor
 import com.jakewharton.mosaic.ui.unit.Constraints
-import io.github.stream29.codex.lite.cli.action.TuiActionScope
-import io.github.stream29.codex.lite.cli.action.TuiShortcut
-import io.github.stream29.codex.lite.cli.action.rememberTuiAction
 
 /** Receiver used to declare keyed content inside [TuiPopupMenu]. */
 @Stable
@@ -383,12 +381,12 @@ private fun TuiPopupMenuSurface(
     dismissGroup: () -> Unit,
     navigateBack: (() -> Unit)?,
 ) {
-    val dismissAction = rememberTuiAction(
-        id = "popup-menu.dismiss",
-        label = "Dismiss menu",
-        shortcut = TuiShortcut(key = "Escape"),
-        onInvoke = dismiss,
-    )
+    val latestDismiss = rememberUpdatedState(dismiss)
+    val dismissOnEscapeModifier = Modifier.onPreviewKeyEvent { event ->
+        if (event != Escape) return@onPreviewKeyEvent false
+        latestDismiss.value()
+        true
+    }
     val wheelModifier = Modifier.onPointerEvent { event ->
         if (event.type != MouseEvent.Type.Press) return@onPointerEvent false
         when (event.button) {
@@ -399,27 +397,27 @@ private fun TuiPopupMenuSurface(
         true
     }
 
-    TuiActionScope(
-        actions = listOf(dismissAction),
-        blockParentActions = true,
+    Box(
+        modifier = dismissOnEscapeModifier
+            .then(modifier)
+            .focusTrap()
+            .then(wheelModifier),
     ) {
-        Box(modifier = modifier.focusTrap() then wheelModifier) {
-            if (backgroundColor.isSpecifiedColor) {
-                Filler(
-                    char = ' ',
-                    modifier = Modifier.matchParentSize(),
-                    background = backgroundColor,
-                    textStyle = TextStyle.Empty,
-                )
-            }
-            TuiPopupMenuLayout(
-                entries = entries,
-                focusedKey = focusedKey,
-                state = state,
-                dismissGroup = dismissGroup,
-                navigateBack = navigateBack,
+        if (backgroundColor.isSpecifiedColor) {
+            Filler(
+                char = ' ',
+                modifier = Modifier.matchParentSize(),
+                background = backgroundColor,
+                textStyle = TextStyle.Empty,
             )
         }
+        TuiPopupMenuLayout(
+            entries = entries,
+            focusedKey = focusedKey,
+            state = state,
+            dismissGroup = dismissGroup,
+            navigateBack = navigateBack,
+        )
     }
 }
 
@@ -888,3 +886,4 @@ private val Tab: KeyEvent = KeyEvent("Tab")
 private val ShiftTab: KeyEvent = KeyEvent("Tab", shift = true)
 private val Enter: KeyEvent = KeyEvent("Enter")
 private val Space: KeyEvent = KeyEvent(" ")
+private val Escape: KeyEvent = KeyEvent("Escape")

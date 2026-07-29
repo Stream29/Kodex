@@ -12,10 +12,12 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import com.jakewharton.mosaic.focus.focusTrap
+import com.jakewharton.mosaic.layout.KeyEvent
 import com.jakewharton.mosaic.layout.LayoutCoordinates
 import com.jakewharton.mosaic.layout.MeasurePolicy
 import com.jakewharton.mosaic.layout.onPlaced
 import com.jakewharton.mosaic.layout.onPointerEvent
+import com.jakewharton.mosaic.layout.onPreviewKeyEvent
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.modifier.composed
 import com.jakewharton.mosaic.terminal.MouseEvent
@@ -27,9 +29,6 @@ import com.jakewharton.mosaic.ui.Layout
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import com.jakewharton.mosaic.ui.unit.IntSize
-import io.github.stream29.codex.lite.cli.action.TuiActionScope
-import io.github.stream29.codex.lite.cli.action.TuiShortcut
-import io.github.stream29.codex.lite.cli.action.rememberTuiAction
 
 /**
  * A stable handle that records the final surface bounds of one popup trigger.
@@ -215,8 +214,9 @@ public fun BoxScope.TuiPopup(
  * Renders centered, modal [content] over this [TuiPopupHost].
  *
  * The dialog traps keyboard focus within its content, consumes pointer events that are not handled
- * by its content, and restores the prior focus when removed. An unhandled Escape invokes
- * [onDismissRequest]. A primary click outside [content] also invokes it when [dismissOnOutsideClick]
+ * by its content, and restores the prior focus when removed. An unmodified Escape invokes
+ * [onDismissRequest] before focused content handles it. A primary click outside [content] also
+ * invokes it when [dismissOnOutsideClick]
  * is `true`.
  *
  * The dialog clears every character cell inside its measured bounds before drawing [content].
@@ -231,12 +231,11 @@ public fun BoxScope.TuiDialog(
 ) {
     requireTuiPopupHost()
     val latestOnDismissRequest = rememberUpdatedState(onDismissRequest)
-    val dismissAction = rememberTuiAction(
-        id = "tui-dialog.dismiss",
-        label = "Dismiss dialog",
-        shortcut = TuiShortcut(key = "Escape"),
-        onInvoke = { latestOnDismissRequest.value() },
-    )
+    val dismissOnEscapeModifier = Modifier.onPreviewKeyEvent { event ->
+        if (event != Escape) return@onPreviewKeyEvent false
+        latestOnDismissRequest.value()
+        true
+    }
     val barrierModifier = Modifier.onPointerEvent { event ->
         if (
             dismissOnOutsideClick &&
@@ -253,26 +252,24 @@ public fun BoxScope.TuiDialog(
             modifier = Modifier.matchParentSize(),
             contentAlignment = Alignment.Center,
         ) {
-            TuiActionScope(
-                actions = listOf(dismissAction),
-                blockParentActions = true,
+            Box(
+                modifier = dismissOnEscapeModifier
+                    .then(modifier)
+                    .focusTrap()
+                    .onPointerEvent { true },
             ) {
-                Box(
-                    modifier = modifier
-                        .focusTrap()
-                        .onPointerEvent { true },
-                ) {
-                    Filler(
-                        char = ' ',
-                        modifier = Modifier.matchParentSize(),
-                        textStyle = TextStyle.Empty,
-                    )
-                    content()
-                }
+                Filler(
+                    char = ' ',
+                    modifier = Modifier.matchParentSize(),
+                    textStyle = TextStyle.Empty,
+                )
+                content()
             }
         }
     }
 }
+
+private val Escape: KeyEvent = KeyEvent("Escape")
 
 /** @property position `null` until the host has been placed in the terminal surface. */
 @Stable

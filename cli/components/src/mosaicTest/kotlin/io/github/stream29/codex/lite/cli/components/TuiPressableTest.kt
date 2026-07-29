@@ -9,13 +9,10 @@ import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.cli.action.TuiAction
-import io.github.stream29.codex.lite.cli.action.TuiActionHost
-import io.github.stream29.codex.lite.cli.action.TuiActionScope
-import io.github.stream29.codex.lite.cli.action.TuiShortcut
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlin.test.assertEquals
 
@@ -27,7 +24,7 @@ val tuiPressableTest by testSuite {
     test("pressed button uses reverse video until release") {
         runMosaicTest(snapshotStrategy = ansiSnapshots) {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     TuiButton(label = "Run") {}
                 }
             }
@@ -48,7 +45,7 @@ val tuiPressableTest by testSuite {
             assertEquals(
                 "[New] [Fork]",
                 setContentAndSnapshot {
-                    TuiActionHost {
+                    Box {
                         Row {
                             TuiButton(label = "New") {}
                             Text(" ")
@@ -71,7 +68,7 @@ val tuiPressableTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     Row {
                         TuiButton(label = "Run") { clickCount++ }
                         Text(" $clickCount")
@@ -99,7 +96,7 @@ val tuiPressableTest by testSuite {
             assertEquals(
                 "\u001B[2m[Unavailable]\u001B[0m",
                 setContentAndSnapshot {
-                    TuiActionHost {
+                    Box {
                         TuiButton(label = "Unavailable", enabled = false) {}
                     }
                 },
@@ -107,49 +104,25 @@ val tuiPressableTest by testSuite {
         }
     }
 
-    test("shortcut, focused key, and captured pointer activation share one action") {
+    test("focused key and captured pointer activation invoke button callbacks") {
         var newCount by mutableStateOf(0)
         var forkCount by mutableStateOf(0)
-        val newAction = TuiAction(
-            id = "new",
-            label = "New",
-            shortcut = TuiShortcut(key = "n", ctrl = true),
-        ) {
-            newCount++
-        }
-        val forkAction = TuiAction(
-            id = "fork",
-            label = "Fork",
-        ) {
-            forkCount++
-        }
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
-                    TuiActionScope(actions = listOf(newAction, forkAction)) {
-                        Row {
-                            TuiButton(action = newAction)
-                            Text(" ")
-                            TuiButton(action = forkAction)
-                            Text(" $newCount/$forkCount")
-                        }
+                Box {
+                    Row {
+                        TuiButton(label = "New", onClick = { newCount++ })
+                        Text(" ")
+                        TuiButton(label = "Fork", onClick = { forkCount++ })
+                        Text(" $newCount/$forkCount")
                     }
                 }
             }
 
-            sendKeyEvent(
-                KeyboardEvent(
-                    codepoint = 'n'.code,
-                    modifiers = KeyboardEvent.ModifierCtrl,
-                ),
-            )
-            awaitSnapshotAfter("shortcut")
-            assertEquals(1, newCount)
-
             sendKeyEvent(KeyboardEvent(codepoint = 13))
             awaitSnapshotAfter("focused Enter")
-            assertEquals(2, newCount)
+            assertEquals(1, newCount)
 
             sendMouseEvent(MouseEvent(7, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
             awaitSnapshotAfter("pointer press")
