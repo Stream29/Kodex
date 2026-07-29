@@ -5,7 +5,7 @@ import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentruntime.compact.compactionRuntime
-import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
+import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgent
 import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.composition.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentsession.composition.buildAgentRuntime
@@ -125,17 +125,17 @@ private data class RecordedCodexResponse(
 
 private class RequestOnlyRuntime(
     private val delegate: CodexAgentStateContract,
-) : CodexAgentRuntime, CodexAgentStateContract by delegate {
+) : ResumableAgent, CodexAgentStateContract by delegate {
     override fun resume(): Flow<ResponsesStreamEvent> = flow {
         emitAll(requestResponseApi())
     }
 }
 
-internal fun CodexAgentStateContract.integrationAgentRuntime(
+internal fun CodexAgentStateContract.integrationResumableAgent(
     client: OpenAiClient,
     modelCatalog: OpenAiModelCatalog,
     mcpService: McpService,
-): CodexAgentRuntime =
+): ResumableAgent =
     buildAgentRuntime(
         dependencies = CodexAgentDependencies(
             client = client,
@@ -515,7 +515,7 @@ val openAiCurrentTimeToolRoundTripProbeTest by testSuite {
                 mcpService = mcpService,
             )
             try {
-                val runtime = state.integrationAgentRuntime(client, modelCatalog, mcpService)
+                val runtime = state.integrationResumableAgent(client, modelCatalog, mcpService)
 
                 listOf(
                     "hello",
@@ -591,7 +591,7 @@ val openAiViewImageToolRuntimeProbeTest by testSuite {
                     mcpService = mcpService,
                 )
                 state = createdState
-                val runtime = createdState.integrationAgentRuntime(openAiClient, modelCatalog, mcpService)
+                val runtime = createdState.integrationResumableAgent(openAiClient, modelCatalog, mcpService)
 
                 createdState.appendUserMessage(
                     "Use the available image-viewing tool named `view_image` to inspect the local " +
@@ -666,7 +666,7 @@ val openAiImageGenerationToolRuntimeProbeTest by testSuite {
                 mcpService = mcpService,
             )
             try {
-                val runtime = state.integrationAgentRuntime(client, modelCatalog, mcpService)
+                val runtime = state.integrationResumableAgent(client, modelCatalog, mcpService)
 
                 state.appendUserMessage(
                     "Use `image_gen.imagegen` to generate a new minimal image of one black circle " +
@@ -747,7 +747,7 @@ val openAiWebRunToolRuntimeProbeTest by testSuite {
                 mcpService = mcpService,
             )
             try {
-                val runtime = state.integrationAgentRuntime(client, modelCatalog, mcpService)
+                val runtime = state.integrationResumableAgent(client, modelCatalog, mcpService)
 
                 state.appendUserMessage(
                     "Use `web.run` with one search_query operation to search for the official OpenAI " +

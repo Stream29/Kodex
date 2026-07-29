@@ -1,6 +1,6 @@
 package io.github.stream29.codex.lite.agentsession.filesystem
 
-import io.github.stream29.codex.lite.agentruntime.composite.CompositeAgentRuntime
+import io.github.stream29.codex.lite.agentruntime.composite.AgentRuntime
 import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
@@ -45,7 +45,7 @@ internal class FileSystemCodexAgentSession(
         agentPathResolver = agentPathResolver,
     )
 
-    override val runtime: CompositeAgentRuntime = state.buildAgentRuntime(
+    override val runtime: AgentRuntime = state.buildAgentRuntime(
         dependencies = dependencies,
         agentPathResolver = agentPathResolver,
     )

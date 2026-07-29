@@ -8,7 +8,7 @@ kotlin {
             api(project(":agent-runtime-contract"))
             api(project(":hook-contract"))
             api(project(":openai-model-catalog-contract"))
-            implementation(project(":agent-runtime-context-window"))
+            implementation(project(":agent-state-context-window"))
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {

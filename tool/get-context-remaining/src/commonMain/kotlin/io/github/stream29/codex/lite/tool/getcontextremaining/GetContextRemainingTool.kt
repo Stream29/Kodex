@@ -1,6 +1,6 @@
 package io.github.stream29.codex.lite.tool.getcontextremaining
 
-import io.github.stream29.codex.lite.agentruntime.contextwindow.tokensUntilCompaction
+import io.github.stream29.codex.lite.agentstate.contextwindow.tokensUntilCompaction
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.codex.lite.tool.builder.jsonToolSuccess
