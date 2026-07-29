@@ -8,6 +8,7 @@ import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
 import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.agentstate.tool.toDeferredToolSearchDocuments
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
@@ -43,6 +44,7 @@ import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchToolClient
 import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchTools
 import io.github.stream29.codex.lite.tool.plan.PlanTools
 import io.github.stream29.codex.lite.tool.plan.updatePlanTool
+import io.github.stream29.codex.lite.tool.contract.ToolCallResult
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchEngine
 import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecToolClient
 import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecTools
@@ -274,6 +276,17 @@ val codexToolRuntimeTest by testSuite {
             FunctionCallOutputBody.Text("done"),
             assertIs<ResponseItem.FunctionCallOutput>(history[2]).output.body,
         )
+        assertEquals(
+            StableTextToolEvent(
+                name = "dynamic",
+                namespace = "mcp__shared",
+                arguments = JsonObject(emptyMap()),
+                result = "runtime test output",
+                success = true,
+            ),
+            storage.stable.latestValue(),
+        )
+        assertEquals(emptyList(), storage.unstable.latestValue())
     }
 
     test("removed MCP routes complete with an explicit failure") {
@@ -722,9 +735,15 @@ private class RuntimeTestTool(
     override val serverInstructions: String = "Tools exposed by $serverName."
     override val spec: ToolSpec = runtimeNamespace(namespace, name)
 
-    override suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput {
+    override suspend fun handle(call: ResponseItem.ToolCall): ToolCallResult {
         val functionCall = assertIs<ResponseItem.FunctionCall>(call)
-        return handler(functionCall)
+        return handler(functionCall) to StableTextToolEvent(
+            name = functionCall.name,
+            namespace = functionCall.namespace,
+            arguments = OpenAiJsonCodec.parseToJsonElement(functionCall.arguments),
+            result = "runtime test output",
+            success = true,
+        )
     }
 
     override fun close(): Unit = Unit

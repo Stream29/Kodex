@@ -299,7 +299,7 @@ val webRunToolClientTest by testSuite {
                         arguments = OpenAiJsonCodec.encodeToString(commands),
                         callId = "call_web_run",
                     ),
-                )
+                ).first
             } as ResponseItem.FunctionCallOutput
 
             assertTrue(output.output.success == true)

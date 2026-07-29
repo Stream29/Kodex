@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.mcp.impl
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableJsonToolEvent
 import io.github.stream29.codex.lite.mcp.contract.McpServerConfiguration
 import io.github.stream29.codex.lite.mcp.contract.McpTool
 import io.github.stream29.codex.lite.openai.CallToolResult
@@ -7,6 +8,7 @@ import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ToolSpec
+import io.github.stream29.codex.lite.tool.contract.ToolCallResult
 import io.github.stream29.codex.lite.utils.coroutines.runCatchingCancellable
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpError
@@ -21,6 +23,7 @@ import kotlinx.schema.json.BooleanPropertyDefinition
 import kotlinx.schema.json.GenericPropertyDefinition
 import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -63,22 +66,36 @@ private class McpToolImpl(
         ),
     )
 
-    override suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput {
+    override suspend fun handle(call: ResponseItem.ToolCall): ToolCallResult {
         val arguments = when (call) {
-            is ResponseItem.FunctionCall -> call.arguments.toArgumentsOrFailure(call.callId)
-            is ResponseItem.CustomToolCall -> return call.failure("MCP tools accept JSON function arguments.")
+            is ResponseItem.FunctionCall -> when (
+                val parsed = call.arguments.toArgumentsOrFailure(call.callId)
+            ) {
+                is ParsedArguments.Success -> parsed.value
+                is ParsedArguments.Failure -> {
+                    return completed(
+                        arguments = JsonPrimitive(call.arguments),
+                        output = call.failure(parsed.message),
+                    )
+                }
+            }
+
+            is ResponseItem.CustomToolCall -> {
+                return completed(
+                    arguments = JsonPrimitive(call.input),
+                    output = call.failure("MCP tools accept JSON function arguments."),
+                )
+            }
+
             is ResponseItem.ClientToolSearchCall -> error("Client tool-search calls are handled by CodexToolRuntime.")
         }
-        if (arguments is ParsedArguments.Failure) {
-            return call.failure(arguments.message)
-        }
 
-        return runCatchingCancellable {
+        val output = runCatchingCancellable {
             val result = activeClient.client.callTool(
                 request = CallToolRequest(
                     CallToolRequestParams(
                         name = tool.name,
-                        arguments = (arguments as ParsedArguments.Success).value,
+                        arguments = arguments,
                     ),
                 ),
                 options = RequestOptions(),
@@ -90,9 +107,25 @@ private class McpToolImpl(
         }.getOrElse { failure ->
             call.failure(failure.toMcpFailureMessage(activeClient.name))
         }
+        return completed(
+            arguments = arguments,
+            output = output,
+        )
     }
 
     override fun close(): Unit = Unit
+
+    private fun completed(
+        arguments: JsonElement,
+        output: ResponseItem.McpToolCallOutput,
+    ): ToolCallResult =
+        output to StableJsonToolEvent(
+            name = tool.name,
+            namespace = activeClient.name,
+            arguments = arguments,
+            result = McpJson.encodeToJsonElement(CallToolResult.serializer(), output.output),
+            success = output.output.isError?.not(),
+        )
 }
 
 private fun String.toModelToolName(): String =

@@ -14,6 +14,7 @@ import io.github.stream29.codex.lite.tool.getcontextremaining.GetContextRemainin
 import io.github.stream29.codex.lite.tool.multiagent.MultiAgentTools
 import io.github.stream29.codex.lite.tool.plan.PlanTools
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputTools
+import io.github.stream29.codex.lite.tool.contract.ToolCallResult
 import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecTools
 import io.github.stream29.codex.lite.tool.webrun.WebRunTools
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -92,7 +93,7 @@ private object TestMcpTool : McpTool {
     override val serverInstructions: String = "Calendar tools."
     override val spec: ToolSpec = CurrentTimeTools.spec
 
-    override suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput =
+    override suspend fun handle(call: ResponseItem.ToolCall): ToolCallResult =
         error("Tool projection tests never execute MCP tools.")
 
     override fun close(): Unit = Unit

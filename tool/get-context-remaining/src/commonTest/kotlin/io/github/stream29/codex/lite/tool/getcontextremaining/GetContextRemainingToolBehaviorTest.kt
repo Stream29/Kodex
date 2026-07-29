@@ -54,7 +54,7 @@ val getContextRemainingToolTest by testSuite {
                 arguments = "{}",
                 callId = "call_context",
             ),
-        ) as ResponseItem.FunctionCallOutput
+        ).first as ResponseItem.FunctionCallOutput
 
         assertEquals(
             "You have 40 tokens left in this context window.",

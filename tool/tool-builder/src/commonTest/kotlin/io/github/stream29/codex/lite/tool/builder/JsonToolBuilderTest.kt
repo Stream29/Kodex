@@ -2,6 +2,7 @@ package io.github.stream29.codex.lite.tool.builder
 
 import de.infix.testBalloon.framework.core.testSuite
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.FunctionCallOutputContentItem
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
@@ -10,6 +11,7 @@ import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ResponseItem
 import kotlinx.schema.json.PropertyBuilder
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.assertEquals
 
 @Serializable
@@ -56,7 +58,7 @@ val jsonToolBuilderTest by testSuite {
                     arguments = """{"value":"hello"}""",
                     callId = "call_1",
                 ),
-            ),
+            ).first,
         )
     }
 
@@ -83,7 +85,7 @@ val jsonToolBuilderTest by testSuite {
                     name = "echo",
                     input = "raw",
                 ),
-            ),
+            ).first,
         )
     }
 
@@ -109,7 +111,7 @@ val jsonToolBuilderTest by testSuite {
                     arguments = """{"value":"hello"}""",
                     callId = "call_1",
                 ),
-            ),
+            ).first,
         )
     }
 
@@ -141,6 +143,11 @@ val jsonToolBuilderTest by testSuite {
                     ),
                 ),
                 success = true,
+            ) to StableTextToolEvent(
+                name = "echo",
+                arguments = JsonPrimitive(input.value),
+                result = "saved from $callId",
+                success = true,
             )
         }
 
@@ -166,7 +173,7 @@ val jsonToolBuilderTest by testSuite {
                     arguments = """{"value":"BASE64"}""",
                     callId = "call_1",
                 ),
-            ),
+            ).first,
         )
     }
 }

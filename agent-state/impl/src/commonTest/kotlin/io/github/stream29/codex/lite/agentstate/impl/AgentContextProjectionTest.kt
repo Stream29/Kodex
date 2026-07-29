@@ -29,6 +29,7 @@ import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.tool.currenttime.CurrentTimeTools
+import io.github.stream29.codex.lite.tool.contract.ToolCallResult
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -359,7 +360,7 @@ private object ProjectionMcpTool : McpTool {
     override val serverInstructions: String = "Projection tools."
     override val spec: ToolSpec = CurrentTimeTools.spec
 
-    override suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput =
+    override suspend fun handle(call: ResponseItem.ToolCall): ToolCallResult =
         error("Projection tests never execute MCP tools.")
 
     override fun close() = Unit

@@ -1,35 +1,22 @@
 package io.github.stream29.codex.lite.agentstorage.cleanmodels.stable
 
+import io.github.stream29.codex.lite.tool.viewimage.ViewImageToolArguments
+import io.github.stream29.codex.lite.tool.viewimage.ViewImageToolOutput
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
  * Stable clean projection of a completed `view_image` interaction.
  *
- * @property path Image path supplied to the tool.
- * @property detail Nullable because callers may omit the requested detail.
- * @property environmentId Nullable because the current environment is implicit.
+ * @property arguments Tool-native image-view arguments.
  * @property result Image inspection outcome.
  */
 @Serializable
 @SerialName("image_view_tool_event")
 public data class StableImageViewToolEvent(
-    public val path: String,
-    public val detail: StableImageDetail? = null,
-    @SerialName("environment_id")
-    public val environmentId: String? = null,
+    public val arguments: ViewImageToolArguments,
     public val result: StableImageViewResult,
-) : StableToolEvent
-
-/** Detail level used when presenting an image to the model. */
-@Serializable
-public enum class StableImageDetail {
-    @SerialName("high")
-    High,
-
-    @SerialName("original")
-    Original,
-}
+) : StableCleanEvent.CompletedTool
 
 /** Completed outcome of an image inspection. */
 @Serializable
@@ -38,9 +25,7 @@ public sealed interface StableImageViewResult {
     @Serializable
     @SerialName("success")
     public data class Success(
-        @SerialName("image_url")
-        public val imageUrl: String,
-        public val detail: StableImageDetail,
+        public val output: ViewImageToolOutput,
     ) : StableImageViewResult
 
     /** The image could not be loaded. */

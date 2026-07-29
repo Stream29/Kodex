@@ -11,7 +11,11 @@ import io.github.stream29.codex.lite.agentstate.contract.canAppendUserMessage
 import io.github.stream29.codex.lite.agentstate.contract.canCompact
 import io.github.stream29.codex.lite.agentstate.contract.canMarkNewTurn
 import io.github.stream29.codex.lite.agentstate.contract.canRequestResponseApi
+import io.github.stream29.codex.lite.agentstate.tool.toPendingToolEvent
 import io.github.stream29.codex.lite.agentstate.tool.visibleToolSpecs
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
@@ -353,7 +357,10 @@ private class CodexAgentStateImpl(
             index
         }
 
-    override suspend fun completeToolCall(output: ResponseItem.ToolCallOutput): Int {
+    override suspend fun completeToolCall(
+        output: ResponseItem.ToolCallOutput,
+        completed: StableCleanEvent.CompletedTool,
+    ): Int {
         var pendingCalls = emptyList<ResponseItem.ToolCall>()
         return mutate(
             validate = { value ->
@@ -365,8 +372,13 @@ private class CodexAgentStateImpl(
             pendingCalls.requireCall(output.callId)
             val nextState = toolPendingState(pendingCalls.filterNot { call -> call.callId == output.callId })
             val index = storage.latestIndex() + 1
+            val remainingPending = storage.pendingToolsWithout(index - 1, output.callId)
             storage.history.setWithTransaction(index, output) {
-                storage.timestamp.setWithTransaction(index, now()) { index }
+                storage.stable.setWithTransaction(index, completed) {
+                    storage.unstable.setWithTransaction(index, remainingPending) {
+                        storage.timestamp.setWithTransaction(index, now()) { index }
+                    }
+                }
             }
             latestIndex.value = index
             state.value = nextState
@@ -396,9 +408,14 @@ private class CodexAgentStateImpl(
             }
             val nextState = toolPendingState(pendingCalls.filterNot { call -> call.callId == output.callId })
             val index = storage.latestIndex() + 1
+            val remainingPending = storage.pendingToolsWithout(index - 1, output.callId)
             storage.settings.setWithTransaction(index, currentSettings.copy(plan = plan)) {
                 storage.history.setWithTransaction(index, output) {
-                    storage.timestamp.setWithTransaction(index, now()) { index }
+                    storage.stable.setWithTransaction(index, StablePlanUpdate) {
+                        storage.unstable.setWithTransaction(index, remainingPending) {
+                            storage.timestamp.setWithTransaction(index, now()) { index }
+                        }
+                    }
                 }
             }
             latestIndex.value = index
@@ -428,14 +445,29 @@ private class CodexAgentStateImpl(
         tokenCount: Long?,
     ): Int {
         val index = storage.latestIndex() + 1
+        val pendingSnapshot = (item as? ResponseItem.ToolCall)?.let { call ->
+            storage.pendingToolsAt(index - 1) + call.toPendingToolEvent()
+        }
         if (tokenCount == null) {
             storage.history.setWithTransaction(index, item) {
-                storage.timestamp.setWithTransaction(index, timestamp) { index }
+                if (pendingSnapshot == null) {
+                    storage.timestamp.setWithTransaction(index, timestamp) { index }
+                } else {
+                    storage.unstable.setWithTransaction(index, pendingSnapshot) {
+                        storage.timestamp.setWithTransaction(index, timestamp) { index }
+                    }
+                }
             }
         } else {
             storage.tokenCount.setWithTransaction(index, tokenCount) {
                 storage.history.setWithTransaction(index, item) {
-                    storage.timestamp.setWithTransaction(index, timestamp) { index }
+                    if (pendingSnapshot == null) {
+                        storage.timestamp.setWithTransaction(index, timestamp) { index }
+                    } else {
+                        storage.unstable.setWithTransaction(index, pendingSnapshot) {
+                            storage.timestamp.setWithTransaction(index, timestamp) { index }
+                        }
+                    }
                 }
             }
         }
@@ -657,6 +689,22 @@ private suspend fun CodexAgentStorage.stateAt(index: Int): CodexAgentStateValue 
 private fun List<ResponseItem.ToolCall>.requireCall(callId: String): ResponseItem.ToolCall =
     firstOrNull { call -> call.callId == callId }
         ?: throw IllegalArgumentException("Tool output does not match a pending call id: $callId")
+
+private suspend fun CodexAgentStorage.pendingToolsWithout(
+    index: Int,
+    callId: String,
+): List<PendingToolEvent> {
+    val pending = pendingToolsAt(index)
+    if (pending.isNotEmpty()) {
+        require(pending.any { event -> event.callId == callId }) {
+            "Unstable clean timeline does not contain pending call id: $callId"
+        }
+    }
+    return pending.filterNot { event -> event.callId == callId }
+}
+
+private suspend fun CodexAgentStorage.pendingToolsAt(index: Int): List<PendingToolEvent> =
+    if (unstable.floorToIndex(index) == null) emptyList() else unstable[index]
 
 private fun toolPendingState(calls: List<ResponseItem.ToolCall>): CodexAgentStateValue {
     return if (calls.isEmpty()) {

@@ -57,7 +57,7 @@ val mcpStdioTransportIoTest by testSuite(
                         arguments = "{}",
                         callId = "stdio-call",
                     ),
-                ),
+                ).first,
             )
             val text = result.output.content.single().jsonObject.getValue("text").jsonPrimitive.content
             assertEquals(

@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.agentstorage.cleanmodels.stable
 
+import io.github.stream29.codex.lite.tool.imagegeneration.GeneratedImageOutput
+import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenToolArguments
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -14,7 +16,7 @@ import kotlinx.serialization.Serializable
 public data class StableImageGenerationToolEvent(
     public val request: StableImageGenerationRequest,
     public val result: StableImageGenerationResult,
-) : StableToolEvent
+) : StableCleanEvent.CompletedTool
 
 /** Input shape available for an image-generation interaction. */
 @Serializable
@@ -23,11 +25,7 @@ public sealed interface StableImageGenerationRequest {
     @Serializable
     @SerialName("tool")
     public data class Tool(
-        public val prompt: String,
-        @SerialName("referenced_image_paths")
-        public val referencedImagePaths: List<String>? = null,
-        @SerialName("num_last_images_to_include")
-        public val numLastImagesToInclude: Long? = null,
+        public val arguments: ImageGenToolArguments,
     ) : StableImageGenerationRequest
 
     /** Hosted image generation did not expose the original prompt as arguments. */
@@ -42,18 +40,14 @@ public sealed interface StableImageGenerationResult {
     /**
      * An image was generated.
      *
-     * @property imageUrl URL or data URL containing the generated image.
-     * @property outputHint Nullable model-visible persistence hint.
+     * @property output Tool-native image-generation result.
      * @property savedPath Nullable local artifact path.
      * @property revisedPrompt Nullable provider-revised prompt.
      */
     @Serializable
     @SerialName("success")
     public data class Success(
-        @SerialName("image_url")
-        public val imageUrl: String,
-        @SerialName("output_hint")
-        public val outputHint: String? = null,
+        public val output: GeneratedImageOutput,
         @SerialName("saved_path")
         public val savedPath: String? = null,
         @SerialName("revised_prompt")
