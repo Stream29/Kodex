@@ -45,8 +45,11 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
@@ -140,7 +143,8 @@ private class CodexAgentStateImpl(
     override fun requestResponseApi(): Flow<ResponsesStreamEvent> = flow {
         val previousState = state.value
         previousState.requireCanRequestResponseApi()
-        if (!state.compareAndSet(previousState, CodexAgentStateValue.RequestResponse)) {
+        val request = ActiveRequest()
+        if (!state.compareAndSet(previousState, request.snapshot())) {
             throw CodexAgentStateInvalidTransitionException("start a response request", state.value)
         }
 
@@ -182,6 +186,9 @@ private class CodexAgentStateImpl(
                 turnMetadata = clientMetadata.turnMetadata,
                 windowId = clientMetadata.windowId,
             ).collect { event ->
+                if (event !is ResponsesStreamEvent.OutputItemDone) {
+                    request.accept(event)
+                }
                 when (event) {
                     is ResponsesStreamEvent.OutputItemDone -> {
                         val historyItem = event.item as? ResponseItem.HistoryItem
@@ -197,6 +204,10 @@ private class CodexAgentStateImpl(
                     }
 
                     else -> Unit
+                }
+                if (event is ResponsesStreamEvent.OutputItemDone) {
+                    request.accept(event)
+                    request.complete(event.outputIndex)
                 }
                 emit(event)
             }
@@ -440,6 +451,47 @@ private class CodexAgentStateImpl(
         latestIndex.value = index
     }
 
+    private inner class ActiveRequest {
+        private var output: ActiveRequestOutput? = null
+
+        fun snapshot(): CodexAgentStateValue.RequestResponse =
+            CodexAgentStateValue.RequestResponse.Started
+
+        suspend fun accept(event: ResponsesStreamEvent) {
+            when (event) {
+                is ResponsesStreamEvent.OutputItemAdded -> {
+                    val next = ActiveRequestOutput(event.outputIndex, event.item)
+                    output = next
+                    state.value = next.state
+                    next.emit(event)
+                }
+
+                else -> output?.emit(event)
+            }
+        }
+
+        fun complete(outputIndex: Long) {
+            if (output?.outputIndex == outputIndex) {
+                output = null
+                state.value = snapshot()
+            }
+        }
+    }
+
+    private class ActiveRequestOutput(
+        val outputIndex: Long,
+        item: ResponseItem,
+    ) {
+        private val mutableEvents = MutableSharedFlow<ResponsesStreamEvent>(replay = Int.MAX_VALUE)
+        val events = mutableEvents.asSharedFlow()
+        val state: CodexAgentStateValue.RequestResponse = item.toRequestResponse(events)
+
+        suspend fun emit(event: ResponsesStreamEvent) {
+            mutableEvents.emit(event)
+        }
+
+    }
+
     private inline fun <T> mutate(
         validate: (CodexAgentStateValue) -> Unit,
         inFlight: CodexAgentStateValue,
@@ -479,7 +531,7 @@ private val CodexAgentStateValue.isStable: Boolean
         -> true
 
         CodexAgentStateValue.ExternalWrite,
-        CodexAgentStateValue.RequestResponse,
+        is CodexAgentStateValue.RequestResponse,
         CodexAgentStateValue.Compacting,
         -> false
     }
@@ -611,6 +663,26 @@ private fun toolPendingState(calls: List<ResponseItem.ToolCall>): CodexAgentStat
         CodexAgentStateValue.ToolCompleted
     } else {
         CodexAgentStateValue.ToolPending(calls)
+    }
+}
+
+private fun ResponseItem.toRequestResponse(
+    events: SharedFlow<ResponsesStreamEvent>,
+): CodexAgentStateValue.RequestResponse {
+    return when (this) {
+        is ResponseItem.Message -> CodexAgentStateValue.RequestResponse.Message(events)
+        is ResponseItem.AgentMessage -> CodexAgentStateValue.RequestResponse.AgentMessage(events)
+        is ResponseItem.Reasoning -> CodexAgentStateValue.RequestResponse.Reasoning(events)
+        is ResponseItem.ToolCall,
+        is ResponseItem.ToolCallOutput,
+        is ResponseItem.LocalShellCall,
+        is ResponseItem.ServerToolSearchCall,
+        is ResponseItem.ServerToolSearchOutput,
+        is ResponseItem.WebSearchCall,
+        is ResponseItem.ImageGenerationCall,
+        -> CodexAgentStateValue.RequestResponse.ToolCall(events)
+
+        else -> CodexAgentStateValue.RequestResponse.Unknown(events)
     }
 }
 
