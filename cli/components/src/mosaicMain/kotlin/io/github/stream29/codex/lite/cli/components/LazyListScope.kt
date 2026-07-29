@@ -97,7 +97,12 @@ internal class LazyListScopeImpl : LazyListScope {
         )
     }
 
-    fun build(): LazyItemProvider = LazyItemProvider(intervals.toList(), itemCount)
+    fun build(reverseLayout: Boolean): LazyItemProvider =
+        LazyItemProvider(
+            intervals = intervals.toList(),
+            itemCount = itemCount,
+            reverseLayout = reverseLayout,
+        )
 
     private fun addInterval(
         count: Int,
@@ -121,6 +126,7 @@ internal class LazyListScopeImpl : LazyListScope {
 internal class LazyItemProvider(
     private val intervals: List<LazyListInterval>,
     val itemCount: Int,
+    private val reverseLayout: Boolean,
 ) {
     private val keys: List<Any> = List(itemCount) { index ->
         val interval = intervalAt(index)
@@ -140,14 +146,25 @@ internal class LazyItemProvider(
 
     fun indexOfKey(key: Any): Int? = indicesByKey[key]
 
+    fun layoutIndexOf(itemIndex: Int): Int =
+        if (reverseLayout) itemCount - 1 - itemIndex else itemIndex
+
+    fun itemIndexAt(layoutIndex: Int): Int =
+        if (reverseLayout) itemCount - 1 - layoutIndex else layoutIndex
+
+    fun keyAtLayoutIndex(layoutIndex: Int): Any =
+        keyAt(itemIndexAt(layoutIndex))
+
     /** @return `null` when this item belongs to the default subcomposition reuse class. */
-    fun contentTypeAt(index: Int): Any? {
+    fun contentTypeAtLayoutIndex(layoutIndex: Int): Any? {
+        val index = itemIndexAt(layoutIndex)
         val interval = intervalAt(index)
         return interval.contentTypeFactory(index - interval.startIndex)
     }
 
     @Composable
-    fun Item(index: Int) {
+    fun ItemAtLayoutIndex(layoutIndex: Int) {
+        val index = itemIndexAt(layoutIndex)
         val interval = intervalAt(index)
         interval.itemContent(index - interval.startIndex)
     }

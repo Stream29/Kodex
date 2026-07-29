@@ -56,6 +56,7 @@ public class LazyListState(
 
     /** `null` until a measure pass has published a contiguous window around the current anchor. */
     private var measuredWindow: LazyMeasuredWindow? = null
+    private var hasMeasuredItems: Boolean = false
 
     init {
         require(initialFirstVisibleItemIndex >= 0) { "Initial lazy list index cannot be negative." }
@@ -132,11 +133,17 @@ public class LazyListState(
         requestedAnchorState.value = LazyAnchorRequest.End
     }
 
-    internal fun resolveAnchor(provider: LazyItemProvider): LazyAnchorRequest {
+    internal fun resolveAnchor(
+        provider: LazyItemProvider,
+        reverseLayout: Boolean,
+    ): LazyAnchorRequest {
         val request = requestedAnchorState.value
         if (request != LazyAnchorRequest.None) return request
         val currentIndex = firstVisibleItemIndex
         val currentOffset = firstVisibleItemScrollOffset
+        if (reverseLayout && !hasMeasuredItems && currentIndex == 0 && currentOffset == 0) {
+            return LazyAnchorRequest.Start
+        }
         val restoredIndex = if (anchorKey === NoAnchorKey) null else provider.indexOfKey(anchorKey)
         return LazyAnchorRequest.Position(
             index = restoredIndex ?: currentIndex,
@@ -160,6 +167,7 @@ public class LazyListState(
         canScrollBackwardState.value = canScrollBackward
         canScrollForwardState.value = canScrollForward
         anchorKey = if (provider.itemCount == 0) NoAnchorKey else provider.keyAt(anchorIndex)
+        hasMeasuredItems = true
         requestedAnchorState.value = LazyAnchorRequest.None
     }
 
@@ -171,7 +179,7 @@ public class LazyListState(
         firstVisibleItemScrollOffsetState.intValue = 0
         layoutInfoState.value = layoutInfo
         measuredWindow = LazyMeasuredWindow(
-            firstIndex = 0,
+            itemIndices = emptyList(),
             keys = emptyList(),
             heights = emptyList(),
             viewportSize = viewportSize,
@@ -180,6 +188,7 @@ public class LazyListState(
         canScrollBackwardState.value = false
         canScrollForwardState.value = false
         anchorKey = NoAnchorKey
+        hasMeasuredItems = false
         requestedAnchorState.value = LazyAnchorRequest.None
     }
 }
@@ -201,16 +210,22 @@ internal sealed interface LazyAnchorRequest {
 }
 
 internal data class LazyMeasuredWindow(
-    val firstIndex: Int,
+    val itemIndices: List<Int>,
     val keys: List<Any>,
     val heights: List<Int>,
     val viewportSize: Int,
     val reachesEnd: Boolean,
 ) {
+    init {
+        require(itemIndices.size == keys.size && keys.size == heights.size) {
+            "Lazy measured-window item metadata must have matching sizes."
+        }
+    }
+
     val totalHeight: Int = heights.sum()
 
     fun positionOf(index: Int, offset: Int): Int? {
-        val localIndex = index - firstIndex
+        val localIndex = itemIndices.indexOf(index)
         if (localIndex !in heights.indices) return null
         var position = offset
         for (itemIndex in 0 until localIndex) {
@@ -225,7 +240,7 @@ internal data class LazyMeasuredWindow(
             val height = heights[localIndex]
             if (height > 0 && remaining < height) {
                 return LazyWindowAnchor(
-                    index = firstIndex + localIndex,
+                    index = itemIndices[localIndex],
                     offset = remaining,
                     key = keys[localIndex],
                 )
@@ -234,7 +249,7 @@ internal data class LazyMeasuredWindow(
         }
         val fallbackIndex = heights.indexOfLast { it > 0 }.coerceAtLeast(0)
         return LazyWindowAnchor(
-            index = firstIndex + fallbackIndex,
+            index = itemIndices[fallbackIndex],
             offset = (heights[fallbackIndex] - 1).coerceAtLeast(0),
             key = keys[fallbackIndex],
         )
