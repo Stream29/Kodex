@@ -6,7 +6,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":agent-context-contract"))
-            api(project(":agent-runtime-contract"))
+            api(project(":agent-runtime-composite"))
             api(project(":agent-session-contract"))
             api(project(":hook-contract"))
             api(project(":mcp-contract"))
@@ -19,6 +19,8 @@ kotlin {
             implementation(project(":agent-state-impl"))
             implementation(project(":agent-state-tool"))
             implementation(project(":agent-runtime-compact"))
+            implementation(project(":agent-runtime-contract"))
+            implementation(project(":agent-runtime-steer"))
             implementation(project(":agent-runtime-tool"))
             implementation(project(":agent-runtime-turn-hook"))
             implementation(project(":tool-apply-patch"))

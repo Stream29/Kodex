@@ -7,7 +7,7 @@ public fun interface SteerProvider {
     /**
      * Atomically claims the current pending steer.
      *
-     * @return the claimed content, or `null` when no steer is pending.
+     * @return the claimed content, or an empty list when no steer is pending.
      */
-    public suspend fun take(): List<ContentItem>?
+    public suspend fun take(): List<ContentItem>
 }

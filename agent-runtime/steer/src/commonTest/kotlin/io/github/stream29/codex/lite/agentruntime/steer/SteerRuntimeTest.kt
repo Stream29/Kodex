@@ -18,7 +18,6 @@ import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
@@ -32,7 +31,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.flow.update
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 val steerRuntimeTest by testSuite {
     testFixture {
@@ -49,16 +48,16 @@ val steerRuntimeTest by testSuite {
             mcpService = TestMcpService(),
         )
         assertEquals(CodexAgentStateValue.Empty, state.state.value)
-        val pendingSteer = MutableStateFlow<List<ContentItem>?>(textContent("first"))
+        val pendingSteer = MutableStateFlow(textContent("first"))
         val runtime = TestRuntime(state).steerRuntime {
-            pendingSteer.getAndUpdate { null }
+            pendingSteer.getAndUpdate { emptyList() }
         }
 
         runtime.resume().toList()
 
         assertEquals(CodexAgentStateValue.UserMessage, state.state.value)
         assertEquals(listOf(listOf("first")), storage.userTextBatches())
-        assertNull(pendingSteer.value)
+        assertTrue(pendingSteer.value.isEmpty())
     }
 
     test("one resume delivers merged pending input without rotating turn id") {
@@ -71,13 +70,13 @@ val steerRuntimeTest by testSuite {
         )
         state.appendUserMessage(textContent("initial"))
         val turnId = storage.settings.latestValue().turnId
-        val pendingSteer = MutableStateFlow<List<ContentItem>?>(null)
+        val pendingSteer = MutableStateFlow(emptyList<ContentItem>())
         val runtime = TestRuntime(state).steerRuntime {
-            pendingSteer.getAndUpdate { null }
+            pendingSteer.getAndUpdate { emptyList() }
         }
 
-        pendingSteer.update { content -> content.orEmpty() + textContent("first") }
-        pendingSteer.update { content -> content.orEmpty() + textContent("second") }
+        pendingSteer.update { content -> content + textContent("first") }
+        pendingSteer.update { content -> content + textContent("second") }
         assertEquals(
             textContent("first") + textContent("second"),
             pendingSteer.value,
@@ -89,7 +88,7 @@ val steerRuntimeTest by testSuite {
             storage.userTextBatches(),
         )
         assertEquals(turnId, storage.settings.latestValue().turnId)
-        assertNull(pendingSteer.value)
+        assertTrue(pendingSteer.value.isEmpty())
 
         runtime.resume().toList()
         assertEquals(
@@ -116,16 +115,16 @@ val steerRuntimeTest by testSuite {
             ),
         )
         assertEquals(CodexAgentStateValue.AssistantMessage, state.state.value)
-        val pendingSteer = MutableStateFlow<List<ContentItem>?>(textContent("continue"))
+        val pendingSteer = MutableStateFlow(textContent("continue"))
         val runtime = TestRuntime(state).steerRuntime {
-            pendingSteer.getAndUpdate { null }
+            pendingSteer.getAndUpdate { emptyList() }
         }
 
         runtime.resume().toList()
 
         assertEquals(CodexAgentStateValue.UserMessage, state.state.value)
         assertEquals(listOf(listOf("continue")), storage.userTextBatches())
-        assertNull(pendingSteer.value)
+        assertTrue(pendingSteer.value.isEmpty())
     }
 
     test("pending input can follow a completed tool batch in the same turn") {
@@ -151,11 +150,11 @@ val steerRuntimeTest by testSuite {
             ),
         )
         assertEquals(CodexAgentStateValue.ToolCompleted, state.state.value)
-        val pendingSteer = MutableStateFlow<List<ContentItem>?>(
+        val pendingSteer = MutableStateFlow(
             textContent("adjust the next step"),
         )
         val runtime = TestRuntime(state).steerRuntime {
-            pendingSteer.getAndUpdate { null }
+            pendingSteer.getAndUpdate { emptyList() }
         }
 
         runtime.resume().toList()
@@ -178,12 +177,12 @@ val steerRuntimeTest by testSuite {
         )
         state.appendUserMessage(textContent("initial"))
         val interruptingInput = textContent("interrupt instead")
-        val pendingSteer = MutableStateFlow<List<ContentItem>?>(interruptingInput)
+        val pendingSteer = MutableStateFlow(interruptingInput)
         val runtime = TestRuntime(state).steerRuntime {
-            pendingSteer.getAndUpdate { null }
+            pendingSteer.getAndUpdate { emptyList() }
         }
 
-        assertEquals(interruptingInput, pendingSteer.getAndUpdate { null })
+        assertEquals(interruptingInput, pendingSteer.getAndUpdate { emptyList() })
         runtime.resume().toList()
 
         assertEquals(listOf(listOf("initial")), storage.userTextBatches())
@@ -209,9 +208,9 @@ val steerRuntimeTest by testSuite {
         )
         assertIs<CodexAgentStateValue.ToolPending>(state.state.value)
         val input = textContent("wait until the tool finishes")
-        val pendingSteer = MutableStateFlow<List<ContentItem>?>(input)
+        val pendingSteer = MutableStateFlow(input)
         val runtime = TestRuntime(state).steerRuntime {
-            pendingSteer.getAndUpdate { null }
+            pendingSteer.getAndUpdate { emptyList() }
         }
 
         runtime.resume().toList()
@@ -224,9 +223,9 @@ val steerRuntimeTest by testSuite {
     test("runtime delivery and interrupt retraction cannot claim the same steer") {
         repeat(100) { iteration ->
             val input = textContent("race $iteration")
-            val pendingSteer = MutableStateFlow<List<ContentItem>?>(input)
+            val pendingSteer = MutableStateFlow(input)
             val steerProvider = SteerProvider {
-                pendingSteer.getAndUpdate { null }
+                pendingSteer.getAndUpdate { emptyList() }
             }
 
             val claims = coroutineScope {
@@ -237,14 +236,14 @@ val steerRuntimeTest by testSuite {
                 }
                 val interruptClaim = async {
                     start.await()
-                    pendingSteer.getAndUpdate { null }
+                    pendingSteer.getAndUpdate { emptyList() }
                 }
                 start.complete(Unit)
                 listOf(runtimeClaim.await(), interruptClaim.await())
             }
 
-            assertEquals(listOf(input), claims.filterNotNull())
-            assertNull(pendingSteer.value)
+            assertEquals(listOf(input), claims.filter { it.isNotEmpty() })
+            assertTrue(pendingSteer.value.isEmpty())
         }
     }
     }

@@ -5,8 +5,8 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-runtime-composite"))
-            api(project(":agent-storage-contract"))
+            api(project(":agent-runtime-contract"))
+            api(libs.kotlinx.coroutines.core)
         }
     }
 }

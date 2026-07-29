@@ -21,10 +21,8 @@ public class SteerRuntime internal constructor(
 ) : CodexAgentRuntime by delegate {
     override fun resume(): Flow<ResponsesStreamEvent> = flow {
         if (state.value.canAppendUserMessage) {
-            steerProvider.take()?.let { content ->
-                require(content.isNotEmpty()) {
-                    "A steer provider must not return empty content."
-                }
+            val content = steerProvider.take()
+            if (content.isNotEmpty()) {
                 delegate.appendUserMessage(content)
             }
         }
