@@ -1,4 +1,4 @@
-package io.github.stream29.codex.lite.agentstorage.cleanmodels
+package io.github.stream29.codex.lite.agentstorage.cleanmodels.stable
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

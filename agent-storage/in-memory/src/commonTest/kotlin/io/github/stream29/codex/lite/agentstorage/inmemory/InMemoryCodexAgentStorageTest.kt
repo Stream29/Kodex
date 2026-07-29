@@ -2,6 +2,9 @@ package io.github.stream29.codex.lite.agentstorage.inmemory
 
 import de.infix.testBalloon.framework.core.testSuite
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolInvocation
 import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.ceilToIndex
 import io.github.stream29.codex.lite.agentstorage.contract.floorToIndex
@@ -86,6 +89,15 @@ private fun assistantMessage(text: String): ResponseItem.Message =
         content = listOf(ContentItem.OutputText(text)),
     )
 
+private fun pendingTool(callId: String): PendingToolEvent =
+    PendingToolEvent(
+        callId = callId,
+        invocation = PendingToolInvocation.Custom(
+            name = "tool-$callId",
+            input = "input-$callId",
+        ),
+    )
+
 val inMemoryCodexAgentStorageTest by testSuite {
     test("storage identity is stable per instance") {
         val first = storage()
@@ -105,6 +117,8 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(0, storage.compaction[0].historyBaseIndex)
         assertEquals(0L, storage.compaction[0].windowNumber)
         assertEquals(-1, storage.history.latestIndex())
+        assertEquals(-1, storage.stable.latestIndex())
+        assertEquals(-1, storage.unstable.latestIndex())
     }
 
     test("history uses sparse timeline and rejects non tail writes") {
@@ -141,6 +155,28 @@ val inMemoryCodexAgentStorageTest by testSuite {
             storage.history[1] = userMessage("overwrite")
         }
         assertEquals(listOf(0, 3), storage.history.indexes().toList())
+    }
+
+    test("clean timelines support out-of-order tool completion") {
+        val storage = storage()
+        val first = pendingTool("call-a")
+        val second = pendingTool("call-b")
+        val completedSecond = StableAssistantMessage("completed-b")
+        val completedFirst = StableAssistantMessage("completed-a")
+
+        storage.unstable[1] = listOf(first, second)
+        storage.stable[2] = completedSecond
+        storage.unstable[2] = listOf(first)
+        storage.stable[3] = completedFirst
+        storage.unstable[3] = emptyList()
+
+        assertEquals(listOf(2, 3), storage.stable.indexes().toList())
+        assertEquals(completedSecond, storage.stable[2])
+        assertEquals(completedFirst, storage.stable[3])
+        assertEquals(listOf(1, 2, 3), storage.unstable.indexes().toList())
+        assertEquals(listOf(first, second), storage.unstable[1])
+        assertEquals(listOf(first), storage.unstable[2])
+        assertEquals(emptyList(), storage.unstable[3])
     }
 
     test("revert removes stored suffix and allows appending again") {
@@ -201,8 +237,12 @@ val inMemoryCodexAgentStorageTest by testSuite {
                 storage.compaction.setWithTransaction(2, checkpoint(windowNumber = 1, windowId = "window-1")) {
                     storage.timestamp.setWithTransaction(2, timestamp(2)) {
                         storage.tokenCount.setWithTransaction(2, 20) {
-                            storage.history.setWithTransaction(2, assistantMessage("temporary")) {
-                                error("fail transaction")
+                            storage.stable.setWithTransaction(2, StableAssistantMessage("temporary")) {
+                                storage.unstable.setWithTransaction(2, listOf(pendingTool("temporary"))) {
+                                    storage.history.setWithTransaction(2, assistantMessage("temporary")) {
+                                        error("fail transaction")
+                                    }
+                                }
                             }
                         }
                     }
@@ -216,6 +256,8 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(initialTimestamp, storage.timestamp[2])
         assertEquals(10, storage.tokenCount[2])
         assertEquals(initialMessage, storage.history[2])
+        assertEquals(-1, storage.stable.latestIndex())
+        assertEquals(-1, storage.unstable.latestIndex())
     }
 
     test("nested set transactions compensate every timeline on cancellation") {
@@ -277,11 +319,15 @@ val inMemoryCodexAgentStorageTest by testSuite {
         storage.history[1] = userMessage("first")
         storage.timestamp[1] = timestamp(1)
         storage.tokenCount[1] = 10
+        storage.stable[1] = StableAssistantMessage("first")
+        storage.unstable[1] = listOf(pendingTool("call-a"))
         storage.settings[2] = updatedSettings
         storage.compaction[2] = updatedCheckpoint
         storage.history[3] = assistantMessage("later")
         storage.timestamp[3] = timestamp(3)
         storage.tokenCount[3] = 30
+        storage.stable[3] = StableAssistantMessage("later")
+        storage.unstable[3] = emptyList()
 
         storage.revert(untilExclusive = 2)
 
@@ -291,10 +337,14 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(listOf(0), storage.compaction.indexes().toList())
         assertEquals(listOf(1), storage.timestamp.indexes().toList())
         assertEquals(listOf(1), storage.tokenCount.indexes().toList())
+        assertEquals(listOf(1), storage.stable.indexes().toList())
+        assertEquals(listOf(1), storage.unstable.indexes().toList())
         assertEquals(initialSettings, storage.settings[1])
         assertEquals(initialCheckpoint, storage.compaction[1])
         assertEquals(timestamp(1), storage.timestamp[1])
         assertEquals(10, storage.tokenCount[1])
+        assertEquals(StableAssistantMessage("first"), storage.stable[1])
+        assertEquals(listOf(pendingTool("call-a")), storage.unstable[1])
     }
 
     test("sparse timelines return active value at requested index") {
@@ -372,10 +422,16 @@ val inMemoryCodexAgentStorageTest by testSuite {
         storage.timestamp[2] = timestamp(2)
         assertEquals(2, storage.latestIndex())
 
+        storage.stable[3] = StableAssistantMessage("clean")
+        storage.unstable[3] = listOf(pendingTool("call-a"))
+        assertEquals(3, storage.latestIndex())
+        assertEquals(3, storage.nextIndex(2))
+        assertEquals(2, storage.prevIndex(3))
+
         storage.history[4] = assistantMessage("future history")
         assertEquals(4, storage.latestIndex())
         assertEquals(4, storage.nextIndex(3))
-        assertEquals(2, storage.prevIndex(4))
+        assertEquals(3, storage.prevIndex(4))
         assertEquals(null, storage.nextIndex(4))
     }
 
@@ -389,12 +445,16 @@ val inMemoryCodexAgentStorageTest by testSuite {
         source.history[1] = userMessage("first")
         source.timestamp[1] = timestamp(1)
         source.tokenCount[1] = 10
+        source.stable[1] = StableAssistantMessage("first")
+        source.unstable[1] = listOf(pendingTool("call-a"))
         source.settings[2] = newSettings
         source.history[2] = assistantMessage("second")
 
         target.history[1] = userMessage("stale")
+        target.stable[1] = StableAssistantMessage("stale")
         target.settings[2] = settings("stale-model")
         target.tokenCount[2] = 999
+        target.unstable[2] = listOf(pendingTool("stale"))
 
         source.forkTo(until = 2, target = target)
 
@@ -410,6 +470,10 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(listOf(1), target.history.indexes().toList())
         assertEquals(listOf(1), target.timestamp.indexes().toList())
         assertEquals(listOf(1), target.tokenCount.indexes().toList())
+        assertEquals(listOf(1), target.stable.indexes().toList())
+        assertEquals(listOf(1), target.unstable.indexes().toList())
+        assertEquals(StableAssistantMessage("first"), target.stable[1])
+        assertEquals(listOf(pendingTool("call-a")), target.unstable[1])
     }
 
     test("fork rejects an empty target snapshot") {

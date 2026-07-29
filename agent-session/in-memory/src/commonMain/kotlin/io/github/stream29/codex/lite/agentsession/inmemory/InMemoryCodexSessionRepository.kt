@@ -283,6 +283,8 @@ private class SessionAgentStorage(
     override val settings = SessionIndexVersioned(parentScope, delegate.settings)
     override val timestamp = SessionIndexVersioned(parentScope, delegate.timestamp)
     override val tokenCount = SessionIndexVersioned(parentScope, delegate.tokenCount)
+    override val stable = SessionIndexVersioned(parentScope, delegate.stable)
+    override val unstable = SessionIndexVersioned(parentScope, delegate.unstable)
 }
 
 private class SessionIndexVersioned<T>(
