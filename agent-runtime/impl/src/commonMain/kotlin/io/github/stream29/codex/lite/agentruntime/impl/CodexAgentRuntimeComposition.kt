@@ -34,9 +34,9 @@ public fun CodexAgentState.buildAgentRuntime(
     dependencies: CodexAgentDependencies,
     agentPathResolver: AgentPathResolver,
 ): AgentRuntime {
-    val fixedTools = fixedTools(dependencies, agentPathResolver)
     val toolSearch = toolSearchState(dependencies.mcpService)
     val pendingSteer = MutableStateFlow(emptyList<ContentItem>())
+    val fixedTools = fixedTools(dependencies, agentPathResolver, pendingSteer)
     return fixedTools.closeOnFailure {
         val runtime = compactionRuntime(
             modelCatalog = dependencies.modelCatalog,

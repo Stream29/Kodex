@@ -2,14 +2,21 @@ package io.github.stream29.codex.lite.tool.multiagent
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
+import io.github.stream29.codex.lite.openai.ContentItem
+import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
+import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
+import io.github.stream29.codex.lite.tool.builder.ToolBuilderJson
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.schema.json.ObjectPropertyDefinition
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -51,16 +58,43 @@ val multiAgentToolsTest by testSuite {
         assertFalse("required" in MultiAgentTools.listAgentsSpec.parameters.jsonObject())
     }
 
-    test("status serializer matches the Rust string and object union") {
+    test("list_agents omits task-message previews") {
+        val agentSchema = requireNotNull(MultiAgentTools.listAgentsSpec.outputSchema)
+            .jsonObject()
+            .getValue("properties").jsonObject
+            .getValue("agents").jsonObject
+            .getValue("items").jsonObject
+        assertEquals(
+            listOf("agent_name", "agent_status"),
+            agentSchema.getValue("required").jsonArray.map { element ->
+                element.jsonPrimitive.content
+            },
+        )
+        val agentProperties = agentSchema.getValue("properties").jsonObject
+        assertFalse("last_task_message" in agentProperties)
+        val statusSchema = agentProperties.getValue("agent_status").jsonObject
+        assertEquals(JsonPrimitive("string"), statusSchema["type"])
+        assertEquals(
+            listOf("running", "idle"),
+            statusSchema.getValue("enum").jsonArray.map { element -> element.jsonPrimitive.content },
+        )
+
+        val result = ListAgentsResult(
+            agents = listOf(ListedAgent("/root", MultiAgentStatus.Running)),
+        )
+        val serializedAgent = OpenAiJsonCodec
+            .parseToJsonElement(OpenAiJsonCodec.encodeToString(ListAgentsResult.serializer(), result))
+            .jsonObject
+            .getValue("agents").jsonArray
+            .single()
+            .jsonObject
+        assertFalse("last_task_message" in serializedAgent)
+    }
+
+    test("status serializer matches the two turn-liveness states") {
         val cases = listOf(
-            MultiAgentStatus.PendingInit to "\"pending_init\"",
             MultiAgentStatus.Running to "\"running\"",
-            MultiAgentStatus.Interrupted to "\"interrupted\"",
-            MultiAgentStatus.Completed(null) to "{\"completed\":null}",
-            MultiAgentStatus.Completed("done") to "{\"completed\":\"done\"}",
-            MultiAgentStatus.Errored("failed") to "{\"errored\":\"failed\"}",
-            MultiAgentStatus.Shutdown to "\"shutdown\"",
-            MultiAgentStatus.NotFound to "\"not_found\"",
+            MultiAgentStatus.Idle to "\"idle\"",
         )
 
         cases.forEach { (status, expectedJson) ->
@@ -70,6 +104,79 @@ val multiAgentToolsTest by testSuite {
                 status,
                 OpenAiJsonCodec.decodeFromString(MultiAgentStatus.serializer(), encoded),
             )
+        }
+    }
+
+    test("wait_agent observes its injected pending steer") {
+        val tool = waitAgentTool(
+            MutableStateFlow(listOf(ContentItem.InputText("agent update"))),
+        )
+
+        val output = tool.handle(
+            ResponseItem.FunctionCall(
+                name = MultiAgentTools.WaitAgentName,
+                arguments = "{}",
+                callId = "wait_1",
+            ),
+        ) as ResponseItem.FunctionCallOutput
+        val body = output.output.body as FunctionCallOutputBody.Text
+
+        assertEquals(
+            WaitAgentResult(message = "Wait completed.", timedOut = false),
+            ToolBuilderJson.decodeFromString(WaitAgentResult.serializer(), body.text),
+        )
+    }
+
+    test("spawn fork mode is decoded with the tool input") {
+        val cases = listOf(
+            "none" to SpawnForkMode.None,
+            "all" to SpawnForkMode.All,
+            "3" to SpawnForkMode.Recent(3),
+        )
+
+        cases.forEach { (wireValue, expected) ->
+            assertEquals(
+                expected,
+                OpenAiJsonCodec.decodeFromString(
+                    SpawnAgentArgs.serializer(),
+                    "{\"task_name\":\"worker\",\"message\":\"Work\",\"fork_turns\":\"$wireValue\"}",
+                ).forkTurns,
+            )
+            assertEquals(
+                "\"$wireValue\"",
+                OpenAiJsonCodec.encodeToString(SpawnForkModeSerializer, expected),
+            )
+        }
+
+        assertEquals(
+            SpawnForkMode.All,
+            OpenAiJsonCodec.decodeFromString(
+                SpawnAgentArgs.serializer(),
+                "{\"task_name\":\"worker\",\"message\":\"Work\"}",
+            ).forkTurns,
+        )
+        assertEquals(
+            SpawnForkMode.All,
+            OpenAiJsonCodec.decodeFromString(
+                SpawnAgentArgs.serializer(),
+                "{\"task_name\":\"worker\",\"message\":\"Work\",\"fork_turns\":null}",
+            ).forkTurns,
+        )
+        assertEquals(
+            SpawnForkMode.All,
+            OpenAiJsonCodec.decodeFromString(
+                SpawnAgentArgs.serializer(),
+                "{\"task_name\":\"worker\",\"message\":\"Work\",\"fork_turns\":\" ALL \"}",
+            ).forkTurns,
+        )
+
+        listOf("\"0\"", "\"-1\"", "\"recent\"", "3").forEach { invalidValue ->
+            assertFailsWith<SerializationException> {
+                OpenAiJsonCodec.decodeFromString(
+                    SpawnAgentArgs.serializer(),
+                    "{\"task_name\":\"worker\",\"message\":\"Work\",\"fork_turns\":$invalidValue}",
+                )
+            }
         }
     }
 
