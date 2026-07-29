@@ -12,20 +12,78 @@ import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonDecoder
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonEncoder
 import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
+
+/** Decoded `fork_turns` selection for `spawn_agent`. */
+@Serializable(with = SpawnForkModeSerializer::class)
+public sealed interface SpawnForkMode {
+    /** Do not copy any parent conversation history. */
+    public data object None : SpawnForkMode
+
+    /** Copy the complete parent conversation history. */
+    public data object All : SpawnForkMode
+
+    /** Copy only the most recent [turns] parent turns. */
+    public data class Recent(public val turns: Int) : SpawnForkMode
+}
+
+/** Serializes [SpawnForkMode] as the string union accepted by `spawn_agent`. */
+public object SpawnForkModeSerializer : KSerializer<SpawnForkMode> {
+    override val descriptor: SerialDescriptor = JsonPrimitive.serializer().descriptor
+
+    override fun serialize(encoder: Encoder, value: SpawnForkMode) {
+        val forkTurns = when (value) {
+            SpawnForkMode.None -> "none"
+            SpawnForkMode.All -> "all"
+            is SpawnForkMode.Recent -> {
+                if (value.turns <= 0) {
+                    throw SerializationException(
+                        "fork_turns must be `none`, `all`, or a positive integer string",
+                    )
+                }
+                value.turns.toString()
+            }
+        }
+        encoder.encodeString(forkTurns)
+    }
+
+    override fun deserialize(decoder: Decoder): SpawnForkMode {
+        if (decoder is JsonDecoder) {
+            return when (val element = decoder.decodeJsonElement()) {
+                is JsonNull -> SpawnForkMode.All
+                is JsonPrimitive -> {
+                    if (!element.isString) {
+                        throw SerializationException("fork_turns must be a string")
+                    }
+                    parseSpawnForkMode(element.content)
+                }
+
+                else -> throw SerializationException("fork_turns must be a string")
+            }
+        }
+        return parseSpawnForkMode(decoder.decodeString())
+    }
+}
+
+private fun parseSpawnForkMode(value: String): SpawnForkMode {
+    val forkTurns = value.trim().ifEmpty { return SpawnForkMode.All }
+    if (forkTurns.equals("none", ignoreCase = true)) return SpawnForkMode.None
+    if (forkTurns.equals("all", ignoreCase = true)) return SpawnForkMode.All
+    val turns = forkTurns.toIntOrNull()
+    if (turns == null || turns <= 0) {
+        throw SerializationException(
+            "fork_turns must be `none`, `all`, or a positive integer string",
+        )
+    }
+    return SpawnForkMode.Recent(turns)
+}
 
 /**
  * Input for `spawn_agent`.
  *
- * @property forkTurns Nullable because callers may accept the default full-history fork;
- * `null` means `all`.
+ * @property forkTurns Defaults to the full-history fork. The serializer also treats a legacy
+ * `null` value as `all`.
  * @property model Nullable because a child normally inherits its parent model; `null` means inherit.
  * @property reasoningEffort Nullable because a child normally inherits its parent effort; `null` means inherit.
  * @property serviceTier Nullable because a child normally inherits its parent tier; `null` means inherit.
@@ -36,7 +94,7 @@ public data class SpawnAgentArgs(
     public val taskName: String,
     public val message: String,
     @SerialName("fork_turns")
-    public val forkTurns: String? = null,
+    public val forkTurns: SpawnForkMode = SpawnForkMode.All,
     public val model: OpenAiModelId? = null,
     @SerialName("reasoning_effort")
     public val reasoningEffort: ReasoningEffort? = null,
@@ -116,87 +174,21 @@ public data class ListAgentsResult(
     public val agents: List<ListedAgent>,
 )
 
-/**
- * One model-facing live-Agent projection.
- *
- * @property lastTaskMessage Nullable because a restored or never-instructed Agent may have no
- * known task message; `null` means no message preview is available.
- */
+/** One model-facing live-Agent projection. */
 @Serializable
 public data class ListedAgent(
     @SerialName("agent_name")
     public val agentName: String,
     @SerialName("agent_status")
     public val agentStatus: MultiAgentStatus,
-    @SerialName("last_task_message")
-    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
-    public val lastTaskMessage: String? = null,
 )
 
-/** Rust-compatible model-facing Agent lifecycle status. */
-@Serializable(with = MultiAgentStatusSerializer::class)
-public sealed interface MultiAgentStatus {
-    public data object PendingInit : MultiAgentStatus
-    public data object Running : MultiAgentStatus
-    public data object Interrupted : MultiAgentStatus
+/** Whether an Agent currently has an active turn. */
+@Serializable
+public enum class MultiAgentStatus {
+    @SerialName("running")
+    Running,
 
-    /**
-     * @property message Nullable because a completed turn may contain no final assistant text;
-     * `null` means no final text was emitted.
-     */
-    public data class Completed(public val message: String?) : MultiAgentStatus
-
-    public data class Errored(public val message: String) : MultiAgentStatus
-    public data object Shutdown : MultiAgentStatus
-    public data object NotFound : MultiAgentStatus
-}
-
-public object MultiAgentStatusSerializer : KSerializer<MultiAgentStatus> {
-    override val descriptor: SerialDescriptor = JsonElement.serializer().descriptor
-
-    override fun serialize(encoder: Encoder, value: MultiAgentStatus) {
-        require(encoder is JsonEncoder) { "MultiAgentStatus can only be encoded as JSON." }
-        val element = when (value) {
-            MultiAgentStatus.PendingInit -> JsonPrimitive("pending_init")
-            MultiAgentStatus.Running -> JsonPrimitive("running")
-            MultiAgentStatus.Interrupted -> JsonPrimitive("interrupted")
-            is MultiAgentStatus.Completed -> buildJsonObject {
-                put("completed", value.message?.let(::JsonPrimitive) ?: JsonNull)
-            }
-            is MultiAgentStatus.Errored -> buildJsonObject {
-                put("errored", value.message)
-            }
-            MultiAgentStatus.Shutdown -> JsonPrimitive("shutdown")
-            MultiAgentStatus.NotFound -> JsonPrimitive("not_found")
-        }
-        encoder.encodeJsonElement(element)
-    }
-
-    override fun deserialize(decoder: Decoder): MultiAgentStatus {
-        require(decoder is JsonDecoder) { "MultiAgentStatus can only be decoded as JSON." }
-        return when (val element = decoder.decodeJsonElement()) {
-            is JsonPrimitive -> when (element.content) {
-                "pending_init" -> MultiAgentStatus.PendingInit
-                "running" -> MultiAgentStatus.Running
-                "interrupted" -> MultiAgentStatus.Interrupted
-                "shutdown" -> MultiAgentStatus.Shutdown
-                "not_found" -> MultiAgentStatus.NotFound
-                else -> throw SerializationException("Unknown Agent status: ${element.content}")
-            }
-
-            is JsonObject -> when {
-                "completed" in element -> MultiAgentStatus.Completed(
-                    element.getValue("completed").let { value ->
-                        if (value is JsonNull) null else value.jsonPrimitive.content
-                    },
-                )
-                "errored" in element -> MultiAgentStatus.Errored(
-                    element.getValue("errored").jsonPrimitive.content,
-                )
-                else -> throw SerializationException("Unknown Agent status object: $element")
-            }
-
-            else -> throw SerializationException("Agent status must be a string or object: $element")
-        }
-    }
+    @SerialName("idle")
+    Idle,
 }

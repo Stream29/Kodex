@@ -2,7 +2,6 @@ package io.github.stream29.codex.lite.tool.multiagent
 
 import kotlinx.schema.json.GenericPropertyDefinition
 import kotlinx.schema.json.JsonSchemaConstants.Types.NULL_TYPE
-import kotlinx.schema.json.AnyOfPropertyDefinition
 import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.schema.json.PropertyBuilder
 import kotlinx.schema.json.obj
@@ -132,14 +131,6 @@ public val ListAgentsOutputSchema: ObjectPropertyDefinition =
                         required = true
                         agentStatus("Last known status of the agent.")
                     }
-                    property("last_task_message") {
-                        required = true
-                        anyOf {
-                            description = "Most recent user or inter-agent instruction received by the agent, when available."
-                            string()
-                            addOption(GenericPropertyDefinition(type = NULL_TYPE))
-                        }
-                    }
                 }
             }
         }
@@ -161,27 +152,8 @@ private fun messageParametersSchema(
         }
     }
 
-private fun PropertyBuilder.agentStatus(description: String): AnyOfPropertyDefinition =
-    anyOf {
+private fun PropertyBuilder.agentStatus(description: String) =
+    string {
         this.description = description
-        string {
-            enum = listOf("pending_init", "running", "interrupted", "shutdown", "not_found")
-        }
-        obj {
-            additionalProperties = false
-            property("completed") {
-                required = true
-                anyOf {
-                    string()
-                    addOption(GenericPropertyDefinition(type = NULL_TYPE))
-                }
-            }
-        }
-        obj {
-            additionalProperties = false
-            property("errored") {
-                required = true
-                string()
-            }
-        }
+        enum = listOf("running", "idle")
     }
