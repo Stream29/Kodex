@@ -17,6 +17,7 @@ kotlin {
             implementation(project(":agent-session-test"))
             implementation(project(":openai-client-test"))
             implementation(project(":openai-json-codec"))
+            implementation(project(":tool-multi-agent"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

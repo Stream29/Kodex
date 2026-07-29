@@ -15,7 +15,12 @@ import io.github.stream29.codex.lite.tool.currenttime.CurrentTimeTools
 import io.github.stream29.codex.lite.tool.getcontextremaining.getContextRemainingTool
 import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationToolClient
 import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenerationTools
-import io.github.stream29.codex.lite.tool.multiagent.multiAgentTools
+import io.github.stream29.codex.lite.tool.multiagent.followupTaskTool
+import io.github.stream29.codex.lite.tool.multiagent.interruptAgentTool
+import io.github.stream29.codex.lite.tool.multiagent.listAgentsTool
+import io.github.stream29.codex.lite.tool.multiagent.sendMessageTool
+import io.github.stream29.codex.lite.tool.multiagent.spawnAgentTool
+import io.github.stream29.codex.lite.tool.multiagent.waitAgentTool
 import io.github.stream29.codex.lite.tool.plan.updatePlanTool
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchEngine
 import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecToolClient
@@ -60,7 +65,12 @@ internal fun CodexAgentState.fixedTools(
             add(CurrentTimeTools.createTool())
             add(getContextRemainingTool(dependencies.modelCatalog))
             add(updatePlanTool())
-            addAll(multiAgentTools(agentPathResolver))
+            add(spawnAgentTool(agentPathResolver))
+            add(sendMessageTool(agentPathResolver))
+            add(followupTaskTool(agentPathResolver))
+            add(waitAgentTool(agentPathResolver))
+            add(interruptAgentTool(agentPathResolver))
+            add(listAgentsTool(agentPathResolver))
             addAll(UnifiedExecTools.createTools(unifiedExecClient))
             add(
                 WebRunTools.createTool(

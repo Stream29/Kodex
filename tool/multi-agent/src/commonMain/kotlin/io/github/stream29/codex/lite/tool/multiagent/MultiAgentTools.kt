@@ -36,7 +36,7 @@ public object MultiAgentTools {
 
     public val waitAgentSpec: ResponsesApiTool = ResponsesApiTool(
         name = WaitAgentName,
-        description = "Wait for a mailbox update from any live agent, including queued messages and final-status notifications. Does not return final content; it returns an activity or timeout summary.",
+        description = "Wait for a pending steering message from any live agent, including queued messages and final-status notifications. Does not return final content; it returns an activity or timeout summary.",
         parameters = WaitAgentParametersSchema,
         outputSchema = WaitAgentOutputSchema,
     )
