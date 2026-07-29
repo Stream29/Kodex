@@ -2,7 +2,7 @@ package io.github.stream29.codex.lite.integrationtest
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.agentsession.composition.CodexAgentDependencies
+import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentsession.filesystem.FileSystemCodexSessionRepository
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstorage.contract.initialize

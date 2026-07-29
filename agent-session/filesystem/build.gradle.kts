@@ -5,8 +5,8 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-session-composition"))
             api(project(":agent-session-contract"))
+            implementation(project(":agent-runtime-impl"))
             implementation(project(":agent-session-multi-agent"))
             implementation(project(":agent-state-impl"))
             implementation(project(":agent-storage-filesystem"))

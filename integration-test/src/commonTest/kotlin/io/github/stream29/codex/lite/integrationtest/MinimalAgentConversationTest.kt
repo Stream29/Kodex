@@ -4,11 +4,11 @@ import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.codex.lite.agentruntime.compact.compactionRuntime
+import io.github.stream29.codex.lite.agentruntime.decorator.compact.compactionRuntime
 import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgent
+import io.github.stream29.codex.lite.agentruntime.impl.buildAgentRuntime
 import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
-import io.github.stream29.codex.lite.agentsession.composition.CodexAgentDependencies
-import io.github.stream29.codex.lite.agentsession.composition.buildAgentRuntime
+import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentcontext.prefix.render.render as renderCollaborationMode
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
