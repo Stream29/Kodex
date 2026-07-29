@@ -19,17 +19,21 @@ import com.jakewharton.mosaic.ui.unit.constrainWidth
  * The vertical axis must have a finite maximum height. Items may contain any Mosaic composables
  * and may occupy different numbers of terminal rows.
  *
+ * When [reverseLayout] is true, logical item `0` is placed at the visual bottom and increasing
+ * item indexes extend upward. Stable keys continue to identify the same logical items.
+ *
  * @param interactionSource `null` when the caller does not observe scroll interactions.
  */
 @Composable
 public fun LazyColumn(
     modifier: Modifier = Modifier,
     state: LazyListState = rememberLazyListState(),
+    reverseLayout: Boolean = false,
     userScrollEnabled: Boolean = true,
     interactionSource: MutableScrollInteractionSource? = null,
     content: LazyListScope.() -> Unit,
 ) {
-    val itemProvider = LazyListScopeImpl().apply(content).build()
+    val itemProvider = LazyListScopeImpl().apply(content).build(reverseLayout)
     val subcomposeState = remember { SubcomposeLayoutState(maxSlotsToRetainForReuse = 2) }
     val beyondBoundsLayout = remember(state) {
         LazyColumnBeyondBoundsLayout(state)
@@ -71,6 +75,7 @@ public fun LazyColumn(
             state = state,
             beyondBoundsLayout = beyondBoundsLayout,
             constraints = constraints,
+            reverseLayout = reverseLayout,
         )
     }
 }
@@ -80,6 +85,7 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
     state: LazyListState,
     beyondBoundsLayout: LazyColumnBeyondBoundsLayout,
     constraints: Constraints,
+    reverseLayout: Boolean,
 ) = run {
     check(constraints.hasBoundedHeight) {
         "A lazy column must be measured with a finite maximum height."
@@ -110,38 +116,42 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
     }
 
     val measuredItems = mutableMapOf<Int, MeasuredLazyItem>()
-    fun measureItem(index: Int): MeasuredLazyItem = measuredItems.getOrPut(index) {
+    fun measureItem(layoutIndex: Int): MeasuredLazyItem = measuredItems.getOrPut(layoutIndex) {
+        val itemIndex = itemProvider.itemIndexAt(layoutIndex)
         val placeables = subcompose(
-            slotId = itemProvider.keyAt(index),
-            contentType = itemProvider.contentTypeAt(index),
+            slotId = itemProvider.keyAtLayoutIndex(layoutIndex),
+            contentType = itemProvider.contentTypeAtLayoutIndex(layoutIndex),
         ) {
-            itemProvider.Item(index)
+            itemProvider.ItemAtLayoutIndex(layoutIndex)
         }.map { measurable: Measurable ->
             measurable.measure(itemConstraints)
         }
         MeasuredLazyItem(
-            index = index,
-            key = itemProvider.keyAt(index),
+            index = itemIndex,
+            key = itemProvider.keyAt(itemIndex),
             placeables = placeables,
         )
     }
 
-    val lastIndex = itemProvider.itemCount - 1
+    val lastLayoutIndex = itemProvider.itemCount - 1
     val forcedRange = beyondBoundsLayout.forcedRange?.let { range ->
-        range.first.coerceIn(0, lastIndex)..range.last.coerceIn(0, lastIndex)
+        range.first.coerceIn(0, lastLayoutIndex)..range.last.coerceIn(0, lastLayoutIndex)
     }
-    val request = state.resolveAnchor(itemProvider)
+    val request = state.resolveAnchor(itemProvider, reverseLayout)
     var requestedIndex = when (request) {
         LazyAnchorRequest.None -> error("LazyListState.resolveAnchor must return a concrete request.")
-        LazyAnchorRequest.Start -> 0
-        LazyAnchorRequest.End -> lastIndex
-        is LazyAnchorRequest.Position -> request.index.coerceAtMost(lastIndex)
+        LazyAnchorRequest.Start -> itemProvider.layoutIndexOf(0)
+        LazyAnchorRequest.End -> itemProvider.layoutIndexOf(itemProvider.itemCount - 1)
+        is LazyAnchorRequest.Position ->
+            itemProvider.layoutIndexOf(request.index.coerceAtMost(itemProvider.itemCount - 1))
     }
     var requestedOffset = when (request) {
         is LazyAnchorRequest.Position -> request.scrollOffset
         else -> 0
     }
-    val alignToEnd = request == LazyAnchorRequest.End
+    val alignToEnd =
+        (!reverseLayout && request == LazyAnchorRequest.End) ||
+            (reverseLayout && request == LazyAnchorRequest.Start)
     val overscanRows = viewportHeight.coerceAtLeast(1)
     var firstMeasuredIndex = minOf(
         (requestedIndex - overscanRows * 2).coerceAtLeast(0),
@@ -156,7 +166,7 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
         while (true) {
             val itemHeight = measureItem(requestedIndex).height
             if (itemHeight > 0 && requestedOffset < itemHeight) break
-            if (requestedIndex == lastIndex) {
+            if (requestedIndex == lastLayoutIndex) {
                 requestedOffset = if (itemHeight == 0) 0 else (itemHeight - 1).coerceAtLeast(0)
                 break
             }
@@ -171,7 +181,7 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
         var rowsAfterAnchor = measureItem(requestedIndex).height - requestedOffset
         val forcedLastIndex = forcedRange?.last ?: -1
         while (
-            lastMeasuredIndex < lastIndex &&
+            lastMeasuredIndex < lastLayoutIndex &&
             (rowsAfterAnchor < viewportHeight + overscanRows || lastMeasuredIndex < forcedLastIndex)
         ) {
             lastMeasuredIndex++
@@ -180,9 +190,9 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
     }
 
     if (alignToEnd) {
-        lastMeasuredIndex = lastIndex
+        lastMeasuredIndex = lastLayoutIndex
     }
-    var reachesEnd = lastMeasuredIndex == lastIndex
+    var reachesEnd = lastMeasuredIndex == lastLayoutIndex
 
     fun measuredHeight(from: Int, through: Int): Int {
         var result = 0
@@ -224,11 +234,13 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
 
     if (!reachesEnd) {
         lastMeasuredIndex = measuredItems.keys.maxOrNull() ?: lastMeasuredIndex
-        reachesEnd = lastMeasuredIndex == lastIndex
+        reachesEnd = lastMeasuredIndex == lastLayoutIndex
     }
 
     val measuredWindow = LazyMeasuredWindow(
-        firstIndex = firstMeasuredIndex,
+        itemIndices = (firstMeasuredIndex..lastMeasuredIndex).map { layoutIndex ->
+            measureItem(layoutIndex).index
+        },
         keys = (firstMeasuredIndex..lastMeasuredIndex).map { index -> measureItem(index).key },
         heights = (firstMeasuredIndex..lastMeasuredIndex).map { index -> measureItem(index).height },
         viewportSize = viewportHeight,
@@ -237,7 +249,18 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
     val anchor = measuredWindow.anchorAt(viewportStart)
     val visibleItems = mutableListOf<LazyListItemInfo>()
     val itemOffsets = mutableMapOf<Int, Int>()
-    var itemOffset = -viewportStart
+    val measuredContentHeight = measuredHeight(firstMeasuredIndex, lastMeasuredIndex)
+    val contentStartOffset = if (
+        reverseLayout &&
+        firstMeasuredIndex == 0 &&
+        reachesEnd &&
+        measuredContentHeight < viewportHeight
+    ) {
+        viewportHeight - measuredContentHeight
+    } else {
+        0
+    }
+    var itemOffset = contentStartOffset - viewportStart
     var measuredWidth = 0
     for (index in firstMeasuredIndex..lastMeasuredIndex) {
         val item = measureItem(index)
@@ -245,7 +268,7 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
         measuredWidth = maxOf(measuredWidth, item.width)
         if (item.height > 0 && itemOffset < viewportHeight && itemOffset + item.height > 0) {
             visibleItems += LazyListItemInfo(
-                index = index,
+                index = item.index,
                 key = item.key,
                 offset = itemOffset,
                 size = item.height,

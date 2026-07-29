@@ -141,6 +141,126 @@ val lazyColumnTest by testSuite {
         assertEquals(2, state.firstVisibleItemIndex)
     }
 
+    test("reverse layout places logical item zero at the visual bottom") {
+        val state = LazyListState()
+        val items = listOf(
+            TestItem("A", 1),
+            TestItem("B", 1),
+            TestItem("C", 1),
+            TestItem("D", 1),
+            TestItem("E", 1),
+        )
+
+        runMosaicTest {
+            assertEquals(
+                "C0\nB0\nA0",
+                setContentAndSnapshot {
+                    TestLazyColumn(
+                        items = items,
+                        state = state,
+                        viewportHeight = 3,
+                        reverseLayout = true,
+                    )
+                },
+            )
+        }
+
+        assertEquals(2, state.firstVisibleItemIndex)
+        assertEquals(
+            listOf(
+                LazyListItemInfo(index = 2, key = "C", offset = 0, size = 1),
+                LazyListItemInfo(index = 1, key = "B", offset = 1, size = 1),
+                LazyListItemInfo(index = 0, key = "A", offset = 2, size = 1),
+            ),
+            state.layoutInfo.visibleItemsInfo,
+        )
+        assertTrue(state.canScrollBackward)
+        assertFalse(state.canScrollForward)
+    }
+
+    test("reverse layout honors an explicit initial logical index") {
+        val state = LazyListState(initialFirstVisibleItemIndex = 3)
+
+        runMosaicTest {
+            assertEquals(
+                "D0\nC0",
+                setContentAndSnapshot {
+                    TestLazyColumn(
+                        items = listOf(
+                            TestItem("A", 1),
+                            TestItem("B", 1),
+                            TestItem("C", 1),
+                            TestItem("D", 1),
+                            TestItem("E", 1),
+                        ),
+                        state = state,
+                        viewportHeight = 2,
+                        reverseLayout = true,
+                    )
+                },
+            )
+        }
+
+        assertEquals(3, state.firstVisibleItemIndex)
+    }
+
+    test("reverse layout bottom-aligns content shorter than the viewport") {
+        runMosaicTest {
+            assertEquals(
+                "\n\nB0\nA0",
+                setContentAndSnapshot {
+                    TestLazyColumn(
+                        items = listOf(TestItem("A", 1), TestItem("B", 1)),
+                        state = LazyListState(),
+                        viewportHeight = 4,
+                        reverseLayout = true,
+                    )
+                },
+            )
+        }
+    }
+
+    test("reverse layout stable key preserves the viewport when logical indexes shift") {
+        val state = LazyListState()
+        var revision by mutableIntStateOf(0)
+        var items by mutableStateOf(
+            listOf(
+                TestItem("A", 1),
+                TestItem("B", 1),
+                TestItem("C", 1),
+                TestItem("D", 1),
+                TestItem("E", 1),
+            )
+        )
+
+        runMosaicTest {
+            assertEquals(
+                "B0\nA0\n0",
+                setContentAndSnapshot {
+                    Column {
+                        TestLazyColumn(
+                            items = items,
+                            state = state,
+                            viewportHeight = 2,
+                            reverseLayout = true,
+                        )
+                        Text(revision.toString())
+                    }
+                },
+            )
+
+            assertEquals(-2, state.scrollBy(-2))
+            revision++
+            assertEquals("D0\nC0\n1", awaitSnapshot())
+
+            items = listOf(TestItem("X", 1)) + items
+            revision++
+            assertEquals("D0\nC0\n2", awaitSnapshot())
+            assertEquals(listOf("D", "C"), state.layoutInfo.visibleItemsInfo.map { item -> item.key })
+            assertEquals(4, state.firstVisibleItemIndex)
+        }
+    }
+
     test("end positioning backfills a full viewport") {
         val state = LazyListState()
         state.requestScrollToEnd()
@@ -437,6 +557,32 @@ val lazyColumnTest by testSuite {
         assertTrue(composedKeys.size < 32, "Composed ${composedKeys.size} of 10,000 items.")
     }
 
+    test("reverse layout composes only its newest bounded viewport window") {
+        val composedKeys = mutableSetOf<Int>()
+
+        runMosaicTest {
+            assertEquals(
+                "3\n2\n1\n0",
+                setContentAndSnapshot {
+                    LazyColumn(
+                        modifier = Modifier.height(4),
+                        reverseLayout = true,
+                    ) {
+                        items(
+                            count = 10_000,
+                            key = { index -> index },
+                        ) { index ->
+                            composedKeys += index
+                            Text(index.toString())
+                        }
+                    }
+                },
+            )
+        }
+
+        assertTrue(composedKeys.size < 32, "Composed ${composedKeys.size} of 10,000 items.")
+    }
+
     test("remembered item identity follows a stable key") {
         val state = LazyListState(initialFirstVisibleItemIndex = 1)
         var items by mutableStateOf(listOf("A", "B", "C"))
@@ -641,10 +787,12 @@ private fun TestLazyColumn(
     items: List<TestItem>,
     state: LazyListState,
     viewportHeight: Int,
+    reverseLayout: Boolean = false,
 ) {
     LazyColumn(
         modifier = Modifier.height(viewportHeight),
         state = state,
+        reverseLayout = reverseLayout,
     ) {
         items(items, key = TestItem::key) { item ->
             Column {
