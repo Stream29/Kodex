@@ -8,6 +8,7 @@ kotlin {
             api(project(":agent-session-composition"))
             api(project(":agent-session-contract"))
             implementation(project(":agent-session-multi-agent"))
+            implementation(project(":agent-state-impl"))
             implementation(project(":agent-storage-filesystem"))
             implementation(project(":utils-coroutines"))
             implementation(project(":utils-filesystem-lease"))

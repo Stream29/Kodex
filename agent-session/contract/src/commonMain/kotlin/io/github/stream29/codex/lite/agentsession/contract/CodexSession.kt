@@ -1,6 +1,6 @@
 package io.github.stream29.codex.lite.agentsession.contract
 
-import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
+import io.github.stream29.codex.lite.agentruntime.composite.CompositeAgentRuntime
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import kotlinx.coroutines.CoroutineScope
 
@@ -27,7 +27,7 @@ public interface CodexAgentSession : CoroutineScope {
      * AgentRuntime already implements the complete AgentState contract, so the
      * session does not expose a second state reference.
      */
-    public val runtime: CodexAgentRuntime
+    public val runtime: CompositeAgentRuntime
 }
 
 /**

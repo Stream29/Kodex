@@ -1,12 +1,17 @@
 package io.github.stream29.codex.lite.agentsession.composition
 
 import io.github.stream29.codex.lite.agentruntime.compact.compactionRuntime
+import io.github.stream29.codex.lite.agentruntime.composite.CompositeAgentRuntime
 import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
+import io.github.stream29.codex.lite.agentruntime.steer.steerRuntime
 import io.github.stream29.codex.lite.agentruntime.tool.toolRuntime
 import io.github.stream29.codex.lite.agentruntime.turnhook.turnHookRuntime
 import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
+import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.tool.contract.Tool
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.job
 
 /**
@@ -18,14 +23,18 @@ import kotlinx.coroutines.job
 public fun CodexAgentState.buildAgentRuntime(
     dependencies: CodexAgentDependencies,
     agentPathResolver: AgentPathResolver,
-): CodexAgentRuntime {
+): CompositeAgentRuntime {
     val fixedTools = fixedTools(dependencies, agentPathResolver)
     val toolSearch = toolSearchState(dependencies.mcpService)
+    val pendingSteer = MutableStateFlow(emptyList<ContentItem>())
     return fixedTools.closeOnFailure {
-        compactionRuntime(
+        val runtime = compactionRuntime(
             modelCatalog = dependencies.modelCatalog,
             compactionHooks = dependencies.hooks,
         )
+            .steerRuntime {
+                pendingSteer.getAndUpdate { emptyList() }
+            }
             .toolRuntime(
                 fixedTools = fixedTools,
                 dynamicTools = dependencies.mcpService.tools,
@@ -38,8 +47,14 @@ public fun CodexAgentState.buildAgentRuntime(
                     fixedTools.closeAll()
                 }
             }
+        CompositeAgentRuntimeImpl(runtime, pendingSteer)
     }
 }
+
+private class CompositeAgentRuntimeImpl(
+    delegate: CodexAgentRuntime,
+    override val pendingSteer: MutableStateFlow<List<ContentItem>>,
+) : CompositeAgentRuntime, CodexAgentRuntime by delegate
 
 private fun List<Tool>.closeAll() {
     asReversed().forEach { tool ->
