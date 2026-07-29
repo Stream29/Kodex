@@ -1,7 +1,7 @@
 package io.github.stream29.codex.lite.agentruntime.decorator.tool
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgent
+import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.codex.lite.agentruntime.decorator.turnhook.turnHookRuntime
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
@@ -653,7 +653,7 @@ val codexToolRuntimeTest by testSuite {
 private class ToolRuntimeTestContext(
     scope: CoroutineScope,
 ) : CoroutineScope by scope {
-    suspend fun ResumableAgent.testToolRuntime(
+    suspend fun ResumableAgentLayer.testToolRuntime(
         mcpService: McpService,
         hooks: ToolHooks,
     ): CodexToolRuntime {
@@ -698,7 +698,7 @@ private class ToolRuntimeTestContext(
 
 private class RequestOnlyRuntime(
     private val delegate: CodexAgentStateContract,
-) : ResumableAgent, CodexAgentStateContract by delegate {
+) : ResumableAgentLayer, CodexAgentStateContract by delegate {
     override fun resume(): Flow<ResponsesStreamEvent> = flow {
         emitAll(requestResponseApi())
     }

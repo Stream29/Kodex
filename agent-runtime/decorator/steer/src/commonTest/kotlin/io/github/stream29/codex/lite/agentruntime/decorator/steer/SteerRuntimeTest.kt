@@ -1,7 +1,7 @@
 package io.github.stream29.codex.lite.agentruntime.decorator.steer
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgent
+import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState as createCodexAgentState
@@ -251,7 +251,7 @@ val steerRuntimeTest by testSuite {
 
 private class TestRuntime(
     private val delegate: CodexAgentState,
-) : ResumableAgent, CodexAgentState by delegate {
+) : ResumableAgentLayer, CodexAgentState by delegate {
     override fun resume(): Flow<ResponsesStreamEvent> = flow {}
 }
 

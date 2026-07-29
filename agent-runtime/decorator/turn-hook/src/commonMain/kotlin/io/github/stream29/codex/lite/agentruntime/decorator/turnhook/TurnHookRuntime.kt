@@ -1,7 +1,7 @@
 package io.github.stream29.codex.lite.agentruntime.decorator.turnhook
 
 import io.github.stream29.codex.lite.agentcontext.promptdsl.promptXml
-import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgent
+import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstorage.contract.indexesDescending
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
@@ -30,9 +30,9 @@ import kotlinx.coroutines.flow.takeWhile
  * snapshot instead of relying on coroutine-local state.
  */
 public class TurnHookRuntime internal constructor(
-    private val delegate: ResumableAgent,
+    private val delegate: ResumableAgentLayer,
     private val hooks: TurnHooks,
-) : ResumableAgent by delegate {
+) : ResumableAgentLayer by delegate {
     override fun resume(): Flow<ResponsesStreamEvent> = channelFlow {
         val context = storage.settings.latestValue().toHookTurnContext(storage.id)
         currentUserPromptTextOrNull()?.let { prompt ->
@@ -137,9 +137,9 @@ public class TurnHookRuntime internal constructor(
 }
 
 /** Adds user-prompt and natural-completion Hooks to this outer runtime. */
-public fun ResumableAgent.turnHookRuntime(
+public fun ResumableAgentLayer.turnHookRuntime(
     hooks: TurnHooks,
-): ResumableAgent = TurnHookRuntime(this, hooks)
+): ResumableAgentLayer = TurnHookRuntime(this, hooks)
 
 private fun List<ContentItem>.userPromptText(): String =
     filterIsInstance<ContentItem.InputText>()

@@ -5,7 +5,7 @@ import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentruntime.decorator.compact.compactionRuntime
-import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgent
+import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.codex.lite.agentruntime.impl.buildAgentRuntime
 import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
@@ -19,7 +19,6 @@ import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
-import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
 import io.github.stream29.codex.lite.hook.contract.NoOpCodexHooks
@@ -81,7 +80,6 @@ import kotlinx.io.files.Path
 import kotlin.io.encoding.Base64
 import kotlin.random.Random
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
@@ -125,7 +123,7 @@ private data class RecordedCodexResponse(
 
 private class RequestOnlyRuntime(
     private val delegate: CodexAgentStateContract,
-) : ResumableAgent, CodexAgentStateContract by delegate {
+) : ResumableAgentLayer, CodexAgentStateContract by delegate {
     override fun resume(): Flow<ResponsesStreamEvent> = flow {
         emitAll(requestResponseApi())
     }
@@ -135,7 +133,7 @@ internal fun CodexAgentStateContract.integrationResumableAgent(
     client: OpenAiClient,
     modelCatalog: OpenAiModelCatalog,
     mcpService: McpService,
-): ResumableAgent =
+): ResumableAgentLayer =
     buildAgentRuntime(
         dependencies = CodexAgentDependencies(
             client = client,

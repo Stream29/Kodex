@@ -2,7 +2,7 @@ package io.github.stream29.codex.lite.agentruntime.decorator.compact
 
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgent
+import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
@@ -32,7 +32,6 @@ import io.github.stream29.codex.lite.openai.TokenUsage
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
@@ -61,7 +60,7 @@ val codexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime: ResumableAgent = state.compactionRuntime(testModelCatalog())
+        val runtime: ResumableAgentLayer = state.compactionRuntime(testModelCatalog())
         val agentState: CodexAgentStateContract = runtime
 
         assertSame(state.state, agentState.state)
@@ -79,7 +78,7 @@ val codexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime: ResumableAgent = DelegatingRuntime(CodexAgentCompactionRuntime(state, testModelCatalog()))
+        val runtime: ResumableAgentLayer = DelegatingRuntime(CodexAgentCompactionRuntime(state, testModelCatalog()))
 
         assertEquals(1, runtime.appendUserMessage(userMessage("Start.").content))
         assertSame(state.state, runtime.state)
@@ -429,8 +428,8 @@ private fun testModelCatalog(): OpenAiModelCatalog =
     )
 
 private class DelegatingRuntime(
-    private val delegate: ResumableAgent,
-) : ResumableAgent by delegate
+    private val delegate: ResumableAgentLayer,
+) : ResumableAgentLayer by delegate
 
 private class RecordingCompactionHooks(
     private val pre: suspend (CompactionHookRequest) -> Unit = {},
