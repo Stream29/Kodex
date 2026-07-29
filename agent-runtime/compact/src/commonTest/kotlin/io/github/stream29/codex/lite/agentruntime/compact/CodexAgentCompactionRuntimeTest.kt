@@ -2,7 +2,7 @@ package io.github.stream29.codex.lite.agentruntime.compact
 
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.codex.lite.agentruntime.contract.CodexAgentRuntime
+import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgent
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
@@ -61,7 +61,7 @@ val codexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime: CodexAgentRuntime = state.compactionRuntime(testModelCatalog())
+        val runtime: ResumableAgent = state.compactionRuntime(testModelCatalog())
         val agentState: CodexAgentStateContract = runtime
 
         assertSame(state.state, agentState.state)
@@ -79,7 +79,7 @@ val codexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime: CodexAgentRuntime = DelegatingRuntime(CodexAgentCompactionRuntime(state, testModelCatalog()))
+        val runtime: ResumableAgent = DelegatingRuntime(CodexAgentCompactionRuntime(state, testModelCatalog()))
 
         assertEquals(1, runtime.appendUserMessage(userMessage("Start.").content))
         assertSame(state.state, runtime.state)
@@ -429,8 +429,8 @@ private fun testModelCatalog(): OpenAiModelCatalog =
     )
 
 private class DelegatingRuntime(
-    private val delegate: CodexAgentRuntime,
-) : CodexAgentRuntime by delegate
+    private val delegate: ResumableAgent,
+) : ResumableAgent by delegate
 
 private class RecordingCompactionHooks(
     private val pre: suspend (CompactionHookRequest) -> Unit = {},
