@@ -1,5 +1,9 @@
 package io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable
 
+import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.codex.lite.tool.toolsearch.SearchToolCallParams
+import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchExecution
+import io.github.stream29.codex.lite.tool.viewimage.ViewImageToolArguments
 import io.github.stream29.codex.lite.utils.applypatch.Patch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -41,19 +45,15 @@ public sealed interface PendingToolInvocation {
     @Serializable
     @SerialName("tool_search")
     public data class ToolSearch(
-        public val execution: PendingToolSearchExecution,
-        public val query: String,
-        public val limit: Int? = null,
+        public val execution: ToolSearchExecution,
+        public val arguments: SearchToolCallParams,
     ) : PendingToolInvocation
 
     /** `view_image` input. */
     @Serializable
     @SerialName("image_view")
     public data class ImageView(
-        public val path: String,
-        public val detail: PendingImageDetail? = null,
-        @SerialName("environment_id")
-        public val environmentId: String? = null,
+        public val arguments: ViewImageToolArguments,
     ) : PendingToolInvocation
 
     /** Local or hosted image-generation input. */
@@ -81,19 +81,14 @@ public sealed interface PendingToolInvocation {
     @Serializable
     @SerialName("request_user_input")
     public data class RequestUserInput(
-        public val questions: List<PendingRequestUserInputQuestion>,
-        @SerialName("auto_resolution_ms")
-        public val autoResolutionMillis: Long? = null,
+        public val arguments: RequestUserInputArgs,
     ) : PendingToolInvocation
 
     /** Local or hosted web-search input. */
     @Serializable
     @SerialName("web_search")
     public data class WebSearch(
-        public val source: PendingWebSearchSource,
-        public val operations: List<PendingWebSearchOperation>,
-        @SerialName("response_length")
-        public val responseLength: PendingWebSearchResponseLength? = null,
+        public val request: PendingWebSearchRequest,
     ) : PendingToolInvocation
 }
 

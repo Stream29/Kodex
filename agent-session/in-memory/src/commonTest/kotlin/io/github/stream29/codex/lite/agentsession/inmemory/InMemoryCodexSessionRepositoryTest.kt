@@ -235,7 +235,7 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
                     ),
                     callId = "call_send",
                 ),
-            ),
+            ).first,
         )
 
         assertTrue(output.output.success == true)
@@ -271,7 +271,7 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
                     ),
                     callId = "call_followup",
                 ),
-            ),
+            ).first,
         )
 
         assertTrue(output.output.success == true)

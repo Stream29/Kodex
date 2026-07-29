@@ -12,4 +12,4 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 @SerialName("plan_update")
-public data object StablePlanUpdate : StableCleanEvent
+public data object StablePlanUpdate : StableCleanEvent.CompletedTool

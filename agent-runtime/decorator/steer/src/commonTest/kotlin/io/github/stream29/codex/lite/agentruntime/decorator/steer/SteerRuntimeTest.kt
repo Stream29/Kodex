@@ -9,6 +9,7 @@ import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
 import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.openai.AgentMessageInputContent
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.flow.update
+import kotlinx.serialization.json.JsonObject
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
@@ -213,6 +215,12 @@ val steerRuntimeTest by testSuite {
             ResponseItem.FunctionCallOutput(
                 callId = call.callId,
                 output = FunctionCallOutputPayload.fromText("done"),
+            ),
+            StableTextToolEvent(
+                name = call.name,
+                arguments = JsonObject(emptyMap()),
+                result = "done",
+                success = true,
             ),
         )
         assertEquals(CodexAgentStateValue.ToolCompleted, state.state.value)

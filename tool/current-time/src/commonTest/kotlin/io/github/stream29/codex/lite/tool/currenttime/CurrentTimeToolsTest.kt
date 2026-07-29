@@ -47,7 +47,7 @@ val currentTimeToolsTest by testSuite {
                 arguments = "{}",
                 callId = "call_1",
             ),
-        ) as ResponseItem.FunctionCallOutput
+        ).first as ResponseItem.FunctionCallOutput
 
         val body = output.output.body as FunctionCallOutputBody.Text
         assertEquals("It is 2026-07-16 08:09:10 UTC.", body.text)

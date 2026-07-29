@@ -6,6 +6,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            api(project(":agent-storage-clean-models"))
             api(project(":openai-models"))
         }
     }

@@ -1,5 +1,8 @@
 package io.github.stream29.codex.lite.tool.applypatch
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.codex.lite.openai.FreeformTool
 import io.github.stream29.codex.lite.openai.FreeformToolFormat
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
@@ -7,6 +10,9 @@ import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.tool.contract.Tool
+import io.github.stream29.codex.lite.tool.contract.ToolCallResult
+import io.github.stream29.codex.lite.utils.applypatch.parsePatch
+import kotlinx.serialization.json.JsonPrimitive
 
 public object ApplyPatchTools {
     public const val Name: String = "apply_patch"
@@ -32,26 +38,66 @@ public class ApplyPatchTool(
 
     override fun close(): Unit = Unit
 
-    override suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput =
+    override suspend fun handle(call: ResponseItem.ToolCall): ToolCallResult =
         when (call) {
-            is ResponseItem.FunctionCall -> ResponseItem.FunctionCallOutput(
-                callId = call.callId,
-                output = output("apply_patch received function-call JSON payload", success = false),
-            )
+            is ResponseItem.FunctionCall -> {
+                val message = "apply_patch received function-call JSON payload"
+                ResponseItem.FunctionCallOutput(
+                    callId = call.callId,
+                    output = output(message, success = false),
+                ) to StableTextToolEvent(
+                    name = call.name,
+                    namespace = call.namespace,
+                    arguments = JsonPrimitive(call.arguments),
+                    result = message,
+                    success = false,
+                )
+            }
 
-            is ResponseItem.CustomToolCall -> ResponseItem.CustomToolCallOutput(
-                callId = call.callId,
-                output = try {
-                    client.apply(call.input)
-                    output("Success. Patch applied.")
-                } catch (error: IllegalArgumentException) {
-                    output(error.message ?: "apply_patch failed", success = false)
-                },
-            )
+            is ResponseItem.CustomToolCall -> handleCustomCall(call)
 
             is ResponseItem.ClientToolSearchCall ->
                 error("Client tool-search calls are handled by CodexToolRuntime.")
         }
+
+    private suspend fun handleCustomCall(
+        call: ResponseItem.CustomToolCall,
+    ): ToolCallResult {
+        val diff = try {
+            call.input.parsePatch()
+        } catch (error: IllegalArgumentException) {
+            val message = error.message ?: "apply_patch failed"
+            return ResponseItem.CustomToolCallOutput(
+                callId = call.callId,
+                output = output(message, success = false),
+            ) to StableTextToolEvent(
+                name = call.name,
+                namespace = call.namespace,
+                arguments = JsonPrimitive(call.input),
+                result = message,
+                success = false,
+            )
+        }
+        return try {
+            val result = client.apply(diff)
+            ResponseItem.CustomToolCallOutput(
+                callId = call.callId,
+                output = output("Success. Patch applied."),
+            ) to StablePatchToolEvent(
+                diff = diff,
+                result = StablePatchToolExecutionResult.Success(result),
+            )
+        } catch (error: IllegalArgumentException) {
+            val message = error.message ?: "apply_patch failed"
+            ResponseItem.CustomToolCallOutput(
+                callId = call.callId,
+                output = output(message, success = false),
+            ) to StablePatchToolEvent(
+                diff = diff,
+                result = StablePatchToolExecutionResult.Failure(message),
+            )
+        }
+    }
 
     private fun output(text: String, success: Boolean = true): FunctionCallOutputPayload =
         FunctionCallOutputPayload(

@@ -2,6 +2,7 @@ package io.github.stream29.codex.lite.agentstate.contract
 
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.openai.CompactionPhase
@@ -226,13 +227,18 @@ public interface CodexAgentState : CoroutineScope {
     public suspend fun appendUserMessage(content: List<ContentItem>): Int
 
     /**
-     * Persists one output for a currently pending local tool call, including a
+     * Completes one currently pending local tool call, including a
      * client-executed tool-search call.
      *
-     * The output call id must match a pending call. State remains ToolPending
-     * until every call from the current batch has an output.
+     * The output call id must match a pending raw call. The same transition
+     * persists [completed] on the stable clean timeline and removes the
+     * matching call id from the unstable pending snapshot. State remains
+     * ToolPending until every call from the current batch has an output.
      */
-    public suspend fun completeToolCall(output: ResponseItem.ToolCallOutput): Int
+    public suspend fun completeToolCall(
+        output: ResponseItem.ToolCallOutput,
+        completed: StableCleanEvent.CompletedTool,
+    ): Int
 
     /**
      * Persists one parsed `update_plan` result and updates the settings

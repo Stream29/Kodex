@@ -67,7 +67,7 @@ val updatePlanToolTest by testSuite {
             state.requestResponseApi().toList()
 
             val output = assertIs<ResponseItem.FunctionCallOutput>(
-                state.updatePlanTool().handle(call),
+                state.updatePlanTool().handle(call).first,
             )
 
             assertEquals(FunctionCallOutputBody.Text("Plan updated"), output.output.body)

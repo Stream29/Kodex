@@ -1,5 +1,8 @@
 package io.github.stream29.codex.lite.agentstorage.cleanmodels.stable
 
+import io.github.stream29.codex.lite.tool.unifiedexec.ExecCommandArguments
+import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecOutput
+import io.github.stream29.codex.lite.tool.unifiedexec.WriteStdinArguments
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -14,7 +17,7 @@ import kotlinx.serialization.Serializable
 public data class StableCommandExecutionToolEvent(
     public val action: StableCommandExecutionAction,
     public val result: StableCommandExecutionResult,
-) : StableToolEvent
+) : StableCleanEvent.CompletedTool
 
 /** Strongly typed command or process interaction. */
 @Serializable
@@ -23,27 +26,14 @@ public sealed interface StableCommandExecutionAction {
     @Serializable
     @SerialName("exec_command")
     public data class ExecCommand(
-        public val command: String,
-        public val workdir: String? = null,
-        public val shell: String? = null,
-        public val tty: Boolean = false,
-        @SerialName("yield_time_ms")
-        public val yieldTimeMillis: Long,
-        @SerialName("max_output_tokens")
-        public val maxOutputTokens: Long,
+        public val arguments: ExecCommandArguments,
     ) : StableCommandExecutionAction
 
     /** Writes to or polls a running unified-exec session. */
     @Serializable
     @SerialName("write_stdin")
     public data class WriteStdin(
-        @SerialName("session_id")
-        public val sessionId: Int,
-        public val chars: String = "",
-        @SerialName("yield_time_ms")
-        public val yieldTimeMillis: Long,
-        @SerialName("max_output_tokens")
-        public val maxOutputTokens: Long,
+        public val arguments: WriteStdinArguments,
     ) : StableCommandExecutionAction
 
     /** Command supplied through a hosted `local_shell_call`. */
@@ -67,17 +57,7 @@ public sealed interface StableCommandExecutionResult {
     @Serializable
     @SerialName("output")
     public data class Output(
-        @SerialName("chunk_id")
-        public val chunkId: String,
-        @SerialName("wall_time_seconds")
-        public val wallTimeSeconds: Double,
-        @SerialName("exit_code")
-        public val exitCode: Int? = null,
-        @SerialName("session_id")
-        public val sessionId: Int? = null,
-        @SerialName("original_token_count")
-        public val originalTokenCount: Long,
-        public val output: String,
+        public val value: UnifiedExecOutput,
     ) : StableCommandExecutionResult
 
     /** Status reported by a hosted shell item without a separate output. */

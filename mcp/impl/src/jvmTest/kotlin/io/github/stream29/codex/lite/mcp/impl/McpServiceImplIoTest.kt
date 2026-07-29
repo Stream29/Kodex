@@ -103,7 +103,7 @@ val mcpServiceImplIoTest by testSuite(
                         arguments = """{"name":"Ada"}""",
                         callId = "alpha-call",
                     ),
-                ),
+                ).first,
             )
             assertEquals(
                 "alpha:second:Ada",

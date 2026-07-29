@@ -9,6 +9,8 @@ import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as Code
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstate.contract.forcedCompact
 import io.github.stream29.codex.lite.agentstate.contract.renameThread
+import io.github.stream29.codex.lite.agentstate.tool.toPendingToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.codex.lite.agentstorage.contract.forkTo
 import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.agentstorage.contract.nextIndex
@@ -437,6 +439,7 @@ val codexAgentStateImplTest by testSuite {
                     callId = "other_call",
                     output = FunctionCallOutputPayload.fromText("no"),
                 ),
+                testCompletedToolEvent("exec_command", "no"),
             )
         }
         assertFailsWith<CodexAgentStateInvalidTransitionException> {
@@ -448,6 +451,7 @@ val codexAgentStateImplTest by testSuite {
                 callId = "call_1",
                 output = FunctionCallOutputPayload.fromText("done"),
             ),
+            testCompletedToolEvent("exec_command", "done"),
         )
         assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
     }
@@ -467,6 +471,11 @@ val codexAgentStateImplTest by testSuite {
         storage.history[1] = userMessage("Run both tools.")
         storage.history[2] = firstCall
         storage.history[3] = secondCall
+        val initialPending = listOf(
+            firstCall.toPendingToolEvent(),
+            secondCall.toPendingToolEvent(),
+        )
+        storage.unstable[3] = initialPending
         val agent = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
@@ -483,18 +492,24 @@ val codexAgentStateImplTest by testSuite {
             callId = firstCall.callId,
             output = FunctionCallOutputPayload.fromText("first"),
         )
+        val secondCompleted = testCompletedToolEvent(secondCall.name, "second")
+        val firstCompleted = testCompletedToolEvent(firstCall.name, "first")
 
-        val secondIndex = agent.completeToolCall(secondOutput)
+        val secondIndex = agent.completeToolCall(secondOutput, secondCompleted)
 
         assertEquals(4, secondIndex)
         assertEquals(secondOutput, storage.history[4])
+        assertEquals(secondCompleted, storage.stable[4])
+        assertEquals(listOf(initialPending.first()), storage.unstable[4])
         assertEquals(CodexAgentStateValue.ToolPending(listOf(firstCall)), agent.state.value)
 
-        val finalIndex = agent.completeToolCall(firstOutput)
+        val finalIndex = agent.completeToolCall(firstOutput, firstCompleted)
 
         assertEquals(5, finalIndex)
         assertEquals(secondOutput, storage.history[4])
         assertEquals(firstOutput, storage.history[5])
+        assertEquals(firstCompleted, storage.stable[5])
+        assertEquals(emptyList(), storage.unstable[5])
         assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
     }
 
@@ -529,6 +544,7 @@ val codexAgentStateImplTest by testSuite {
                     status = "completed",
                     tools = emptyList(),
                 ),
+                testCompletedToolEvent("tool_search", "no"),
             )
         }
 
@@ -537,7 +553,13 @@ val codexAgentStateImplTest by testSuite {
             status = "completed",
             tools = emptyList(),
         )
-        assertEquals(4, agent.completeToolCall(searchOutput))
+        assertEquals(
+            4,
+            agent.completeToolCall(
+                searchOutput,
+                testCompletedToolEvent("tool_search", "completed"),
+            ),
+        )
         assertEquals(searchOutput, storage.history[4])
         assertEquals(CodexAgentStateValue.ToolPending(listOf(functionCall)), agent.state.value)
 
@@ -546,6 +568,7 @@ val codexAgentStateImplTest by testSuite {
                 callId = functionCall.callId,
                 output = FunctionCallOutputPayload.fromText("done"),
             ),
+            testCompletedToolEvent(functionCall.name, "done"),
         )
         val reloadedAgent = CodexAgentState(
             client = mockOpenAiClient(),
@@ -625,6 +648,7 @@ val codexAgentStateImplTest by testSuite {
                 callId = planCall.callId,
                 output = FunctionCallOutputPayload.fromText("Plan updated").copy(success = true),
             ),
+            testCompletedToolEvent(planCall.name, "Plan updated"),
         )
 
         assertEquals(3, outputIndex)
@@ -1824,6 +1848,17 @@ private fun assistantMessage(text: String): ResponseItem.Message =
     ResponseItem.Message(
         role = MessageRole.Assistant,
         content = listOf(ContentItem.OutputText(text)),
+    )
+
+private fun testCompletedToolEvent(
+    name: String,
+    result: String,
+): StableTextToolEvent =
+    StableTextToolEvent(
+        name = name,
+        arguments = buildJsonObject {},
+        result = result,
+        success = true,
     )
 
 private suspend fun CodexAgentStateContract.appendUserMessage(

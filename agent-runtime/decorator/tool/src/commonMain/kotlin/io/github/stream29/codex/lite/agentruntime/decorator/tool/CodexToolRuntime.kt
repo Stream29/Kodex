@@ -1,6 +1,8 @@
 package io.github.stream29.codex.lite.agentruntime.decorator.tool
 
 import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableToolSearchEvent
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.hook.contract.tool.PreToolUseResult
 import io.github.stream29.codex.lite.hook.contract.tool.ToolHooks
@@ -16,8 +18,10 @@ import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.tool.contract.Tool
+import io.github.stream29.codex.lite.tool.contract.ToolCallResult
 import io.github.stream29.codex.lite.tool.contract.ToolName
 import io.github.stream29.codex.lite.tool.toolsearch.SearchToolCallParams
+import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchExecution
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchEngine
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchResult
 import kotlinx.coroutines.channels.Channel
@@ -26,6 +30,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
 
 /**
@@ -57,7 +62,8 @@ public class CodexToolRuntime internal constructor(
             for (call in pending.calls) {
                 when (call) {
                     is ResponseItem.ClientToolSearchCall -> {
-                        completeToolCall(toolSearch.value.handle(call))
+                        val (output, completed) = toolSearch.value.handle(call)
+                        completeToolCall(output, completed)
                         handledCall = true
                     }
 
@@ -66,11 +72,10 @@ public class CodexToolRuntime internal constructor(
                     -> {
                         val tool = toolsByName[call.toolName]
                         if (tool == null && call.toolName.namespace?.startsWith("mcp__") == true) {
-                            completeToolCall(
-                                call.unavailable(
-                                    "The MCP tool is no longer available in the current catalog.",
-                                ),
-                            )
+                            val message =
+                                "The MCP tool is no longer available in the current catalog."
+                            val output = call.unavailable(message)
+                            completeToolCall(output, call.failedEvent(message))
                         } else if (tool == null) {
                             continue
                         } else {
@@ -95,13 +100,16 @@ public class CodexToolRuntime internal constructor(
     ) {
         when (val result = toolHooks.runPreToolUse(delegate.storage, call)) {
             is PreToolUseResult.Block -> {
-                completeToolCall(call.toHookBlockedOutput(result.reason))
+                completeToolCall(
+                    call.toHookBlockedOutput(result.reason),
+                    call.failedEvent(result.reason),
+                )
                 return
             }
 
             PreToolUseResult.Continue -> Unit
         }
-        val output = tool.handle(call)
+        val (output, completed) = tool.handle(call)
         toolHooks.runPostToolUse(
             storage = delegate.storage,
             call = call,
@@ -113,7 +121,7 @@ public class CodexToolRuntime internal constructor(
             ?.any { pendingCall -> pendingCall.callId == call.callId }
             ?: false
         if (remainsPending) {
-            completeToolCall(output)
+            completeToolCall(output, completed)
         }
     }
 }
@@ -186,19 +194,44 @@ private val ResponseItem.ToolCall.toolName: ToolName
 
 private fun ToolSearchEngine.handle(
     call: ResponseItem.ClientToolSearchCall,
-): ResponseItem.ClientToolSearchOutput {
-    val result = try {
+): ToolCallResult =
+    try {
         val arguments = OpenAiJsonCodec.decodeFromJsonElement<SearchToolCallParams>(call.arguments)
-        search(arguments)
-    } catch (_: SerializationException) {
-        null
+        val result = search(arguments)
+        ResponseItem.ClientToolSearchOutput(
+            callId = call.callId,
+            status = "completed",
+            tools = (result as? ToolSearchResult.Success)?.tools.orEmpty(),
+        ) to StableToolSearchEvent(
+            execution = ToolSearchExecution.Client,
+            arguments = arguments,
+            result = result,
+        )
+    } catch (error: SerializationException) {
+        val message = "failed to parse tool_search arguments: ${error.message}"
+        ResponseItem.ClientToolSearchOutput(
+            callId = call.callId,
+            status = "completed",
+            tools = emptyList(),
+        ) to StableTextToolEvent(
+            name = "tool_search",
+            arguments = call.arguments,
+            result = message,
+            success = false,
+        )
+    } catch (error: IllegalArgumentException) {
+        val message = "failed to parse tool_search arguments: ${error.message}"
+        ResponseItem.ClientToolSearchOutput(
+            callId = call.callId,
+            status = "completed",
+            tools = emptyList(),
+        ) to StableTextToolEvent(
+            name = "tool_search",
+            arguments = call.arguments,
+            result = message,
+            success = false,
+        )
     }
-    return ResponseItem.ClientToolSearchOutput(
-        callId = call.callId,
-        status = "completed",
-        tools = (result as? ToolSearchResult.Success)?.tools.orEmpty(),
-    )
-}
 
 private fun ResponseItem.ToolCall.unavailable(message: String): ResponseItem.ToolCallOutput =
     when (this) {
@@ -214,3 +247,31 @@ private fun ResponseItem.ToolCall.unavailable(message: String): ResponseItem.Too
 
         is ResponseItem.ClientToolSearchCall -> error("Client tool-search calls have a dedicated output type.")
     }
+
+private fun ResponseItem.ToolCall.failedEvent(message: String): StableTextToolEvent =
+    StableTextToolEvent(
+        name = when (this) {
+            is ResponseItem.FunctionCall -> name
+            is ResponseItem.CustomToolCall -> name
+            is ResponseItem.ClientToolSearchCall -> "tool_search"
+        },
+        namespace = when (this) {
+            is ResponseItem.FunctionCall -> namespace
+            is ResponseItem.CustomToolCall -> namespace
+            is ResponseItem.ClientToolSearchCall -> null
+        },
+        arguments = when (this) {
+            is ResponseItem.FunctionCall -> try {
+                OpenAiJsonCodec.parseToJsonElement(arguments)
+            } catch (_: SerializationException) {
+                JsonPrimitive(arguments)
+            } catch (_: IllegalArgumentException) {
+                JsonPrimitive(arguments)
+            }
+
+            is ResponseItem.CustomToolCall -> JsonPrimitive(input)
+            is ResponseItem.ClientToolSearchCall -> arguments
+        },
+        result = message,
+        success = false,
+    )

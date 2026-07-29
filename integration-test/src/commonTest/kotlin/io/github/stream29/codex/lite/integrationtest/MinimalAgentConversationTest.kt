@@ -19,6 +19,8 @@ import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
 import io.github.stream29.codex.lite.hook.contract.NoOpCodexHooks
@@ -846,6 +848,10 @@ val openAiRequestUserInputProbeTest by testSuite {
                             response,
                         ),
                     ).copy(success = true),
+                ),
+                StableRequestUserInputToolEvent(
+                    arguments = arguments,
+                    result = StableRequestUserInputResult.Answered(response),
                 ),
             )
             assertEquals(CodexAgentStateValue.ToolCompleted, state.state.value)

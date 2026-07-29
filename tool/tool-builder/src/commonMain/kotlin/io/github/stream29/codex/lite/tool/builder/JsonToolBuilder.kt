@@ -1,14 +1,22 @@
 package io.github.stream29.codex.lite.tool.builder
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableJsonToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.tool.contract.Tool
+import io.github.stream29.codex.lite.tool.contract.ToolCallResult
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
 
 public val ToolBuilderJson: Json = Json {
     explicitNulls = false
@@ -39,20 +47,50 @@ public fun <Input, Output> jsonTool(
     inputDeserializer: DeserializationStrategy<Input>,
     outputSerializer: SerializationStrategy<Output>,
     json: Json = ToolBuilderJson,
+    completedEvent: ((Input, JsonToolHandlerResult<Output>) -> StableCleanEvent.CompletedTool)? = null,
     handler: suspend (Input) -> JsonToolHandlerResult<Output>,
 ): Tool =
-    FunctionOutputTool(spec, inputDeserializer, json) { _, input ->
+    FunctionOutputTool(spec, inputDeserializer, json) { call, input, arguments ->
         when (val result = handler(input)) {
-            is JsonToolHandlerResult.Failure -> failedOutput(result.message)
+            is JsonToolHandlerResult.Failure -> {
+                failedOutput(result.message) to (
+                    completedEvent?.invoke(input, result)
+                        ?: StableTextToolEvent(
+                            name = call.name,
+                            namespace = call.namespace,
+                            arguments = arguments,
+                            result = result.message,
+                            success = false,
+                        )
+                    )
+            }
+
             is JsonToolHandlerResult.Success -> try {
+                val resultJson = json.encodeToJsonElement(outputSerializer, result.value)
                 FunctionCallOutputPayload(
                     body = FunctionCallOutputBody.Text(
                         json.encodeToString(outputSerializer, result.value),
                     ),
                     success = result.success,
+                ) to (
+                    completedEvent?.invoke(input, result)
+                        ?: StableJsonToolEvent(
+                            name = call.name,
+                            namespace = call.namespace,
+                            arguments = arguments,
+                            result = resultJson,
+                            success = result.success,
+                        )
                 )
             } catch (error: SerializationException) {
-                failedOutput("failed to serialize tool output: ${error.message}")
+                val message = "failed to serialize tool output: ${error.message}"
+                failedOutput(message) to StableTextToolEvent(
+                    name = call.name,
+                    namespace = call.namespace,
+                    arguments = arguments,
+                    result = message,
+                    success = false,
+                )
             }
         }
     }
@@ -74,15 +112,39 @@ public fun <Input> textTool(
     spec: ToolSpec,
     inputDeserializer: DeserializationStrategy<Input>,
     json: Json = ToolBuilderJson,
+    completedEvent: ((Input, JsonToolHandlerResult<String>) -> StableCleanEvent.CompletedTool)? = null,
     handler: suspend (Input) -> JsonToolHandlerResult<String>,
 ): Tool =
-    FunctionOutputTool(spec, inputDeserializer, json) { _, input ->
+    FunctionOutputTool(spec, inputDeserializer, json) { call, input, arguments ->
         when (val result = handler(input)) {
-            is JsonToolHandlerResult.Failure -> failedOutput(result.message)
-            is JsonToolHandlerResult.Success -> FunctionCallOutputPayload(
-                body = FunctionCallOutputBody.Text(result.value),
-                success = result.success,
-            )
+            is JsonToolHandlerResult.Failure -> {
+                failedOutput(result.message) to (
+                    completedEvent?.invoke(input, result)
+                        ?: StableTextToolEvent(
+                            name = call.name,
+                            namespace = call.namespace,
+                            arguments = arguments,
+                            result = result.message,
+                            success = false,
+                        )
+                    )
+            }
+
+            is JsonToolHandlerResult.Success -> {
+                FunctionCallOutputPayload(
+                    body = FunctionCallOutputBody.Text(result.value),
+                    success = result.success,
+                ) to (
+                    completedEvent?.invoke(input, result)
+                        ?: StableTextToolEvent(
+                            name = call.name,
+                            namespace = call.namespace,
+                            arguments = arguments,
+                            result = result.value,
+                            success = result.success,
+                        )
+                    )
+            }
         }
     }
 
@@ -100,46 +162,89 @@ public fun <Input> functionOutputTool(
     spec: ToolSpec,
     inputDeserializer: DeserializationStrategy<Input>,
     json: Json = ToolBuilderJson,
-    handler: suspend (callId: String, input: Input) -> FunctionCallOutputPayload,
+    handler: suspend (
+        callId: String,
+        input: Input,
+    ) -> Pair<FunctionCallOutputPayload, StableCleanEvent.CompletedTool>,
 ): Tool =
-    FunctionOutputTool(spec, inputDeserializer, json, handler)
+    FunctionOutputTool(spec, inputDeserializer, json) { call, input, _ ->
+        handler(call.callId, input)
+    }
 
 private class FunctionOutputTool<Input>(
     override val spec: ToolSpec,
     private val inputDeserializer: DeserializationStrategy<Input>,
     private val json: Json,
-    private val handler: suspend (callId: String, input: Input) -> FunctionCallOutputPayload,
+    private val handler: suspend (
+        call: ResponseItem.FunctionCall,
+        input: Input,
+        arguments: JsonElement,
+    ) -> Pair<FunctionCallOutputPayload, StableCleanEvent.CompletedTool>,
 ) : Tool {
     override fun close(): Unit = Unit
 
-    override suspend fun handle(call: ResponseItem.ToolCall): ResponseItem.ToolCallOutput =
+    override suspend fun handle(call: ResponseItem.ToolCall): ToolCallResult =
         when (call) {
-            is ResponseItem.FunctionCall -> ResponseItem.FunctionCallOutput(
-                callId = call.callId,
-                output = handleFunctionCall(call.callId, call.arguments),
-            )
+            is ResponseItem.FunctionCall -> {
+                val (output, completed) = handleFunctionCall(call)
+                ResponseItem.FunctionCallOutput(
+                    callId = call.callId,
+                    output = output,
+                ) to completed
+            }
 
-            is ResponseItem.CustomToolCall -> ResponseItem.CustomToolCallOutput(
-                callId = call.callId,
-                output = failedOutput("JSON tool received custom tool payload"),
-            )
+            is ResponseItem.CustomToolCall -> {
+                val message = "JSON tool received custom tool payload"
+                ResponseItem.CustomToolCallOutput(
+                    callId = call.callId,
+                    output = failedOutput(message),
+                ) to StableTextToolEvent(
+                    name = call.name,
+                    namespace = call.namespace,
+                    arguments = JsonPrimitive(call.input),
+                    result = message,
+                    success = false,
+                )
+            }
 
             is ResponseItem.ClientToolSearchCall ->
                 error("Client tool-search calls are handled by CodexToolRuntime.")
         }
 
     private suspend fun handleFunctionCall(
-        callId: String,
-        argumentsJson: String,
-    ): FunctionCallOutputPayload {
-        val input = try {
-            json.decodeFromString(inputDeserializer, argumentsJson)
+        call: ResponseItem.FunctionCall,
+    ): Pair<FunctionCallOutputPayload, StableCleanEvent.CompletedTool> {
+        val arguments = try {
+            json.parseToJsonElement(call.arguments)
         } catch (error: SerializationException) {
-            return failedOutput("failed to parse function arguments: ${error.message}")
+            return call.failedResult(
+                arguments = JsonPrimitive(call.arguments),
+                message = "failed to parse function arguments: ${error.message}",
+            )
         }
-        return handler(callId, input)
+        val input = try {
+            json.decodeFromJsonElement(inputDeserializer, arguments)
+        } catch (error: SerializationException) {
+            return call.failedResult(
+                arguments = arguments,
+                message = "failed to parse function arguments: ${error.message}",
+            )
+        }
+        return handler(call, input, arguments)
     }
 }
+
+private fun ResponseItem.FunctionCall.failedResult(
+    arguments: JsonElement,
+    message: String,
+): Pair<FunctionCallOutputPayload, StableCleanEvent.CompletedTool> =
+    failedOutput(message) to StableTextToolEvent(
+        name = name,
+        namespace = namespace,
+        arguments = arguments,
+        result = message,
+        success = false,
+    )
 
 private fun failedOutput(message: String): FunctionCallOutputPayload =
     FunctionCallOutputPayload(

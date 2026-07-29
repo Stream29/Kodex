@@ -20,7 +20,7 @@ import kotlinx.serialization.Serializable
 public data class StablePatchToolEvent(
     public val diff: Patch,
     public val result: StablePatchToolExecutionResult,
-) : StableToolEvent
+) : StableCleanEvent.CompletedTool
 
 /**
  * Execution result for an `apply_patch` tool event.
