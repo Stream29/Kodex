@@ -3,6 +3,10 @@ package io.github.stream29.codex.lite.agentsession.multiagent
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
+import io.github.stream29.codex.lite.agentsession.contract.listChild
+import io.github.stream29.codex.lite.agentsession.contract.parentOf
+import io.github.stream29.codex.lite.agentsession.contract.pathOf
+import io.github.stream29.codex.lite.agentsession.contract.rootSession
 import io.github.stream29.codex.lite.agentsession.inmemory.InMemoryCodexSessionRepository
 import io.github.stream29.codex.lite.agentsession.test.testCodexAgentDependencies
 import io.github.stream29.codex.lite.agentstorage.contract.initialize
@@ -10,6 +14,7 @@ import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import kotlinx.coroutines.cancel
+import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 
@@ -46,6 +51,32 @@ val agentPathResolverImplTest by testSuite {
 
             assertSame(child, resolver.resolveOrNull("/root/reviewer"))
             assertNull(resolver.resolveOrNull("/root/worker"))
+            assertEquals("/root/reviewer", resolver.pathOf(child))
+            assertSame(root, resolver.parentOf(child))
+        } finally {
+            repository.cancel()
+        }
+    }
+
+    test("navigates roots, paths, parents, and initialized children") {
+        val repository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
+        try {
+            val root = repository.initializedSession("/root")
+            val researcher = root.subagents.initializedSession("/root/researcher")
+            val worker = researcher.subagents.initializedSession("/root/researcher/worker")
+            val reviewer = root.subagents.initializedSession("/root/reviewer")
+            root.subagents.create()
+            val resolver = AgentPathResolverImpl(root)
+
+            assertSame(root, resolver.rootSession())
+            assertEquals("/root", resolver.pathOf(root))
+            assertEquals("/root/researcher", resolver.pathOf(researcher))
+            assertEquals("/root/researcher/worker", resolver.pathOf(worker))
+            assertNull(resolver.parentOf(root))
+            assertSame(root, resolver.parentOf(researcher))
+            assertSame(researcher, resolver.parentOf(worker))
+            assertEquals(listOf(researcher, reviewer), resolver.listChild(root))
+            assertEquals(listOf(worker), resolver.listChild(researcher))
         } finally {
             repository.cancel()
         }
