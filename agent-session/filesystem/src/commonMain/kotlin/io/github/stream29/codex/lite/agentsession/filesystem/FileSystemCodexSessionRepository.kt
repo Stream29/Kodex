@@ -2,7 +2,7 @@ package io.github.stream29.codex.lite.agentsession.filesystem
 
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
-import io.github.stream29.codex.lite.agentsession.composition.CodexAgentDependencies
+import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.codex.lite.agentstorage.filesystem.ofEmpty
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope

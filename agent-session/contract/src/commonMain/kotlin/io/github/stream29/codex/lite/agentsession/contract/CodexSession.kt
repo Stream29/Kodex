@@ -1,6 +1,6 @@
 package io.github.stream29.codex.lite.agentsession.contract
 
-import io.github.stream29.codex.lite.agentruntime.composite.AgentRuntime
+import io.github.stream29.codex.lite.agentruntime.contract.AgentRuntime
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import kotlinx.coroutines.CoroutineScope
 

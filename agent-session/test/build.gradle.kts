@@ -5,7 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-session-composition"))
+            api(project(":agent-session-contract"))
             implementation(project(":agent-state-test"))
             implementation(project(":hook-contract"))
             implementation(project(":openai-client-test"))

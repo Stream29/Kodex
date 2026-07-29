@@ -1,11 +1,11 @@
 package io.github.stream29.codex.lite.agentsession.inmemory
 
-import io.github.stream29.codex.lite.agentruntime.composite.AgentRuntime
+import io.github.stream29.codex.lite.agentruntime.contract.AgentRuntime
+import io.github.stream29.codex.lite.agentruntime.impl.buildAgentRuntime
 import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
+import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
-import io.github.stream29.codex.lite.agentsession.composition.CodexAgentDependencies
-import io.github.stream29.codex.lite.agentsession.composition.buildAgentRuntime
 import io.github.stream29.codex.lite.agentsession.multiagent.AgentPathResolverImpl
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState

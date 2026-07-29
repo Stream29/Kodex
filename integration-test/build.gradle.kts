@@ -6,8 +6,8 @@ kotlin {
     sourceSets {
         commonTest.dependencies {
             implementation(project(":agent-context-prefix-render"))
-            implementation(project(":agent-runtime-compact"))
-            implementation(project(":agent-session-composition"))
+            implementation(project(":agent-runtime-decorator-compact"))
+            implementation(project(":agent-runtime-impl"))
             implementation(project(":agent-session-filesystem"))
             implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-contract"))
@@ -35,7 +35,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
         jvmTest.dependencies {
-            implementation(project(":agent-runtime-tool"))
+            implementation(project(":agent-runtime-decorator-tool"))
             implementation(project(":mcp-impl"))
             implementation(libs.kotlinx.schema.json)
             implementation(libs.ktor.server.cio)
