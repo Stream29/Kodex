@@ -8,6 +8,7 @@ import com.jakewharton.mosaic.LocalTerminalState
 import com.jakewharton.mosaic.focus.FocusState
 import com.jakewharton.mosaic.focus.onFocusChanged
 import com.jakewharton.mosaic.layout.height
+import com.jakewharton.mosaic.layout.onKeyEvent
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.AnsiLevel
@@ -17,14 +18,11 @@ import com.jakewharton.mosaic.terminal.Terminal
 import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.cli.action.TuiAction
-import io.github.stream29.codex.lite.cli.action.TuiActionHost
-import io.github.stream29.codex.lite.cli.action.TuiActionScope
-import io.github.stream29.codex.lite.cli.action.TuiShortcut
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -42,7 +40,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(
                         expanded = expanded,
                         state = state,
@@ -75,7 +73,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(state = state) {
                         repeat(8) { index ->
                             TuiPopupMenuItem(key = index, onClick = {}) { Text(index.toString()) }
@@ -105,7 +103,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(
                         expanded = expanded,
                         state = state,
@@ -137,7 +135,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(state = state) {
                         TuiPopupMenuItem(
                             key = "disabled",
@@ -161,12 +159,44 @@ val tuiPopupMenuTest by testSuite {
         assertEquals(0, disabledInvocations)
     }
 
+    test("escape dismisses a menu without an enabled item") {
+        var expanded by mutableStateOf(true)
+        val state = TuiPopupMenuState()
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Box {
+                    PopupMenuHarness(
+                        expanded = expanded,
+                        state = state,
+                        onDismissRequest = { expanded = false },
+                    ) {
+                        TuiPopupMenuItem(
+                            key = "disabled",
+                            enabled = false,
+                            onClick = {},
+                        ) {
+                            Text("disabled")
+                        }
+                    }
+                }
+            }
+            awaitSnapshotContaining("[disabled]")
+            assertEquals(null, state.focusedKey)
+
+            sendKeyEvent(KeyboardEvent(codepoint = 27))
+            awaitSnapshot()
+        }
+
+        assertFalse(expanded)
+    }
+
     test("selected item supplies the initial focus key") {
         val state = TuiPopupMenuState()
 
         runMosaicTest(snapshotStrategy = popupMenuAnsiSnapshots) {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(state = state) {
                         TuiPopupMenuItem(key = "first", onClick = {}) { Text("first") }
                         TuiPopupMenuItem(key = "selected", selected = true, onClick = {}) {
@@ -188,7 +218,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(state = state) {
                         TuiPopupMenuItem(key = "first", onClick = {}) { Text("first") }
                         TuiPopupMenuItem(
@@ -216,7 +246,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(
                         state = state,
                         width = 8,
@@ -239,7 +269,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(state = state, width = 20, height = 4) {
                         TuiPopupMenuItem(
                             key = "open",
@@ -267,7 +297,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(state = state) {
                         TuiPopupSubmenuItem(
                             key = "model",
@@ -299,7 +329,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(state = state) {
                         TuiPopupSubmenuItem(
                             key = "model",
@@ -334,7 +364,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(
                         expanded = expanded,
                         state = state,
@@ -370,7 +400,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(state = state) {
                         repeat(8) { index ->
                             TuiPopupMenuItem(key = index, onClick = {}) { Text(index.toString()) }
@@ -423,7 +453,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(state = state) {
                         items.forEach { value ->
                             TuiPopupMenuItem(key = value, onClick = {}) { Text(value) }
@@ -445,7 +475,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest(snapshotStrategy = popupMenuAnsiSnapshots) {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(
                         state = state,
                         width = 8,
@@ -469,7 +499,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(
                         state = state,
                         width = 8,
@@ -492,7 +522,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     FocusRestorationHarness(
                         expanded = expanded,
                         isTriggerFocused = triggerFocused,
@@ -515,33 +545,20 @@ val tuiPopupMenuTest by testSuite {
         assertTrue(triggerFocused)
     }
 
-    test("menu action scope blocks shortcuts registered by its parent") {
-        var parentInvocations by mutableStateOf(0)
+    test("menu passes non-Escape keys to its focus path") {
         var unhandledEvents by mutableStateOf(0)
         val state = TuiPopupMenuState()
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost(
-                    onUnhandledKeyEvent = {
+                Box(
+                    modifier = Modifier.onKeyEvent {
                         unhandledEvents++
                         true
                     },
                 ) {
-                    TuiActionScope(
-                        actions = listOf(
-                            TuiAction(
-                                id = "parent.new",
-                                label = "New",
-                                shortcut = TuiShortcut(key = "n", ctrl = true),
-                            ) {
-                                parentInvocations++
-                            },
-                        ),
-                    ) {
-                        PopupMenuHarness(state = state) {
-                            TuiPopupMenuItem(key = "item", onClick = {}) { Text("item") }
-                        }
+                    PopupMenuHarness(state = state) {
+                        TuiPopupMenuItem(key = "item", onClick = {}) { Text("item") }
                     }
                 }
             }
@@ -556,7 +573,6 @@ val tuiPopupMenuTest by testSuite {
             awaitSnapshotUntil { unhandledEvents == 1 }
         }
 
-        assertEquals(0, parentInvocations)
         assertEquals(1, unhandledEvents)
     }
 
@@ -566,7 +582,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(
                         expanded = expanded,
                         state = state,
@@ -601,7 +617,7 @@ val tuiPopupMenuTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     PopupMenuHarness(
                         expanded = expanded,
                         state = state,
@@ -639,7 +655,7 @@ val tuiPopupMenuTest by testSuite {
 @Composable
 private fun TerminalSizedPopupMenuHarness(state: TuiPopupMenuState) {
     val terminalSize = LocalTerminalState.current.size
-    TuiActionHost {
+    Box {
         PopupMenuHarness(
             state = state,
             width = terminalSize.columns,

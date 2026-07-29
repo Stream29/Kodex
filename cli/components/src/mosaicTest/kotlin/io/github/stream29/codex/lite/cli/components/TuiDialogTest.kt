@@ -15,13 +15,10 @@ import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Text
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.codex.lite.cli.action.TuiAction
-import io.github.stream29.codex.lite.cli.action.TuiActionHost
-import io.github.stream29.codex.lite.cli.action.TuiActionScope
-import io.github.stream29.codex.lite.cli.action.TuiShortcut
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -31,7 +28,7 @@ val tuiDialogTest by testSuite {
     test("dialog centers its content over the popup host") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     TuiPopupHost(
                         modifier = Modifier
                             .width(24)
@@ -53,7 +50,7 @@ val tuiDialogTest by testSuite {
     test("dialog clears background characters inside its bounds") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     TuiPopupHost(
                         modifier = Modifier
                             .width(12)
@@ -84,7 +81,7 @@ val tuiDialogTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     TuiPopupHost(
                         modifier = Modifier
                             .width(24)
@@ -127,6 +124,33 @@ val tuiDialogTest by testSuite {
         assertEquals(0, dialogKeyEvents)
     }
 
+    test("escape dismisses a dialog without a focusable child") {
+        var expanded by mutableStateOf(true)
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Box {
+                    TuiPopupHost(
+                        modifier = Modifier
+                            .width(24)
+                            .height(8),
+                    ) {
+                        if (expanded) {
+                            TuiDialog(onDismissRequest = { expanded = false }) {
+                                Text("[dialog]")
+                            }
+                        }
+                    }
+                }
+            }
+
+            sendKeyEvent(KeyboardEvent(codepoint = 27))
+            awaitSnapshot()
+        }
+
+        assertFalse(expanded)
+    }
+
     test("button dismissal restores the prior focus target") {
         var expanded by mutableStateOf(false)
         var backgroundFocused by mutableStateOf(false)
@@ -134,7 +158,7 @@ val tuiDialogTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     TuiPopupHost(
                         modifier = Modifier
                             .width(24)
@@ -185,7 +209,7 @@ val tuiDialogTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     TuiPopupHost(
                         modifier = Modifier
                             .width(24)
@@ -217,7 +241,7 @@ val tuiDialogTest by testSuite {
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
+                Box {
                     TuiPopupHost(
                         modifier = Modifier
                             .width(24)
@@ -242,40 +266,27 @@ val tuiDialogTest by testSuite {
         assertEquals(1, dialogPresses)
     }
 
-    test("dialog blocks parent actions while preserving focused input") {
-        var parentActionInvocations by mutableStateOf(0)
+    test("dialog passes non-Escape keys to focused content") {
         var dialogKeyEvents by mutableStateOf(0)
 
         runMosaicTest {
             setContentAndSnapshot {
-                TuiActionHost {
-                    TuiActionScope(
-                        actions = listOf(
-                            TuiAction(
-                                id = "parent.new",
-                                label = "New",
-                                shortcut = TuiShortcut(key = "n", ctrl = true),
-                            ) {
-                                parentActionInvocations++
-                            },
-                        ),
+                Box {
+                    TuiPopupHost(
+                        modifier = Modifier
+                            .width(24)
+                            .height(8),
                     ) {
-                        TuiPopupHost(
-                            modifier = Modifier
-                                .width(24)
-                                .height(8),
-                        ) {
-                            TuiDialog(onDismissRequest = {}) {
-                                Text(
-                                    value = "$parentActionInvocations/$dialogKeyEvents",
-                                    modifier = Modifier
-                                        .onKeyEvent {
-                                            dialogKeyEvents++
-                                            true
-                                        }
-                                        .focusable(),
-                                )
-                            }
+                        TuiDialog(onDismissRequest = {}) {
+                            Text(
+                                value = dialogKeyEvents.toString(),
+                                modifier = Modifier
+                                    .onKeyEvent {
+                                        dialogKeyEvents++
+                                        true
+                                    }
+                                    .focusable(),
+                            )
                         }
                     }
                 }
@@ -291,7 +302,6 @@ val tuiDialogTest by testSuite {
             awaitSnapshot()
         }
 
-        assertEquals(0, parentActionInvocations)
         assertEquals(1, dialogKeyEvents)
     }
 }

@@ -7,14 +7,13 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
-import io.github.stream29.codex.lite.cli.action.TuiAction
 
 /**
  * Compact bracketed command surface with terminal-native interaction feedback.
  *
  * Focus is represented by the terminal cursor, hover uses bold text, a held primary-pointer press
- * uses inverse video, and a disabled button is dim. Enter, Space, pointer activation, and an
- * optional [TuiAction] shortcut all converge on the same command.
+ * uses inverse video, and a disabled button is dim. Enter, Space, and pointer activation all
+ * converge on the same command.
  */
 @Composable
 public fun TuiButton(
@@ -48,24 +47,3 @@ public fun TuiButton(
         )
     }
 }
-
-/** Renders [action] as a button whose pointer and keyboard activation invoke that action. */
-@Composable
-public fun TuiButton(
-    action: TuiAction,
-    label: String = action.label,
-    modifier: Modifier = Modifier,
-    color: Color = Color.Unspecified,
-    focusRequester: FocusRequester? = null,
-    onKeyEvent: ((KeyEvent) -> Boolean)? = null,
-    autoFocus: Boolean = false,
-): Unit = TuiButton(
-    label = label,
-    modifier = modifier,
-    color = color,
-    enabled = action.enabled,
-    focusRequester = focusRequester,
-    onKeyEvent = onKeyEvent,
-    autoFocus = autoFocus,
-    onClick = action::invoke,
-)
