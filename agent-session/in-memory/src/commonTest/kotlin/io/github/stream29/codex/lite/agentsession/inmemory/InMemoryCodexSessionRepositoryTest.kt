@@ -27,6 +27,7 @@ import io.github.stream29.codex.lite.tool.multiagent.MultiAgentTools
 import io.github.stream29.codex.lite.tool.multiagent.FollowupTaskArgs
 import io.github.stream29.codex.lite.tool.multiagent.SendMessageArgs
 import io.github.stream29.codex.lite.tool.multiagent.SpawnAgentArgs
+import io.github.stream29.codex.lite.tool.multiagent.SpawnForkMode
 import io.github.stream29.codex.lite.tool.multiagent.followupTaskTool
 import io.github.stream29.codex.lite.tool.multiagent.sendMessageTool
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
@@ -369,7 +370,7 @@ private fun spawnResponse() = flowOf(
                 SpawnAgentArgs(
                     taskName = "worker",
                     message = "Complete one background turn.",
-                    forkTurns = "none",
+                    forkTurns = SpawnForkMode.None,
                 ),
             ),
             callId = "call_spawn",
