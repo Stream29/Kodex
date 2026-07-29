@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.agentsession.filesystem
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.codex.lite.agentstorage.filesystem.FileSystemAgentStorage
@@ -28,6 +30,8 @@ internal suspend fun FileSystemAgentStorage.cached(
         cachedSettings = settings.cached(ownerScope, valueCacheSize),
         cachedTimestamp = timestamp.cached(ownerScope, valueCacheSize),
         cachedTokenCount = tokenCount.cached(ownerScope, valueCacheSize),
+        cachedStable = stable.cached(ownerScope, valueCacheSize),
+        cachedUnstable = unstable.cached(ownerScope, valueCacheSize),
     )
 }
 
@@ -40,6 +44,8 @@ internal class CachedAgentStorage internal constructor(
     private val cachedSettings: MutableIndexVersioned<CodexAgentSettings>,
     private val cachedTimestamp: MutableIndexVersioned<kotlin.time.Instant>,
     private val cachedTokenCount: MutableIndexVersioned<Long>,
+    private val cachedStable: MutableIndexVersioned<StableCleanEvent>,
+    private val cachedUnstable: MutableIndexVersioned<List<PendingToolEvent>>,
 ) : MutableCodexAgentStorage {
     override val id: String
         get() {
@@ -70,6 +76,16 @@ internal class CachedAgentStorage internal constructor(
         get() {
             requireActive()
             return cachedTokenCount
+        }
+    override val stable: MutableIndexVersioned<StableCleanEvent>
+        get() {
+            requireActive()
+            return cachedStable
+        }
+    override val unstable: MutableIndexVersioned<List<PendingToolEvent>>
+        get() {
+            requireActive()
+            return cachedUnstable
         }
 
     private fun requireActive() {

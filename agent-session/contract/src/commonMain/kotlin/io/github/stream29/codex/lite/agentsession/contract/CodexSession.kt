@@ -7,7 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 /**
  * One exclusively owned Agent node in a recursive Codex session tree.
  *
- * This interface combines one Agent's five storage timelines with the
+ * This interface combines one Agent's seven storage timelines with the
  * repository of its direct child Agents. [runtime] is created when this
  * session is opened and remains owned by the session's coroutine lifecycle.
  *

@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.agentstorage.inmemory
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
@@ -40,6 +42,10 @@ public class InMemoryCodexAgentStorage private constructor(
     public override val timestamp: MutableIndexVersioned<Instant> =
         InMemoryIndexVersioned()
     public override val tokenCount: MutableIndexVersioned<Long> =
+        InMemoryIndexVersioned()
+    public override val stable: MutableIndexVersioned<StableCleanEvent> =
+        InMemoryIndexVersioned()
+    public override val unstable: MutableIndexVersioned<List<PendingToolEvent>> =
         InMemoryIndexVersioned()
 
     public companion object {

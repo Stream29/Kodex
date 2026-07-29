@@ -1,0 +1,12 @@
+package io.github.stream29.codex.lite.agentstorage.cleanmodels.stable
+
+import kotlinx.serialization.Serializable
+
+/**
+ * Completed clean event that can be appended to stable history.
+ *
+ * Stable history follows tool-result persistence order. It does not retain
+ * pending call identities or depend on the unstable clean-model package.
+ */
+@Serializable
+public sealed interface StableCleanEvent

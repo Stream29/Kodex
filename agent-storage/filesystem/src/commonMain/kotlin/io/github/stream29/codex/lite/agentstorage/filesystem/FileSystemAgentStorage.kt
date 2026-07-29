@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.agentstorage.filesystem
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
@@ -8,11 +10,12 @@ import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.serializer
 import kotlin.time.Instant
 
-/** Unowned direct view of the five timelines stored under one thread directory. */
+/** Unowned direct view of the seven timelines stored under one thread directory. */
 public class FileSystemAgentStorage internal constructor(
     public val directory: Path,
     fileSystem: CoroutineFileSystem,
@@ -55,6 +58,20 @@ public class FileSystemAgentStorage internal constructor(
             OpenAiJsonCodec,
             fileSystem,
         )
+    override val stable: FileSystemIndexVersioned<StableCleanEvent> =
+        FileSystemIndexVersioned(
+            Path(directory, StableDirectory),
+            StableCleanEvent.serializer(),
+            OpenAiJsonCodec,
+            fileSystem,
+        )
+    override val unstable: FileSystemIndexVersioned<List<PendingToolEvent>> =
+        FileSystemIndexVersioned(
+            Path(directory, UnstableDirectory),
+            ListSerializer(PendingToolEvent.serializer()),
+            OpenAiJsonCodec,
+            fileSystem,
+        )
 
     public companion object
 }
@@ -77,6 +94,8 @@ internal const val CompactionDirectory: String = "compaction"
 internal const val SettingsDirectory: String = "settings"
 internal const val TimestampDirectory: String = "timestamp"
 internal const val TokenCountDirectory: String = "token-count"
+internal const val StableDirectory: String = "stable"
+internal const val UnstableDirectory: String = "unstable"
 
 internal val TimelineDirectories: List<String> = listOf(
     HistoryDirectory,
@@ -84,6 +103,8 @@ internal val TimelineDirectories: List<String> = listOf(
     SettingsDirectory,
     TimestampDirectory,
     TokenCountDirectory,
+    StableDirectory,
+    UnstableDirectory,
 )
 
 /** Directory names that make up one filesystem AgentStorage. */

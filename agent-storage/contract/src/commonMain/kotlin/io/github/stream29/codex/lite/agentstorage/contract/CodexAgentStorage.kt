@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.agentstorage.contract
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.openai.ResponseItem
@@ -55,6 +57,13 @@ import kotlin.time.Instant
  * OpenAI-reported context token count used for compaction scheduling, not
  * cumulative usage or billing data. Absence of a new entry at a state index
  * means OpenAI did not report a new count for that transition.
+ * @property stable Sparse completed clean-event timeline. Each stored index
+ * contains the event completed by that state transition. Enumerate its stored
+ * indexes instead of treating [IndexVersioned.get] as a cumulative history
+ * snapshot.
+ * @property unstable Sparse pending-tool snapshot timeline. Each stored value
+ * is the complete ordered set of pending tool calls after that state
+ * transition. No visible value means the pending set is empty.
  */
 public interface CodexAgentStorage {
     public val id: String
@@ -63,6 +72,8 @@ public interface CodexAgentStorage {
     public val settings: IndexVersioned<CodexAgentSettings>
     public val timestamp: IndexVersioned<Instant>
     public val tokenCount: IndexVersioned<Long>
+    public val stable: IndexVersioned<StableCleanEvent>
+    public val unstable: IndexVersioned<List<PendingToolEvent>>
 }
 
 /**
@@ -77,6 +88,8 @@ public suspend fun CodexAgentStorage.latestIndex(): Int =
         settings.latestIndex(),
         timestamp.latestIndex(),
         tokenCount.latestIndex(),
+        stable.latestIndex(),
+        unstable.latestIndex(),
     )
 
 /**
@@ -92,6 +105,8 @@ public suspend fun CodexAgentStorage.floorToIndex(index: Int): Int? =
         settings.floorToIndex(index),
         timestamp.floorToIndex(index),
         tokenCount.floorToIndex(index),
+        stable.floorToIndex(index),
+        unstable.floorToIndex(index),
     ).maxOrNull()
 
 /**
@@ -107,6 +122,8 @@ public suspend fun CodexAgentStorage.ceilToIndex(index: Int): Int? =
         settings.ceilToIndex(index),
         timestamp.ceilToIndex(index),
         tokenCount.ceilToIndex(index),
+        stable.ceilToIndex(index),
+        unstable.ceilToIndex(index),
     ).minOrNull()
 
 /**
@@ -135,6 +152,8 @@ public interface MutableCodexAgentStorage : CodexAgentStorage {
     public override val settings: MutableIndexVersioned<CodexAgentSettings>
     public override val timestamp: MutableIndexVersioned<Instant>
     public override val tokenCount: MutableIndexVersioned<Long>
+    public override val stable: MutableIndexVersioned<StableCleanEvent>
+    public override val unstable: MutableIndexVersioned<List<PendingToolEvent>>
 }
 
 /**
@@ -149,7 +168,11 @@ public suspend fun MutableCodexAgentStorage.revert(untilExclusive: Int) {
         compaction.revertWithTransaction(untilExclusive) {
             settings.revertWithTransaction(untilExclusive) {
                 timestamp.revertWithTransaction(untilExclusive) {
-                    tokenCount.revert(untilExclusive)
+                    tokenCount.revertWithTransaction(untilExclusive) {
+                        stable.revertWithTransaction(untilExclusive) {
+                            unstable.revert(untilExclusive)
+                        }
+                    }
                 }
             }
         }
@@ -177,11 +200,17 @@ public suspend fun CodexAgentStorage.forkTo(
             target.settings.revertWithTransaction(0) {
                 target.timestamp.revertWithTransaction(0) {
                     target.tokenCount.revertWithTransaction(0) {
-                        this.history.forkTo(until, target.history)
-                        this.compaction.forkTo(until, target.compaction)
-                        this.settings.forkTo(until, target.settings)
-                        this.timestamp.forkTo(until, target.timestamp)
-                        this.tokenCount.forkTo(until, target.tokenCount)
+                        target.stable.revertWithTransaction(0) {
+                            target.unstable.revertWithTransaction(0) {
+                                this.history.forkTo(until, target.history)
+                                this.compaction.forkTo(until, target.compaction)
+                                this.settings.forkTo(until, target.settings)
+                                this.timestamp.forkTo(until, target.timestamp)
+                                this.tokenCount.forkTo(until, target.tokenCount)
+                                this.stable.forkTo(until, target.stable)
+                                this.unstable.forkTo(until, target.unstable)
+                            }
+                        }
                     }
                 }
             }

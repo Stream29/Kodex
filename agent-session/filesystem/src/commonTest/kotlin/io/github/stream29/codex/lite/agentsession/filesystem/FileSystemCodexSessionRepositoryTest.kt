@@ -5,6 +5,9 @@ import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
 import io.github.stream29.codex.lite.agentsession.inmemory.InMemoryCodexSessionRepository
 import io.github.stream29.codex.lite.agentsession.test.testCodexAgentDependencies
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolInvocation
 import io.github.stream29.codex.lite.agentstorage.contract.forkTo
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.initialize
@@ -46,6 +49,15 @@ private fun userMessage(text: String): ResponseItem.Message =
         content = listOf(ContentItem.InputText(text)),
     )
 
+private fun pendingTool(callId: String): PendingToolEvent =
+    PendingToolEvent(
+        callId = callId,
+        invocation = PendingToolInvocation.Custom(
+            name = "tool-$callId",
+            input = "input-$callId",
+        ),
+    )
+
 private suspend fun CodexAgentSession.spawnInitialized(name: String): CodexAgentSession =
     subagents.open(subagents.create()).also { child ->
         child.runtime.modify { target -> storage.forkTo(1, target) }
@@ -85,12 +97,26 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
             val session = repository.open(index)
             val storageId = session.storage.id
             val timestamp = Instant.parse("2026-07-22T00:00:00Z")
+            val stableEvent = StableAssistantMessage("persisted clean event")
+            val pendingEvent = pendingTool("call-persisted")
             session.storage.history[1] = userMessage("persisted")
             session.storage.timestamp[1] = timestamp
+            session.storage.stable[1] = stableEvent
+            session.storage.unstable[1] = listOf(pendingEvent)
 
             val directory = Path(root, "sessions/0")
             assertEquals(
-                setOf("history", "compaction", "settings", "timestamp", "token-count", "subagents", "lock.json"),
+                setOf(
+                    "history",
+                    "compaction",
+                    "settings",
+                    "timestamp",
+                    "token-count",
+                    "stable",
+                    "unstable",
+                    "subagents",
+                    "lock.json",
+                ),
                 SystemCoroutineFileSystem.list(directory)
                     .map(Path::name)
                     .filterNot { name -> name.startsWith(".") }
@@ -105,6 +131,8 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
             assertEquals(storageId, reopenedSession.storage.id)
             assertEquals(userMessage("persisted"), reopenedSession.storage.history[1])
             assertEquals(cwd, reopenedSession.storage.settings[0].cwd)
+            assertEquals(stableEvent, reopenedSession.storage.stable[1])
+            assertEquals(listOf(pendingEvent), reopenedSession.storage.unstable[1])
             reopened.closeAndJoin()
         }
 
