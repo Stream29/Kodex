@@ -1,5 +1,29 @@
 package io.github.stream29.codex.lite.openai
 
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+/**
+ * Complete OAuth tokens for a ChatGPT subscription session.
+ *
+ * @property idToken Raw JWT used to derive subscription claims.
+ * @property accessToken Bearer JWT used for OpenAI API requests.
+ * @property refreshToken Token used to renew the subscription session.
+ * @property accountId Nullable because an OAuth response may omit an explicit
+ * account id; `null` means it must be derived from [idToken] when needed.
+ */
+@Serializable
+public data class OpenAiSubscriptionTokens(
+    @SerialName("id_token")
+    public val idToken: String,
+    @SerialName("access_token")
+    public val accessToken: String,
+    @SerialName("refresh_token")
+    public val refreshToken: String,
+    @SerialName("account_id")
+    public val accountId: String? = null,
+)
+
 /**
  * @property accountId Nullable because Codex auth files may omit the account id;
  * `null` means no account header should be sent.

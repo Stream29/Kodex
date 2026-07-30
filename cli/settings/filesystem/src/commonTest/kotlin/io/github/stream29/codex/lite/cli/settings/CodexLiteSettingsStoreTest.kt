@@ -3,6 +3,7 @@ package io.github.stream29.codex.lite.cli.settings
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.hook.contract.HookConfiguration
+import io.github.stream29.codex.lite.mcp.contract.McpServerConfiguration
 import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.ReasoningEffort
@@ -75,7 +76,7 @@ val codexLiteSettingsStoreTest by testSuite(
             assertEquals(ServiceTier.Flex, effective.newSession.serviceTier)
             assertEquals(NewLineKey.Enter, effective.newLineKey)
             assertEquals(
-                McpServerSettings(
+                McpServerConfiguration.StreamableHttp(
                     url = "https://user.example.test/mcp",
                     headers = mapOf("X-User" to "one"),
                     enabled = true,
@@ -127,8 +128,11 @@ val codexLiteSettingsStoreTest by testSuite(
             assertEquals(OpenAiModelId("configured-model"), effective.newSession.model)
             assertEquals(ReasoningEffort.High, effective.newSession.reasoningEffort)
             assertEquals(ServiceTier.Fast, effective.newSession.serviceTier)
-            assertEquals("http://127.0.0.1:64342/sse", effective.mcpServers.getValue("idea").url)
-            assertFalse("browser" in effective.mcpServers)
+            val idea = assertIs<McpServerConfiguration.StreamableHttp>(effective.mcpServers.getValue("idea"))
+            assertEquals("http://127.0.0.1:64342/sse", idea.url)
+            val browser = assertIs<McpServerConfiguration.Stdio>(effective.mcpServers.getValue("browser"))
+            assertEquals("browser-mcp", browser.command)
+            assertEquals(listOf("--headless"), browser.args)
             val hookSource = effective.hooks.sources.single()
             assertEquals(configPath(root), hookSource.sourcePath)
             val command = assertIs<CodexCliHookHandler.Command>(
@@ -273,6 +277,7 @@ val codexLiteSettingsStoreTest by testSuite(
             val selectedShell = Shell(ShellType.Bash, Path("/custom/bin/bash"))
             val expected = first.update { current ->
                 current.copy(
+                    authSource = CodexAuthSource.CodexLite,
                     shell = selectedShell,
                     newLineKey = NewLineKey.Enter,
                     newSession = current.newSession.copy(
@@ -288,7 +293,8 @@ val codexLiteSettingsStoreTest by testSuite(
             }
 
             val yaml = SystemCoroutineFileSystem.readString(globalSettingsPath(root))
-            assertTrue(yaml.contains("schema_version: 1"), yaml)
+            assertTrue(yaml.contains("schema_version: 2"), yaml)
+            assertTrue(yaml.contains("auth_source: codex-lite"), yaml)
             assertTrue(yaml.contains("shell: /custom/bin/bash"), yaml)
             assertTrue(yaml.contains("model: override-model"), yaml)
             assertTrue(yaml.contains("mode: plan"), yaml)
@@ -307,6 +313,54 @@ val codexLiteSettingsStoreTest by testSuite(
             val reopened = CodexCliStorage(root).openGlobalSettings(root)
 
             assertEquals(expected, reopened.settings.value)
+        }
+    }
+
+    test("persists HTTP and stdio MCP transport overrides") {
+        withSettingsDirectory("mcp-transports") { root ->
+            val storage = CodexCliStorage(root)
+            val store = storage.openGlobalSettings(root)
+            val expected = mapOf(
+                "docs" to McpServerConfiguration.StreamableHttp(
+                    url = "https://docs.example.test/mcp",
+                    headers = mapOf("Authorization" to "Bearer test"),
+                ),
+                "browser" to McpServerConfiguration.Stdio(
+                    command = "browser-mcp",
+                    args = listOf("--headless"),
+                    environment = mapOf("MCP_TOKEN" to "test-token"),
+                    workingDirectory = Path(root, "workspace"),
+                ),
+            )
+
+            store.update { settings -> settings.copy(mcpServers = expected) }
+
+            assertEquals(expected, storage.openGlobalSettings(root).settings.value.mcpServers)
+            val yaml = SystemCoroutineFileSystem.readString(globalSettingsPath(root))
+            assertTrue(yaml.contains("""type: "streamable_http""""), yaml)
+            assertTrue(yaml.contains("""type: "stdio""""), yaml)
+        }
+    }
+
+    test("persists the selected authentication source") {
+        withSettingsDirectory("auth-source") { root ->
+            val storage = CodexCliStorage(root)
+            val store = storage.openGlobalSettings(root)
+
+            val updated = store.update { current ->
+                current.copy(authSource = CodexAuthSource.CodexLite)
+            }
+
+            assertEquals(CodexAuthSource.CodexLite, updated.authSource)
+            assertEquals(CodexAuthSource.CodexLite, store.settings.value.authSource)
+            assertEquals(
+                CodexAuthSource.CodexLite,
+                CodexCliStorage(root).openGlobalSettings(root).settings.value.authSource,
+            )
+            assertTrue(
+                SystemCoroutineFileSystem.readString(globalSettingsPath(root))
+                    .contains("auth_source: codex-lite"),
+            )
         }
     }
 

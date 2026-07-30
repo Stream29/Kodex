@@ -245,6 +245,7 @@ val unifiedExecToolsTest by testSuite {
             ).requireUnifiedExecOutput()
 
             val sessionId = assertNotNull(initial.sessionId)
+            assertTrue(sessionId > 0)
             assertEquals(null, initial.exitCode)
             assertTrue(initial.output.contains("ready"))
 
@@ -448,7 +449,7 @@ val unifiedExecToolsTest by testSuite {
     test("cancellation closes and unregisters a running session", testConfig = realIoTestConfig) {
         val client = testUnifiedExecToolClient()
         try {
-            coroutineScope {
+            val sessionId = coroutineScope {
                 val request = async(start = CoroutineStart.UNDISPATCHED) {
                     client.execCommand(
                         ExecCommandArguments(
@@ -458,7 +459,9 @@ val unifiedExecToolsTest by testSuite {
                         ),
                     )
                 }
-                delay(100.milliseconds)
+                val sessionId = withTimeout(1.seconds) {
+                    client.activeSessions.first { sessions -> sessions.isNotEmpty() }.keys.single()
+                }
                 request.cancel()
                 try {
                     request.await()
@@ -466,13 +469,14 @@ val unifiedExecToolsTest by testSuite {
                 } catch (_: CancellationException) {
                     // Expected: cancellation must close the child and discard its session entry.
                 }
+                sessionId
             }
 
             try {
-                client.writeStdin(WriteStdinArguments(sessionId = 1))
+                client.writeStdin(WriteStdinArguments(sessionId = sessionId))
                 fail("Canceled process session remained registered.")
             } catch (_: UnifiedExecToolException) {
-                // Expected: session identifiers are never reused after cancellation.
+                // Expected: cancellation removes the session entry.
             }
         } finally {
             client.close()

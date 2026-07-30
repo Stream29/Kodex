@@ -1,11 +1,14 @@
 package io.github.stream29.codex.lite.cli.settings
 
+import com.charleskorn.kaml.PolymorphismStyle
 import com.charleskorn.kaml.SingleLineStringStyle
 import com.charleskorn.kaml.Yaml
 import com.charleskorn.kaml.YamlConfiguration
 import io.github.stream29.codex.lite.hook.contract.HookConfiguration
+import io.github.stream29.codex.lite.mcp.contract.McpServerConfiguration
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliConfig
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliHookSourceKind
+import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliMcpServer
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
@@ -100,6 +103,10 @@ public class CodexLiteSettingsStore private constructor(
         return resolver.resolve()
     }
 
+    /**
+     * @return Nullable because the private settings file may not exist; `null`
+     * means Codex Lite contributes no overrides.
+     */
     private suspend fun readOverrideOrNull(): GlobalSettingsFile? {
         if (!fileSystem.exists(settingsPath)) return null
         val text = fileSystem.readString(settingsPath)
@@ -229,28 +236,38 @@ private class SettingsResolver(
 
     private fun applyMcpServers(config: CodexCliConfig) {
         if (config.mcpServers.isEmpty()) return
-        var changed = false
-        val merged = settings.mcpServers.toMutableMap()
-        config.mcpServers.forEach { (name, server) ->
-            val current = merged[name]
-            val url = server.url ?: current?.url ?: return@forEach
-            merged[name] = McpServerSettings(
-                url = url,
-                headers = current?.headers.orEmpty() + server.headers,
-                enabled = server.enabled ?: current?.enabled ?: true,
-            )
-            changed = true
-        }
-        if (changed) {
-            settings = settings.copy(mcpServers = merged)
-        }
+        settings = settings.copy(
+            mcpServers = settings.mcpServers + config.mcpServers.mapValues { (_, server) ->
+                server.toSettings()
+            },
+        )
     }
 }
+
+private fun CodexCliMcpServer.toSettings(): McpServerConfiguration =
+    when (this) {
+        is CodexCliMcpServer.StreamableHttp -> McpServerConfiguration.StreamableHttp(
+            url = url,
+            headers = headers,
+            enabled = enabled,
+        )
+
+        is CodexCliMcpServer.Stdio -> McpServerConfiguration.Stdio(
+            command = command,
+            args = args,
+            environment = env,
+            workingDirectory = Path(cwd),
+            enabled = enabled,
+        )
+    }
 
 private fun CodexGlobalSettings.withOverride(
     override: GlobalSettingsFile,
 ): CodexGlobalSettings {
     var effective = this
+    override.authSource?.let { value ->
+        effective = effective.copy(authSource = value)
+    }
     override.shell?.let { value ->
         effective = effective.copy(shell = value)
     }
@@ -278,7 +295,7 @@ private fun CodexGlobalSettings.withOverride(
     }
     override.mcpServers?.let { servers ->
         effective = effective.copy(
-            mcpServers = servers.mapValues { (_, server) -> server.toSettings() },
+            mcpServers = servers,
         )
     }
     override.hooks?.let { hooks ->
@@ -311,6 +328,8 @@ private data class GlobalSettingsFile(
     val schemaVersion: Int = CurrentGlobalSettingsSchemaVersion,
     @SerialName("codex_home")
     val codexHome: String? = null,
+    @SerialName("auth_source")
+    val authSource: CodexAuthSource? = null,
     val shell: Shell? = null,
     @SerialName("new_line_key")
     val newLineKey: NewLineKey? = null,
@@ -319,7 +338,7 @@ private data class GlobalSettingsFile(
     @SerialName("session_title")
     val sessionTitle: SessionTitleOverride? = null,
     @SerialName("mcp_servers")
-    val mcpServers: Map<String, PersistedMcpServer>? = null,
+    val mcpServers: Map<String, McpServerConfiguration>? = null,
     val hooks: HookConfiguration? = null,
 )
 
@@ -328,12 +347,13 @@ private fun GlobalSettingsFile.withChanges(
     updated: CodexGlobalSettings,
 ): GlobalSettingsFile = copy(
     codexHome = updated.codexHome.toString(),
+    authSource = updated.authSource.takeIf { it != current.authSource } ?: authSource,
     shell = updated.shell.takeIf { it != current.shell } ?: shell,
     newLineKey = updated.newLineKey.takeIf { it != current.newLineKey } ?: newLineKey,
     newSession = newSession.withChanges(current.newSession, updated.newSession),
     sessionTitle = sessionTitle.withChanges(current.sessionTitle, updated.sessionTitle),
     mcpServers = if (updated.mcpServers != current.mcpServers) {
-        updated.mcpServers.mapValues { (_, server) -> PersistedMcpServer.from(server) }
+        updated.mcpServers
     } else {
         mcpServers
     },
@@ -405,23 +425,6 @@ private data class SessionTitleOverride(
     fun isEmpty(): Boolean = enabled == null && model == null
 }
 
-@Serializable
-private data class PersistedMcpServer(
-    val url: String,
-    val headers: Map<String, String> = emptyMap(),
-    val enabled: Boolean = true,
-) {
-    fun toSettings(): McpServerSettings = McpServerSettings(url, headers, enabled)
-
-    companion object {
-        fun from(settings: McpServerSettings): PersistedMcpServer = PersistedMcpServer(
-            url = settings.url,
-            headers = settings.headers,
-            enabled = settings.enabled,
-        )
-    }
-}
-
 /**
  * @return Nullable because Codex may add service tiers before Codex Lite models
  * them; `null` means the unknown native value does not override lower layers.
@@ -452,9 +455,11 @@ private val SettingsYaml = Yaml(
     configuration = YamlConfiguration(
         encodeDefaults = false,
         strictMode = false,
+        polymorphismStyle = PolymorphismStyle.Property,
+        polymorphismPropertyName = "type",
         singleLineStringStyle = SingleLineStringStyle.PlainExceptAmbiguous,
     ),
 )
 
-private const val CurrentGlobalSettingsSchemaVersion: Int = 1
+private const val CurrentGlobalSettingsSchemaVersion: Int = 2
 private const val CodexLiteSettingsFileName: String = "settings.yml"

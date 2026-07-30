@@ -1,6 +1,7 @@
 package io.github.stream29.codex.lite.openai.client
 
 import io.github.stream29.codex.lite.cli.auth.CodexAuthStore
+import io.github.stream29.codex.lite.cli.auth.CodexAuthState
 import io.github.stream29.codex.lite.openai.ImageEditRequest
 import io.github.stream29.codex.lite.openai.ImageGenerationRequest
 import io.github.stream29.codex.lite.openai.ImageResponse
@@ -95,7 +96,15 @@ public class OpenAiClient(
             headers[HttpHeaders.CodexOriginator] = config.originator
             headers[HttpHeaders.UserAgent] = config.userAgent
             headers.addAll(config.defaultHeaders)
-            val (accessToken, accountId) = authStore.auth.value
+            val auth = when (val state = authStore.state.value) {
+                is CodexAuthState.Authenticated -> state.value
+                is CodexAuthState.Unavailable -> {
+                    throw IllegalStateException(
+                        "OpenAI authentication is unavailable: " + state.message,
+                    )
+                }
+            }
+            val (accessToken, accountId) = auth
             bearerAuth(accessToken)
             headers[HttpHeaders.ChatGptAccountId] = accountId
         }

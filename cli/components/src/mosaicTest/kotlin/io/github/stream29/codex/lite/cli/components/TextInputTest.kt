@@ -1,11 +1,39 @@
 package io.github.stream29.codex.lite.cli.components
 
+import com.jakewharton.mosaic.terminal.AnsiLevel
+import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.PasteEvent
+import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.runMosaicTest
 import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 
+private val ansiSnapshots = SnapshotStrategy { mosaic ->
+    mosaic.draw().render(AnsiLevel.TRUECOLOR, supportsKittyUnderlines = false)
+}
+
 val textInputTest by testSuite {
+    test("disabled input is dim and rejects keyboard edits") {
+        val state = TextInputState(TextInputValue(text = "locked", cursorOffset = 6))
+
+        runMosaicTest(snapshotStrategy = ansiSnapshots) {
+            assertEquals(
+                "\u001B[2mlocked\u001B[0m",
+                setContentAndSnapshot {
+                    TextInput(
+                        state = state,
+                        layout = TextInputLayout.create(value = state.value, width = 80),
+                        enabled = false,
+                    )
+                },
+            )
+
+            sendKeyEvent(KeyboardEvent(codepoint = 'x'.code))
+
+            assertEquals(TextInputValue(text = "locked", cursorOffset = 6), state.value)
+        }
+    }
+
     test("paste inserts normalized content through input state") {
         val state = TextInputState()
         val pasted = "首行\t😀\r\nsecond\rthird"
@@ -25,6 +53,27 @@ val textInputTest by testSuite {
 
             assertEquals(expected, state.value.text)
             assertEquals(expected.length, state.value.cursorOffset)
+        }
+    }
+
+    test("editing notifies a caller that owns the draft") {
+        val state = TextInputState()
+        var observed: TextInputValue? = null
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                TextInput(
+                    state = state,
+                    layout = TextInputLayout.create(value = state.value, width = 80),
+                    autoFocus = true,
+                    onValueChanged = { value -> observed = value },
+                )
+            }
+
+            sendPasteEvent(PasteEvent("draft"))
+            awaitSnapshot()
+
+            assertEquals(state.value, observed)
         }
     }
 

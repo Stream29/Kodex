@@ -3,6 +3,7 @@ package io.github.stream29.codex.lite.agentsession.contract
 import io.github.stream29.codex.lite.agentruntime.contract.AgentRuntime
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * One exclusively owned Agent node in a recursive Codex session tree.
@@ -30,6 +31,13 @@ public interface CodexAgentSession : CoroutineScope {
     public val runtime: AgentRuntime
 }
 
+/** Lightweight persisted metadata for one direct Agent entry. */
+public data class CodexSessionEntry(
+    public val entryIndex: Int,
+    /** The latest thread name, or `null` while the entry is uninitialized. */
+    public val threadName: String?,
+)
+
 /**
  * One collection of direct Agent entries in a recursive Codex session tree.
  *
@@ -39,8 +47,23 @@ public interface CodexAgentSession : CoroutineScope {
  * them.
  */
 public interface CodexSessionRepository : CoroutineScope {
-    /** Returns direct Agent entry indices in stable repository order. */
+    /**
+     * Ordered snapshot of this repository's direct Agent entry indices.
+     *
+     * The initial value reflects the entries that existed when this repository was opened.
+     * Implementations publish a replacement snapshot after each successful [create] or [delete].
+     */
+    public val entries: StateFlow<List<Int>>
+
+    /** Returns the current [entries] snapshot in stable repository order. */
     public suspend fun list(): List<Int>
+
+    /**
+     * Reads lightweight direct-entry metadata without opening Agent runtimes.
+     *
+     * The returned list follows [list] order. An uninitialized entry has no [CodexSessionEntry.threadName].
+     */
+    public suspend fun listEntries(): List<CodexSessionEntry>
 
     /**
      * Creates one uninitialized direct Agent, then returns its entry index.
