@@ -49,6 +49,8 @@ public sealed interface ResponseItem {
     /**
      * Declares extra tool definitions inline in a Responses Lite input sequence.
      *
+     * This is a request-only prefix and must not be persisted as agent history.
+     *
      * @property id Nullable because hosted Responses Lite input may omit an item
      * id; `null` means no id was provided.
      * @property tools Raw tool definitions because this protocol item may carry
@@ -60,7 +62,7 @@ public sealed interface ResponseItem {
         public val id: ResponseItemId? = null,
         public val role: String,
         public val tools: List<JsonElement>,
-    ) : HistoryItem
+    ) : Known
 
     /**
      * @property id Nullable because providers may omit message ids; `null`

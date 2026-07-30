@@ -9,6 +9,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 
 
 
@@ -32,6 +33,7 @@ val responseItemSerializationTest by testSuite {
         assertEquals(JsonPrimitive("at_server"), encoded["id"])
         assertEquals(JsonPrimitive("developer"), encoded["role"])
         assertEquals(item, json.decodeFromString<ResponseItem>(json.encodeToString<ResponseItem>(item)))
+        assertFalse((item as ResponseItem) is ResponseItem.HistoryItem)
     }
 
     test("response item ids and custom tool namespace round trip") {

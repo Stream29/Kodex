@@ -204,7 +204,9 @@ public interface CodexAgentState : CoroutineScope {
      *
      * An empty [items] list is a no-op and returns the current visible index.
      * Non-empty lists are persisted as one atomic state transition in the
-     * supplied order.
+     * supplied order. Projectable completed items are written to the stable
+     * clean timeline, while local tool calls and outputs advance the unstable
+     * pending snapshot.
      */
     public suspend fun injectHistory(items: List<ResponseItem.HistoryItem>): Int
 
@@ -222,7 +224,8 @@ public interface CodexAgentState : CoroutineScope {
      *
      * A formal user submission starts with [markNewTurn], while a runtime
      * inserting user input into the current turn calls this operation directly.
-     * A user-role context injection must use [injectHistory].
+     * A user-role context injection must use [injectHistory]. The raw and stable
+     * user-message representations are committed at the same storage index.
      */
     public suspend fun appendUserMessage(content: List<ContentItem>): Int
 

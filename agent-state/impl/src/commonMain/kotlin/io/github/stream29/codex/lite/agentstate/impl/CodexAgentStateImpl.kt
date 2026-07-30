@@ -15,6 +15,7 @@ import io.github.stream29.codex.lite.agentstate.tool.toPendingToolEvent
 import io.github.stream29.codex.lite.agentstate.tool.visibleToolSpecs
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.toStableCleanEventOrNull
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
@@ -290,15 +291,27 @@ private class CodexAgentStateImpl(
         ) {
             val timestamp = now()
             val firstIndex = storage.latestIndex() + 1
+            var pendingSnapshot = storage.pendingToolsAt(firstIndex - 1)
             val index = storage.history.revertWithTransaction(firstIndex) {
-                storage.timestamp.revertWithTransaction(firstIndex) {
-                    var index = storage.latestIndex()
-                    for (item in items) {
-                        index += 1
-                        storage.history[index] = item
-                        storage.timestamp[index] = timestamp
+                storage.stable.revertWithTransaction(firstIndex) {
+                    storage.unstable.revertWithTransaction(firstIndex) {
+                        storage.timestamp.revertWithTransaction(firstIndex) {
+                            var index = storage.latestIndex()
+                            for (item in items) {
+                                index += 1
+                                storage.history[index] = item
+                                item.toStableCleanEventOrNull()?.let { event ->
+                                    storage.stable[index] = event
+                                }
+                                item.pendingSnapshotAfter(pendingSnapshot)?.let { nextSnapshot ->
+                                    pendingSnapshot = nextSnapshot
+                                    storage.unstable[index] = nextSnapshot
+                                }
+                                storage.timestamp[index] = timestamp
+                            }
+                            index
+                        }
                     }
-                    index
                 }
             }
             latestIndex.value = index
@@ -345,11 +358,15 @@ private class CodexAgentStateImpl(
             )
             val firstIndex = snapshotIndex + 1
             val timestamp = now()
+            val stableEvent = checkNotNull(item.toStableCleanEventOrNull())
             val index = storage.history.revertWithTransaction(firstIndex) {
-                storage.timestamp.revertWithTransaction(firstIndex) {
-                    storage.history[firstIndex] = item
-                    storage.timestamp[firstIndex] = timestamp
-                    firstIndex
+                storage.stable.revertWithTransaction(firstIndex) {
+                    storage.timestamp.revertWithTransaction(firstIndex) {
+                        storage.history[firstIndex] = item
+                        storage.stable[firstIndex] = stableEvent
+                        storage.timestamp[firstIndex] = timestamp
+                        firstIndex
+                    }
                 }
             }
             latestIndex.value = index
@@ -445,28 +462,19 @@ private class CodexAgentStateImpl(
         tokenCount: Long?,
     ): Int {
         val index = storage.latestIndex() + 1
-        val pendingSnapshot = (item as? ResponseItem.ToolCall)?.let { call ->
-            storage.pendingToolsAt(index - 1) + call.toPendingToolEvent()
-        }
+        val stableEvent = item.toStableCleanEventOrNull()
+        val pendingSnapshot = item.pendingSnapshotAfter(storage.pendingToolsAt(index - 1))
         if (tokenCount == null) {
             storage.history.setWithTransaction(index, item) {
-                if (pendingSnapshot == null) {
+                storage.setCleanTimelinesWithTransaction(index, stableEvent, pendingSnapshot) {
                     storage.timestamp.setWithTransaction(index, timestamp) { index }
-                } else {
-                    storage.unstable.setWithTransaction(index, pendingSnapshot) {
-                        storage.timestamp.setWithTransaction(index, timestamp) { index }
-                    }
                 }
             }
         } else {
             storage.tokenCount.setWithTransaction(index, tokenCount) {
                 storage.history.setWithTransaction(index, item) {
-                    if (pendingSnapshot == null) {
+                    storage.setCleanTimelinesWithTransaction(index, stableEvent, pendingSnapshot) {
                         storage.timestamp.setWithTransaction(index, timestamp) { index }
-                    } else {
-                        storage.unstable.setWithTransaction(index, pendingSnapshot) {
-                            storage.timestamp.setWithTransaction(index, timestamp) { index }
-                        }
                     }
                 }
             }
@@ -705,6 +713,37 @@ private suspend fun CodexAgentStorage.pendingToolsWithout(
 
 private suspend fun CodexAgentStorage.pendingToolsAt(index: Int): List<PendingToolEvent> =
     if (unstable.floorToIndex(index) == null) emptyList() else unstable[index]
+
+private fun ResponseItem.HistoryItem.pendingSnapshotAfter(
+    current: List<PendingToolEvent>,
+): List<PendingToolEvent>? =
+    when (this) {
+        is ResponseItem.ToolCall -> current + toPendingToolEvent()
+        is ResponseItem.ToolCallOutput -> current.filterNot { event -> event.callId == callId }
+        else -> null
+    }
+
+private suspend inline fun <T> MutableCodexAgentStorage.setCleanTimelinesWithTransaction(
+    index: Int,
+    stableEvent: StableCleanEvent?,
+    pendingSnapshot: List<PendingToolEvent>?,
+    block: () -> T,
+): T =
+    if (stableEvent == null) {
+        if (pendingSnapshot == null) {
+            block()
+        } else {
+            unstable.setWithTransaction(index, pendingSnapshot, block)
+        }
+    } else {
+        stable.setWithTransaction(index, stableEvent) {
+            if (pendingSnapshot == null) {
+                block()
+            } else {
+                unstable.setWithTransaction(index, pendingSnapshot, block)
+            }
+        }
+    }
 
 private fun toolPendingState(calls: List<ResponseItem.ToolCall>): CodexAgentStateValue {
     return if (calls.isEmpty()) {

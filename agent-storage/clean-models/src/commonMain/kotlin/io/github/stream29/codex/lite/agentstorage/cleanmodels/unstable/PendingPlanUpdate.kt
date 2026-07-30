@@ -1,4 +1,4 @@
-package io.github.stream29.codex.lite.agentstorage.cleanmodels.stable
+package io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable
 
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponseItemId
@@ -6,33 +6,24 @@ import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/**
- * Stable completed `update_plan` interaction.
- *
- * The settings timeline remains the source of truth for the active plan.
- */
+/** `update_plan` call waiting for completion. */
 @Serializable
 @SerialName("plan_update")
-public data class StablePlanUpdate(
+public data class PendingPlanUpdate(
     @SerialName("call_id")
-    public val callId: String,
+    override val callId: String,
     @SerialName("item_id")
-    public val itemId: ResponseItemId? = null,
+    override val itemId: ResponseItemId? = null,
     public val arguments: UpdatePlanArgs,
-) : StableCleanEvent.CompletedTool {
+) : PendingToolEvent {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
-            stableFunctionCall(
+            pendingFunctionCall(
                 callId = callId,
                 itemId = itemId,
                 name = "update_plan",
                 serializer = UpdatePlanArgs.serializer(),
                 arguments = arguments,
-            ),
-            stableTextOutput(
-                callId = callId,
-                text = "Plan updated",
-                success = true,
             ),
         )
 }

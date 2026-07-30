@@ -3,6 +3,7 @@ package io.github.stream29.codex.lite.agentstorage.inmemory
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolInvocation
 import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
@@ -527,5 +528,6 @@ val inMemoryCodexAgentStorageTest by testSuite {
         assertEquals(transitionTime, storage.timestamp[1])
         assertEquals(42, storage.tokenCount[1])
         assertEquals(settings, storage.settings[1])
+        assertEquals(StableContextCompaction, storage.stable[1])
     }
 }
