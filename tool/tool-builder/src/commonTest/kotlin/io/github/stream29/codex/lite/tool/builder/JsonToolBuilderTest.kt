@@ -2,16 +2,16 @@ package io.github.stream29.codex.lite.tool.builder
 
 import de.infix.testBalloon.framework.core.testSuite
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCustomToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableJsonToolEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
-import io.github.stream29.codex.lite.openai.FunctionCallOutputContentItem
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
-import io.github.stream29.codex.lite.openai.ImageDetail
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
-import io.github.stream29.codex.lite.openai.ResponseItem
 import kotlinx.schema.json.PropertyBuilder
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.assertEquals
 
 @Serializable
@@ -43,22 +43,23 @@ val jsonToolBuilderTest by testSuite {
         }
 
         assertEquals(
-            ResponseItem.FunctionCallOutput(
+            StableJsonToolEvent(
                 callId = "call_1",
-                output = FunctionCallOutputPayload(
-                    body = FunctionCallOutputBody.Text(
-                        ToolBuilderJson.encodeToString(JsonToolOutput.serializer(), JsonToolOutput("hello")),
-                    ),
-                    success = true,
+                name = "echo",
+                arguments = ToolBuilderJson.parseToJsonElement("""{"value":"hello"}"""),
+                result = ToolBuilderJson.encodeToJsonElement(
+                    JsonToolOutput.serializer(),
+                    JsonToolOutput("hello"),
                 ),
+                success = true,
             ),
             tool.handle(
-                ResponseItem.FunctionCall(
+                PendingFunctionToolEvent(
                     name = "echo",
-                    arguments = """{"value":"hello"}""",
+                    arguments = ToolBuilderJson.parseToJsonElement("""{"value":"hello"}"""),
                     callId = "call_1",
                 ),
-            ).first,
+            ),
         )
     }
 
@@ -72,20 +73,23 @@ val jsonToolBuilderTest by testSuite {
         }
 
         assertEquals(
-            ResponseItem.CustomToolCallOutput(
+            StableCustomToolEvent(
                 callId = "call_1",
-                output = FunctionCallOutputPayload(
+                name = "echo",
+                input = "raw",
+                result = FunctionCallOutputPayload(
                     body = FunctionCallOutputBody.Text("JSON tool received custom tool payload"),
                     success = false,
                 ),
+                success = false,
             ),
             tool.handle(
-                ResponseItem.CustomToolCall(
+                PendingCustomToolEvent(
                     callId = "call_1",
                     name = "echo",
                     input = "raw",
                 ),
-            ).first,
+            ),
         )
     }
 
@@ -98,20 +102,20 @@ val jsonToolBuilderTest by testSuite {
         }
 
         assertEquals(
-            ResponseItem.FunctionCallOutput(
+            StableTextToolEvent(
                 callId = "call_1",
-                output = FunctionCallOutputPayload(
-                    body = FunctionCallOutputBody.Text("echoed: hello"),
-                    success = true,
-                ),
+                name = "echo",
+                arguments = ToolBuilderJson.parseToJsonElement("""{"value":"hello"}"""),
+                result = "echoed: hello",
+                success = true,
             ),
             tool.handle(
-                ResponseItem.FunctionCall(
+                PendingFunctionToolEvent(
                     name = "echo",
-                    arguments = """{"value":"hello"}""",
+                    arguments = ToolBuilderJson.parseToJsonElement("""{"value":"hello"}"""),
                     callId = "call_1",
                 ),
-            ).first,
+            ),
         )
     }
 
@@ -127,53 +131,37 @@ val jsonToolBuilderTest by testSuite {
         tool.close()
     }
 
-    test("returns protocol-native rich function output") {
+    test("returns the handler's clean completed event") {
         val tool = functionOutputTool(
             spec = jsonToolTestSpec,
             inputDeserializer = JsonToolInput.serializer(),
-        ) { callId, input ->
-            FunctionCallOutputPayload(
-                body = FunctionCallOutputBody.ContentItems(
-                    listOf(
-                        FunctionCallOutputContentItem.InputImage(
-                            imageUrl = "data:image/png;base64,${input.value}",
-                            detail = ImageDetail.High,
-                        ),
-                        FunctionCallOutputContentItem.InputText("saved from $callId"),
-                    ),
-                ),
-                success = true,
-            ) to StableTextToolEvent(
-                name = "echo",
-                arguments = JsonPrimitive(input.value),
-                result = "saved from $callId",
+        ) { pending, input ->
+            StableTextToolEvent(
+                callId = pending.callId,
+                itemId = pending.itemId,
+                name = pending.name,
+                namespace = pending.namespace,
+                arguments = ToolBuilderJson.parseToJsonElement("""{"value":"${input.value}"}"""),
+                result = "saved from ${pending.callId}",
                 success = true,
             )
         }
 
         assertEquals(
-            ResponseItem.FunctionCallOutput(
+            StableTextToolEvent(
                 callId = "call_1",
-                output = FunctionCallOutputPayload(
-                    body = FunctionCallOutputBody.ContentItems(
-                        listOf(
-                            FunctionCallOutputContentItem.InputImage(
-                                imageUrl = "data:image/png;base64,BASE64",
-                                detail = ImageDetail.High,
-                            ),
-                            FunctionCallOutputContentItem.InputText("saved from call_1"),
-                        ),
-                    ),
-                    success = true,
-                ),
+                name = "echo",
+                arguments = ToolBuilderJson.parseToJsonElement("""{"value":"BASE64"}"""),
+                result = "saved from call_1",
+                success = true,
             ),
             tool.handle(
-                ResponseItem.FunctionCall(
+                PendingFunctionToolEvent(
                     name = "echo",
-                    arguments = """{"value":"BASE64"}""",
+                    arguments = ToolBuilderJson.parseToJsonElement("""{"value":"BASE64"}"""),
                     callId = "call_1",
                 ),
-            ).first,
+            ),
         )
     }
 }

@@ -1,12 +1,16 @@
 package io.github.stream29.codex.lite.tool.multiagent
 
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableAgentDeliveryResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableInterruptAgentResult
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableListAgentsResult
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMultiAgentOperation
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMultiAgentToolEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableSpawnAgentResult
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableWaitAgentResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMultiAgentInvocation
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMultiAgentToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
@@ -22,15 +26,12 @@ import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.openai.AgentMessageInputContent
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
-import io.github.stream29.codex.lite.openai.MessageRole
-import io.github.stream29.codex.lite.openai.ResponseItem
-import io.github.stream29.codex.lite.tool.builder.ToolBuilderJson
+import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.tool.builder.JsonToolHandlerResult
-import io.github.stream29.codex.lite.tool.builder.jsonTool
 import io.github.stream29.codex.lite.tool.builder.jsonToolFailure
 import io.github.stream29.codex.lite.tool.builder.jsonToolSuccess
-import io.github.stream29.codex.lite.tool.builder.textTool
 import io.github.stream29.codex.lite.tool.contract.Tool
+import io.github.stream29.codex.lite.tool.contract.typedTool
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.cancelAndJoin
@@ -40,7 +41,6 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.json.Json
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -50,12 +50,10 @@ public fun CodexAgentState.spawnAgentTool(
     agentPathResolver: AgentPathResolver,
 ): Tool {
     val callerSession = callerSessionProvider(agentPathResolver)
-    return jsonTool(
+    return multiAgentTool(
         spec = MultiAgentTools.spawnAgentSpec,
-        inputDeserializer = SpawnAgentArgs.serializer(),
-        outputSerializer = SpawnAgentResult.serializer(),
-        json = MultiAgentToolJson,
-        completedEvent = SpawnAgentArgs::completedEvent,
+        operation = { (it as? PendingMultiAgentInvocation.SpawnAgent)?.arguments },
+        completedEvent = { pending, args, result -> args.completedEvent(pending, result) },
     ) { args ->
         try {
             val caller = callerSession()
@@ -107,11 +105,10 @@ public fun CodexAgentState.sendMessageTool(
     agentPathResolver: AgentPathResolver,
 ): Tool {
     val callerSession = callerSessionProvider(agentPathResolver)
-    return textTool(
+    return multiAgentTool(
         spec = MultiAgentTools.sendMessageSpec,
-        inputDeserializer = SendMessageArgs.serializer(),
-        json = MultiAgentToolJson,
-        completedEvent = SendMessageArgs::completedEvent,
+        operation = { (it as? PendingMultiAgentInvocation.SendMessage)?.arguments },
+        completedEvent = { pending, args, result -> args.completedEvent(pending, result) },
     ) { args ->
         try {
             val caller = callerSession()
@@ -143,11 +140,10 @@ public fun CodexAgentState.followupTaskTool(
     agentPathResolver: AgentPathResolver,
 ): Tool {
     val callerSession = callerSessionProvider(agentPathResolver)
-    return textTool(
+    return multiAgentTool(
         spec = MultiAgentTools.followupTaskSpec,
-        inputDeserializer = FollowupTaskArgs.serializer(),
-        json = MultiAgentToolJson,
-        completedEvent = FollowupTaskArgs::completedEvent,
+        operation = { (it as? PendingMultiAgentInvocation.FollowupTask)?.arguments },
+        completedEvent = { pending, args, result -> args.completedEvent(pending, result) },
     ) { args ->
         try {
             val caller = callerSession()
@@ -180,14 +176,12 @@ public fun CodexAgentState.followupTaskTool(
 
 /** Creates a `wait_agent` tool that observes the owning runtime's pending steer. */
 public fun waitAgentTool(
-    pendingSteer: StateFlow<List<ResponseItem.Steerable>>,
+    pendingSteer: StateFlow<List<StableCleanEvent.Steerable>>,
 ): Tool =
-    jsonTool(
+    multiAgentTool(
         spec = MultiAgentTools.waitAgentSpec,
-        inputDeserializer = WaitAgentArgs.serializer(),
-        outputSerializer = WaitAgentResult.serializer(),
-        json = MultiAgentToolJson,
-        completedEvent = WaitAgentArgs::completedEvent,
+        operation = { (it as? PendingMultiAgentInvocation.WaitAgent)?.arguments },
+        completedEvent = { pending, args, result -> args.completedEvent(pending, result) },
     ) { args ->
         try {
             val timeoutMillis = args.timeoutMs ?: MultiAgentTools.DefaultWaitTimeoutMillis
@@ -217,12 +211,10 @@ public fun waitAgentTool(
 public fun CodexAgentState.interruptAgentTool(
     agentPathResolver: AgentPathResolver,
 ): Tool {
-    return jsonTool(
+    return multiAgentTool(
         spec = MultiAgentTools.interruptAgentSpec,
-        inputDeserializer = InterruptAgentArgs.serializer(),
-        outputSerializer = InterruptAgentResult.serializer(),
-        json = MultiAgentToolJson,
-        completedEvent = InterruptAgentArgs::completedEvent,
+        operation = { (it as? PendingMultiAgentInvocation.InterruptAgent)?.arguments },
+        completedEvent = { pending, args, result -> args.completedEvent(pending, result) },
     ) { args ->
         try {
             val target = requireNotNull(agentPathResolver.resolveOrNull(args.target)) {
@@ -251,12 +243,10 @@ public fun CodexAgentState.interruptAgentTool(
 public fun CodexAgentState.listAgentsTool(
     agentPathResolver: AgentPathResolver,
 ): Tool =
-    jsonTool(
+    multiAgentTool(
         spec = MultiAgentTools.listAgentsSpec,
-        inputDeserializer = ListAgentsArgs.serializer(),
-        outputSerializer = ListAgentsResult.serializer(),
-        json = MultiAgentToolJson,
-        completedEvent = ListAgentsArgs::completedEvent,
+        operation = { (it as? PendingMultiAgentInvocation.ListAgents)?.arguments },
+        completedEvent = { pending, args, result -> args.completedEvent(pending, result) },
     ) { args ->
         try {
             val prefix = args.pathPrefix
@@ -279,11 +269,37 @@ public fun CodexAgentState.listAgentsTool(
         }
     }
 
+private fun <Arguments, Output> multiAgentTool(
+    spec: ToolSpec,
+    operation: (PendingMultiAgentInvocation) -> Arguments?,
+    completedEvent: (
+        PendingMultiAgentToolEvent,
+        Arguments,
+        JsonToolHandlerResult<Output>,
+    ) -> StableCleanEvent.CompletedTool,
+    handler: suspend (Arguments) -> JsonToolHandlerResult<Output>,
+): Tool =
+    typedTool(
+        spec = spec,
+        select = { event ->
+            (event as? PendingMultiAgentToolEvent)
+                ?.takeIf { pending -> operation(pending.operation) != null }
+        },
+    ) { pending ->
+        val arguments = requireNotNull(operation(pending.operation)) {
+            "Multi-agent tool received an unsupported pending operation."
+        }
+        completedEvent(pending, arguments, handler(arguments))
+    }
+
 private fun SpawnAgentArgs.completedEvent(
+    pending: PendingMultiAgentToolEvent,
     result: JsonToolHandlerResult<SpawnAgentResult>,
 ): StableMultiAgentToolEvent =
     StableMultiAgentToolEvent(
-        StableMultiAgentOperation.SpawnAgent(
+        callId = pending.callId,
+        itemId = pending.itemId,
+        operation = StableMultiAgentOperation.SpawnAgent(
             arguments = this,
             result = when (result) {
                 is JsonToolHandlerResult.Success -> StableSpawnAgentResult.Success(result.value)
@@ -293,30 +309,39 @@ private fun SpawnAgentArgs.completedEvent(
     )
 
 private fun SendMessageArgs.completedEvent(
+    pending: PendingMultiAgentToolEvent,
     result: JsonToolHandlerResult<String>,
 ): StableMultiAgentToolEvent =
     StableMultiAgentToolEvent(
-        StableMultiAgentOperation.SendMessage(
+        callId = pending.callId,
+        itemId = pending.itemId,
+        operation = StableMultiAgentOperation.SendMessage(
             arguments = this,
             result = result.toDeliveryResult(),
         ),
     )
 
 private fun FollowupTaskArgs.completedEvent(
+    pending: PendingMultiAgentToolEvent,
     result: JsonToolHandlerResult<String>,
 ): StableMultiAgentToolEvent =
     StableMultiAgentToolEvent(
-        StableMultiAgentOperation.FollowupTask(
+        callId = pending.callId,
+        itemId = pending.itemId,
+        operation = StableMultiAgentOperation.FollowupTask(
             arguments = this,
             result = result.toDeliveryResult(),
         ),
     )
 
 private fun WaitAgentArgs.completedEvent(
+    pending: PendingMultiAgentToolEvent,
     result: JsonToolHandlerResult<WaitAgentResult>,
 ): StableMultiAgentToolEvent =
     StableMultiAgentToolEvent(
-        StableMultiAgentOperation.WaitAgent(
+        callId = pending.callId,
+        itemId = pending.itemId,
+        operation = StableMultiAgentOperation.WaitAgent(
             arguments = this,
             result = when (result) {
                 is JsonToolHandlerResult.Success -> StableWaitAgentResult.Success(result.value)
@@ -326,10 +351,13 @@ private fun WaitAgentArgs.completedEvent(
     )
 
 private fun InterruptAgentArgs.completedEvent(
+    pending: PendingMultiAgentToolEvent,
     result: JsonToolHandlerResult<InterruptAgentResult>,
 ): StableMultiAgentToolEvent =
     StableMultiAgentToolEvent(
-        StableMultiAgentOperation.InterruptAgent(
+        callId = pending.callId,
+        itemId = pending.itemId,
+        operation = StableMultiAgentOperation.InterruptAgent(
             arguments = this,
             result = when (result) {
                 is JsonToolHandlerResult.Success -> StableInterruptAgentResult.Success(result.value)
@@ -339,10 +367,13 @@ private fun InterruptAgentArgs.completedEvent(
     )
 
 private fun ListAgentsArgs.completedEvent(
+    pending: PendingMultiAgentToolEvent,
     result: JsonToolHandlerResult<ListAgentsResult>,
 ): StableMultiAgentToolEvent =
     StableMultiAgentToolEvent(
-        StableMultiAgentOperation.ListAgents(
+        callId = pending.callId,
+        itemId = pending.itemId,
+        operation = StableMultiAgentOperation.ListAgents(
             arguments = this,
             result = when (result) {
                 is JsonToolHandlerResult.Success -> StableListAgentsResult.Success(result.value)
@@ -384,7 +415,7 @@ private fun CodexAgentSession.resumeIfIdle() {
 }
 
 private fun CodexAgentSession.enqueue(
-    message: ResponseItem.AgentMessage,
+    message: StableCleanEvent.AgentMessage,
 ) {
     runtime.pendingSteer.update { pending ->
         pending + message
@@ -425,8 +456,8 @@ private fun agentMessage(
     recipient: String,
     payload: String,
     type: AgentMessageType,
-): ResponseItem.AgentMessage =
-    ResponseItem.AgentMessage(
+): StableCleanEvent.AgentMessage =
+    StableCleanEvent.AgentMessage(
         author = author,
         recipient = recipient,
         content = listOf(
@@ -472,13 +503,14 @@ private suspend fun initializeSpawnStorage(
 
 private suspend fun CodexAgentSession.forkBoundary(): Int {
     val pendingCallIds = (runtime.state.value as? CodexAgentStateValue.ToolPending)
-        ?.calls
-        ?.mapTo(mutableSetOf(), ResponseItem.ToolCall::callId)
+        ?.events
+        ?.mapTo(mutableSetOf()) { event -> event.callId }
         .orEmpty()
     if (pendingCallIds.isEmpty()) return storage.latestIndex() + 1
-    val pendingIndexes = storage.history.indexes().toList().filter { index ->
-        val item = storage.history[index]
-        item is ResponseItem.ToolCall && item.callId in pendingCallIds
+    val pendingIndexes = storage.unstable.indexes().toList().filter { index ->
+        storage.unstable[index]
+            .filterIsInstance<PendingToolEvent>()
+            .any { event -> event.callId in pendingCallIds }
     }
     return pendingIndexes.minOrNull() ?: (storage.latestIndex() + 1)
 }
@@ -486,13 +518,13 @@ private suspend fun CodexAgentSession.forkBoundary(): Int {
 private suspend fun CodexAgentSession.activeHistory(
     untilExclusive: Int,
     turns: Int,
-): List<ResponseItem.HistoryItem> {
+): List<StableCleanEvent> {
     val index = untilExclusive - 1
     if (index < 0) return emptyList()
     val checkpoint = storage.compaction[index]
     val items = checkpoint.prefix.toMutableList()
-    storage.history.indexes(checkpoint.historyBaseIndex).toList().forEach { historyIndex ->
-        if (historyIndex < untilExclusive) items += storage.history[historyIndex]
+    storage.stable.indexes(checkpoint.historyBaseIndex).toList().forEach { eventIndex ->
+        if (eventIndex < untilExclusive) items += storage.stable[eventIndex]
     }
     val boundaries = items.indices.filter { itemIndex -> items[itemIndex].startsTurn }
     if (boundaries.isEmpty()) return items
@@ -525,16 +557,12 @@ private fun validateTaskSegment(value: String) {
     }
 }
 
-private val ResponseItem.HistoryItem.startsTurn: Boolean
+private val StableCleanEvent.startsTurn: Boolean
     get() = when (this) {
-        is ResponseItem.Message -> role == MessageRole.User
-        is ResponseItem.AgentMessage -> content
+        is StableCleanEvent.UserMessage -> true
+        is StableCleanEvent.AgentMessage -> content
             .filterIsInstance<AgentMessageInputContent.InputText>()
             .any { content -> content.text.startsWith("Message Type: NEW_TASK\n") }
 
         else -> false
     }
-
-private val MultiAgentToolJson: Json = Json(ToolBuilderJson) {
-    explicitNulls = true
-}

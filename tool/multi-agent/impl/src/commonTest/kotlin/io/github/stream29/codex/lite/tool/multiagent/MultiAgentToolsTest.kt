@@ -1,17 +1,21 @@
 package io.github.stream29.codex.lite.tool.multiagent
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMultiAgentOperation
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMultiAgentToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableWaitAgentResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMultiAgentInvocation
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMultiAgentToolEvent
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
-import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
-import io.github.stream29.codex.lite.openai.MessageRole
-import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.tool.builder.ToolBuilderJson
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -19,6 +23,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 val multiAgentToolsTest by testSuite {
@@ -108,30 +113,60 @@ val multiAgentToolsTest by testSuite {
         }
     }
 
+    test("standard tool JSON explicitly encodes nullable defaults") {
+        val spawn = ToolBuilderJson.encodeToString(
+            SpawnAgentArgs.serializer(),
+            SpawnAgentArgs(taskName = "worker", message = "Inspect the contract."),
+        ).jsonObject()
+        assertEquals(JsonNull, spawn["model"])
+        assertEquals(JsonNull, spawn["reasoning_effort"])
+        assertEquals(JsonNull, spawn["service_tier"])
+
+        val result = ToolBuilderJson.encodeToString(
+            SpawnAgentResult.serializer(),
+            SpawnAgentResult(taskName = "/root/worker"),
+        ).jsonObject()
+        assertEquals(JsonNull, result["nickname"])
+
+        val wait = ToolBuilderJson.encodeToString(
+            WaitAgentArgs.serializer(),
+            WaitAgentArgs(),
+        ).jsonObject()
+        assertEquals(JsonNull, wait["timeout_ms"])
+
+        val list = ToolBuilderJson.encodeToString(
+            ListAgentsArgs.serializer(),
+            ListAgentsArgs(),
+        ).jsonObject()
+        assertEquals(JsonNull, list["path_prefix"])
+    }
+
     test("wait_agent observes its injected pending steer") {
         val tool = waitAgentTool(
             MutableStateFlow(
-                listOf<ResponseItem.Steerable>(
-                    ResponseItem.Message(
-                        role = MessageRole.User,
+                listOf<StableCleanEvent.Steerable>(
+                    StableCleanEvent.UserMessage(
                         content = listOf(ContentItem.InputText("agent update")),
                     ),
                 ),
             ),
         )
 
-        val output = tool.handle(
-            ResponseItem.FunctionCall(
-                name = MultiAgentTools.WaitAgentName,
-                arguments = "{}",
-                callId = "wait_1",
+        val completed = assertIs<StableMultiAgentToolEvent>(
+            tool.handle(
+                PendingMultiAgentToolEvent(
+                    callId = "wait_1",
+                    operation = PendingMultiAgentInvocation.WaitAgent(WaitAgentArgs()),
+                ),
             ),
-        ).first as ResponseItem.FunctionCallOutput
-        val body = output.output.body as FunctionCallOutputBody.Text
+        )
+        val result = assertIs<StableMultiAgentOperation.WaitAgent>(completed.operation).result
 
         assertEquals(
-            WaitAgentResult(message = "Wait completed.", timedOut = false),
-            ToolBuilderJson.decodeFromString(WaitAgentResult.serializer(), body.text),
+            StableWaitAgentResult.Success(
+                WaitAgentResult(message = "Wait completed.", timedOut = false),
+            ),
+            result,
         )
     }
 
@@ -193,3 +228,5 @@ val multiAgentToolsTest by testSuite {
 private fun ObjectPropertyDefinition.jsonObject() = OpenAiJsonCodec.parseToJsonElement(
     OpenAiJsonCodec.encodeToString(this),
 ).jsonObject
+
+private fun String.jsonObject() = ToolBuilderJson.parseToJsonElement(this).jsonObject

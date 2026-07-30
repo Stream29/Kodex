@@ -5,16 +5,17 @@ import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableWebSearchResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
 import io.github.stream29.codex.lite.openai.ClickOperation
 import io.github.stream29.codex.lite.openai.FindOperation
-import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.FinanceAssetType
 import io.github.stream29.codex.lite.openai.FinanceOperation
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.OpenAiResult
 import io.github.stream29.codex.lite.openai.OpenOperation
-import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.SearchCommands
 import io.github.stream29.codex.lite.openai.SearchQuery
 import io.github.stream29.codex.lite.openai.ScreenshotOperation
@@ -28,7 +29,6 @@ import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.codex.lite.openai.client.OpenAiClient
 import io.github.stream29.codex.lite.openai.client.OpenAiClientConfig
-import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.utils.osenvironment.environmentVariable
 import io.github.stream29.codex.lite.utils.osenvironment.userHomeDirectory
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +36,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlinx.serialization.encodeToString
 import kotlin.random.Random
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.test.fail
 import kotlin.time.Duration.Companion.seconds
@@ -291,19 +292,19 @@ val webRunToolClientTest by testSuite {
                     modelProvider = { testModel() },
                 ),
             )
-            val output = withContext(Dispatchers.Default) {
-                tool.handle(
-                    ResponseItem.FunctionCall(
-                        name = WebRunToolName,
-                        namespace = WebRunNamespace,
-                        arguments = OpenAiJsonCodec.encodeToString(commands),
-                        callId = "call_web_run",
+            val completed = withContext(Dispatchers.Default) {
+                assertIs<StableWebSearchToolEvent>(
+                    tool.handle(
+                        PendingWebSearchToolEvent(
+                            callId = "call_web_run",
+                            commands = commands,
+                        ),
                     ),
-                ).first
-            } as ResponseItem.FunctionCallOutput
+                )
+            }
+            val output = assertIs<StableWebSearchResult.Success>(completed.result).response
 
-            assertTrue(output.output.success == true)
-            val text = (output.output.body as FunctionCallOutputBody.Text).text
+            val text = output.output
             assertTrue(text.isNotBlank())
             text.assertContainsReference("search")
         }

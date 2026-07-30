@@ -18,6 +18,11 @@ public data class PendingMcpToolEvent(
     public val namespace: String,
     public val arguments: JsonElement,
 ) : PendingToolEvent {
+    override val toolName: String
+        get() = name
+    override val toolNamespace: String
+        get() = namespace
+
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             pendingFunctionCall(

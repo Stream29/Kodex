@@ -9,9 +9,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 
-internal val StableToolJson: Json = Json {
-    explicitNulls = false
-}
+internal val StableToolJson: Json = Json
 
 internal fun stableFunctionCall(
     callId: String,

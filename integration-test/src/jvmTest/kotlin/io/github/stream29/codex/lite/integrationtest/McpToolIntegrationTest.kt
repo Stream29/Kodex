@@ -92,7 +92,7 @@ val openAiMcpToolRoundTripProbeTest by testSuite {
                 )
                 state = createdState
                 val runtime = McpRequestOnlyRuntime(createdState)
-                    .integrationToolRuntime(client, modelCatalog, service)
+                    .integrationResumableAgent(client, modelCatalog, service)
 
                 createdState.appendUserMessage(
                     listOf(
@@ -105,7 +105,8 @@ val openAiMcpToolRoundTripProbeTest by testSuite {
                 )
                 runtime.resume().toList()
 
-                val history = storage.history.indexes().toList().map { index -> storage.history[index] }
+                val history = storage.stable.indexes().toList()
+                    .flatMap { index -> storage.stable[index].toResponseHistoryItems() }
                 val call = history
                     .filterIsInstance<ResponseItem.FunctionCall>()
                     .single { item ->

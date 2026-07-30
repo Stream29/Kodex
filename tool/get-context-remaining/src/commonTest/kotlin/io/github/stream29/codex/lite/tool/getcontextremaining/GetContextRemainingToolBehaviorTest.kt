@@ -4,20 +4,22 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
 import io.github.stream29.codex.lite.agentstate.test.TestMcpService
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
-import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.OpenAiResult
 import io.github.stream29.codex.lite.openai.ModelsResponse
-import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
+import io.github.stream29.codex.lite.tool.builder.ToolBuilderJson
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.io.files.Path
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 
 private fun getContextRemainingTestCatalog(): OpenAiModelCatalog =
     OpenAiModelCatalog(
@@ -48,17 +50,19 @@ val getContextRemainingToolTest by testSuite {
             mcpService = TestMcpService(),
         )
         val catalog = getContextRemainingTestCatalog()
-        val output = state.getContextRemainingTool(catalog).handle(
-            ResponseItem.FunctionCall(
+        val completed = assertIs<StableTextToolEvent>(
+            state.getContextRemainingTool(catalog).handle(
+                PendingFunctionToolEvent(
                 name = GetContextRemainingTools.Name,
-                arguments = "{}",
+                arguments = ToolBuilderJson.parseToJsonElement("{}"),
                 callId = "call_context",
             ),
-        ).first as ResponseItem.FunctionCallOutput
+            ),
+        )
 
         assertEquals(
             "You have 40 tokens left in this context window.",
-            (output.output.body as FunctionCallOutputBody.Text).text,
+            completed.result,
         )
     }
     }

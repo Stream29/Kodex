@@ -2,9 +2,10 @@ package io.github.stream29.codex.lite.mcp.impl
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMcpToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.codex.lite.mcp.contract.McpServerConfiguration
 import io.github.stream29.codex.lite.mcp.contract.McpSettings
-import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.ktor.http.ContentType
@@ -96,18 +97,19 @@ val mcpServiceImplIoTest by testSuite(
             }
             assertEquals("alpha", alphaTool.serverName)
             assertEquals("alpha tools", alphaTool.serverInstructions)
-            val output = assertIs<ResponseItem.McpToolCallOutput>(
+            val completed = assertIs<StableMcpToolEvent>(
                 alphaTool.handle(
-                    ResponseItem.FunctionCall(
-                        name = "mcp__alpha__echo",
-                        arguments = """{"name":"Ada"}""",
+                    PendingMcpToolEvent(
                         callId = "alpha-call",
+                        name = "echo",
+                        namespace = "mcp__alpha",
+                        arguments = buildJsonObject { put("name", "Ada") },
                     ),
-                ).first,
+                ),
             )
             assertEquals(
                 "alpha:second:Ada",
-                output.output.content.single().jsonObject.getValue("text").jsonPrimitive.content,
+                completed.result.content.single().jsonObject.getValue("text").jsonPrimitive.content,
             )
 
             settings.value = TestMcpSettings(

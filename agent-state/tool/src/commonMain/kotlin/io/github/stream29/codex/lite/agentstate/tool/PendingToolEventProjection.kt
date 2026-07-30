@@ -1,14 +1,25 @@
 package io.github.stream29.codex.lite.agentstate.tool
 
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingFunctionArguments
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingImageGenerationRequest
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingImageGenerationToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingImageViewToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMultiAgentInvocation
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMultiAgentToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingPlanUpdate
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolInvocation
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingWebSearchRequest
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.SearchCommands
+import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchTools
 import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenNamespace
@@ -24,7 +35,6 @@ import io.github.stream29.codex.lite.tool.multiagent.WaitAgentArgs
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputTools
 import io.github.stream29.codex.lite.tool.toolsearch.SearchToolCallParams
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchExecution
 import io.github.stream29.codex.lite.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecTools
 import io.github.stream29.codex.lite.tool.unifiedexec.WriteStdinArguments
@@ -35,170 +45,236 @@ import io.github.stream29.codex.lite.tool.webrun.WebRunToolName
 import io.github.stream29.codex.lite.utils.applypatch.parsePatch
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.JsonElement
 
-/** Projects one raw local tool call into the unstable clean timeline. */
+/** Converts one provider-issued local tool call at the AgentState boundary. */
 public fun ResponseItem.ToolCall.toPendingToolEvent(): PendingToolEvent =
-    PendingToolEvent(
-        callId = callId,
-        invocation = when (this) {
-            is ResponseItem.FunctionCall -> toPendingInvocation()
-            is ResponseItem.CustomToolCall -> toPendingInvocation()
-            is ResponseItem.ClientToolSearchCall -> toPendingInvocation()
-        },
-    )
+    when (this) {
+        is ResponseItem.FunctionCall -> toPendingToolEvent()
+        is ResponseItem.CustomToolCall -> toPendingToolEvent()
+        is ResponseItem.ClientToolSearchCall -> toPendingToolEvent()
+    }
 
-private fun ResponseItem.FunctionCall.toPendingInvocation(): PendingToolInvocation {
-    fun <T> specialized(
-        deserializer: DeserializationStrategy<T>,
-        transform: (T) -> PendingToolInvocation,
-    ): PendingToolInvocation =
-        decodeArguments(deserializer)?.let(transform) ?: genericInvocation()
+private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolEvent {
+    fun <Arguments> typed(
+        deserializer: DeserializationStrategy<Arguments>,
+        transform: (Arguments) -> PendingToolEvent,
+    ): PendingToolEvent =
+        decodeArguments(deserializer)?.let(transform)
+            ?: invalid("Invalid JSON arguments for ${qualifiedName()}.")
 
     return when {
         namespace == null && name == UnifiedExecTools.ExecCommandName ->
-            specialized(ExecCommandArguments.serializer()) { arguments ->
-                PendingToolInvocation.CommandExecution(
-                    PendingCommandExecutionAction.ExecCommand(arguments),
+            typed(ExecCommandArguments.serializer()) { arguments ->
+                PendingCommandExecutionToolEvent(
+                    callId = callId,
+                    itemId = id,
+                    action = PendingCommandExecutionAction.ExecCommand(arguments),
                 )
             }
 
         namespace == null && name == UnifiedExecTools.WriteStdinName ->
-            specialized(WriteStdinArguments.serializer()) { arguments ->
-                PendingToolInvocation.CommandExecution(
-                    PendingCommandExecutionAction.WriteStdin(arguments),
+            typed(WriteStdinArguments.serializer()) { arguments ->
+                PendingCommandExecutionToolEvent(
+                    callId = callId,
+                    itemId = id,
+                    action = PendingCommandExecutionAction.WriteStdin(arguments),
                 )
             }
 
         namespace == WebRunNamespace && name == WebRunToolName ->
-            specialized(SearchCommands.serializer()) { commands ->
-                PendingToolInvocation.WebSearch(PendingWebSearchRequest.WebRun(commands))
+            typed(SearchCommands.serializer()) { commands ->
+                PendingWebSearchToolEvent(
+                    callId = callId,
+                    itemId = id,
+                    commands = commands,
+                )
             }
 
         namespace == ImageGenNamespace && name == ImageGenToolName ->
-            specialized(ImageGenToolArguments.serializer()) { arguments ->
-                PendingToolInvocation.ImageGeneration(
-                    PendingImageGenerationRequest.Tool(arguments),
+            typed(ImageGenToolArguments.serializer()) { arguments ->
+                PendingImageGenerationToolEvent(
+                    callId = callId,
+                    itemId = id,
+                    arguments = arguments,
                 )
             }
 
         namespace == null && name == ViewImageTools.Name ->
-            specialized(ViewImageToolArguments.serializer()) { arguments ->
-                PendingToolInvocation.ImageView(arguments)
+            typed(ViewImageToolArguments.serializer()) { arguments ->
+                PendingImageViewToolEvent(
+                    callId = callId,
+                    itemId = id,
+                    arguments = arguments,
+                )
             }
 
         namespace == null && name == MultiAgentTools.SpawnAgentName ->
-            specialized(SpawnAgentArgs.serializer()) { arguments ->
-                PendingToolInvocation.MultiAgent(
-                    PendingMultiAgentInvocation.SpawnAgent(arguments),
-                )
+            typed(SpawnAgentArgs.serializer()) { arguments ->
+                multiAgent(PendingMultiAgentInvocation.SpawnAgent(arguments))
             }
 
         namespace == null && name == MultiAgentTools.SendMessageName ->
-            specialized(SendMessageArgs.serializer()) { arguments ->
-                PendingToolInvocation.MultiAgent(
-                    PendingMultiAgentInvocation.SendMessage(arguments),
-                )
+            typed(SendMessageArgs.serializer()) { arguments ->
+                multiAgent(PendingMultiAgentInvocation.SendMessage(arguments))
             }
 
         namespace == null && name == MultiAgentTools.FollowupTaskName ->
-            specialized(FollowupTaskArgs.serializer()) { arguments ->
-                PendingToolInvocation.MultiAgent(
-                    PendingMultiAgentInvocation.FollowupTask(arguments),
-                )
+            typed(FollowupTaskArgs.serializer()) { arguments ->
+                multiAgent(PendingMultiAgentInvocation.FollowupTask(arguments))
             }
 
         namespace == null && name == MultiAgentTools.WaitAgentName ->
-            specialized(WaitAgentArgs.serializer()) { arguments ->
-                PendingToolInvocation.MultiAgent(
-                    PendingMultiAgentInvocation.WaitAgent(arguments),
-                )
+            typed(WaitAgentArgs.serializer()) { arguments ->
+                multiAgent(PendingMultiAgentInvocation.WaitAgent(arguments))
             }
 
         namespace == null && name == MultiAgentTools.InterruptAgentName ->
-            specialized(InterruptAgentArgs.serializer()) { arguments ->
-                PendingToolInvocation.MultiAgent(
-                    PendingMultiAgentInvocation.InterruptAgent(arguments),
-                )
+            typed(InterruptAgentArgs.serializer()) { arguments ->
+                multiAgent(PendingMultiAgentInvocation.InterruptAgent(arguments))
             }
 
         namespace == null && name == MultiAgentTools.ListAgentsName ->
-            specialized(ListAgentsArgs.serializer()) { arguments ->
-                PendingToolInvocation.MultiAgent(
-                    PendingMultiAgentInvocation.ListAgents(arguments),
-                )
+            typed(ListAgentsArgs.serializer()) { arguments ->
+                multiAgent(PendingMultiAgentInvocation.ListAgents(arguments))
             }
 
         namespace == null && name == RequestUserInputTools.Name ->
-            specialized(RequestUserInputArgs.serializer()) { arguments ->
-                PendingToolInvocation.RequestUserInput(arguments)
+            typed(RequestUserInputArgs.serializer()) { arguments ->
+                PendingRequestUserInputToolEvent(
+                    callId = callId,
+                    itemId = id,
+                    arguments = arguments,
+                )
             }
 
-        else -> genericInvocation()
+        namespace == null && name == "update_plan" ->
+            typed(UpdatePlanArgs.serializer()) { arguments ->
+                PendingPlanUpdate(
+                    callId = callId,
+                    itemId = id,
+                    arguments = arguments,
+                )
+            }
+
+        namespace?.startsWith("mcp__") == true ->
+            parsedJson()?.let { arguments ->
+                PendingMcpToolEvent(
+                    callId = callId,
+                    itemId = id,
+                    name = name,
+                    namespace = checkNotNull(namespace),
+                    arguments = arguments,
+                )
+            } ?: invalid("Invalid JSON arguments for ${qualifiedName()}.")
+
+        else ->
+            parsedJson()?.let { arguments ->
+                PendingFunctionToolEvent(
+                    callId = callId,
+                    itemId = id,
+                    name = name,
+                    namespace = namespace,
+                    arguments = arguments,
+                )
+            } ?: invalid("Invalid JSON arguments for ${qualifiedName()}.")
     }
 }
 
-private fun ResponseItem.CustomToolCall.toPendingInvocation(): PendingToolInvocation =
+private fun ResponseItem.CustomToolCall.toPendingToolEvent(): PendingToolEvent =
     if (namespace == null && name == ApplyPatchTools.Name) {
         try {
-            PendingToolInvocation.ApplyPatch(input.parsePatch())
-        } catch (_: IllegalArgumentException) {
-            genericInvocation()
+            PendingPatchToolEvent(
+                callId = callId,
+                itemId = id,
+                diff = input.parsePatch(),
+            )
+        } catch (failure: IllegalArgumentException) {
+            PendingInvalidToolCall(
+                callId = callId,
+                itemId = id,
+                invocation = PendingInvalidToolInvocation.Custom(
+                    name = name,
+                    namespace = namespace,
+                    input = input,
+                ),
+                message = failure.message ?: "Invalid apply_patch input.",
+            )
         }
     } else {
-        genericInvocation()
+        PendingCustomToolEvent(
+            callId = callId,
+            itemId = id,
+            name = name,
+            namespace = namespace,
+            input = input,
+        )
     }
 
-private fun ResponseItem.ClientToolSearchCall.toPendingInvocation(): PendingToolInvocation =
+private fun ResponseItem.ClientToolSearchCall.toPendingToolEvent(): PendingToolEvent =
     try {
-        PendingToolInvocation.ToolSearch(
-            execution = ToolSearchExecution.Client,
+        PendingToolSearchEvent(
+            callId = callId,
+            itemId = id,
             arguments = OpenAiJsonCodec.decodeFromJsonElement(
                 SearchToolCallParams.serializer(),
                 arguments,
             ),
         )
     } catch (_: SerializationException) {
-        PendingToolInvocation.Function(
-            name = "tool_search",
-            arguments = PendingFunctionArguments.Json(arguments),
-        )
+        invalidToolSearch()
     } catch (_: IllegalArgumentException) {
-        PendingToolInvocation.Function(
-            name = "tool_search",
-            arguments = PendingFunctionArguments.Json(arguments),
-        )
+        invalidToolSearch()
     }
 
-private fun ResponseItem.FunctionCall.genericInvocation(): PendingToolInvocation.Function =
-    PendingToolInvocation.Function(
-        name = name,
-        namespace = namespace,
-        arguments = arguments.toPendingArguments(),
+private fun ResponseItem.FunctionCall.multiAgent(
+    operation: PendingMultiAgentInvocation,
+): PendingMultiAgentToolEvent =
+    PendingMultiAgentToolEvent(
+        callId = callId,
+        itemId = id,
+        operation = operation,
     )
 
-private fun ResponseItem.CustomToolCall.genericInvocation(): PendingToolInvocation.Custom =
-    PendingToolInvocation.Custom(
-        name = name,
-        namespace = namespace,
-        input = input,
+private fun ResponseItem.FunctionCall.invalid(message: String): PendingInvalidToolCall =
+    PendingInvalidToolCall(
+        callId = callId,
+        itemId = id,
+        invocation = PendingInvalidToolInvocation.Function(
+            name = name,
+            namespace = namespace,
+            arguments = arguments,
+        ),
+        message = message,
     )
 
-private fun <T> ResponseItem.FunctionCall.decodeArguments(
-    deserializer: DeserializationStrategy<T>,
-): T? =
+private fun ResponseItem.ClientToolSearchCall.invalidToolSearch(): PendingInvalidToolCall =
+    PendingInvalidToolCall(
+        callId = callId,
+        itemId = id,
+        invocation = PendingInvalidToolInvocation.ToolSearch(arguments),
+        message = "Invalid client tool-search arguments.",
+    )
+
+private fun ResponseItem.FunctionCall.qualifiedName(): String =
+    namespace?.let { "$it.$name" } ?: name
+
+private fun ResponseItem.FunctionCall.parsedJson(): JsonElement? =
+    try {
+        OpenAiJsonCodec.parseToJsonElement(arguments)
+    } catch (_: SerializationException) {
+        null
+    } catch (_: IllegalArgumentException) {
+        null
+    }
+
+private fun <Arguments> ResponseItem.FunctionCall.decodeArguments(
+    deserializer: DeserializationStrategy<Arguments>,
+): Arguments? =
     try {
         OpenAiJsonCodec.decodeFromString(deserializer, arguments)
     } catch (_: SerializationException) {
         null
     } catch (_: IllegalArgumentException) {
         null
-    }
-
-private fun String.toPendingArguments(): PendingFunctionArguments =
-    try {
-        PendingFunctionArguments.Json(OpenAiJsonCodec.parseToJsonElement(this))
-    } catch (_: SerializationException) {
-        PendingFunctionArguments.InvalidJson(this)
-    } catch (_: IllegalArgumentException) {
-        PendingFunctionArguments.InvalidJson(this)
     }

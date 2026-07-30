@@ -2,6 +2,7 @@ package io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.openai.PlanItemArg
+import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponseItemId
 import io.github.stream29.codex.lite.openai.SearchCommands
 import io.github.stream29.codex.lite.openai.SearchQuery
@@ -36,6 +37,47 @@ import kotlin.test.assertEquals
 private val pendingHierarchyJson = Json
 
 val pendingToolEventHierarchySerializationTest by testSuite {
+    test("round trips a pending hosted server tool search") {
+        val call = ResponseItem.ServerToolSearchCall(
+            id = ResponseItemId("search_call"),
+            status = "in_progress",
+            arguments = buildJsonObject {
+                put("query", "connected drive tools")
+            },
+        )
+        val event: UnstableCleanEvent = PendingServerToolSearch(call)
+
+        val encoded = pendingHierarchyJson.encodeToString<UnstableCleanEvent>(event)
+        val element = pendingHierarchyJson.parseToJsonElement(encoded).jsonObject
+
+        assertEquals(JsonPrimitive("server_tool_search"), element["type"])
+        assertEquals(event, pendingHierarchyJson.decodeFromString<UnstableCleanEvent>(encoded))
+        assertEquals(listOf(call), event.toResponseHistoryItems())
+    }
+
+    test("round trips a client pending tool through the unstable root") {
+        val event: UnstableCleanEvent = PendingFunctionToolEvent(
+            callId = "call_function",
+            itemId = ResponseItemId("item_function"),
+            name = "search",
+            arguments = buildJsonObject {
+                put("query", "design context")
+            },
+        )
+
+        val encoded = pendingHierarchyJson.encodeToString<UnstableCleanEvent>(event)
+
+        assertEquals(event, pendingHierarchyJson.decodeFromString<UnstableCleanEvent>(encoded))
+        assertEquals(event.toResponseHistoryItems(), listOf(
+            ResponseItem.FunctionCall(
+                id = ResponseItemId("item_function"),
+                callId = "call_function",
+                name = "search",
+                arguments = """{"query":"design context"}""",
+            ),
+        ))
+    }
+
     test("round trips every pending tool event kind") {
         val events: List<Pair<PendingToolEvent, String>> = listOf(
             PendingFunctionToolEvent(

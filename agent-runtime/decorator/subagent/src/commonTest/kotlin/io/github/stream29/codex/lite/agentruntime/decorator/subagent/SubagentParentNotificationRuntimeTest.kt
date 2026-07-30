@@ -7,6 +7,7 @@ import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState as createCodexAgentState
 import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
 import io.github.stream29.codex.lite.agentstate.test.TestMcpService
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.openai.AgentMessageInputContent
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
@@ -39,7 +40,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
         cancelAndJoin()
     } asContextForEach {
         test("successful resume sends its newest persisted assistant message") {
-            val notifications = mutableListOf<ResponseItem.AgentMessage>()
+            val notifications = mutableListOf<StableCleanEvent.AgentMessage>()
             val firstAssistant = assistantMessage("intermediate result")
             val lastAssistant = assistantMessage("child result")
             val completed = ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = true))
@@ -64,7 +65,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
 
             assertEquals(
                 listOf(
-                    ResponseItem.AgentMessage(
+                    StableCleanEvent.AgentMessage(
                         author = "/root/worker",
                         recipient = "/root",
                         content = listOf(
@@ -82,7 +83,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
         }
 
         test("a failed response event still reports the newest persisted assistant message") {
-            val notifications = mutableListOf<ResponseItem.AgentMessage>()
+            val notifications = mutableListOf<StableCleanEvent.AgentMessage>()
             val assistant = assistantMessage("partial result")
             val failed = ResponsesStreamEvent.Failed(
                 FailedResponse(ResponseError(message = "upstream disconnected")),
@@ -95,7 +96,13 @@ val subagentParentNotificationRuntimeTest by testSuite {
                 notifyParent = notifications::add,
             )
 
-            state.injectHistory(listOf(assistantMessage("previous turn")))
+            state.injectHistory(
+                listOf(
+                    StableCleanEvent.AssistantMessage(
+                        content = assistantMessage("previous turn").content,
+                    ),
+                ),
+            )
             runtime.appendUserMessage(listOf(ContentItem.InputText("do the work")))
             assertEquals(
                 listOf(
@@ -109,7 +116,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
         }
 
         test("an incomplete response event still reports the newest persisted assistant message") {
-            val notifications = mutableListOf<ResponseItem.AgentMessage>()
+            val notifications = mutableListOf<StableCleanEvent.AgentMessage>()
             val assistant = assistantMessage("partial result")
             val incomplete = ResponsesStreamEvent.Incomplete(IncompleteResponse())
             val state = stateFor(
@@ -133,7 +140,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
         }
 
         test("a completed response with pending tools does not notify the parent") {
-            val notifications = mutableListOf<ResponseItem.AgentMessage>()
+            val notifications = mutableListOf<StableCleanEvent.AgentMessage>()
             val call = ResponseItem.FunctionCall(
                 name = "test_tool",
                 arguments = "{}",
@@ -176,7 +183,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
         }
 
         test("an upstream runtime failure is rethrown without notifying the parent") {
-            val notifications = mutableListOf<ResponseItem.AgentMessage>()
+            val notifications = mutableListOf<StableCleanEvent.AgentMessage>()
             val assistant = assistantMessage("partial result")
             val state = stateFor(
                 flow = flow {
@@ -198,7 +205,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
         }
 
         test("a downstream collector failure is not reported as a child failure") {
-            val notifications = mutableListOf<ResponseItem.AgentMessage>()
+            val notifications = mutableListOf<StableCleanEvent.AgentMessage>()
             val state = stateFor(
                 ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = assistantMessage("child result")),
                 ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = true)),
@@ -251,8 +258,8 @@ private fun assistantMessage(text: String): ResponseItem.Message =
         content = listOf(ContentItem.OutputText(text)),
     )
 
-private fun parentMessage(text: String): ResponseItem.AgentMessage =
-    ResponseItem.AgentMessage(
+private fun parentMessage(text: String): StableCleanEvent.AgentMessage =
+    StableCleanEvent.AgentMessage(
         author = "/root/worker",
         recipient = "/root",
         content = listOf(

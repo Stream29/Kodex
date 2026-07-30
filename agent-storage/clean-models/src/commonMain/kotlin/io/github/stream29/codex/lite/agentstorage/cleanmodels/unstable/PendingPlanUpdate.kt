@@ -16,6 +16,9 @@ public data class PendingPlanUpdate(
     override val itemId: ResponseItemId? = null,
     public val arguments: UpdatePlanArgs,
 ) : PendingToolEvent {
+    override val toolName: String = "update_plan"
+    override val toolNamespace: String? = null
+
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             pendingFunctionCall(

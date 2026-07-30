@@ -1,10 +1,9 @@
 package io.github.stream29.codex.lite.agentstorage.contract
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.CleanCompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
-import io.github.stream29.codex.lite.openai.CompactionCheckpoint
-import io.github.stream29.codex.lite.openai.ResponseItem
 import kotlin.time.Instant
 
 /**
@@ -27,12 +26,9 @@ import kotlin.time.Instant
  * bound for a read. Reading each timeline's own latest index independently may
  * observe different upper bounds.
  *
- * The active model-visible history at a snapshot index is:
- *
- * ```kotlin
- * val checkpoint = compaction[index]
- * checkpoint.prefix + stored history items in [checkpoint.historyBaseIndex, index]
- * ```
+ * The active model-visible history at a snapshot index is the clean
+ * checkpoint projection followed by stable clean events in
+ * `[checkpoint.historyBaseIndex, index]` and the current unstable tail.
  *
  * Compose [setWithTransaction] and [revertWithTransaction] when one logical
  * state transition updates multiple timelines. Callers must serialize writers.
@@ -41,11 +37,6 @@ import kotlin.time.Instant
  * keep it stable across reopen, while transient backends keep it stable for
  * the lifetime of the storage object. It is not an additional persisted
  * timeline or manifest field.
- * @property history Sparse response history log. Only real
- * [ResponseItem.HistoryItem] entries are stored. Use [IndexVersioned.nextIndex]
- * or [indexes] to enumerate stored history indexes; `history[index]` returns
- * the latest history item visible at a snapshot index and does not imply that
- * `index` itself stores a history item.
  * @property compaction Sparse checkpoint timeline. `compaction[index]` returns
  * the checkpoint active for the snapshot at `index`.
  * @property settings Sparse agent-thread settings timeline. `settings[index]`
@@ -61,19 +52,18 @@ import kotlin.time.Instant
  * contains the event completed by that state transition. Enumerate its stored
  * indexes instead of treating [IndexVersioned.get] as a cumulative history
  * snapshot.
- * @property unstable Sparse pending-tool snapshot timeline. Each stored value
- * is the complete ordered set of pending tool calls after that state
- * transition. No visible value means the pending set is empty.
+ * @property unstable Sparse unfinished-tool snapshot timeline. Each stored
+ * value is the complete ordered set of unfinished clean tool events after that
+ * state transition. No visible value means the pending set is empty.
  */
 public interface CodexAgentStorage {
     public val id: String
-    public val history: IndexVersioned<ResponseItem.HistoryItem>
-    public val compaction: IndexVersioned<CompactionCheckpoint>
+    public val compaction: IndexVersioned<CleanCompactionCheckpoint>
     public val settings: IndexVersioned<CodexAgentSettings>
     public val timestamp: IndexVersioned<Instant>
     public val tokenCount: IndexVersioned<Long>
     public val stable: IndexVersioned<StableCleanEvent>
-    public val unstable: IndexVersioned<List<PendingToolEvent>>
+    public val unstable: IndexVersioned<List<UnstableCleanEvent>>
 }
 
 /**
@@ -83,7 +73,6 @@ public interface CodexAgentStorage {
  */
 public suspend fun CodexAgentStorage.latestIndex(): Int =
     maxOf(
-        history.latestIndex(),
         compaction.latestIndex(),
         settings.latestIndex(),
         timestamp.latestIndex(),
@@ -100,7 +89,6 @@ public suspend fun CodexAgentStorage.latestIndex(): Int =
  */
 public suspend fun CodexAgentStorage.floorToIndex(index: Int): Int? =
     listOfNotNull(
-        history.floorToIndex(index),
         compaction.floorToIndex(index),
         settings.floorToIndex(index),
         timestamp.floorToIndex(index),
@@ -117,7 +105,6 @@ public suspend fun CodexAgentStorage.floorToIndex(index: Int): Int? =
  */
 public suspend fun CodexAgentStorage.ceilToIndex(index: Int): Int? =
     listOfNotNull(
-        history.ceilToIndex(index),
         compaction.ceilToIndex(index),
         settings.ceilToIndex(index),
         timestamp.ceilToIndex(index),
@@ -147,13 +134,12 @@ public suspend fun CodexAgentStorage.prevIndex(index: Int): Int? {
  * compose operation-level compensation when those updates form one transition.
  */
 public interface MutableCodexAgentStorage : CodexAgentStorage {
-    public override val history: MutableIndexVersioned<ResponseItem.HistoryItem>
-    public override val compaction: MutableIndexVersioned<CompactionCheckpoint>
+    public override val compaction: MutableIndexVersioned<CleanCompactionCheckpoint>
     public override val settings: MutableIndexVersioned<CodexAgentSettings>
     public override val timestamp: MutableIndexVersioned<Instant>
     public override val tokenCount: MutableIndexVersioned<Long>
     public override val stable: MutableIndexVersioned<StableCleanEvent>
-    public override val unstable: MutableIndexVersioned<List<PendingToolEvent>>
+    public override val unstable: MutableIndexVersioned<List<UnstableCleanEvent>>
 }
 
 /**
@@ -164,14 +150,12 @@ public interface MutableCodexAgentStorage : CodexAgentStorage {
  * empties the storage for [forkTo]; a live agent state must retain index `0`.
  */
 public suspend fun MutableCodexAgentStorage.revert(untilExclusive: Int) {
-    history.revertWithTransaction(untilExclusive) {
-        compaction.revertWithTransaction(untilExclusive) {
-            settings.revertWithTransaction(untilExclusive) {
-                timestamp.revertWithTransaction(untilExclusive) {
-                    tokenCount.revertWithTransaction(untilExclusive) {
-                        stable.revertWithTransaction(untilExclusive) {
-                            unstable.revert(untilExclusive)
-                        }
+    compaction.revertWithTransaction(untilExclusive) {
+        settings.revertWithTransaction(untilExclusive) {
+            timestamp.revertWithTransaction(untilExclusive) {
+                tokenCount.revertWithTransaction(untilExclusive) {
+                    stable.revertWithTransaction(untilExclusive) {
+                        unstable.revert(untilExclusive)
                     }
                 }
             }
@@ -195,21 +179,18 @@ public suspend fun CodexAgentStorage.forkTo(
 ) {
     require(this !== target) { "Cannot fork a storage into itself." }
     require(until > 0) { "A fork must include the initialized state at index 0." }
-    target.history.revertWithTransaction(0) {
-        target.compaction.revertWithTransaction(0) {
-            target.settings.revertWithTransaction(0) {
-                target.timestamp.revertWithTransaction(0) {
-                    target.tokenCount.revertWithTransaction(0) {
-                        target.stable.revertWithTransaction(0) {
-                            target.unstable.revertWithTransaction(0) {
-                                this.history.forkTo(until, target.history)
-                                this.compaction.forkTo(until, target.compaction)
-                                this.settings.forkTo(until, target.settings)
-                                this.timestamp.forkTo(until, target.timestamp)
-                                this.tokenCount.forkTo(until, target.tokenCount)
-                                this.stable.forkTo(until, target.stable)
-                                this.unstable.forkTo(until, target.unstable)
-                            }
+    target.compaction.revertWithTransaction(0) {
+        target.settings.revertWithTransaction(0) {
+            target.timestamp.revertWithTransaction(0) {
+                target.tokenCount.revertWithTransaction(0) {
+                    target.stable.revertWithTransaction(0) {
+                        target.unstable.revertWithTransaction(0) {
+                            this.compaction.forkTo(until, target.compaction)
+                            this.settings.forkTo(until, target.settings)
+                            this.timestamp.forkTo(until, target.timestamp)
+                            this.tokenCount.forkTo(until, target.tokenCount)
+                            this.stable.forkTo(until, target.stable)
+                            this.unstable.forkTo(until, target.unstable)
                         }
                     }
                 }

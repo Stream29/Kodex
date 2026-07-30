@@ -4,8 +4,10 @@ import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
-import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCommandExecutionResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.tool.builder.ToolBuilderJson
 import io.github.stream29.codex.lite.tool.contract.Tool
@@ -60,42 +62,31 @@ private suspend fun testUnifiedExecToolClient(
 private fun List<Tool>.toolNamed(name: String): Tool =
     single { tool -> (tool.spec as ResponsesApiTool).name == name }
 
-private fun ResponseItem.ToolCallOutput.requireUnifiedExecOutput(): UnifiedExecOutput {
-    val functionOutput = assertIs<ResponseItem.FunctionCallOutput>(this)
-    assertTrue(
-        functionOutput.output.success == true,
-        "Unified exec tool failed: ${functionOutput.output.body}",
+private fun StableCommandExecutionToolEvent.requireUnifiedExecOutput(): UnifiedExecOutput =
+    when (val completed = result) {
+        is StableCommandExecutionResult.Output -> completed.value
+        is StableCommandExecutionResult.Failure -> fail("Unified exec tool failed: ${completed.message}")
+    }
+
+private suspend fun Tool.exec(arguments: ExecCommandArguments): StableCommandExecutionToolEvent =
+    assertIs<StableCommandExecutionToolEvent>(
+        handle(
+            PendingCommandExecutionToolEvent(
+                callId = "call_exec_command",
+                action = PendingCommandExecutionAction.ExecCommand(arguments),
+            ),
+        ),
     )
-    val text = assertIs<FunctionCallOutputBody.Text>(functionOutput.output.body).text
-    return ToolBuilderJson.decodeFromString(UnifiedExecOutput.serializer(), text)
-}
 
-private suspend fun Tool.exec(arguments: ExecCommandArguments): ResponseItem.ToolCallOutput =
-    handle(
-        ResponseItem.FunctionCall(
-            name = UnifiedExecTools.ExecCommandName,
-            arguments = ToolBuilderJson.encodeToString(arguments),
-            callId = "call_exec_command",
+private suspend fun Tool.write(arguments: WriteStdinArguments): StableCommandExecutionToolEvent =
+    assertIs<StableCommandExecutionToolEvent>(
+        handle(
+            PendingCommandExecutionToolEvent(
+                callId = "call_write_stdin",
+                action = PendingCommandExecutionAction.WriteStdin(arguments),
+            ),
         ),
-    ).first
-
-private suspend fun Tool.execRaw(arguments: String): ResponseItem.ToolCallOutput =
-    handle(
-        ResponseItem.FunctionCall(
-            name = UnifiedExecTools.ExecCommandName,
-            arguments = arguments,
-            callId = "call_exec_command",
-        ),
-    ).first
-
-private suspend fun Tool.write(arguments: WriteStdinArguments): ResponseItem.ToolCallOutput =
-    handle(
-        ResponseItem.FunctionCall(
-            name = UnifiedExecTools.WriteStdinName,
-            arguments = ToolBuilderJson.encodeToString(arguments),
-            callId = "call_write_stdin",
-        ),
-    ).first
+    )
 
 val unifiedExecToolsTest by testSuite {
     test("specs declare the two Rust-compatible plain function tools") {
@@ -278,21 +269,6 @@ val unifiedExecToolsTest by testSuite {
             assertEquals(0, completed.exitCode)
             assertEquals(null, completed.sessionId)
             assertTrue(output.contains("received:hello from tty"))
-        } finally {
-            client.close()
-        }
-    }
-
-    test("unsupported shell names report an explicit tool failure") {
-        val client = testUnifiedExecToolClient()
-        try {
-            val exec = UnifiedExecTools.createTools(client).toolNamed(UnifiedExecTools.ExecCommandName)
-            val output = assertIs<ResponseItem.FunctionCallOutput>(
-                exec.execRaw("""{"cmd":"echo test","shell":"unsupported-shell"}"""),
-            )
-
-            assertFalse(output.output.success == true)
-            assertTrue((output.output.body as FunctionCallOutputBody.Text).text.contains("Unsupported shell"))
         } finally {
             client.close()
         }

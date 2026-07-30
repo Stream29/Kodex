@@ -2,10 +2,9 @@ package io.github.stream29.codex.lite.tool.viewimage
 
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
-import io.github.stream29.codex.lite.openai.FunctionCallOutputContentItem
-import io.github.stream29.codex.lite.openai.ImageDetail
-import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableImageViewResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableImageViewToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingImageViewToolEvent
 import io.github.stream29.codex.lite.utils.images.ImageMimeType
 import io.github.stream29.codex.lite.utils.images.detectImageInfo
 import io.github.stream29.codex.lite.utils.images.decodePromptImageDataUrlBytes
@@ -58,38 +57,34 @@ val viewImageToolClientTest by testSuite {
             val imagePath = Path(root, "image.png")
             SystemCoroutineFileSystem.writeBytes(imagePath, png64x32)
 
-            val result = assertIs<ResponseItem.FunctionCallOutput>(
+            val completed = assertIs<StableImageViewToolEvent>(
                 ViewImageTools.createTool(ViewImageToolClient(workingDirectoryProvider = { root })).handle(
-                    ResponseItem.FunctionCall(
+                    PendingImageViewToolEvent(
                         callId = "view_1",
-                        name = ViewImageTools.Name,
-                        arguments = """{"path":"image.png"}""",
+                        arguments = ViewImageToolArguments(path = "image.png"),
                     ),
-                ).first,
+                ),
             )
-            val body = assertIs<FunctionCallOutputBody.ContentItems>(result.output.body)
-            val image = assertIs<FunctionCallOutputContentItem.InputImage>(body.items.single())
+            val output = assertIs<StableImageViewResult.Success>(completed.result).output
 
-            assertTrue(image.imageUrl.startsWith("data:image/png;base64,"))
-            assertEquals(ImageDetail.High, image.detail)
-            assertEquals(true, result.output.success)
+            assertTrue(output.imageUrl.startsWith("data:image/png;base64,"))
+            assertEquals(ViewImageDetail.High, output.detail)
         }
 
         test("tool returns a failure output for a missing image") { root ->
-            val result = assertIs<ResponseItem.FunctionCallOutput>(
+            val completed = assertIs<StableImageViewToolEvent>(
                 ViewImageTools.createTool(ViewImageToolClient(workingDirectoryProvider = { root })).handle(
-                    ResponseItem.FunctionCall(
+                    PendingImageViewToolEvent(
                         callId = "view_1",
-                        name = ViewImageTools.Name,
-                        arguments = """{"path":"missing.png"}""",
+                        arguments = ViewImageToolArguments(path = "missing.png"),
                     ),
-                ).first,
+                ),
             )
+            val failure = assertIs<StableImageViewResult.Failure>(completed.result)
 
-            assertEquals(false, result.output.success)
             assertEquals(
-                FunctionCallOutputBody.Text("image file does not exist: missing.png"),
-                result.output.body,
+                "image file does not exist: missing.png",
+                failure.message,
             )
         }
 

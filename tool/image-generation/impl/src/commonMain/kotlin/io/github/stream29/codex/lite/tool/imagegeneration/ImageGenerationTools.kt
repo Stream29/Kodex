@@ -1,18 +1,14 @@
 package io.github.stream29.codex.lite.tool.imagegeneration
 
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableImageGenerationRequest
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableImageGenerationResult
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
-import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
-import io.github.stream29.codex.lite.openai.FunctionCallOutputContentItem
-import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
-import io.github.stream29.codex.lite.openai.ImageDetail
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingImageGenerationToolEvent
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ToolSpec
-import io.github.stream29.codex.lite.tool.builder.functionOutputTool
 import io.github.stream29.codex.lite.tool.contract.Tool
+import io.github.stream29.codex.lite.tool.contract.typedTool
 import kotlinx.coroutines.CancellationException
 import kotlinx.io.files.Path
 
@@ -66,22 +62,21 @@ public object ImageGenerationTools {
         client: ImageGenerationToolClient,
         outputDirectory: Path,
     ): Tool =
-        functionOutputTool(
+        typedTool(
             spec = spec,
-            inputDeserializer = ImageGenToolArguments.serializer(),
-        ) { callId, arguments ->
-            val request = StableImageGenerationRequest.Tool(arguments)
+            select = { it as? PendingImageGenerationToolEvent },
+        ) { pending ->
             try {
-                val output = client.run(arguments)
+                val output = client.run(pending.arguments)
                 var savedPath: String? = null
                 val persistedOutput = try {
                     output.persistGeneratedImage(
                         outputDirectory = outputDirectory,
-                        callId = callId,
+                        callId = pending.callId,
                     ).also {
                         savedPath = Path(
                             outputDirectory,
-                            "${callId.toImageArtifactPathSegment()}.png",
+                            "${pending.callId.toImageArtifactPathSegment()}.png",
                         ).toString()
                     }
                 } catch (cancellation: CancellationException) {
@@ -89,8 +84,10 @@ public object ImageGenerationTools {
                 } catch (_: Exception) {
                     output
                 }
-                persistedOutput.toFunctionCallOutputPayload() to StableImageGenerationToolEvent(
-                    request = request,
+                StableImageGenerationToolEvent(
+                    callId = pending.callId,
+                    itemId = pending.itemId,
+                    arguments = pending.arguments,
                     result = StableImageGenerationResult.Success(
                         output = persistedOutput,
                         savedPath = savedPath,
@@ -98,11 +95,10 @@ public object ImageGenerationTools {
                 )
             } catch (error: ImageGenerationToolException) {
                 val message = error.message ?: "image_generation failed"
-                FunctionCallOutputPayload(
-                    body = FunctionCallOutputBody.Text(message),
-                    success = false,
-                ) to StableImageGenerationToolEvent(
-                    request = request,
+                StableImageGenerationToolEvent(
+                    callId = pending.callId,
+                    itemId = pending.itemId,
+                    arguments = pending.arguments,
                     result = StableImageGenerationResult.Failure(message),
                 )
             }
@@ -112,21 +108,6 @@ public object ImageGenerationTools {
     public fun outputDirectory(codexLiteHome: Path, sessionId: String): Path =
         Path(codexLiteHome, "generated_images", sessionId.toImageArtifactPathSegment())
 
-    private fun GeneratedImageOutput.toFunctionCallOutputPayload(): FunctionCallOutputPayload =
-        FunctionCallOutputPayload(
-            body = FunctionCallOutputBody.ContentItems(
-                buildList {
-                    add(
-                        FunctionCallOutputContentItem.InputImage(
-                            imageUrl = "data:image/png;base64,$result",
-                            detail = ImageDetail.High,
-                        ),
-                    )
-                    outputHint?.let { add(FunctionCallOutputContentItem.InputText(it)) }
-                },
-            ),
-            success = true,
-        )
 }
 
 internal fun String.toImageArtifactPathSegment(): String =

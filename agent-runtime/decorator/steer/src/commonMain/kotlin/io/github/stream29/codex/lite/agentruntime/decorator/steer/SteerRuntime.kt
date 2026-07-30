@@ -31,7 +31,7 @@ public class SteerRuntime internal constructor(
 }
 
 /**
- * Adds delivery for typed input inserted into the current logical turn.
+ * Adds delivery for clean input inserted into the current logical turn.
  *
  * Compose this after the compaction runtime and before tool handling.
  */

@@ -13,10 +13,13 @@ import io.github.stream29.codex.lite.agentstate.contract.canMarkNewTurn
 import io.github.stream29.codex.lite.agentstate.contract.canRequestResponseApi
 import io.github.stream29.codex.lite.agentstate.tool.toPendingToolEvent
 import io.github.stream29.codex.lite.agentstate.tool.visibleToolSpecs
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.codexRequestWindowId
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.toStableCleanEventOrNull
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingPlanUpdate
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
@@ -41,8 +44,6 @@ import io.github.stream29.codex.lite.openai.CompactionReason
 import io.github.stream29.codex.lite.openai.CompactionTrigger
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
-import io.github.stream29.codex.lite.openai.UpdatePlanArgs
-import io.github.stream29.codex.lite.openai.codexRequestWindowId
 import io.github.stream29.codex.lite.openai.client.contract.OpenAiClient
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
@@ -148,12 +149,33 @@ private class CodexAgentStateImpl(
     override fun requestResponseApi(): Flow<ResponsesStreamEvent> = flow {
         val previousState = state.value
         previousState.requireCanRequestResponseApi()
-        val request = ActiveRequest()
-        if (!state.compareAndSet(previousState, request.snapshot())) {
+        if (!state.compareAndSet(previousState, CodexAgentStateValue.RequestResponse.Started)) {
             throw CodexAgentStateInvalidTransitionException("start a response request", state.value)
         }
 
         try {
+            var streamingOutput: StreamingOutput? = null
+
+            suspend fun acceptResponseEvent(event: ResponsesStreamEvent) {
+                when (event) {
+                    is ResponsesStreamEvent.OutputItemAdded -> {
+                        val next = StreamingOutput(event.outputIndex, event.item)
+                        streamingOutput = next
+                        state.value = next.state
+                        next.emit(event)
+                    }
+
+                    else -> streamingOutput?.emit(event)
+                }
+            }
+
+            fun completeResponseOutput(outputIndex: Long) {
+                if (streamingOutput?.outputIndex == outputIndex) {
+                    streamingOutput = null
+                    state.value = CodexAgentStateValue.RequestResponse.Started
+                }
+            }
+
             val snapshotIndex = storage.latestIndex()
             check(snapshotIndex >= 0) { "Cannot request a response without initial state." }
 
@@ -192,17 +214,18 @@ private class CodexAgentStateImpl(
                 windowId = clientMetadata.windowId,
             ).collect { event ->
                 if (event !is ResponsesStreamEvent.OutputItemDone) {
-                    request.accept(event)
+                    acceptResponseEvent(event)
                 }
                 when (event) {
                     is ResponsesStreamEvent.OutputItemDone -> {
                         val historyItem = event.item as? ResponseItem.HistoryItem
                         if (historyItem != null) {
-                            appendHistoryItem(historyItem, now(), tokenCount = null)
+                            appendResponseHistoryItem(historyItem, now())
                         }
                     }
 
                     is ResponsesStreamEvent.Completed -> {
+                        storage.requireNoPendingServerToolSearch()
                         event.response.usage?.totalTokens?.let { tokenCount ->
                             appendTimestampAndTokenCount(tokenCount)
                         }
@@ -211,8 +234,8 @@ private class CodexAgentStateImpl(
                     else -> Unit
                 }
                 if (event is ResponsesStreamEvent.OutputItemDone) {
-                    request.accept(event)
-                    request.complete(event.outputIndex)
+                    acceptResponseEvent(event)
+                    completeResponseOutput(event.outputIndex)
                 }
                 emit(event)
             }
@@ -269,10 +292,8 @@ private class CodexAgentStateImpl(
                 windowId = clientMetadata.windowId,
             )
             storage.appendCompactionCheckpoint(
-                prefix = buildRemoteCompactionV2Prefix(input, result.compactionOutput),
-                marker = ResponseItem.ContextCompaction(
-                    encryptedContent = result.compactionOutput.encryptedContent,
-                ),
+                prefix = buildRemoteCompactionV2Prefix(input),
+                compaction = result.compactionOutput,
                 timestamp = now(),
                 tokenCount = result.completedResponse?.usage?.totalTokens,
                 previousCheckpoint = checkpoint,
@@ -281,8 +302,8 @@ private class CodexAgentStateImpl(
             ).also { latestIndex.value = it }
         }
 
-    override suspend fun injectHistory(items: List<ResponseItem.HistoryItem>): Int {
-        if (items.isEmpty()) {
+    override suspend fun injectHistory(events: List<StableCleanEvent>): Int {
+        if (events.isEmpty()) {
             return latestIndex.value
         }
         return mutate(
@@ -291,27 +312,15 @@ private class CodexAgentStateImpl(
         ) {
             val timestamp = now()
             val firstIndex = storage.latestIndex() + 1
-            var pendingSnapshot = storage.pendingToolsAt(firstIndex - 1)
-            val index = storage.history.revertWithTransaction(firstIndex) {
-                storage.stable.revertWithTransaction(firstIndex) {
-                    storage.unstable.revertWithTransaction(firstIndex) {
-                        storage.timestamp.revertWithTransaction(firstIndex) {
-                            var index = storage.latestIndex()
-                            for (item in items) {
-                                index += 1
-                                storage.history[index] = item
-                                item.toStableCleanEventOrNull()?.let { event ->
-                                    storage.stable[index] = event
-                                }
-                                item.pendingSnapshotAfter(pendingSnapshot)?.let { nextSnapshot ->
-                                    pendingSnapshot = nextSnapshot
-                                    storage.unstable[index] = nextSnapshot
-                                }
-                                storage.timestamp[index] = timestamp
-                            }
-                            index
-                        }
+            val index = storage.stable.revertWithTransaction(firstIndex) {
+                storage.timestamp.revertWithTransaction(firstIndex) {
+                    var index = storage.latestIndex()
+                    for (event in events) {
+                        index += 1
+                        storage.stable[index] = event
+                        storage.timestamp[index] = timestamp
                     }
+                    index
                 }
             }
             latestIndex.value = index
@@ -351,22 +360,14 @@ private class CodexAgentStateImpl(
             validate = CodexAgentStateValue::requireCanAppendUserMessage,
             inFlight = CodexAgentStateValue.ExternalWrite,
         ) {
-            val snapshotIndex = storage.latestIndex()
-            val item = ResponseItem.Message(
-                role = MessageRole.User,
-                content = content,
-            )
-            val firstIndex = snapshotIndex + 1
+            val firstIndex = storage.latestIndex() + 1
             val timestamp = now()
-            val stableEvent = checkNotNull(item.toStableCleanEventOrNull())
-            val index = storage.history.revertWithTransaction(firstIndex) {
-                storage.stable.revertWithTransaction(firstIndex) {
-                    storage.timestamp.revertWithTransaction(firstIndex) {
-                        storage.history[firstIndex] = item
-                        storage.stable[firstIndex] = stableEvent
-                        storage.timestamp[firstIndex] = timestamp
-                        firstIndex
-                    }
+            val stableEvent = StableCleanEvent.UserMessage(content)
+            val index = storage.stable.revertWithTransaction(firstIndex) {
+                storage.timestamp.revertWithTransaction(firstIndex) {
+                    storage.stable[firstIndex] = stableEvent
+                    storage.timestamp[firstIndex] = timestamp
+                    firstIndex
                 }
             }
             latestIndex.value = index
@@ -374,27 +375,25 @@ private class CodexAgentStateImpl(
             index
         }
 
-    override suspend fun completeToolCall(
-        output: ResponseItem.ToolCallOutput,
-        completed: StableCleanEvent.CompletedTool,
-    ): Int {
-        var pendingCalls = emptyList<ResponseItem.ToolCall>()
+    override suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int {
+        var pendingEvents = emptyList<PendingToolEvent>()
         return mutate(
             validate = { value ->
                 val pending = value.requireToolPending()
-                pendingCalls = pending.calls
+                pendingEvents = pending.events
             },
             inFlight = CodexAgentStateValue.ExternalWrite,
         ) {
-            pendingCalls.requireCall(output.callId)
-            val nextState = toolPendingState(pendingCalls.filterNot { call -> call.callId == output.callId })
+            val output = completed.requireProjectedOutput()
+            pendingEvents.requireEvent(output.callId)
+            val nextState = toolPendingState(
+                pendingEvents.filterNot { event -> event.callId == output.callId },
+            )
             val index = storage.latestIndex() + 1
-            val remainingPending = storage.pendingToolsWithout(index - 1, output.callId)
-            storage.history.setWithTransaction(index, output) {
-                storage.stable.setWithTransaction(index, completed) {
-                    storage.unstable.setWithTransaction(index, remainingPending) {
-                        storage.timestamp.setWithTransaction(index, now()) { index }
-                    }
+            val remainingPending = storage.unstableWithoutPendingToolCall(index - 1, output.callId)
+            storage.stable.setWithTransaction(index, completed) {
+                storage.unstable.setWithTransaction(index, remainingPending) {
+                    storage.timestamp.setWithTransaction(index, now()) { index }
                 }
             }
             latestIndex.value = index
@@ -403,35 +402,35 @@ private class CodexAgentStateImpl(
         }
     }
 
-    override suspend fun appendPlanUpdate(
-        output: ResponseItem.FunctionCallOutput,
-        plan: UpdatePlanArgs,
-    ): Int {
-        var pendingCalls = emptyList<ResponseItem.ToolCall>()
+    override suspend fun appendPlanUpdate(completed: StablePlanUpdate): Int {
+        var pendingEvents = emptyList<PendingToolEvent>()
         return mutate(
             validate = { value ->
                 val pending = value.requireToolPending()
-                pendingCalls = pending.calls
+                pendingEvents = pending.events
             },
             inFlight = CodexAgentStateValue.ExternalWrite,
         ) {
-            val pendingCall = pendingCalls.requireCall(output.callId)
-            require(pendingCall is ResponseItem.FunctionCall && pendingCall.name == "update_plan") {
+            val pending = pendingEvents.requireEvent(completed.callId)
+            require(pending is PendingPlanUpdate && pending.arguments == completed.arguments) {
                 "Plan updates can complete only a pending update_plan function call."
             }
             val currentSettings = storage.settings.latestValue()
             require(currentSettings.collaborationMode != ModeKind.Plan) {
                 "update_plan is a TODO/checklist tool and is not allowed in Plan mode."
             }
-            val nextState = toolPendingState(pendingCalls.filterNot { call -> call.callId == output.callId })
+            val nextState = toolPendingState(
+                pendingEvents.filterNot { event -> event.callId == completed.callId },
+            )
             val index = storage.latestIndex() + 1
-            val remainingPending = storage.pendingToolsWithout(index - 1, output.callId)
-            storage.settings.setWithTransaction(index, currentSettings.copy(plan = plan)) {
-                storage.history.setWithTransaction(index, output) {
-                    storage.stable.setWithTransaction(index, StablePlanUpdate) {
-                        storage.unstable.setWithTransaction(index, remainingPending) {
-                            storage.timestamp.setWithTransaction(index, now()) { index }
-                        }
+            val remainingPending = storage.unstableWithoutPendingToolCall(index - 1, completed.callId)
+            storage.settings.setWithTransaction(index, currentSettings.copy(plan = completed.arguments)) {
+                storage.stable.setWithTransaction(
+                    index,
+                    completed,
+                ) {
+                    storage.unstable.setWithTransaction(index, remainingPending) {
+                        storage.timestamp.setWithTransaction(index, now()) { index }
                     }
                 }
             }
@@ -456,27 +455,87 @@ private class CodexAgentStateImpl(
             index
         }
 
-    private suspend fun appendHistoryItem(
+    private suspend fun appendResponseHistoryItem(
         item: ResponseItem.HistoryItem,
         timestamp: Instant,
-        tokenCount: Long?,
+    ) {
+        when (item) {
+            is ResponseItem.ToolCall ->
+                appendPendingToolEvent(item.toPendingToolEvent(), timestamp)
+
+            is ResponseItem.ServerToolSearchCall ->
+                appendPendingServerToolSearch(item, timestamp)
+
+            is ResponseItem.ServerToolSearchOutput ->
+                appendServerToolSearchOutput(item, timestamp)
+
+            else ->
+                appendStableEvent(item.toIndependentStableCleanEvent(), timestamp)
+        }
+    }
+
+    private suspend fun appendStableEvent(
+        event: StableCleanEvent,
+        timestamp: Instant,
     ): Int {
         val index = storage.latestIndex() + 1
-        val stableEvent = item.toStableCleanEventOrNull()
-        val pendingSnapshot = item.pendingSnapshotAfter(storage.pendingToolsAt(index - 1))
-        if (tokenCount == null) {
-            storage.history.setWithTransaction(index, item) {
-                storage.setCleanTimelinesWithTransaction(index, stableEvent, pendingSnapshot) {
-                    storage.timestamp.setWithTransaction(index, timestamp) { index }
-                }
-            }
-        } else {
-            storage.tokenCount.setWithTransaction(index, tokenCount) {
-                storage.history.setWithTransaction(index, item) {
-                    storage.setCleanTimelinesWithTransaction(index, stableEvent, pendingSnapshot) {
-                        storage.timestamp.setWithTransaction(index, timestamp) { index }
-                    }
-                }
+        storage.stable.setWithTransaction(index, event) {
+            storage.timestamp.setWithTransaction(index, timestamp) { index }
+        }
+        latestIndex.value = index
+        return index
+    }
+
+    private suspend fun appendPendingToolEvent(
+        event: PendingToolEvent,
+        timestamp: Instant,
+    ): Int {
+        val index = storage.latestIndex() + 1
+        val current = storage.unstableEventsAt(index - 1)
+        require(current.filterIsInstance<PendingToolEvent>().none { pending -> pending.callId == event.callId }) {
+            "Duplicate pending tool call id: ${event.callId}"
+        }
+        storage.unstable.setWithTransaction(index, current + event) {
+            storage.timestamp.setWithTransaction(index, timestamp) { index }
+        }
+        latestIndex.value = index
+        return index
+    }
+
+    private suspend fun appendPendingServerToolSearch(
+        call: ResponseItem.ServerToolSearchCall,
+        timestamp: Instant,
+    ): Int {
+        val index = storage.latestIndex() + 1
+        val current = storage.unstableEventsAt(index - 1)
+        require(current.none { event -> event is PendingServerToolSearch }) {
+            "A server tool-search call is already waiting for its output."
+        }
+        storage.unstable.setWithTransaction(index, current + PendingServerToolSearch(call)) {
+            storage.timestamp.setWithTransaction(index, timestamp) { index }
+        }
+        latestIndex.value = index
+        return index
+    }
+
+    private suspend fun appendServerToolSearchOutput(
+        output: ResponseItem.ServerToolSearchOutput,
+        timestamp: Instant,
+    ): Int {
+        val index = storage.latestIndex() + 1
+        val current = storage.unstableEventsAt(index - 1)
+        val pending = current.filterIsInstance<PendingServerToolSearch>().singleOrNull()
+            ?: error("Server tool-search output has no preceding call.")
+        val remaining = current.toMutableList().also { events -> events.remove(pending) }
+        storage.stable.setWithTransaction(
+            index,
+            StableCleanEvent.ServerToolSearch(
+                call = pending.call,
+                output = output,
+            ),
+        ) {
+            storage.unstable.setWithTransaction(index, remaining) {
+                storage.timestamp.setWithTransaction(index, timestamp) { index }
             }
         }
         latestIndex.value = index
@@ -491,34 +550,7 @@ private class CodexAgentStateImpl(
         latestIndex.value = index
     }
 
-    private inner class ActiveRequest {
-        private var output: ActiveRequestOutput? = null
-
-        fun snapshot(): CodexAgentStateValue.RequestResponse =
-            CodexAgentStateValue.RequestResponse.Started
-
-        suspend fun accept(event: ResponsesStreamEvent) {
-            when (event) {
-                is ResponsesStreamEvent.OutputItemAdded -> {
-                    val next = ActiveRequestOutput(event.outputIndex, event.item)
-                    output = next
-                    state.value = next.state
-                    next.emit(event)
-                }
-
-                else -> output?.emit(event)
-            }
-        }
-
-        fun complete(outputIndex: Long) {
-            if (output?.outputIndex == outputIndex) {
-                output = null
-                state.value = snapshot()
-            }
-        }
-    }
-
-    private class ActiveRequestOutput(
+    private class StreamingOutput(
         val outputIndex: Long,
         item: ResponseItem,
     ) {
@@ -606,150 +638,142 @@ private fun CodexAgentStateValue.requireToolPending(): CodexAgentStateValue.Tool
 
 private suspend fun CodexAgentStorage.modelInputAt(index: Int): List<ResponseItem> {
     val checkpoint = compaction[index]
-    val items = checkpoint.prefix.toMutableList()
-    history.indexes(checkpoint.historyBaseIndex).collect { itemIndex ->
-        if (itemIndex <= index) {
-            items += history[itemIndex]
+    val items = checkpoint.toResponseHistoryItems().toMutableList<ResponseItem>()
+    stable.indexes(checkpoint.historyBaseIndex).collect { eventIndex ->
+        if (eventIndex <= index) {
+            items += stable[eventIndex].toResponseHistoryItems()
         }
     }
+    items += unstableEventsAt(index).flatMap(UnstableCleanEvent::toResponseHistoryItems)
     return items
 }
 
 /**
- * Derives the state from the active history tail at [index].
- *
- * A user, inter-Agent, Hook, assistant, or tool message ends the current
- * local-tool batch. A developer message is context-only, so this scans past it
- * and returns every unresolved call in chronological order.
+ * Derives the state from the clean stable history and unstable pending tail.
  */
 private suspend fun CodexAgentStorage.stateAt(index: Int): CodexAgentStateValue {
     if (index < 0) {
         return CodexAgentStateValue.Empty
     }
 
-    val checkpoint = compaction[index]
-    val completedToolCallIds = mutableSetOf<String>()
-    val pendingCallsReversed = mutableListOf<ResponseItem.ToolCall>()
-    var sawToolOutput = false
-    fun stateAfterReading(item: ResponseItem): CodexAgentStateValue? =
-        when (item) {
-            is ResponseItem.ToolCallOutput -> {
-                completedToolCallIds += item.callId
-                sawToolOutput = true
-                null
-            }
-
-            is ResponseItem.ToolCall -> {
-                if (completedToolCallIds.remove(item.callId)) {
-                    null
-                } else {
-                    pendingCallsReversed += item
-                    null
-                }
-            }
-
-            is ResponseItem.Message -> {
-                if (pendingCallsReversed.isNotEmpty()) {
-                    CodexAgentStateValue.ToolPending(pendingCallsReversed.asReversed().toList())
-                } else if (sawToolOutput) {
-                    CodexAgentStateValue.ToolCompleted
-                } else {
-                    when (item.role) {
-                        MessageRole.User -> CodexAgentStateValue.UserMessage
-                        MessageRole.Developer -> null
-                        MessageRole.Assistant -> CodexAgentStateValue.AssistantMessage
-                        MessageRole.Tool -> CodexAgentStateValue.ToolCompleted
-                    }
-                }
-            }
-
-            is ResponseItem.AgentMessage -> {
-                if (pendingCallsReversed.isNotEmpty()) {
-                    CodexAgentStateValue.ToolPending(pendingCallsReversed.asReversed().toList())
-                } else if (sawToolOutput) {
-                    CodexAgentStateValue.ToolCompleted
-                } else {
-                    CodexAgentStateValue.UserMessage
-                }
-            }
-
-            else -> null
-        }
-
-    var historyIndex = history.floorToIndex(index)
-    while (historyIndex != null && historyIndex >= checkpoint.historyBaseIndex) {
-        stateAfterReading(history[historyIndex])?.let { return it }
-        historyIndex = history.prevIndex(historyIndex)
+    val pending = pendingToolEventsAt(index)
+    if (pending.isNotEmpty()) {
+        return CodexAgentStateValue.ToolPending(pending)
     }
 
-    for (item in checkpoint.prefix.asReversed()) {
-        stateAfterReading(item)?.let { return it }
+    var eventIndex = stable.floorToIndex(index)
+    while (eventIndex != null) {
+        stable[eventIndex].toAgentStateValueOrNull()?.let { return it }
+        eventIndex = stable.prevIndex(eventIndex)
     }
-    return when {
-        pendingCallsReversed.isNotEmpty() ->
-            CodexAgentStateValue.ToolPending(pendingCallsReversed.asReversed().toList())
 
-        sawToolOutput -> CodexAgentStateValue.ToolCompleted
-        else -> CodexAgentStateValue.Empty
+    for (event in compaction[index].prefix.asReversed()) {
+        event.toAgentStateValueOrNull()?.let { return it }
     }
+    return CodexAgentStateValue.Empty
 }
 
-private fun List<ResponseItem.ToolCall>.requireCall(callId: String): ResponseItem.ToolCall =
-    firstOrNull { call -> call.callId == callId }
+private fun StableCleanEvent.toAgentStateValueOrNull(): CodexAgentStateValue? =
+    when (this) {
+        is StableCleanEvent.UserMessage,
+        is StableCleanEvent.AgentMessage,
+        -> CodexAgentStateValue.UserMessage
+
+        is StableCleanEvent.AssistantMessage ->
+            CodexAgentStateValue.AssistantMessage
+
+        is StableCleanEvent.CompletedTool ->
+            CodexAgentStateValue.ToolCompleted
+
+        is StableCleanEvent.DeveloperMessage,
+        is StableCleanEvent.Reasoning,
+        StableCleanEvent.ContextCompaction,
+        -> null
+    }
+
+private fun List<PendingToolEvent>.requireEvent(callId: String): PendingToolEvent =
+    firstOrNull { event -> event.callId == callId }
         ?: throw IllegalArgumentException("Tool output does not match a pending call id: $callId")
 
-private suspend fun CodexAgentStorage.pendingToolsWithout(
+private suspend fun CodexAgentStorage.unstableWithoutPendingToolCall(
     index: Int,
     callId: String,
-): List<PendingToolEvent> {
-    val pending = pendingToolsAt(index)
-    if (pending.isNotEmpty()) {
-        require(pending.any { event -> event.callId == callId }) {
-            "Unstable clean timeline does not contain pending call id: $callId"
-        }
+): List<UnstableCleanEvent> {
+    val events = unstableEventsAt(index)
+    require(events.filterIsInstance<PendingToolEvent>().any { event -> event.callId == callId }) {
+        "Unstable clean timeline does not contain pending call id: $callId"
     }
-    return pending.filterNot { event -> event.callId == callId }
+    return events.filterNot { event -> event is PendingToolEvent && event.callId == callId }
 }
 
-private suspend fun CodexAgentStorage.pendingToolsAt(index: Int): List<PendingToolEvent> =
+private suspend fun CodexAgentStorage.unstableEventsAt(index: Int): List<UnstableCleanEvent> =
     if (unstable.floorToIndex(index) == null) emptyList() else unstable[index]
 
-private fun ResponseItem.HistoryItem.pendingSnapshotAfter(
-    current: List<PendingToolEvent>,
-): List<PendingToolEvent>? =
+private suspend fun CodexAgentStorage.pendingToolEventsAt(index: Int): List<PendingToolEvent> =
+    unstableEventsAt(index).filterIsInstance<PendingToolEvent>()
+
+private suspend fun CodexAgentStorage.requireNoPendingServerToolSearch() {
+    check(unstableEventsAt(latestIndex()).none { event -> event is PendingServerToolSearch }) {
+        "Server tool-search call completed without an output."
+    }
+}
+
+private fun ResponseItem.HistoryItem.toIndependentStableCleanEvent(): StableCleanEvent =
     when (this) {
-        is ResponseItem.ToolCall -> current + toPendingToolEvent()
-        is ResponseItem.ToolCallOutput -> current.filterNot { event -> event.callId == callId }
-        else -> null
-    }
+        is ResponseItem.Message ->
+            when (role) {
+                MessageRole.User -> StableCleanEvent.UserMessage(content)
+                MessageRole.Developer -> StableCleanEvent.DeveloperMessage(content)
+                MessageRole.Assistant -> StableCleanEvent.AssistantMessage(
+                    content = content,
+                    id = id,
+                    phase = phase,
+                )
 
-private suspend inline fun <T> MutableCodexAgentStorage.setCleanTimelinesWithTransaction(
-    index: Int,
-    stableEvent: StableCleanEvent?,
-    pendingSnapshot: List<PendingToolEvent>?,
-    block: () -> T,
-): T =
-    if (stableEvent == null) {
-        if (pendingSnapshot == null) {
-            block()
-        } else {
-            unstable.setWithTransaction(index, pendingSnapshot, block)
-        }
-    } else {
-        stable.setWithTransaction(index, stableEvent) {
-            if (pendingSnapshot == null) {
-                block()
-            } else {
-                unstable.setWithTransaction(index, pendingSnapshot, block)
+                MessageRole.Tool ->
+                    error("Tool-role messages are not part of the clean history model.")
             }
-        }
+
+        is ResponseItem.AgentMessage ->
+            StableCleanEvent.AgentMessage(
+                author = author,
+                recipient = recipient,
+                content = content,
+            )
+
+        is ResponseItem.Reasoning ->
+            StableCleanEvent.Reasoning(this)
+
+        is ResponseItem.WebSearchCall ->
+            StableCleanEvent.WebSearchCall(this)
+
+        is ResponseItem.ImageGenerationCall ->
+            StableCleanEvent.ImageGenerationCall(this)
+
+        is ResponseItem.ToolCall,
+        is ResponseItem.ToolCallOutput,
+        is ResponseItem.ServerToolSearchCall,
+        is ResponseItem.ServerToolSearchOutput,
+        is ResponseItem.LocalShellCall,
+        is ResponseItem.Compaction,
+        is ResponseItem.CompactionSummary,
+        is ResponseItem.ContextCompaction,
+        -> error("Response item ${this::class.simpleName} requires a dedicated clean-history path.")
     }
 
-private fun toolPendingState(calls: List<ResponseItem.ToolCall>): CodexAgentStateValue {
-    return if (calls.isEmpty()) {
+private fun StableCleanEvent.CompletedTool.requireProjectedOutput(): ResponseItem.ToolCallOutput =
+    toResponseHistoryItems()
+        .filterIsInstance<ResponseItem.ToolCallOutput>()
+        .singleOrNull()
+        ?: throw IllegalArgumentException(
+            "Completed local tool events must project exactly one tool output.",
+        )
+
+private fun toolPendingState(events: List<PendingToolEvent>): CodexAgentStateValue {
+    return if (events.isEmpty()) {
         CodexAgentStateValue.ToolCompleted
     } else {
-        CodexAgentStateValue.ToolPending(calls)
+        CodexAgentStateValue.ToolPending(events)
     }
 }
 

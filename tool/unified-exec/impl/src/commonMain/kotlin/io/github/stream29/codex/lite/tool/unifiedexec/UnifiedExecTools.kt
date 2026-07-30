@@ -3,14 +3,13 @@ package io.github.stream29.codex.lite.tool.unifiedexec
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCommandExecutionResult
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
-import io.github.stream29.codex.lite.openai.ResponseItem
-import io.github.stream29.codex.lite.tool.builder.JsonToolHandlerResult
-import io.github.stream29.codex.lite.tool.builder.jsonTool
-import io.github.stream29.codex.lite.tool.builder.jsonToolFailure
-import io.github.stream29.codex.lite.tool.builder.jsonToolSuccess
 import io.github.stream29.codex.lite.tool.contract.Tool
-import io.github.stream29.codex.lite.tool.contract.ToolCallResult
+import io.github.stream29.codex.lite.tool.contract.typedTool
 
 public object UnifiedExecTools {
     public const val ExecCommandName: String = "exec_command"
@@ -43,31 +42,63 @@ public object UnifiedExecTools {
     public fun createTools(client: UnifiedExecToolClient): List<Tool> =
         listOf(
             CloseableUnifiedExecTool(
-                delegate = jsonTool(
+                delegate = typedTool(
                     spec = execCommandSpec,
-                    inputDeserializer = ExecCommandArguments.serializer(),
-                    outputSerializer = UnifiedExecOutput.serializer(),
-                    completedEvent = ExecCommandArguments::completedEvent,
-                ) { arguments ->
+                    select = { event ->
+                        (event as? PendingCommandExecutionToolEvent)
+                            ?.takeIf { it.action is PendingCommandExecutionAction.ExecCommand }
+                    },
+                ) { pending ->
+                    val action = pending.action as PendingCommandExecutionAction.ExecCommand
                     try {
-                        jsonToolSuccess(client.execCommand(arguments))
+                        StableCommandExecutionToolEvent(
+                            callId = pending.callId,
+                            itemId = pending.itemId,
+                            action = StableCommandExecutionAction.ExecCommand(action.arguments),
+                            result = StableCommandExecutionResult.Output(
+                                client.execCommand(action.arguments),
+                            ),
+                        )
                     } catch (failure: UnifiedExecToolException) {
-                        jsonToolFailure(failure.message ?: "exec_command failed.")
+                        StableCommandExecutionToolEvent(
+                            callId = pending.callId,
+                            itemId = pending.itemId,
+                            action = StableCommandExecutionAction.ExecCommand(action.arguments),
+                            result = StableCommandExecutionResult.Failure(
+                                failure.message ?: "exec_command failed.",
+                            ),
+                        )
                     }
                 },
                 client = client,
             ),
             CloseableUnifiedExecTool(
-                delegate = jsonTool(
+                delegate = typedTool(
                     spec = writeStdinSpec,
-                    inputDeserializer = WriteStdinArguments.serializer(),
-                    outputSerializer = UnifiedExecOutput.serializer(),
-                    completedEvent = WriteStdinArguments::completedEvent,
-                ) { arguments ->
+                    select = { event ->
+                        (event as? PendingCommandExecutionToolEvent)
+                            ?.takeIf { it.action is PendingCommandExecutionAction.WriteStdin }
+                    },
+                ) { pending ->
+                    val action = pending.action as PendingCommandExecutionAction.WriteStdin
                     try {
-                        jsonToolSuccess(client.writeStdin(arguments))
+                        StableCommandExecutionToolEvent(
+                            callId = pending.callId,
+                            itemId = pending.itemId,
+                            action = StableCommandExecutionAction.WriteStdin(action.arguments),
+                            result = StableCommandExecutionResult.Output(
+                                client.writeStdin(action.arguments),
+                            ),
+                        )
                     } catch (failure: UnifiedExecToolException) {
-                        jsonToolFailure(failure.message ?: "write_stdin failed.")
+                        StableCommandExecutionToolEvent(
+                            callId = pending.callId,
+                            itemId = pending.itemId,
+                            action = StableCommandExecutionAction.WriteStdin(action.arguments),
+                            result = StableCommandExecutionResult.Failure(
+                                failure.message ?: "write_stdin failed.",
+                            ),
+                        )
                     }
                 },
                 client = client,
@@ -82,32 +113,10 @@ private class CloseableUnifiedExecTool(
     override val spec: ResponsesApiTool
         get() = delegate.spec as ResponsesApiTool
 
-    override suspend fun handle(call: ResponseItem.ToolCall): ToolCallResult =
-        delegate.handle(call)
+    override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool =
+        delegate.handle(pending)
 
     override fun close() {
         client.close()
     }
 }
-
-private fun ExecCommandArguments.completedEvent(
-    result: JsonToolHandlerResult<UnifiedExecOutput>,
-): StableCommandExecutionToolEvent =
-    StableCommandExecutionToolEvent(
-        action = StableCommandExecutionAction.ExecCommand(this),
-        result = result.toStableResult(),
-    )
-
-private fun WriteStdinArguments.completedEvent(
-    result: JsonToolHandlerResult<UnifiedExecOutput>,
-): StableCommandExecutionToolEvent =
-    StableCommandExecutionToolEvent(
-        action = StableCommandExecutionAction.WriteStdin(this),
-        result = result.toStableResult(),
-    )
-
-private fun JsonToolHandlerResult<UnifiedExecOutput>.toStableResult(): StableCommandExecutionResult =
-    when (this) {
-        is JsonToolHandlerResult.Failure -> StableCommandExecutionResult.Failure(message)
-        is JsonToolHandlerResult.Success -> StableCommandExecutionResult.Output(value)
-    }

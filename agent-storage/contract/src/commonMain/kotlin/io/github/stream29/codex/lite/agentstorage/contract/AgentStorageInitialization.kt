@@ -1,7 +1,7 @@
 package io.github.stream29.codex.lite.agentstorage.contract
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.CleanCompactionCheckpoint
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
-import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -18,7 +18,7 @@ public suspend fun MutableCodexAgentStorage.initialize(initialSettings: CodexAge
     val windowId = Uuid.generateV7().toString()
     compaction.setWithTransaction(
         index = 0,
-        value = CompactionCheckpoint(
+        value = CleanCompactionCheckpoint(
             prefix = emptyList(),
             historyBaseIndex = 0,
             windowNumber = 0,

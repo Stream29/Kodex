@@ -1,29 +1,47 @@
 package io.github.stream29.codex.lite.tool.contract
 
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.openai.ToolSpec
-import io.github.stream29.codex.lite.openai.ResponseItem
-
-/**
- * Raw model-facing output paired with its completed clean projection.
- */
-public typealias ToolCallResult =
-    Pair<ResponseItem.ToolCallOutput, StableCleanEvent.CompletedTool>
 
 /**
  * Non-generic executable tool contract used by the agent loop.
  *
- * Tool implementations may use typed DTOs internally. The public boundary uses
- * OpenAI protocol DTOs so agent-loop state can persist calls and results
- * without depending on a tool module's private business model. Implementations
- * own their close behavior because handlers may hold resources.
- *
- * `ClientToolSearchCall` shares the generic [ResponseItem.ToolCall] lifecycle,
- * but runtime reserves it for deferred-tool search and never passes it to a
- * [Tool].
+ * The public boundary uses durable clean models. Implementations own their
+ * close behavior because handlers may hold resources.
  */
 public interface Tool : AutoCloseable {
     public val spec: ToolSpec
 
-    public suspend fun handle(call: ResponseItem.ToolCall): ToolCallResult
+    /**
+     * Executes [pending] and returns its sole canonical completion.
+     *
+     * The returned event owns the model-facing call/output projection. Runtime
+     * consumers must derive protocol items from it instead of maintaining a
+     * second raw output representation.
+     */
+    public suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool
 }
+
+/**
+ * Creates a resource-free [Tool] that accepts one concrete pending clean-event
+ * shape. [select] keeps the downcast at the contract boundary so tool business
+ * logic receives its typed pending model directly.
+ */
+public fun <Pending : PendingToolEvent> typedTool(
+    spec: ToolSpec,
+    select: (PendingToolEvent) -> Pending?,
+    handler: suspend (Pending) -> StableCleanEvent.CompletedTool,
+): Tool =
+    object : Tool {
+        override val spec: ToolSpec = spec
+
+        override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool {
+            val typedPending = requireNotNull(select(pending)) {
+                "Tool $spec cannot handle pending event ${pending::class.simpleName}."
+            }
+            return handler(typedPending)
+        }
+
+        override fun close(): Unit = Unit
+    }

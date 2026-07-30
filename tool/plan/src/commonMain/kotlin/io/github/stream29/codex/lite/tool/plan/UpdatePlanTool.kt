@@ -2,13 +2,12 @@ package io.github.stream29.codex.lite.tool.plan
 
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
-import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
-import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.tool.builder.ToolBuilderJson
-import io.github.stream29.codex.lite.tool.builder.functionOutputTool
 import io.github.stream29.codex.lite.tool.contract.Tool
+import io.github.stream29.codex.lite.tool.contract.typedTool
 import kotlinx.serialization.json.encodeToJsonElement
 
 /**
@@ -19,28 +18,30 @@ import kotlinx.serialization.json.encodeToJsonElement
  * not append the returned output again when the call is no longer pending.
  */
 public fun CodexAgentState.updatePlanTool(): Tool =
-    functionOutputTool(
+    typedTool(
         spec = PlanTools.spec,
-        inputDeserializer = UpdatePlanArgs.serializer(),
-    ) { callId, plan ->
-        val output = FunctionCallOutputPayload.fromText("Plan updated").copy(success = true)
+        select = { it as? PendingPlanUpdate },
+    ) { pending ->
+        val completed = StablePlanUpdate(
+            callId = pending.callId,
+            itemId = pending.itemId,
+            arguments = pending.arguments,
+        )
         try {
-            appendPlanUpdate(
-                output = ResponseItem.FunctionCallOutput(
-                    callId = callId,
-                    output = output,
-                ),
-                plan = plan,
-            )
-            output to StablePlanUpdate
+            appendPlanUpdate(completed)
+            completed
         } catch (error: IllegalArgumentException) {
             val message = error.message ?: "update_plan failed"
-            FunctionCallOutputPayload.fromText(message).copy(success = false) to
-                StableTextToolEvent(
-                    name = "update_plan",
-                    arguments = ToolBuilderJson.encodeToJsonElement(UpdatePlanArgs.serializer(), plan),
-                    result = message,
-                    success = false,
-                )
+            StableTextToolEvent(
+                callId = pending.callId,
+                itemId = pending.itemId,
+                name = PlanTools.Name,
+                arguments = ToolBuilderJson.encodeToJsonElement(
+                    UpdatePlanArgs.serializer(),
+                    pending.arguments,
+                ),
+                result = message,
+                success = false,
+            )
         }
     }

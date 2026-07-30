@@ -2,12 +2,22 @@ package io.github.stream29.codex.lite.agentstate.tool
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingFunctionArguments
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingImageGenerationRequest
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingImageGenerationToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingImageViewToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMultiAgentInvocation
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolInvocation
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingWebSearchRequest
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMultiAgentToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
 import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.openai.ResponseItemId
 import io.github.stream29.codex.lite.openai.SearchCommands
 import io.github.stream29.codex.lite.openai.SearchQuery
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
@@ -26,7 +36,6 @@ import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.codex.lite.tool.requestuserinput.RequestUserInputTools
 import io.github.stream29.codex.lite.tool.toolsearch.SearchToolCallParams
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchExecution
 import io.github.stream29.codex.lite.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecTools
 import io.github.stream29.codex.lite.tool.unifiedexec.WriteStdinArguments
@@ -39,9 +48,10 @@ import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 
 val pendingToolEventProjectionTest by testSuite {
-    test("projects specialized function calls with their contract arguments") {
+    test("projects specialized function calls into direct pending branches") {
         val exec = ExecCommandArguments(command = "./gradlew check", workdir = "CodexLite")
         val write = WriteStdinArguments(sessionId = 7, chars = "\u0003")
         val web = SearchCommands(searchQuery = listOf(SearchQuery("Kotlin serialization")))
@@ -56,106 +66,134 @@ val pendingToolEventProjectionTest by testSuite {
                 ),
             ),
         )
-        val cases = listOf(
+        val cases: List<Pair<ResponseItem.FunctionCall, PendingToolEvent>> = listOf(
             functionCall(
                 UnifiedExecTools.ExecCommandName,
                 ExecCommandArguments.serializer(),
                 exec,
-            ) to PendingToolInvocation.CommandExecution(
-                PendingCommandExecutionAction.ExecCommand(exec),
+            ) to PendingCommandExecutionToolEvent(
+                callId = "call_${UnifiedExecTools.ExecCommandName}",
+                itemId = ItemId,
+                action = PendingCommandExecutionAction.ExecCommand(exec),
             ),
             functionCall(
                 UnifiedExecTools.WriteStdinName,
                 WriteStdinArguments.serializer(),
                 write,
-            ) to PendingToolInvocation.CommandExecution(
-                PendingCommandExecutionAction.WriteStdin(write),
+            ) to PendingCommandExecutionToolEvent(
+                callId = "call_${UnifiedExecTools.WriteStdinName}",
+                itemId = ItemId,
+                action = PendingCommandExecutionAction.WriteStdin(write),
             ),
             functionCall(
                 WebRunToolName,
                 SearchCommands.serializer(),
                 web,
                 namespace = WebRunNamespace,
-            ) to PendingToolInvocation.WebSearch(PendingWebSearchRequest.WebRun(web)),
+            ) to PendingWebSearchToolEvent(
+                callId = "call_$WebRunToolName",
+                itemId = ItemId,
+                commands = web,
+            ),
             functionCall(
                 ImageGenToolName,
                 ImageGenToolArguments.serializer(),
                 imageGeneration,
                 namespace = ImageGenNamespace,
-            ) to PendingToolInvocation.ImageGeneration(
-                PendingImageGenerationRequest.Tool(imageGeneration),
+            ) to PendingImageGenerationToolEvent(
+                callId = "call_$ImageGenToolName",
+                itemId = ItemId,
+                arguments = imageGeneration,
             ),
             functionCall(
                 ViewImageTools.Name,
                 ViewImageToolArguments.serializer(),
                 imageView,
-            ) to PendingToolInvocation.ImageView(imageView),
+            ) to PendingImageViewToolEvent(
+                callId = "call_${ViewImageTools.Name}",
+                itemId = ItemId,
+                arguments = imageView,
+            ),
             functionCall(
                 RequestUserInputTools.Name,
                 RequestUserInputArgs.serializer(),
                 requestUserInput,
-            ) to PendingToolInvocation.RequestUserInput(requestUserInput),
+            ) to PendingRequestUserInputToolEvent(
+                callId = "call_${RequestUserInputTools.Name}",
+                itemId = ItemId,
+                arguments = requestUserInput,
+            ),
         )
 
-        cases.forEach { (call, invocation) ->
-            val event = call.toPendingToolEvent()
-
-            assertEquals(call.callId, event.callId)
-            assertEquals(invocation, event.invocation)
+        cases.forEach { (call, expected) ->
+            assertEquals(expected, call.toPendingToolEvent())
+            val projected = assertIs<ResponseItem.FunctionCall>(
+                expected.toResponseHistoryItems().single(),
+            )
+            assertEquals(call.id, projected.id)
+            assertEquals(call.callId, projected.callId)
+            assertEquals(call.name, projected.name)
+            assertEquals(call.namespace, projected.namespace)
+            assertEquals(expected, projected.toPendingToolEvent())
         }
     }
 
-    test("projects every multi-agent call with its contract arguments") {
-        val spawn = SpawnAgentArgs("review", "Review this change.")
-        val send = SendMessageArgs("/root/review", "Focus on the model.")
-        val followup = FollowupTaskArgs("/root/review", "Continue.")
-        val wait = WaitAgentArgs(timeoutMs = 30_000)
-        val interrupt = InterruptAgentArgs("/root/review")
-        val list = ListAgentsArgs("/root")
+    test("projects every multi-agent call with its typed operation") {
         val cases = listOf(
-            functionCall(
+            multiAgentCase(
                 MultiAgentTools.SpawnAgentName,
                 SpawnAgentArgs.serializer(),
-                spawn,
-            ) to PendingMultiAgentInvocation.SpawnAgent(spawn),
-            functionCall(
+                SpawnAgentArgs("review", "Review this change."),
+                PendingMultiAgentInvocation::SpawnAgent,
+            ),
+            multiAgentCase(
                 MultiAgentTools.SendMessageName,
                 SendMessageArgs.serializer(),
-                send,
-            ) to PendingMultiAgentInvocation.SendMessage(send),
-            functionCall(
+                SendMessageArgs("/root/review", "Focus on the model."),
+                PendingMultiAgentInvocation::SendMessage,
+            ),
+            multiAgentCase(
                 MultiAgentTools.FollowupTaskName,
                 FollowupTaskArgs.serializer(),
-                followup,
-            ) to PendingMultiAgentInvocation.FollowupTask(followup),
-            functionCall(
+                FollowupTaskArgs("/root/review", "Continue."),
+                PendingMultiAgentInvocation::FollowupTask,
+            ),
+            multiAgentCase(
                 MultiAgentTools.WaitAgentName,
                 WaitAgentArgs.serializer(),
-                wait,
-            ) to PendingMultiAgentInvocation.WaitAgent(wait),
-            functionCall(
+                WaitAgentArgs(timeoutMs = 30_000),
+                PendingMultiAgentInvocation::WaitAgent,
+            ),
+            multiAgentCase(
                 MultiAgentTools.InterruptAgentName,
                 InterruptAgentArgs.serializer(),
-                interrupt,
-            ) to PendingMultiAgentInvocation.InterruptAgent(interrupt),
-            functionCall(
+                InterruptAgentArgs("/root/review"),
+                PendingMultiAgentInvocation::InterruptAgent,
+            ),
+            multiAgentCase(
                 MultiAgentTools.ListAgentsName,
                 ListAgentsArgs.serializer(),
-                list,
-            ) to PendingMultiAgentInvocation.ListAgents(list),
+                ListAgentsArgs("/root"),
+                PendingMultiAgentInvocation::ListAgents,
+            ),
         )
 
         cases.forEach { (call, operation) ->
             assertEquals(
-                PendingToolInvocation.MultiAgent(operation),
-                call.toPendingToolEvent().invocation,
+                PendingMultiAgentToolEvent(
+                    callId = call.callId,
+                    itemId = call.id,
+                    operation = operation,
+                ),
+                call.toPendingToolEvent(),
             )
         }
     }
 
-    test("projects client tool search and apply patch without field mapping") {
+    test("projects client tool search and apply patch with call metadata") {
         val searchArguments = SearchToolCallParams("connected drive tools", limit = 3)
         val searchCall = ResponseItem.ClientToolSearchCall(
+            id = ItemId,
             callId = "call_search",
             arguments = OpenAiJsonCodec.encodeToJsonElement(
                 SearchToolCallParams.serializer(),
@@ -168,61 +206,81 @@ val pendingToolEventProjectionTest by testSuite {
             *** End Patch
         """.trimIndent()
         val patchCall = ResponseItem.CustomToolCall(
+            id = ItemId,
             callId = "call_patch",
             name = ApplyPatchTools.Name,
             input = patchText,
         )
 
         assertEquals(
-            PendingToolInvocation.ToolSearch(
-                execution = ToolSearchExecution.Client,
-                arguments = searchArguments,
-            ),
-            searchCall.toPendingToolEvent().invocation,
+            PendingToolSearchEvent("call_search", ItemId, searchArguments),
+            searchCall.toPendingToolEvent(),
         )
         assertEquals(
-            PendingToolInvocation.ApplyPatch(patchText.parsePatch()),
-            patchCall.toPendingToolEvent().invocation,
+            PendingPatchToolEvent("call_patch", ItemId, patchText.parsePatch()),
+            patchCall.toPendingToolEvent(),
         )
     }
 
-    test("falls back losslessly when a specialized call cannot be decoded") {
+    test("routes parse failures to pending invalid tool call") {
         val call = ResponseItem.FunctionCall(
+            id = ItemId,
             callId = "call_invalid",
             name = UnifiedExecTools.ExecCommandName,
             arguments = """{"cmd":""",
         )
 
+        val event = assertIs<PendingInvalidToolCall>(call.toPendingToolEvent())
+        assertEquals(call.callId, event.callId)
+        assertEquals(call.id, event.itemId)
         assertEquals(
-            PendingToolInvocation.Function(
-                name = UnifiedExecTools.ExecCommandName,
-                arguments = PendingFunctionArguments.InvalidJson(call.arguments),
+            PendingInvalidToolInvocation.Function(
+                name = call.name,
+                arguments = call.arguments,
             ),
-            call.toPendingToolEvent().invocation,
+            event.invocation,
         )
+        assertEquals(listOf(call), event.toResponseHistoryItems())
     }
 
-    test("retains dynamic function namespace and JSON arguments") {
-        val arguments = buildJsonObject {
-            put("query", "design context")
-        }
-        val call = ResponseItem.FunctionCall(
+    test("distinguishes dynamic function and MCP calls after JSON parsing") {
+        val arguments = buildJsonObject { put("query", "design context") }
+        val function = ResponseItem.FunctionCall(
+            id = ItemId,
             callId = "call_dynamic",
             namespace = "google_drive",
             name = "search",
             arguments = arguments.toString(),
         )
+        val mcp = function.copy(
+            callId = "call_mcp",
+            namespace = "mcp__google_drive",
+        )
 
         assertEquals(
-            PendingToolInvocation.Function(
-                name = call.name,
-                namespace = call.namespace,
-                arguments = PendingFunctionArguments.Json(arguments),
+            PendingFunctionToolEvent(
+                callId = function.callId,
+                itemId = function.id,
+                name = function.name,
+                namespace = function.namespace,
+                arguments = arguments,
             ),
-            call.toPendingToolEvent().invocation,
+            function.toPendingToolEvent(),
+        )
+        assertEquals(
+            PendingMcpToolEvent(
+                callId = mcp.callId,
+                itemId = mcp.id,
+                name = mcp.name,
+                namespace = checkNotNull(mcp.namespace),
+                arguments = arguments,
+            ),
+            mcp.toPendingToolEvent(),
         )
     }
 }
+
+private val ItemId: ResponseItemId = ResponseItemId("item_1")
 
 private fun <Arguments> functionCall(
     name: String,
@@ -231,8 +289,17 @@ private fun <Arguments> functionCall(
     namespace: String? = null,
 ): ResponseItem.FunctionCall =
     ResponseItem.FunctionCall(
+        id = ItemId,
         callId = "call_$name",
         namespace = namespace,
         name = name,
         arguments = OpenAiJsonCodec.encodeToString(serializer, arguments),
     )
+
+private fun <Arguments> multiAgentCase(
+    name: String,
+    serializer: SerializationStrategy<Arguments>,
+    arguments: Arguments,
+    operation: (Arguments) -> PendingMultiAgentInvocation,
+): Pair<ResponseItem.FunctionCall, PendingMultiAgentInvocation> =
+    functionCall(name, serializer, arguments) to operation(arguments)

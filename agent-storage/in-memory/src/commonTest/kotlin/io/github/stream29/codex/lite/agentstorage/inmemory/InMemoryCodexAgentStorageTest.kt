@@ -1,11 +1,10 @@
 package io.github.stream29.codex.lite.agentstorage.inmemory
 
 import de.infix.testBalloon.framework.core.testSuite
-
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableContextCompaction
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.CleanCompactionCheckpoint
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolInvocation
 import io.github.stream29.codex.lite.agentstorage.contract.appendCompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.ceilToIndex
 import io.github.stream29.codex.lite.agentstorage.contract.floorToIndex
@@ -20,14 +19,9 @@ import io.github.stream29.codex.lite.agentstorage.contract.revert
 import io.github.stream29.codex.lite.agentstorage.contract.revertWithTransaction
 import io.github.stream29.codex.lite.agentstorage.contract.setWithTransaction
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
-import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.openai.ContentItem
-import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.OpenAiModelId
-import io.github.stream29.codex.lite.openai.PlanItemArg
 import io.github.stream29.codex.lite.openai.ResponseItem
-import io.github.stream29.codex.lite.openai.StepStatus
-import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
@@ -49,485 +43,230 @@ private fun settings(model: String): CodexAgentSettings =
         turnId = "turn-$model",
     )
 
-private fun plan(
-    step: String,
-    status: StepStatus,
-): UpdatePlanArgs =
-    UpdatePlanArgs(
-        explanation = "plan update",
-        plan = listOf(PlanItemArg(step, status)),
-    )
-
 private fun timestamp(seconds: Long): Instant =
     Instant.fromEpochSeconds(seconds)
 
-private fun checkpoint(
-    prefix: List<ResponseItem.HistoryItem> = emptyList(),
-    historyBaseIndex: Int = 0,
-    windowNumber: Long = 0,
-    firstWindowId: String = "window-0",
-    previousWindowId: String? = null,
-    windowId: String = firstWindowId,
-): CompactionCheckpoint =
-    CompactionCheckpoint(
-        prefix = prefix,
-        historyBaseIndex = historyBaseIndex,
-        windowNumber = windowNumber,
-        firstWindowId = firstWindowId,
-        previousWindowId = previousWindowId,
-        windowId = windowId,
-    )
+private fun userMessage(text: String): StableCleanEvent.UserMessage =
+    StableCleanEvent.UserMessage(listOf(ContentItem.InputText(text)))
 
-private fun userMessage(text: String): ResponseItem.Message =
-    ResponseItem.Message(
-        role = MessageRole.User,
-        content = listOf(ContentItem.InputText(text)),
-    )
-
-private fun assistantMessage(text: String): ResponseItem.Message =
-    ResponseItem.Message(
-        role = MessageRole.Assistant,
-        content = listOf(ContentItem.OutputText(text)),
-    )
+private fun assistantMessage(text: String): StableCleanEvent.AssistantMessage =
+    StableCleanEvent.AssistantMessage(listOf(ContentItem.OutputText(text)))
 
 private fun pendingTool(callId: String): PendingToolEvent =
-    PendingToolEvent(
+    PendingCustomToolEvent(
         callId = callId,
-        invocation = PendingToolInvocation.Custom(
-            name = "tool-$callId",
-            input = "input-$callId",
-        ),
+        name = "tool-$callId",
+        input = "input-$callId",
     )
 
 val inMemoryCodexAgentStorageTest by testSuite {
-    test("storage identity is stable per instance") {
+    test("construction publishes a clean initial snapshot with stable identity") {
         val first = storage()
         val second = storage()
 
         assertEquals(first.id, first.id)
         assertNotEquals(first.id, second.id)
+        assertEquals(0, first.latestIndex())
+        assertEquals(settings("initial-model"), first.settings.latestValue())
+        assertEquals(emptyList(), first.compaction[0].prefix)
+        assertEquals(null, first.compaction[0].compaction)
+        assertEquals(0, first.compaction[0].historyBaseIndex)
+        assertEquals(0L, first.compaction[0].windowNumber)
+        assertEquals(-1, first.stable.latestIndex())
+        assertEquals(-1, first.unstable.latestIndex())
     }
 
-    test("construction publishes a legal initial snapshot") {
-        val storage = storage()
-
-        assertEquals(0, storage.latestIndex())
-        assertEquals(settings("initial-model"), storage.settings[0])
-        assertEquals(settings("initial-model"), storage.settings.latestValue())
-        assertEquals(emptyList(), storage.compaction[0].prefix)
-        assertEquals(0, storage.compaction[0].historyBaseIndex)
-        assertEquals(0L, storage.compaction[0].windowNumber)
-        assertEquals(-1, storage.history.latestIndex())
-        assertEquals(-1, storage.stable.latestIndex())
-        assertEquals(-1, storage.unstable.latestIndex())
-    }
-
-    test("history uses sparse timeline and rejects non tail writes") {
+    test("stable timeline is sparse and rejects non-tail writes") {
         val storage = storage()
         val first = userMessage("first")
         val second = assistantMessage("second")
 
-        assertEquals(-1, storage.history.latestIndex())
+        storage.stable[1] = first
+        storage.stable[3] = second
 
-        storage.history[0] = first
-        storage.history[3] = second
-
-        assertEquals(3, storage.history.latestIndex())
-        assertEquals(first, storage.history[0])
-        assertEquals(first, storage.history[2])
-        assertEquals(second, storage.history[3])
-        assertEquals(null, storage.history.floorToIndex(-1))
-        assertEquals(0, storage.history.floorToIndex(0))
-        assertEquals(0, storage.history.floorToIndex(2))
-        assertEquals(3, storage.history.floorToIndex(3))
-        assertEquals(0, storage.history.ceilToIndex(-1))
-        assertEquals(0, storage.history.ceilToIndex(0))
-        assertEquals(3, storage.history.ceilToIndex(1))
-        assertEquals(null, storage.history.ceilToIndex(4))
-        assertEquals(3, storage.history.nextIndex(0))
-        assertEquals(null, storage.history.nextIndex(3))
-        assertEquals(0, storage.history.prevIndex(3))
-        assertEquals(null, storage.history.prevIndex(0))
-        assertEquals(listOf(0, 3), storage.history.indexes().toList())
-        assertEquals(listOf(3), storage.history.indexes(from = 1).toList())
-        assertEquals(listOf(3, 0), storage.history.indexesDescending(from = 3).toList())
-        assertEquals(listOf(0), storage.history.indexesDescending(from = 2).toList())
+        assertEquals(3, storage.stable.latestIndex())
+        assertEquals(first, storage.stable[2])
+        assertEquals(second, storage.stable[3])
+        assertEquals(null, storage.stable.floorToIndex(0))
+        assertEquals(1, storage.stable.floorToIndex(2))
+        assertEquals(3, storage.stable.ceilToIndex(2))
+        assertEquals(3, storage.stable.nextIndex(1))
+        assertEquals(1, storage.stable.prevIndex(3))
+        assertEquals(listOf(1, 3), storage.stable.indexes().toList())
+        assertEquals(listOf(3, 1), storage.stable.indexesDescending(3).toList())
         assertFailsWith<IllegalArgumentException> {
-            storage.history[1] = userMessage("overwrite")
+            storage.stable[2] = userMessage("overwrite")
         }
-        assertEquals(listOf(0, 3), storage.history.indexes().toList())
     }
 
-    test("clean timelines support out-of-order tool completion") {
+    test("unstable snapshots preserve pending order and allow out-of-order completion") {
         val storage = storage()
-        val first = pendingTool("call-a")
-        val second = pendingTool("call-b")
-        val completedSecond = StableAssistantMessage("completed-b")
-        val completedFirst = StableAssistantMessage("completed-a")
+        val first = pendingTool("first")
+        val second = pendingTool("second")
 
-        storage.unstable[1] = listOf(first, second)
-        storage.stable[2] = completedSecond
-        storage.unstable[2] = listOf(first)
-        storage.stable[3] = completedFirst
-        storage.unstable[3] = emptyList()
+        storage.unstable[1] = listOf(first)
+        storage.unstable[2] = listOf(first, second)
+        storage.stable[3] = assistantMessage("second completed")
+        storage.unstable[3] = listOf(first)
+        storage.stable[4] = assistantMessage("first completed")
+        storage.unstable[4] = emptyList()
 
-        assertEquals(listOf(2, 3), storage.stable.indexes().toList())
-        assertEquals(completedSecond, storage.stable[2])
-        assertEquals(completedFirst, storage.stable[3])
-        assertEquals(listOf(1, 2, 3), storage.unstable.indexes().toList())
-        assertEquals(listOf(first, second), storage.unstable[1])
-        assertEquals(listOf(first), storage.unstable[2])
-        assertEquals(emptyList(), storage.unstable[3])
+        assertEquals(listOf(first, second), storage.unstable[2])
+        assertEquals(listOf(first), storage.unstable[3])
+        assertEquals(emptyList(), storage.unstable[4])
     }
 
-    test("revert removes stored suffix and allows appending again") {
+    test("timeline revert removes suffix and permits replacement") {
         val storage = storage()
         val first = userMessage("first")
-        val replacement = assistantMessage("replacement")
 
-        storage.history[0] = first
-        storage.history[3] = assistantMessage("third")
-        storage.history[5] = assistantMessage("fifth")
+        storage.stable[1] = first
+        storage.stable[3] = assistantMessage("third")
+        storage.stable.revert(3)
 
-        storage.history.revert(untilExclusive = 3)
-
-        assertEquals(0, storage.history.latestIndex())
-        assertEquals(listOf(0), storage.history.indexes().toList())
-        assertEquals(first, storage.history[8])
-
-        storage.history[3] = replacement
-        assertEquals(listOf(0, 3), storage.history.indexes().toList())
-        assertEquals(replacement, storage.history[3])
-
-        storage.history.revert(untilExclusive = 4)
-        assertEquals(listOf(0, 3), storage.history.indexes().toList())
-
-        storage.history.revert(untilExclusive = 0)
-        assertEquals(-1, storage.history.latestIndex())
-        assertEquals(emptyList(), storage.history.indexes().toList())
+        assertEquals(listOf(1), storage.stable.indexes().toList())
+        assertEquals(first, storage.stable[8])
+        storage.stable[3] = assistantMessage("replacement")
+        assertEquals(listOf(1, 3), storage.stable.indexes().toList())
     }
 
-    test("set transaction compensates its appended entry on failure") {
+    test("set transaction compensates its own and nested timeline entries") {
         val storage = storage()
-        val first = userMessage("first")
-        storage.history[0] = first
+        storage.stable[1] = userMessage("initial")
 
         assertFailsWith<IllegalStateException> {
-            storage.history.setWithTransaction(2, assistantMessage("temporary")) {
-                error("fail transaction")
-            }
-        }
-
-        assertEquals(0, storage.history.latestIndex())
-        assertEquals(listOf(0), storage.history.indexes().toList())
-        assertEquals(first, storage.history[2])
-    }
-
-    test("nested set transactions compensate every timeline on failure") {
-        val initialSettings = settings("initial-model")
-        val storage = storage(initialSettings)
-        val initialCheckpoint = storage.compaction[0]
-        val initialTimestamp = timestamp(0)
-        val initialMessage = userMessage("initial")
-        storage.timestamp[0] = initialTimestamp
-        storage.tokenCount[0] = 10
-        storage.history[0] = initialMessage
-
-        assertFailsWith<IllegalStateException> {
-            storage.settings.setWithTransaction(2, settings("temporary-model")) {
-                storage.compaction.setWithTransaction(2, checkpoint(windowNumber = 1, windowId = "window-1")) {
-                    storage.timestamp.setWithTransaction(2, timestamp(2)) {
-                        storage.tokenCount.setWithTransaction(2, 20) {
-                            storage.stable.setWithTransaction(2, StableAssistantMessage("temporary")) {
-                                storage.unstable.setWithTransaction(2, listOf(pendingTool("temporary"))) {
-                                    storage.history.setWithTransaction(2, assistantMessage("temporary")) {
-                                        error("fail transaction")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        assertEquals(0, storage.latestIndex())
-        assertEquals(initialSettings, storage.settings[2])
-        assertEquals(initialCheckpoint, storage.compaction[2])
-        assertEquals(initialTimestamp, storage.timestamp[2])
-        assertEquals(10, storage.tokenCount[2])
-        assertEquals(initialMessage, storage.history[2])
-        assertEquals(-1, storage.stable.latestIndex())
-        assertEquals(-1, storage.unstable.latestIndex())
-    }
-
-    test("nested set transactions compensate every timeline on cancellation") {
-        val storage = storage()
-        storage.timestamp[0] = timestamp(0)
-        storage.tokenCount[0] = 10
-        storage.history[0] = userMessage("initial")
-
-        val transaction = launch(start = CoroutineStart.UNDISPATCHED) {
-            storage.settings.setWithTransaction(2, settings("temporary-model")) {
+            storage.stable.setWithTransaction(2, assistantMessage("temporary")) {
                 storage.timestamp.setWithTransaction(2, timestamp(2)) {
-                    storage.history.setWithTransaction(2, assistantMessage("temporary")) {
-                        awaitCancellation()
-                    }
+                    error("boom")
                 }
             }
         }
 
-        transaction.cancelAndJoin()
+        assertEquals(listOf(1), storage.stable.indexes().toList())
+        assertEquals(-1, storage.timestamp.latestIndex())
+    }
 
-        assertEquals(0, storage.latestIndex())
-        assertEquals(listOf(0), storage.settings.indexes().toList())
-        assertEquals(listOf(0), storage.timestamp.indexes().toList())
-        assertEquals(listOf(0), storage.history.indexes().toList())
+    test("set transaction compensates cancellation") {
+        val storage = storage()
+        val job = launch(start = CoroutineStart.UNDISPATCHED) {
+            storage.stable.setWithTransaction(1, userMessage("temporary")) {
+                storage.timestamp.setWithTransaction(1, timestamp(1)) {
+                    awaitCancellation()
+                }
+            }
+        }
+
+        job.cancelAndJoin()
+
+        assertEquals(-1, storage.stable.latestIndex())
+        assertEquals(-1, storage.timestamp.latestIndex())
     }
 
     test("revert transaction restores the original suffix on failure") {
         val storage = storage()
         val first = userMessage("first")
         val third = assistantMessage("third")
-        storage.history[1] = first
-        storage.history[3] = third
+        storage.stable[1] = first
+        storage.stable[3] = third
 
         assertFailsWith<IllegalStateException> {
-            storage.history.revertWithTransaction(1) {
-                storage.history[2] = assistantMessage("replacement")
-                error("fail replacement")
+            storage.stable.revertWithTransaction(2) {
+                storage.stable[2] = assistantMessage("replacement")
+                error("boom")
             }
         }
 
-        assertEquals(listOf(1, 3), storage.history.indexes().toList())
-        assertEquals(first, storage.history[1])
-        assertEquals(third, storage.history[3])
+        assertEquals(listOf(1, 3), storage.stable.indexes().toList())
+        assertEquals(first, storage.stable[1])
+        assertEquals(third, storage.stable[3])
     }
 
-    test("storage revert removes every timeline suffix") {
-        val initialSettings = settings("initial-model")
-        val storage = storage(initialSettings)
-        val initialCheckpoint = storage.compaction[0]
-        val updatedSettings = settings("updated-model")
-        val updatedCheckpoint = checkpoint(
-            historyBaseIndex = 2,
-            windowNumber = 1,
-            firstWindowId = initialCheckpoint.firstWindowId,
-            previousWindowId = initialCheckpoint.windowId,
-            windowId = "window-1",
-        )
-
-        storage.history[1] = userMessage("first")
-        storage.timestamp[1] = timestamp(1)
-        storage.tokenCount[1] = 10
-        storage.stable[1] = StableAssistantMessage("first")
-        storage.unstable[1] = listOf(pendingTool("call-a"))
-        storage.settings[2] = updatedSettings
-        storage.compaction[2] = updatedCheckpoint
-        storage.history[3] = assistantMessage("later")
+    test("storage revert removes every clean timeline suffix") {
+        val storage = storage()
+        storage.stable[1] = userMessage("first")
+        storage.unstable[2] = listOf(pendingTool("call"))
         storage.timestamp[3] = timestamp(3)
-        storage.tokenCount[3] = 30
-        storage.stable[3] = StableAssistantMessage("later")
-        storage.unstable[3] = emptyList()
+        storage.tokenCount[4] = 40L
+        storage.settings[5] = settings("later")
 
-        storage.revert(untilExclusive = 2)
+        storage.revert(2)
 
-        assertEquals(1, storage.latestIndex())
-        assertEquals(listOf(1), storage.history.indexes().toList())
-        assertEquals(listOf(0), storage.settings.indexes().toList())
-        assertEquals(listOf(0), storage.compaction.indexes().toList())
-        assertEquals(listOf(1), storage.timestamp.indexes().toList())
-        assertEquals(listOf(1), storage.tokenCount.indexes().toList())
         assertEquals(listOf(1), storage.stable.indexes().toList())
-        assertEquals(listOf(1), storage.unstable.indexes().toList())
-        assertEquals(initialSettings, storage.settings[1])
-        assertEquals(initialCheckpoint, storage.compaction[1])
-        assertEquals(timestamp(1), storage.timestamp[1])
-        assertEquals(10, storage.tokenCount[1])
-        assertEquals(StableAssistantMessage("first"), storage.stable[1])
-        assertEquals(listOf(pendingTool("call-a")), storage.unstable[1])
+        assertEquals(-1, storage.unstable.latestIndex())
+        assertEquals(-1, storage.timestamp.latestIndex())
+        assertEquals(-1, storage.tokenCount.latestIndex())
+        assertEquals(0, storage.settings.latestIndex())
     }
 
-    test("sparse timelines return active value at requested index") {
-        val initialSettings = settings("initial-model").copy(plan = plan("inspect", StepStatus.Pending))
-        val storage = storage(initialSettings)
-        val updatedSettings = settings("updated-model").copy(plan = plan("implement", StepStatus.InProgress))
-        val initialTimestamp = timestamp(1)
-        val updatedTimestamp = timestamp(3)
-
-        storage.settings[3] = updatedSettings
-        storage.timestamp[0] = initialTimestamp
-        storage.timestamp[3] = updatedTimestamp
-        storage.tokenCount[0] = 10
-        storage.tokenCount[3] = 30
-
-        assertEquals(3, storage.settings.latestIndex())
-        assertEquals(initialSettings, storage.settings[0])
-        assertEquals(initialSettings, storage.settings[2])
-        assertEquals(updatedSettings, storage.settings[3])
-        assertEquals(updatedSettings, storage.settings[8])
-        assertEquals(updatedSettings, storage.settings.latestValue())
-        assertEquals(listOf(0, 3), storage.settings.indexes().toList())
-        assertEquals(listOf(3), storage.settings.indexes(from = 1).toList())
-        assertFailsWith<IllegalArgumentException> {
-            storage.settings[3] = settings("overwrite")
-        }
-
-        assertEquals(initialSettings.plan, storage.settings[2].plan)
-        assertEquals(updatedSettings.plan, storage.settings[8].plan)
-
-        assertEquals(3, storage.timestamp.latestIndex())
-        assertEquals(initialTimestamp, storage.timestamp[2])
-        assertEquals(updatedTimestamp, storage.timestamp[8])
-
-        assertEquals(3, storage.tokenCount.latestIndex())
-        assertEquals(10, storage.tokenCount[2])
-        assertEquals(30, storage.tokenCount[8])
-    }
-
-    test("sparse timeline rejects reads before first stored index") {
+    test("global index helpers merge the six timelines") {
         val storage = storage()
+        storage.stable[2] = userMessage("two")
+        storage.timestamp[4] = timestamp(4)
+        storage.unstable[6] = listOf(pendingTool("six"))
 
-        storage.history[2] = assistantMessage("summary")
-
-        assertFailsWith<IllegalArgumentException> {
-            storage.history[1]
-        }
-        assertEquals(2, storage.history.latestIndex())
-        assertEquals(listOf(2), storage.history.indexes().toList())
+        assertEquals(6, storage.latestIndex())
+        assertEquals(4, storage.floorToIndex(5))
+        assertEquals(6, storage.ceilToIndex(5))
+        assertEquals(6, storage.nextIndex(4))
+        assertEquals(4, storage.prevIndex(6))
     }
 
-    test("storage latest index uses common state index") {
-        val storage = storage()
+    test("fork resets target and copies only indexes below boundary") {
+        val source = storage(settings("source"))
+        val target = storage(settings("target"))
+        source.stable[1] = userMessage("first")
+        source.unstable[2] = listOf(pendingTool("pending"))
+        source.stable[3] = assistantMessage("future")
+        target.stable[1] = userMessage("stale")
 
-        assertEquals(0, storage.latestIndex())
-        assertEquals(0, storage.floorToIndex(0))
-        assertEquals(0, storage.ceilToIndex(0))
-        assertEquals(null, storage.nextIndex(0))
+        source.forkTo(until = 3, target = target)
 
-        storage.history[1] = userMessage("hello")
-        assertEquals(1, storage.latestIndex())
-        assertEquals(1, storage.nextIndex(0))
-        assertEquals(0, storage.prevIndex(1))
-
-        storage.tokenCount[1] = 10
-        storage.timestamp[1] = timestamp(1)
-        assertEquals(1, storage.latestIndex())
-
-        storage.settings[2] = settings("future-model")
-        storage.tokenCount[2] = 30
-        assertEquals(2, storage.latestIndex())
-        assertEquals(2, storage.nextIndex(1))
-        assertEquals(1, storage.prevIndex(2))
-
-        storage.timestamp[2] = timestamp(2)
-        assertEquals(2, storage.latestIndex())
-
-        storage.stable[3] = StableAssistantMessage("clean")
-        storage.unstable[3] = listOf(pendingTool("call-a"))
-        assertEquals(3, storage.latestIndex())
-        assertEquals(3, storage.nextIndex(2))
-        assertEquals(2, storage.prevIndex(3))
-
-        storage.history[4] = assistantMessage("future history")
-        assertEquals(4, storage.latestIndex())
-        assertEquals(4, storage.nextIndex(3))
-        assertEquals(3, storage.prevIndex(4))
-        assertEquals(null, storage.nextIndex(4))
-    }
-
-    test("fork resets target before copying") {
-        val oldPlan = plan("old step", StepStatus.Completed)
-        val oldSettings = settings("old-model").copy(plan = oldPlan)
-        val source = storage(oldSettings)
-        val target = storage(settings("target-model"))
-        val newSettings = settings("new-model")
-
-        source.history[1] = userMessage("first")
-        source.timestamp[1] = timestamp(1)
-        source.tokenCount[1] = 10
-        source.stable[1] = StableAssistantMessage("first")
-        source.unstable[1] = listOf(pendingTool("call-a"))
-        source.settings[2] = newSettings
-        source.history[2] = assistantMessage("second")
-
-        target.history[1] = userMessage("stale")
-        target.stable[1] = StableAssistantMessage("stale")
-        target.settings[2] = settings("stale-model")
-        target.tokenCount[2] = 999
-        target.unstable[2] = listOf(pendingTool("stale"))
-
-        source.forkTo(until = 2, target = target)
-
-        assertEquals(1, target.latestIndex())
-        assertEquals(userMessage("first"), target.history[1])
-        assertEquals(userMessage("first"), target.history[2])
-        assertEquals(oldSettings, target.settings[2])
-        assertEquals(oldPlan, target.settings[1].plan)
-        assertEquals(timestamp(1), target.timestamp[1])
-        assertEquals(10, target.tokenCount[1])
-        assertEquals(listOf(0), target.settings.indexes().toList())
-        assertEquals(listOf(0), target.compaction.indexes().toList())
-        assertEquals(listOf(1), target.history.indexes().toList())
-        assertEquals(listOf(1), target.timestamp.indexes().toList())
-        assertEquals(listOf(1), target.tokenCount.indexes().toList())
+        assertEquals(settings("source"), target.settings[0])
+        assertEquals(userMessage("first"), target.stable[1])
+        assertEquals(listOf(pendingTool("pending")), target.unstable[2])
         assertEquals(listOf(1), target.stable.indexes().toList())
-        assertEquals(listOf(1), target.unstable.indexes().toList())
-        assertEquals(StableAssistantMessage("first"), target.stable[1])
-        assertEquals(listOf(pendingTool("call-a")), target.unstable[1])
-    }
-
-    test("fork rejects an empty target snapshot") {
-        val source = storage()
-        val target = storage()
-
         assertFailsWith<IllegalArgumentException> {
             source.forkTo(until = 0, target = target)
         }
     }
 
-    test("append compaction checkpoint publishes shared storage transition") {
+    test("append compaction checkpoint stores replacement data exactly once") {
         val storage = storage()
-        val prefix = listOf(userMessage("summary"))
-        val marker = ResponseItem.ContextCompaction(encryptedContent = "encrypted")
-        val transitionTime = timestamp(4)
-        val previousCheckpoint = CompactionCheckpoint(
-            prefix = emptyList(),
-            historyBaseIndex = 0,
-            windowNumber = 6,
-            firstWindowId = "window-0",
-            previousWindowId = "window-5",
-            windowId = "window-6",
-        )
-        val settings = settings("test-model")
+        val previous = storage.compaction[0]
+        val retained = listOf(userMessage("retained"))
+        val compaction = ResponseItem.Compaction(encryptedContent = "encrypted")
+        val nextSettings = settings("next")
 
         val index = storage.appendCompactionCheckpoint(
-            prefix = prefix,
-            marker = marker,
-            timestamp = transitionTime,
-            tokenCount = 42,
-            previousCheckpoint = previousCheckpoint,
-            nextWindowId = "window-7",
-            settings = settings,
+            prefix = retained,
+            compaction = compaction,
+            timestamp = timestamp(10),
+            tokenCount = 99L,
+            previousCheckpoint = previous,
+            nextWindowId = "window-1",
+            settings = nextSettings,
         )
 
         assertEquals(1, index)
-        assertEquals(1, storage.latestIndex())
-        assertEquals(marker, storage.history[1])
         assertEquals(
-            CompactionCheckpoint(
-                prefix = prefix,
+            CleanCompactionCheckpoint(
+                prefix = retained,
+                compaction = compaction,
                 historyBaseIndex = 2,
-                windowNumber = 7,
-                firstWindowId = "window-0",
-                previousWindowId = "window-6",
-                windowId = "window-7",
+                windowNumber = 1,
+                firstWindowId = previous.firstWindowId,
+                previousWindowId = previous.windowId,
+                windowId = "window-1",
             ),
-            storage.compaction[1],
+            storage.compaction[index],
         )
-        assertEquals(transitionTime, storage.timestamp[1])
-        assertEquals(42, storage.tokenCount[1])
-        assertEquals(settings, storage.settings[1])
-        assertEquals(StableContextCompaction, storage.stable[1])
+        assertEquals(StableCleanEvent.ContextCompaction, storage.stable[index])
+        assertEquals(nextSettings, storage.settings[index])
+        assertEquals(99L, storage.tokenCount[index])
+        assertEquals(timestamp(10), storage.timestamp[index])
+        assertEquals(
+            retained.flatMap(StableCleanEvent::toResponseHistoryItems) + compaction,
+            storage.compaction[index].toResponseHistoryItems(),
+        )
     }
 }

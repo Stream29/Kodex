@@ -16,6 +16,9 @@ public data class PendingImageViewToolEvent(
     override val itemId: ResponseItemId? = null,
     public val arguments: ViewImageToolArguments,
 ) : PendingToolEvent {
+    override val toolName: String = "view_image"
+    override val toolNamespace: String? = null
+
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             pendingFunctionCall(

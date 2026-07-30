@@ -5,18 +5,20 @@ import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
 import io.github.stream29.codex.lite.agentsession.inmemory.InMemoryCodexSessionRepository
 import io.github.stream29.codex.lite.agentsession.test.testCodexAgentDependencies
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolInvocation
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.codex.lite.agentstorage.contract.forkTo
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
-import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.openai.ResponseItemId
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.codex.lite.utils.filesystemlease.FileSystemLeaseInUseException
 import kotlinx.coroutines.flow.toList
@@ -25,6 +27,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -43,19 +47,16 @@ private fun settings(
 ): CodexAgentSettings =
     CodexAgentSettings(model = OpenAiModelId("test-model"), cwd = cwd, threadName = name)
 
-private fun userMessage(text: String): ResponseItem.Message =
-    ResponseItem.Message(
-        role = MessageRole.User,
+private fun userMessage(text: String): StableCleanEvent.UserMessage =
+    StableCleanEvent.UserMessage(
         content = listOf(ContentItem.InputText(text)),
     )
 
 private fun pendingTool(callId: String): PendingToolEvent =
-    PendingToolEvent(
+    PendingCustomToolEvent(
         callId = callId,
-        invocation = PendingToolInvocation.Custom(
-            name = "tool-$callId",
-            input = "input-$callId",
-        ),
+        name = "tool-$callId",
+        input = "input-$callId",
     )
 
 private suspend fun CodexAgentSession.spawnInitialized(name: String): CodexAgentSession =
@@ -97,17 +98,27 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
             val session = repository.open(index)
             val storageId = session.storage.id
             val timestamp = Instant.parse("2026-07-22T00:00:00Z")
-            val stableEvent = StableAssistantMessage("persisted clean event")
-            val pendingEvent = pendingTool("call-persisted")
-            session.storage.history[1] = userMessage("persisted")
+            val stableEvent = StableCleanEvent.AssistantMessage(
+                listOf(ContentItem.OutputText("persisted clean event")),
+            )
+            val pendingEvents: List<UnstableCleanEvent> = listOf(
+                pendingTool("call-persisted"),
+                PendingServerToolSearch(
+                    ResponseItem.ServerToolSearchCall(
+                        id = ResponseItemId("server-tool-search"),
+                        arguments = buildJsonObject {
+                            put("query", "connected drive tools")
+                        },
+                    ),
+                ),
+            )
             session.storage.timestamp[1] = timestamp
             session.storage.stable[1] = stableEvent
-            session.storage.unstable[1] = listOf(pendingEvent)
+            session.storage.unstable[1] = pendingEvents
 
             val directory = Path(root, "sessions/0")
             assertEquals(
                 setOf(
-                    "history",
                     "compaction",
                     "settings",
                     "timestamp",
@@ -129,10 +140,9 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
             val reopened = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
             val reopenedSession = reopened.open(index)
             assertEquals(storageId, reopenedSession.storage.id)
-            assertEquals(userMessage("persisted"), reopenedSession.storage.history[1])
             assertEquals(cwd, reopenedSession.storage.settings[0].cwd)
             assertEquals(stableEvent, reopenedSession.storage.stable[1])
-            assertEquals(listOf(pendingEvent), reopenedSession.storage.unstable[1])
+            assertEquals(pendingEvents, reopenedSession.storage.unstable[1])
             reopened.closeAndJoin()
         }
 
@@ -228,8 +238,8 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
                 target.storage.settings[latest].copy(threadName = "[fork] Source"),
             )
 
-            assertEquals(listOf(1), target.storage.history.indexes().toList())
-            assertEquals(userMessage("copied"), target.storage.history[1])
+            assertEquals(listOf(1), target.storage.stable.indexes().toList())
+            assertEquals(userMessage("copied"), target.storage.stable[1])
             assertEquals("[fork] Source", target.storage.settings[2].threadName)
             assertEquals(sourceCwd, target.storage.settings[2].cwd)
             assertEquals(emptyList(), target.subagents.list())

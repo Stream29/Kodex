@@ -5,12 +5,13 @@ import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
 import io.github.stream29.codex.lite.agentstate.test.TestMcpService
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
-import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.PlanItemArg
 import io.github.stream29.codex.lite.openai.Response
@@ -66,17 +67,19 @@ val updatePlanToolTest by testSuite {
             state.appendUserMessage(listOf(ContentItem.InputText("Update the plan.")))
             state.requestResponseApi().toList()
 
-            val output = assertIs<ResponseItem.FunctionCallOutput>(
-                state.updatePlanTool().handle(call).first,
+            val pending = assertIs<PendingPlanUpdate>(
+                assertIs<CodexAgentStateValue.ToolPending>(state.state.value).events.single(),
             )
+            val completed = assertIs<StablePlanUpdate>(state.updatePlanTool().handle(pending))
 
-            assertEquals(FunctionCallOutputBody.Text("Plan updated"), output.output.body)
+            assertEquals(StablePlanUpdate(callId = call.callId, arguments = plan), completed)
             assertEquals(plan, state.storage.settings.latestValue().plan)
             assertEquals(CodexAgentStateValue.ToolCompleted, state.state.value)
-            val outputs = state.storage.history.indexes().toList()
-                .map { index -> state.storage.history[index] }
-                .filterIsInstance<ResponseItem.FunctionCallOutput>()
-            assertEquals(listOf(output), outputs)
+            val persisted = state.storage.stable.indexes().toList()
+                .map { index -> state.storage.stable[index] }
+                .filterIsInstance<StablePlanUpdate>()
+                .single()
+            assertEquals(completed, persisted)
         }
     }
 }

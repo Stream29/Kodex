@@ -1,11 +1,10 @@
 package io.github.stream29.codex.lite.agentstorage.filesystem
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.CleanCompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
-import io.github.stream29.codex.lite.openai.CompactionCheckpoint
-import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -15,7 +14,7 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.serializer
 import kotlin.time.Instant
 
-/** Unowned direct view of the seven timelines stored under one thread directory. */
+/** Unowned direct view of the six timelines stored under one thread directory. */
 public class FileSystemAgentStorage internal constructor(
     public val directory: Path,
     fileSystem: CoroutineFileSystem,
@@ -23,17 +22,10 @@ public class FileSystemAgentStorage internal constructor(
 ) : MutableCodexAgentStorage {
     override val id: String = "filesystem:$directory"
 
-    override val history: FileSystemIndexVersioned<ResponseItem.HistoryItem> =
-        FileSystemIndexVersioned(
-            Path(directory, HistoryDirectory),
-            ResponseItem.HistoryItem.serializer(),
-            OpenAiJsonCodec,
-            fileSystem,
-        )
-    override val compaction: FileSystemIndexVersioned<CompactionCheckpoint> =
+    override val compaction: FileSystemIndexVersioned<CleanCompactionCheckpoint> =
         FileSystemIndexVersioned(
             Path(directory, CompactionDirectory),
-            CompactionCheckpoint.serializer(),
+            CleanCompactionCheckpoint.serializer(),
             OpenAiJsonCodec,
             fileSystem,
         )
@@ -65,10 +57,10 @@ public class FileSystemAgentStorage internal constructor(
             OpenAiJsonCodec,
             fileSystem,
         )
-    override val unstable: FileSystemIndexVersioned<List<PendingToolEvent>> =
+    override val unstable: FileSystemIndexVersioned<List<UnstableCleanEvent>> =
         FileSystemIndexVersioned(
             Path(directory, UnstableDirectory),
-            ListSerializer(PendingToolEvent.serializer()),
+            ListSerializer(UnstableCleanEvent.serializer()),
             OpenAiJsonCodec,
             fileSystem,
         )
@@ -89,7 +81,6 @@ public suspend fun FileSystemAgentStorage(
     )
 }
 
-internal const val HistoryDirectory: String = "history"
 internal const val CompactionDirectory: String = "compaction"
 internal const val SettingsDirectory: String = "settings"
 internal const val TimestampDirectory: String = "timestamp"
@@ -98,7 +89,6 @@ internal const val StableDirectory: String = "stable"
 internal const val UnstableDirectory: String = "unstable"
 
 internal val TimelineDirectories: List<String> = listOf(
-    HistoryDirectory,
     CompactionDirectory,
     SettingsDirectory,
     TimestampDirectory,

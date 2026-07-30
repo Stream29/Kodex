@@ -4,8 +4,8 @@ package io.github.stream29.codex.lite.tool.currenttime
 
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
-import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.tool.builder.ToolBuilderJson
 import kotlinx.serialization.encodeToString
@@ -13,6 +13,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 val currentTimeToolsTest by testSuite {
@@ -40,16 +41,17 @@ val currentTimeToolsTest by testSuite {
         val fixedClock = object : Clock {
             override fun now(): Instant = Instant.parse("2026-07-16T08:09:10Z")
         }
-        val output = CurrentTimeTools.createTool(CurrentTimeToolClient(fixedClock)).handle(
-            ResponseItem.FunctionCall(
+        val completed = assertIs<StableTextToolEvent>(
+            CurrentTimeTools.createTool(CurrentTimeToolClient(fixedClock)).handle(
+                PendingFunctionToolEvent(
                 name = CurrentTimeToolName,
                 namespace = CurrentTimeNamespace,
-                arguments = "{}",
+                arguments = ToolBuilderJson.parseToJsonElement("{}"),
                 callId = "call_1",
             ),
-        ).first as ResponseItem.FunctionCallOutput
+            ),
+        )
 
-        val body = output.output.body as FunctionCallOutputBody.Text
-        assertEquals("It is 2026-07-16 08:09:10 UTC.", body.text)
+        assertEquals("It is 2026-07-16 08:09:10 UTC.", completed.result)
     }
 }

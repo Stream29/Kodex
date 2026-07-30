@@ -1,14 +1,13 @@
 package io.github.stream29.codex.lite.agentsession.filesystem
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.CleanCompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.codex.lite.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.codex.lite.agentstorage.filesystem.FileSystemIndexVersioned
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
-import io.github.stream29.codex.lite.openai.CompactionCheckpoint
-import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.utils.SafeRw
 import io.github.reactivecircus.cache4k.Cache
 import kotlinx.coroutines.CoroutineScope
@@ -25,7 +24,6 @@ internal suspend fun FileSystemAgentStorage.cached(
     return CachedAgentStorage(
         ownerScope = ownerScope,
         storageId = id,
-        cachedHistory = history.cached(ownerScope, valueCacheSize),
         cachedCompaction = compaction.cached(ownerScope, valueCacheSize),
         cachedSettings = settings.cached(ownerScope, valueCacheSize),
         cachedTimestamp = timestamp.cached(ownerScope, valueCacheSize),
@@ -39,25 +37,19 @@ internal suspend fun FileSystemAgentStorage.cached(
 internal class CachedAgentStorage internal constructor(
     private val ownerScope: CoroutineScope,
     private val storageId: String,
-    private val cachedHistory: MutableIndexVersioned<ResponseItem.HistoryItem>,
-    private val cachedCompaction: MutableIndexVersioned<CompactionCheckpoint>,
+    private val cachedCompaction: MutableIndexVersioned<CleanCompactionCheckpoint>,
     private val cachedSettings: MutableIndexVersioned<CodexAgentSettings>,
     private val cachedTimestamp: MutableIndexVersioned<kotlin.time.Instant>,
     private val cachedTokenCount: MutableIndexVersioned<Long>,
     private val cachedStable: MutableIndexVersioned<StableCleanEvent>,
-    private val cachedUnstable: MutableIndexVersioned<List<PendingToolEvent>>,
+    private val cachedUnstable: MutableIndexVersioned<List<UnstableCleanEvent>>,
 ) : MutableCodexAgentStorage {
     override val id: String
         get() {
             requireActive()
             return storageId
         }
-    override val history: MutableIndexVersioned<ResponseItem.HistoryItem>
-        get() {
-            requireActive()
-            return cachedHistory
-        }
-    override val compaction: MutableIndexVersioned<CompactionCheckpoint>
+    override val compaction: MutableIndexVersioned<CleanCompactionCheckpoint>
         get() {
             requireActive()
             return cachedCompaction
@@ -82,7 +74,7 @@ internal class CachedAgentStorage internal constructor(
             requireActive()
             return cachedStable
         }
-    override val unstable: MutableIndexVersioned<List<PendingToolEvent>>
+    override val unstable: MutableIndexVersioned<List<UnstableCleanEvent>>
         get() {
             requireActive()
             return cachedUnstable

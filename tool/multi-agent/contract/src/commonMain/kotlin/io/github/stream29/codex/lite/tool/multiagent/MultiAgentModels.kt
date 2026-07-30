@@ -95,10 +95,13 @@ public data class SpawnAgentArgs(
     public val message: String,
     @SerialName("fork_turns")
     public val forkTurns: SpawnForkMode = SpawnForkMode.All,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val model: OpenAiModelId? = null,
     @SerialName("reasoning_effort")
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val reasoningEffort: ReasoningEffort? = null,
     @SerialName("service_tier")
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val serviceTier: ServiceTier? = null,
 )
 
@@ -137,6 +140,7 @@ public data class FollowupTaskArgs(
 @Serializable
 public data class WaitAgentArgs(
     @SerialName("timeout_ms")
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val timeoutMs: Long? = null,
 )
 
@@ -166,6 +170,7 @@ public data class InterruptAgentResult(
 @Serializable
 public data class ListAgentsArgs(
     @SerialName("path_prefix")
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val pathPrefix: String? = null,
 )
 

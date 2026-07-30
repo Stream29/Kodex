@@ -4,6 +4,8 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentcontext.contract.AgentContextSettings
 import io.github.stream29.codex.lite.agentcontext.prefix.render.render as renderCollaborationMode
 import io.github.stream29.codex.lite.agentcontext.prefix.render.renderMultiAgentMode
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.mcp.contract.McpService
@@ -29,7 +31,6 @@ import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.tool.currenttime.CurrentTimeTools
-import io.github.stream29.codex.lite.tool.contract.ToolCallResult
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -78,8 +79,8 @@ val agentContextProjectionTest by testSuite {
                     ),
                 )
                 assertEquals(user, input.last())
-                assertEquals(user, storage.history[1])
-                assertEquals(1, storage.history.latestIndex())
+                assertEquals(StableCleanEvent.UserMessage(user.content), storage.stable[1])
+                assertEquals(1, storage.stable.latestIndex())
                 assertEquals(1, storage.latestIndex())
             } finally {
                 deleteRecursively(fixture.root)
@@ -220,10 +221,15 @@ val agentContextProjectionTest by testSuite {
                     assertIs<ToolSpec.ToolSearch>(compactionRequests.single().tools.last())
                 assertTrue(toolSearchSpec.description.contains("- projection: Projection tools."))
                 assertEquals(2, compactIndex)
-                assertEquals(user, storage.history[1])
+                assertEquals(StableCleanEvent.UserMessage(user.content), storage.stable[1])
+                assertEquals(StableCleanEvent.ContextCompaction, storage.stable[compactIndex])
                 assertEquals(
-                    ResponseItem.ContextCompaction(encryptedContent = "compacted"),
-                    storage.history[compactIndex],
+                    listOf(StableCleanEvent.UserMessage(user.content)),
+                    storage.compaction[compactIndex].prefix,
+                )
+                assertEquals(
+                    ResponseItem.Compaction(encryptedContent = "compacted"),
+                    storage.compaction[compactIndex].compaction,
                 )
             } finally {
                 deleteRecursively(fixture.root)
@@ -360,7 +366,7 @@ private object ProjectionMcpTool : McpTool {
     override val serverInstructions: String = "Projection tools."
     override val spec: ToolSpec = CurrentTimeTools.spec
 
-    override suspend fun handle(call: ResponseItem.ToolCall): ToolCallResult =
+    override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool =
         error("Projection tests never execute MCP tools.")
 
     override fun close() = Unit

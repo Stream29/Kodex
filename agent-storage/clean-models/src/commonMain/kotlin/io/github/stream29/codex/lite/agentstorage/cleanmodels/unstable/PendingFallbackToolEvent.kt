@@ -18,6 +18,11 @@ public data class PendingFunctionToolEvent(
     public val namespace: String? = null,
     public val arguments: JsonElement,
 ) : PendingToolEvent {
+    override val toolName: String
+        get() = name
+    override val toolNamespace: String?
+        get() = namespace
+
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             pendingFunctionCall(
@@ -42,6 +47,11 @@ public data class PendingCustomToolEvent(
     public val namespace: String? = null,
     public val input: String,
 ) : PendingToolEvent {
+    override val toolName: String
+        get() = name
+    override val toolNamespace: String?
+        get() = namespace
+
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.CustomToolCall(

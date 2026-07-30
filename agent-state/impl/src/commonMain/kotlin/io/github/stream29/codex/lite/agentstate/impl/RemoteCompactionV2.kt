@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.agentstate.impl
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.ResponseItem
@@ -9,14 +10,13 @@ private const val ApproximateBytesPerToken: Int = 4
 
 internal fun buildRemoteCompactionV2Prefix(
     input: List<ResponseItem>,
-    compactionOutput: ResponseItem.Compaction,
-): List<ResponseItem.HistoryItem> =
+): List<StableCleanEvent> =
     input.asSequence()
         .filterIsInstance<ResponseItem.Message>()
         .filter { it.role == MessageRole.User }
         .toList()
         .truncateForRemoteCompaction(RemoteCompactionV2RetainedMessageTokenBudget)
-        .plus(compactionOutput)
+        .map { message -> StableCleanEvent.UserMessage(message.content) }
 
 private fun List<ResponseItem.Message>.truncateForRemoteCompaction(
     maxTokens: Int,

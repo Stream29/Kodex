@@ -1,14 +1,15 @@
 package io.github.stream29.codex.lite.mcp.impl
 
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableJsonToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMcpToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.mcp.contract.McpServerConfiguration
 import io.github.stream29.codex.lite.mcp.contract.McpTool
 import io.github.stream29.codex.lite.openai.CallToolResult
-import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ToolSpec
-import io.github.stream29.codex.lite.tool.contract.ToolCallResult
 import io.github.stream29.codex.lite.utils.coroutines.runCatchingCancellable
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpError
@@ -22,9 +23,7 @@ import kotlinx.schema.json.ArrayPropertyDefinition
 import kotlinx.schema.json.BooleanPropertyDefinition
 import kotlinx.schema.json.GenericPropertyDefinition
 import kotlinx.schema.json.ObjectPropertyDefinition
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
@@ -66,32 +65,23 @@ private class McpToolImpl(
         ),
     )
 
-    override suspend fun handle(call: ResponseItem.ToolCall): ToolCallResult {
-        val arguments = when (call) {
-            is ResponseItem.FunctionCall -> when (
-                val parsed = call.arguments.toArgumentsOrFailure(call.callId)
-            ) {
-                is ParsedArguments.Success -> parsed.value
-                is ParsedArguments.Failure -> {
-                    return completed(
-                        arguments = JsonPrimitive(call.arguments),
-                        output = call.failure(parsed.message),
-                    )
-                }
-            }
-
-            is ResponseItem.CustomToolCall -> {
-                return completed(
-                    arguments = JsonPrimitive(call.input),
-                    output = call.failure("MCP tools accept JSON function arguments."),
-                )
-            }
-
-            is ResponseItem.ClientToolSearchCall -> error("Client tool-search calls are handled by CodexToolRuntime.")
+    override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool {
+        val mcpPending = requireNotNull(pending as? PendingMcpToolEvent) {
+            "MCP tools require a pending MCP tool event."
+        }
+        val arguments = try {
+            mcpPending.arguments.jsonObject
+        } catch (failure: IllegalArgumentException) {
+            return completed(
+                pending = mcpPending,
+                result = failureResult(
+                    "MCP arguments for ${mcpPending.callId} must be a JSON object: ${failure.message}",
+                ),
+            )
         }
 
-        val output = runCatchingCancellable {
-            val result = activeClient.client.callTool(
+        val result = runCatchingCancellable {
+            activeClient.client.callTool(
                 request = CallToolRequest(
                     CallToolRequestParams(
                         name = tool.name,
@@ -99,32 +89,29 @@ private class McpToolImpl(
                     ),
                 ),
                 options = RequestOptions(),
-            )
-            ResponseItem.McpToolCallOutput(
-                callId = call.callId,
-                output = result.toOpenAiResult(),
-            )
+            ).toOpenAiResult()
         }.getOrElse { failure ->
-            call.failure(failure.toMcpFailureMessage(activeClient.name))
+            failureResult(failure.toMcpFailureMessage(activeClient.name))
         }
         return completed(
-            arguments = arguments,
-            output = output,
+            pending = mcpPending,
+            result = result,
         )
     }
 
     override fun close(): Unit = Unit
 
     private fun completed(
-        arguments: JsonElement,
-        output: ResponseItem.McpToolCallOutput,
-    ): ToolCallResult =
-        output to StableJsonToolEvent(
-            name = tool.name,
-            namespace = activeClient.name,
-            arguments = arguments,
-            result = McpJson.encodeToJsonElement(CallToolResult.serializer(), output.output),
-            success = output.output.isError?.not(),
+        pending: PendingMcpToolEvent,
+        result: CallToolResult,
+    ): StableMcpToolEvent =
+        StableMcpToolEvent(
+            callId = pending.callId,
+            itemId = pending.itemId,
+            name = pending.name,
+            namespace = pending.namespace,
+            arguments = pending.arguments,
+            result = result,
         )
 }
 
@@ -159,22 +146,6 @@ internal fun mcpCallToolResultOutputSchema(
         additionalProperties = AdditionalPropertiesConstraint.deny(),
     )
 
-private sealed interface ParsedArguments {
-    data class Success(val value: JsonObject) : ParsedArguments
-    data class Failure(val message: String) : ParsedArguments
-}
-
-private fun String.toArgumentsOrFailure(callId: String): ParsedArguments {
-    if (isBlank()) return ParsedArguments.Success(JsonObject(emptyMap()))
-    return try {
-        ParsedArguments.Success(McpJson.parseToJsonElement(this).jsonObject)
-    } catch (failure: SerializationException) {
-        ParsedArguments.Failure("Invalid MCP arguments for $callId: ${failure.message}")
-    } catch (failure: IllegalArgumentException) {
-        ParsedArguments.Failure("MCP arguments for $callId must be a JSON object: ${failure.message}")
-    }
-}
-
 private fun io.modelcontextprotocol.kotlin.sdk.types.CallToolResult.toOpenAiResult(): CallToolResult =
     CallToolResult(
         content = content.map { block -> McpJson.encodeToJsonElement(block) },
@@ -183,18 +154,15 @@ private fun io.modelcontextprotocol.kotlin.sdk.types.CallToolResult.toOpenAiResu
         meta = meta,
     )
 
-private fun ResponseItem.ToolCall.failure(message: String): ResponseItem.McpToolCallOutput =
-    ResponseItem.McpToolCallOutput(
-        callId = callId,
-        output = CallToolResult(
-            content = listOf(
-                buildJsonObject {
-                    put("type", JsonPrimitive("text"))
-                    put("text", JsonPrimitive(message))
-                },
-            ),
-            isError = true,
+private fun failureResult(message: String): CallToolResult =
+    CallToolResult(
+        content = listOf(
+            buildJsonObject {
+                put("type", JsonPrimitive("text"))
+                put("text", JsonPrimitive(message))
+            },
         ),
+        isError = true,
     )
 
 private fun Throwable.toMcpFailureMessage(serverName: String): String =

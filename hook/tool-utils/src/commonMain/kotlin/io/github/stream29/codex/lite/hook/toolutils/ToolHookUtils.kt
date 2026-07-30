@@ -2,6 +2,8 @@ package io.github.stream29.codex.lite.hook.toolutils
 
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.hook.contract.toHookTurnContext
 import io.github.stream29.codex.lite.hook.contract.tool.HookToolInvocation
 import io.github.stream29.codex.lite.hook.contract.tool.PostToolUseRequest
@@ -16,16 +18,17 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * Executes PreToolUse hooks before [call].
+ * Executes PreToolUse hooks before [pending].
  *
  * [storage] is read only to project the latest persisted Hook context. Calls
  * that intentionally do not participate in Tool Hooks are allowed unchanged.
- * PreToolUse may block [call], but cannot replace or modify it.
+ * PreToolUse may block [pending], but cannot replace or modify it.
  */
 public suspend fun ToolHooks.runPreToolUse(
     storage: CodexAgentStorage,
-    call: ResponseItem.ToolCall,
+    pending: PendingToolEvent,
 ): PreToolUseResult {
+    val call = pending.projectedToolCallOrNull() ?: return PreToolUseResult.Continue
     val descriptor = call.toToolHookDescriptor()
         ?: return PreToolUseResult.Continue
     val invocation = descriptor.toInvocation(storage, call.callId)
@@ -33,17 +36,17 @@ public suspend fun ToolHooks.runPreToolUse(
 }
 
 /**
- * Executes PostToolUse hooks after a successful [output].
+ * Executes PostToolUse hooks after a successful [completed] tool event.
  *
- * PostToolUse is observation-only: it cannot replace [output] or change its
+ * PostToolUse is observation-only: it cannot replace [completed] or change its
  * success state. Failed outputs and calls that do not participate in Tool Hooks
  * are ignored. [storage] is only read to project the latest persisted context.
  */
 public suspend fun ToolHooks.runPostToolUse(
     storage: CodexAgentStorage,
-    call: ResponseItem.ToolCall,
-    output: ResponseItem.ToolCallOutput,
+    completed: StableCleanEvent.CompletedTool,
 ) {
+    val (call, output) = completed.projectedToolCallOutputOrNull() ?: return
     if (!output.isSuccessfulForPostToolUse()) return
     val descriptor = call.toToolHookDescriptor() ?: return
     val response = output.toHookResponse() ?: return
@@ -55,21 +58,21 @@ public suspend fun ToolHooks.runPostToolUse(
     )
 }
 
-/** Projects a PreToolUse rejection into the corresponding model-visible tool output. */
-public fun ResponseItem.ToolCall.toHookBlockedOutput(reason: String): ResponseItem.ToolCallOutput =
-    when (this) {
-        is ResponseItem.FunctionCall -> ResponseItem.FunctionCallOutput(
-            callId = callId,
-            output = FunctionCallOutputPayload.fromText(reason).copy(success = false),
-        )
+private fun PendingToolEvent.projectedToolCallOrNull(): ResponseItem.ToolCall? =
+    toResponseHistoryItems().filterIsInstance<ResponseItem.ToolCall>().singleOrNull()
 
-        is ResponseItem.CustomToolCall -> ResponseItem.CustomToolCallOutput(
-            callId = callId,
-            output = FunctionCallOutputPayload.fromText(reason).copy(success = false),
-        )
-
-        is ResponseItem.ClientToolSearchCall -> error("Client tool search does not run Tool Hooks.")
+private fun StableCleanEvent.CompletedTool.projectedToolCallOutputOrNull(): Pair<
+    ResponseItem.ToolCall,
+    ResponseItem.ToolCallOutput,
+>? {
+    val items = toResponseHistoryItems()
+    val call = items.filterIsInstance<ResponseItem.ToolCall>().singleOrNull() ?: return null
+    val output = items.filterIsInstance<ResponseItem.ToolCallOutput>().singleOrNull() ?: return null
+    check(call.callId == output.callId) {
+        "Completed tool event projected a call and output with different call ids."
     }
+    return call to output
+}
 
 private data class ToolHookDescriptor(
     val toolName: String,

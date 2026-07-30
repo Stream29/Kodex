@@ -2,6 +2,7 @@ package io.github.stream29.codex.lite.agentstate.impl
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
@@ -59,10 +60,13 @@ val hostedWebSearchTest by testSuite {
         agent.requestResponseApi().toList()
 
         assertEquals(1, requests.size)
-        assertEquals(webSearchCall, storage.history[2])
-        assertEquals(assistantMessage, storage.history[3])
+        assertEquals(StableCleanEvent.WebSearchCall(webSearchCall), storage.stable[2])
+        assertEquals(
+            StableCleanEvent.AssistantMessage(assistantMessage.content),
+            storage.stable[3],
+        )
         assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
-        assertIs<ResponseItem.WebSearchCall>(storage.history[2])
+        assertIs<StableCleanEvent.WebSearchCall>(storage.stable[2])
     }
     }
 }
