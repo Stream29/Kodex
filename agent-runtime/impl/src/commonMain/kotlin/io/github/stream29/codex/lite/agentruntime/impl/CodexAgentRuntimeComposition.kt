@@ -11,11 +11,14 @@ import io.github.stream29.codex.lite.agentruntime.decorator.turnhook.turnHookRun
 import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
+import io.github.stream29.codex.lite.agentstate.contract.clearPending
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.tool.contract.Tool
 import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecToolClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +29,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
+import kotlinx.coroutines.withContext
 
 /** Builds the root Agent runtime. */
 public fun CodexAgentState.buildMasterAgentRuntime(
@@ -151,6 +155,11 @@ private class AgentRuntimeImpl(
         }
         try {
             emitAll(delegate.resume())
+        } catch (cancellation: CancellationException) {
+            withContext(NonCancellable) {
+                delegate.clearPending()
+            }
+            throw cancellation
         } finally {
             runningTurnSlot.compareAndSet(turn, null)
         }

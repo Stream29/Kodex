@@ -49,6 +49,7 @@ import io.github.stream29.codex.lite.cli.components.TextInputValue
 import io.github.stream29.codex.lite.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.codex.lite.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.codex.lite.cli.session.RootSessionEntry
+import io.github.stream29.codex.lite.cli.session.AgentRuntimeTreeEntry
 import io.github.stream29.codex.lite.cli.session.RootSessionViewState
 import io.github.stream29.codex.lite.cli.components.TuiPopupHost
 import io.github.stream29.codex.lite.cli.newsession.NewSessionViewModel
@@ -61,7 +62,10 @@ import io.github.stream29.codex.lite.cli.settings.CodexAuthSource
 import io.github.stream29.codex.lite.cli.settings.CodexGlobalSettings
 import io.github.stream29.codex.lite.cli.settings.CodexNewSessionSettings
 import io.github.stream29.codex.lite.cli.settings.NewLineKey
+import io.github.stream29.codex.lite.cli.settings.SessionTitleSettings
 import io.github.stream29.codex.lite.cli.settings.SubmitKey
+import io.github.stream29.codex.lite.cli.sessiontitle.DefaultSessionTitleModel
+import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.ReasoningEffort
@@ -70,6 +74,8 @@ import io.github.stream29.codex.lite.utils.terminaltext.terminalCellWidth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.io.files.Path
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 /** Existing terminal surface backed by session-tree, Agent, and new-session ViewModels. */
 @Composable
@@ -117,11 +123,17 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     )
     var tabMenuTarget by remember { mutableStateOf<SessionTabTarget?>(null) }
     var renameSessionRequest by remember { mutableStateOf<RenameSessionRequest?>(null) }
-    val newSessionSettings = activeNewSessionState?.settings ?: globalSettings.newSession
+    var deleteSessionRequest by remember { mutableStateOf<RootSessionEntry?>(null) }
+    val newSessionDefaults = globalSettings.newSession
+    val newSessionSettings = activeNewSessionState?.settings ?: newSessionDefaults
     val modelOptions = (
         applicationState.models.map { model -> model.slug } +
             newSessionSettings.model +
-            listOfNotNull(agentState?.durable?.settings?.model)
+            listOfNotNull(
+                agentState?.durable?.settings?.model,
+                globalSettings.sessionTitle.model,
+            ) +
+            DefaultSessionTitleModel
         )
         .distinct()
     val activeSettings = agentState?.durable?.settings
@@ -195,7 +207,9 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                             columns = contentColumns,
                             rows = contentRows,
                             newLineKey = globalSettings.newLineKey,
-                            onSubmit = { viewModel.submitNewSessionComposer(newSessionTarget) },
+                            onSubmit = {
+                                scope.launch { viewModel.submitNewSessionComposer(newSessionTarget) }
+                            },
                             statusBar = {
                                 SessionTreeStatusBar(
                                     columns = contentColumns,
@@ -206,6 +220,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                                     tierDropdown = tierDropdown,
                                     modeDropdown = modeDropdown,
                                     onCancel = {},
+                                    onClearPending = {},
                                     showFork = false,
                                     forkEnabled = false,
                                     onFork = {},
@@ -232,6 +247,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                                     tierDropdown = tierDropdown,
                                     modeDropdown = modeDropdown,
                                     onCancel = { selectedAgent.viewModel.cancel() },
+                                    onClearPending = { selectedAgent.viewModel.clearPending() },
                                     showFork = true,
                                     forkEnabled = forkEnabled,
                                     onFork = { scope.launch { runCatching { viewModel.forkSelectedSession() } } },
@@ -375,6 +391,19 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                     state = applicationState,
                     scope = scope,
                     onDismiss = { browserOpen = false },
+                    onDelete = { session -> deleteSessionRequest = session },
+                )
+            }
+            deleteSessionRequest?.let { session ->
+                DeleteSessionDialog(
+                    session = session,
+                    onDismiss = { deleteSessionRequest = null },
+                    onDelete = {
+                        scope.launch {
+                            viewModel.delete(session.sessionIndex)
+                            deleteSessionRequest = null
+                        }
+                    },
                 )
             }
             if (settingsOpen) {
@@ -395,13 +424,16 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                     },
                     onNewLineKey = { key -> scope.launch { viewModel.updateNewLineKey(key) } },
                     onAuthSource = { source -> scope.launch { viewModel.updateAuthSource(source) } },
+                    onUpdateSessionTitle = { transform ->
+                        scope.launch { viewModel.updateSessionTitleSettings(transform) }
+                    },
                     onOpenLogin = {
                         if (openAiLoginViewModel == null) {
                             openAiLoginViewModel = scope.createOpenAiLoginViewModel(viewModel.authStore)
                         }
                     },
                     onBrowseWorkingDirectory = { directory -> directoryPickerInitialDirectory = directory },
-                    newSessionSettings = newSessionSettings,
+                    newSessionSettings = newSessionDefaults,
                     sessionName = activeSessionName,
                     onRenameSession = {
                         directoryPickerInitialDirectory = null
@@ -416,7 +448,14 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                     },
                 )
                 when (settingsRoute) {
-                    SettingsRoute.Global -> Unit
+                    SettingsRoute.Global -> SessionTitleSettingsDropdownMenus(
+                        settings = globalSettings.sessionTitle,
+                        models = modelOptions,
+                        dropdowns = settingsDropdowns,
+                        onUpdate = { transform ->
+                            scope.launch { viewModel.updateSessionTitleSettings(transform) }
+                        },
+                    )
                     SettingsRoute.Session -> activeSettings?.let { settings ->
                         AgentSettingsDropdownMenus(
                             settings = settings,
@@ -429,17 +468,11 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                         )
                     }
                     SettingsRoute.NewSession -> NewSessionSettingsDropdownMenus(
-                        settings = newSessionSettings,
+                        settings = newSessionDefaults,
                         models = modelOptions,
                         dropdowns = settingsDropdowns,
                         onUpdate = { transform ->
-                            scope.launch {
-                                if (activeNewSession != null) {
-                                    viewModel.updateNewSessionSettings(transform)
-                                } else {
-                                    viewModel.updateNewSessionDefaults(transform)
-                                }
-                            }
+                            scope.launch { viewModel.updateNewSessionDefaults(transform) }
                         },
                     )
                 }
@@ -493,6 +526,13 @@ private fun SessionAgentSidebar(
     onToggleExpanded: () -> Unit,
     onSelectAgent: (String) -> Unit,
 ) {
+    var expandedAgentIds by remember(tree?.rootAgentId) {
+        mutableStateOf(tree?.rootAgentId?.let(::setOf).orEmpty())
+    }
+    val visibleAgents = tree?.visibleAgentTreeEntries(expandedAgentIds).orEmpty()
+    val agentsWithChildren = remember(tree?.agents) {
+        tree?.agents?.mapNotNull(AgentRuntimeTreeEntry::parentAgentId)?.toSet().orEmpty()
+    }
     Column(
         modifier = Modifier
             .width(columns)
@@ -512,34 +552,65 @@ private fun SessionAgentSidebar(
             )
             Text("Agent tree", color = SettingsDialogForeground)
             Box(modifier = Modifier.width(columns).height((rows - 2).coerceAtLeast(0))) {
-                val agents = tree?.agents.orEmpty()
-                if (agents.isEmpty()) {
+                if (visibleAgents.isEmpty()) {
                     Text("No agents", color = SettingsDialogForeground)
                 } else {
                     LazyColumn(modifier = Modifier.width(columns).height((rows - 2).coerceAtLeast(0))) {
-                        items(agents, key = { it.agentId }) { agent ->
+                        items(visibleAgents, key = { it.agentId }) { agent ->
                             val agentState by agent.viewModel.state.collectAsState()
                             val background = if (agent.selected) {
                                 SettingsDialogSelectionBackground
                             } else {
                                 SettingsDialogNavigationBackground
                             }
+                            val hasChildren = agent.agentId in agentsWithChildren
+                            val nodeLabel = tree?.agentTreeNodeLabel(
+                                agent = agent,
+                                threadName = agentState.durable.settings?.threadName,
+                            ) ?: agent.agentId
                             val label = buildString {
-                                append("  ".repeat(agent.depth))
-                                append(if (agent.selected) "> " else "- ")
-                                append(agentState.durable.settings?.threadName ?: agent.agentId)
+                                append(nodeLabel)
                                 if (agentState.running) append(" *")
-                            }.ellipsizeToTerminalWidth(columns)
+                            }.ellipsizeToTerminalWidth(
+                                (
+                                    columns -
+                                        agent.depth * SessionTreeIndentColumns -
+                                        SessionTreeDisclosureColumns -
+                                        SessionTreeNodeButtonBorderColumns
+                                ).coerceAtLeast(1),
+                            )
                             Column(modifier = Modifier.fillMaxWidth().background(background)) {
-                                TuiButton(
-                                    label = label,
-                                    modifier = Modifier.fillMaxWidth().background(background),
-                                    color = SettingsDialogForeground,
-                                    onClick = { onSelectAgent(agent.agentId) },
-                                )
+                                Row(modifier = Modifier.fillMaxWidth().background(background)) {
+                                    Text(" ".repeat(agent.depth * SessionTreeIndentColumns))
+                                    if (hasChildren) {
+                                        TuiButton(
+                                            label = if (agent.agentId in expandedAgentIds) "▼" else "▶",
+                                            modifier = Modifier.background(background),
+                                            color = SettingsDialogForeground,
+                                            onClick = {
+                                                expandedAgentIds = if (agent.agentId in expandedAgentIds) {
+                                                    expandedAgentIds - agent.agentId
+                                                } else {
+                                                    expandedAgentIds + agent.agentId
+                                                }
+                                            },
+                                        )
+                                    } else {
+                                        Text(" ".repeat(SessionTreeDisclosureColumns))
+                                    }
+                                    TuiButton(
+                                        label = label,
+                                        modifier = Modifier.weight(1f).background(background),
+                                        color = SettingsDialogForeground,
+                                        onClick = { onSelectAgent(agent.agentId) },
+                                    )
+                                }
                                 Text(
                                     value = (
-                                        "  ".repeat(agent.depth + 1) + agentState.toRenderState().label()
+                                        " ".repeat(
+                                            agent.depth * SessionTreeIndentColumns +
+                                                SessionTreeDisclosureColumns,
+                                        ) + agentState.toRenderState().label()
                                     ).ellipsizeToTerminalWidth(columns),
                                     modifier = Modifier.fillMaxWidth().background(background),
                                     color = SettingsDialogForeground,
@@ -565,6 +636,34 @@ private fun SessionAgentSidebar(
     }
 }
 
+internal fun RootSessionViewState.visibleAgentTreeEntries(
+    expandedAgentIds: Set<String>,
+): List<AgentRuntimeTreeEntry> {
+    val agentsById = agents.associateBy(AgentRuntimeTreeEntry::agentId)
+    return agents.filter { agent ->
+        val visited = mutableSetOf<String>()
+        var parentAgentId = agent.parentAgentId
+        while (parentAgentId != null) {
+            if (!visited.add(parentAgentId) || parentAgentId !in expandedAgentIds) return@filter false
+            val parent = agentsById[parentAgentId] ?: return@filter false
+            parentAgentId = parent.parentAgentId
+        }
+        true
+    }
+}
+
+internal fun RootSessionViewState.agentTreeNodeLabel(
+    agent: AgentRuntimeTreeEntry,
+    threadName: String?,
+): String {
+    val label = threadName?.takeIf(String::isNotBlank) ?: agent.agentId
+    return if (agent.agentId == rootAgentId) {
+        label
+    } else {
+        label.substringAfterLast('/').ifBlank { label }
+    }
+}
+
 @Composable
 private fun SessionTreeStatusBar(
     columns: Int,
@@ -575,6 +674,7 @@ private fun SessionTreeStatusBar(
     tierDropdown: TuiDropdownState,
     modeDropdown: TuiDropdownState,
     onCancel: () -> Unit,
+    onClearPending: () -> Unit,
     showFork: Boolean,
     forkEnabled: Boolean,
     onFork: () -> Unit,
@@ -589,6 +689,13 @@ private fun SessionTreeStatusBar(
         agentState?.durable?.tokenCount?.let { tokenCount -> Text("${tokenCount}t ") }
         if (agentState?.running == true) {
             TuiButton(label = "Stop", onClick = onCancel)
+            Text(" ")
+        }
+        if (
+            agentState?.running != true &&
+            agentState?.agentState is CodexAgentStateValue.ToolPending
+        ) {
+            TuiButton(label = "Clear pending", onClick = onClearPending)
             Text(" ")
         }
         TuiDropdownTrigger(
@@ -639,6 +746,7 @@ private fun BoxScope.SessionTreeBrowserDialog(
     state: SessionTreeCliState,
     scope: CoroutineScope,
     onDismiss: () -> Unit,
+    onDelete: (RootSessionEntry) -> Unit,
 ) {
     val width = (LocalTerminalState.current.size.columns - 4).coerceIn(1, 84)
     val bodyRows = sessionBrowserVisibleRows(LocalTerminalState.current.size.rows)
@@ -671,22 +779,32 @@ private fun BoxScope.SessionTreeBrowserDialog(
                 } else {
                     LazyColumn(state = sessionListState, modifier = Modifier.fillMaxWidth().height(bodyRows)) {
                         items(state.sessions.sessions, key = { it.sessionIndex }) { session ->
-                            TuiButton(
-                                label = session.sessionBrowserLabel((width - 2).coerceAtLeast(1)),
-                                color = SettingsDialogForeground,
-                                autoFocus = session.sessionIndex == selectedSessionIndex,
-                                modifier = if (session.sessionIndex == selectedSessionIndex) {
-                                    Modifier.background(SettingsDialogSelectionBackground)
-                                } else {
-                                    Modifier
-                                },
-                                onClick = {
-                                    scope.launch {
-                                        viewModel.open(session.sessionIndex)
-                                        onDismiss()
-                                    }
-                                },
-                            )
+                            val background = if (session.sessionIndex == selectedSessionIndex) {
+                                SettingsDialogSelectionBackground
+                            } else {
+                                SettingsDialogNavigationBackground
+                            }
+                            Row(modifier = Modifier.fillMaxWidth().background(background)) {
+                                TuiButton(
+                                    label = session.sessionBrowserLabel(sessionBrowserTitleColumns(width)),
+                                    color = SettingsDialogForeground,
+                                    autoFocus = session.sessionIndex == selectedSessionIndex,
+                                    modifier = Modifier.weight(1f).background(background),
+                                    onClick = {
+                                        scope.launch {
+                                            viewModel.open(session.sessionIndex)
+                                            onDismiss()
+                                        }
+                                    },
+                                )
+                                Text(" ")
+                                TuiButton(
+                                    label = SessionBrowserDeleteLabel,
+                                    color = SettingsDialogForeground,
+                                    modifier = Modifier.background(background),
+                                    onClick = { onDelete(session) },
+                                )
+                            }
                         }
                     }
                 }
@@ -698,18 +816,90 @@ private fun BoxScope.SessionTreeBrowserDialog(
     }
 }
 
+@Composable
+private fun BoxScope.DeleteSessionDialog(
+    session: RootSessionEntry,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val width = (LocalTerminalState.current.size.columns - 4).coerceIn(1, 72)
+    val title = session.threadName?.takeIf(String::isNotBlank) ?: "Session ${session.sessionIndex}"
+    TuiDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.width(width).background(SettingsDialogHomeBackground),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                value = "Delete session?",
+                modifier = Modifier.fillMaxWidth().background(SettingsDialogHeaderBackground),
+                color = SettingsDialogForeground,
+                textStyle = TextStyle.Bold,
+            )
+            Text(
+                value = title.ellipsizeToTerminalWidth(width),
+                modifier = Modifier.fillMaxWidth(),
+                color = SettingsDialogForeground,
+            )
+            Text("This cannot be undone.", color = SettingsDialogForeground, textStyle = TextStyle.Dim)
+            Row(modifier = Modifier.fillMaxWidth().background(SettingsDialogActionBackground)) {
+                TuiButton(label = "Delete", color = SettingsDialogForeground, onClick = onDelete)
+                Text(" ")
+                TuiButton(
+                    label = "Cancel",
+                    color = SettingsDialogForeground,
+                    autoFocus = true,
+                    onClick = onDismiss,
+                )
+            }
+        }
+    }
+}
+
 private fun initialBrowserScrollOffset(itemCount: Int, visibleItemCount: Int, selectedIndex: Int): Int =
     (selectedIndex - visibleItemCount / 2).coerceIn(0, (itemCount - visibleItemCount).coerceAtLeast(0))
 
 internal fun sessionBrowserVisibleRows(terminalRows: Int): Int =
     (terminalRows - SessionBrowserDialogRows).coerceIn(1, SessionBrowserMaximumListRows)
 
-internal fun RootSessionEntry.sessionBrowserLabel(maximumColumns: Int): String =
-    (threadName?.takeIf(String::isNotBlank) ?: "Session $sessionIndex")
-        .ellipsizeToTerminalWidth(maximumColumns)
+private fun sessionBrowserTitleColumns(dialogWidth: Int): Int =
+    (
+        dialogWidth -
+            SessionBrowserListHorizontalPaddingColumns -
+            "[$SessionBrowserDeleteLabel]".terminalCellWidth() -
+            SessionBrowserItemGapColumns
+    ).coerceAtLeast(1)
+
+internal fun RootSessionEntry.sessionBrowserLabel(
+    maximumColumns: Int,
+    now: Instant = Clock.System.now(),
+): String {
+    val title = threadName?.takeIf(String::isNotBlank) ?: "Session $sessionIndex"
+    val lastActivity = lastActivityAt?.relativeTimeFrom(now)
+        ?: return title.ellipsizeToTerminalWidth(maximumColumns)
+    val suffix = " · $lastActivity"
+    val titleWidth = maximumColumns - suffix.terminalCellWidth()
+    return if (titleWidth > 0) {
+        title.ellipsizeToTerminalWidth(titleWidth) + suffix
+    } else {
+        (title + suffix).ellipsizeToTerminalWidth(maximumColumns)
+    }
+}
+
+private fun Instant.relativeTimeFrom(now: Instant): String {
+    val seconds = (now - this).inWholeSeconds.coerceAtLeast(0L)
+    return when {
+        seconds < 60L -> "now"
+        seconds < 60L * 60 -> "${seconds / 60L}m ago"
+        seconds < 24L * 60 * 60 -> "${seconds / (60L * 60)}h ago"
+        else -> "${seconds / (24L * 60 * 60)}d ago"
+    }
+}
 
 private const val SessionBrowserMaximumListRows: Int = 16
 private const val SessionBrowserDialogRows: Int = 2
+private const val SessionBrowserDeleteLabel: String = "Delete"
+private const val SessionBrowserListHorizontalPaddingColumns: Int = 2
+private const val SessionBrowserItemGapColumns: Int = 1
 private data class RenameSessionRequest(
     val target: SessionTabTarget,
     val initialName: String,
@@ -783,6 +973,7 @@ private fun BoxScope.GlobalSettingsDialog(
     onDismiss: () -> Unit,
     onNewLineKey: (NewLineKey) -> Unit,
     onAuthSource: (CodexAuthSource) -> Unit,
+    onUpdateSessionTitle: ((SessionTitleSettings) -> SessionTitleSettings) -> Unit,
     onOpenLogin: () -> Unit,
     onBrowseWorkingDirectory: (Path) -> Unit,
     newSessionSettings: CodexNewSessionSettings,
@@ -823,8 +1014,10 @@ private fun BoxScope.GlobalSettingsDialog(
                     when (route) {
                         SettingsRoute.Global -> GlobalSettingsContent(
                             state = state,
+                            dropdowns = dropdowns,
                             onNewLineKey = onNewLineKey,
                             onAuthSource = onAuthSource,
+                            onUpdateSessionTitle = onUpdateSessionTitle,
                             onOpenLogin = onOpenLogin,
                         )
                         SettingsRoute.Session -> {
@@ -864,8 +1057,10 @@ private fun BoxScope.GlobalSettingsDialog(
 @Composable
 private fun GlobalSettingsContent(
     state: CodexGlobalSettings,
+    dropdowns: SettingsDropdownStates,
     onNewLineKey: (NewLineKey) -> Unit,
     onAuthSource: (CodexAuthSource) -> Unit,
+    onUpdateSessionTitle: ((SessionTitleSettings) -> SessionTitleSettings) -> Unit,
     onOpenLogin: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogHomeBackground)) {
@@ -880,6 +1075,29 @@ private fun GlobalSettingsContent(
         background = SettingsDialogHomeBackground,
         enabled = true,
         onSelect = onAuthSource,
+    )
+    SettingsChoiceGroup(
+        label = "Automatic session title",
+        options = listOf(true, false),
+        selected = state.sessionTitle.enabled,
+        optionLabel = { enabled -> if (enabled) "Enabled" else "Disabled" },
+        background = SettingsDialogHomeBackground,
+        enabled = true,
+        onSelect = { enabled ->
+            onUpdateSessionTitle { current -> current.copy(enabled = enabled) }
+        },
+    )
+    SettingsDropdownField(
+        label = "Title model",
+        selectedLabel = (state.sessionTitle.model ?: DefaultSessionTitleModel).value,
+        dropdownState = dropdowns.model,
+        background = SettingsDialogNewLineBackground,
+    )
+    SettingsDropdownField(
+        label = "Title reasoning",
+        selectedLabel = state.sessionTitle.reasoningEffort.displayName(),
+        dropdownState = dropdowns.reasoning,
+        background = SettingsDialogSubmitKeyBackground,
     )
     Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogHomeBackground)) {
         Text("Codex Lite account", color = SettingsDialogForeground)
@@ -1130,6 +1348,31 @@ private fun BoxScope.NewSessionSettingsDropdownMenus(
     )
 }
 
+@Composable
+private fun BoxScope.SessionTitleSettingsDropdownMenus(
+    settings: SessionTitleSettings,
+    models: List<OpenAiModelId>,
+    dropdowns: SettingsDropdownStates,
+    onUpdate: ((SessionTitleSettings) -> SessionTitleSettings) -> Unit,
+) {
+    TuiDropdownMenu(
+        dropdownState = dropdowns.model,
+        options = (models + listOfNotNull(settings.model, DefaultSessionTitleModel)).distinct(),
+        selected = settings.model ?: DefaultSessionTitleModel,
+        optionLabel = OpenAiModelId::value,
+        backgroundColor = PopupMenuBackground,
+        onSelect = { model -> onUpdate { current -> current.copy(model = model) } },
+    )
+    TuiDropdownMenu(
+        dropdownState = dropdowns.reasoning,
+        options = knownReasoningEfforts,
+        selected = settings.reasoningEffort,
+        optionLabel = ReasoningEffort::displayName,
+        backgroundColor = PopupMenuBackground,
+        onSelect = { effort -> onUpdate { current -> current.copy(reasoningEffort = effort) } },
+    )
+}
+
 private class SettingsDropdownStates(
     val model: TuiDropdownState,
     val reasoning: TuiDropdownState,
@@ -1221,4 +1464,7 @@ private val knownReasoningEfforts: List<ReasoningEffort> = listOf(
 
 private const val SessionSidebarExpandedColumns: Int = 28
 private const val SessionSidebarCollapsedColumns: Int = 1
+private const val SessionTreeIndentColumns: Int = 2
+private const val SessionTreeDisclosureColumns: Int = 3
+private const val SessionTreeNodeButtonBorderColumns: Int = 2
 private const val SessionTabBarRows: Int = 1

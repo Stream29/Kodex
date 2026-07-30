@@ -224,11 +224,13 @@ internal suspend fun fileSystemSessionEntry(
     directory: Path,
     fileSystem: CoroutineFileSystem,
 ): CodexSessionEntry {
-    val settings = FileSystemAgentStorage(directory, fileSystem).settings
-    val settingsIndex = settings.latestIndex()
+    val storage = FileSystemAgentStorage(directory, fileSystem)
+    val settingsIndex = storage.settings.latestIndex()
+    val timestampIndex = storage.timestamp.latestIndex()
     return CodexSessionEntry(
         entryIndex = entryIndex,
-        threadName = settingsIndex.takeIf { it >= 0 }?.let { index -> settings[index].threadName },
+        threadName = settingsIndex.takeIf { it >= 0 }?.let { index -> storage.settings[index].threadName },
+        lastActivityAt = timestampIndex.takeIf { it >= 0 }?.let { index -> storage.timestamp[index] },
     )
 }
 

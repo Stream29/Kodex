@@ -38,6 +38,7 @@ val openAiSessionTitleGeneratorTest by testSuite {
         val result = OpenAiSessionTitleGenerator(client).generateTitle(
             userText = "Please add automatic session titles.",
             model = OpenAiModelId("title-model"),
+            reasoningEffort = ReasoningEffort.High,
         )
 
         assertEquals(
@@ -48,7 +49,7 @@ val openAiSessionTitleGeneratorTest by testSuite {
         assertEquals(false, captured.store)
         assertTrue(captured.tools.isEmpty())
         assertEquals(false, captured.parallelToolCalls)
-        assertEquals(ReasoningEffort.Low, captured.reasoning.effort)
+        assertEquals(ReasoningEffort.High, captured.reasoning.effort)
         val input = assertIs<ResponseItem.Message>(captured.input.single())
         assertEquals(MessageRole.User, input.role)
         assertEquals(
@@ -76,7 +77,11 @@ val openAiSessionTitleGeneratorTest by testSuite {
         }
         val input = "😀".repeat(SessionTitleInputLimit + 1)
 
-        OpenAiSessionTitleGenerator(client).generateTitle(input, OpenAiModelId("title-model"))
+        OpenAiSessionTitleGenerator(client).generateTitle(
+            input,
+            OpenAiModelId("title-model"),
+            ReasoningEffort.Low,
+        )
 
         val prompt = assertIs<ContentItem.InputText>(
             assertIs<ResponseItem.Message>(captured.input.single()).content.single(),
@@ -102,7 +107,11 @@ val openAiSessionTitleGeneratorTest by testSuite {
 
         assertEquals(
             SessionTitleGenerationResult.Generated("Locate foo_bar creation"),
-            OpenAiSessionTitleGenerator(client).generateTitle("Where is foo_bar?", OpenAiModelId("title-model")),
+            OpenAiSessionTitleGenerator(client).generateTitle(
+                "Where is foo_bar?",
+                OpenAiModelId("title-model"),
+                ReasoningEffort.Low,
+            ),
         )
     }
 
@@ -121,7 +130,11 @@ val openAiSessionTitleGeneratorTest by testSuite {
         }
 
         assertIs<SessionTitleGenerationResult.Rejected>(
-            OpenAiSessionTitleGenerator(client).generateTitle("Prompt", OpenAiModelId("title-model")),
+            OpenAiSessionTitleGenerator(client).generateTitle(
+                "Prompt",
+                OpenAiModelId("title-model"),
+                ReasoningEffort.Low,
+            ),
         )
     }
 

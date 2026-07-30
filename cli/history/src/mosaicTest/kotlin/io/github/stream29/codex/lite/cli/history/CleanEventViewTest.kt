@@ -2,7 +2,9 @@ package io.github.stream29.codex.lite.cli.history
 
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
+import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.terminal.MouseEvent
+import com.jakewharton.mosaic.testing.MosaicSnapshots
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
@@ -15,6 +17,7 @@ import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableReque
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.codex.lite.openai.AgentMessageInputContent
 import io.github.stream29.codex.lite.openai.CallToolResult
 import io.github.stream29.codex.lite.openai.ContentItem
@@ -88,10 +91,10 @@ class CleanEventViewTest {
             val collapsed = setContentAndSnapshot {
                 Box(Modifier.width(40)) { event.render() }
             }
-            assertEquals("> demo · succeeded", collapsed)
+            assertEquals("> demo", collapsed)
 
             val expanded = clickFirstRow()
-            assertTrue("v demo · succeeded" in expanded)
+            assertTrue("v demo" in expanded)
             assertTrue("Tool: demo" in expanded)
             assertTrue("> Arguments" in expanded)
             assertTrue("> Result" in expanded)
@@ -126,7 +129,7 @@ class CleanEventViewTest {
             val collapsed = setContentAndSnapshot {
                 Box(Modifier.width(60)) { event.render() }
             }
-            assertEquals("> Run command: pwd · succeeded", collapsed)
+            assertEquals("> Run command: pwd", collapsed)
             assertFalse("exec_command" in collapsed)
 
             val expanded = clickFirstRow()
@@ -161,14 +164,14 @@ class CleanEventViewTest {
 
         runMosaicTest {
             assertEquals(
-                "> Run command: sleep 5 · running",
+                "> Run command: sleep 5",
                 setContentAndSnapshot {
                     Box(Modifier.width(60)) { event.renderCommandExecution(session) }
                 },
             )
 
             session.completed.value = true
-            assertEquals("> Run command: sleep 5 · finished", awaitSnapshot())
+            assertEquals("> Run command: sleep 5", awaitSnapshot())
 
             val expanded = clickFirstRow()
             assertTrue("> Process" in expanded)
@@ -199,7 +202,7 @@ class CleanEventViewTest {
 
         runMosaicTest {
             assertEquals(
-                "> Run command: sleep 5 · finished",
+                "> Run command: sleep 5",
                 setContentAndSnapshot {
                     Box(Modifier.width(60)) { event.renderCommandExecution(session = null) }
                 },
@@ -233,7 +236,7 @@ class CleanEventViewTest {
             val collapsed = setContentAndSnapshot {
                 Box(Modifier.width(60)) { event.renderCommandExecution(session) }
             }
-            assertEquals("> Read output: tail -f build.log · running", collapsed)
+            assertEquals("> Read output: tail -f build.log", collapsed)
             assertFalse("write_stdin" in collapsed)
 
             val expanded = clickFirstRow()
@@ -247,26 +250,55 @@ class CleanEventViewTest {
     }
 
     @Test
-    fun planUsesTheEventArgumentsInsteadOfSettings() = runTest {
+    fun planRendersAsAnInlineChecklist() = runTest {
         val event = io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePlanUpdate(
             callId = "plan",
             arguments = UpdatePlanArgs(
                 explanation = "Current plan",
-                plan = listOf(PlanItemArg("Implement renderer", StepStatus.InProgress)),
+                plan = listOf(
+                    PlanItemArg("Inspect the current renderer", StepStatus.Completed),
+                    PlanItemArg("Implement the checklist", StepStatus.InProgress),
+                    PlanItemArg("Verify the history view", StepStatus.Pending),
+                ),
             ),
         )
 
         runMosaicTest {
-            setContentAndSnapshot {
+            val rendered = setContentAndSnapshot {
                 Box(Modifier.width(48)) { event.render() }
             }
-            val expanded = clickFirstRow()
-            assertTrue("> Arguments" in expanded)
-            assertFalse("Explanation: Current plan" in expanded)
+            assertEquals(
+                """
+                • Updated Plan
+                  └ Current plan
+                    [x] Inspect the current renderer
+                    [>] Implement the checklist
+                    [ ] Verify the history view
+                """.trimIndent(),
+                rendered,
+            )
+            assertFalse("Plan:" in rendered)
+            assertFalse("Arguments" in rendered)
+            assertFalse("update_plan" in rendered)
+        }
+    }
 
-            val arguments = clickRow(2)
-            assertTrue("Explanation: Current plan" in arguments)
-            assertTrue("Plan: [>] Implement renderer" in arguments)
+    @Test
+    fun pendingPlanRendersAsAnInlineChecklist() = runTest {
+        val event = PendingPlanUpdate(
+            callId = "plan",
+            arguments = UpdatePlanArgs(
+                plan = listOf(PlanItemArg("Implement the checklist", StepStatus.InProgress)),
+            ),
+        )
+
+        runMosaicTest {
+            assertEquals(
+                "• Updating Plan\n  └ [>] Implement the checklist",
+                setContentAndSnapshot {
+                    Box(Modifier.width(48)) { event.render() }
+                },
+            )
         }
     }
 
@@ -348,7 +380,7 @@ class CleanEventViewTest {
             val collapsed = setContentAndSnapshot {
                 Box(Modifier.width(60)) { event.render() }
             }
-            assertTrue(collapsed.startsWith("> mcp.inspect ·"))
+            assertEquals("> mcp.inspect", collapsed)
             val expanded = clickFirstRow()
             assertTrue("> Result" in expanded)
             assertFalse("Image: [inline image, 17 characters]" in expanded)
@@ -371,7 +403,7 @@ class CleanEventViewTest {
             val snapshot = setContentAndSnapshot {
                 Box(Modifier.width(40)) { event.render() }
             }
-            assertEquals("> demo · running", snapshot)
+            assertEquals("> demo", snapshot)
         }
     }
 
@@ -397,7 +429,7 @@ class CleanEventViewTest {
             val collapsed = setContentAndSnapshot {
                 Box(Modifier.width(40)) { event.render() }
             }
-            assertEquals("> Editing 1 file · running", collapsed)
+            assertEquals("> Editing 1 file", collapsed)
             assertFalse("apply_patch" in collapsed)
 
             val expanded = clickFirstRow()
@@ -409,6 +441,58 @@ class CleanEventViewTest {
             assertTrue("M file.txt" in changes)
             assertTrue("- old" in changes)
             assertTrue("+ new" in changes)
+        }
+    }
+
+    @Test
+    fun toolHeadersUseColorInsteadOfTextualStatus() = runTest {
+        val running = PendingFunctionToolEvent(
+            callId = "running",
+            name = "demo",
+            arguments = JsonObject(emptyMap()),
+        )
+        val succeeded = StableTextToolEvent(
+            callId = "succeeded",
+            name = "demo",
+            arguments = JsonObject(emptyMap()),
+            result = "done",
+            success = true,
+        )
+        val failed = StableTextToolEvent(
+            callId = "failed",
+            name = "demo",
+            arguments = JsonObject(emptyMap()),
+            result = "error",
+            success = false,
+        )
+
+        runMosaicTest(MosaicSnapshots) {
+            val pending = setContentAndSnapshot {
+                Box(Modifier.width(40)) { running.render() }
+            }.draw().render(
+                ansiLevel = AnsiLevel.TRUECOLOR,
+                supportsKittyUnderlines = false,
+            )
+            assertTrue("38;2;0;255;0" in pending)
+            assertFalse("running" in pending)
+
+            val normal = setContentAndSnapshot {
+                Box(Modifier.width(40)) { succeeded.render() }
+            }.draw().render(
+                ansiLevel = AnsiLevel.TRUECOLOR,
+                supportsKittyUnderlines = false,
+            )
+            assertTrue("38;2;255;255;255" in normal)
+            assertFalse("succeeded" in normal)
+
+            val failure = setContentAndSnapshot {
+                Box(Modifier.width(40)) { failed.render() }
+            }.draw().render(
+                ansiLevel = AnsiLevel.TRUECOLOR,
+                supportsKittyUnderlines = false,
+            )
+            assertTrue("38;2;255;0;0" in failure)
+            assertFalse("failed" in failure)
         }
     }
 

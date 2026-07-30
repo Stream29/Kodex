@@ -11,6 +11,7 @@ import androidx.compose.runtime.snapshotFlow
 import com.jakewharton.mosaic.layout.fillMaxSize
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
+import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.SubcomposeLayout
 import com.jakewharton.mosaic.ui.Text
@@ -226,6 +227,7 @@ private fun HistoryMarkerText(value: String) {
 internal fun WrappedHistoryText(
     value: String,
     textStyle: TextStyle = TextStyle.Unspecified,
+    color: Color = Color.Unspecified,
 ) {
     SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
         check(constraints.hasBoundedWidth) {
@@ -238,6 +240,7 @@ internal fun WrappedHistoryText(
                 lines.forEach { line ->
                     Text(
                         value = line,
+                        color = color,
                         textStyle = textStyle,
                     )
                 }

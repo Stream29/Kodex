@@ -92,7 +92,7 @@ internal fun NewSessionScreen(
     columns: Int,
     rows: Int,
     newLineKey: NewLineKey,
-    onSubmit: suspend () -> Boolean,
+    onSubmit: () -> Unit,
     statusBar: @Composable () -> Unit,
 ) {
     val composer = rememberComposerInputState(composerViewModel)
@@ -104,7 +104,6 @@ internal fun NewSessionScreen(
     )
     val historyRows = (rows - HistoryComposerSeparatorRows - composerLayout.rowCount - RuntimeStatusRows)
         .coerceAtLeast(0)
-    val scope = rememberCoroutineScope()
 
     Column(modifier = Modifier.width(columns).height(rows)) {
         Box(modifier = Modifier.width(columns).height(historyRows)) {
@@ -119,7 +118,7 @@ internal fun NewSessionScreen(
             layout = composerLayout,
             newLineKey = newLineKey,
             onSubmit = {
-                scope.launch { onSubmit() }
+                onSubmit()
             },
             onValueChanged = { value ->
                 composerViewModel.update(value.text, value.cursorOffset)

@@ -8,6 +8,8 @@ import com.jakewharton.mosaic.testing.MosaicSnapshots
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
 import io.github.stream29.codex.lite.utils.applypatch.AddFileHunk
 import io.github.stream29.codex.lite.utils.applypatch.Patch
 import io.github.stream29.codex.lite.utils.applypatch.UpdateFileChunk
@@ -41,7 +43,7 @@ class PatchToolEventViewTest {
                     PendingPatchToolEventView(patch)
                 }
             }
-            assertEquals("> Editing 1 file · running", collapsed)
+            assertEquals("> Editing 1 file", collapsed)
 
             val expanded = click()
             assertTrue("Tool: apply_patch" in expanded)
@@ -77,7 +79,6 @@ class PatchToolEventViewTest {
             assertEquals(
                 listOf(
                     "v Editing 1 file",
-                    "   · running",
                     "Tool: apply_patc",
                     "  h",
                     "v Changes",
@@ -86,7 +87,7 @@ class PatchToolEventViewTest {
                     "+ 界界界界界界ab",
                     "  cdefghi",
                 ).joinToString("\n"),
-                click(y = 4),
+                click(y = 3),
             )
         }
     }
@@ -126,6 +127,40 @@ class PatchToolEventViewTest {
 
             assertTrue("\u001B[38;2;255;0;0m- old" in rendered)
             assertTrue("\u001B[38;2;0;255;0m+ new" in rendered)
+            assertTrue(
+                rendered.indexOf("38;2;0;255;0") < rendered.indexOf("v Editing 1 file"),
+            )
+        }
+    }
+
+    @Test
+    fun failedPatchUsesARedToolHeaderWithoutStatusText() = runTest {
+        val event = StablePatchToolEvent(
+            callId = "patch",
+            diff = Patch(
+                patch = "",
+                hunks = listOf(
+                    UpdateFileHunk(
+                        path = "file.txt",
+                        chunks = emptyList(),
+                    ),
+                ),
+            ),
+            result = StablePatchToolExecutionResult.Failure("patch did not apply"),
+        )
+
+        runMosaicTest(MosaicSnapshots) {
+            val rendered = setContentAndSnapshot {
+                Box(Modifier.width(40)) {
+                    StablePatchToolEventView(event)
+                }
+            }.draw().render(
+                ansiLevel = AnsiLevel.TRUECOLOR,
+                supportsKittyUnderlines = false,
+            )
+
+            assertTrue("38;2;255;0;0" in rendered)
+            assertTrue("failed" !in rendered)
         }
     }
 

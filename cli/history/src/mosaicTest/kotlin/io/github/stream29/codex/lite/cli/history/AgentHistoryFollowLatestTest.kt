@@ -1,5 +1,6 @@
 package io.github.stream29.codex.lite.cli.history
 
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -7,10 +8,10 @@ import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Text
+import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.cli.components.LazyColumn
 import io.github.stream29.codex.lite.cli.components.LazyListState
 import io.github.stream29.codex.lite.cli.components.items
-import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -58,7 +59,7 @@ val agentHistoryFollowLatestTest by testSuite {
     }
 }
 
-@androidx.compose.runtime.Composable
+@Composable
 private fun HistoryTestList(
     entries: List<String>,
     state: LazyListState,

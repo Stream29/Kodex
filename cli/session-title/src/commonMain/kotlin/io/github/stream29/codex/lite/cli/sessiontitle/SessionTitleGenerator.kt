@@ -1,6 +1,7 @@
 package io.github.stream29.codex.lite.cli.sessiontitle
 
 import io.github.stream29.codex.lite.openai.OpenAiModelId
+import io.github.stream29.codex.lite.openai.ReasoningEffort
 
 /** Compiled model used when global settings do not override title generation. */
 public val DefaultSessionTitleModel: OpenAiModelId = OpenAiModelId("gpt-5.3-codex-spark")
@@ -11,6 +12,7 @@ public fun interface SessionTitleGenerator {
     public suspend fun generateTitle(
         userText: String,
         model: OpenAiModelId,
+        reasoningEffort: ReasoningEffort,
     ): SessionTitleGenerationResult
 }
 

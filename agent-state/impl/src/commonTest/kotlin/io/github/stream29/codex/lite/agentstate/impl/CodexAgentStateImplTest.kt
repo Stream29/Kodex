@@ -3,6 +3,7 @@ package io.github.stream29.codex.lite.agentstate.impl
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
+import io.github.stream29.codex.lite.agentstate.contract.clearPending
 import io.github.stream29.codex.lite.agentstate.contract.forcedCompact
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.codexRequestWindowId
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
@@ -254,6 +255,34 @@ val codexAgentStateImplTest by testSuite {
             assertEquals(completed, storage.stable[3])
             assertEquals(emptyList(), storage.unstable[3])
             assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
+        }
+
+        test("clear pending completes every tool call with user interrupt") {
+            val storage = storage()
+            val first = functionCall("first", "call_first")
+            val second = functionCall("second", "call_second")
+            val agent = CodexAgentState(
+                client = mockOpenAiClient {
+                    createResponse {
+                        flowOf(
+                            ResponsesStreamEvent.OutputItemDone(0, first),
+                            ResponsesStreamEvent.OutputItemDone(1, second),
+                        )
+                    }
+                },
+                storage = storage,
+            )
+
+            agent.appendUserMessage(userMessage("Run both.").content)
+            agent.requestResponseApi().toList()
+
+            assertEquals(5, agent.clearPending())
+            assertEquals(failedTool(first, "user interrupt"), storage.stable[4])
+            assertEquals(listOf(pendingTool(second)), storage.unstable[4])
+            assertEquals(failedTool(second, "user interrupt"), storage.stable[5])
+            assertEquals(emptyList(), storage.unstable[5])
+            assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
+            assertEquals(5, agent.clearPending())
         }
 
         test("tool completions may arrive out of order") {
@@ -570,6 +599,12 @@ private fun completedTool(
         result = result,
         success = true,
     )
+
+private fun failedTool(
+    call: ResponseItem.FunctionCall,
+    result: String,
+): StableTextToolEvent =
+    completedTool(call, result).copy(success = false)
 
 private fun pendingTool(call: ResponseItem.FunctionCall): PendingFunctionToolEvent =
     PendingFunctionToolEvent(

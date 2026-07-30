@@ -19,7 +19,8 @@ val patchPresentationTest by testSuite {
     test("projects an update hunk into context removal and addition lines") {
         val presentation = updatePatch().toPendingPatchPresentation()
 
-        assertEquals("Editing 1 file · running", presentation.header)
+        assertEquals("Editing 1 file", presentation.header)
+        assertEquals(PatchPresentationStatus.Running, presentation.status)
         assertEquals(
             listOf(
                 "M src/Main.kt",
@@ -72,7 +73,8 @@ val patchPresentationTest by testSuite {
             result = StablePatchToolExecutionResult.Failure("context did not match"),
         ).toStablePatchPresentation()
 
-        assertEquals("Editing 1 file · failed", presentation.header)
+        assertEquals("Editing 1 file", presentation.header)
+        assertEquals(PatchPresentationStatus.Failed, presentation.status)
         assertTrue(
             PatchPresentationLine(
                 text = "Error: context did not match",
@@ -111,7 +113,8 @@ val patchPresentationTest by testSuite {
             ),
         ).toStablePatchPresentation()
 
-        assertEquals("Edited 1 file · succeeded", presentation.header)
+        assertEquals("Edited 1 file", presentation.header)
+        assertEquals(PatchPresentationStatus.Completed, presentation.status)
         assertTrue(presentation.lines.any { it.text == "M applied.txt" })
         assertTrue(presentation.lines.any { it.text == "- old" })
         assertTrue(presentation.lines.any { it.text == "+ new" })
@@ -166,7 +169,8 @@ val patchPresentationTest by testSuite {
             ),
         ).toStablePatchPresentation()
 
-        assertEquals("Edited 4 files · succeeded", presentation.header)
+        assertEquals("Edited 4 files", presentation.header)
+        assertEquals(PatchPresentationStatus.Completed, presentation.status)
         val renderedLines = presentation.lines.map(PatchPresentationLine::text)
         assertTrue("A new.txt" in renderedLines)
         assertTrue("+ new" in renderedLines)

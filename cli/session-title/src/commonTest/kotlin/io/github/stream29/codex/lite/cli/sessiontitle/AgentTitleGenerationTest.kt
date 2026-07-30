@@ -7,6 +7,7 @@ import io.github.stream29.codex.lite.agentstorage.contract.initialize
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.OpenAiModelId
+import io.github.stream29.codex.lite.openai.ReasoningEffort
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
@@ -38,7 +39,7 @@ val agentTitleGenerationTest by testSuite {
         }
         val content = listOf(ContentItem.InputText("Plan the agent title handoff."))
         root.runtime.appendUserMessage(content)
-        val capturedModel = CompletableDeferred<OpenAiModelId>()
+        val capturedRequest = CompletableDeferred<Pair<OpenAiModelId, ReasoningEffort>>()
         val generation = AgentTitleGeneration(this)
 
         assertTrue(
@@ -47,14 +48,15 @@ val agentTitleGenerationTest by testSuite {
                 content = content,
                 enabled = true,
                 model = null,
-                generator = SessionTitleGenerator { _, model ->
-                    capturedModel.complete(model)
+                reasoningEffort = ReasoningEffort.Low,
+                generator = SessionTitleGenerator { _, model, reasoningEffort ->
+                    capturedRequest.complete(model to reasoningEffort)
                     SessionTitleGenerationResult.Generated("Plan agent title handoff")
                 },
             ),
         )
 
-        assertEquals(DefaultSessionTitleModel, capturedModel.await())
+        assertEquals(DefaultSessionTitleModel to ReasoningEffort.Low, capturedRequest.await())
         val titleIndex = withContext(Dispatchers.Default.limitedParallelism(1)) {
             withTimeout(5.seconds) {
                 root.runtime.latestIndex.first { index -> index >= 2 }
@@ -86,7 +88,8 @@ val agentTitleGenerationTest by testSuite {
                 content = content,
                 enabled = true,
                 model = OpenAiModelId("title-model"),
-                generator = SessionTitleGenerator { _, _ ->
+                reasoningEffort = ReasoningEffort.High,
+                generator = SessionTitleGenerator { _, _, _ ->
                     generationStarted.complete(Unit)
                     CompletableDeferred<SessionTitleGenerationResult>().await()
                 },

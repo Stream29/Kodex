@@ -218,7 +218,7 @@ class StreamingRequestResponseViewTest {
                 }
             }
             val collapsed = awaitSnapshot()
-            assertEquals("> Run a command · streaming", collapsed)
+            assertEquals("> Run a command", collapsed)
             assertFalse("shell.run" in collapsed)
 
             val expanded = clickRow()
@@ -257,7 +257,7 @@ class StreamingRequestResponseViewTest {
                 }
             }
             val collapsed = awaitSnapshot()
-            assertEquals("> apply_patch · in_progress", collapsed)
+            assertEquals("> apply_patch", collapsed)
         }
     }
 

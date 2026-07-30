@@ -4,6 +4,7 @@ import io.github.stream29.codex.lite.agentruntime.contract.AgentRuntime
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.time.Instant
 
 /**
  * One exclusively owned Agent node in a recursive Codex session tree.
@@ -36,6 +37,8 @@ public data class CodexSessionEntry(
     public val entryIndex: Int,
     /** The latest thread name, or `null` while the entry is uninitialized. */
     public val threadName: String?,
+    /** Latest recorded entry activity, or `null` when no timestamp has been persisted. */
+    public val lastActivityAt: Instant? = null,
 )
 
 /**

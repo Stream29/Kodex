@@ -278,6 +278,14 @@ internal class SessionTreeCliViewModel(
         globalSettings.update { settings -> settings.copy(newSession = transform(settings.newSession)) }
     }
 
+    /** Updates the application-wide controls for automatic root-session titles. */
+    suspend fun updateSessionTitleSettings(
+        transform: (io.github.stream29.codex.lite.cli.settings.SessionTitleSettings) ->
+            io.github.stream29.codex.lite.cli.settings.SessionTitleSettings,
+    ) {
+        globalSettings.update { settings -> settings.copy(sessionTitle = transform(settings.sessionTitle)) }
+    }
+
     /** Updates the application-wide multiline composer policy. */
     suspend fun updateNewLineKey(newLineKey: io.github.stream29.codex.lite.cli.settings.NewLineKey) {
         globalSettings.update { settings -> settings.copy(newLineKey = newLineKey) }

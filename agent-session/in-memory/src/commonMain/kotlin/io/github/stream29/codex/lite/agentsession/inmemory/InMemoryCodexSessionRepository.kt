@@ -298,9 +298,11 @@ private class SessionNode(
 
 private suspend fun SessionNode.entry(entryIndex: Int): CodexSessionEntry {
     val settingsIndex = storage.settings.latestIndex()
+    val timestampIndex = storage.timestamp.latestIndex()
     return CodexSessionEntry(
         entryIndex = entryIndex,
         threadName = settingsIndex.takeIf { it >= 0 }?.let { index -> storage.settings[index].threadName },
+        lastActivityAt = timestampIndex.takeIf { it >= 0 }?.let { index -> storage.timestamp[index] },
     )
 }
 

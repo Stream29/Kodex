@@ -68,10 +68,12 @@ public data class CodexNewSessionSettings(
  * @property enabled Whether the first accepted text may start title generation.
  * @property model Nullable because callers may use the title generator's
  * compiled default; `null` selects that default model.
+ * @property reasoningEffort Reasoning effort sent with the title request.
  */
 public data class SessionTitleSettings(
     public val enabled: Boolean = true,
     public val model: OpenAiModelId? = null,
+    public val reasoningEffort: ReasoningEffort = ReasoningEffort.Low,
 )
 
 /** Key chord for inserting a newline, paired with the only non-conflicting [submitKey]. */

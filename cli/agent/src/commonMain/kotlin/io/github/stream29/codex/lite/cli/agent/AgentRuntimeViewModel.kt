@@ -5,11 +5,13 @@ import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableReque
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
+import io.github.stream29.codex.lite.agentstate.contract.clearPending
 import io.github.stream29.codex.lite.cli.sessiontitle.AgentTitleGeneration
 import io.github.stream29.codex.lite.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.OpenAiModelId
+import io.github.stream29.codex.lite.openai.ReasoningEffort
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -55,6 +57,7 @@ public enum class AgentStreamKind {
 public data class AgentAutomaticTitleSettings(
     public val enabled: Boolean,
     public val model: OpenAiModelId?,
+    public val reasoningEffort: ReasoningEffort = ReasoningEffort.Low,
 )
 
 /**
@@ -153,6 +156,18 @@ public class AgentRuntimeViewModel internal constructor(
         session.runtime.runningTurn.value?.cancel()
     }
 
+    /** Fails every pending local tool call so the persisted conversation can continue safely. */
+    public fun clearPending(): Job = scope.launch {
+        clearFailure()
+        try {
+            session.runtime.clearPending()
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            recordFailure(failure)
+        }
+    }
+
     /** Completes this Agent's pending `request_user_input` call, then resumes the same runtime. */
     public fun submitRequestUserInput(): Job? {
         val submission = requestUserInput.beginSubmission() ?: return null
@@ -223,6 +238,7 @@ public class AgentRuntimeViewModel internal constructor(
                 content = content,
                 enabled = settings.enabled,
                 model = settings.model,
+                reasoningEffort = settings.reasoningEffort,
                 generator = configuration.generator,
             )
         } catch (failure: CancellationException) {

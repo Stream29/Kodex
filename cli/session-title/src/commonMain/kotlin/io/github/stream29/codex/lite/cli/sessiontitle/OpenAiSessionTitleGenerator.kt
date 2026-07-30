@@ -24,11 +24,12 @@ public class OpenAiSessionTitleGenerator(
     override suspend fun generateTitle(
         userText: String,
         model: OpenAiModelId,
+        reasoningEffort: ReasoningEffort,
     ): SessionTitleGenerationResult {
         val streamedText = StringBuilder()
         val completedItemsText = StringBuilder()
         var terminal: TitleStreamTerminal = TitleStreamTerminal.Open
-        client.createResponse(titleRequest(userText, model)).collect { event ->
+        client.createResponse(titleRequest(userText, model, reasoningEffort)).collect { event ->
             when (event) {
                 is ResponsesStreamEvent.OutputTextDelta -> streamedText.append(event.delta)
                 is ResponsesStreamEvent.OutputItemDone -> {
@@ -74,7 +75,11 @@ public class OpenAiSessionTitleGenerator(
     }
 }
 
-private fun titleRequest(userText: String, model: OpenAiModelId): ResponsesApiRequest =
+private fun titleRequest(
+    userText: String,
+    model: OpenAiModelId,
+    reasoningEffort: ReasoningEffort,
+): ResponsesApiRequest =
     ResponsesApiRequest(
         model = model,
         input = listOf(
@@ -91,7 +96,7 @@ private fun titleRequest(userText: String, model: OpenAiModelId): ResponsesApiRe
         store = false,
         tools = emptyList(),
         parallelToolCalls = false,
-        reasoning = Reasoning(effort = ReasoningEffort.Low),
+        reasoning = Reasoning(effort = reasoningEffort),
         text = TextControls(
             format = TextFormat(
                 name = "session_title",
