@@ -60,6 +60,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotSame
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -192,6 +193,14 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
 
         assertFalse(root.runtime.coroutineContext[Job]?.isActive ?: true)
         assertFalse(child.runtime.coroutineContext[Job]?.isActive ?: true)
+    }
+
+    test("exposes one Unified Exec client for each Agent runtime") {
+        val repository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
+        val root = repository.open(repository.createInitialized(settings("root")))
+        val child = root.spawnInitialized("child")
+
+        assertNotSame(root.runtime.unifiedExecToolClient, child.runtime.unifiedExecToolClient)
     }
 
     test("runtime rejects concurrent resume collectors") {

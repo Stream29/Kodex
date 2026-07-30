@@ -11,21 +11,30 @@ import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCo
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.tool.builder.ToolBuilderJson
 import io.github.stream29.codex.lite.tool.contract.Tool
+import io.github.stream29.codex.lite.utils.shellclient.ProcessSession
 import io.github.stream29.codex.lite.utils.shellclient.Shell
 import io.github.stream29.codex.lite.utils.shellclient.ShellSettings
 import io.github.stream29.codex.lite.utils.shellclient.ShellType
+import io.github.stream29.codex.lite.utils.shellclient.StdoutBuffer
+import io.github.stream29.codex.lite.utils.shellclient.StdoutBufferSnapshot
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
 import kotlinx.io.files.SystemTemporaryDirectory
@@ -36,6 +45,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.test.fail
 import kotlin.time.Duration.Companion.milliseconds
@@ -68,6 +78,36 @@ private fun StableCommandExecutionToolEvent.requireUnifiedExecOutput(): UnifiedE
         is StableCommandExecutionResult.Failure -> fail("Unified exec tool failed: ${completed.message}")
     }
 
+private class CompletionTrackingProcessSession(
+    override val scope: CoroutineScope,
+) : ProcessSession {
+    private val exitCodeDeferred: CompletableDeferred<Int> = CompletableDeferred()
+
+    override val stdin: SendChannel<String> = Channel()
+    override val stdout: StdoutBuffer = EmptyStdoutBuffer
+    override val standardOutput: StdoutBuffer = EmptyStdoutBuffer
+    override val standardError: StdoutBuffer = EmptyStdoutBuffer
+    override val exitCode: Deferred<Int> = exitCodeDeferred
+
+    fun complete(exitCode: Int) {
+        exitCodeDeferred.complete(exitCode)
+    }
+
+    override fun close() {
+        stdin.close()
+        scope.cancel()
+    }
+}
+
+private data object EmptyStdoutBuffer : StdoutBuffer {
+    override suspend fun drain(): StdoutBufferSnapshot = EmptyStdoutBufferSnapshot
+
+    override suspend fun read(yieldTime: kotlin.time.Duration): StdoutBufferSnapshot = EmptyStdoutBufferSnapshot
+}
+
+private val EmptyStdoutBufferSnapshot: StdoutBufferSnapshot =
+    StdoutBufferSnapshot(head = ByteArray(0), tail = ByteArray(0), omittedByteCount = 0)
+
 private suspend fun Tool.exec(arguments: ExecCommandArguments): StableCommandExecutionToolEvent =
     assertIs<StableCommandExecutionToolEvent>(
         handle(
@@ -89,6 +129,37 @@ private suspend fun Tool.write(arguments: WriteStdinArguments): StableCommandExe
     )
 
 val unifiedExecToolsTest by testSuite {
+    test("managed sessions retain their original arguments and observe process completion") {
+        coroutineScope {
+            val processScope = CoroutineScope(
+                currentCoroutineContext() + SupervisorJob(currentCoroutineContext()[Job]),
+            )
+            val session = CompletionTrackingProcessSession(processScope)
+            val arguments = ExecCommandArguments(command = "echo managed-session")
+            val managed = ManagedProcessSession(
+                sessionId = 1,
+                arguments = arguments,
+                session = session,
+            )
+            val observed: UnifiedExecProcessSession = managed
+
+            try {
+                assertEquals(1, observed.sessionId)
+                assertSame(arguments, observed.arguments)
+                assertFalse(observed.completed.value)
+
+                session.complete(0)
+
+                withTimeout(1.seconds) {
+                    observed.completed.first { completed -> completed }
+                }
+                assertTrue(observed.completed.value)
+            } finally {
+                session.close()
+            }
+        }
+    }
+
     test("specs declare the two Rust-compatible plain function tools") {
         assertEquals(UnifiedExecTools.ExecCommandName, UnifiedExecTools.execCommandSpec.name)
         assertEquals(UnifiedExecTools.WriteStdinName, UnifiedExecTools.writeStdinSpec.name)
