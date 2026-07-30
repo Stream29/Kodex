@@ -7,6 +7,7 @@ import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
+import io.github.stream29.codex.lite.agentsession.contract.CodexSessionEntry
 import io.github.stream29.codex.lite.agentsession.multiagent.AgentPathResolverImpl
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
@@ -19,6 +20,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -36,29 +40,39 @@ public class InMemoryCodexSessionRepository internal constructor(
 ) :
     CodexSessionRepository,
     CoroutineScope by scope {
-    private val openRootsMutex: Mutex = Mutex()
+    private val entriesMutex: Mutex = Mutex()
     private val sessions: MutableMap<Int, SessionNode> = linkedMapOf()
     private val openRoots: MutableMap<Int, InMemoryCodexAgentSession> = mutableMapOf()
+    private val mutableEntries = MutableStateFlow<List<Int>>(emptyList())
+
+    override val entries: StateFlow<List<Int>> = mutableEntries.asStateFlow()
 
     init {
         coroutineContext[Job]?.invokeOnCompletion { openRoots.clear() }
     }
 
-    override suspend fun list(): List<Int> = openRootsMutex.withLock {
-        sessions.keys.sorted()
+    override suspend fun list(): List<Int> = entriesMutex.withLock {
+        requireOpen()
+        entries.value
     }
 
-    override suspend fun create(): Int = openRootsMutex.withLock {
+    override suspend fun listEntries(): List<CodexSessionEntry> = entriesMutex.withLock {
+        requireOpen()
+        entries.value.map { entryIndex -> requireSession(entryIndex).entry(entryIndex) }
+    }
+
+    override suspend fun create(): Int = entriesMutex.withLock {
         requireOpen()
         val index = nextSessionIndex()
         check(sessions.put(
             index,
             SessionNode(InMemoryCodexAgentStorage.empty()),
         ) == null)
+        mutableEntries.value = (entries.value + index).sorted()
         index
     }
 
-    override suspend fun open(entryIndex: Int): CodexAgentSession = openRootsMutex.withLock {
+    override suspend fun open(entryIndex: Int): CodexAgentSession = entriesMutex.withLock {
         requireOpen()
         require(entryIndex >= 0) { "Session entry index must be non-negative." }
         val root = requireSession(entryIndex)
@@ -76,11 +90,12 @@ public class InMemoryCodexSessionRepository internal constructor(
     }
 
     override suspend fun delete(entryIndex: Int) {
-        val openRoot = openRootsMutex.withLock {
+        val openRoot = entriesMutex.withLock {
             requireOpen()
             require(entryIndex >= 0) { "Session entry index must be non-negative." }
             requireSession(entryIndex)
             sessions.remove(entryIndex)
+            mutableEntries.value = entries.value - entryIndex
             openRoots.remove(entryIndex)
         }
         withContext(NonCancellable) { openRoot?.cancelAndJoin() }
@@ -196,6 +211,9 @@ public class InMemoryCodexSessionRepository internal constructor(
     ) : CodexSessionRepository, CoroutineScope by scope {
         private val entriesMutex: Mutex = Mutex()
         private val openSessions: MutableMap<Int, InMemoryCodexAgentSession> = mutableMapOf()
+        private val mutableEntries = MutableStateFlow(children.keys.sorted())
+
+        override val entries: StateFlow<List<Int>> = mutableEntries.asStateFlow()
 
         init {
             coroutineContext[Job]?.invokeOnCompletion { openSessions.clear() }
@@ -203,13 +221,23 @@ public class InMemoryCodexSessionRepository internal constructor(
 
         override suspend fun list(): List<Int> = entriesMutex.withLock {
             requireActive()
-            children.keys.sorted()
+            entries.value
+        }
+
+        override suspend fun listEntries(): List<CodexSessionEntry> = entriesMutex.withLock {
+            requireActive()
+            entries.value.map { entryIndex ->
+                requireNotNull(children[entryIndex]) {
+                    "No Agent entry exists at index $entryIndex."
+                }.entry(entryIndex)
+            }
         }
 
         override suspend fun create(): Int = entriesMutex.withLock {
             requireActive()
-            val entryIndex = smallestMissing(children.keys)
+            val entryIndex = smallestMissing(entries.value)
             children[entryIndex] = SessionNode(InMemoryCodexAgentStorage.empty())
+            mutableEntries.value = (entries.value + entryIndex).sorted()
             entryIndex
         }
 
@@ -240,6 +268,7 @@ public class InMemoryCodexSessionRepository internal constructor(
                 requireNotNull(children.remove(entryIndex)) {
                     "No Agent entry exists at index $entryIndex."
                 }
+                mutableEntries.value = entries.value - entryIndex
                 openSessions.remove(entryIndex)
             }
             withContext(NonCancellable) { openSession?.cancelAndJoin() }
@@ -265,6 +294,14 @@ private class SessionNode(
     val storage: InMemoryCodexAgentStorage,
 ) {
     val children: MutableMap<Int, SessionNode> = linkedMapOf()
+}
+
+private suspend fun SessionNode.entry(entryIndex: Int): CodexSessionEntry {
+    val settingsIndex = storage.settings.latestIndex()
+    return CodexSessionEntry(
+        entryIndex = entryIndex,
+        threadName = settingsIndex.takeIf { it >= 0 }?.let { index -> storage.settings[index].threadName },
+    )
 }
 
 private fun smallestMissing(values: Iterable<Int>): Int {

@@ -3,6 +3,7 @@ package io.github.stream29.codex.lite.agentsession.inmemory
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
+import io.github.stream29.codex.lite.agentsession.contract.CodexSessionEntry
 import io.github.stream29.codex.lite.agentsession.multiagent.AgentPathResolverImpl
 import io.github.stream29.codex.lite.agentsession.test.testCodexAgentDependencies
 import io.github.stream29.codex.lite.agentruntime.contract.ConcurrentAgentRuntimeResumeException
@@ -115,6 +116,13 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         assertEquals(1, second)
         assertEquals("Session 0", repository.open(first).storage.settings[0].threadName)
         assertEquals(listOf(first, second), repository.list())
+        assertEquals(
+            listOf(
+                CodexSessionEntry(first, "Session 0"),
+                CodexSessionEntry(second, "Named"),
+            ),
+            repository.listEntries(),
+        )
     }
 
     test("returns one cached root instance and persists its recursive tree") {
@@ -143,6 +151,28 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
 
         assertEquals(listOf(second), root.subagents.list())
         assertFailsWith<IllegalArgumentException> { root.subagents.open(first) }
+    }
+
+    test("publishes ordered direct entry snapshots") {
+        val repository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
+
+        assertEquals(emptyList(), repository.entries.value)
+        val rootIndex = repository.create()
+        assertEquals(listOf(rootIndex), repository.entries.value)
+        val root = repository.open(rootIndex)
+        assertEquals(emptyList(), root.subagents.entries.value)
+
+        val first = root.subagents.create()
+        val second = root.subagents.create()
+        assertEquals(listOf(first, second), root.subagents.entries.value)
+
+        root.subagents.delete(first)
+        assertEquals(listOf(second), root.subagents.entries.value)
+        assertEquals(first, root.subagents.create())
+        assertEquals(listOf(first, second), root.subagents.entries.value)
+
+        repository.delete(rootIndex)
+        assertEquals(emptyList(), repository.entries.value)
     }
 
     test("delete invalidates cached nodes and releases the numeric slot") {

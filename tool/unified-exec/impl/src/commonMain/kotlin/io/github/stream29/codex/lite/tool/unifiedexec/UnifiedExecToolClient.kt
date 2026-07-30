@@ -45,7 +45,6 @@ public class UnifiedExecToolClient internal constructor(
     private val registryMutex: Mutex = Mutex()
     private val mutableSessions: MutableStateFlow<Map<Int, ManagedProcessSession>> =
         MutableStateFlow(emptyMap())
-    private var nextSessionId: Int = 1
 
     /**
      * Sessions that can still be read through `write_stdin`, keyed by their
@@ -187,8 +186,7 @@ public class UnifiedExecToolClient internal constructor(
 
     private fun allocateSessionId(sessions: Map<Int, ManagedProcessSession>): Int {
         repeat(Int.MAX_VALUE) {
-            val candidate = nextSessionId
-            nextSessionId = if (nextSessionId == Int.MAX_VALUE) 1 else nextSessionId + 1
+            val candidate = Random.nextInt(Int.MAX_VALUE) + 1
             if (candidate !in sessions) return candidate
         }
         throw UnifiedExecToolException("No process session identifiers are available.")

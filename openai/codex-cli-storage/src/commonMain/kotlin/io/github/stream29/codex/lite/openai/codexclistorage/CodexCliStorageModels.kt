@@ -4,6 +4,7 @@ import dev.eav.tomlkt.TomlContentPolymorphicSerializer
 import dev.eav.tomlkt.TomlElement
 import dev.eav.tomlkt.asTomlTable
 import io.github.stream29.codex.lite.openai.ModelInfo
+import io.github.stream29.codex.lite.openai.OpenAiSubscriptionTokens
 import io.github.stream29.codex.lite.openai.ReasoningEffort
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerialName
@@ -139,7 +140,7 @@ public data class CodexAuthJson(
     public val openAiApiKey: String? = null,
     @SerialName("auth_mode")
     public val authMode: CodexAuthMode? = null,
-    public val tokens: CodexAuthTokens? = null,
+    public val tokens: OpenAiSubscriptionTokens? = null,
     @SerialName("last_refresh")
     public val lastRefresh: Instant? = null,
 )
@@ -168,22 +169,3 @@ public enum class CodexAuthMode {
     @SerialName("bedrockApiKey")
     BedrockApiKey,
 }
-
-/**
- * @property idToken Raw JWT required by Codex CLI's token data.
- * @property accessToken Required bearer JWT.
- * @property refreshToken Required token used by Codex CLI to renew the session.
- * @property accountId Nullable because Codex CLI may omit the account id;
- * `null` means no account id should be propagated.
- */
-@Serializable
-public data class CodexAuthTokens(
-    @SerialName("id_token")
-    public val idToken: String,
-    @SerialName("access_token")
-    public val accessToken: String,
-    @SerialName("refresh_token")
-    public val refreshToken: String,
-    @SerialName("account_id")
-    public val accountId: String? = null,
-)

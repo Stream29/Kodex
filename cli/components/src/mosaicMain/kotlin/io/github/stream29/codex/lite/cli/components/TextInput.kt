@@ -12,6 +12,7 @@ import com.jakewharton.mosaic.layout.onKeyEvent
 import com.jakewharton.mosaic.layout.onPasteEvent
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Text
+import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.codex.lite.utils.terminaltext.takeFirstFittingTerminalWidth
 import io.github.stream29.codex.lite.utils.terminaltext.takeLastFittingTerminalWidth
 import io.github.stream29.codex.lite.utils.terminaltext.terminalCellWidth
@@ -81,62 +82,75 @@ public fun TextInput(
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
     autoFocus: Boolean = false,
+    enabled: Boolean = true,
     onKeyEvent: ((KeyEvent) -> Boolean)? = null,
+    onValueChanged: ((TextInputValue) -> Unit)? = null,
 ) {
     val latestOnKeyEvent = rememberUpdatedState(onKeyEvent)
+    val latestOnValueChanged = rememberUpdatedState(onValueChanged)
     val requesterModifier = if (focusRequester == null) Modifier else Modifier.focusRequester(focusRequester)
 
-    Text(
-        value = layout.renderedText,
-        modifier = modifier
+    fun applyEdit(edit: TextInputEdit) {
+        if (state.edit(edit)) latestOnValueChanged.value?.invoke(state.value)
+    }
+
+    val inputModifier = if (enabled) {
+        modifier
             .then(requesterModifier)
             .focusable(autoFocus = autoFocus)
             .focusCursor(layout.cursorColumn, layout.cursorRow)
             .onPasteEvent { event ->
-                state.edit(TextInputEdit.Insert(event.text.normalizeLineEndings()))
+                applyEdit(TextInputEdit.Insert(event.text.normalizeLineEndings()))
                 true
             }
             .onKeyEvent { event ->
                 when {
                     latestOnKeyEvent.value?.invoke(event) == true -> true
                     event.key == "Backspace" -> {
-                        state.edit(TextInputEdit.DeleteBeforeCursor)
+                        applyEdit(TextInputEdit.DeleteBeforeCursor)
                         true
                     }
 
                     event.key == "Delete" -> {
-                        state.edit(TextInputEdit.DeleteAtCursor)
+                        applyEdit(TextInputEdit.DeleteAtCursor)
                         true
                     }
 
                     event.key == "ArrowLeft" -> {
-                        state.edit(TextInputEdit.MoveCursorLeft)
+                        applyEdit(TextInputEdit.MoveCursorLeft)
                         true
                     }
 
                     event.key == "ArrowRight" -> {
-                        state.edit(TextInputEdit.MoveCursorRight)
+                        applyEdit(TextInputEdit.MoveCursorRight)
                         true
                     }
 
                     event.key == "Home" -> {
-                        state.edit(TextInputEdit.MoveCursorToStart)
+                        applyEdit(TextInputEdit.MoveCursorToStart)
                         true
                     }
 
                     event.key == "End" -> {
-                        state.edit(TextInputEdit.MoveCursorToEnd)
+                        applyEdit(TextInputEdit.MoveCursorToEnd)
                         true
                     }
 
                     !event.ctrl && !event.alt && event.key.isSingleScalar() -> {
-                        state.edit(TextInputEdit.Insert(event.key))
+                        applyEdit(TextInputEdit.Insert(event.key))
                         true
                     }
 
                     else -> false
                 }
-            },
+            }
+    } else {
+        modifier
+    }
+    Text(
+        value = layout.renderedText,
+        modifier = inputModifier,
+        textStyle = if (enabled) TextStyle.Unspecified else TextStyle.Dim,
     )
 }
 

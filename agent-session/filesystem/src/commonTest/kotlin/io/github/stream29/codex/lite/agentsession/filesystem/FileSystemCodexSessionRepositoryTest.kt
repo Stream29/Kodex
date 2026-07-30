@@ -3,6 +3,7 @@ package io.github.stream29.codex.lite.agentsession.filesystem
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
+import io.github.stream29.codex.lite.agentsession.contract.CodexSessionEntry
 import io.github.stream29.codex.lite.agentsession.inmemory.InMemoryCodexSessionRepository
 import io.github.stream29.codex.lite.agentsession.test.testCodexAgentDependencies
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
@@ -115,6 +116,7 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
             session.storage.timestamp[1] = timestamp
             session.storage.stable[1] = stableEvent
             session.storage.unstable[1] = pendingEvents
+            val childEntry = session.subagents.create()
 
             val directory = Path(root, "sessions/0")
             assertEquals(
@@ -139,6 +141,8 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
 
             val reopened = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
             val reopenedSession = reopened.open(index)
+            assertEquals(listOf(index), reopened.entries.value)
+            assertEquals(listOf(childEntry), reopenedSession.subagents.entries.value)
             assertEquals(storageId, reopenedSession.storage.id)
             assertEquals(cwd, reopenedSession.storage.settings[0].cwd)
             assertEquals(stableEvent, reopenedSession.storage.stable[1])
@@ -183,12 +187,44 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
             repository.closeAndJoin()
         }
 
+        test("publishes ordered direct entry snapshots") { root ->
+            val repository = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
+
+            assertEquals(emptyList(), repository.entries.value)
+            val rootIndex = repository.create()
+            assertEquals(listOf(rootIndex), repository.entries.value)
+            val rootSession = repository.open(rootIndex)
+            assertEquals(emptyList(), rootSession.subagents.entries.value)
+
+            val first = rootSession.subagents.create()
+            val second = rootSession.subagents.create()
+            assertEquals(listOf(first, second), rootSession.subagents.entries.value)
+
+            rootSession.subagents.delete(first)
+            assertEquals(listOf(second), rootSession.subagents.entries.value)
+            assertEquals(first, rootSession.subagents.create())
+            assertEquals(listOf(first, second), rootSession.subagents.entries.value)
+
+            repository.delete(rootIndex)
+            assertEquals(emptyList(), repository.entries.value)
+            repository.closeAndJoin()
+        }
+
         test("allocates the next slot when an earlier root directory already exists") { root ->
             val repository = FileSystemCodexSessionRepository(root, testCodexAgentDependencies())
 
-            assertEquals(0, repository.createInitialized(settings("first")))
-            assertEquals(1, repository.createInitialized(settings("second")))
+            val first = repository.createInitialized(settings("first"))
+            val second = repository.createInitialized(settings("second"))
 
+            assertEquals(0, first)
+            assertEquals(1, second)
+            assertEquals(
+                listOf(
+                    CodexSessionEntry(first, "first"),
+                    CodexSessionEntry(second, "second"),
+                ),
+                repository.listEntries(),
+            )
             repository.closeAndJoin()
         }
 

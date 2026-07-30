@@ -17,6 +17,7 @@ val inMemoryCodexGlobalSettingsTest by testSuite {
         val updated = settings.update {
             it.copy(
                 codexHome = Path("/workspace/.codex"),
+                authSource = CodexAuthSource.CodexLite,
                 shell = shell,
                 newLineKey = NewLineKey.Enter,
             )
@@ -24,6 +25,7 @@ val inMemoryCodexGlobalSettingsTest by testSuite {
 
         assertEquals(updated, settings.settings.value)
         assertEquals(Path("/workspace/.codex"), updated.codexHome)
+        assertEquals(CodexAuthSource.CodexLite, updated.authSource)
         assertEquals(shell, updated.shell)
         assertEquals(NewLineKey.Enter, updated.newLineKey)
         assertEquals(SubmitKey.CtrlEnter, updated.newLineKey.submitKey)

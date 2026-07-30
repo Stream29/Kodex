@@ -7,6 +7,7 @@ import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
+import io.github.stream29.codex.lite.agentsession.contract.CodexSessionEntry
 import io.github.stream29.codex.lite.agentsession.multiagent.AgentPathResolverImpl
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState as CodexAgentStateContract
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
@@ -19,6 +20,9 @@ import io.github.stream29.codex.lite.utils.kotlinxiocoroutines.CoroutineFileSyst
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -40,6 +44,7 @@ internal class FileSystemCodexAgentSession(
     state: CodexAgentStateContract,
     createAgentPathResolver: (CodexAgentSession) -> AgentPathResolver,
     runtimeBuilder: AgentRuntimeBuilder,
+    initialSubagentEntries: List<Int>,
 ) : CodexAgentSession, CoroutineScope by scope {
     private val agentPathResolver: AgentPathResolver =
         createAgentPathResolver(this)
@@ -51,6 +56,7 @@ internal class FileSystemCodexAgentSession(
         scope = scope.supervisorChildScope(),
         dependencies = dependencies,
         agentPathResolver = agentPathResolver,
+        initialEntries = initialSubagentEntries,
     )
 
     override val runtime: AgentRuntime = runtimeBuilder(state, dependencies, agentPathResolver)
@@ -63,9 +69,13 @@ private class FileSystemSubagentRepository(
     scope: CoroutineScope,
     private val dependencies: CodexAgentDependencies,
     private val agentPathResolver: AgentPathResolver,
+    initialEntries: List<Int>,
 ) : CodexSessionRepository, CoroutineScope by scope {
     private val entriesMutex: Mutex = Mutex()
     private val openSessions: MutableMap<Int, FileSystemCodexAgentSession> = mutableMapOf()
+    private val mutableEntries = MutableStateFlow(initialEntries)
+
+    override val entries: StateFlow<List<Int>> = mutableEntries.asStateFlow()
 
     init {
         coroutineContext[Job]?.invokeOnCompletion { openSessions.clear() }
@@ -73,13 +83,21 @@ private class FileSystemSubagentRepository(
 
     override suspend fun list(): List<Int> = entriesMutex.withLock {
         requireActive()
-        childDirectories(directory, fileSystem).map { (entryIndex) -> entryIndex }
+        entries.value
+    }
+
+    override suspend fun listEntries(): List<CodexSessionEntry> = entriesMutex.withLock {
+        requireActive()
+        entries.value.map { entryIndex ->
+            fileSystemSessionEntry(entryIndex, Path(directory, entryIndex.toString()), fileSystem)
+        }
     }
 
     override suspend fun create(): Int = entriesMutex.withLock {
         requireActive()
-        val entryIndex = smallestMissing(childDirectories(directory, fileSystem).map { (index) -> index })
+        val entryIndex = smallestMissing(entries.value)
         createEmptyFileSystemAgentSessionNode(Path(directory, entryIndex.toString()), fileSystem)
+        mutableEntries.value = (entries.value + entryIndex).sorted()
         entryIndex
     }
 
@@ -90,10 +108,17 @@ private class FileSystemSubagentRepository(
         require(fileSystem.metadataOrNull(agentDirectory)?.isDirectory == true) {
             "Agent entry does not exist: $entryIndex"
         }
+        if (entryIndex !in entries.value) {
+            mutableEntries.value = (entries.value + entryIndex).sorted()
+        }
         openSessions[entryIndex]?.let { session ->
             if (session.coroutineContext[Job]?.isActive == true) return@withLock session
             openSessions.remove(entryIndex)
         }
+        val initialSubagentEntries = childDirectories(
+            directory = Path(agentDirectory, SubagentsDirectory),
+            fileSystem = fileSystem,
+        ).map { (index) -> index }
         val agentScope = supervisorChildScope()
         val storage = FileSystemAgentStorage(agentDirectory, fileSystem)
             .cached(agentScope, valueCacheSize)
@@ -115,6 +140,7 @@ private class FileSystemSubagentRepository(
                 runtimeBuilder = { state, dependencies, agentPathResolver ->
                     state.buildSubagentRuntime(dependencies, agentPathResolver)
                 },
+                initialSubagentEntries = initialSubagentEntries,
             )
         } catch (failure: Throwable) {
             withContext(NonCancellable) { agentScope.cancelAndJoin() }
@@ -136,6 +162,7 @@ private class FileSystemSubagentRepository(
                 openSessions.remove(entryIndex)?.cancelAndJoin()
                 deleteRecursively(agentDirectory, fileSystem)
             }
+            mutableEntries.value = entries.value - entryIndex
         }
     }
 
@@ -163,6 +190,10 @@ internal suspend fun CoroutineScope.FileSystemCodexAgentSession(
     }
     try {
         val storage = FileSystemAgentStorage(directory, fileSystem).cached(scope, valueCacheSize)
+        val initialSubagentEntries = childDirectories(
+            directory = Path(directory, SubagentsDirectory),
+            fileSystem = fileSystem,
+        ).map { (index) -> index }
         val session = FileSystemCodexAgentSession(
             directory = directory,
             fileSystem = fileSystem,
@@ -182,6 +213,7 @@ internal suspend fun CoroutineScope.FileSystemCodexAgentSession(
             runtimeBuilder = { state, dependencies, agentPathResolver ->
                 state.buildMasterAgentRuntime(dependencies, agentPathResolver)
             },
+            initialSubagentEntries = initialSubagentEntries,
         )
         scope.coroutineContext[Job]?.invokeOnCompletion { lease.close() }
         return session

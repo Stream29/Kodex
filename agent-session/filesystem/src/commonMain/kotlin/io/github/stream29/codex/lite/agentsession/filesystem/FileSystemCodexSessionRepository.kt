@@ -3,6 +3,7 @@ package io.github.stream29.codex.lite.agentsession.filesystem
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentSession
 import io.github.stream29.codex.lite.agentsession.contract.CodexSessionRepository
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
+import io.github.stream29.codex.lite.agentsession.contract.CodexSessionEntry
 import io.github.stream29.codex.lite.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.codex.lite.agentstorage.filesystem.ofEmpty
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
@@ -14,6 +15,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -29,60 +33,73 @@ public class FileSystemCodexSessionRepository internal constructor(
     private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     private val valueCacheSize: Int = 256,
     private val dependencies: CodexAgentDependencies,
+    initialEntries: List<Int>,
 ) :
     CodexSessionRepository,
     CoroutineScope by scope {
-    private val openRootsMutex = Mutex()
+    private val entriesMutex = Mutex()
     private val openRoots: MutableMap<Int, CodexAgentSession> = mutableMapOf()
+    private val mutableEntries = MutableStateFlow(initialEntries)
     private val sessionsRoot = Path(root, SessionsDirectory)
+
+    override val entries: StateFlow<List<Int>> = mutableEntries.asStateFlow()
 
     init {
         coroutineContext[Job]?.invokeOnCompletion { openRoots.clear() }
     }
 
-    override suspend fun list(): List<Int> {
+    override suspend fun list(): List<Int> = entriesMutex.withLock {
         requireOpen()
-        return sessionDirectories().map { (index) -> index }
+        entries.value
     }
 
-    override suspend fun create(): Int {
+    override suspend fun listEntries(): List<CodexSessionEntry> = entriesMutex.withLock {
         requireOpen()
-        val index = smallestMissing(sessionDirectories().map { (index) -> index })
+        entries.value.map { entryIndex ->
+            fileSystemSessionEntry(entryIndex, sessionDirectory(entryIndex), fileSystem)
+        }
+    }
+
+    override suspend fun create(): Int = entriesMutex.withLock {
+        requireOpen()
+        val index = smallestMissing(entries.value)
         val directory = sessionDirectory(index)
         FileSystemAgentStorage.ofEmpty(directory, fileSystem)
         fileSystem.createDirectories(Path(directory, SubagentsDirectory), mustCreate = true)
-        return index
+        mutableEntries.value = (entries.value + index).sorted()
+        index
     }
 
     override suspend fun open(
         entryIndex: Int,
-    ): CodexAgentSession {
+    ): CodexAgentSession = entriesMutex.withLock {
         requireOpen()
         require(entryIndex >= 0) { "Session entry index must be non-negative." }
-        return openRootsMutex.withLock {
-            openRoots[entryIndex]?.let { root ->
-                if (root.coroutineContext[Job]?.isActive == true) return@withLock root
-                openRoots.remove(entryIndex)
-            }
-            val directory = sessionDirectory(entryIndex)
-            require(fileSystem.metadataOrNull(directory)?.isDirectory == true) {
-                "Session directory does not exist: $directory"
-            }
-            FileSystemCodexAgentSession(
-                directory = directory,
-                fileSystem = fileSystem,
-                valueCacheSize = valueCacheSize,
-                dependencies = dependencies,
-            ).also { root ->
-                openRoots[entryIndex] = root
-            }
+        openRoots[entryIndex]?.let { root ->
+            if (root.coroutineContext[Job]?.isActive == true) return@withLock root
+            openRoots.remove(entryIndex)
+        }
+        val directory = sessionDirectory(entryIndex)
+        require(fileSystem.metadataOrNull(directory)?.isDirectory == true) {
+            "Session directory does not exist: $directory"
+        }
+        if (entryIndex !in entries.value) {
+            mutableEntries.value = (entries.value + entryIndex).sorted()
+        }
+        FileSystemCodexAgentSession(
+            directory = directory,
+            fileSystem = fileSystem,
+            valueCacheSize = valueCacheSize,
+            dependencies = dependencies,
+        ).also { root ->
+            openRoots[entryIndex] = root
         }
     }
 
-    override suspend fun delete(entryIndex: Int) {
+    override suspend fun delete(entryIndex: Int): Unit = entriesMutex.withLock {
         requireOpen()
         require(entryIndex >= 0) { "Session entry index must be non-negative." }
-        val openRoot = openRootsMutex.withLock { openRoots.remove(entryIndex) }
+        val openRoot = openRoots.remove(entryIndex)
         withContext(NonCancellable) {
             openRoot?.coroutineContext?.get(Job)?.cancelAndJoin()
         }
@@ -97,6 +114,7 @@ public class FileSystemCodexSessionRepository internal constructor(
             }
         }
         fileSystem.delete(directory, mustExist = false)
+        mutableEntries.value = entries.value - entryIndex
     }
 
     private suspend fun acquireSessionLeaseAfterClose(
@@ -116,19 +134,6 @@ public class FileSystemCodexSessionRepository internal constructor(
             }
         }
     }
-
-    private suspend fun sessionDirectories(): List<Pair<Int, Path>> =
-        fileSystem.list(sessionsRoot)
-            .filterNot { path -> path.name.startsWith(".") }
-            .map { directory ->
-                val index = directory.name.toInt()
-                require(index >= 0) { "Session index must be non-negative: $directory" }
-                require(fileSystem.metadataOrNull(directory)?.isDirectory == true) {
-                    "Session entry is not a directory: $directory"
-                }
-                index to directory
-            }
-            .sortedBy { (index) -> index }
 
     private fun sessionDirectory(index: Int): Path =
         Path(sessionsRoot, index.toString())
@@ -155,6 +160,22 @@ public class FileSystemCodexSessionRepository internal constructor(
     }
 
 }
+
+private suspend fun sessionDirectories(
+    directory: Path,
+    fileSystem: CoroutineFileSystem,
+): List<Pair<Int, Path>> =
+    fileSystem.list(directory)
+        .filterNot { path -> path.name.startsWith(".") }
+        .map { sessionDirectory ->
+            val index = sessionDirectory.name.toInt()
+            require(index >= 0) { "Session index must be non-negative: $sessionDirectory" }
+            require(fileSystem.metadataOrNull(sessionDirectory)?.isDirectory == true) {
+                "Session entry is not a directory: $sessionDirectory"
+            }
+            index to sessionDirectory
+        }
+        .sortedBy { (index) -> index }
 
 internal fun smallestMissing(values: List<Int>): Int {
     var candidate = 0
@@ -198,6 +219,19 @@ internal suspend fun deleteRecursively(
     fileSystem.delete(path, mustExist = false)
 }
 
+internal suspend fun fileSystemSessionEntry(
+    entryIndex: Int,
+    directory: Path,
+    fileSystem: CoroutineFileSystem,
+): CodexSessionEntry {
+    val settings = FileSystemAgentStorage(directory, fileSystem).settings
+    val settingsIndex = settings.latestIndex()
+    return CodexSessionEntry(
+        entryIndex = entryIndex,
+        threadName = settingsIndex.takeIf { it >= 0 }?.let { index -> settings[index].threadName },
+    )
+}
+
 /** Creates a filesystem session repository, initializing its root layout when needed. */
 public suspend fun CoroutineScope.FileSystemCodexSessionRepository(
     root: Path,
@@ -206,13 +240,15 @@ public suspend fun CoroutineScope.FileSystemCodexSessionRepository(
     valueCacheSize: Int = 256,
 ): FileSystemCodexSessionRepository {
     fileSystem.createDirectories(root)
-    fileSystem.createDirectories(Path(root, SessionsDirectory))
+    val sessionsRoot = Path(root, SessionsDirectory)
+    fileSystem.createDirectories(sessionsRoot)
     return FileSystemCodexSessionRepository(
         scope = supervisorChildScope(),
         root = root,
         fileSystem = fileSystem,
         valueCacheSize = valueCacheSize,
         dependencies = dependencies,
+        initialEntries = sessionDirectories(sessionsRoot, fileSystem).map { (index) -> index },
     )
 }
 

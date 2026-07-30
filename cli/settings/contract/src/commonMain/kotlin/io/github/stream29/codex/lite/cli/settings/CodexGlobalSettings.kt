@@ -1,8 +1,10 @@
 package io.github.stream29.codex.lite.cli.settings
 
-import io.github.stream29.codex.lite.agentcontext.prefix.contract.AgentContextSettings
+import io.github.stream29.codex.lite.agentcontext.contract.AgentContextSettings
 import io.github.stream29.codex.lite.hook.contract.HookConfiguration
 import io.github.stream29.codex.lite.hook.contract.HookSettings
+import io.github.stream29.codex.lite.mcp.contract.McpServerConfiguration
+import io.github.stream29.codex.lite.mcp.contract.McpSettings
 import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
 import io.github.stream29.codex.lite.openai.ReasoningEffort
@@ -19,24 +21,38 @@ import kotlinx.serialization.Serializable
  * Application-wide settings that apply independently of any one agent session.
  *
  * @property codexHome Root directory of the local Codex CLI data.
+ * @property authSource Persistent source of subscription credentials.
  * @property shell Default shell advertised to Agents and used by shell tools.
  * @property newLineKey Key chord that a multiline text input treats as a newline.
  * @property newSession Defaults copied into each newly created thread.
  * @property sessionTitle Automatic session-title generation controls.
- * @property mcpServers Application-wide Streamable HTTP MCP server configurations.
+ * @property mcpServers Application-wide MCP server configurations.
  * @property hooks Effective Hook configuration. It inherits the
  * selected Codex Home and project configuration until Codex Lite persists a
  * complete override.
  */
 public data class CodexGlobalSettings(
     public override val codexHome: Path,
+    public val authSource: CodexAuthSource = CodexAuthSource.Codex,
     public override val shell: Shell = Shell.default,
     public val newLineKey: NewLineKey = NewLineKey.ShiftEnter,
     public val newSession: CodexNewSessionSettings = CodexNewSessionSettings(),
     public val sessionTitle: SessionTitleSettings = SessionTitleSettings(),
-    public val mcpServers: Map<String, McpServerSettings> = emptyMap(),
+    public override val mcpServers: Map<String, McpServerConfiguration> = emptyMap(),
     public override val hooks: HookConfiguration = HookConfiguration(),
-) : AgentContextSettings, HookSettings
+) : AgentContextSettings, HookSettings, McpSettings
+
+/** Selects whether subscription credentials come from Codex or Codex Lite storage. */
+@Serializable
+public enum class CodexAuthSource {
+    /** Reads the selected Codex Home auth.json without modifying it. */
+    @SerialName("codex")
+    Codex,
+
+    /** Reads and refreshes Codex Lite private auth.yml. */
+    @SerialName("codex-lite")
+    CodexLite,
+}
 
 /** Defaults used to construct a new thread's first settings snapshot. */
 public data class CodexNewSessionSettings(
@@ -56,13 +72,6 @@ public data class CodexNewSessionSettings(
 public data class SessionTitleSettings(
     public val enabled: Boolean = true,
     public val model: OpenAiModelId? = null,
-)
-
-/** Global configuration for one Streamable HTTP MCP server. */
-public data class McpServerSettings(
-    public val url: String,
-    public val headers: Map<String, String> = emptyMap(),
-    public val enabled: Boolean = true,
 )
 
 /** Key chord for inserting a newline, paired with the only non-conflicting [submitKey]. */
