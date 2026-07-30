@@ -1,5 +1,5 @@
 plugins {
-    id("codexlite.kmp-host")
+    id("kodex.kmp-host")
 }
 
 kotlin {
@@ -31,7 +31,7 @@ kotlin {
             implementation(project(":tool-unified-exec-impl"))
             implementation(project(":tool-view-image-impl"))
             implementation(project(":tool-web-run"))
-            implementation(project(":utils-codex-lite-home"))
+            implementation(project(":utils-kodex-home"))
             implementation(project(":utils-shell-client"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.io.core)

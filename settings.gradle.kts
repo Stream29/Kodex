@@ -15,7 +15,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "CodexLite"
+rootProject.name = "Kodex"
 
 includeBuild("Mosaic")
 includeBuild("KotlinMcpSdk") {

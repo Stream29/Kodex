@@ -1,4 +1,4 @@
-package = io.github.stream29.codex.lite.utils.shellclient.conpty
+package = io.github.stream29.kodex.utils.shellclient.conpty
 
 headers = windows.h
 
@@ -11,7 +11,7 @@ headers = windows.h
 #define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE ProcThreadAttributeValue(22, FALSE, TRUE, FALSE)
 #endif
 
-typedef HRESULT (WINAPI *codexlite_create_pseudo_console)(
+typedef HRESULT (WINAPI *kodex_create_pseudo_console)(
     COORD,
     HANDLE,
     HANDLE,
@@ -19,22 +19,22 @@ typedef HRESULT (WINAPI *codexlite_create_pseudo_console)(
     HANDLE *
 );
 
-typedef VOID (WINAPI *codexlite_close_pseudo_console)(HANDLE);
+typedef VOID (WINAPI *kodex_close_pseudo_console)(HANDLE);
 
-typedef struct codexlite_windows_pseudo_console {
+typedef struct kodex_windows_pseudo_console {
     HANDLE pseudo_console;
     HANDLE input_read;
     HANDLE output_write;
-} codexlite_windows_pseudo_console;
+} kodex_windows_pseudo_console;
 
-static inline void codexlite_close_handle(HANDLE *handle) {
+static inline void kodex_close_handle(HANDLE *handle) {
     if (*handle != NULL) {
         CloseHandle(*handle);
         *handle = NULL;
     }
 }
 
-static inline int codexlite_spawn_windows_pty(
+static inline int kodex_spawn_windows_pty(
     HANDLE *process_out,
     HANDLE *thread_out,
     void **pseudo_console_out,
@@ -47,15 +47,15 @@ static inline int codexlite_spawn_windows_pty(
     SHORT rows
 ) {
     HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
-    codexlite_create_pseudo_console create_pseudo_console;
-    codexlite_close_pseudo_console close_pseudo_console;
+    kodex_create_pseudo_console create_pseudo_console;
+    kodex_close_pseudo_console close_pseudo_console;
     SECURITY_ATTRIBUTES security_attributes;
     HANDLE stdin_read = NULL;
     HANDLE stdin_write = NULL;
     HANDLE output_read = NULL;
     HANDLE output_write = NULL;
     HANDLE pseudo_console = NULL;
-    codexlite_windows_pseudo_console *pseudo_console_owner = NULL;
+    kodex_windows_pseudo_console *pseudo_console_owner = NULL;
     SIZE_T attribute_list_size = 0;
     LPPROC_THREAD_ATTRIBUTE_LIST attribute_list = NULL;
     STARTUPINFOEXW startup_info;
@@ -82,8 +82,8 @@ static inline int codexlite_spawn_windows_pty(
     *output_read_out = NULL;
 
     if (kernel32 == NULL) return ERROR_CALL_NOT_IMPLEMENTED;
-    create_pseudo_console = (codexlite_create_pseudo_console)GetProcAddress(kernel32, "CreatePseudoConsole");
-    close_pseudo_console = (codexlite_close_pseudo_console)GetProcAddress(kernel32, "ClosePseudoConsole");
+    create_pseudo_console = (kodex_create_pseudo_console)GetProcAddress(kernel32, "CreatePseudoConsole");
+    close_pseudo_console = (kodex_close_pseudo_console)GetProcAddress(kernel32, "ClosePseudoConsole");
     if (create_pseudo_console == NULL || close_pseudo_console == NULL) return ERROR_CALL_NOT_IMPLEMENTED;
 
     ZeroMemory(&security_attributes, sizeof(security_attributes));
@@ -114,10 +114,10 @@ static inline int codexlite_spawn_windows_pty(
         goto fail;
     }
     // CreatePseudoConsole borrows these handles until ClosePseudoConsole.
-    pseudo_console_owner = (codexlite_windows_pseudo_console *)HeapAlloc(
+    pseudo_console_owner = (kodex_windows_pseudo_console *)HeapAlloc(
         GetProcessHeap(),
         HEAP_ZERO_MEMORY,
-        sizeof(codexlite_windows_pseudo_console)
+        sizeof(kodex_windows_pseudo_console)
     );
     if (pseudo_console_owner == NULL) {
         error = ERROR_NOT_ENOUGH_MEMORY;
@@ -204,32 +204,32 @@ fail:
         if (pseudo_console_owner->pseudo_console != NULL && close_pseudo_console != NULL) {
             close_pseudo_console(pseudo_console_owner->pseudo_console);
         }
-        codexlite_close_handle(&pseudo_console_owner->input_read);
-        codexlite_close_handle(&pseudo_console_owner->output_write);
+        kodex_close_handle(&pseudo_console_owner->input_read);
+        kodex_close_handle(&pseudo_console_owner->output_write);
         HeapFree(GetProcessHeap(), 0, pseudo_console_owner);
     } else if (pseudo_console != NULL && close_pseudo_console != NULL) {
         close_pseudo_console(pseudo_console);
     }
-    codexlite_close_handle(&stdin_read);
-    codexlite_close_handle(&stdin_write);
-    codexlite_close_handle(&output_read);
-    codexlite_close_handle(&output_write);
+    kodex_close_handle(&stdin_read);
+    kodex_close_handle(&stdin_write);
+    kodex_close_handle(&output_read);
+    kodex_close_handle(&output_write);
     return (int)error;
 }
 
-static inline void codexlite_close_windows_pseudo_console(void *pseudo_console) {
+static inline void kodex_close_windows_pseudo_console(void *pseudo_console) {
     HMODULE kernel32;
-    codexlite_close_pseudo_console close_pseudo_console;
-    codexlite_windows_pseudo_console *owner = (codexlite_windows_pseudo_console *)pseudo_console;
+    kodex_close_pseudo_console close_pseudo_console;
+    kodex_windows_pseudo_console *owner = (kodex_windows_pseudo_console *)pseudo_console;
     if (owner == NULL) return;
     kernel32 = GetModuleHandleW(L"kernel32.dll");
     close_pseudo_console = kernel32 == NULL
         ? NULL
-        : (codexlite_close_pseudo_console)GetProcAddress(kernel32, "ClosePseudoConsole");
+        : (kodex_close_pseudo_console)GetProcAddress(kernel32, "ClosePseudoConsole");
     if (close_pseudo_console != NULL && owner->pseudo_console != NULL) {
         close_pseudo_console(owner->pseudo_console);
     }
-    codexlite_close_handle(&owner->input_read);
-    codexlite_close_handle(&owner->output_write);
+    kodex_close_handle(&owner->input_read);
+    kodex_close_handle(&owner->output_write);
     HeapFree(GetProcessHeap(), 0, owner);
 }

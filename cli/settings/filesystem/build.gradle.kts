@@ -1,5 +1,5 @@
 plugins {
-    id("codexlite.kmp-cli")
+    id("kodex.kmp-cli")
     alias(libs.plugins.kotlin.serialization)
 }
 

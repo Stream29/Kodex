@@ -1,0 +1,33 @@
+package io.github.stream29.kodex.agentstorage.cleanmodels.unstable
+
+import io.github.stream29.kodex.openai.ResponseItem
+import io.github.stream29.kodex.openai.ResponseItemId
+import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+/** Deferred client tool search waiting for local execution. */
+@Serializable
+@SerialName("tool_search")
+public data class PendingToolSearchEvent(
+    @SerialName("call_id")
+    override val callId: String,
+    @SerialName("item_id")
+    override val itemId: ResponseItemId? = null,
+    public val arguments: SearchToolCallParams,
+) : PendingToolEvent {
+    override val toolName: String? = null
+    override val toolNamespace: String? = null
+
+    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+        listOf(
+            ResponseItem.ClientToolSearchCall(
+                id = itemId,
+                callId = callId,
+                arguments = pendingJsonElement(
+                    serializer = SearchToolCallParams.serializer(),
+                    value = arguments,
+                ),
+            ),
+        )
+}
