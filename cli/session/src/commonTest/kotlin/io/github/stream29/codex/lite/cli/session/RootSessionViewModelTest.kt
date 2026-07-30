@@ -11,12 +11,14 @@ import io.github.stream29.codex.lite.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.OpenAiModelId
+import io.github.stream29.codex.lite.openai.ReasoningEffort
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -24,6 +26,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration.Companion.seconds
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 val rootSessionViewModelTest by testSuite {
     test("updates recursively from child entry snapshots") {
@@ -40,6 +43,9 @@ val rootSessionViewModelTest by testSuite {
                     viewModel.state.first { tree -> tree.agents.size == 2 }
                 }
                 assertEquals(listOf(0, 1), childTree.agents.map(AgentRuntimeTreeEntry::depth))
+                val childViewModel = requireNotNull(childTree.agents.firstOrNull { entry ->
+                    entry.parentAgentId == root.storage.id
+                }).viewModel
 
                 val child = root.subagents.open(childEntry)
                 child.subagents.create()
@@ -53,8 +59,28 @@ val rootSessionViewModelTest by testSuite {
                     viewModel.state.first { tree -> tree.agents.size == 1 }
                 }
                 assertEquals(root.storage.id, removedTree.agents.single().agentId)
+                assertTrue(childViewModel.resume().isCancelled)
             } finally {
                 viewModel.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("closing the root tree propagates through the session scope") {
+        coroutineScope {
+            val repository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
+            val root = repository.open(repository.create())
+            val child = root.subagents.open(root.subagents.create())
+            val viewModel = RootSessionViewModel(root)
+            try {
+                viewModel.refresh()
+
+                viewModel.close()
+
+                assertTrue(requireNotNull(root.coroutineContext[Job]).isCancelled)
+                assertTrue(requireNotNull(child.coroutineContext[Job]).isCancelled)
+            } finally {
                 repository.cancelAndJoin()
             }
         }
@@ -63,7 +89,7 @@ val rootSessionViewModelTest by testSuite {
     test("root submission starts title generation after its input is accepted") {
         coroutineScope {
             val titleModel = OpenAiModelId("title-model")
-            val titleRequest = CompletableDeferred<Pair<String, OpenAiModelId>>()
+            val titleRequest = CompletableDeferred<Triple<String, OpenAiModelId, ReasoningEffort>>()
             val responseStarted = CompletableDeferred<Unit>()
             val releaseResponse = CompletableDeferred<Unit>()
             val repository = InMemoryCodexSessionRepository(
@@ -89,12 +115,16 @@ val rootSessionViewModelTest by testSuite {
                 )
             }
             val configuration = AgentAutomaticTitleConfiguration(
-                generator = SessionTitleGenerator { text, model ->
-                    titleRequest.complete(text to model)
+                generator = SessionTitleGenerator { text, model, reasoningEffort ->
+                    titleRequest.complete(Triple(text, model, reasoningEffort))
                     SessionTitleGenerationResult.Generated("Generated root title")
                 },
                 settingsProvider = {
-                    AgentAutomaticTitleSettings(enabled = true, model = titleModel)
+                    AgentAutomaticTitleSettings(
+                        enabled = true,
+                        model = titleModel,
+                        reasoningEffort = ReasoningEffort.High,
+                    )
                 },
             )
             val viewModel = RootSessionViewModel(root, configuration)
@@ -115,7 +145,7 @@ val rootSessionViewModelTest by testSuite {
                     }
                 }
                 assertEquals(
-                    "Create a title from this prompt." to titleModel,
+                    Triple("Create a title from this prompt.", titleModel, ReasoningEffort.High),
                     withContext(Dispatchers.Default.limitedParallelism(1)) {
                         withTimeout(5.seconds) {
                             titleRequest.await()

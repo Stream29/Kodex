@@ -13,6 +13,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.time.Instant
 
 /** Repository-level CLI state. A session entry is one root Agent tree. */
 public data class SessionRepositoryViewState(
@@ -26,6 +27,8 @@ public data class RootSessionEntry(
     public val selected: Boolean,
     /** Current root Agent title read from the lightweight persisted catalog. */
     public val threadName: String? = null,
+    /** Latest root activity read from the lightweight persisted catalog. */
+    public val lastActivityAt: Instant? = null,
 )
 
 /**
@@ -146,12 +149,16 @@ public class SessionRepositoryViewModel internal constructor(
 
     private fun publish(entries: List<CodexSessionEntry>, selectedSessionIndex: Int?) {
         mutableState.value = SessionRepositoryViewState(
-            sessions = entries.map { entry ->
+            sessions = entries.sortedWith(
+                compareByDescending<CodexSessionEntry> { entry -> entry.lastActivityAt }
+                    .thenByDescending { entry -> entry.entryIndex },
+            ).map { entry ->
                 RootSessionEntry(
                     sessionIndex = entry.entryIndex,
                     viewModel = rootViewModels[entry.entryIndex],
                     selected = entry.entryIndex == selectedSessionIndex,
                     threadName = entry.threadName,
+                    lastActivityAt = entry.lastActivityAt,
                 )
             },
             selectedSessionIndex = selectedSessionIndex,

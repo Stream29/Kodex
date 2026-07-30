@@ -6,7 +6,6 @@ import io.github.stream29.codex.lite.cli.agent.AgentRuntimeViewModel
 import io.github.stream29.codex.lite.cli.agent.AgentRuntimeViewModel as createAgentRuntimeViewModel
 import io.github.stream29.codex.lite.cli.history.AgentHistoryViewModel
 import io.github.stream29.codex.lite.cli.history.AgentHistoryViewModel as createAgentHistoryViewModel
-import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
@@ -47,7 +46,7 @@ public data class AgentRuntimeTreeEntry(
  */
 public class RootSessionViewModel internal constructor(
     public val rootSession: CodexAgentSession,
-    private val scope: CoroutineScope,
+    private val sessionScope: CoroutineScope,
     private val automaticTitleConfiguration: AgentAutomaticTitleConfiguration? = null,
 ) : AutoCloseable {
     private val agentViewModels = linkedMapOf<String, AgentRuntimeViewModel>()
@@ -89,27 +88,25 @@ public class RootSessionViewModel internal constructor(
 
         visit(rootSession, parentAgentId = null, depth = 0)
         val discoveredIds = discoveredAgents.mapTo(mutableSetOf(), DiscoveredAgent::agentId)
-        agentViewModels.entries.removeAll { (agentId, viewModel) ->
+        agentViewModels.entries.removeAll { (agentId, _) ->
             if (agentId in discoveredIds) {
                 false
             } else {
-                viewModel.close()
-                agentHistoryViewModels.remove(agentId)?.close()
-                agentObservations.remove(agentId)?.cancel()
+                agentHistoryViewModels.remove(agentId)
+                agentObservations.remove(agentId)
                 true
             }
         }
-        topologyObservations.entries.removeAll { (agentId, observation) ->
+        topologyObservations.entries.removeAll { (agentId, _) ->
             if (agentId in discoveredIds) {
                 false
             } else {
-                observation.cancel()
                 true
             }
         }
         discoveredAgents.forEach { discovered ->
             val viewModel = agentViewModels.getOrPut(discovered.agentId) {
-                scope.createAgentRuntimeViewModel(
+                discovered.session.createAgentRuntimeViewModel(
                     session = discovered.session,
                     automaticTitleConfiguration = automaticTitleConfiguration
                         ?.takeIf { discovered.agentId == rootSession.storage.id },
@@ -119,7 +116,7 @@ public class RootSessionViewModel internal constructor(
                 createAgentHistoryViewModel(discovered.session.runtime)
             }
             if (discovered.agentId !in agentObservations) {
-                agentObservations[discovered.agentId] = scope.launch {
+                agentObservations[discovered.agentId] = discovered.session.launch {
                     viewModel.state.collect {
                         mutableState.update { current ->
                             current.copy(renderRevision = current.renderRevision + 1)
@@ -128,7 +125,7 @@ public class RootSessionViewModel internal constructor(
                 }
             }
             if (discovered.agentId !in topologyObservations) {
-                topologyObservations[discovered.agentId] = scope.launch {
+                topologyObservations[discovered.agentId] = discovered.session.launch {
                     var observedEntries = discovered.childEntries
                     discovered.session.subagents.entries.collect { currentEntries ->
                         if (currentEntries != observedEntries) {
@@ -170,26 +167,18 @@ public class RootSessionViewModel internal constructor(
     }
 
     override fun close() {
-        agentViewModels.values.forEach(AgentRuntimeViewModel::close)
-        agentViewModels.clear()
-        agentHistoryViewModels.values.forEach { viewModel -> viewModel.close() }
-        agentHistoryViewModels.clear()
-        agentObservations.values.forEach(Job::cancel)
-        agentObservations.clear()
-        topologyObservations.values.forEach(Job::cancel)
-        topologyObservations.clear()
-        scope.cancel()
+        sessionScope.cancel()
     }
 }
 
-/** Creates a root-session VM whose child VMs are cancelled with this scope. */
+/** Creates a root-session VM whose lifecycle follows its root session scope. */
 public fun CoroutineScope.RootSessionViewModel(
     rootSession: CodexAgentSession,
     automaticTitleConfiguration: AgentAutomaticTitleConfiguration? = null,
 ): RootSessionViewModel =
     RootSessionViewModel(
         rootSession = rootSession,
-        scope = supervisorChildScope(),
+        sessionScope = rootSession,
         automaticTitleConfiguration = automaticTitleConfiguration,
     )
 

@@ -290,6 +290,7 @@ private fun CodexGlobalSettings.withOverride(
             sessionTitle = SessionTitleSettings(
                 enabled = values.enabled ?: effective.sessionTitle.enabled,
                 model = values.model?.let(::OpenAiModelId) ?: effective.sessionTitle.model,
+                reasoningEffort = values.reasoningEffort ?: effective.sessionTitle.reasoningEffort,
             ),
         )
     }
@@ -387,6 +388,8 @@ private fun SessionTitleOverride?.withChanges(
     return existing.copy(
         enabled = updated.enabled.takeIf { updated.enabled != current.enabled } ?: existing.enabled,
         model = if (updated.model != current.model) updated.model?.value else existing.model,
+        reasoningEffort = updated.reasoningEffort
+            .takeIf { updated.reasoningEffort != current.reasoningEffort } ?: existing.reasoningEffort,
     ).takeUnless(SessionTitleOverride::isEmpty)
 }
 
@@ -416,13 +419,17 @@ private data class NewSessionOverride(
  * setting; `null` contributes no enabled override.
  * @property model Nullable because omission inherits the lower-precedence
  * setting; `null` contributes no model override.
+ * @property reasoningEffort Nullable because omission inherits the
+ * lower-precedence setting; `null` contributes no reasoning-effort override.
  */
 @Serializable
 private data class SessionTitleOverride(
     val enabled: Boolean? = null,
     val model: String? = null,
+    @SerialName("reasoning_effort")
+    val reasoningEffort: ReasoningEffort? = null,
 ) {
-    fun isEmpty(): Boolean = enabled == null && model == null
+    fun isEmpty(): Boolean = enabled == null && model == null && reasoningEffort == null
 }
 
 /**

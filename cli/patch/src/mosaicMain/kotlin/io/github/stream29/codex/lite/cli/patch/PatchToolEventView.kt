@@ -78,6 +78,11 @@ private fun PatchToolEventView(
         ) { isFocused, isHovered, isPressed ->
             WrappedPatchText(
                 value = "${if (expanded) "v" else ">"} ${presentation.header}",
+                color = when (presentation.status) {
+                    PatchPresentationStatus.Running -> Color.Green
+                    PatchPresentationStatus.Completed -> Color.White
+                    PatchPresentationStatus.Failed -> Color.Red
+                },
                 textStyle = when {
                     isPressed -> TextStyle.Invert
                     isFocused || isHovered -> TextStyle.Bold
@@ -238,12 +243,13 @@ private fun PatchBody(
 private fun WrappedPatchText(
     value: String,
     textStyle: TextStyle,
+    color: Color = Color.Unspecified,
 ) {
     WrappedPatchLines(
         lines = listOf(
             StyledPatchLine(
                 text = value,
-                style = SpanStyle(textStyle = textStyle),
+                style = SpanStyle(color = color, textStyle = textStyle),
             ),
         ),
     )

@@ -287,6 +287,7 @@ val codexLiteSettingsStoreTest by testSuite(
                     sessionTitle = SessionTitleSettings(
                         enabled = false,
                         model = OpenAiModelId("title-model"),
+                        reasoningEffort = ReasoningEffort.High,
                     ),
                     mcpServers = emptyMap(),
                 )
@@ -301,9 +302,9 @@ val codexLiteSettingsStoreTest by testSuite(
             assertTrue(yaml.contains("session_title:"), yaml)
             assertTrue(yaml.contains("enabled: false"), yaml)
             assertTrue(yaml.contains("model: title-model"), yaml)
+            assertTrue(yaml.contains("reasoning_effort: high"), yaml)
             assertTrue(yaml.contains("codex_home: $root"), yaml)
             assertFalse(yaml.contains("service_tier"), yaml)
-            assertFalse(yaml.contains("reasoning_effort"), yaml)
             assertEquals(emptyList(), temporarySettingsFiles(root))
 
             SystemCoroutineFileSystem.writeString(

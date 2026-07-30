@@ -5,6 +5,7 @@ import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.OpenAiModelId
+import io.github.stream29.codex.lite.openai.ReasoningEffort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -39,6 +40,7 @@ public class AgentTitleGeneration(
         content: List<ContentItem>,
         enabled: Boolean,
         model: OpenAiModelId?,
+        reasoningEffort: ReasoningEffort,
         generator: SessionTitleGenerator,
     ): Boolean {
         val userText = content.firstNonblankInputText() ?: return false
@@ -59,6 +61,7 @@ public class AgentTitleGeneration(
                     val result = generator.generateTitle(
                         userText = userText,
                         model = model ?: DefaultSessionTitleModel,
+                        reasoningEffort = reasoningEffort,
                     )
                     val generated = result as? SessionTitleGenerationResult.Generated ?: return@launch
                     persistIfCurrent(

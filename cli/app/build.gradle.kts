@@ -53,6 +53,14 @@ kotlin {
             implementation(libs.kotlinx.io.core)
             implementation(libs.kotlin.logging)
         }
+        commonTest.dependencies {
+            implementation(project(":agent-session-in-memory"))
+            implementation(project(":agent-session-test"))
+            implementation(project(":cli-auth-contract"))
+            implementation(project(":cli-settings-contract"))
+            implementation(project(":openai-client-test"))
+            implementation(libs.kotlinx.coroutines.test)
+        }
         val mosaicMain by creating {
             dependsOn(commonMain)
             dependencies {

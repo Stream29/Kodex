@@ -414,7 +414,7 @@ private fun ResponseItem.unknownHeader(): String = when (this) {
     is ResponseItem.AgentMessage -> "$author → $recipient · streaming"
     is ResponseItem.Reasoning -> "Thinking · streaming"
     else -> streamingToolPresentation(webSearchStatus = null).let { presentation ->
-        "${presentation.summary} · ${presentation.status}"
+        presentation.summary
     }
 }
 

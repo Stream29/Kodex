@@ -12,6 +12,7 @@ import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableAgent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMultiAgentOperation
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMultiAgentToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMultiAgentInvocation
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMultiAgentToolEvent
 import io.github.stream29.codex.lite.agentstorage.contract.forkTo
@@ -57,6 +58,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.encodeToString
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -111,6 +113,10 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         val repository = InMemoryCodexSessionRepository(testCodexAgentDependencies())
         val first = repository.createInitialized(settings())
         val second = repository.createInitialized(settings("Named"))
+        val firstLastActivityAt = Instant.parse("2026-07-31T10:00:00Z")
+        val secondLastActivityAt = Instant.parse("2026-07-31T10:05:00Z")
+        repository.open(first).storage.timestamp[1] = firstLastActivityAt
+        repository.open(second).storage.timestamp[1] = secondLastActivityAt
 
         assertEquals(0, first)
         assertEquals(1, second)
@@ -118,8 +124,8 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         assertEquals(listOf(first, second), repository.list())
         assertEquals(
             listOf(
-                CodexSessionEntry(first, "Session 0"),
-                CodexSessionEntry(second, "Named"),
+                CodexSessionEntry(first, "Session 0", firstLastActivityAt),
+                CodexSessionEntry(second, "Named", secondLastActivityAt),
             ),
             repository.listEntries(),
         )
@@ -261,6 +267,46 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         assertSame(first, root.runtime.runningTurn.value)
 
         first.cancelJobAndJoin()
+        assertNull(root.runtime.runningTurn.value)
+    }
+
+    test("cancelling a turn fails its persisted pending tool calls") {
+        val pending = CompletableDeferred<Unit>()
+        val client = mockOpenAiClient {
+            createResponse { _, _, _, _ ->
+                flow {
+                    emit(
+                        ResponsesStreamEvent.OutputItemDone(
+                            outputIndex = 0,
+                            item = ResponseItem.FunctionCall(
+                                name = "unhandled",
+                                arguments = "{}",
+                                callId = "call_1",
+                            ),
+                        ),
+                    )
+                    pending.complete(Unit)
+                    awaitCancellation()
+                }
+            }
+        }
+        val repository = InMemoryCodexSessionRepository(
+            testCodexAgentDependencies(client),
+        )
+        val root = repository.open(repository.createInitialized(settings("root")))
+        root.runtime.appendUserMessage(listOf(ContentItem.InputText("Start a turn.")))
+
+        val turn = async(start = CoroutineStart.UNDISPATCHED) {
+            root.runtime.resume().toList()
+        }
+        pending.await()
+        turn.cancelJobAndJoin()
+
+        val failure = assertIs<StableTextToolEvent>(root.storage.stable[3])
+        assertEquals("user interrupt", failure.result)
+        assertEquals(false, failure.success)
+        assertEquals(emptyList(), root.storage.unstable[3])
+        assertEquals(CodexAgentStateValue.ToolCompleted, root.runtime.state.value)
         assertNull(root.runtime.runningTurn.value)
     }
 

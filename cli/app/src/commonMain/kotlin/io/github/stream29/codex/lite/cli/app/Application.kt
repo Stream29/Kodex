@@ -196,6 +196,7 @@ internal class CodexLiteApplication private constructor(
                         AgentAutomaticTitleSettings(
                             enabled = settings.enabled,
                             model = settings.model,
+                            reasoningEffort = settings.reasoningEffort,
                         )
                     },
                 )

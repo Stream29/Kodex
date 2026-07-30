@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
+import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.SubcomposeLayout
 import com.jakewharton.mosaic.ui.TextStyle
@@ -74,7 +75,6 @@ import io.github.stream29.codex.lite.openai.MessagePhase
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.SearchCommands
-import io.github.stream29.codex.lite.openai.StepStatus
 import io.github.stream29.codex.lite.openai.WebSearchAction
 import io.github.stream29.codex.lite.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.codex.lite.tool.multiagent.FollowupTaskArgs
@@ -130,7 +130,7 @@ public fun StableCleanEvent.render(
         is StableImageViewToolEvent -> renderImageView()
         is StableMcpToolEvent -> renderMcpTool()
         is StableMultiAgentToolEvent -> renderMultiAgentTool()
-        is StablePlanUpdate -> renderPlanUpdate(status = "succeeded")
+        is StablePlanUpdate -> renderPlanUpdate()
         is StableRequestUserInputToolEvent -> renderRequestUserInput()
         is StableToolSearchEvent -> renderToolSearch()
         is StableWebSearchToolEvent -> renderWebSearch()
@@ -162,7 +162,7 @@ public fun UnstableCleanEvent.render(
         }
 
         is PendingPatchToolEvent -> PendingPatchToolEventView(diff)
-        is PendingPlanUpdate -> renderPlanUpdate(status = "running")
+        is PendingPlanUpdate -> renderPlanUpdate()
         is PendingCommandExecutionToolEvent -> renderCommandExecution(unifiedExecToolClient)
 
         is PendingMultiAgentToolEvent -> renderPendingMultiAgentTool()
@@ -557,18 +557,6 @@ private fun StableMultiAgentToolEvent.renderMultiAgentTool() {
 }
 
 @Composable
-private fun StablePlanUpdate.renderPlanUpdate(status: String) {
-    ToolEvent(
-        summary = "Update the plan",
-        rawName = "update_plan",
-        status = status,
-        expansionKey = callId,
-    ) {
-        section("Arguments") { arguments.renderDetails() }
-    }
-}
-
-@Composable
 private fun StableRequestUserInputToolEvent.renderRequestUserInput() {
     ToolEvent(
         summary = arguments.toolSummary(),
@@ -623,19 +611,6 @@ private fun StableWebSearchToolEvent.renderWebSearch() {
 }
 
 @Composable
-private fun PendingPlanUpdate.renderPlanUpdate(status: String) {
-    ToolEvent(
-        summary = "Update the plan",
-        rawName = "update_plan",
-        status = status,
-        expansionKey = callId,
-        detailStyle = TextStyle.Dim,
-    ) {
-        section("Arguments") { arguments.renderDetails(TextStyle.Dim) }
-    }
-}
-
-@Composable
 private fun PendingMultiAgentToolEvent.renderPendingMultiAgentTool() {
     ToolEvent(
         summary = operation.toolSummary(),
@@ -684,6 +659,7 @@ internal fun ToolEvent(
     content: @Composable ToolEventDetailsScope.() -> Unit,
 ) {
     var expanded by remember(expansionKey) { mutableStateOf(false) }
+    val headerColor = toolHeaderColor(status)
 
     Column(modifier = Modifier.fillMaxWidth()) {
         TuiPressable(
@@ -691,11 +667,12 @@ internal fun ToolEvent(
             modifier = Modifier.fillMaxWidth(),
         ) { isFocused, isHovered, isPressed ->
             WrappedHistoryText(
-                value = "${if (expanded) "v" else ">"} $summary · $status",
+                value = "${if (expanded) "v" else ">"} $summary",
+                color = headerColor,
                 textStyle = when {
                     isPressed -> TextStyle.Invert
                     isFocused || isHovered -> TextStyle.Bold
-                    else -> detailStyle
+                    else -> TextStyle.Unspecified
                 },
             )
         }
@@ -705,6 +682,12 @@ internal fun ToolEvent(
             ToolEventDetailsScope(detailStyle).content()
         }
     }
+}
+
+private fun toolHeaderColor(status: String): Color = when (status) {
+    "failed" -> Color.Red
+    "running", "streaming", "starting", "in_progress", "inprogress" -> Color.Green
+    else -> Color.White
 }
 
 internal class ToolEventDetailsScope(
@@ -1233,16 +1216,6 @@ private fun ListAgentsResult.renderDetails() {
 }
 
 @Composable
-private fun io.github.stream29.codex.lite.openai.UpdatePlanArgs.renderDetails(
-    textStyle: TextStyle = TextStyle.Unspecified,
-) {
-    explanation?.takeIf(String::isNotBlank)?.let { Detail("Explanation", it, textStyle) }
-    plan.forEach { item ->
-        Detail("Plan", "${item.status.marker()} ${item.step}", textStyle)
-    }
-}
-
-@Composable
 private fun LoadableTools(
     label: String,
     tools: List<LoadableToolSpec>,
@@ -1390,12 +1363,6 @@ private fun SpawnForkMode.displayName(): String = when (this) {
     SpawnForkMode.None -> "none"
     SpawnForkMode.All -> "all"
     is SpawnForkMode.Recent -> "${turns} turns"
-}
-
-private fun StepStatus.marker(): String = when (this) {
-    StepStatus.Pending -> "[ ]"
-    StepStatus.InProgress -> "[>]"
-    StepStatus.Completed -> "[x]"
 }
 
 private fun MultiAgentStatus.displayName(): String = when (this) {

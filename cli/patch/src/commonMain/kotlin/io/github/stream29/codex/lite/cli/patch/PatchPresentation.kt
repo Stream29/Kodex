@@ -13,9 +13,16 @@ import io.github.stream29.codex.lite.utils.applypatch.UpdateFileHunk
 
 internal data class PatchPresentation(
     val header: String,
+    val status: PatchPresentationStatus,
     val rawToolName: String,
     val lines: List<PatchPresentationLine>,
 )
+
+internal enum class PatchPresentationStatus {
+    Running,
+    Completed,
+    Failed,
+}
 
 internal data class PatchPresentationLine(
     val text: String,
@@ -34,7 +41,7 @@ internal enum class PatchPresentationLineKind {
 internal fun Patch.toPendingPatchPresentation(): PatchPresentation =
     toPatchPresentation(
         summary = fileEditSummary("Editing"),
-        status = "running",
+        status = PatchPresentationStatus.Running,
         bodyLines = toInputPresentationLines(),
         emptyMessage = "No patch hunks",
     )
@@ -44,7 +51,7 @@ internal fun StablePatchToolEvent.toStablePatchPresentation(): PatchPresentation
         is StablePatchToolExecutionResult.Success ->
             diff.toPatchPresentation(
                 summary = result.applyResult.fileEditSummary("Edited"),
-                status = "succeeded",
+                status = PatchPresentationStatus.Completed,
                 bodyLines = result.applyResult.toPresentationLines(),
                 emptyMessage = "No applied changes",
             )
@@ -52,7 +59,7 @@ internal fun StablePatchToolEvent.toStablePatchPresentation(): PatchPresentation
         is StablePatchToolExecutionResult.Failure ->
             diff.toPatchPresentation(
                 summary = diff.fileEditSummary("Editing"),
-                status = "failed",
+                status = PatchPresentationStatus.Failed,
                 bodyLines = diff.toInputPresentationLines(),
                 emptyMessage = "No patch hunks",
                 failure = result.reason,
@@ -61,13 +68,14 @@ internal fun StablePatchToolEvent.toStablePatchPresentation(): PatchPresentation
 
 private fun Patch.toPatchPresentation(
     summary: String,
-    status: String,
+    status: PatchPresentationStatus,
     bodyLines: List<PatchPresentationLine>,
     emptyMessage: String,
     failure: String? = null,
 ): PatchPresentation =
     PatchPresentation(
-        header = "$summary · $status",
+        header = summary,
+        status = status,
         rawToolName = "apply_patch",
         lines = buildList {
             workdir?.takeIf(String::isNotBlank)?.let { workdir ->

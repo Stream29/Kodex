@@ -215,13 +215,17 @@ val fileSystemCodexSessionRepositoryTest by testSuite {
 
             val first = repository.createInitialized(settings("first"))
             val second = repository.createInitialized(settings("second"))
+            val firstLastActivityAt = Instant.parse("2026-07-31T10:00:00Z")
+            val secondLastActivityAt = Instant.parse("2026-07-31T10:05:00Z")
+            repository.open(first).storage.timestamp[1] = firstLastActivityAt
+            repository.open(second).storage.timestamp[1] = secondLastActivityAt
 
             assertEquals(0, first)
             assertEquals(1, second)
             assertEquals(
                 listOf(
-                    CodexSessionEntry(first, "first"),
-                    CodexSessionEntry(second, "second"),
+                    CodexSessionEntry(first, "first", firstLastActivityAt),
+                    CodexSessionEntry(second, "second", secondLastActivityAt),
                 ),
                 repository.listEntries(),
             )
