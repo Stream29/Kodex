@@ -22,16 +22,4 @@ public sealed interface PendingCommandExecutionAction {
         public val arguments: WriteStdinArguments,
     ) : PendingCommandExecutionAction
 
-    /** Command supplied through a hosted `local_shell_call`. */
-    @Serializable
-    @SerialName("local_shell")
-    public data class LocalShell(
-        public val command: List<String>,
-        @SerialName("timeout_ms")
-        public val timeoutMillis: Long? = null,
-        @SerialName("working_directory")
-        public val workingDirectory: String? = null,
-        public val environment: Map<String, String>? = null,
-        public val user: String? = null,
-    ) : PendingCommandExecutionAction
 }

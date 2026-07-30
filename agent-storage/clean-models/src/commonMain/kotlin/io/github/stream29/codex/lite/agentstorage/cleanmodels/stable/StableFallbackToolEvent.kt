@@ -1,50 +1,100 @@
 package io.github.stream29.codex.lite.agentstorage.cleanmodels.stable
 
+import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
+import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.openai.ResponseItemId
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
-/**
- * Fallback stable projection for a dynamic tool whose arguments and result are JSON.
- *
- * MCP interactions use this fallback with the complete `CallToolResult`
- * envelope as [result]; projections must not flatten that envelope first.
- *
- * @property name Tool name shown to users.
- * @property namespace Nullable because plain function tools are not namespaced;
- * `null` means route or display by [name] only.
- * @property arguments Decoded tool-call arguments.
- * @property result Decoded JSON result returned by the tool.
- * @property success Nullable because a function-call output may omit an
- * explicit success value.
- */
+/** Completed function tool with decoded JSON arguments and result. */
 @Serializable
 @SerialName("json_tool_event")
 public data class StableJsonToolEvent(
+    @SerialName("call_id")
+    public val callId: String,
+    @SerialName("item_id")
+    public val itemId: ResponseItemId? = null,
     public val name: String,
     public val namespace: String? = null,
     public val arguments: JsonElement,
     public val result: JsonElement,
     public val success: Boolean? = null,
-) : StableCleanEvent.CompletedTool
+) : StableCleanEvent.CompletedTool {
+    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+        listOf(
+            stableFunctionCall(
+                callId = callId,
+                itemId = itemId,
+                name = name,
+                namespace = namespace,
+                arguments = arguments,
+            ),
+            stableTextOutput(
+                callId = callId,
+                text = StableToolJson.encodeToString(JsonElement.serializer(), result),
+                success = success,
+            ),
+        )
+}
 
-/**
- * Fallback stable projection for a dynamic tool with JSON arguments and a text result.
- *
- * @property name Tool name shown to users.
- * @property namespace Nullable because plain function tools are not namespaced;
- * `null` means route or display by [name] only.
- * @property arguments Decoded tool-call arguments.
- * @property result Raw text returned by the tool.
- * @property success Nullable because a function-call output may omit an
- * explicit success value.
- */
+/** Completed function tool with decoded JSON arguments and a text result. */
 @Serializable
 @SerialName("text_tool_event")
 public data class StableTextToolEvent(
+    @SerialName("call_id")
+    public val callId: String,
+    @SerialName("item_id")
+    public val itemId: ResponseItemId? = null,
     public val name: String,
     public val namespace: String? = null,
     public val arguments: JsonElement,
     public val result: String,
     public val success: Boolean? = null,
-) : StableCleanEvent.CompletedTool
+) : StableCleanEvent.CompletedTool {
+    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+        listOf(
+            stableFunctionCall(
+                callId = callId,
+                itemId = itemId,
+                name = name,
+                namespace = namespace,
+                arguments = arguments,
+            ),
+            stableTextOutput(
+                callId = callId,
+                text = result,
+                success = success,
+            ),
+        )
+}
+
+/** Completed custom tool retained when no dedicated semantic event applies. */
+@Serializable
+@SerialName("custom_tool_event")
+public data class StableCustomToolEvent(
+    @SerialName("call_id")
+    public val callId: String,
+    @SerialName("item_id")
+    public val itemId: ResponseItemId? = null,
+    public val name: String,
+    public val namespace: String? = null,
+    public val input: String,
+    public val result: FunctionCallOutputPayload,
+    public val success: Boolean? = null,
+) : StableCleanEvent.CompletedTool {
+    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+        listOf(
+            ResponseItem.CustomToolCall(
+                id = itemId,
+                callId = callId,
+                name = name,
+                namespace = namespace,
+                input = input,
+            ),
+            ResponseItem.CustomToolCallOutput(
+                callId = callId,
+                output = result.copy(success = success),
+            ),
+        )
+}

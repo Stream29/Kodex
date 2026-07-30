@@ -1,19 +1,17 @@
 package io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable
 
-import kotlinx.serialization.SerialName
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.CleanOpenAiEvent
+import io.github.stream29.codex.lite.openai.ResponseItemId
 import kotlinx.serialization.Serializable
 
 /**
- * Durable tool call that has not produced a durable result yet.
+ * Durable local tool call that has not produced a durable result yet.
  *
- * [callId] only correlates the pending call with its future result. Once the
- * result is persisted, projection removes this value and appends a completed
- * event to stable history.
+ * Every concrete event owns its typed input and provider-facing projection.
+ * Runtime-only input deltas and provider call status are not represented here.
  */
 @Serializable
-@SerialName("pending_tool_call")
-public data class PendingToolEvent(
-    @SerialName("call_id")
-    public val callId: String,
-    public val invocation: PendingToolInvocation,
-)
+public sealed interface PendingToolEvent : CleanOpenAiEvent {
+    public val callId: String
+    public val itemId: ResponseItemId?
+}

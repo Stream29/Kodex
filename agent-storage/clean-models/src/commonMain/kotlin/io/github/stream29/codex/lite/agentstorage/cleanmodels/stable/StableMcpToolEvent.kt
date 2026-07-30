@@ -1,38 +1,39 @@
 package io.github.stream29.codex.lite.agentstorage.cleanmodels.stable
 
+import io.github.stream29.codex.lite.openai.CallToolResult
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponseItemId
-import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 /**
- * Stable completed `update_plan` interaction.
- *
- * The settings timeline remains the source of truth for the active plan.
+ * Stable MCP interaction with its complete protocol-native result envelope.
  */
 @Serializable
-@SerialName("plan_update")
-public data class StablePlanUpdate(
+@SerialName("mcp_tool_event")
+public data class StableMcpToolEvent(
     @SerialName("call_id")
     public val callId: String,
     @SerialName("item_id")
     public val itemId: ResponseItemId? = null,
-    public val arguments: UpdatePlanArgs,
+    public val name: String,
+    public val namespace: String,
+    public val arguments: JsonElement,
+    public val result: CallToolResult,
 ) : StableCleanEvent.CompletedTool {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             stableFunctionCall(
                 callId = callId,
                 itemId = itemId,
-                name = "update_plan",
-                serializer = UpdatePlanArgs.serializer(),
+                name = name,
+                namespace = namespace,
                 arguments = arguments,
             ),
-            stableTextOutput(
+            ResponseItem.McpToolCallOutput(
                 callId = callId,
-                text = "Plan updated",
-                success = true,
+                output = result,
             ),
         )
 }

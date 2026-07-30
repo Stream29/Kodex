@@ -2,52 +2,47 @@ package io.github.stream29.codex.lite.agentstorage.cleanmodels.stable
 
 import io.github.stream29.codex.lite.openai.SearchCommands
 import io.github.stream29.codex.lite.openai.SearchResponse
-import io.github.stream29.codex.lite.openai.WebSearchAction
+import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.openai.ResponseItemId
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * Stable clean projection of a completed web-search interaction.
+ * Stable completed local `web.run` interaction.
  *
- * Local `web.run` calls retain [commands] and [SearchResponse] without
- * translating either DTO. Hosted calls retain their provider-native [action].
+ * Hosted web search uses [StableCleanEvent.WebSearchCall].
  */
 @Serializable
 @SerialName("web_search_tool_event")
 public data class StableWebSearchToolEvent(
-    public val request: StableWebSearchRequest,
+    @SerialName("call_id")
+    public val callId: String,
+    @SerialName("item_id")
+    public val itemId: ResponseItemId? = null,
+    public val commands: SearchCommands,
     public val result: StableWebSearchResult,
-) : StableCleanEvent.CompletedTool
-
-/** Provider-native input available for a web-search interaction. */
-@Serializable
-public sealed interface StableWebSearchRequest {
-    @Serializable
-    @SerialName("web_run")
-    public data class WebRun(
-        public val commands: SearchCommands,
-    ) : StableWebSearchRequest
-
-    @Serializable
-    @SerialName("hosted")
-    public data class Hosted(
-        public val action: WebSearchAction? = null,
-    ) : StableWebSearchRequest
+) : StableCleanEvent.CompletedTool {
+    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+        listOf(
+            stableFunctionCall(
+                callId = callId,
+                itemId = itemId,
+                name = "run",
+                namespace = "web",
+                serializer = SearchCommands.serializer(),
+                arguments = commands,
+            ),
+            result.toFunctionOutput(callId),
+        )
 }
 
-/** Completed outcome of a web-search interaction. */
+/** Completed outcome of local web search. */
 @Serializable
 public sealed interface StableWebSearchResult {
-    /**
-     * Web search completed.
-     *
-     * [response] is absent for hosted search because its history item has no
-     * separate local `SearchResponse`.
-     */
     @Serializable
     @SerialName("success")
     public data class Success(
-        public val response: SearchResponse? = null,
+        public val response: SearchResponse,
     ) : StableWebSearchResult
 
     @Serializable
@@ -56,3 +51,22 @@ public sealed interface StableWebSearchResult {
         public val message: String,
     ) : StableWebSearchResult
 }
+
+private fun StableWebSearchResult.toFunctionOutput(
+    callId: String,
+): ResponseItem.FunctionCallOutput =
+    when (this) {
+        is StableWebSearchResult.Success ->
+            stableTextOutput(
+                callId = callId,
+                text = response.output,
+                success = true,
+            )
+
+        is StableWebSearchResult.Failure ->
+            stableTextOutput(
+                callId = callId,
+                text = message,
+                success = false,
+            )
+    }

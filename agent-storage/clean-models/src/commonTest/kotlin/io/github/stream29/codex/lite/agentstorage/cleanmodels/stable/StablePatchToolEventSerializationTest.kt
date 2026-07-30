@@ -2,6 +2,10 @@ package io.github.stream29.codex.lite.agentstorage.cleanmodels.stable
 
 import de.infix.testBalloon.framework.core.testSuite
 
+import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
+import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
+import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.openai.ResponseItemId
 import io.github.stream29.codex.lite.utils.applypatch.PatchAffectedPaths
 import io.github.stream29.codex.lite.utils.applypatch.PatchApplyResult
 import io.github.stream29.codex.lite.utils.applypatch.PatchChange
@@ -28,8 +32,10 @@ val stablePatchToolEventSerializationTest by testSuite {
             -old
             +new
             *** End Patch
-            """.trimIndent()
+        """.trimIndent()
         val event = StablePatchToolEvent(
+            callId = "call_apply_patch",
+            itemId = ResponseItemId("item_apply_patch"),
             diff = patchText.parsePatch(),
             result = StablePatchToolExecutionResult.Success(
                 applyResult = PatchApplyResult(
@@ -59,6 +65,10 @@ val stablePatchToolEventSerializationTest by testSuite {
         val encoded = json.encodeToString(event)
         val element = json.parseToJsonElement(encoded).jsonObject
 
+        assertEquals(
+            setOf("call_id", "item_id", "diff", "result"),
+            element.keys,
+        )
         val firstHunkType = element["diff"]
             ?.jsonObject
             ?.get("hunks")
@@ -69,15 +79,35 @@ val stablePatchToolEventSerializationTest by testSuite {
         assertEquals(JsonPrimitive("update_file"), firstHunkType)
         assertEquals(JsonPrimitive("success"), element["result"]?.jsonObject?.get("type"))
         assertEquals(event, json.decodeFromString<StablePatchToolEvent>(encoded))
+        assertEquals(
+            listOf(
+                ResponseItem.CustomToolCall(
+                    id = event.itemId,
+                    callId = event.callId,
+                    name = "apply_patch",
+                    input = event.diff.patch,
+                ),
+                ResponseItem.CustomToolCallOutput(
+                    callId = event.callId,
+                    output = FunctionCallOutputPayload(
+                        body = FunctionCallOutputBody.Text("Success. Patch applied."),
+                        success = true,
+                    ),
+                ),
+            ),
+            event.toResponseHistoryItems(),
+        )
     }
 
     test("round trips failed patch tool event") {
-        val event = StablePatchToolEvent(
-            diff = """
+        val patchText = """
                 *** Begin Patch
                 *** Delete File: missing.txt
                 *** End Patch
-                """.trimIndent().parsePatch(),
+                """.trimIndent()
+        val event = StablePatchToolEvent(
+            callId = "call_apply_patch",
+            diff = patchText.parsePatch(),
             result = StablePatchToolExecutionResult.Failure("File does not exist: missing.txt"),
         )
 
@@ -86,5 +116,15 @@ val stablePatchToolEventSerializationTest by testSuite {
 
         assertEquals(JsonPrimitive("failure"), element["result"]?.jsonObject?.get("type"))
         assertEquals(event, json.decodeFromString<StablePatchToolEvent>(encoded))
+        assertEquals(
+            ResponseItem.CustomToolCallOutput(
+                callId = event.callId,
+                output = FunctionCallOutputPayload(
+                    body = FunctionCallOutputBody.Text("File does not exist: missing.txt"),
+                    success = false,
+                ),
+            ),
+            event.toResponseHistoryItems().last(),
+        )
     }
 }

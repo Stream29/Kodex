@@ -10,9 +10,17 @@ import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStor
 import io.github.stream29.codex.lite.agentstate.contract.forcedCompact
 import io.github.stream29.codex.lite.agentstate.contract.renameThread
 import io.github.stream29.codex.lite.agentstate.tool.toPendingToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableContextCompaction
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableDeveloperMessage
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableReasoning
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableUserMessageContent
 import io.github.stream29.codex.lite.agentstorage.contract.forkTo
 import io.github.stream29.codex.lite.agentstorage.contract.initialize
+import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.nextIndex
 import io.github.stream29.codex.lite.agentstorage.contract.revert
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
@@ -33,6 +41,7 @@ import io.github.stream29.codex.lite.openai.PlanItemArg
 import io.github.stream29.codex.lite.openai.RemoteCompactionV2Response
 import io.github.stream29.codex.lite.openai.Reasoning
 import io.github.stream29.codex.lite.openai.ReasoningEffort
+import io.github.stream29.codex.lite.openai.ReasoningItemReasoningSummary
 import io.github.stream29.codex.lite.openai.Response
 import io.github.stream29.codex.lite.openai.ResponseError
 import io.github.stream29.codex.lite.openai.ResponseItem
@@ -265,6 +274,19 @@ val codexAgentStateImplTest by testSuite {
 
         assertEquals(context, storage.history[1])
         assertEquals(userInput, storage.history[2])
+        assertEquals(listOf(1, 2), storage.stable.indexes().toList())
+        assertEquals(
+            StableUserMessage(
+                listOf(StableUserMessageContent.Text("# AGENTS.md instructions")),
+            ),
+            storage.stable[1],
+        )
+        assertEquals(
+            StableUserMessage(
+                listOf(StableUserMessageContent.Text("Implement the change.")),
+            ),
+            storage.stable[2],
+        )
         assertEquals(turnId, storage.settings[2].turnId)
         assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
     }
@@ -309,12 +331,86 @@ val codexAgentStateImplTest by testSuite {
 
         assertEquals(1, agent.injectHistory(listOf(task)))
         assertEquals(CodexAgentStateValue.UserMessage, agent.state.value)
+        assertEquals(
+            StableAgentMessage(
+                author = task.author,
+                recipient = task.recipient,
+                content = task.content,
+            ),
+            storage.stable[1],
+        )
 
         val reloaded = CodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,
         )
         assertEquals(CodexAgentStateValue.UserMessage, reloaded.state.value)
+    }
+
+    test("history injection projects stable events and pending tool snapshots") {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+        val developerContent = listOf(ContentItem.InputText("Injected host context."))
+        val reasoning = ResponseItem.Reasoning(
+            summary = listOf(
+                ReasoningItemReasoningSummary.SummaryText("Inspecting"),
+            ),
+        )
+        val assistant = assistantMessage("Prior answer.")
+        val call = ResponseItem.FunctionCall(
+            name = "exec_command",
+            arguments = """{"cmd":"date"}""",
+            callId = "call_1",
+        )
+
+        assertEquals(
+            4,
+            agent.injectHistory(
+                listOf(
+                    ResponseItem.Message(
+                        role = MessageRole.Developer,
+                        content = developerContent,
+                    ),
+                    reasoning,
+                    assistant,
+                    call,
+                ),
+            ),
+        )
+
+        assertEquals(listOf(1, 2, 3), storage.stable.indexes().toList())
+        assertEquals(StableDeveloperMessage(developerContent), storage.stable[1])
+        assertEquals(StableReasoning("Inspecting"), storage.stable[2])
+        assertEquals(StableAssistantMessage("Prior answer."), storage.stable[3])
+        assertEquals(listOf(call.toPendingToolEvent()), storage.unstable[4])
+        assertEquals(CodexAgentStateValue.ToolPending(listOf(call)), agent.state.value)
+    }
+
+    test("history injection removes completed calls from the pending snapshot") {
+        val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
+        val agent = CodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+        )
+        val call = ResponseItem.FunctionCall(
+            name = "exec_command",
+            arguments = """{"cmd":"date"}""",
+            callId = "call_1",
+        )
+        val output = ResponseItem.FunctionCallOutput(
+            callId = call.callId,
+            output = FunctionCallOutputPayload.fromText("done"),
+        )
+
+        assertEquals(2, agent.injectHistory(listOf(call, output)))
+
+        assertEquals(listOf(1, 2), storage.unstable.indexes().toList())
+        assertEquals(listOf(call.toPendingToolEvent()), storage.unstable[1])
+        assertEquals(emptyList(), storage.unstable[2])
+        assertEquals(CodexAgentStateValue.ToolCompleted, agent.state.value)
     }
 
     test("user messages do not derive or replace the thread name") {
@@ -770,6 +866,9 @@ val codexAgentStateImplTest by testSuite {
         assertEquals(4, storage.latestIndex())
         assertIs<ResponseItem.Reasoning>(storage.history[2])
         assertEquals(assistantMessage("Preparing the answer."), storage.history[3])
+        assertEquals(listOf(1, 2, 3), storage.stable.indexes().toList())
+        assertEquals(StableReasoning(""), storage.stable[2])
+        assertEquals(StableAssistantMessage("Preparing the answer."), storage.stable[3])
         assertEquals(null, storage.history.nextIndex(4))
         assertEquals(12, storage.tokenCount[4])
         assertTrue(storage.timestamp[4] > instant(0))
@@ -902,6 +1001,7 @@ val codexAgentStateImplTest by testSuite {
 
         assertEquals(CodexAgentStateValue.AssistantMessage, agent.state.value)
         assertEquals(listOf(added, delta, done), output.events.replayCache)
+        assertEquals(StableAssistantMessage("hello"), storage.stable[2])
     }
 
     test("request state exposes agent messages separately") {
@@ -935,6 +1035,15 @@ val codexAgentStateImplTest by testSuite {
 
         release.complete(Unit)
         request.await()
+
+        assertEquals(
+            StableAgentMessage(
+                author = item.author,
+                recipient = item.recipient,
+                content = item.content,
+            ),
+            storage.stable[2],
+        )
     }
 
     test("request state aggregates hosted tool calls") {
@@ -1438,6 +1547,7 @@ val codexAgentStateImplTest by testSuite {
         assertTrue(compactRequest.turnMetadata.contains("\"reason\":\"user_requested\""))
         assertTrue(compactRequest.turnMetadata.contains("\"phase\":\"standalone_turn\""))
         assertEquals(ResponseItem.ContextCompaction(encryptedContent = "compact"), storage.history[2])
+        assertEquals(StableContextCompaction, storage.stable[2])
         assertAdvancedCompactionCheckpoint(
             checkpoint = storage.compaction[2],
             prefix = listOf(user, compaction),

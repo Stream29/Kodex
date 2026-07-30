@@ -1,13 +1,14 @@
 package io.github.stream29.codex.lite.agentstorage.contract
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ResponseItem
 import kotlin.time.Instant
 
 /**
- * Appends a compaction checkpoint and its model-visible history marker at one
- * shared storage index.
+ * Appends a compaction checkpoint, model-visible raw marker, and stable clean
+ * marker at one shared storage index.
  *
  * @param prefix Model-visible prefix after compaction.
  * @param marker History marker recorded at the compaction boundary.
@@ -38,11 +39,13 @@ public suspend fun MutableCodexAgentStorage.appendCompactionCheckpoint(
     )) {
         this.settings.setWithTransaction(index, settings) {
             history.setWithTransaction(index, marker) {
-                if (tokenCount == null) {
-                    this.timestamp.setWithTransaction(index, timestamp) { index }
-                } else {
-                    this.tokenCount.setWithTransaction(index, tokenCount) {
+                stable.setWithTransaction(index, StableContextCompaction) {
+                    if (tokenCount == null) {
                         this.timestamp.setWithTransaction(index, timestamp) { index }
+                    } else {
+                        this.tokenCount.setWithTransaction(index, tokenCount) {
+                            this.timestamp.setWithTransaction(index, timestamp) { index }
+                        }
                     }
                 }
             }

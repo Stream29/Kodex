@@ -1,5 +1,7 @@
 package io.github.stream29.codex.lite.agentstorage.cleanmodels.stable
 
+import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.openai.ResponseItemId
 import io.github.stream29.codex.lite.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecOutput
 import io.github.stream29.codex.lite.tool.unifiedexec.WriteStdinArguments
@@ -9,15 +11,25 @@ import kotlinx.serialization.Serializable
 /**
  * Stable clean projection of a command execution or process interaction.
  *
- * [action] distinguishes the local unified-exec functions from hosted shell
- * execution without retaining their raw JSON arguments.
+ * [action] distinguishes the local unified-exec functions without retaining
+ * their raw JSON arguments.
  */
 @Serializable
 @SerialName("command_execution_tool_event")
 public data class StableCommandExecutionToolEvent(
+    @SerialName("call_id")
+    public val callId: String,
+    @SerialName("item_id")
+    public val itemId: ResponseItemId? = null,
     public val action: StableCommandExecutionAction,
     public val result: StableCommandExecutionResult,
-) : StableCleanEvent.CompletedTool
+) : StableCleanEvent.CompletedTool {
+    override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
+        listOf(
+            action.toFunctionCall(callId, itemId),
+            result.toFunctionOutput(callId),
+        )
+}
 
 /** Strongly typed command or process interaction. */
 @Serializable
@@ -36,21 +48,9 @@ public sealed interface StableCommandExecutionAction {
         public val arguments: WriteStdinArguments,
     ) : StableCommandExecutionAction
 
-    /** Command supplied through a hosted `local_shell_call`. */
-    @Serializable
-    @SerialName("local_shell")
-    public data class LocalShell(
-        public val command: List<String>,
-        @SerialName("timeout_ms")
-        public val timeoutMillis: Long? = null,
-        @SerialName("working_directory")
-        public val workingDirectory: String? = null,
-        public val environment: Map<String, String>? = null,
-        public val user: String? = null,
-    ) : StableCommandExecutionAction
 }
 
-/** Completed or provider-reported command outcome. */
+/** Completed local command outcome. */
 @Serializable
 public sealed interface StableCommandExecutionResult {
     /** Output returned by `exec_command` or `write_stdin`. */
@@ -58,13 +58,6 @@ public sealed interface StableCommandExecutionResult {
     @SerialName("output")
     public data class Output(
         public val value: UnifiedExecOutput,
-    ) : StableCommandExecutionResult
-
-    /** Status reported by a hosted shell item without a separate output. */
-    @Serializable
-    @SerialName("status")
-    public data class Status(
-        public val status: StableCommandExecutionStatus,
     ) : StableCommandExecutionResult
 
     /** Command execution failed before a structured output was produced. */
@@ -75,15 +68,46 @@ public sealed interface StableCommandExecutionResult {
     ) : StableCommandExecutionResult
 }
 
-/** Provider-reported lifecycle state for hosted command execution. */
-@Serializable
-public enum class StableCommandExecutionStatus {
-    @SerialName("in_progress")
-    InProgress,
+private fun StableCommandExecutionAction.toFunctionCall(
+    callId: String,
+    itemId: ResponseItemId?,
+): ResponseItem.FunctionCall =
+    when (this) {
+        is StableCommandExecutionAction.ExecCommand ->
+            stableFunctionCall(
+                callId = callId,
+                itemId = itemId,
+                name = "exec_command",
+                serializer = ExecCommandArguments.serializer(),
+                arguments = arguments,
+            )
 
-    @SerialName("completed")
-    Completed,
+        is StableCommandExecutionAction.WriteStdin ->
+            stableFunctionCall(
+                callId = callId,
+                itemId = itemId,
+                name = "write_stdin",
+                serializer = WriteStdinArguments.serializer(),
+                arguments = arguments,
+            )
+    }
 
-    @SerialName("incomplete")
-    Incomplete,
-}
+private fun StableCommandExecutionResult.toFunctionOutput(
+    callId: String,
+): ResponseItem.FunctionCallOutput =
+    when (this) {
+        is StableCommandExecutionResult.Output ->
+            stableJsonOutput(
+                callId = callId,
+                serializer = UnifiedExecOutput.serializer(),
+                result = value,
+                success = true,
+            )
+
+        is StableCommandExecutionResult.Failure ->
+            stableTextOutput(
+                callId = callId,
+                text = message,
+                success = false,
+            )
+    }
