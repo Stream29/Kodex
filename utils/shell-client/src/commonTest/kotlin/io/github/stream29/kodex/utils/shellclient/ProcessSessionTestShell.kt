@@ -1,0 +1,23 @@
+package io.github.stream29.kodex.utils.shellclient
+
+internal data class TestShellCommand(
+    val command: String,
+    val shell: Shell,
+)
+
+internal expect val oneShotProcessCommand: TestShellCommand
+
+internal expect val interactiveProcessCommand: TestShellCommand
+
+internal expect val delayedProcessCommand: TestShellCommand
+
+internal expect val ttyProbeProcessCommand: TestShellCommand
+
+internal expect val separatedOutputProcessCommand: TestShellCommand
+
+internal expect val environmentProbeProcessCommands: List<TestShellCommand>
+
+internal expect fun unicodeProbeProcessCommand(
+    markerFileName: String,
+    content: String,
+): TestShellCommand

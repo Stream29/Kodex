@@ -1,4 +1,4 @@
-package = io.github.stream29.codex.lite.utils.shellclient.cinterop
+package = io.github.stream29.kodex.utils.shellclient.cinterop
 
 headers = spawn.h unistd.h
 
@@ -7,29 +7,29 @@ headers = spawn.h unistd.h
 #ifdef __APPLE__
 #include <crt_externs.h>
 #include <util.h>
-#define CODEXLITE_ENVIRON (*_NSGetEnviron())
+#define KODEX_ENVIRON (*_NSGetEnviron())
 #else
 #include <pty.h>
 extern char **environ;
-#define CODEXLITE_ENVIRON environ
+#define KODEX_ENVIRON environ
 #endif
 
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
-static inline size_t codexlite_environment_name_length(const char *entry) {
+static inline size_t kodex_environment_name_length(const char *entry) {
     const char *separator = strchr(entry, '=');
     return separator == NULL ? strlen(entry) : (size_t)(separator - entry);
 }
 
-static inline int codexlite_environment_names_equal(const char *first, const char *second) {
-    size_t first_length = codexlite_environment_name_length(first);
-    size_t second_length = codexlite_environment_name_length(second);
+static inline int kodex_environment_names_equal(const char *first, const char *second) {
+    size_t first_length = kodex_environment_name_length(first);
+    size_t second_length = kodex_environment_name_length(second);
     return first_length == second_length && strncmp(first, second, first_length) == 0;
 }
 
-static inline char **codexlite_merge_environment(
+static inline char **kodex_merge_environment(
     const char *const *overrides,
     size_t override_count
 ) {
@@ -39,22 +39,22 @@ static inline char **codexlite_merge_environment(
     size_t override_index;
     char **merged;
 
-    while (CODEXLITE_ENVIRON[inherited_count] != NULL) inherited_count++;
+    while (KODEX_ENVIRON[inherited_count] != NULL) inherited_count++;
     merged = (char **)malloc((inherited_count + override_count + 1) * sizeof(char *));
     if (merged == NULL) return NULL;
 
     for (inherited_index = 0; inherited_index < inherited_count; inherited_index++) {
         int overridden = 0;
         for (override_index = 0; override_index < override_count; override_index++) {
-            if (codexlite_environment_names_equal(
-                CODEXLITE_ENVIRON[inherited_index],
+            if (kodex_environment_names_equal(
+                KODEX_ENVIRON[inherited_index],
                 overrides[override_index]
             )) {
                 overridden = 1;
                 break;
             }
         }
-        if (!overridden) merged[output_count++] = CODEXLITE_ENVIRON[inherited_index];
+        if (!overridden) merged[output_count++] = KODEX_ENVIRON[inherited_index];
     }
     for (override_index = 0; override_index < override_count; override_index++) {
         merged[output_count++] = (char *)overrides[override_index];
@@ -63,7 +63,7 @@ static inline char **codexlite_merge_environment(
     return merged;
 }
 
-static inline int codexlite_spawn_pty_shell(
+static inline int kodex_spawn_pty_shell(
     pid_t *pid,
     int *master_fd,
     const char *const *environment_overrides,
@@ -75,7 +75,7 @@ static inline int codexlite_spawn_pty_shell(
 ) {
     char **merged_environment = NULL;
     if (environment_override_count > 0) {
-        merged_environment = codexlite_merge_environment(
+        merged_environment = kodex_merge_environment(
             environment_overrides,
             environment_override_count
         );
@@ -97,7 +97,7 @@ static inline int codexlite_spawn_pty_shell(
         if (second_argument != NULL) argv[++argument_count] = (char *)second_argument;
         argv[++argument_count] = (char *)command;
         argv[++argument_count] = NULL;
-        if (merged_environment != NULL) CODEXLITE_ENVIRON = merged_environment;
+        if (merged_environment != NULL) KODEX_ENVIRON = merged_environment;
         execvp(shell, argv);
         _exit(127);
     }

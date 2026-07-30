@@ -1,7 +1,7 @@
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
-    id("codexlite.kmp-cli")
+    id("kodex.kmp-cli")
     alias(libs.plugins.kotlin.compose)
 }
 
@@ -10,7 +10,7 @@ kotlin {
 
     targets.withType<KotlinNativeTarget>().configureEach {
         binaries.executable {
-            entryPoint = "io.github.stream29.codex.lite.cli.app.main"
+            entryPoint = "io.github.stream29.kodex.cli.app.main"
         }
     }
 
@@ -43,7 +43,7 @@ kotlin {
             implementation(project(":mcp-contract"))
             implementation(project(":mcp-impl"))
             implementation(project(":hook-impl"))
-            implementation(project(":utils-codex-lite-home"))
+            implementation(project(":utils-kodex-home"))
             implementation(project(":utils-coroutines"))
             implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(project(":utils-os-environment"))

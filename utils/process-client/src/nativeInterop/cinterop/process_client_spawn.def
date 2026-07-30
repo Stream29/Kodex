@@ -1,4 +1,4 @@
-package = io.github.stream29.codex.lite.utils.processclient.cinterop
+package = io.github.stream29.kodex.utils.processclient.cinterop
 
 headers = signal.h unistd.h
 
@@ -6,10 +6,10 @@ headers = signal.h unistd.h
 
 #ifdef __APPLE__
 #include <crt_externs.h>
-#define CODEXLITE_ENVIRON (*_NSGetEnviron())
+#define KODEX_ENVIRON (*_NSGetEnviron())
 #else
 extern char **environ;
-#define CODEXLITE_ENVIRON environ
+#define KODEX_ENVIRON environ
 #endif
 
 #include <errno.h>
@@ -18,18 +18,18 @@ extern char **environ;
 #include <stdlib.h>
 #include <string.h>
 
-static inline size_t codexlite_process_environment_name_length(const char *entry) {
+static inline size_t kodex_process_environment_name_length(const char *entry) {
     const char *separator = strchr(entry, '=');
     return separator == NULL ? strlen(entry) : (size_t)(separator - entry);
 }
 
-static inline int codexlite_process_environment_names_equal(const char *first, const char *second) {
-    size_t first_length = codexlite_process_environment_name_length(first);
-    size_t second_length = codexlite_process_environment_name_length(second);
+static inline int kodex_process_environment_names_equal(const char *first, const char *second) {
+    size_t first_length = kodex_process_environment_name_length(first);
+    size_t second_length = kodex_process_environment_name_length(second);
     return first_length == second_length && strncmp(first, second, first_length) == 0;
 }
 
-static inline char **codexlite_process_merge_environment(
+static inline char **kodex_process_merge_environment(
     const char *const *overrides,
     size_t override_count
 ) {
@@ -39,22 +39,22 @@ static inline char **codexlite_process_merge_environment(
     size_t override_index;
     char **merged;
 
-    while (CODEXLITE_ENVIRON[inherited_count] != NULL) inherited_count++;
+    while (KODEX_ENVIRON[inherited_count] != NULL) inherited_count++;
     merged = (char **)malloc((inherited_count + override_count + 1) * sizeof(char *));
     if (merged == NULL) return NULL;
 
     for (inherited_index = 0; inherited_index < inherited_count; inherited_index++) {
         int overridden = 0;
         for (override_index = 0; override_index < override_count; override_index++) {
-            if (codexlite_process_environment_names_equal(
-                CODEXLITE_ENVIRON[inherited_index],
+            if (kodex_process_environment_names_equal(
+                KODEX_ENVIRON[inherited_index],
                 overrides[override_index]
             )) {
                 overridden = 1;
                 break;
             }
         }
-        if (!overridden) merged[output_count++] = CODEXLITE_ENVIRON[inherited_index];
+        if (!overridden) merged[output_count++] = KODEX_ENVIRON[inherited_index];
     }
     for (override_index = 0; override_index < override_count; override_index++) {
         merged[output_count++] = (char *)overrides[override_index];
@@ -63,7 +63,7 @@ static inline char **codexlite_process_merge_environment(
     return merged;
 }
 
-static inline const char *codexlite_process_environment_value(
+static inline const char *kodex_process_environment_value(
     char *const *environment,
     const char *name
 ) {
@@ -81,7 +81,7 @@ static inline const char *codexlite_process_environment_value(
     return NULL;
 }
 
-static inline char *codexlite_process_join_path(
+static inline char *kodex_process_join_path(
     const char *first,
     size_t first_length,
     const char *second,
@@ -109,7 +109,7 @@ static inline char *codexlite_process_join_path(
     return path;
 }
 
-static inline char *codexlite_process_resolve_executable(
+static inline char *kodex_process_resolve_executable(
     const char *executable,
     const char *working_directory,
     char *const *environment
@@ -117,7 +117,7 @@ static inline char *codexlite_process_resolve_executable(
     if (strchr(executable, '/') != NULL) {
         char *candidate = executable[0] == '/'
             ? strdup(executable)
-            : codexlite_process_join_path(
+            : kodex_process_join_path(
                 working_directory,
                 strlen(working_directory),
                 "",
@@ -132,7 +132,7 @@ static inline char *codexlite_process_resolve_executable(
     }
 
     {
-        const char *path = codexlite_process_environment_value(environment, "PATH");
+        const char *path = kodex_process_environment_value(environment, "PATH");
         const char *cursor = path == NULL ? "/bin:/usr/bin" : path;
         while (1) {
             const char *separator = strchr(cursor, ':');
@@ -140,7 +140,7 @@ static inline char *codexlite_process_resolve_executable(
                 ? strlen(cursor)
                 : (size_t)(separator - cursor);
             int absolute_directory = directory_length > 0 && cursor[0] == '/';
-            char *candidate = codexlite_process_join_path(
+            char *candidate = kodex_process_join_path(
                 absolute_directory ? "" : working_directory,
                 absolute_directory ? 0 : strlen(working_directory),
                 cursor,
@@ -162,7 +162,7 @@ static inline char *codexlite_process_resolve_executable(
     return NULL;
 }
 
-static inline int codexlite_spawn_process(
+static inline int kodex_spawn_process(
     pid_t *pid,
     int *process_group,
     int stdin_read,
@@ -180,7 +180,7 @@ static inline int codexlite_spawn_process(
 ) {
     char **argv = NULL;
     char **merged_environment = NULL;
-    char *const *child_environment = CODEXLITE_ENVIRON;
+    char *const *child_environment = KODEX_ENVIRON;
     char *resolved_executable = NULL;
     pid_t child;
     int result = 0;
@@ -193,7 +193,7 @@ static inline int codexlite_spawn_process(
 #endif
 
     if (environment_override_count > 0) {
-        merged_environment = codexlite_process_merge_environment(
+        merged_environment = kodex_process_merge_environment(
             environment_overrides,
             environment_override_count
         );
@@ -214,7 +214,7 @@ static inline int codexlite_spawn_process(
                 argv[argument_index + 1] = (char *)arguments[argument_index];
             }
             argv[argument_count + 1] = NULL;
-            resolved_executable = codexlite_process_resolve_executable(
+            resolved_executable = kodex_process_resolve_executable(
                 executable,
                 working_directory,
                 child_environment
@@ -259,7 +259,7 @@ static inline int codexlite_spawn_process(
     return result;
 }
 
-static inline ssize_t codexlite_process_write(
+static inline ssize_t kodex_process_write(
     int descriptor,
     const void *bytes,
     size_t byte_count

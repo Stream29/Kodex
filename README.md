@@ -1,6 +1,6 @@
-# CodexLite
+# Kodex
 
-Kotlin Multiplatform library for BuildCodexLite.
+Kotlin Multiplatform implementation for Codex.
 
 ## Build
 

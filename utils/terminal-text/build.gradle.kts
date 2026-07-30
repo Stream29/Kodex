@@ -1,5 +1,5 @@
 plugins {
-    id("codexlite.kmp-shared")
+    id("kodex.kmp-shared")
 }
 
 kotlin {

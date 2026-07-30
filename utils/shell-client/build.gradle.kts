@@ -5,7 +5,7 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.konan.target.Family
 
 plugins {
-    id("codexlite.kmp-host")
+    id("kodex.kmp-host")
     alias(libs.plugins.kotlin.serialization)
 }
 

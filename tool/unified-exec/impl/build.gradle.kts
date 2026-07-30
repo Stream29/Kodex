@@ -3,7 +3,7 @@
 import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
 
 plugins {
-    id("codexlite.kmp-host")
+    id("kodex.kmp-host")
     alias(libs.plugins.kotlin.serialization)
 }
 

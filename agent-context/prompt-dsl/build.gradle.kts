@@ -1,3 +1,3 @@
 plugins {
-    id("codexlite.kmp-host")
+    id("kodex.kmp-host")
 }

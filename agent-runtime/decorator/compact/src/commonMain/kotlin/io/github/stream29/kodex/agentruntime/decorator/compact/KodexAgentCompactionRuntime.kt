@@ -1,0 +1,115 @@
+package io.github.stream29.kodex.agentruntime.decorator.compact
+
+import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
+import io.github.stream29.kodex.agentstate.contextwindow.tokensUntilCompaction
+import io.github.stream29.kodex.agentstate.contract.KodexAgentState
+import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.hook.contract.compaction.CompactionHookRequest
+import io.github.stream29.kodex.hook.contract.compaction.CompactionHooks
+import io.github.stream29.kodex.hook.contract.compaction.HookCompactionTrigger
+import io.github.stream29.kodex.hook.contract.toHookTurnContext
+import io.github.stream29.kodex.openai.CompactionPhase
+import io.github.stream29.kodex.openai.CompactionReason
+import io.github.stream29.kodex.openai.CompactionTrigger
+import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.channelFlow
+
+/**
+ * Basic runtime with no environment-side effects.
+ *
+ * It handles token-limit compaction and server-requested continuation before
+ * returning control. A pending tool call ends this flow so a higher runtime
+ * can execute the tool through the inherited atomic state API.
+ *
+ * @param compactionHooks Nullable because Hooks are an optional host feature;
+ * `null` runs the compaction core without PreCompact or PostCompact.
+ */
+public class KodexAgentCompactionRuntime(
+    private val delegate: KodexAgentState,
+    private val modelCatalog: OpenAiModelCatalog,
+    private val compactionHooks: CompactionHooks? = null,
+) : ResumableAgentLayer, KodexAgentState by delegate {
+
+    public override fun resume(): Flow<ResponsesStreamEvent> = channelFlow {
+        if (state.value is KodexAgentStateValue.ToolPending) {
+            return@channelFlow
+        }
+
+        if (shouldAutoCompact()) {
+            compactForContextLimit(CompactionPhase.PreTurn)
+        }
+
+        while (true) {
+            var needsFollowUp = false
+            requestResponseApi().collect { event ->
+                if (event is ResponsesStreamEvent.Completed && event.response.endTurn == false) {
+                    needsFollowUp = true
+                }
+                send(event)
+            }
+
+            if (state.value is KodexAgentStateValue.ToolPending || !needsFollowUp) {
+                return@channelFlow
+            }
+
+            if (shouldAutoCompact()) {
+                compactForContextLimit(CompactionPhase.MidTurn)
+            }
+        }
+    }.buffer(Channel.UNLIMITED)
+
+    override suspend fun compact(
+        trigger: CompactionTrigger,
+        reason: CompactionReason,
+        phase: CompactionPhase,
+    ): Int {
+        val hooks = compactionHooks ?: return delegate.compact(trigger, reason, phase)
+        val context = storage.settings[latestIndex.value].toHookTurnContext(storage.id)
+        val request = CompactionHookRequest(
+            context = context,
+            trigger = trigger.toHookTrigger(),
+        )
+        hooks.onPreCompact(request)
+
+        val index = delegate.compact(trigger, reason, phase)
+        hooks.onPostCompact(request)
+        return index
+    }
+
+    private suspend fun compactForContextLimit(phase: CompactionPhase) {
+        compact(
+            trigger = CompactionTrigger.Auto,
+            reason = CompactionReason.ContextLimit,
+            phase = phase,
+        )
+    }
+
+    private suspend fun shouldAutoCompact(): Boolean {
+        return tokensUntilCompaction(modelCatalog) == 0L
+    }
+}
+
+/**
+ * Adds automatic compaction and server-requested continuation to this state.
+ *
+ * @param compactionHooks Nullable because Hooks are optional; `null` disables
+ * both compaction Hook boundaries.
+ */
+public fun KodexAgentState.compactionRuntime(
+    modelCatalog: OpenAiModelCatalog,
+    compactionHooks: CompactionHooks? = null,
+): ResumableAgentLayer =
+    KodexAgentCompactionRuntime(
+        delegate = this,
+        modelCatalog = modelCatalog,
+        compactionHooks = compactionHooks,
+    )
+
+private fun CompactionTrigger.toHookTrigger(): HookCompactionTrigger = when (this) {
+    CompactionTrigger.Auto -> HookCompactionTrigger.Auto
+    CompactionTrigger.Manual -> HookCompactionTrigger.Manual
+}
