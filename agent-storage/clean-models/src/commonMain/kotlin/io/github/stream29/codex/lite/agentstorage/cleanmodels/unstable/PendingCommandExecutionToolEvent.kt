@@ -17,6 +17,13 @@ public data class PendingCommandExecutionToolEvent(
     override val itemId: ResponseItemId? = null,
     public val action: PendingCommandExecutionAction,
 ) : PendingToolEvent {
+    override val toolName: String
+        get() = when (action) {
+            is PendingCommandExecutionAction.ExecCommand -> "exec_command"
+            is PendingCommandExecutionAction.WriteStdin -> "write_stdin"
+        }
+    override val toolNamespace: String? = null
+
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(action.toFunctionCall(callId, itemId))
 }

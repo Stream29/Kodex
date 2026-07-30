@@ -6,6 +6,8 @@ import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
 import io.github.stream29.codex.lite.agentstate.test.TestMcpService
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
@@ -28,7 +30,6 @@ import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchTools
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.flow.flowOf
@@ -85,7 +86,7 @@ val turnHookRuntimeTest by testSuite {
         assertEquals("hello again", hookRequests.single().prompt)
         assertEquals(1, requests.size)
         assertEquals(hookRequests.single().context.turnId, storage.settings.latestValue().turnId)
-        val history = storage.history.indexes().toList().map { index -> storage.history[index] }
+        val history = storage.stableHistoryItems()
         assertEquals(3, history.size)
         assertEquals(MessageRole.User, assertIs<ResponseItem.Message>(history[0]).role)
         assertEquals("hook context", assertIs<ResponseItem.Message>(history[1]).inputText())
@@ -123,8 +124,7 @@ val turnHookRuntimeTest by testSuite {
         runtime.appendUserMessage(listOf(ContentItem.InputText("actual prompt")))
         runtime.injectHistory(
             listOf(
-                ResponseItem.Message(
-                    role = MessageRole.User,
+                StableCleanEvent.UserMessage(
                     content = listOf(ContentItem.InputText("selected skill instructions")),
                 ),
             ),
@@ -165,7 +165,7 @@ val turnHookRuntimeTest by testSuite {
         assertEquals(emptyList(), runtime.resume().toList())
 
         assertEquals(0, requestCount)
-        val history = storage.history.indexes().toList().map { index -> storage.history[index] }
+        val history = storage.stableHistoryItems()
         assertEquals(2, history.size)
         assertEquals(MessageRole.User, assertIs<ResponseItem.Message>(history[0]).role)
         assertEquals(MessageRole.Developer, assertIs<ResponseItem.Message>(history[1]).role)
@@ -221,8 +221,7 @@ val turnHookRuntimeTest by testSuite {
         assertEquals(listOf(false, true), stopRequests.map(StopRequest::stopHookActive))
         assertEquals(listOf("first", "second"), stopRequests.map(StopRequest::lastAssistantMessage))
         assertEquals(stopRequests[0].context.turnId, stopRequests[1].context.turnId)
-        val hookPromptMessage = storage.history.indexes().toList()
-            .map { index -> storage.history[index] }
+        val hookPromptMessage = storage.stableHistoryItems()
             .filterIsInstance<ResponseItem.Message>()
             .last { message -> message.role == MessageRole.User }
         assertEquals(
@@ -300,6 +299,11 @@ private fun assistantMessage(text: String): ResponseItem.Message =
 private fun ResponseItem.Message.inputText(): String =
     content.filterIsInstance<ContentItem.InputText>()
         .joinToString(separator = "", transform = ContentItem.InputText::text)
+
+private suspend fun CodexAgentStorage.stableHistoryItems(): List<ResponseItem.HistoryItem> =
+    stable.indexes().toList().flatMap { index ->
+        stable[index].toResponseHistoryItems()
+    }
 
 private fun testSettings(): CodexAgentSettings =
     CodexAgentSettings(model = OpenAiModelId("test-model"))

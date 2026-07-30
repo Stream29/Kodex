@@ -1,44 +1,81 @@
 package io.github.stream29.codex.lite.agentruntime.decorator.tool
 
 import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.InvalidToolInvocation
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableAgentDeliveryResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCommandExecutionAction
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCommandExecutionResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCustomToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableImageGenerationResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableImageViewResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableImageViewToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableInterruptAgentResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableListAgentsResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMcpToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMultiAgentOperation
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMultiAgentToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableSpawnAgentResult
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableToolSearchEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableWaitAgentResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableWebSearchResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingImageGenerationToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingImageViewToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMultiAgentInvocation
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMultiAgentToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingPlanUpdate
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.hook.contract.tool.PreToolUseResult
 import io.github.stream29.codex.lite.hook.contract.tool.ToolHooks
-import io.github.stream29.codex.lite.hook.toolutils.runPreToolUse
 import io.github.stream29.codex.lite.hook.toolutils.runPostToolUse
-import io.github.stream29.codex.lite.hook.toolutils.toHookBlockedOutput
+import io.github.stream29.codex.lite.hook.toolutils.runPreToolUse
+import io.github.stream29.codex.lite.openai.CallToolResult
 import io.github.stream29.codex.lite.openai.FreeformTool
 import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
-import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.openai.ToolSpec
+import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.tool.contract.Tool
-import io.github.stream29.codex.lite.tool.contract.ToolCallResult
 import io.github.stream29.codex.lite.tool.contract.ToolName
-import io.github.stream29.codex.lite.tool.toolsearch.SearchToolCallParams
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchExecution
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchEngine
-import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchResult
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.channelFlow
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.encodeToJsonElement
 
 /**
  * Executes borrowed fixed and dynamic tools plus client tool-search calls.
  *
  * Tool construction, dynamic catalog updates, and resource ownership remain
- * outside this decorator. It only samples the supplied state, routes calls,
- * runs hooks, and persists outputs.
+ * outside this decorator. It only samples the supplied clean pending events,
+ * routes them, runs hooks, and persists their clean completions.
  */
 public class CodexToolRuntime internal constructor(
     private val delegate: ResumableAgentLayer,
@@ -58,34 +95,38 @@ public class CodexToolRuntime internal constructor(
                     ?: return@channelFlow
             }
             val toolsByName = fixedToolsByName.merge(dynamicTools.value.toToolMap())
-            var handledCall = false
-            for (call in pending.calls) {
-                when (call) {
-                    is ResponseItem.ClientToolSearchCall -> {
-                        val (output, completed) = toolSearch.value.handle(call)
-                        completeToolCall(output, completed)
-                        handledCall = true
+            var handledEvent = false
+            for (pendingEvent in pending.events) {
+                when (pendingEvent) {
+                    is PendingInvalidToolCall -> {
+                        completeToolCall(pendingEvent.completedEvent())
+                        handledEvent = true
                     }
 
-                    is ResponseItem.FunctionCall,
-                    is ResponseItem.CustomToolCall,
-                    -> {
-                        val tool = toolsByName[call.toolName]
-                        if (tool == null && call.toolName.namespace?.startsWith("mcp__") == true) {
-                            val message =
-                                "The MCP tool is no longer available in the current catalog."
-                            val output = call.unavailable(message)
-                            completeToolCall(output, call.failedEvent(message))
+                    is PendingToolSearchEvent -> {
+                        completeToolCall(toolSearch.value.handle(pendingEvent))
+                        handledEvent = true
+                    }
+
+                    else -> {
+                        val toolName = pendingEvent.requireToolName()
+                        val tool = toolsByName[toolName]
+                        if (tool == null && toolName.namespace?.startsWith("mcp__") == true) {
+                            completeToolCall(
+                                pendingEvent.failedEvent(
+                                    "The MCP tool is no longer available in the current catalog.",
+                                ),
+                            )
                         } else if (tool == null) {
                             continue
                         } else {
-                            handleToolCall(tool, call)
+                            handleToolCall(tool, pendingEvent)
                         }
-                        handledCall = true
+                        handledEvent = true
                     }
                 }
             }
-            if (!handledCall) {
+            if (!handledEvent) {
                 return@channelFlow
             }
             if (state.value is CodexAgentStateValue.ToolPending) {
@@ -96,35 +137,59 @@ public class CodexToolRuntime internal constructor(
 
     private suspend fun handleToolCall(
         tool: Tool,
-        call: ResponseItem.ToolCall,
+        pending: PendingToolEvent,
     ) {
-        when (val result = toolHooks.runPreToolUse(delegate.storage, call)) {
+        when (val result = toolHooks.runPreToolUse(delegate.storage, pending)) {
             is PreToolUseResult.Block -> {
-                completeToolCall(
-                    call.toHookBlockedOutput(result.reason),
-                    call.failedEvent(result.reason),
-                )
+                completeToolCall(pending.failedEvent(result.reason))
                 return
             }
 
             PreToolUseResult.Continue -> Unit
         }
-        val (output, completed) = tool.handle(call)
+        val completed = tool.handle(pending)
         toolHooks.runPostToolUse(
             storage = delegate.storage,
-            call = call,
-            output = output,
+            completed = completed,
         )
         // State-bound tools may atomically persist their own specialized output.
         val remainsPending = (state.value as? CodexAgentStateValue.ToolPending)
-            ?.calls
-            ?.any { pendingCall -> pendingCall.callId == call.callId }
+            ?.events
+            ?.any { event -> event.callId == pending.callId }
             ?: false
         if (remainsPending) {
-            completeToolCall(output, completed)
+            completeToolCall(completed)
         }
     }
 }
+
+private fun PendingInvalidToolCall.completedEvent(): StableCleanEvent.InvalidToolCall =
+    StableCleanEvent.InvalidToolCall(
+        callId = callId,
+        itemId = itemId,
+        invocation = invocation.toStableInvocation(),
+        message = message,
+    )
+
+private fun PendingInvalidToolInvocation.toStableInvocation(): InvalidToolInvocation =
+    when (this) {
+        is PendingInvalidToolInvocation.Function ->
+            InvalidToolInvocation.Function(
+                name = name,
+                namespace = namespace,
+                arguments = arguments,
+            )
+
+        is PendingInvalidToolInvocation.Custom ->
+            InvalidToolInvocation.Custom(
+                name = name,
+                namespace = namespace,
+                input = input,
+            )
+
+        is PendingInvalidToolInvocation.ToolSearch ->
+            InvalidToolInvocation.ToolSearch(arguments)
+    }
 
 /**
  * Adds a tool-execution layer over externally owned tool state.
@@ -185,93 +250,188 @@ private fun Tool.routingNames(): List<ToolName> {
     return names
 }
 
-private val ResponseItem.ToolCall.toolName: ToolName
-    get() = when (this) {
-        is ResponseItem.FunctionCall -> ToolName(name = name, namespace = namespace)
-        is ResponseItem.CustomToolCall -> ToolName(name = name, namespace = namespace)
-        is ResponseItem.ClientToolSearchCall -> error("Client tool search calls have no tool name.")
-    }
+private fun PendingToolEvent.requireToolName(): ToolName =
+    ToolName(
+        name = requireNotNull(toolName) {
+            "Pending event ${this::class.simpleName} does not identify a local tool route."
+        },
+        namespace = toolNamespace,
+    )
 
 private fun ToolSearchEngine.handle(
-    call: ResponseItem.ClientToolSearchCall,
-): ToolCallResult =
-    try {
-        val arguments = OpenAiJsonCodec.decodeFromJsonElement<SearchToolCallParams>(call.arguments)
-        val result = search(arguments)
-        ResponseItem.ClientToolSearchOutput(
-            callId = call.callId,
-            status = "completed",
-            tools = (result as? ToolSearchResult.Success)?.tools.orEmpty(),
-        ) to StableToolSearchEvent(
-            execution = ToolSearchExecution.Client,
-            arguments = arguments,
-            result = result,
-        )
-    } catch (error: SerializationException) {
-        val message = "failed to parse tool_search arguments: ${error.message}"
-        ResponseItem.ClientToolSearchOutput(
-            callId = call.callId,
-            status = "completed",
-            tools = emptyList(),
-        ) to StableTextToolEvent(
-            name = "tool_search",
-            arguments = call.arguments,
-            result = message,
-            success = false,
-        )
-    } catch (error: IllegalArgumentException) {
-        val message = "failed to parse tool_search arguments: ${error.message}"
-        ResponseItem.ClientToolSearchOutput(
-            callId = call.callId,
-            status = "completed",
-            tools = emptyList(),
-        ) to StableTextToolEvent(
-            name = "tool_search",
-            arguments = call.arguments,
-            result = message,
-            success = false,
-        )
-    }
+    pending: PendingToolSearchEvent,
+): StableToolSearchEvent =
+    StableToolSearchEvent(
+        callId = pending.callId,
+        itemId = pending.itemId,
+        arguments = pending.arguments,
+        result = search(pending.arguments),
+    )
 
-private fun ResponseItem.ToolCall.unavailable(message: String): ResponseItem.ToolCallOutput =
+private fun PendingToolEvent.failedEvent(message: String): StableCleanEvent.CompletedTool =
     when (this) {
-        is ResponseItem.FunctionCall -> ResponseItem.FunctionCallOutput(
-            callId = callId,
-            output = FunctionCallOutputPayload.fromText(message).copy(success = false),
-        )
+        is PendingFunctionToolEvent ->
+            StableTextToolEvent(
+                callId = callId,
+                itemId = itemId,
+                name = name,
+                namespace = namespace,
+                arguments = arguments,
+                result = message,
+                success = false,
+            )
 
-        is ResponseItem.CustomToolCall -> ResponseItem.CustomToolCallOutput(
-            callId = callId,
-            output = FunctionCallOutputPayload.fromText(message).copy(success = false),
-        )
+        is PendingCustomToolEvent ->
+            StableCustomToolEvent(
+                callId = callId,
+                itemId = itemId,
+                name = name,
+                namespace = namespace,
+                input = input,
+                result = FunctionCallOutputPayload.fromText(message),
+                success = false,
+            )
 
-        is ResponseItem.ClientToolSearchCall -> error("Client tool-search calls have a dedicated output type.")
+        is PendingMcpToolEvent ->
+            StableMcpToolEvent(
+                callId = callId,
+                itemId = itemId,
+                name = name,
+                namespace = namespace,
+                arguments = arguments,
+                result = mcpFailureResult(message),
+            )
+
+        is PendingPatchToolEvent ->
+            StablePatchToolEvent(
+                callId = callId,
+                itemId = itemId,
+                diff = diff,
+                result = StablePatchToolExecutionResult.Failure(message),
+            )
+
+        is PendingCommandExecutionToolEvent ->
+            StableCommandExecutionToolEvent(
+                callId = callId,
+                itemId = itemId,
+                action = action.toStableAction(),
+                result = StableCommandExecutionResult.Failure(message),
+            )
+
+        is PendingWebSearchToolEvent ->
+            StableWebSearchToolEvent(
+                callId = callId,
+                itemId = itemId,
+                commands = commands,
+                result = StableWebSearchResult.Failure(message),
+            )
+
+        is PendingImageGenerationToolEvent ->
+            StableImageGenerationToolEvent(
+                callId = callId,
+                itemId = itemId,
+                arguments = arguments,
+                result = StableImageGenerationResult.Failure(message),
+            )
+
+        is PendingImageViewToolEvent ->
+            StableImageViewToolEvent(
+                callId = callId,
+                itemId = itemId,
+                arguments = arguments,
+                result = StableImageViewResult.Failure(message),
+            )
+
+        is PendingMultiAgentToolEvent ->
+            StableMultiAgentToolEvent(
+                callId = callId,
+                itemId = itemId,
+                operation = operation.toFailedStableOperation(message),
+            )
+
+        is PendingRequestUserInputToolEvent ->
+            StableRequestUserInputToolEvent(
+                callId = callId,
+                itemId = itemId,
+                arguments = arguments,
+                result = StableRequestUserInputResult.Failure(message),
+            )
+
+        is PendingPlanUpdate ->
+            StableTextToolEvent(
+                callId = callId,
+                itemId = itemId,
+                name = requireNotNull(toolName),
+                arguments = OpenAiJsonCodec.encodeToJsonElement(
+                    UpdatePlanArgs.serializer(),
+                    arguments,
+                ),
+                result = message,
+                success = false,
+            )
+
+        is PendingInvalidToolCall,
+        is PendingToolSearchEvent,
+        -> error("$this cannot be blocked by a tool hook.")
     }
 
-private fun ResponseItem.ToolCall.failedEvent(message: String): StableTextToolEvent =
-    StableTextToolEvent(
-        name = when (this) {
-            is ResponseItem.FunctionCall -> name
-            is ResponseItem.CustomToolCall -> name
-            is ResponseItem.ClientToolSearchCall -> "tool_search"
-        },
-        namespace = when (this) {
-            is ResponseItem.FunctionCall -> namespace
-            is ResponseItem.CustomToolCall -> namespace
-            is ResponseItem.ClientToolSearchCall -> null
-        },
-        arguments = when (this) {
-            is ResponseItem.FunctionCall -> try {
-                OpenAiJsonCodec.parseToJsonElement(arguments)
-            } catch (_: SerializationException) {
-                JsonPrimitive(arguments)
-            } catch (_: IllegalArgumentException) {
-                JsonPrimitive(arguments)
-            }
+private fun PendingCommandExecutionAction.toStableAction(): StableCommandExecutionAction =
+    when (this) {
+        is PendingCommandExecutionAction.ExecCommand ->
+            StableCommandExecutionAction.ExecCommand(arguments)
 
-            is ResponseItem.CustomToolCall -> JsonPrimitive(input)
-            is ResponseItem.ClientToolSearchCall -> arguments
-        },
-        result = message,
-        success = false,
+        is PendingCommandExecutionAction.WriteStdin ->
+            StableCommandExecutionAction.WriteStdin(arguments)
+    }
+
+private fun PendingMultiAgentInvocation.toFailedStableOperation(
+    message: String,
+): StableMultiAgentOperation =
+    when (this) {
+        is PendingMultiAgentInvocation.SpawnAgent ->
+            StableMultiAgentOperation.SpawnAgent(
+                arguments = arguments,
+                result = StableSpawnAgentResult.Failure(message),
+            )
+
+        is PendingMultiAgentInvocation.SendMessage ->
+            StableMultiAgentOperation.SendMessage(
+                arguments = arguments,
+                result = StableAgentDeliveryResult.Failure(message),
+            )
+
+        is PendingMultiAgentInvocation.FollowupTask ->
+            StableMultiAgentOperation.FollowupTask(
+                arguments = arguments,
+                result = StableAgentDeliveryResult.Failure(message),
+            )
+
+        is PendingMultiAgentInvocation.WaitAgent ->
+            StableMultiAgentOperation.WaitAgent(
+                arguments = arguments,
+                result = StableWaitAgentResult.Failure(message),
+            )
+
+        is PendingMultiAgentInvocation.InterruptAgent ->
+            StableMultiAgentOperation.InterruptAgent(
+                arguments = arguments,
+                result = StableInterruptAgentResult.Failure(message),
+            )
+
+        is PendingMultiAgentInvocation.ListAgents ->
+            StableMultiAgentOperation.ListAgents(
+                arguments = arguments,
+                result = StableListAgentsResult.Failure(message),
+            )
+    }
+
+private fun mcpFailureResult(message: String): CallToolResult =
+    CallToolResult(
+        content = listOf(
+            buildJsonObject {
+                put("type", JsonPrimitive("text"))
+                put("text", JsonPrimitive(message))
+            },
+        ),
+        isError = true,
     )

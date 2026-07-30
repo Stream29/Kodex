@@ -1,6 +1,6 @@
 package io.github.stream29.codex.lite.tool.contract
 
-import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import kotlinx.serialization.Serializable
 
 /**
@@ -31,10 +31,6 @@ public data class ToolName(
     }
 }
 
-/** Returns whether this call targets [toolName], including its namespace. */
-public fun ResponseItem.ToolCall.matches(toolName: ToolName): Boolean =
-    when (this) {
-        is ResponseItem.FunctionCall -> name == toolName.name && namespace == toolName.namespace
-        is ResponseItem.CustomToolCall -> name == toolName.name && namespace == toolName.namespace
-        is ResponseItem.ClientToolSearchCall -> false
-    }
+/** Returns whether this pending event targets [toolName], including its namespace. */
+public fun PendingToolEvent.matches(toolName: ToolName): Boolean =
+    toolName.name == this.toolName && toolName.namespace == toolNamespace

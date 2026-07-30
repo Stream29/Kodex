@@ -7,9 +7,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 
-internal val PendingToolJson: Json = Json {
-    explicitNulls = false
-}
+internal val PendingToolJson: Json = Json
 
 internal fun pendingFunctionCall(
     callId: String,

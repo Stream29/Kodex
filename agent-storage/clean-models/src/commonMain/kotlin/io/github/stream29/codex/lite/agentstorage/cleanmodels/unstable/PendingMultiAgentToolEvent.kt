@@ -21,6 +21,10 @@ public data class PendingMultiAgentToolEvent(
     override val itemId: ResponseItemId? = null,
     public val operation: PendingMultiAgentInvocation,
 ) : PendingToolEvent {
+    override val toolName: String
+        get() = operation.toolName
+    override val toolNamespace: String? = null
+
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(operation.toFunctionCall(callId, itemId))
 }

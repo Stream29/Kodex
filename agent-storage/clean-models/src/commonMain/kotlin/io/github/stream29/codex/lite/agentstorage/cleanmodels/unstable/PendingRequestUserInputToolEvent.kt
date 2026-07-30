@@ -16,6 +16,9 @@ public data class PendingRequestUserInputToolEvent(
     override val itemId: ResponseItemId? = null,
     public val arguments: RequestUserInputArgs,
 ) : PendingToolEvent {
+    override val toolName: String = "request_user_input"
+    override val toolNamespace: String? = null
+
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             pendingFunctionCall(

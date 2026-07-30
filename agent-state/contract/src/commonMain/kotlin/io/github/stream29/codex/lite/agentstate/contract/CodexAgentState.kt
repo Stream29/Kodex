@@ -3,6 +3,8 @@ package io.github.stream29.codex.lite.agentstate.contract
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.openai.CompactionPhase
@@ -10,7 +12,6 @@ import io.github.stream29.codex.lite.openai.CompactionReason
 import io.github.stream29.codex.lite.openai.CompactionTrigger
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
-import io.github.stream29.codex.lite.openai.UpdatePlanArgs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
@@ -35,15 +36,15 @@ public sealed interface CodexAgentStateValue {
     /**
      * The model emitted tool calls whose outputs have not all been persisted.
      *
-     * @property calls Pending locally executable calls, including client tool
-     * search calls.
+     * @property events Pending locally executable clean events, including
+     * client tool-search calls.
      */
     public data class ToolPending(
-        public val calls: List<ResponseItem.ToolCall>,
+        public val events: List<PendingToolEvent>,
     ) : CodexAgentStateValue {
         init {
-            require(calls.isNotEmpty()) {
-                "ToolPending requires at least one pending local tool call."
+            require(events.isNotEmpty()) {
+                "ToolPending requires at least one pending local tool event."
             }
         }
     }
@@ -195,20 +196,19 @@ public interface CodexAgentState : CoroutineScope {
     ): Int
 
     /**
-     * Injects model-visible host history without reopening a generic history
-     * write API.
+     * Injects model-visible stable clean events without reopening a generic
+     * storage write API.
      *
-     * A user-role item in [items] remains part of the current logical turn and
+     * A user message in [events] remains part of the current logical turn and
      * does not rotate the persisted turn id. The item role alone does not
      * define a turn boundary.
      *
-     * An empty [items] list is a no-op and returns the current visible index.
-     * Non-empty lists are persisted as one atomic state transition in the
-     * supplied order. Projectable completed items are written to the stable
-     * clean timeline, while local tool calls and outputs advance the unstable
-     * pending snapshot.
+     * An empty [events] list is a no-op and returns the current visible index.
+     * Non-empty lists are persisted on the stable timeline as one atomic state
+     * transition in the supplied order. Pending calls must enter through a
+     * model response, and pending completion must use [completeToolCall].
      */
-    public suspend fun injectHistory(items: List<ResponseItem.HistoryItem>): Int
+    public suspend fun injectHistory(events: List<StableCleanEvent>): Int
 
     /**
      * Marks the next user message as the start of a new logical turn.
@@ -224,8 +224,7 @@ public interface CodexAgentState : CoroutineScope {
      *
      * A formal user submission starts with [markNewTurn], while a runtime
      * inserting user input into the current turn calls this operation directly.
-     * A user-role context injection must use [injectHistory]. The raw and stable
-     * user-message representations are committed at the same storage index.
+     * A user-role context injection must use [injectHistory].
      */
     public suspend fun appendUserMessage(content: List<ContentItem>): Int
 
@@ -233,29 +232,24 @@ public interface CodexAgentState : CoroutineScope {
      * Completes one currently pending local tool call, including a
      * client-executed tool-search call.
      *
-     * The output call id must match a pending raw call. The same transition
-     * persists [completed] on the stable clean timeline and removes the
-     * matching call id from the unstable pending snapshot. State remains
-     * ToolPending until every call from the current batch has an output.
+     * The event's projected output call id must match a pending clean call.
+     * The same transition persists [completed] on the stable timeline and
+     * removes the matching call id from the unstable pending snapshot. State
+     * remains ToolPending until every call from the current batch has an
+     * output.
      */
-    public suspend fun completeToolCall(
-        output: ResponseItem.ToolCallOutput,
-        completed: StableCleanEvent.CompletedTool,
-    ): Int
+    public suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int
 
     /**
      * Persists one parsed `update_plan` result and updates the settings
      * snapshot's plan atomically.
      *
-     * [output] must match a pending function call named `update_plan`. Tool
+     * [completed] must match a pending function call named `update_plan`. Tool
      * dispatch selects this operation explicitly rather than relying on
      * [completeToolCall] to inspect tool-specific payloads. Plan mode rejects
      * this operation because Codex does not expose `update_plan` in that mode.
      */
-    public suspend fun appendPlanUpdate(
-        output: ResponseItem.FunctionCallOutput,
-        plan: UpdatePlanArgs,
-    ): Int
+    public suspend fun appendPlanUpdate(completed: StablePlanUpdate): Int
 
     /**
      * Updates model request settings and records a timestamp for the same state

@@ -8,7 +8,16 @@ import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
 import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.agentstate.tool.toDeferredToolSearchDocuments
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.InvalidToolInvocation
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMcpToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.codex.lite.agentstorage.contract.CodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
@@ -21,9 +30,8 @@ import io.github.stream29.codex.lite.hook.contract.tool.ToolHooks
 import io.github.stream29.codex.lite.mcp.contract.McpService
 import io.github.stream29.codex.lite.mcp.contract.McpTool
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
+import io.github.stream29.codex.lite.openai.CallToolResult
 import io.github.stream29.codex.lite.openai.ContentItem
-import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
-import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
 import io.github.stream29.codex.lite.openai.MessageRole
 import io.github.stream29.codex.lite.openai.ModeKind
 import io.github.stream29.codex.lite.openai.OpenAiModelId
@@ -44,7 +52,6 @@ import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchToolClient
 import io.github.stream29.codex.lite.tool.applypatch.ApplyPatchTools
 import io.github.stream29.codex.lite.tool.plan.PlanTools
 import io.github.stream29.codex.lite.tool.plan.updatePlanTool
-import io.github.stream29.codex.lite.tool.contract.ToolCallResult
 import io.github.stream29.codex.lite.tool.toolsearch.ToolSearchEngine
 import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecToolClient
 import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecTools
@@ -167,31 +174,25 @@ val codexToolRuntimeTest by testSuite {
 
         assertEquals(3, requests.size)
         assertEquals(requests.first().tools, requests.last().tools)
-        val history = storage.history.indexes().toList().map { index -> storage.history[index] }
+        val history = storage.stableHistoryItems()
         val searchOutput = assertIs<ResponseItem.ClientToolSearchOutput>(history[2])
         val namespace = assertIs<ResponsesApiNamespace>(searchOutput.tools.single())
         assertEquals("dynamic", assertIs<ResponsesApiTool>(namespace.tools.single()).name)
         assertEquals(
-            FunctionCallOutputBody.Text("done"),
-            assertIs<ResponseItem.FunctionCallOutput>(history[4]).output.body,
+            mcpTextResult("done"),
+            assertIs<ResponseItem.McpToolCallOutput>(history[4]).output,
         )
     }
 
     test("dynamic tools refresh handlers between resumes") {
         val handledTools = mutableListOf<String>()
-        val alpha = RuntimeTestTool("mcp__server", "alpha") { call ->
-            handledTools += call.name
-            ResponseItem.FunctionCallOutput(
-                callId = call.callId,
-                output = FunctionCallOutputPayload.fromText("alpha"),
-            )
+        val alpha = RuntimeTestTool("mcp__server", "alpha") { pending ->
+            handledTools += pending.name
+            mcpTextResult("alpha")
         }
-        val beta = RuntimeTestTool("mcp__server", "beta") { call ->
-            handledTools += call.name
-            ResponseItem.FunctionCallOutput(
-                callId = call.callId,
-                output = FunctionCallOutputPayload.fromText("beta"),
-            )
+        val beta = RuntimeTestTool("mcp__server", "beta") { pending ->
+            handledTools += pending.name
+            mcpTextResult("beta")
         }
         val mcpService = TestMcpService(listOf(alpha))
         val storage = InMemoryCodexAgentStorage(CodexAgentSettings(OpenAiModelId("test-model")))
@@ -271,20 +272,23 @@ val codexToolRuntimeTest by testSuite {
             .toList()
 
         assertEquals(2, requestCount)
-        val history = storage.history.indexes().toList().map { index -> storage.history[index] }
+        val history = storage.stableHistoryItems()
         assertEquals(
-            FunctionCallOutputBody.Text("done"),
-            assertIs<ResponseItem.FunctionCallOutput>(history[2]).output.body,
+            mcpTextResult("done"),
+            assertIs<ResponseItem.McpToolCallOutput>(history[2]).output,
         )
         assertEquals(
-            StableTextToolEvent(
+            StableMcpToolEvent(
+                callId = "call_dynamic",
                 name = "dynamic",
                 namespace = "mcp__shared",
                 arguments = JsonObject(emptyMap()),
-                result = "runtime test output",
-                success = true,
+                result = mcpTextResult("done"),
             ),
-            storage.stable.latestValue(),
+            storage.stable.indexes().toList()
+                .map { index -> storage.stable[index] }
+                .filterIsInstance<StableMcpToolEvent>()
+                .single(),
         )
         assertEquals(emptyList(), storage.unstable.latestValue())
     }
@@ -332,15 +336,15 @@ val codexToolRuntimeTest by testSuite {
             .resume()
             .toList()
 
-        val history = storage.history.indexes().toList().map { index -> storage.history[index] }
-        val output = assertIs<ResponseItem.FunctionCallOutput>(history[2])
-        assertEquals(false, output.output.success)
+        val history = storage.stableHistoryItems()
+        val output = assertIs<ResponseItem.McpToolCallOutput>(history[2])
+        assertEquals(true, output.output.isError)
     }
 
     test("tool hooks preserve handler input and observe successful output") {
         val hookInvocations = mutableListOf<HookToolInvocation>()
         val postRequests = mutableListOf<PostToolUseRequest>()
-        val handledCalls = mutableListOf<ResponseItem.FunctionCall>()
+        val handledCalls = mutableListOf<PendingMcpToolEvent>()
         val hooks = object : ToolHooks {
             override suspend fun onPreToolUse(invocation: HookToolInvocation): PreToolUseResult {
                 hookInvocations += invocation
@@ -351,12 +355,9 @@ val codexToolRuntimeTest by testSuite {
                 postRequests += request
             }
         }
-        val tool = RuntimeTestTool("mcp__shared", "dynamic") { call ->
-            handledCalls += call
-            ResponseItem.FunctionCallOutput(
-                callId = call.callId,
-                output = FunctionCallOutputPayload.fromText("original").copy(success = true),
-            )
+        val tool = RuntimeTestTool("mcp__shared", "dynamic") { pending ->
+            handledCalls += pending
+            mcpTextResult("original")
         }
         val call = ResponseItem.FunctionCall(
             name = "dynamic",
@@ -400,22 +401,24 @@ val codexToolRuntimeTest by testSuite {
 
         assertEquals("mcp__shared__dynamic", hookInvocations.single().toolName)
         assertEquals(JsonPrimitive("before"), (hookInvocations.single().input as JsonObject)["value"])
-        assertEquals("{\"value\":\"before\"}", handledCalls.single().arguments)
-        assertEquals(JsonPrimitive("original"), postRequests.single().response)
-        val history = storage.history.indexes().toList().map { index -> storage.history[index] }
-        val output = history.filterIsInstance<ResponseItem.FunctionCallOutput>().single()
-        assertEquals(FunctionCallOutputBody.Text("original"), output.output.body)
-        assertEquals(true, output.output.success)
+        assertEquals(
+            buildJsonObject { put("value", JsonPrimitive("before")) },
+            handledCalls.single().arguments,
+        )
+        assertEquals(
+            OpenAiJsonCodec.encodeToJsonElement(CallToolResult.serializer(), mcpTextResult("original")),
+            postRequests.single().response,
+        )
+        val history = storage.stableHistoryItems()
+        val output = history.filterIsInstance<ResponseItem.McpToolCallOutput>().single()
+        assertEquals(mcpTextResult("original"), output.output)
     }
 
     test("pre tool hook block skips the handler") {
         var handlerCalls = 0
-        val tool = RuntimeTestTool("mcp__shared", "dynamic") { call ->
+        val tool = RuntimeTestTool("mcp__shared", "dynamic") {
             handlerCalls += 1
-            ResponseItem.FunctionCallOutput(
-                callId = call.callId,
-                output = FunctionCallOutputPayload.fromText("should not run"),
-            )
+            mcpTextResult("should not run")
         }
         val hooks = object : ToolHooks {
             override suspend fun onPreToolUse(invocation: HookToolInvocation): PreToolUseResult =
@@ -468,12 +471,10 @@ val codexToolRuntimeTest by testSuite {
             .toList()
 
         assertEquals(0, handlerCalls)
-        val output = storage.history.indexes().toList()
-            .map { index -> storage.history[index] }
-            .filterIsInstance<ResponseItem.FunctionCallOutput>()
+        val output = storage.stableHistoryItems()
+            .filterIsInstance<ResponseItem.McpToolCallOutput>()
             .single()
-        assertEquals(false, output.output.success)
-        assertEquals(FunctionCallOutputBody.Text("denied"), output.output.body)
+        assertEquals(true, output.output.isError)
     }
 
     test("custom tool uses the latest cwd and preserves original input through hooks") {
@@ -532,12 +533,11 @@ val codexToolRuntimeTest by testSuite {
                 "hook input\n",
                 SystemCoroutineFileSystem.readString(Path(updatedRoot, "hook.txt")),
             )
-            val output = fixture.state.storage.history.indexes().toList()
-                .map { index -> fixture.state.storage.history[index] }
-                .filterIsInstance<ResponseItem.CustomToolCallOutput>()
+            val completed = fixture.state.storage.stable.indexes().toList()
+                .map { index -> fixture.state.storage.stable[index] }
+                .filterIsInstance<StablePatchToolEvent>()
                 .single()
-            assertEquals(true, output.output.success)
-            assertEquals(FunctionCallOutputBody.Text("Success. Patch applied."), output.output.body)
+            assertIs<StablePatchToolExecutionResult.Success>(completed.result)
         } finally {
             deleteRecursively(initialRoot)
             deleteRecursively(updatedRoot)
@@ -594,6 +594,36 @@ val codexToolRuntimeTest by testSuite {
         assertTrue(postRequests.all { request -> request.response is JsonPrimitive })
     }
 
+    test("invalid pending calls complete without invoking their ordinary handler") {
+        val call = ResponseItem.FunctionCall(
+            name = UnifiedExecTools.ExecCommandName,
+            arguments = """{"cmd":""",
+            callId = "call_invalid",
+        )
+        val mcpService = TestMcpService()
+        val fixture = testStateWithCalls(mcpService, calls = arrayOf(call))
+
+        RequestOnlyRuntime(fixture.state)
+            .testToolRuntime(mcpService, NoOpToolHooks)
+            .resume()
+            .toList()
+
+        val completed = fixture.state.storage.stable.indexes().toList()
+            .map { index -> fixture.state.storage.stable[index] }
+            .filterIsInstance<StableCleanEvent.InvalidToolCall>()
+            .single()
+        assertEquals(
+            InvalidToolInvocation.Function(
+                name = call.name,
+                arguments = call.arguments,
+            ),
+            completed.invocation,
+        )
+        assertTrue(
+            completed.message.contains("Invalid JSON arguments"),
+        )
+    }
+
     test("update plan is handled by the ordinary tool runtime") {
         val plan = UpdatePlanArgs(
             explanation = "Start implementation.",
@@ -613,12 +643,11 @@ val codexToolRuntimeTest by testSuite {
             .toList()
 
         assertEquals(plan, fixture.state.storage.settings.latestValue().plan)
-        val output = fixture.state.storage.history.indexes().toList()
-            .map { index -> fixture.state.storage.history[index] }
-            .filterIsInstance<ResponseItem.FunctionCallOutput>()
+        val completed = fixture.state.storage.stable.indexes().toList()
+            .map { index -> fixture.state.storage.stable[index] }
+            .filterIsInstance<StablePlanUpdate>()
             .single()
-        assertEquals(true, output.output.success)
-        assertEquals(FunctionCallOutputBody.Text("Plan updated"), output.output.body)
+        assertEquals(plan, completed.arguments)
     }
 
     test("update plan remains unavailable in plan mode") {
@@ -650,14 +679,12 @@ val codexToolRuntimeTest by testSuite {
             .toList()
 
         assertEquals(originalPlan, fixture.state.storage.settings.latestValue().plan)
-        val output = fixture.state.storage.history.indexes().toList()
-            .map { index -> fixture.state.storage.history[index] }
-            .filterIsInstance<ResponseItem.FunctionCallOutput>()
+        val completed = fixture.state.storage.stable.indexes().toList()
+            .map { index -> fixture.state.storage.stable[index] }
+            .filterIsInstance<StableTextToolEvent>()
             .single()
-        assertEquals(false, output.output.success)
         assertTrue(
-            (output.output.body as FunctionCallOutputBody.Text).text
-                .contains("not allowed in Plan mode"),
+            completed.result.contains("not allowed in Plan mode"),
         )
     }
     }
@@ -724,30 +751,42 @@ private data class TestShellSettings(
 private class RuntimeTestTool(
     namespace: String,
     name: String,
-    private val handler: suspend (ResponseItem.FunctionCall) -> ResponseItem.ToolCallOutput = { call ->
-        ResponseItem.FunctionCallOutput(
-            callId = call.callId,
-            output = FunctionCallOutputPayload.fromText("done"),
-        )
+    private val handler: suspend (PendingMcpToolEvent) -> CallToolResult = {
+        mcpTextResult("done")
     },
 ) : McpTool {
     override val serverName: String = namespace.removePrefix("mcp__")
     override val serverInstructions: String = "Tools exposed by $serverName."
     override val spec: ToolSpec = runtimeNamespace(namespace, name)
 
-    override suspend fun handle(call: ResponseItem.ToolCall): ToolCallResult {
-        val functionCall = assertIs<ResponseItem.FunctionCall>(call)
-        return handler(functionCall) to StableTextToolEvent(
-            name = functionCall.name,
-            namespace = functionCall.namespace,
-            arguments = OpenAiJsonCodec.parseToJsonElement(functionCall.arguments),
-            result = "runtime test output",
-            success = true,
+    override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool {
+        val mcpPending = assertIs<PendingMcpToolEvent>(pending)
+        return StableMcpToolEvent(
+            callId = mcpPending.callId,
+            itemId = mcpPending.itemId,
+            name = mcpPending.name,
+            namespace = mcpPending.namespace,
+            arguments = mcpPending.arguments,
+            result = handler(mcpPending),
         )
     }
 
     override fun close(): Unit = Unit
 }
+
+private fun mcpTextResult(
+    text: String,
+    isError: Boolean? = null,
+): CallToolResult =
+    CallToolResult(
+        content = listOf(
+            buildJsonObject {
+                put("type", JsonPrimitive("text"))
+                put("text", JsonPrimitive(text))
+            },
+        ),
+        isError = isError,
+    )
 
 private class RecordingToolHooks(
     private val pre: suspend (HookToolInvocation) -> PreToolUseResult = {
@@ -848,6 +887,11 @@ private fun assistantResponse(responseId: String): Flow<ResponsesStreamEvent> = 
     ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = assistantMessage()),
     ResponsesStreamEvent.Completed(Response(id = responseId, endTurn = true)),
 )
+
+private suspend fun CodexAgentStorage.stableHistoryItems(): List<ResponseItem.HistoryItem> =
+    stable.indexes().toList().flatMap { index ->
+        stable[index].toResponseHistoryItems()
+    }
 
 private suspend fun deleteRecursively(path: Path) {
     val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return

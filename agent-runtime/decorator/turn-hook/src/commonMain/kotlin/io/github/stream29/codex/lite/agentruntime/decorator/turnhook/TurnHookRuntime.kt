@@ -3,6 +3,7 @@ package io.github.stream29.codex.lite.agentruntime.decorator.turnhook
 import io.github.stream29.codex.lite.agentcontext.promptdsl.promptXml
 import io.github.stream29.codex.lite.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.codex.lite.agentstorage.contract.indexesDescending
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.hook.contract.turn.HookPromptFragment
@@ -13,8 +14,6 @@ import io.github.stream29.codex.lite.hook.contract.turn.TurnHooks
 import io.github.stream29.codex.lite.hook.contract.turn.UserPromptSubmitRequest
 import io.github.stream29.codex.lite.hook.contract.turn.UserPromptSubmitResult
 import io.github.stream29.codex.lite.openai.ContentItem
-import io.github.stream29.codex.lite.openai.MessageRole
-import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -58,15 +57,10 @@ public class TurnHookRuntime internal constructor(
         var lastAssistantMessage: String? = null
 
         while (true) {
+            val historyStartIndex = latestIndex.value
             var naturalCompletion = false
             delegate.resume().collect { event ->
                 when (event) {
-                    is ResponsesStreamEvent.OutputItemDone -> {
-                        event.item.assistantTextOrNull()?.let { text ->
-                            lastAssistantMessage = text
-                        }
-                    }
-
                     is ResponsesStreamEvent.Completed -> naturalCompletion = true
                     is ResponsesStreamEvent.Failed,
                     is ResponsesStreamEvent.Incomplete,
@@ -79,6 +73,9 @@ public class TurnHookRuntime internal constructor(
 
             if (!naturalCompletion || state.value != CodexAgentStateValue.AssistantMessage) {
                 return@channelFlow
+            }
+            latestAssistantMessageSince(historyStartIndex)?.let { text ->
+                lastAssistantMessage = text
             }
 
             when (
@@ -98,7 +95,7 @@ public class TurnHookRuntime internal constructor(
 
                 is StopResult.Continue -> {
                     if (result.fragments.isEmpty()) return@channelFlow
-                    injectHistory(listOf(result.fragments.toHookPromptMessage()))
+                    injectHistory(listOf(result.fragments.toHookPromptEvent()))
                     stopHookActive = true
                 }
             }
@@ -109,8 +106,7 @@ public class TurnHookRuntime internal constructor(
         if (contexts.isEmpty()) return
         injectHistory(
             contexts.map { context ->
-                ResponseItem.Message(
-                    role = MessageRole.Developer,
+                StableCleanEvent.DeveloperMessage(
                     content = listOf(ContentItem.InputText(context)),
                 )
             },
@@ -124,18 +120,28 @@ public class TurnHookRuntime internal constructor(
      */
     private suspend fun currentUserPromptTextOrNull(): String? {
         if (state.value != CodexAgentStateValue.UserMessage) return null
-        val message = storage.history
+        val message = storage.stable
             .indexesDescending(latestIndex.value)
-            .map { index -> storage.history[index] }
-            .takeWhile { item ->
-                item is ResponseItem.Message &&
-                    (item.role == MessageRole.User || item.role == MessageRole.Developer)
+            .map { index -> storage.stable[index] }
+            .takeWhile { event ->
+                event is StableCleanEvent.UserMessage ||
+                    event is StableCleanEvent.DeveloperMessage
             }
-            .firstOrNull { item ->
-                item is ResponseItem.Message && item.role == MessageRole.User
-            } as? ResponseItem.Message
+            .firstOrNull { event -> event is StableCleanEvent.UserMessage }
+            as? StableCleanEvent.UserMessage
         return message?.content?.userPromptText()
     }
+
+    private suspend fun latestAssistantMessageSince(historyStartIndex: Int): String? =
+        storage.stable
+            .indexesDescending(latestIndex.value)
+            .firstOrNull { index ->
+                index > historyStartIndex &&
+                    storage.stable[index] is StableCleanEvent.AssistantMessage
+            }
+            ?.let { index ->
+                (storage.stable[index] as StableCleanEvent.AssistantMessage).assistantOutputText()
+            }
 }
 
 /** Adds user-prompt and natural-completion Hooks to this outer runtime. */
@@ -145,19 +151,16 @@ public fun ResumableAgentLayer.turnHookRuntime(
 
 private fun List<ContentItem>.userPromptText(): String =
     filterIsInstance<ContentItem.InputText>()
-        .joinToString(separator = "\n\n", transform = ContentItem.InputText::text)
+        .joinToString(separator = "", transform = ContentItem.InputText::text)
 
-private fun ResponseItem.assistantTextOrNull(): String? {
-    val message = this as? ResponseItem.Message ?: return null
-    if (message.role != MessageRole.Assistant) return null
-    val output = message.content.filterIsInstance<ContentItem.OutputText>()
+private fun StableCleanEvent.AssistantMessage.assistantOutputText(): String? {
+    val output = content.filterIsInstance<ContentItem.OutputText>()
     return output.takeIf(List<ContentItem.OutputText>::isNotEmpty)
         ?.joinToString(separator = "", transform = ContentItem.OutputText::text)
 }
 
-private fun List<HookPromptFragment>.toHookPromptMessage(): ResponseItem.Message =
-    ResponseItem.Message(
-        role = MessageRole.User,
+private fun List<HookPromptFragment>.toHookPromptEvent(): StableCleanEvent.UserMessage =
+    StableCleanEvent.UserMessage(
         content = map { fragment ->
             ContentItem.InputText(fragment.toHookPromptXml())
         },

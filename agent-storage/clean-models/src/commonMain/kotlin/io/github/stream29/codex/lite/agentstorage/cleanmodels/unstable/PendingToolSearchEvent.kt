@@ -16,6 +16,9 @@ public data class PendingToolSearchEvent(
     override val itemId: ResponseItemId? = null,
     public val arguments: SearchToolCallParams,
 ) : PendingToolEvent {
+    override val toolName: String? = null
+    override val toolNamespace: String? = null
+
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.ClientToolSearchCall(

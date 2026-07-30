@@ -1,17 +1,15 @@
 package io.github.stream29.codex.lite.tool.webrun
 
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableWebSearchResult
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableWebSearchRequest
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
-import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
-import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
 import io.github.stream29.codex.lite.openai.OpenAiResult
 import io.github.stream29.codex.lite.openai.SearchCommands
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
 import io.github.stream29.codex.lite.openai.ToolSpec
-import io.github.stream29.codex.lite.tool.builder.functionOutputTool
 import io.github.stream29.codex.lite.tool.contract.Tool
+import io.github.stream29.codex.lite.tool.contract.typedTool
 
 public const val WebRunNamespace: String = "web"
 public const val WebRunToolName: String = "run"
@@ -142,28 +140,26 @@ public object WebRunTools {
         )
 
     public fun createTool(client: WebRunToolClient): Tool =
-        functionOutputTool(
+        typedTool(
             spec = spec,
-            inputDeserializer = SearchCommands.serializer(),
-        ) { _, commands ->
-            when (val result = client.run(commands)) {
+            select = { it as? PendingWebSearchToolEvent },
+        ) { pending ->
+            when (val result = client.run(pending.commands)) {
                 is OpenAiResult.Success ->
-                    FunctionCallOutputPayload(
-                        body = FunctionCallOutputBody.Text(result.value.output),
-                        success = true,
-                    ) to StableWebSearchToolEvent(
-                        request = StableWebSearchRequest.WebRun(commands),
+                    StableWebSearchToolEvent(
+                        callId = pending.callId,
+                        itemId = pending.itemId,
+                        commands = pending.commands,
                         result = StableWebSearchResult.Success(result.value),
                     )
 
                 is OpenAiResult.Failure -> {
                     val message =
                         result.error.messageText ?: "web.run failed without an error message."
-                    FunctionCallOutputPayload(
-                        body = FunctionCallOutputBody.Text(message),
-                        success = false,
-                    ) to StableWebSearchToolEvent(
-                        request = StableWebSearchRequest.WebRun(commands),
+                    StableWebSearchToolEvent(
+                        callId = pending.callId,
+                        itemId = pending.itemId,
+                        commands = pending.commands,
                         result = StableWebSearchResult.Failure(message),
                     )
                 }

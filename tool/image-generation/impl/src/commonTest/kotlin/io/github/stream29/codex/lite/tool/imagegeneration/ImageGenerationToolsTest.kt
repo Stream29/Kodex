@@ -2,13 +2,12 @@ package io.github.stream29.codex.lite.tool.imagegeneration
 
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
-import io.github.stream29.codex.lite.openai.FunctionCallOutputContentItem
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableImageGenerationResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingImageGenerationToolEvent
 import io.github.stream29.codex.lite.openai.ImageData
-import io.github.stream29.codex.lite.openai.ImageDetail
 import io.github.stream29.codex.lite.openai.ImageResponse
 import io.github.stream29.codex.lite.openai.OpenAiResult
-import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.codex.lite.openai.ResponsesApiNamespace
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
@@ -23,6 +22,7 @@ import kotlin.random.Random
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 
@@ -101,34 +101,29 @@ val imageGenerationToolsTest by testSuite {
                 outputDirectory = Path(root, "session"),
             )
 
-            val result = tool.handle(
-                ResponseItem.FunctionCall(
+            val completed = assertIs<StableImageGenerationToolEvent>(
+                tool.handle(
+                    PendingImageGenerationToolEvent(
                     callId = "call_1",
-                    namespace = ImageGenNamespace,
-                    name = ImageGenToolName,
-                    arguments = """{"prompt":"draw"}""",
+                    arguments = ImageGenToolArguments(prompt = "draw"),
                 ),
-            ).first as ResponseItem.FunctionCallOutput
-            val content = (result.output.body as FunctionCallOutputBody.ContentItems).items
+                ),
+            )
+            val result = assertIs<StableImageGenerationResult.Success>(completed.result)
             val outputPath = Path(root, "session", "call_1.png")
 
             assertEquals(
-                FunctionCallOutputContentItem.InputImage(
-                    imageUrl = "data:image/png;base64,$encodedImage",
-                    detail = ImageDetail.High,
-                ),
-                content[0],
+                encodedImage,
+                result.output.result,
             )
             assertEquals(
-                FunctionCallOutputContentItem.InputText(
-                    "Generated images are saved to ${outputPath.parent} as $outputPath by default.\n" +
-                        "If you need to use a generated image at another path, copy it and leave the original " +
-                        "in place unless the user explicitly asks you to delete it.",
-                ),
-                content[1],
+                "Generated images are saved to ${outputPath.parent} as $outputPath by default.\n" +
+                    "If you need to use a generated image at another path, copy it and leave the original " +
+                    "in place unless the user explicitly asks you to delete it.",
+                result.output.outputHint,
             )
             assertContentEquals(bytes, SystemCoroutineFileSystem.readBytes(outputPath))
-            assertEquals(true, result.output.success)
+            assertEquals(outputPath.toString(), result.savedPath)
         } finally {
             deleteImageGenerationToolFiles(root)
         }

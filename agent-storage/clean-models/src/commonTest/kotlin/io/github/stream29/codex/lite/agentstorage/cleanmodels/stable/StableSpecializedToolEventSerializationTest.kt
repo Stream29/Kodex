@@ -1,6 +1,7 @@
 package io.github.stream29.codex.lite.agentstorage.cleanmodels.stable
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.PlanItemArg
 import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ResponseItemId
@@ -44,6 +45,7 @@ import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -216,6 +218,35 @@ val stableSpecializedToolEventSerializationTest by testSuite {
                 "list_agents",
             ),
             events.map { event -> event.projectedFunctionName() },
+        )
+    }
+
+    test("multi-agent projection explicitly retains nullable defaults") {
+        val event = StableMultiAgentToolEvent(
+            callId = "call_spawn",
+            operation = StableMultiAgentOperation.SpawnAgent(
+                arguments = SpawnAgentArgs(
+                    taskName = "worker",
+                    message = "Inspect the contract.",
+                ),
+                result = StableSpawnAgentResult.Success(
+                    SpawnAgentResult(taskName = "/root/worker"),
+                ),
+            ),
+        )
+
+        val items = event.toResponseHistoryItems()
+        val call = assertIs<ResponseItem.FunctionCall>(items[0])
+        val arguments = specializedToolJson.parseToJsonElement(call.arguments).jsonObject
+        assertEquals(JsonNull, arguments["model"])
+        assertEquals(JsonNull, arguments["reasoning_effort"])
+        assertEquals(JsonNull, arguments["service_tier"])
+
+        val output = assertIs<ResponseItem.FunctionCallOutput>(items[1])
+        val body = assertIs<FunctionCallOutputBody.Text>(output.output.body)
+        assertEquals(
+            JsonNull,
+            specializedToolJson.parseToJsonElement(body.text).jsonObject["nickname"],
         )
     }
 

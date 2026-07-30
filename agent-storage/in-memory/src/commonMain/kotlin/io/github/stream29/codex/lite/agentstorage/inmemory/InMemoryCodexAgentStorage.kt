@@ -1,10 +1,9 @@
 package io.github.stream29.codex.lite.agentstorage.inmemory
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.CleanCompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
-import io.github.stream29.codex.lite.openai.CompactionCheckpoint
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
 import io.github.stream29.codex.lite.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.codex.lite.utils.ReadWriteMutex
@@ -22,7 +21,7 @@ import kotlin.uuid.Uuid
  */
 @OptIn(ExperimentalUuidApi::class)
 public class InMemoryCodexAgentStorage private constructor(
-    initialCompaction: MutableList<IndexedValue<CompactionCheckpoint>>,
+    initialCompaction: MutableList<IndexedValue<CleanCompactionCheckpoint>>,
     initialSettings: MutableList<IndexedValue<CodexAgentSettings>>,
 ) : MutableCodexAgentStorage {
     private val identity: Any = Any()
@@ -33,9 +32,7 @@ public class InMemoryCodexAgentStorage private constructor(
     )
 
     public override val id: String = "memory:${identity.hashCode().toUInt().toString(16)}"
-    public override val history: MutableIndexVersioned<ResponseItem.HistoryItem> =
-        InMemoryIndexVersioned()
-    public override val compaction: MutableIndexVersioned<CompactionCheckpoint> =
+    public override val compaction: MutableIndexVersioned<CleanCompactionCheckpoint> =
         InMemoryIndexVersioned(initialCompaction)
     public override val settings: MutableIndexVersioned<CodexAgentSettings> =
         InMemoryIndexVersioned(initialSettings)
@@ -45,7 +42,7 @@ public class InMemoryCodexAgentStorage private constructor(
         InMemoryIndexVersioned()
     public override val stable: MutableIndexVersioned<StableCleanEvent> =
         InMemoryIndexVersioned()
-    public override val unstable: MutableIndexVersioned<List<PendingToolEvent>> =
+    public override val unstable: MutableIndexVersioned<List<UnstableCleanEvent>> =
         InMemoryIndexVersioned()
 
     public companion object {
@@ -59,12 +56,12 @@ public class InMemoryCodexAgentStorage private constructor(
 }
 
 @OptIn(ExperimentalUuidApi::class)
-private fun initializedCompaction(): MutableList<IndexedValue<CompactionCheckpoint>> {
+private fun initializedCompaction(): MutableList<IndexedValue<CleanCompactionCheckpoint>> {
     val windowId = Uuid.generateV7().toString()
     return mutableListOf(
         IndexedValue(
             0,
-            CompactionCheckpoint(
+            CleanCompactionCheckpoint(
                 prefix = emptyList(),
                 historyBaseIndex = 0,
                 windowNumber = 0,

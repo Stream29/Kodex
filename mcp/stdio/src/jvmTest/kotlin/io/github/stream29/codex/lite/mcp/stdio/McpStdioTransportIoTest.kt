@@ -2,10 +2,11 @@ package io.github.stream29.codex.lite.mcp.stdio
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMcpToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.codex.lite.mcp.contract.McpServerConfiguration
 import io.github.stream29.codex.lite.mcp.contract.McpSettings
 import io.github.stream29.codex.lite.mcp.impl.McpServiceImpl
-import io.github.stream29.codex.lite.openai.ResponseItem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -15,6 +16,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonObject
 import java.nio.file.Files
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.deleteIfExists
@@ -50,16 +52,17 @@ val mcpStdioTransportIoTest by testSuite(
             val tool = withTimeout(10.seconds) {
                 service.tools.first(List<*>::isNotEmpty).single()
             }
-            val result = assertIs<ResponseItem.McpToolCallOutput>(
+            val completed = assertIs<StableMcpToolEvent>(
                 tool.handle(
-                    ResponseItem.FunctionCall(
-                        name = "mcp__stdio_fixture__environment",
-                        arguments = "{}",
+                    PendingMcpToolEvent(
                         callId = "stdio-call",
+                        name = "environment",
+                        namespace = "mcp__stdio_fixture",
+                        arguments = JsonObject(emptyMap()),
                     ),
-                ).first,
+                ),
             )
-            val text = result.output.content.single().jsonObject.getValue("text").jsonPrimitive.content
+            val text = completed.result.content.single().jsonObject.getValue("text").jsonPrimitive.content
             assertEquals(
                 "env=$TestEnvironmentValue;cwd=${workingDirectory.toRealPath().absolutePathString()}",
                 text,

@@ -16,6 +16,9 @@ public data class PendingWebSearchToolEvent(
     override val itemId: ResponseItemId? = null,
     public val commands: SearchCommands,
 ) : PendingToolEvent {
+    override val toolName: String = "run"
+    override val toolNamespace: String = "web"
+
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             pendingFunctionCall(

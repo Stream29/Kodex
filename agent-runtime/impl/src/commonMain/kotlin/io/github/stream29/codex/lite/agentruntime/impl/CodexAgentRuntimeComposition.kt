@@ -11,7 +11,7 @@ import io.github.stream29.codex.lite.agentruntime.decorator.turnhook.turnHookRun
 import io.github.stream29.codex.lite.agentsession.contract.AgentPathResolver
 import io.github.stream29.codex.lite.agentsession.contract.CodexAgentDependencies
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
-import io.github.stream29.codex.lite.openai.ResponseItem
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.tool.contract.Tool
 import kotlinx.coroutines.Job
@@ -38,7 +38,7 @@ public fun CodexAgentState.buildMasterAgentRuntime(
 private fun CodexAgentState.masterRuntimeLayer(
     dependencies: CodexAgentDependencies,
     agentPathResolver: AgentPathResolver,
-    pendingSteer: MutableStateFlow<List<ResponseItem.Steerable>>,
+    pendingSteer: MutableStateFlow<List<StableCleanEvent.Steerable>>,
 ): ResumableAgentLayer {
     val toolSearch = toolSearchState(dependencies.mcpService)
     val fixedTools = fixedTools(dependencies, agentPathResolver, pendingSteer)
@@ -77,7 +77,7 @@ public fun CodexAgentState.buildSubagentRuntime(
 private fun CodexAgentState.subagentRuntimeLayer(
     dependencies: CodexAgentDependencies,
     agentPathResolver: AgentPathResolver,
-    pendingSteer: MutableStateFlow<List<ResponseItem.Steerable>>,
+    pendingSteer: MutableStateFlow<List<StableCleanEvent.Steerable>>,
 ): ResumableAgentLayer {
     val toolSearch = toolSearchState(dependencies.mcpService)
     val fixedTools = fixedTools(dependencies, agentPathResolver, pendingSteer)
@@ -112,15 +112,15 @@ private fun CodexAgentState.subagentRuntimeLayer(
 }
 
 private fun CodexAgentState.buildAgentRuntime(
-    buildLayer: (MutableStateFlow<List<ResponseItem.Steerable>>) -> ResumableAgentLayer,
+    buildLayer: (MutableStateFlow<List<StableCleanEvent.Steerable>>) -> ResumableAgentLayer,
 ): AgentRuntime {
-    val pendingSteer = MutableStateFlow(emptyList<ResponseItem.Steerable>())
+    val pendingSteer = MutableStateFlow(emptyList<StableCleanEvent.Steerable>())
     return AgentRuntimeImpl(buildLayer(pendingSteer), pendingSteer)
 }
 
 private class AgentRuntimeImpl(
     private val delegate: ResumableAgentLayer,
-    override val pendingSteer: MutableStateFlow<List<ResponseItem.Steerable>>,
+    override val pendingSteer: MutableStateFlow<List<StableCleanEvent.Steerable>>,
 ) : AgentRuntime, ResumableAgentLayer by delegate {
     private val runningTurnSlot: MutableStateFlow<Job?> = MutableStateFlow(null)
 

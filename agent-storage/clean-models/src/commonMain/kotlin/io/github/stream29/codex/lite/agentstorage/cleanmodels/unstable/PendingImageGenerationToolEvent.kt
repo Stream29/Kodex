@@ -16,6 +16,9 @@ public data class PendingImageGenerationToolEvent(
     override val itemId: ResponseItemId? = null,
     public val arguments: ImageGenToolArguments,
 ) : PendingToolEvent {
+    override val toolName: String = "imagegen"
+    override val toolNamespace: String = "image_gen"
+
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             pendingFunctionCall(

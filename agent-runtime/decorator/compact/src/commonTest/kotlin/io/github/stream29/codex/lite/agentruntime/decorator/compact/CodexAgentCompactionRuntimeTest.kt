@@ -8,6 +8,9 @@ import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
 import io.github.stream29.codex.lite.agentstate.impl.CodexAgentState
 import io.github.stream29.codex.lite.agentstate.test.TestAgentContextSettings
 import io.github.stream29.codex.lite.agentstate.test.TestMcpService
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
 import io.github.stream29.codex.lite.agentstorage.contract.latestValue
 import io.github.stream29.codex.lite.agentstorage.contract.MutableCodexAgentStorage
@@ -32,6 +35,7 @@ import io.github.stream29.codex.lite.openai.TokenUsage
 import io.github.stream29.codex.lite.openai.client.test.mockOpenAiClient
 import io.github.stream29.codex.lite.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.codex.lite.openai.modelcatalog.OpenAiModelCatalog
+import io.github.stream29.codex.lite.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.codex.lite.utils.coroutines.cancelAndJoin
 import io.github.stream29.codex.lite.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
@@ -184,7 +188,10 @@ val codexAgentCompactionRuntimeTest by testSuite {
         assertEquals(2, requests.size)
         assertRequestHistory(requests[0], user)
         assertRequestHistory(requests[1], user, assistantMessage("Preparing the answer."))
-        assertEquals(assistantMessage("Done."), storage.history[5])
+        assertEquals(
+            StableCleanEvent.AssistantMessage(assistantMessage("Done.").content),
+            storage.stable[5],
+        )
         assertEquals(13, storage.tokenCount[5])
         assertEquals(5, storage.latestIndex())
         assertEquals(CodexAgentStateValue.AssistantMessage, state.state.value)
@@ -252,8 +259,9 @@ val codexAgentCompactionRuntimeTest by testSuite {
         assertTrue(compactRequest.turnMetadata.contains("\"phase\":\"pre_turn\""))
         assertEquals(listOf(user, ResponseItem.CompactionTrigger), compactRequest.request.input)
         assertRequestHistory(responseRequests.single(), user, compaction)
-        assertEquals(ResponseItem.ContextCompaction(encryptedContent = "pre-turn-compact"), storage.history[2])
-        assertEquals(final, storage.history[3])
+        assertEquals(StableCleanEvent.ContextCompaction, storage.stable[2])
+        assertEquals(compaction, storage.compaction[2].compaction)
+        assertEquals(StableCleanEvent.AssistantMessage(final.content), storage.stable[3])
         assertEquals(3, storage.compaction[2].historyBaseIndex)
         assertEquals(initialCheckpoint.windowNumber + 1, storage.compaction[2].windowNumber)
         assertEquals(listOf(persistedTurnId, persistedTurnId), hookRequests.map { it.context.turnId })
@@ -304,8 +312,12 @@ val codexAgentCompactionRuntimeTest by testSuite {
         assertEquals(listOf(1, compactedIndex), observedIndexes)
         assertEquals(persistedTurnId, storage.settings[compactedIndex].turnId)
         assertEquals(
-            ResponseItem.ContextCompaction(encryptedContent = "committed"),
-            storage.history[compactedIndex],
+            StableCleanEvent.ContextCompaction,
+            storage.stable[compactedIndex],
+        )
+        assertEquals(
+            ResponseItem.Compaction(encryptedContent = "committed"),
+            storage.compaction[compactedIndex].compaction,
         )
         assertEquals(listOf(persistedTurnId, persistedTurnId), hookRequests.map { it.context.turnId })
     }
@@ -374,7 +386,7 @@ val codexAgentCompactionRuntimeTest by testSuite {
         )
         assertTrue(compactRequests.single().turnMetadata.contains("\"phase\":\"mid_turn\""))
         assertRequestHistory(responseRequests[1], user, compaction)
-        assertEquals(final, storage.history[5])
+        assertEquals(StableCleanEvent.AssistantMessage(final.content), storage.stable[5])
     }
 
     test("loop stops at pending tool call without issuing another request") {
@@ -400,14 +412,20 @@ val codexAgentCompactionRuntimeTest by testSuite {
             mcpService = TestMcpService(),
         )
         val runtime = CodexAgentCompactionRuntime(state, testModelCatalog())
+        val pending = PendingCommandExecutionToolEvent(
+            callId = "call_1",
+            action = PendingCommandExecutionAction.ExecCommand(
+                ExecCommandArguments(command = "date"),
+            ),
+        )
 
         state.appendUserMessage(userMessage("What time is it?"))
         runtime.resume().toList()
         runtime.resume().toList()
 
         assertEquals(1, requests.size)
-        assertEquals(CodexAgentStateValue.ToolPending(listOf(toolCall)), state.state.value)
-        assertIs<ResponseItem.FunctionCall>(storage.history[2])
+        assertEquals(CodexAgentStateValue.ToolPending(listOf(pending)), state.state.value)
+        assertEquals(pending, storage.unstable[2].single())
     }
     }
 }

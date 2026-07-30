@@ -19,8 +19,10 @@ import io.github.stream29.codex.lite.agentstate.test.TestMcpService
 import io.github.stream29.codex.lite.openai.CodexAgentSettings
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.latestIndex
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableRequestUserInputResult
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.codex.lite.agentstorage.inmemory.InMemoryCodexAgentStorage
 import io.github.stream29.codex.lite.cli.auth.InMemoryCodexAuthStore
 import io.github.stream29.codex.lite.hook.contract.NoOpCodexHooks
@@ -28,7 +30,6 @@ import io.github.stream29.codex.lite.mcp.contract.McpService
 import io.github.stream29.codex.lite.openai.ContentItem
 import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
 import io.github.stream29.codex.lite.openai.FunctionCallOutputContentItem
-import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
 import io.github.stream29.codex.lite.openai.ImageDetail
 import io.github.stream29.codex.lite.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.codex.lite.openai.MessageRole
@@ -278,17 +279,17 @@ private suspend fun CodexAgentStateContract.appendUserMessage(text: String): Int
 
 private suspend fun InMemoryCodexAgentStorage.lastAssistantMessage(): String? {
     var message: String? = null
-    history.indexes().collect { index ->
-        val item = history[index]
-        if (item is ResponseItem.Message && item.role == MessageRole.Assistant) {
-            message = item.text()
+    stable.indexes().collect { index ->
+        val event = stable[index]
+        if (event is StableCleanEvent.AssistantMessage) {
+            message = event.text
         }
     }
     return message
 }
 
 private suspend fun InMemoryCodexAgentStorage.historyItems(): List<ResponseItem.HistoryItem> =
-    history.indexes().toList().map { index -> history[index] }
+    stable.indexes().toList().flatMap { index -> stable[index].toResponseHistoryItems() }
 
 private fun userMessage(text: String): ResponseItem.Message =
     ResponseItem.Message(
@@ -433,9 +434,9 @@ val minimalAgentConversationTest by testSuite {
                 ),
                 requests[1].input,
             )
-            assertIs<ResponseItem.Message>(storage.history[1])
-            assertIs<ResponseItem.Message>(storage.history[2])
-            assertIs<ResponseItem.Message>(storage.history[3])
+            assertIs<StableCleanEvent.UserMessage>(storage.stable[1])
+            assertIs<StableCleanEvent.AssistantMessage>(storage.stable[2])
+            assertIs<StableCleanEvent.AssistantMessage>(storage.stable[3])
             assertEquals(OpenAiModelId("test-model"), storage.settings[2].model)
             assertEquals(0, storage.compaction[3].historyBaseIndex)
             assertTrue(storage.timestamp[3] > Instant.fromEpochSeconds(0))
@@ -825,12 +826,9 @@ val openAiRequestUserInputProbeTest by testSuite {
             }
 
             val pending = assertIs<CodexAgentStateValue.ToolPending>(state.state.value)
-            val pendingCall = assertIs<ResponseItem.FunctionCall>(pending.calls.single())
-            assertEquals(RequestUserInputTools.Name, pendingCall.name)
-            val arguments = OpenAiJsonCodec.decodeFromString(
-                RequestUserInputArgs.serializer(),
-                pendingCall.arguments,
-            )
+            val pendingCall = assertIs<PendingRequestUserInputToolEvent>(pending.events.single())
+            assertEquals(RequestUserInputTools.Name, pendingCall.toolName)
+            val arguments = pendingCall.arguments
             val question = arguments.questions.single()
             assertTrue(question.options.orEmpty().size >= 2)
 
@@ -840,16 +838,9 @@ val openAiRequestUserInputProbeTest by testSuite {
                 ),
             )
             state.completeToolCall(
-                ResponseItem.FunctionCallOutput(
-                    callId = pendingCall.callId,
-                    output = FunctionCallOutputPayload.fromText(
-                        OpenAiJsonCodec.encodeToString(
-                            RequestUserInputResponse.serializer(),
-                            response,
-                        ),
-                    ).copy(success = true),
-                ),
                 StableRequestUserInputToolEvent(
+                    callId = pendingCall.callId,
+                    itemId = pendingCall.itemId,
                     arguments = arguments,
                     result = StableRequestUserInputResult.Answered(response),
                 ),
@@ -902,10 +893,14 @@ val openAiForcedCompactProbeTest by testSuite {
                     promptCacheKey = "codex-lite-forced-compact-probe",
                 ),
             )
-            storage.history[1] = userMessage(
-                "请记住：项目代号是 Cedar，目标是把 Kotlin agent state 的上下文压缩链路跑通。",
+            storage.stable[1] = StableCleanEvent.UserMessage(
+                userMessage(
+                    "请记住：项目代号是 Cedar，目标是把 Kotlin agent state 的上下文压缩链路跑通。",
+                ).content,
             )
-            storage.history[2] = assistantMessage("已记录 Cedar 项目的目标。")
+            storage.stable[2] = StableCleanEvent.AssistantMessage(
+                assistantMessage("已记录 Cedar 项目的目标。").content,
+            )
             val agent = CodexAgentState(
                 client = client,
                 storage = storage,
@@ -926,7 +921,7 @@ val openAiForcedCompactProbeTest by testSuite {
             )
             assertTrue(checkpoint.prefix.isNotEmpty(), "Expected server compaction output to become checkpoint prefix.")
             assertEquals(compactIndex + 1, checkpoint.historyBaseIndex)
-            assertIs<ResponseItem.ContextCompaction>(storage.history[compactIndex])
+            assertIs<StableCleanEvent.ContextCompaction>(storage.stable[compactIndex])
             assertEquals(compactIndex, storage.latestIndex())
         }
     }

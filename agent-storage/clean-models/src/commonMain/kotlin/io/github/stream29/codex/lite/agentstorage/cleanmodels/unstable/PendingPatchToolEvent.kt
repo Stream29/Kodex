@@ -16,6 +16,9 @@ public data class PendingPatchToolEvent(
     override val itemId: ResponseItemId? = null,
     public val diff: Patch,
 ) : PendingToolEvent {
+    override val toolName: String = "apply_patch"
+    override val toolNamespace: String? = null
+
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.CustomToolCall(

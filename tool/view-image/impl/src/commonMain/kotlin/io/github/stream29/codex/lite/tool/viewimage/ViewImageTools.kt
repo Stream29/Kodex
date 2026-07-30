@@ -2,13 +2,10 @@ package io.github.stream29.codex.lite.tool.viewimage
 
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableImageViewResult
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableImageViewToolEvent
-import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
-import io.github.stream29.codex.lite.openai.FunctionCallOutputContentItem
-import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
-import io.github.stream29.codex.lite.openai.ImageDetail
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingImageViewToolEvent
 import io.github.stream29.codex.lite.openai.ResponsesApiTool
-import io.github.stream29.codex.lite.tool.builder.functionOutputTool
 import io.github.stream29.codex.lite.tool.contract.Tool
+import io.github.stream29.codex.lite.tool.contract.typedTool
 
 public object ViewImageTools {
     public const val Name: String = "view_image"
@@ -31,36 +28,24 @@ public object ViewImageTools {
         client: ViewImageToolClient = ViewImageToolClient(),
         options: ViewImageToolOptions = ViewImageToolOptions(),
     ): Tool =
-        functionOutputTool(
+        typedTool(
             spec = toolSpec(options),
-            inputDeserializer = ViewImageToolArguments.serializer(),
-        ) { _, arguments ->
+            select = { it as? PendingImageViewToolEvent },
+        ) { pending ->
             try {
-                val output = client.view(arguments)
-                FunctionCallOutputPayload(
-                    body = FunctionCallOutputBody.ContentItems(
-                        listOf(
-                            FunctionCallOutputContentItem.InputImage(
-                                imageUrl = output.imageUrl,
-                                detail = when (output.detail) {
-                                    ViewImageDetail.High -> ImageDetail.High
-                                    ViewImageDetail.Original -> ImageDetail.Original
-                                },
-                            ),
-                        ),
-                    ),
-                    success = true,
-                ) to StableImageViewToolEvent(
-                    arguments = arguments,
+                val output = client.view(pending.arguments)
+                StableImageViewToolEvent(
+                    callId = pending.callId,
+                    itemId = pending.itemId,
+                    arguments = pending.arguments,
                     result = StableImageViewResult.Success(output),
                 )
             } catch (error: ViewImageToolException) {
                 val message = error.message ?: "view_image failed"
-                FunctionCallOutputPayload(
-                    body = FunctionCallOutputBody.Text(message),
-                    success = false,
-                ) to StableImageViewToolEvent(
-                    arguments = arguments,
+                StableImageViewToolEvent(
+                    callId = pending.callId,
+                    itemId = pending.itemId,
+                    arguments = pending.arguments,
                     result = StableImageViewResult.Failure(message),
                 )
             }

@@ -1,18 +1,16 @@
 package io.github.stream29.codex.lite.tool.applypatch
 
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.codex.lite.openai.FreeformTool
 import io.github.stream29.codex.lite.openai.FreeformToolFormat
-import io.github.stream29.codex.lite.openai.FunctionCallOutputBody
-import io.github.stream29.codex.lite.openai.FunctionCallOutputPayload
-import io.github.stream29.codex.lite.openai.ResponseItem
 import io.github.stream29.codex.lite.openai.ToolSpec
 import io.github.stream29.codex.lite.tool.contract.Tool
-import io.github.stream29.codex.lite.tool.contract.ToolCallResult
-import io.github.stream29.codex.lite.utils.applypatch.parsePatch
-import kotlinx.serialization.json.JsonPrimitive
 
 public object ApplyPatchTools {
     public const val Name: String = "apply_patch"
@@ -38,72 +36,48 @@ public class ApplyPatchTool(
 
     override fun close(): Unit = Unit
 
-    override suspend fun handle(call: ResponseItem.ToolCall): ToolCallResult =
-        when (call) {
-            is ResponseItem.FunctionCall -> {
+    override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool =
+        when (pending) {
+            is PendingFunctionToolEvent -> {
                 val message = "apply_patch received function-call JSON payload"
-                ResponseItem.FunctionCallOutput(
-                    callId = call.callId,
-                    output = output(message, success = false),
-                ) to StableTextToolEvent(
-                    name = call.name,
-                    namespace = call.namespace,
-                    arguments = JsonPrimitive(call.arguments),
+                StableTextToolEvent(
+                    callId = pending.callId,
+                    itemId = pending.itemId,
+                    name = pending.name,
+                    namespace = pending.namespace,
+                    arguments = pending.arguments,
                     result = message,
                     success = false,
                 )
             }
 
-            is ResponseItem.CustomToolCall -> handleCustomCall(call)
+            is PendingPatchToolEvent -> handlePatch(pending)
 
-            is ResponseItem.ClientToolSearchCall ->
-                error("Client tool-search calls are handled by CodexToolRuntime.")
+            else -> error("apply_patch requires a parsed pending patch event.")
         }
 
-    private suspend fun handleCustomCall(
-        call: ResponseItem.CustomToolCall,
-    ): ToolCallResult {
-        val diff = try {
-            call.input.parsePatch()
-        } catch (error: IllegalArgumentException) {
-            val message = error.message ?: "apply_patch failed"
-            return ResponseItem.CustomToolCallOutput(
-                callId = call.callId,
-                output = output(message, success = false),
-            ) to StableTextToolEvent(
-                name = call.name,
-                namespace = call.namespace,
-                arguments = JsonPrimitive(call.input),
-                result = message,
-                success = false,
-            )
-        }
+    private suspend fun handlePatch(
+        pending: PendingPatchToolEvent,
+    ): StableCleanEvent.CompletedTool {
         return try {
-            val result = client.apply(diff)
-            ResponseItem.CustomToolCallOutput(
-                callId = call.callId,
-                output = output("Success. Patch applied."),
-            ) to StablePatchToolEvent(
-                diff = diff,
+            val result = client.apply(pending.diff)
+            StablePatchToolEvent(
+                callId = pending.callId,
+                itemId = pending.itemId,
+                diff = pending.diff,
                 result = StablePatchToolExecutionResult.Success(result),
             )
         } catch (error: IllegalArgumentException) {
             val message = error.message ?: "apply_patch failed"
-            ResponseItem.CustomToolCallOutput(
-                callId = call.callId,
-                output = output(message, success = false),
-            ) to StablePatchToolEvent(
-                diff = diff,
+            StablePatchToolEvent(
+                callId = pending.callId,
+                itemId = pending.itemId,
+                diff = pending.diff,
                 result = StablePatchToolExecutionResult.Failure(message),
             )
         }
     }
 
-    private fun output(text: String, success: Boolean = true): FunctionCallOutputPayload =
-        FunctionCallOutputPayload(
-            body = FunctionCallOutputBody.Text(text),
-            success = success,
-        )
 }
 
 public const val ApplyPatchDescription: String =

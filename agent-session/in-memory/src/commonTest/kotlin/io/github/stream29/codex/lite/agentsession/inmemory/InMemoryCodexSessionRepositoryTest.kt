@@ -7,6 +7,12 @@ import io.github.stream29.codex.lite.agentsession.multiagent.AgentPathResolverIm
 import io.github.stream29.codex.lite.agentsession.test.testCodexAgentDependencies
 import io.github.stream29.codex.lite.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.codex.lite.agentstate.contract.CodexAgentStateValue
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableAgentDeliveryResult
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMultiAgentOperation
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableMultiAgentToolEvent
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMultiAgentInvocation
+import io.github.stream29.codex.lite.agentstorage.cleanmodels.unstable.PendingMultiAgentToolEvent
 import io.github.stream29.codex.lite.agentstorage.contract.forkTo
 import io.github.stream29.codex.lite.agentstorage.contract.indexes
 import io.github.stream29.codex.lite.agentstorage.contract.initialize
@@ -61,9 +67,8 @@ import kotlin.test.assertTrue
 private fun settings(name: String = ""): CodexAgentSettings =
     CodexAgentSettings(model = OpenAiModelId("test-model"), threadName = name)
 
-private fun userMessage(text: String): ResponseItem.Message =
-    ResponseItem.Message(
-        role = MessageRole.User,
+private fun userMessage(text: String): StableCleanEvent.UserMessage =
+    StableCleanEvent.UserMessage(
         content = listOf(ContentItem.InputText(text)),
     )
 
@@ -169,8 +174,8 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
             target.storage.settings[latest].copy(threadName = "[fork] Source"),
         )
 
-        assertEquals(listOf(1), target.storage.history.indexes().toList())
-        assertEquals(userMessage("copied"), target.storage.history[1])
+        assertEquals(listOf(1), target.storage.stable.indexes().toList())
+        assertEquals(userMessage("copied"), target.storage.stable[1])
         assertEquals("[fork] Source", target.storage.settings[2].threadName)
         assertEquals(emptyList(), target.subagents.list())
     }
@@ -226,22 +231,24 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         val child = root.spawnInitialized("/root/worker")
         val sendMessageTool = child.runtime.sendMessageTool(AgentPathResolverImpl(root))
 
-        val output = assertIs<ResponseItem.FunctionCallOutput>(
+        val completed = assertIs<StableMultiAgentToolEvent>(
             sendMessageTool.handle(
-                ResponseItem.FunctionCall(
-                    name = MultiAgentTools.SendMessageName,
-                    arguments = OpenAiJsonCodec.encodeToString(
+                PendingMultiAgentToolEvent(
+                    callId = "call_send",
+                    operation = PendingMultiAgentInvocation.SendMessage(
                         SendMessageArgs("/root", "Caller is the worker."),
                     ),
-                    callId = "call_send",
                 ),
-            ).first,
+            ),
         )
 
-        assertTrue(output.output.success == true)
+        assertEquals(
+            StableAgentDeliveryResult.Success(""),
+            assertIs<StableMultiAgentOperation.SendMessage>(completed.operation).result,
+        )
         assertTrue(
             root.runtime.pendingSteer.value.any { input ->
-                input is ResponseItem.AgentMessage &&
+                input is StableCleanEvent.AgentMessage &&
                     input.author == "/root/worker" &&
                     input.recipient == "/root" &&
                     input.containsText("Caller is the worker.")
@@ -262,25 +269,27 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         val child = root.spawnInitialized("/root/worker")
         val followupTool = root.runtime.followupTaskTool(AgentPathResolverImpl(root))
 
-        val output = assertIs<ResponseItem.FunctionCallOutput>(
+        val completed = assertIs<StableMultiAgentToolEvent>(
             followupTool.handle(
-                ResponseItem.FunctionCall(
-                    name = MultiAgentTools.FollowupTaskName,
-                    arguments = OpenAiJsonCodec.encodeToString(
+                PendingMultiAgentToolEvent(
+                    callId = "call_followup",
+                    operation = PendingMultiAgentInvocation.FollowupTask(
                         FollowupTaskArgs("/root/worker", "Continue this task."),
                     ),
-                    callId = "call_followup",
                 ),
-            ).first,
+            ),
         )
 
-        assertTrue(output.output.success == true)
+        assertEquals(
+            StableAgentDeliveryResult.Success(""),
+            assertIs<StableMultiAgentOperation.FollowupTask>(completed.operation).result,
+        )
         withContext(Dispatchers.Default.limitedParallelism(1)) {
             withTimeout(10.seconds) {
                 child.runtime.state.first { state -> state == CodexAgentStateValue.AssistantMessage }
                 root.runtime.pendingSteer.first { inputs ->
                     inputs.any { input ->
-                        input is ResponseItem.AgentMessage &&
+                        input is StableCleanEvent.AgentMessage &&
                             input.containsText("Follow-up complete.")
                     }
                 }
@@ -288,16 +297,16 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         }
         assertEquals(1, root.runtime.pendingSteer.value.size)
         assertTrue(
-            root.storage.history.indexes().toList().none { index ->
-                root.storage.history[index] is ResponseItem.AgentMessage
+            root.storage.stable.indexes().toList().none { index ->
+                root.storage.stable[index] is StableCleanEvent.AgentMessage
             },
         )
 
         root.runtime.resume().toList()
 
         assertTrue(
-            root.storage.history.indexes().toList().any { index ->
-                (root.storage.history[index] as? ResponseItem.AgentMessage)
+            root.storage.stable.indexes().toList().any { index ->
+                (root.storage.stable[index] as? StableCleanEvent.AgentMessage)
                     ?.containsText("Follow-up complete.") == true
             },
         )
@@ -339,10 +348,10 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
             withTimeout(10.seconds) {
                 child.runtime.state.first { state -> state == CodexAgentStateValue.AssistantMessage }
                 while (
-                    root.storage.history.indexes().toList().none { index ->
-                    root.storage.history[index].containsWorkerCompletion()
+                    root.storage.stable.indexes().toList().none { index ->
+                    root.storage.stable[index].containsWorkerCompletion()
                     } && root.runtime.pendingSteer.value.none { input ->
-                        input is ResponseItem.AgentMessage &&
+                        input is StableCleanEvent.AgentMessage &&
                             input.containsText("Worker complete.")
                     }
                 ) {
@@ -353,11 +362,12 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
         assertEquals("/root/worker", child.storage.settings[child.storage.latestIndex()].threadName)
         assertTrue(MultiAgentTools.specs.all { spec -> spec.name in rootToolNames })
         assertTrue(
-            root.storage.history.indexes().toList().any { index ->
-                val item = root.storage.history[index]
-                item is ResponseItem.FunctionCallOutput &&
-                    item.callId == "call_spawn" &&
-                    item.output.success == true
+            root.storage.stable.indexes().toList().any { index ->
+                root.storage.stable[index].toResponseHistoryItems().any { item ->
+                    item is ResponseItem.FunctionCallOutput &&
+                        item.callId == "call_spawn" &&
+                        item.output.success == true
+                }
             },
         )
     }
@@ -367,19 +377,19 @@ val inMemoryCodexSessionRepositoryTest by testSuite {
 private fun ResponsesApiRequest.toolNames(): List<String> =
     tools.filterIsInstance<ResponsesApiTool>().map(ResponsesApiTool::name)
 
-private fun ResponseItem.HistoryItem.containsWorkerCompletion(): Boolean = when (this) {
-    is ResponseItem.AgentMessage -> content
+private fun StableCleanEvent.containsWorkerCompletion(): Boolean = when (this) {
+    is StableCleanEvent.AgentMessage -> content
         .filterIsInstance<AgentMessageInputContent.InputText>()
         .any { content -> "Worker complete." in content.text }
 
-    is ResponseItem.Message -> content
+    is StableCleanEvent.UserMessage -> content
         .filterIsInstance<ContentItem.InputText>()
         .any { content -> "Worker complete." in content.text }
 
     else -> false
 }
 
-private fun ResponseItem.AgentMessage.containsText(text: String): Boolean =
+private fun StableCleanEvent.AgentMessage.containsText(text: String): Boolean =
     content.filterIsInstance<AgentMessageInputContent.InputText>()
         .any { content -> text in content.text }
 

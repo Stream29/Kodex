@@ -278,7 +278,6 @@ private class SessionAgentStorage(
     delegate: InMemoryCodexAgentStorage,
 ) : MutableCodexAgentStorage {
     override val id: String = delegate.id
-    override val history = SessionIndexVersioned(parentScope, delegate.history)
     override val compaction = SessionIndexVersioned(parentScope, delegate.compaction)
     override val settings = SessionIndexVersioned(parentScope, delegate.settings)
     override val timestamp = SessionIndexVersioned(parentScope, delegate.timestamp)

@@ -22,6 +22,19 @@ public data class PendingInvalidToolCall(
     public val invocation: PendingInvalidToolInvocation,
     public val message: String,
 ) : PendingToolEvent {
+    override val toolName: String?
+        get() = when (val invalidInvocation = invocation) {
+            is PendingInvalidToolInvocation.Function -> invalidInvocation.name
+            is PendingInvalidToolInvocation.Custom -> invalidInvocation.name
+            is PendingInvalidToolInvocation.ToolSearch -> null
+        }
+    override val toolNamespace: String?
+        get() = when (val invalidInvocation = invocation) {
+            is PendingInvalidToolInvocation.Function -> invalidInvocation.namespace
+            is PendingInvalidToolInvocation.Custom -> invalidInvocation.namespace
+            is PendingInvalidToolInvocation.ToolSearch -> null
+        }
+
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             when (val invalidInvocation = invocation) {

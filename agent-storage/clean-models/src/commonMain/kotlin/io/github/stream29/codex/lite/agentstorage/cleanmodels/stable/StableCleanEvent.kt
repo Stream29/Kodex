@@ -24,7 +24,7 @@ public sealed interface StableCleanEvent : CleanOpenAiEvent {
     @SerialName("user_message")
     public data class UserMessage(
         public val content: List<ContentItem>,
-    ) : StableCleanEvent {
+    ) : Steerable {
         override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
             listOf(
                 ResponseItem.Message(
@@ -43,7 +43,7 @@ public sealed interface StableCleanEvent : CleanOpenAiEvent {
         public val content: List<ContentItem>,
         public val id: ResponseItemId? = null,
         public val phase: MessagePhase? = null,
-    ) : StableCleanEvent {
+    ) : Steerable {
         public val text: String
             get() = content.mapNotNull { part ->
                 when (part) {
@@ -69,7 +69,7 @@ public sealed interface StableCleanEvent : CleanOpenAiEvent {
     @SerialName("developer_message")
     public data class DeveloperMessage(
         public val content: List<ContentItem>,
-    ) : StableCleanEvent {
+    ) : Steerable {
         override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
             listOf(
                 ResponseItem.Message(
@@ -86,7 +86,7 @@ public sealed interface StableCleanEvent : CleanOpenAiEvent {
         public val author: String,
         public val recipient: String,
         public val content: List<AgentMessageInputContent>,
-    ) : StableCleanEvent {
+    ) : Steerable {
         override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
             listOf(
                 ResponseItem.AgentMessage(
@@ -190,4 +190,13 @@ public sealed interface StableCleanEvent : CleanOpenAiEvent {
      */
     @Serializable
     public sealed interface CompletedTool : StableCleanEvent
+
+    /**
+     * Clean input that may be delivered into an active logical turn.
+     *
+     * This deliberately excludes reasoning, tool events, and compaction
+     * markers: those are persisted protocol history, not external steer input.
+     */
+    @Serializable
+    public sealed interface Steerable : StableCleanEvent
 }
