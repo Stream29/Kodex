@@ -37,11 +37,16 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.io.files.Path
 
+internal data class CodexAgentFixedTools(
+    val tools: List<Tool>,
+    val unifiedExecToolClient: UnifiedExecToolClient,
+)
+
 internal fun CodexAgentState.fixedTools(
     dependencies: CodexAgentDependencies,
     agentPathResolver: AgentPathResolver,
     pendingSteer: StateFlow<List<StableCleanEvent.Steerable>>,
-): List<Tool> {
+): CodexAgentFixedTools {
     val agentSettingsProvider: suspend () -> CodexAgentSettings = {
         storage.settings.latestValue()
     }
@@ -56,50 +61,53 @@ internal fun CodexAgentState.fixedTools(
         workingDirectoryProvider = workingDirectoryProvider,
     )
     return unifiedExecClient.closeOnFailure {
-        buildList {
-            add(
-                ApplyPatchTools.createTool(
-                    ApplyPatchToolClient(
-                        workingDirectoryProvider = workingDirectoryProvider,
+        CodexAgentFixedTools(
+            tools = buildList {
+                add(
+                    ApplyPatchTools.createTool(
+                        ApplyPatchToolClient(
+                            workingDirectoryProvider = workingDirectoryProvider,
+                        ),
                     ),
-                ),
-            )
-            add(CurrentTimeTools.createTool())
-            add(getContextRemainingTool(dependencies.modelCatalog))
-            add(updatePlanTool())
-            add(spawnAgentTool(agentPathResolver))
-            add(sendMessageTool(agentPathResolver))
-            add(followupTaskTool(agentPathResolver))
-            add(waitAgentTool(pendingSteer))
-            add(interruptAgentTool(agentPathResolver))
-            add(listAgentsTool(agentPathResolver))
-            addAll(UnifiedExecTools.createTools(unifiedExecClient))
-            add(
-                WebRunTools.createTool(
-                    WebRunToolClient(
-                        client = dependencies.client,
-                        sessionId = storage.id,
-                        modelProvider = modelProvider,
+                )
+                add(CurrentTimeTools.createTool())
+                add(getContextRemainingTool(dependencies.modelCatalog))
+                add(updatePlanTool())
+                add(spawnAgentTool(agentPathResolver))
+                add(sendMessageTool(agentPathResolver))
+                add(followupTaskTool(agentPathResolver))
+                add(waitAgentTool(pendingSteer))
+                add(interruptAgentTool(agentPathResolver))
+                add(listAgentsTool(agentPathResolver))
+                addAll(UnifiedExecTools.createTools(unifiedExecClient))
+                add(
+                    WebRunTools.createTool(
+                        WebRunToolClient(
+                            client = dependencies.client,
+                            sessionId = storage.id,
+                            modelProvider = modelProvider,
+                        ),
                     ),
-                ),
-            )
-            add(
-                ViewImageTools.createTool(
-                    ViewImageToolClient(
-                        workingDirectoryProvider = workingDirectoryProvider,
+                )
+                add(
+                    ViewImageTools.createTool(
+                        ViewImageToolClient(
+                            workingDirectoryProvider = workingDirectoryProvider,
+                        ),
                     ),
-                ),
-            )
-            add(
-                ImageGenerationTools.createTool(
-                    client = ImageGenerationToolClient(
-                        client = dependencies.client,
-                        workingDirectoryProvider = workingDirectoryProvider,
+                )
+                add(
+                    ImageGenerationTools.createTool(
+                        client = ImageGenerationToolClient(
+                            client = dependencies.client,
+                            workingDirectoryProvider = workingDirectoryProvider,
+                        ),
+                        outputDirectory = ImageGenerationTools.outputDirectory(CodexLiteHome, storage.id),
                     ),
-                    outputDirectory = ImageGenerationTools.outputDirectory(CodexLiteHome, storage.id),
-                ),
-            )
-        }
+                )
+            },
+            unifiedExecToolClient = unifiedExecClient,
+        )
     }
 }
 

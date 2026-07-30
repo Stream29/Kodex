@@ -14,6 +14,7 @@ import io.github.stream29.codex.lite.agentstate.contract.CodexAgentState
 import io.github.stream29.codex.lite.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.codex.lite.openai.ResponsesStreamEvent
 import io.github.stream29.codex.lite.tool.contract.Tool
+import io.github.stream29.codex.lite.tool.unifiedexec.UnifiedExecToolClient
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
@@ -39,29 +40,32 @@ private fun CodexAgentState.masterRuntimeLayer(
     dependencies: CodexAgentDependencies,
     agentPathResolver: AgentPathResolver,
     pendingSteer: MutableStateFlow<List<StableCleanEvent.Steerable>>,
-): ResumableAgentLayer {
+): AgentRuntimeLayer {
     val toolSearch = toolSearchState(dependencies.mcpService)
     val fixedTools = fixedTools(dependencies, agentPathResolver, pendingSteer)
-    return fixedTools.closeOnFailure {
-        compactionRuntime(
-            modelCatalog = dependencies.modelCatalog,
-            compactionHooks = dependencies.hooks,
-        )
-            .steerRuntime {
-                pendingSteer.getAndUpdate { emptyList() }
-            }
-            .toolRuntime(
-                fixedTools = fixedTools,
-                dynamicTools = dependencies.mcpService.tools,
-                toolSearch = toolSearch,
-                toolHooks = dependencies.hooks,
+    return fixedTools.tools.closeOnFailure {
+        AgentRuntimeLayer(
+            delegate = compactionRuntime(
+                modelCatalog = dependencies.modelCatalog,
+                compactionHooks = dependencies.hooks,
             )
-            .turnHookRuntime(dependencies.hooks)
-            .also {
-                coroutineContext.job.invokeOnCompletion {
-                    fixedTools.closeAll()
+                .steerRuntime {
+                    pendingSteer.getAndUpdate { emptyList() }
                 }
-            }
+                .toolRuntime(
+                    fixedTools = fixedTools.tools,
+                    dynamicTools = dependencies.mcpService.tools,
+                    toolSearch = toolSearch,
+                    toolHooks = dependencies.hooks,
+                )
+                .turnHookRuntime(dependencies.hooks)
+                .also {
+                    coroutineContext.job.invokeOnCompletion {
+                        fixedTools.tools.closeAll()
+                    }
+                },
+            unifiedExecToolClient = fixedTools.unifiedExecToolClient,
+        )
     }
 }
 
@@ -78,49 +82,63 @@ private fun CodexAgentState.subagentRuntimeLayer(
     dependencies: CodexAgentDependencies,
     agentPathResolver: AgentPathResolver,
     pendingSteer: MutableStateFlow<List<StableCleanEvent.Steerable>>,
-): ResumableAgentLayer {
+): AgentRuntimeLayer {
     val toolSearch = toolSearchState(dependencies.mcpService)
     val fixedTools = fixedTools(dependencies, agentPathResolver, pendingSteer)
-    return fixedTools.closeOnFailure {
-        compactionRuntime(
-            modelCatalog = dependencies.modelCatalog,
-            compactionHooks = dependencies.hooks,
-        )
-            .steerRuntime {
-                pendingSteer.getAndUpdate { emptyList() }
-            }
-            .toolRuntime(
-                fixedTools = fixedTools,
-                dynamicTools = dependencies.mcpService.tools,
-                toolSearch = toolSearch,
-                toolHooks = dependencies.hooks,
+    return fixedTools.tools.closeOnFailure {
+        AgentRuntimeLayer(
+            delegate = compactionRuntime(
+                modelCatalog = dependencies.modelCatalog,
+                compactionHooks = dependencies.hooks,
             )
-            .turnHookRuntime(dependencies.hooks)
-            .also {
-                coroutineContext.job.invokeOnCompletion {
-                    fixedTools.closeAll()
+                .steerRuntime {
+                    pendingSteer.getAndUpdate { emptyList() }
                 }
-            }
-            .subagentParentNotificationRuntime { message ->
-                agentPathResolver.resolveOrNull(message.recipient)?.let { parent ->
-                    parent.runtime.pendingSteer.update { pending ->
-                        pending + message
+                .toolRuntime(
+                    fixedTools = fixedTools.tools,
+                    dynamicTools = dependencies.mcpService.tools,
+                    toolSearch = toolSearch,
+                    toolHooks = dependencies.hooks,
+                )
+                .turnHookRuntime(dependencies.hooks)
+                .also {
+                    coroutineContext.job.invokeOnCompletion {
+                        fixedTools.tools.closeAll()
                     }
                 }
-            }
+                .subagentParentNotificationRuntime { message ->
+                    agentPathResolver.resolveOrNull(message.recipient)?.let { parent ->
+                        parent.runtime.pendingSteer.update { pending ->
+                            pending + message
+                        }
+                    }
+                },
+            unifiedExecToolClient = fixedTools.unifiedExecToolClient,
+        )
     }
 }
 
 private fun CodexAgentState.buildAgentRuntime(
-    buildLayer: (MutableStateFlow<List<StableCleanEvent.Steerable>>) -> ResumableAgentLayer,
+    buildLayer: (MutableStateFlow<List<StableCleanEvent.Steerable>>) -> AgentRuntimeLayer,
 ): AgentRuntime {
     val pendingSteer = MutableStateFlow(emptyList<StableCleanEvent.Steerable>())
-    return AgentRuntimeImpl(buildLayer(pendingSteer), pendingSteer)
+    val layer = buildLayer(pendingSteer)
+    return AgentRuntimeImpl(
+        delegate = layer.delegate,
+        pendingSteer = pendingSteer,
+        unifiedExecToolClient = layer.unifiedExecToolClient,
+    )
 }
+
+private data class AgentRuntimeLayer(
+    val delegate: ResumableAgentLayer,
+    val unifiedExecToolClient: UnifiedExecToolClient,
+)
 
 private class AgentRuntimeImpl(
     private val delegate: ResumableAgentLayer,
     override val pendingSteer: MutableStateFlow<List<StableCleanEvent.Steerable>>,
+    override val unifiedExecToolClient: UnifiedExecToolClient,
 ) : AgentRuntime, ResumableAgentLayer by delegate {
     private val runningTurnSlot: MutableStateFlow<Job?> = MutableStateFlow(null)
 

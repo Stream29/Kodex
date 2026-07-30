@@ -8,6 +8,11 @@ import io.github.stream29.codex.lite.utils.shellclient.ShellProcessCommand
 import io.github.stream29.codex.lite.utils.shellclient.ShellSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.io.files.Path
@@ -38,8 +43,17 @@ public class UnifiedExecToolClient internal constructor(
     private val shellClient: ShellClient,
 ) : AutoCloseable {
     private val registryMutex: Mutex = Mutex()
-    private val sessions: MutableMap<Int, ManagedProcessSession> = mutableMapOf()
+    private val mutableSessions: MutableStateFlow<Map<Int, ManagedProcessSession>> =
+        MutableStateFlow(emptyMap())
     private var nextSessionId: Int = 1
+
+    /**
+     * Sessions that can still be read through `write_stdin`, keyed by their
+     * public session identifier. A session can report [UnifiedExecProcessSession.completed]
+     * without leaving this snapshot: its final output still needs to be read.
+     */
+    public val activeSessions: StateFlow<Map<Int, UnifiedExecProcessSession>> =
+        mutableSessions.asStateFlow()
 
     public suspend fun execCommand(arguments: ExecCommandArguments): UnifiedExecOutput {
         arguments.validate()
@@ -55,6 +69,7 @@ public class UnifiedExecToolClient internal constructor(
         val managed = try {
             registryMutex.withLock {
                 discardInactiveSessions()
+                val sessions = mutableSessions.value
                 if (!session.scope.isActive && !session.exitCode.isCompleted) {
                     throw UnifiedExecToolException("Unified exec tool client is closed.")
                 }
@@ -64,9 +79,12 @@ public class UnifiedExecToolClient internal constructor(
                     )
                 }
                 ManagedProcessSession(
-                    sessionId = allocateSessionId(),
+                    sessionId = allocateSessionId(sessions),
+                    arguments = arguments,
                     session = session,
-                ).also { sessions[it.sessionId] = it }
+                ).also {
+                    mutableSessions.update { current -> current + (it.sessionId to it) }
+                }
             }
         } catch (error: Throwable) {
             session.close()
@@ -131,10 +149,12 @@ public class UnifiedExecToolClient internal constructor(
 
     private suspend fun sessionFor(sessionId: Int): ManagedProcessSession =
         registryMutex.withLock {
-            val managed = sessions[sessionId]
+            val managed = mutableSessions.value[sessionId]
                 ?: throw UnifiedExecToolException("Unknown process session_id: $sessionId.")
             if (!managed.session.scope.isActive && !managed.session.exitCode.isCompleted) {
-                sessions.remove(sessionId)
+                mutableSessions.update { current ->
+                    if (current[sessionId] === managed) current - sessionId else current
+                }
                 throw UnifiedExecToolException("Unknown process session_id: $sessionId.")
             }
             managed
@@ -142,8 +162,8 @@ public class UnifiedExecToolClient internal constructor(
 
     private suspend fun removeAndClose(managed: ManagedProcessSession) {
         registryMutex.withLock {
-            if (sessions[managed.sessionId] === managed) {
-                sessions.remove(managed.sessionId)
+            mutableSessions.update { current ->
+                if (current[managed.sessionId] === managed) current - managed.sessionId else current
             }
         }
         managed.session.close()
@@ -158,12 +178,14 @@ public class UnifiedExecToolClient internal constructor(
     }
 
     private fun discardInactiveSessions() {
-        sessions.entries.removeAll { entry ->
-            !entry.value.session.scope.isActive && !entry.value.session.exitCode.isCompleted
+        mutableSessions.update { current ->
+            current.filterValues { managed ->
+                managed.session.scope.isActive || managed.session.exitCode.isCompleted
+            }
         }
     }
 
-    private fun allocateSessionId(): Int {
+    private fun allocateSessionId(sessions: Map<Int, ManagedProcessSession>): Int {
         repeat(Int.MAX_VALUE) {
             val candidate = nextSessionId
             nextSessionId = if (nextSessionId == Int.MAX_VALUE) 1 else nextSessionId + 1
@@ -191,11 +213,34 @@ public fun CoroutineScope.UnifiedExecToolClient(
         shellClient = ShellClient(),
     )
 
-private class ManagedProcessSession(
-    val sessionId: Int,
-    val session: ProcessSession,
-) {
-    val mutex: Mutex = Mutex()
+internal class ManagedProcessSession(
+    override val sessionId: Int,
+    /** The original `exec_command` arguments that started this session. */
+    override val arguments: ExecCommandArguments,
+    internal val session: ProcessSession,
+) : UnifiedExecProcessSession {
+    internal val mutex: Mutex = Mutex()
+    private val mutableCompleted: MutableStateFlow<Boolean> = MutableStateFlow(false)
+    override val completed: StateFlow<Boolean> = mutableCompleted.asStateFlow()
+
+    init {
+        session.scope.launch {
+            session.exitCode.await()
+            mutableCompleted.value = true
+        }
+    }
+}
+
+/**
+ * Read-only facts about one active unified-exec process session.
+ *
+ * Implementations retain the process and synchronization details; consumers
+ * can use the original command and [completed] state for presentation only.
+ */
+public interface UnifiedExecProcessSession {
+    public val sessionId: Int
+    public val arguments: ExecCommandArguments
+    public val completed: StateFlow<Boolean>
 }
 
 private data class ProcessSessionOutput(
