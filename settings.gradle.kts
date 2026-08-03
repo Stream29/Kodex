@@ -40,7 +40,7 @@ fun includeModuleTree(rootPath: String) {
 }
 
 includeModuleTree("integration-test")
-includeModuleTree("cli")
+includeModuleTree("app")
 includeModuleTree("mcp")
 includeModuleTree("openai")
 includeModuleTree("agent-state")
