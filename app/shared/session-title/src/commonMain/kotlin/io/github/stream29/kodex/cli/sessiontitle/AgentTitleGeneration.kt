@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.cli.sessiontitle
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
-import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstate.contract.updateThreadName
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -9,7 +9,6 @@ import io.github.stream29.kodex.openai.ReasoningEffort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -98,7 +97,7 @@ public class AgentTitleGeneration(
         threadName: String,
     ): Int = mutex.withLock {
         invalidateLocked()
-        agentState.updateSettings(agentState.latestSettings().copy(threadName = threadName))
+        agentState.updateThreadName(threadName)
     }
 
     /** Serializes an explicit thread-name settings update ahead of generated output. */
@@ -120,12 +119,11 @@ public class AgentTitleGeneration(
         expectedThreadName: String,
         title: String,
     ) {
-        agentState.state.first(KodexAgentStateValue::allowsTitleUpdate)
         mutex.withLock {
             if (activeAttemptId != attemptId) return
-            val currentSettings = agentState.latestSettings()
-            if (currentSettings.threadName != expectedThreadName) return
-            agentState.updateSettings(currentSettings.copy(threadName = title))
+            val currentIndex = agentState.latestIndex.value
+            if (agentState.storage.settings[currentIndex].threadName != expectedThreadName) return
+            agentState.updateThreadName(title)
         }
     }
 
@@ -137,12 +135,6 @@ public class AgentTitleGeneration(
     }
 }
 
-private suspend fun KodexAgentState.latestSettings(): KodexAgentSettings {
-    val latestIndex = latestIndex.value
-    require(latestIndex >= 0) { "An uninitialized Agent has no settings." }
-    return storage.settings[latestIndex]
-}
-
 private fun List<ContentItem>.firstNonblankInputText(): String? {
     for (item in this) {
         val text = (item as? ContentItem.InputText)?.text
@@ -152,19 +144,5 @@ private fun List<ContentItem>.firstNonblankInputText(): String? {
 }
 
 private fun String.isDefaultSessionTitle(): Boolean = DefaultSessionTitlePattern.matches(this)
-
-private fun KodexAgentStateValue.allowsTitleUpdate(): Boolean = when (this) {
-    KodexAgentStateValue.ExternalWrite,
-    is KodexAgentStateValue.RequestResponse,
-    KodexAgentStateValue.Compacting,
-    -> false
-
-    KodexAgentStateValue.Empty,
-    KodexAgentStateValue.UserMessage,
-    KodexAgentStateValue.AssistantMessage,
-    is KodexAgentStateValue.ToolPending,
-    KodexAgentStateValue.ToolCompleted,
-    -> true
-}
 
 private val DefaultSessionTitlePattern: Regex = Regex("Session [0-9]+")

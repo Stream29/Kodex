@@ -3,7 +3,6 @@ package io.github.stream29.kodex.agentstate.contract
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
@@ -130,6 +129,10 @@ public val KodexAgentStateValue.canCompact: Boolean
  *
  * Implementations commit each storage transition before publishing its next
  * stable [state]. They publish [KodexAgentStorage.tokenCount] only when OpenAI reports it.
+ *
+ * Every operation that may change this state or its storage shares one fair
+ * per-instance write queue. Preconditions are checked only after an operation
+ * reaches the front of that queue.
  */
 public interface KodexAgentState : CoroutineScope {
     /**
@@ -161,6 +164,9 @@ public interface KodexAgentState : CoroutineScope {
      * Storage-level operations such as initialization, fork, and revert remain
      * defined by the AgentStorage contract and should be invoked through this
      * boundary when the storage belongs to a live AgentState.
+     *
+     * [block] already owns the non-reentrant AgentState write lock and must not
+     * invoke another mutation operation on this AgentState.
      */
     public suspend fun <T> modify(
         block: suspend (MutableKodexAgentStorage) -> T,
@@ -241,17 +247,6 @@ public interface KodexAgentState : CoroutineScope {
     public suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int
 
     /**
-     * Persists one parsed `update_plan` result and updates the settings
-     * snapshot's plan atomically.
-     *
-     * [completed] must match a pending function call named `update_plan`. Tool
-     * dispatch selects this operation explicitly rather than relying on
-     * [completeToolCall] to inspect tool-specific payloads. Plan mode rejects
-     * this operation because Codex does not expose `update_plan` in that mode.
-     */
-    public suspend fun appendPlanUpdate(completed: StablePlanUpdate): Int
-
-    /**
      * Updates model request settings and records a timestamp for the same state
      * transition. This does not change the conversation state.
      *
@@ -259,5 +254,4 @@ public interface KodexAgentState : CoroutineScope {
      * compaction requests, so callers cannot supply an arbitrary value here.
      */
     public suspend fun updateSettings(settings: KodexAgentSettings): Int
-
 }
