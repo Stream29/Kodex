@@ -36,7 +36,7 @@ val updatePlanToolTest by testSuite {
     } closeWith {
         cancelAndJoin()
     } asContextForEach {
-        test("tool commits the plan and matching output atomically") {
+        test("tool updates the plan and completes the matching output") {
             val plan = UpdatePlanArgs(
                 explanation = "Start implementation.",
                 plan = listOf(PlanItemArg("Implement runtime", StepStatus.InProgress)),

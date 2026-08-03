@@ -15,8 +15,6 @@ import io.github.stream29.kodex.agentstate.tool.toPendingToolEvent
 import io.github.stream29.kodex.agentstate.tool.visibleToolSpecs
 import io.github.stream29.kodex.agentstorage.cleanmodels.codexRequestWindowId
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
@@ -38,7 +36,6 @@ import io.github.stream29.kodex.openai.CompactionStrategy
 import io.github.stream29.kodex.openai.CompactionTurnMetadata
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
-import io.github.stream29.kodex.openai.ModeKind
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
@@ -58,6 +55,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlin.time.Clock
 import kotlin.time.Instant
@@ -121,6 +119,7 @@ private class KodexAgentStateImpl(
     initialState: KodexAgentStateValue,
 ) : KodexAgentState, CoroutineScope by scope {
     private val contextPrefixResolver = AgentContextPrefixResolver(contextSettings)
+    private val writeMutex = Mutex()
 
     override val state: StateFlow<KodexAgentStateValue>
         field = MutableStateFlow(initialState)
@@ -135,25 +134,14 @@ private class KodexAgentStateImpl(
             validate = {},
             inFlight = KodexAgentStateValue.ExternalWrite,
         ) {
-            try {
-                block(storage)
-            } finally {
-                withContext(NonCancellable) {
-                    val index = storage.latestIndex()
-                    latestIndex.value = index
-                    state.value = storage.stateAt(index)
-                }
-            }
+            block(storage)
         }
 
     override fun requestResponseApi(): Flow<ResponsesStreamEvent> = flow {
-        val previousState = state.value
-        previousState.requireCanRequestResponseApi()
-        if (!state.compareAndSet(previousState, KodexAgentStateValue.RequestResponse.Started)) {
-            throw KodexAgentStateInvalidTransitionException("start a response request", state.value)
-        }
-
-        try {
+        mutate(
+            validate = KodexAgentStateValue::requireCanRequestResponseApi,
+            inFlight = KodexAgentStateValue.RequestResponse.Started,
+        ) {
             var streamingOutput: StreamingOutput? = null
 
             suspend fun acceptResponseEvent(event: ResponsesStreamEvent) {
@@ -161,8 +149,8 @@ private class KodexAgentStateImpl(
                     is ResponsesStreamEvent.OutputItemAdded -> {
                         val next = StreamingOutput(event.outputIndex, event.item)
                         streamingOutput = next
-                        state.value = next.state
                         next.emit(event)
+                        state.value = next.state
                     }
 
                     else -> streamingOutput?.emit(event)
@@ -238,10 +226,6 @@ private class KodexAgentStateImpl(
                     completeResponseOutput(event.outputIndex)
                 }
                 emit(event)
-            }
-        } finally {
-            state.value = withContext(NonCancellable) {
-                storage.stateAt(storage.latestIndex())
             }
         }
     }.buffer(Channel.UNLIMITED)
@@ -402,44 +386,6 @@ private class KodexAgentStateImpl(
         }
     }
 
-    override suspend fun appendPlanUpdate(completed: StablePlanUpdate): Int {
-        var pendingEvents = emptyList<PendingToolEvent>()
-        return mutate(
-            validate = { value ->
-                val pending = value.requireToolPending()
-                pendingEvents = pending.events
-            },
-            inFlight = KodexAgentStateValue.ExternalWrite,
-        ) {
-            val pending = pendingEvents.requireEvent(completed.callId)
-            require(pending is PendingPlanUpdate && pending.arguments == completed.arguments) {
-                "Plan updates can complete only a pending update_plan function call."
-            }
-            val currentSettings = storage.settings.latestValue()
-            require(currentSettings.collaborationMode != ModeKind.Plan) {
-                "update_plan is a TODO/checklist tool and is not allowed in Plan mode."
-            }
-            val nextState = toolPendingState(
-                pendingEvents.filterNot { event -> event.callId == completed.callId },
-            )
-            val index = storage.latestIndex() + 1
-            val remainingPending = storage.unstableWithoutPendingToolCall(index - 1, completed.callId)
-            storage.settings.setWithTransaction(index, currentSettings.copy(plan = completed.arguments)) {
-                storage.stable.setWithTransaction(
-                    index,
-                    completed,
-                ) {
-                    storage.unstable.setWithTransaction(index, remainingPending) {
-                        storage.timestamp.setWithTransaction(index, now()) { index }
-                    }
-                }
-            }
-            latestIndex.value = index
-            state.value = nextState
-            index
-        }
-    }
-
     override suspend fun updateSettings(settings: KodexAgentSettings): Int =
         mutate(
             validate = {},
@@ -564,26 +510,30 @@ private class KodexAgentStateImpl(
 
     }
 
-    private inline fun <T> mutate(
+    private suspend inline fun <T> mutate(
         validate: (KodexAgentStateValue) -> Unit,
         inFlight: KodexAgentStateValue,
         block: () -> T,
     ): T {
-        val currentState = state.value
-        if (!currentState.isStable) {
-            throw KodexAgentStateInvalidTransitionException("start an atomic operation", currentState)
-        }
-        validate(currentState)
-        if (!state.compareAndSet(currentState, inFlight)) {
-            throw KodexAgentStateInvalidTransitionException("start an atomic operation", state.value)
-        }
-
+        writeMutex.lock()
         try {
-            return block()
-        } finally {
-            if (state.value == inFlight) {
-                state.value = currentState
+            val currentState = state.value
+            if (!currentState.isStable) {
+                throw KodexAgentStateInvalidTransitionException("start an atomic operation", currentState)
             }
+            validate(currentState)
+            state.value = inFlight
+            try {
+                return block()
+            } finally {
+                withContext(NonCancellable) {
+                    val index = storage.latestIndex()
+                    latestIndex.value = index
+                    state.value = storage.stateAt(index)
+                }
+            }
+        } finally {
+            writeMutex.unlock()
         }
     }
 }

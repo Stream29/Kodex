@@ -4,6 +4,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
+import io.github.stream29.kodex.agentstate.contract.appendPlanUpdate
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.tool.builder.ToolBuilderJson
 import io.github.stream29.kodex.tool.contract.Tool
@@ -13,8 +14,8 @@ import kotlinx.serialization.json.encodeToJsonElement
 /**
  * Creates the ordinary `update_plan` tool bound to this Agent.
  *
- * A successful call commits its parsed plan and tool output together through
- * [KodexAgentState.appendPlanUpdate]. The generic tool runtime therefore must
+ * A successful call updates its parsed plan and completes its tool output
+ * through [appendPlanUpdate]. The generic tool runtime therefore must
  * not append the returned output again when the call is no longer pending.
  */
 public fun KodexAgentState.updatePlanTool(): Tool =

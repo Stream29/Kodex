@@ -43,6 +43,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.job
+import kotlinx.coroutines.yield
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.assertEquals
@@ -101,6 +102,53 @@ val kodexAgentStateImplTest by testSuite {
             assertEquals(1, agent.latestIndex.value)
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
             assertEquals(userEvent("persisted"), storage.stable[1])
+        }
+
+        test("queued writes are fair and a cancelled waiter never enters its mutation") {
+            val storage = storage()
+            val agent = KodexAgentState(
+                client = mockOpenAiClient(),
+                storage = storage,
+            )
+            val holderStarted = CompletableDeferred<Unit>()
+            val releaseHolder = CompletableDeferred<Unit>()
+            val executionOrder = mutableListOf<String>()
+            val holder = async(start = CoroutineStart.UNDISPATCHED) {
+                agent.modify {
+                    holderStarted.complete(Unit)
+                    releaseHolder.await()
+                }
+            }
+            holderStarted.await()
+
+            val first = async(start = CoroutineStart.UNDISPATCHED) {
+                agent.modify { executionOrder += "first" }
+            }
+            val cancelled = async(start = CoroutineStart.UNDISPATCHED) {
+                agent.modify {
+                    executionOrder += "cancelled"
+                    it.stable[1] = userEvent("must not be written")
+                }
+            }
+            val last = async(start = CoroutineStart.UNDISPATCHED) {
+                agent.modify { executionOrder += "last" }
+            }
+            assertFalse(first.isCompleted)
+            assertFalse(cancelled.isCompleted)
+            assertFalse(last.isCompleted)
+
+            cancelled.cancel()
+            cancelled.join()
+            releaseHolder.complete(Unit)
+            holder.await()
+            first.await()
+            last.await()
+
+            assertTrue(cancelled.isCancelled)
+            assertEquals(listOf("first", "last"), executionOrder)
+            assertEquals(-1, storage.stable.latestIndex())
+            assertEquals(0, agent.latestIndex.value)
+            assertEquals(KodexAgentStateValue.Empty, agent.state.value)
         }
 
         test("forked clean timelines reconstruct assistant state") {
@@ -254,6 +302,45 @@ val kodexAgentStateImplTest by testSuite {
 
             assertEquals(completed, storage.stable[3])
             assertEquals(emptyList(), storage.unstable[3])
+            assertEquals(KodexAgentStateValue.ToolCompleted, agent.state.value)
+        }
+
+        test("tool completion waits for the active response and validates its pending output") {
+            val storage = storage()
+            val call = functionCall("echo", "call_queued")
+            val responseReachedPending = CompletableDeferred<Unit>()
+            val releaseResponse = CompletableDeferred<Unit>()
+            val agent = KodexAgentState(
+                client = mockOpenAiClient {
+                    createResponse {
+                        flow {
+                            emit(ResponsesStreamEvent.OutputItemDone(0, call))
+                            responseReachedPending.complete(Unit)
+                            releaseResponse.await()
+                            emit(ResponsesStreamEvent.Completed(Response(id = "response_queued", endTurn = false)))
+                        }
+                    }
+                },
+                storage = storage,
+            )
+            agent.appendUserMessage(userMessage("Queue the tool output.").content)
+            val response = async(start = CoroutineStart.UNDISPATCHED) {
+                agent.requestResponseApi().toList()
+            }
+            responseReachedPending.await()
+
+            val completed = completedTool(call, "queued result")
+            val completion = async(start = CoroutineStart.UNDISPATCHED) {
+                agent.completeToolCall(completed)
+            }
+            assertFalse(completion.isCompleted)
+
+            releaseResponse.complete(Unit)
+            response.await()
+            val completedAt = completion.await()
+
+            assertEquals(completed, storage.stable[completedAt])
+            assertEquals(emptyList(), storage.unstable[completedAt])
             assertEquals(KodexAgentStateValue.ToolCompleted, agent.state.value)
         }
 
@@ -460,6 +547,42 @@ val kodexAgentStateImplTest by testSuite {
             )
         }
 
+        test("settings updates wait for remote compaction to publish its checkpoint") {
+            val storage = storage()
+            val compactionStarted = CompletableDeferred<Unit>()
+            val releaseCompaction = CompletableDeferred<Unit>()
+            val compactionItem = ResponseItem.Compaction(encryptedContent = "queued-compaction")
+            val agent = KodexAgentState(
+                client = mockOpenAiClient {
+                    createRemoteCompactionV2Response { _, _, _, _ ->
+                        compactionStarted.complete(Unit)
+                        releaseCompaction.await()
+                        RemoteCompactionV2Response(compactionItem, null)
+                    }
+                },
+                storage = storage,
+            )
+            agent.appendUserMessage(userMessage("Compact before updating settings.").content)
+            val compaction = async(start = CoroutineStart.UNDISPATCHED) {
+                agent.forcedCompact()
+            }
+            compactionStarted.await()
+
+            val settingsUpdate = async(start = CoroutineStart.UNDISPATCHED) {
+                agent.updateSettings(settings().copy(threadName = "After compaction"))
+            }
+            assertFalse(settingsUpdate.isCompleted)
+
+            releaseCompaction.complete(Unit)
+            val compactedAt = compaction.await()
+            val settingsAt = settingsUpdate.await()
+
+            assertTrue(settingsAt > compactedAt)
+            assertEquals(compactionItem, storage.compaction[compactedAt].compaction)
+            assertEquals("After compaction", storage.settings[settingsAt].threadName)
+            assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
+        }
+
         test("post-compaction request projects checkpoint without duplicate marker") {
             val storage = storage()
             val requests = mutableListOf<ResponsesApiRequest>()
@@ -543,6 +666,47 @@ val kodexAgentStateImplTest by testSuite {
             release.complete(Unit)
             running.await()
             assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
+        }
+
+        test("a queued request reports the stable state produced by the preceding request") {
+            val storage = storage()
+            val call = functionCall("echo", "call_blocks_next_request")
+            val firstRequestReachedPending = CompletableDeferred<Unit>()
+            val releaseFirstRequest = CompletableDeferred<Unit>()
+            var requestCount = 0
+            val agent = KodexAgentState(
+                client = mockOpenAiClient {
+                    createResponse {
+                        requestCount += 1
+                        flow {
+                            emit(ResponsesStreamEvent.OutputItemDone(0, call))
+                            firstRequestReachedPending.complete(Unit)
+                            releaseFirstRequest.await()
+                        }
+                    }
+                },
+                storage = storage,
+            )
+            agent.appendUserMessage(userMessage("Run one request.").content)
+            val first = async(start = CoroutineStart.UNDISPATCHED) {
+                agent.requestResponseApi().toList()
+            }
+            firstRequestReachedPending.await()
+            val queued = async(start = CoroutineStart.UNDISPATCHED) {
+                agent.requestResponseApi().toList()
+            }
+            yield()
+            assertFalse(queued.isCompleted)
+
+            releaseFirstRequest.complete(Unit)
+            first.await()
+            val failure = assertFailsWith<KodexAgentStateInvalidTransitionException> {
+                queued.await()
+            }
+
+            assertIs<KodexAgentStateValue.ToolPending>(failure.currentState)
+            assertEquals(1, requestCount)
+            assertIs<KodexAgentStateValue.ToolPending>(agent.state.value)
         }
     }
 }
