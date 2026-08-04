@@ -56,6 +56,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.time.Clock
 import kotlin.time.Instant
@@ -387,10 +388,7 @@ private class KodexAgentStateImpl(
     }
 
     override suspend fun updateSettings(settings: KodexAgentSettings): Int =
-        mutate(
-            validate = {},
-            inFlight = KodexAgentStateValue.ExternalWrite,
-        ) {
+        writeMutex.withLock {
             val currentSettings = storage.settings.latestValue()
             val index = storage.latestIndex() + 1
             require(index > 0) { "Settings updates require an existing state index." }
