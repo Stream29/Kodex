@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.cli.agent
 
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
@@ -138,10 +139,23 @@ public class AgentRuntimeViewModel internal constructor(
         startAutomaticTitle(content)
     }
 
-    /** Consumes this Agent's text draft and starts a turn for this exact Agent. */
+    /**
+     * Consumes this Agent's text draft.
+     *
+     * An active turn receives the text as pending steer. Otherwise the text
+     * starts a new logical turn for this exact Agent.
+     */
     public suspend fun submitComposer(): Boolean {
         val text = composer.takeText() ?: return false
-        submit(listOf(ContentItem.InputText(text)))
+        val content = listOf(ContentItem.InputText(text))
+        if (session.runtime.runningTurn.value != null) {
+            clearFailure()
+            session.runtime.pendingSteer.update { pending ->
+                pending + StableCleanEvent.UserMessage(content)
+            }
+        } else {
+            submit(content)
+        }
         return true
     }
 
