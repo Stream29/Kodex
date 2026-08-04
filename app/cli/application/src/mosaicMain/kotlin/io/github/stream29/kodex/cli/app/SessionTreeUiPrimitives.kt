@@ -5,6 +5,7 @@ import com.jakewharton.mosaic.layout.KeyEvent
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Color
+import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.cli.components.TextInput
@@ -25,35 +26,41 @@ internal fun ComposerInput(
     newLineKey: NewLineKey,
     autoFocus: Boolean = true,
     enabled: Boolean = true,
+    submitHint: String? = null,
     onSubmit: () -> Unit,
     onValueChanged: ((TextInputValue) -> Unit)? = null,
 ) {
-    TextInput(
-        state = state,
-        layout = layout,
-        modifier = Modifier
-            .fillMaxWidth(),
-        autoFocus = autoFocus,
-        enabled = enabled,
-        onValueChanged = onValueChanged,
-        onKeyEvent = { event ->
-            when {
-                newLineKey.matches(event) -> {
-                    if (state.edit(TextInputEdit.Insert("\n"))) {
-                        onValueChanged?.invoke(state.value)
+    Column {
+        TextInput(
+            state = state,
+            layout = layout,
+            modifier = Modifier
+                .fillMaxWidth(),
+            autoFocus = autoFocus,
+            enabled = enabled,
+            onValueChanged = onValueChanged,
+            onKeyEvent = { event ->
+                when {
+                    newLineKey.matches(event) -> {
+                        if (state.edit(TextInputEdit.Insert("\n"))) {
+                            onValueChanged?.invoke(state.value)
+                        }
+                        true
                     }
-                    true
-                }
 
-                newLineKey.submitKey.matches(event) -> {
-                    onSubmit()
-                    true
-                }
+                    newLineKey.submitKey.matches(event) -> {
+                        onSubmit()
+                        true
+                    }
 
-                else -> false
-            }
-        },
-    )
+                    else -> false
+                }
+            },
+        )
+        submitHint?.let { hint ->
+            Text(value = hint, textStyle = TextStyle.Dim)
+        }
+    }
 }
 
 @Composable

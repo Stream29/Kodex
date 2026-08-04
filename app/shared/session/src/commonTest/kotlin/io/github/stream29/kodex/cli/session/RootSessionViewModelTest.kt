@@ -4,6 +4,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.contract.initialize
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.cli.agent.AgentAutomaticTitleConfiguration
 import io.github.stream29.kodex.cli.agent.AgentAutomaticTitleSettings
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerationResult
@@ -164,6 +165,71 @@ val rootSessionViewModelTest by testSuite {
                     }
                 }
                 assertEquals("Generated root title", root.storage.settings[titleIndex].threadName)
+            } finally {
+                releaseResponse.complete(Unit)
+                viewModel.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("running Agent composer submits pending steer without starting a new turn") {
+        coroutineScope {
+            val responseStarted = CompletableDeferred<Unit>()
+            val releaseResponse = CompletableDeferred<Unit>()
+            val repository = InMemoryKodexSessionRepository(
+                testKodexAgentDependencies(
+                    mockOpenAiClient {
+                        createResponse {
+                            flow {
+                                responseStarted.complete(Unit)
+                                releaseResponse.await()
+                                emit(ResponsesStreamEvent.Completed(Response(id = "agent-response")))
+                            }
+                        }
+                    },
+                ),
+            )
+            val root = repository.open(repository.create())
+            root.runtime.modify { storage ->
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("agent-model")))
+            }
+            val viewModel = RootSessionViewModel(root)
+            try {
+                viewModel.refresh()
+                val tree = viewModel.state.value
+                val rootAgent = requireNotNull(tree.agents.firstOrNull { entry ->
+                    entry.agentId == tree.rootAgentId
+                })
+                val initialContent = listOf(ContentItem.InputText("Initial request"))
+                val steerContent = listOf(ContentItem.InputText("Adjust the active turn"))
+
+                rootAgent.viewModel.submit(initialContent)
+                val runningTurn = withContext(Dispatchers.Default.limitedParallelism(1)) {
+                    withTimeout(5.seconds) {
+                        responseStarted.await()
+                        requireNotNull(root.runtime.runningTurn.value)
+                    }
+                }
+                rootAgent.viewModel.composer.update(
+                    text = "Adjust the active turn",
+                    cursorOffset = "Adjust the active turn".length,
+                )
+
+                assertTrue(rootAgent.viewModel.submitComposer())
+
+                assertEquals("", rootAgent.viewModel.composer.state.value.text)
+                assertEquals(
+                    listOf(StableCleanEvent.UserMessage(steerContent)),
+                    root.runtime.pendingSteer.value,
+                )
+                assertEquals(StableCleanEvent.UserMessage(initialContent), root.storage.stable[1])
+                assertEquals(1, root.runtime.latestIndex.value)
+
+                releaseResponse.complete(Unit)
+                withContext(Dispatchers.Default.limitedParallelism(1)) {
+                    withTimeout(5.seconds) { runningTurn.join() }
+                }
             } finally {
                 releaseResponse.complete(Unit)
                 viewModel.close()
