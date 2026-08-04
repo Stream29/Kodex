@@ -10,6 +10,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import io.github.oshai.kotlinlogging.KotlinLogging
 import com.jakewharton.mosaic.LocalTerminalState
+import com.jakewharton.mosaic.animation.animateIntAsState
 import com.jakewharton.mosaic.layout.background
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.layout.fillMaxHeight
@@ -29,7 +30,6 @@ import io.github.stream29.kodex.cli.agent.AgentRuntimeViewState
 import io.github.stream29.kodex.cli.agent.label
 import io.github.stream29.kodex.cli.agent.toRenderState
 import io.github.stream29.kodex.cli.components.TuiButton
-import io.github.stream29.kodex.cli.components.safeSpringInt
 import io.github.stream29.kodex.cli.components.TuiPressable
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.LazyColumn
@@ -98,10 +98,8 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     var sidebarPinnedExpanded by remember { mutableStateOf(false) }
     var sidebarHovered by remember { mutableStateOf(false) }
     val sidebarExpanded = sidebarPinnedExpanded || sidebarHovered
-    val sidebarColumns = safeSpringInt(
+    val sidebarColumns by animateIntAsState(
         targetValue = if (sidebarExpanded) SessionSidebarExpandedColumns else SessionSidebarCollapsedColumns,
-        minimum = SessionSidebarCollapsedColumns,
-        maximum = SessionSidebarExpandedColumns,
         label = "agent sidebar width",
     )
     val contentColumns = (columns - sidebarColumns).coerceAtLeast(1)
