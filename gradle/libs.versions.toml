@@ -73,7 +73,7 @@ cache4k = { module = "io.github.reactivecircus.cache4k:cache4k", version.ref = "
 [bundles]
 ktor-client-jvm-engines = ["ktor-client-cio"]
 ktor-client-js-engines = ["ktor-client-js"]
-ktor-client-linux-engines = ["ktor-client-cio"]
+ktor-client-linux-engines = ["ktor-client-curl"]
 ktor-client-macos-engines = ["ktor-client-darwin"]
 ktor-client-mingw-engines = ["ktor-client-winhttp"]
 
