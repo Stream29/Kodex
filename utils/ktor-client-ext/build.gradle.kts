@@ -11,10 +11,7 @@ kotlin {
         jvmMain.dependencies {
             api(libs.bundles.ktor.client.jvm.engines)
         }
-        linuxX64Main.dependencies {
-            api(libs.bundles.ktor.client.linux.engines)
-        }
-        linuxArm64Main.dependencies {
+        linuxMain.dependencies {
             api(libs.bundles.ktor.client.linux.engines)
         }
         macosArm64Main.dependencies {
