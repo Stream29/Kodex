@@ -10,6 +10,10 @@ public fun RootSessionViewState.renderTreeLines(): List<String> = agents.map { e
         if (entry.selected) append("> ") else append("  ")
         append(entry.viewModel.state.value.durable.settings?.threadName ?: entry.agentId)
         append(" — ")
-        append(entry.viewModel.state.value.toRenderState().label())
+        append(
+            entry.viewModel.state.value.toRenderState().label(
+                entry.viewModel.session.runtime.unifiedExecToolClient.activeSessions.value.size,
+            ),
+        )
     }
 }

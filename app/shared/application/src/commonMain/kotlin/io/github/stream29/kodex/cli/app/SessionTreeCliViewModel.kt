@@ -19,7 +19,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -253,22 +252,6 @@ public class SessionTreeCliViewModel internal constructor(
     public fun activeNewSession(): NewSessionViewModel? =
         (tabRegistry.activeTarget as? SessionTabTarget.NewSession)
             ?.let { target -> newSessionTabs[target.id] }
-
-    /** Updates settings for the active virtual New-session tab only. */
-    public suspend fun updateNewSessionSettings(
-        transform: (io.github.stream29.kodex.cli.settings.KodexNewSessionSettings) ->
-            io.github.stream29.kodex.cli.settings.KodexNewSessionSettings,
-    ) {
-        lifecycleMutex.withLock {
-            val target = requireNotNull(tabRegistry.activeTarget as? SessionTabTarget.NewSession) {
-                "No New session tab is active."
-            }
-            val newSession = requireNotNull(newSessionTabs[target.id]) {
-                "New session tab ${target.id} is not open."
-            }
-            newSession.updateSettings(transform)
-        }
-    }
 
     /** Updates application-wide defaults copied into subsequently created New-session tabs. */
     public suspend fun updateNewSessionDefaults(

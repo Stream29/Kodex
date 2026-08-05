@@ -2,7 +2,9 @@ package io.github.stream29.kodex.cli.app
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.cli.agent.AgentRuntimeControl
 import io.github.stream29.kodex.cli.agent.AgentRuntimeViewState
+import io.github.stream29.kodex.cli.agent.runtimeControl
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
