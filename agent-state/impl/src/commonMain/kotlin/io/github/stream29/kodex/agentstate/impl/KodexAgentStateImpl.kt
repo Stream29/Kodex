@@ -7,6 +7,7 @@ import io.github.stream29.kodex.agentcontext.prefix.impl.AgentContextPrefixResol
 import io.github.stream29.kodex.agentcontext.prefix.render.render
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstate.contract.RequestFinish
 import io.github.stream29.kodex.agentstate.contract.canAppendUserMessage
 import io.github.stream29.kodex.agentstate.contract.canCompact
 import io.github.stream29.kodex.agentstate.contract.canMarkNewTurn
@@ -36,6 +37,8 @@ import io.github.stream29.kodex.openai.CompactionStrategy
 import io.github.stream29.kodex.openai.CompactionTurnMetadata
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
+import io.github.stream29.kodex.openai.OpenAiResponseStreamFailureException
+import io.github.stream29.kodex.openai.OpenAiResponseStreamIncompleteException
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
@@ -46,15 +49,11 @@ import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -138,8 +137,9 @@ private class KodexAgentStateImpl(
             block(storage)
         }
 
-    override fun requestResponseApi(): Flow<ResponsesStreamEvent> = flow {
+    override suspend fun requestResponseApi(): RequestFinish {
         val snapshotIndex = startRequestResponse()
+        var terminalReason: RequestFinish? = null
         try {
             var streamingOutput: StreamingOutput? = null
 
@@ -217,6 +217,19 @@ private class KodexAgentStateImpl(
                                 appendTimestampAndTokenCount(tokenCount)
                             }
                         }
+                        terminalReason = if (event.response.endTurn == false) {
+                            RequestFinish.Resumable
+                        } else {
+                            RequestFinish.Finish
+                        }
+                    }
+
+                    is ResponsesStreamEvent.Failed -> {
+                        throw OpenAiResponseStreamFailureException(event.response.error)
+                    }
+
+                    is ResponsesStreamEvent.Incomplete -> {
+                        throw OpenAiResponseStreamIncompleteException(event.response.incompleteDetails)
                     }
 
                     else -> Unit
@@ -225,12 +238,13 @@ private class KodexAgentStateImpl(
                     acceptResponseEvent(event)
                     completeResponseOutput(event.outputIndex)
                 }
-                emit(event)
             }
         } finally {
             finishRequestResponse()
         }
-    }.buffer(Channel.UNLIMITED)
+
+        return terminalReason ?: RequestFinish.Resumable
+    }
 
     @OptIn(ExperimentalUuidApi::class)
     override suspend fun compact(

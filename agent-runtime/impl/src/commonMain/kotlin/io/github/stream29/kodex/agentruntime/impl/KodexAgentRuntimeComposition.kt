@@ -18,7 +18,6 @@ import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.openai.ResponseItem
-import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecToolClient
 import io.github.stream29.kodex.utils.logging.agent
@@ -29,12 +28,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
@@ -216,12 +212,12 @@ private class AgentRuntimeImpl(
     override val pendingSteer: MutableStateFlow<List<StableCleanEvent.Steerable>>,
     override val unifiedExecToolClient: UnifiedExecToolClient,
     private val logger: KLogger,
-) : AgentRuntime, ResumableAgentLayer by delegate {
+) : AgentRuntime, KodexAgentState by delegate {
     private val runningTurnSlot: MutableStateFlow<Job?> = MutableStateFlow(null)
 
     override val runningTurn: StateFlow<Job?> = runningTurnSlot.asStateFlow()
 
-    override fun resume(): Flow<ResponsesStreamEvent> = flow {
+    override suspend fun resume() {
         val turn = currentCoroutineContext().job
         if (!runningTurnSlot.compareAndSet(null, turn)) {
             logger.warn { "Rejected concurrent Agent turn." }
@@ -229,7 +225,7 @@ private class AgentRuntimeImpl(
         }
         logger.info { "Agent turn started." }
         try {
-            emitAll(delegate.resume())
+            delegate.resume()
             logger.logPendingHostToolCalls(delegate.state.value)
             logger.info { "Agent turn completed." }
         } catch (cancellation: CancellationException) {

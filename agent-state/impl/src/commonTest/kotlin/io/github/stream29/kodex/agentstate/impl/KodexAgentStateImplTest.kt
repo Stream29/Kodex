@@ -3,6 +3,7 @@ package io.github.stream29.kodex.agentstate.impl
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstate.contract.RequestFinish
 import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
 import io.github.stream29.kodex.agentstorage.cleanmodels.codexRequestWindowId
@@ -11,7 +12,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEv
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.forkTo
 import io.github.stream29.kodex.agentstorage.contract.indexes
 import io.github.stream29.kodex.agentstorage.contract.initialize
@@ -20,11 +20,17 @@ import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.FailedResponse
+import io.github.stream29.kodex.openai.IncompleteDetails
+import io.github.stream29.kodex.openai.IncompleteResponse
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.OpenAiModelId
+import io.github.stream29.kodex.openai.OpenAiResponseStreamFailureException
+import io.github.stream29.kodex.openai.OpenAiResponseStreamIncompleteException
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
 import io.github.stream29.kodex.openai.ReasoningItemReasoningSummary
 import io.github.stream29.kodex.openai.Response
+import io.github.stream29.kodex.openai.ResponseError
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.openai.ResponsesApiRequest
@@ -38,7 +44,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -250,7 +255,7 @@ val kodexAgentStateImplTest by testSuite {
 
             val user = userMessage("Answer.")
             agent.appendUserMessage(user.content)
-            agent.requestResponseApi().toList()
+            agent.requestResponseApi()
 
             assertEquals(listOf(user), requests.single().input.takeLast(1))
             assertEquals(StableCleanEvent.Reasoning(reasoningItem), storage.stable[2])
@@ -264,6 +269,74 @@ val kodexAgentStateImplTest by testSuite {
             )
             assertEquals(12L, storage.tokenCount[4])
             assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
+        }
+
+        test("response request returns finish dispositions and throws unsuccessful terminals") {
+            suspend fun requestFinishReason(
+                events: List<ResponsesStreamEvent>,
+            ): RequestFinish {
+                val agent = KodexAgentState(
+                    client = mockOpenAiClient {
+                        createResponse { flowOf(*events.toTypedArray()) }
+                    },
+                    storage = storage(),
+                )
+                agent.appendUserMessage(userMessage("Finish.").content)
+                return agent.requestResponseApi()
+            }
+
+            assertEquals(
+                RequestFinish.Finish,
+                requestFinishReason(
+                    listOf(ResponsesStreamEvent.Completed(Response(id = "end", endTurn = true))),
+                ),
+            )
+            assertEquals(
+                RequestFinish.Resumable,
+                requestFinishReason(
+                    listOf(ResponsesStreamEvent.Completed(Response(id = "continue", endTurn = false))),
+                ),
+            )
+
+            val responseError = ResponseError(
+                message = "Context limit exceeded.",
+                code = "context_length_exceeded",
+                type = "invalid_request_error",
+            )
+            val failed = assertFailsWith<OpenAiResponseStreamFailureException> {
+                requestFinishReason(
+                    listOf(ResponsesStreamEvent.Failed(FailedResponse(responseError))),
+                )
+            }
+            assertEquals(responseError, failed.error)
+            assertEquals(
+                "OpenAI response stream failed " +
+                    "(code=context_length_exceeded, " +
+                    "type=invalid_request_error, " +
+                    "message=Context limit exceeded.).",
+                failed.message,
+            )
+
+            val incompleteDetails = IncompleteDetails(reason = "max_output_tokens")
+            val incomplete = assertFailsWith<OpenAiResponseStreamIncompleteException> {
+                requestFinishReason(
+                    listOf(
+                        ResponsesStreamEvent.Incomplete(
+                            IncompleteResponse(incompleteDetails),
+                        ),
+                    ),
+                )
+            }
+            assertEquals(incompleteDetails, incomplete.incompleteDetails)
+            assertEquals(
+                "OpenAI response stream was incomplete (reason=max_output_tokens).",
+                incomplete.message,
+            )
+
+            assertEquals(
+                RequestFinish.Resumable,
+                requestFinishReason(emptyList()),
+            )
         }
 
         test("provider tool call enters unstable and completion moves it to stable") {
@@ -282,7 +355,7 @@ val kodexAgentStateImplTest by testSuite {
             )
 
             agent.appendUserMessage(userMessage("Use a tool.").content)
-            agent.requestResponseApi().toList()
+            val finishReason = agent.requestResponseApi()
 
             assertEquals(
                 listOf(
@@ -294,6 +367,10 @@ val kodexAgentStateImplTest by testSuite {
                     ),
                 ),
                 storage.unstable[2],
+            )
+            assertEquals(
+                RequestFinish.Resumable,
+                finishReason,
             )
             assertEquals(KodexAgentStateValue.ToolPending(listOf(pendingTool(call))), agent.state.value)
 
@@ -325,7 +402,7 @@ val kodexAgentStateImplTest by testSuite {
             )
             agent.appendUserMessage(userMessage("Queue the tool output.").content)
             val response = async(start = CoroutineStart.UNDISPATCHED) {
-                agent.requestResponseApi().toList()
+                agent.requestResponseApi()
             }
             responseReachedPending.await()
 
@@ -356,6 +433,7 @@ val kodexAgentStateImplTest by testSuite {
                         flowOf(
                             ResponsesStreamEvent.OutputItemDone(0, first),
                             ResponsesStreamEvent.OutputItemDone(1, second),
+                            ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
                         )
                     }
                 },
@@ -363,7 +441,7 @@ val kodexAgentStateImplTest by testSuite {
             )
 
             agent.appendUserMessage(userMessage("Run both.").content)
-            agent.requestResponseApi().toList()
+            agent.requestResponseApi()
 
             assertEquals(5, agent.clearPending())
             assertEquals(failedTool(first, "user interrupt"), storage.stable[4])
@@ -384,6 +462,7 @@ val kodexAgentStateImplTest by testSuite {
                         flowOf(
                             ResponsesStreamEvent.OutputItemDone(0, first),
                             ResponsesStreamEvent.OutputItemDone(1, second),
+                            ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
                         )
                     }
                 },
@@ -391,7 +470,7 @@ val kodexAgentStateImplTest by testSuite {
             )
 
             agent.appendUserMessage(userMessage("Run both.").content)
-            agent.requestResponseApi().toList()
+            agent.requestResponseApi()
 
             val secondCompleted = completedTool(second, "second result")
             agent.completeToolCall(secondCompleted)
@@ -420,10 +499,14 @@ val kodexAgentStateImplTest by testSuite {
                         requests += request
                         requestNumber += 1
                         if (requestNumber == 1) {
-                            flowOf(ResponsesStreamEvent.OutputItemDone(0, call))
+                            flowOf(
+                                ResponsesStreamEvent.OutputItemDone(0, call),
+                                ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
+                            )
                         } else {
                             flowOf(
                                 ResponsesStreamEvent.OutputItemDone(0, assistantMessage("Finished.")),
+                                ResponsesStreamEvent.Completed(Response(id = "response_2", endTurn = true)),
                             )
                         }
                     }
@@ -433,10 +516,10 @@ val kodexAgentStateImplTest by testSuite {
 
             val user = userMessage("Run.")
             agent.appendUserMessage(user.content)
-            agent.requestResponseApi().toList()
+            agent.requestResponseApi()
             val completed = completedTool(call, "result")
             agent.completeToolCall(completed)
-            agent.requestResponseApi().toList()
+            agent.requestResponseApi()
 
             assertEquals(
                 listOf(user) + completed.toResponseHistoryItems(),
@@ -472,7 +555,7 @@ val kodexAgentStateImplTest by testSuite {
             )
 
             agent.appendUserMessage(userMessage("Search tools.").content)
-            agent.requestResponseApi().toList()
+            agent.requestResponseApi()
 
             assertEquals(listOf(PendingServerToolSearch(call)), storage.unstable[2])
             assertEquals(StableCleanEvent.ServerToolSearch(call, output), storage.stable[3])
@@ -500,7 +583,7 @@ val kodexAgentStateImplTest by testSuite {
             agent.appendUserMessage(userMessage("Search tools.").content)
 
             assertFailsWith<IllegalStateException> {
-                agent.requestResponseApi().toList()
+                agent.requestResponseApi()
             }
             assertEquals(listOf(1), storage.stable.indexes().toList())
             assertEquals(listOf(PendingServerToolSearch(call)), storage.unstable[2])
@@ -596,7 +679,10 @@ val kodexAgentStateImplTest by testSuite {
                     }
                     createResponse { request ->
                         requests += request
-                        flowOf(ResponsesStreamEvent.OutputItemDone(0, assistantMessage("After.")))
+                        flowOf(
+                            ResponsesStreamEvent.OutputItemDone(0, assistantMessage("After.")),
+                            ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = true)),
+                        )
                     }
                 },
                 storage = storage,
@@ -605,7 +691,7 @@ val kodexAgentStateImplTest by testSuite {
             val user = userMessage("Before.")
             agent.appendUserMessage(user.content)
             agent.forcedCompact()
-            agent.requestResponseApi().toList()
+            agent.requestResponseApi()
 
             assertEquals(listOf(user, compaction), requests.single().input.takeLast(2))
             assertEquals(assistantEvent("After."), storage.stable[3])
@@ -649,6 +735,7 @@ val kodexAgentStateImplTest by testSuite {
                                     addedItem.copy(content = listOf(ContentItem.OutputText("hello"))),
                                 ),
                             )
+                            emit(ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = true)))
                         }
                     }
                 },
@@ -657,7 +744,7 @@ val kodexAgentStateImplTest by testSuite {
 
             agent.appendUserMessage(userMessage("Stream.").content)
             val running = async(start = CoroutineStart.UNDISPATCHED) {
-                agent.requestResponseApi().toList()
+                agent.requestResponseApi()
             }
             val active = agent.state.first { value ->
                 value is KodexAgentStateValue.RequestResponse.Message
@@ -685,9 +772,13 @@ val kodexAgentStateImplTest by testSuite {
                                 requestStarted.complete(Unit)
                                 releaseFirstRequest.await()
                                 emit(ResponsesStreamEvent.OutputItemDone(0, assistantMessage("First.")))
+                                emit(ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = true)))
                             }
                         } else {
-                            flowOf(ResponsesStreamEvent.OutputItemDone(0, assistantMessage("Second.")))
+                            flowOf(
+                                ResponsesStreamEvent.OutputItemDone(0, assistantMessage("Second.")),
+                                ResponsesStreamEvent.Completed(Response(id = "response_2", endTurn = true)),
+                            )
                         }
                     }
                 },
@@ -695,7 +786,7 @@ val kodexAgentStateImplTest by testSuite {
             )
             agent.appendUserMessage(userMessage("Use the initial model.").content)
             val first = async(start = CoroutineStart.UNDISPATCHED) {
-                agent.requestResponseApi().toList()
+                agent.requestResponseApi()
             }
             requestStarted.await()
 
@@ -710,7 +801,7 @@ val kodexAgentStateImplTest by testSuite {
             first.await()
             assertEquals(assistantEvent("First."), storage.stable[3])
 
-            agent.requestResponseApi().toList()
+            agent.requestResponseApi()
 
             assertEquals(
                 listOf(OpenAiModelId("test-model"), updatedModel),
@@ -734,7 +825,7 @@ val kodexAgentStateImplTest by testSuite {
             )
             agent.appendUserMessage(userMessage("Cancel this request.").content)
             val running = async(start = CoroutineStart.UNDISPATCHED) {
-                agent.requestResponseApi().toList()
+                agent.requestResponseApi()
             }
             requestStarted.await()
 
@@ -762,6 +853,7 @@ val kodexAgentStateImplTest by testSuite {
                             emit(ResponsesStreamEvent.OutputItemDone(0, call))
                             firstRequestReachedPending.complete(Unit)
                             releaseFirstRequest.await()
+                            emit(ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)))
                         }
                     }
                 },
@@ -769,12 +861,12 @@ val kodexAgentStateImplTest by testSuite {
             )
             agent.appendUserMessage(userMessage("Run one request.").content)
             val first = async(start = CoroutineStart.UNDISPATCHED) {
-                agent.requestResponseApi().toList()
+                agent.requestResponseApi()
             }
             firstRequestReachedPending.await()
 
             val failure = assertFailsWith<KodexAgentStateInvalidTransitionException> {
-                agent.requestResponseApi().toList()
+                agent.requestResponseApi()
             }
             assertIs<KodexAgentStateValue.RequestResponse>(failure.currentState)
             assertIs<KodexAgentStateValue.RequestResponse>(agent.state.value)

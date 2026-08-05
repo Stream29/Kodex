@@ -239,7 +239,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
         assertNotSame(root.runtime.unifiedExecToolClient, child.runtime.unifiedExecToolClient)
     }
 
-    test("runtime rejects concurrent resume collectors") {
+    test("runtime rejects concurrent resume operations") {
         val entered = CompletableDeferred<Unit>()
         val client = mockOpenAiClient {
             createResponse { _, _, _, _ ->
@@ -256,18 +256,46 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
         root.runtime.appendUserMessage(listOf(ContentItem.InputText("Start a turn.")))
 
         val first = async(start = CoroutineStart.UNDISPATCHED) {
-            root.runtime.resume().toList()
+            root.runtime.resume()
         }
         entered.await()
         assertSame(first, root.runtime.runningTurn.value)
 
         assertFailsWith<ConcurrentAgentRuntimeResumeException> {
-            root.runtime.resume().toList()
+            root.runtime.resume()
         }
         assertSame(first, root.runtime.runningTurn.value)
 
         first.cancelJobAndJoin()
         assertNull(root.runtime.runningTurn.value)
+    }
+
+    test("runtime leaves host-owned pending calls in state") {
+        val client = mockOpenAiClient {
+            createResponse { _, _, _, _ ->
+                flowOf(
+                    ResponsesStreamEvent.OutputItemDone(
+                        outputIndex = 0,
+                        item = ResponseItem.FunctionCall(
+                            name = "host_only",
+                            arguments = "{}",
+                            callId = "call_host_only",
+                        ),
+                    ),
+                    ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
+                )
+            }
+        }
+        val repository = InMemoryKodexSessionRepository(
+            testKodexAgentDependencies(client),
+        )
+        val root = repository.open(repository.createInitialized(settings("root")))
+        root.runtime.appendUserMessage(listOf(ContentItem.InputText("Ask the host.")))
+
+        root.runtime.resume()
+
+        val pending = assertIs<KodexAgentStateValue.ToolPending>(root.runtime.state.value)
+        assertEquals(listOf("call_host_only"), pending.events.map { event -> event.callId })
     }
 
     test("cancelling a turn fails its persisted pending tool calls") {
@@ -297,7 +325,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
         root.runtime.appendUserMessage(listOf(ContentItem.InputText("Start a turn.")))
 
         val turn = async(start = CoroutineStart.UNDISPATCHED) {
-            root.runtime.resume().toList()
+            root.runtime.resume()
         }
         pending.await()
         turn.cancelJobAndJoin()
@@ -387,7 +415,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             },
         )
 
-        root.runtime.resume().toList()
+        root.runtime.resume()
 
         assertTrue(
             root.storage.stable.indexes().toList().any { index ->
@@ -426,7 +454,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
         val root = repository.open(repository.createInitialized(settings("root")))
 
         root.runtime.appendUserMessage(listOf(ContentItem.InputText("Delegate this task.")))
-        root.runtime.resume().toList()
+        root.runtime.resume()
 
         val child = root.subagents.open(root.subagents.list().single())
         withContext(Dispatchers.Default.limitedParallelism(1)) {

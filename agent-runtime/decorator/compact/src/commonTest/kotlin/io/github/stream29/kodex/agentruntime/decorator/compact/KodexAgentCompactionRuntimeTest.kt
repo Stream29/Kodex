@@ -39,11 +39,8 @@ import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.toList
 import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -99,11 +96,9 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         assertSame(state.storage, runtime.storage)
     }
 
-    test("loop does not wait for slow stream consumer") {
+    test("loop completes without an external event collector") {
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
         val productionCompleted = CompletableDeferred<Unit>()
-        val firstEventCollected = CompletableDeferred<Unit>()
-        val releaseConsumer = CompletableDeferred<Unit>()
         val delta = ResponsesStreamEvent.OutputTextDelta(
             itemId = "message_1",
             outputIndex = 0,
@@ -131,18 +126,8 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         )
 
         state.appendUserMessage(userMessage("Start."))
-        val runningResume = async(start = CoroutineStart.UNDISPATCHED) {
-            runtime.resume().collect {
-                firstEventCollected.complete(Unit)
-                releaseConsumer.await()
-            }
-        }
-
-        firstEventCollected.await()
+        runtime.resume()
         productionCompleted.await()
-
-        releaseConsumer.complete(Unit)
-        runningResume.await()
     }
 
     test("loop continues sampling when end turn is false") {
@@ -197,7 +182,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         val user = userMessage("Answer briefly.")
 
         state.appendUserMessage(user, tokenCount = 1)
-        runtime.resume().toList()
+        runtime.resume()
 
         assertEquals(2, requests.size)
         assertRequestHistory(requests[0], user)
@@ -265,7 +250,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
 
         state.appendUserMessage(user, tokenCount = 90)
         val persistedTurnId = storage.settings.latestValue().turnId
-        runtime.resume().toList()
+        runtime.resume()
 
         assertEquals(1, compactRequests.size)
         val compactRequest = compactRequests.single()
@@ -396,7 +381,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         )
 
         state.appendUserMessage(user, tokenCount = 1)
-        runtime.resume().toList()
+        runtime.resume()
 
         assertEquals(2, responseRequests.size)
         assertRequestHistory(responseRequests[0], user)
@@ -444,8 +429,8 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         )
 
         state.appendUserMessage(userMessage("What time is it?"))
-        runtime.resume().toList()
-        runtime.resume().toList()
+        runtime.resume()
+        runtime.resume()
 
         assertEquals(1, requests.size)
         assertEquals(KodexAgentStateValue.ToolPending(listOf(pending)), state.state.value)

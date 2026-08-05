@@ -9,10 +9,8 @@ import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
-import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -175,7 +173,10 @@ public interface KodexAgentState : CoroutineScope {
 
     /**
      * Executes exactly one model request from the current state, commits each
-     * completed output item, and returns that request's raw stream events.
+     * completed output item, and returns that request's normal completion
+     * disposition. A stream that ends without a terminal event is resumable;
+     * failed and incomplete responses raise exceptions that preserve available
+     * protocol diagnostics.
      *
      * The implementation passes the settings visible at the request snapshot
      * to its bound context-prefix provider, renders the result, then prepends
@@ -184,17 +185,18 @@ public interface KodexAgentState : CoroutineScope {
      * from fixed Codex tools, current settings, and its dynamic tool-search
      * source.
      *
-     * Collection atomically claims [KodexAgentStateValue.RequestResponse] and
-     * captures one storage snapshot, then releases the write queue during the
-     * remote stream. Each completed output commit and final state recovery
-     * reacquires that queue. Conflicting state transitions are invalid while
-     * the request value remains published; settings writes may proceed and
-     * affect the next request.
+     * The operation atomically claims [KodexAgentStateValue.RequestResponse]
+     * and captures one storage snapshot, then releases the write queue while
+     * it consumes the remote stream. Active output events are published through
+     * that state value's [SharedFlow], not returned from this operation. Each
+     * completed output commit and final state recovery reacquires the queue.
+     * Conflicting state transitions are invalid while the request value remains
+     * published; settings writes may proceed and affect the next request.
      *
      * Automatic compaction and `end_turn == false` continuation belong to
      * AgentRuntime rather than this state-layer operation.
      */
-    public fun requestResponseApi(): Flow<ResponsesStreamEvent>
+    public suspend fun requestResponseApi(): RequestFinish
 
     /**
      * Requests one server-side context compaction using the specified runtime

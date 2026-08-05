@@ -148,7 +148,20 @@ public class OpenAiResponseResultException(
 public class OpenAiResponseStreamFailureException(
     public val error: ResponseError?,
 ) : IllegalStateException(
-    error?.message ?: "OpenAI response stream failed without structured error.",
+    "OpenAI response stream failed " +
+        "(code=${error?.code ?: "unknown"}, " +
+        "type=${error?.type ?: "unknown"}, " +
+        "message=${error?.message ?: "unknown"}).",
+)
+
+/**
+ * Raised when a Responses stream emits `response.incomplete`.
+ */
+public class OpenAiResponseStreamIncompleteException(
+    public val incompleteDetails: IncompleteDetails?,
+) : IllegalStateException(
+    "OpenAI response stream was incomplete " +
+        "(reason=${incompleteDetails?.reason ?: "unknown"}).",
 )
 
 /**

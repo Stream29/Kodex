@@ -5,6 +5,8 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentruntime.decorator.turnhook.turnHookRuntime
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
+import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstate.contract.RequestFinish
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
@@ -67,8 +69,6 @@ import io.github.stream29.kodex.utils.shellclient.ShellSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -116,7 +116,7 @@ val kodexToolRuntimeTest by testSuite {
         val runtime = RequestOnlyRuntime(state)
             .testToolRuntime(mcpService, NoOpToolHooks)
 
-        runtime.resume().toList()
+        runtime.resume()
 
         assertEquals(1, requests.size)
         val toolSearchSpec = assertIs<ToolSpec.ToolSearch>(requests.single().tools.last())
@@ -174,7 +174,7 @@ val kodexToolRuntimeTest by testSuite {
         val runtime = RequestOnlyRuntime(state)
             .testToolRuntime(mcpService, NoOpToolHooks)
 
-        runtime.resume().toList()
+        runtime.resume()
 
         assertEquals(3, requests.size)
         assertEquals(requests.first().tools, requests.last().tools)
@@ -223,10 +223,10 @@ val kodexToolRuntimeTest by testSuite {
             .testToolRuntime(mcpService, NoOpToolHooks)
 
         state.appendUserMessage(listOf(ContentItem.InputText("Use alpha.")))
-        runtime.resume().toList()
+        runtime.resume()
         mcpService.tools.value = listOf(beta)
         state.appendUserMessage(listOf(ContentItem.InputText("Use beta.")))
-        runtime.resume().toList()
+        runtime.resume()
 
         assertEquals(listOf("alpha", "beta"), handledTools)
     }
@@ -268,12 +268,11 @@ val kodexToolRuntimeTest by testSuite {
             mcpService = mcpService,
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Use the tool.")))
-        state.requestResponseApi().toList()
+        state.requestResponseApi()
 
         RequestOnlyRuntime(state)
             .testToolRuntime(mcpService, NoOpToolHooks)
             .resume()
-            .toList()
 
         assertEquals(2, requestCount)
         val history = storage.stableHistoryItems()
@@ -295,6 +294,39 @@ val kodexToolRuntimeTest by testSuite {
                 .single(),
         )
         assertEquals(emptyList(), storage.unstable.latestValue())
+    }
+
+    test("unowned pending calls stop at the state boundary") {
+        val mcpService = TestMcpService()
+        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
+        val state = KodexAgentState(
+            client = mockOpenAiClient {
+                createResponse {
+                    flowOf(
+                        ResponsesStreamEvent.OutputItemDone(
+                            outputIndex = 0,
+                            item = ResponseItem.FunctionCall(
+                                name = "host_only",
+                                arguments = "{}",
+                                callId = "call_host_only",
+                            ),
+                        ),
+                        ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
+                    )
+                }
+            },
+            storage = storage,
+            contextSettings = TestAgentContextSettings,
+            mcpService = mcpService,
+        )
+        state.appendUserMessage(listOf(ContentItem.InputText("Ask the host.")))
+        val runtime = RequestOnlyRuntime(state)
+            .testToolRuntime(mcpService, NoOpToolHooks)
+
+        runtime.resume()
+
+        val pending = assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
+        assertEquals(listOf("call_host_only"), pending.events.map(PendingToolEvent::callId))
     }
 
     test("removed MCP routes complete with an explicit failure") {
@@ -338,7 +370,6 @@ val kodexToolRuntimeTest by testSuite {
         RequestOnlyRuntime(state)
             .testToolRuntime(mcpService, NoOpToolHooks)
             .resume()
-            .toList()
 
         val history = storage.stableHistoryItems()
         val output = assertIs<ResponseItem.McpToolCallOutput>(history[2])
@@ -404,7 +435,7 @@ val kodexToolRuntimeTest by testSuite {
                 logger = TestLogger,
             )
 
-        runtime.resume().toList()
+        assertEquals(Unit, runtime.resume())
 
         assertEquals("mcp__shared__dynamic", hookInvocations.single().toolName)
         assertEquals(JsonPrimitive("before"), (hookInvocations.single().input as JsonObject)["value"])
@@ -478,7 +509,6 @@ val kodexToolRuntimeTest by testSuite {
                 logger = TestLogger,
             )
             .resume()
-            .toList()
 
         assertEquals(0, handlerCalls)
         val output = storage.stableHistoryItems()
@@ -536,7 +566,7 @@ val kodexToolRuntimeTest by testSuite {
                 )
             fixture.state.updateSettings(initialSettings.copy(cwd = updatedRoot))
 
-            runtime.resume().toList()
+            runtime.resume()
 
             assertEquals("apply_patch", invocations.single().toolName)
             assertEquals(emptyList(), invocations.single().matcherAliases)
@@ -557,7 +587,7 @@ val kodexToolRuntimeTest by testSuite {
         }
     }
 
-    test("exec command and write stdin run independent tool hooks") {
+    test("exec command and failed write stdin run independent pre tool hooks") {
         val preInvocations = mutableListOf<HookToolInvocation>()
         val postRequests = mutableListOf<PostToolUseRequest>()
         val hooks = RecordingToolHooks(
@@ -582,14 +612,13 @@ val kodexToolRuntimeTest by testSuite {
         val mcpService = TestMcpService()
         val fixture = testStateWithCalls(mcpService, calls = arrayOf(execCall, writeCall))
 
-        RequestOnlyRuntime(fixture.state)
+        val runtime = RequestOnlyRuntime(fixture.state)
             .testToolRuntime(mcpService, hooks)
             .turnHookRuntime(
                 hooks = NoOpTurnHooks,
                 logger = TestLogger,
             )
-            .resume()
-            .toList()
+        assertEquals(Unit, runtime.resume())
 
         assertEquals(
             listOf("exec_command", "write_stdin"),
@@ -604,7 +633,7 @@ val kodexToolRuntimeTest by testSuite {
             (preInvocations[1].input as JsonObject)["session_id"],
         )
         assertEquals(
-            listOf("call_exec", "call_write"),
+            listOf("call_exec"),
             postRequests.map { request -> request.invocation.toolUseId },
         )
         assertTrue(postRequests.all { request -> request.response is JsonPrimitive })
@@ -622,7 +651,6 @@ val kodexToolRuntimeTest by testSuite {
         RequestOnlyRuntime(fixture.state)
             .testToolRuntime(mcpService, NoOpToolHooks)
             .resume()
-            .toList()
 
         val completed = fixture.state.storage.stable.indexes().toList()
             .map { index -> fixture.state.storage.stable[index] }
@@ -656,7 +684,6 @@ val kodexToolRuntimeTest by testSuite {
         RequestOnlyRuntime(fixture.state)
             .testToolRuntime(mcpService, NoOpToolHooks)
             .resume()
-            .toList()
 
         assertEquals(plan, fixture.state.storage.settings.latestValue().plan)
         val completed = fixture.state.storage.stable.indexes().toList()
@@ -692,7 +719,6 @@ val kodexToolRuntimeTest by testSuite {
         RequestOnlyRuntime(fixture.state)
             .testToolRuntime(mcpService, NoOpToolHooks)
             .resume()
-            .toList()
 
         assertEquals(originalPlan, fixture.state.storage.settings.latestValue().plan)
         val completed = fixture.state.storage.stable.indexes().toList()
@@ -759,8 +785,14 @@ private class ToolRuntimeTestContext(
 private class RequestOnlyRuntime(
     private val delegate: KodexAgentStateContract,
 ) : ResumableAgentLayer, KodexAgentStateContract by delegate {
-    override fun resume(): Flow<ResponsesStreamEvent> = flow {
-        emitAll(requestResponseApi())
+    override suspend fun resume() {
+        while (true) {
+            if (state.value is KodexAgentStateValue.ToolPending) return
+            when (requestResponseApi()) {
+                RequestFinish.Resumable -> Unit
+                RequestFinish.Finish -> return
+            }
+        }
     }
 }
 

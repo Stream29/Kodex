@@ -57,7 +57,7 @@ val hostedWebSearchTest by testSuite {
         )
 
         agent.appendUserMessage(listOf(ContentItem.InputText("Find current weather.")))
-        agent.requestResponseApi().toList()
+        agent.requestResponseApi()
 
         assertEquals(1, requests.size)
         assertEquals(StableCleanEvent.WebSearchCall(webSearchCall), storage.stable[2])

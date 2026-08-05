@@ -78,7 +78,7 @@ public class AgentAutomaticTitleConfiguration(
 /**
  * Owns only frontend projection state for one open Agent runtime.
  *
- * It owns collection of [io.github.stream29.kodex.agentruntime.contract.AgentRuntime.resume]
+ * It invokes [io.github.stream29.kodex.agentruntime.contract.AgentRuntime.resume]
  * only for UI-originated turns. The runtime remains the owner of state transitions, tool routing,
  * continuations, and mutual exclusion. Completed output is read through [latestIndex] by the
  * session/history projection. The history renderer directly subscribes to
@@ -162,7 +162,7 @@ public class AgentRuntimeViewModel internal constructor(
     /** Starts or continues this Agent's runtime. Runtime-level concurrency checks remain authoritative. */
     public fun resume(): Job = scope.launch {
         clearFailure()
-        session.runtime.resume().collect()
+        session.runtime.resume()
     }
 
     /** Cancels this Agent's active runtime turn when one exists. */

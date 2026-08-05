@@ -16,7 +16,6 @@ import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
-import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.client.OpenAiClient as RealOpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiClientConfig
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliHookSourceKind
@@ -127,8 +126,7 @@ private suspend fun runFreshSessionHookIntegration() {
 
         val prompt = "Reply with exactly $HookIntegrationMarker and no other text."
         runtime.appendUserMessage(listOf(ContentItem.InputText(prompt)))
-        val events = runtime.resume().toList()
-        assertTrue(events.any { event -> event is ResponsesStreamEvent.Completed })
+        runtime.resume()
         assertIs<KodexAgentStateValue.AssistantMessage>(runtime.state.value)
 
         val requests = readHookRequests(hookLog)
