@@ -135,6 +135,42 @@ val tuiPressableTest by testSuite {
             assertEquals(1, forkCount)
         }
     }
+
+    test("secondary pointer and Shift F10 invoke only the secondary callback") {
+        var primaryCount by mutableStateOf(0)
+        var secondaryCount by mutableStateOf(0)
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Box {
+                    Row {
+                        TuiButton(
+                            label = "Session",
+                            onSecondaryClick = { secondaryCount++ },
+                            onClick = { primaryCount++ },
+                        )
+                        Text(" $primaryCount/$secondaryCount")
+                    }
+                }
+            }
+
+            sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Press, MouseEvent.Button.Right))
+            sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Release))
+            awaitSnapshotAfter("secondary pointer release")
+            assertEquals(0, primaryCount)
+            assertEquals(1, secondaryCount)
+
+            sendKeyEvent(
+                KeyboardEvent(
+                    codepoint = KeyboardEvent.F10,
+                    modifiers = KeyboardEvent.ModifierShift,
+                ),
+            )
+            awaitSnapshotAfter("Shift F10")
+            assertEquals(0, primaryCount)
+            assertEquals(2, secondaryCount)
+        }
+    }
 }
 
 private suspend fun TestMosaic<String>.awaitSnapshotAfter(stage: String): String = try {

@@ -3,6 +3,7 @@ package io.github.stream29.kodex.cli.app
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import com.jakewharton.mosaic.layout.background
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
@@ -11,6 +12,7 @@ import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
+import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 
@@ -19,8 +21,8 @@ import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 internal fun SessionTabBar(
     tabs: List<SessionTabViewState>,
     columns: Int,
-    tabMenuAnchor: TuiPopupAnchor,
     onSelectTab: (SessionTabTarget) -> Unit,
+    onOpenTabMenu: (SessionTabTarget, String, TuiPopupAnchor) -> Unit,
     onCreateNewSession: () -> Unit,
     onOpenSessions: () -> Unit,
 ) {
@@ -37,12 +39,14 @@ internal fun SessionTabBar(
         Text(" ")
         visible.forEachIndexed { index, entry ->
             if (index != 0) Text(" ")
-            SessionTab(
-                entry = entry,
-                maximumLabelColumns = tabLabelColumns(entry, tabColumns, visible.size),
-                tabMenuAnchor = tabMenuAnchor,
-                onClick = { onSelectTab(entry.target) },
-            )
+            key(entry.target) {
+                SessionTab(
+                    entry = entry,
+                    maximumLabelColumns = tabLabelColumns(entry, tabColumns, visible.size),
+                    onClick = { onSelectTab(entry.target) },
+                    onOpenMenu = onOpenTabMenu,
+                )
+            }
         }
         if (visible.isNotEmpty()) Text(" ")
         TuiButton(
@@ -58,18 +62,20 @@ internal fun SessionTabBar(
 private fun SessionTab(
     entry: SessionTabViewState,
     maximumLabelColumns: Int,
-    tabMenuAnchor: TuiPopupAnchor,
     onClick: () -> Unit,
+    onOpenMenu: (SessionTabTarget, String, TuiPopupAnchor) -> Unit,
 ) {
     val sessionTarget = when (val target = entry.target) {
         is SessionTabTarget.NewSession -> {
+            val sessionName = entry.newSessionName
+                ?: if (target.ordinal == 1) "New session" else "New session ${target.ordinal}"
             SessionTabButton(
                 entry = entry,
-                label = entry.newSessionName
-                    ?: if (target.ordinal == 1) "New session" else "New session ${target.ordinal}",
+                sessionName = sessionName,
+                label = sessionName,
                 maximumLabelColumns = maximumLabelColumns,
-                tabMenuAnchor = tabMenuAnchor,
                 onClick = onClick,
+                onOpenMenu = onOpenMenu,
             )
             return
         }
@@ -82,40 +88,45 @@ private fun SessionTab(
     if (root == null) {
         SessionTabButton(
             entry = entry,
+            sessionName = "Session ${sessionTarget.sessionIndex}",
             label = "Session ${sessionTarget.sessionIndex}",
             maximumLabelColumns = maximumLabelColumns,
-            tabMenuAnchor = tabMenuAnchor,
             onClick = onClick,
+            onOpenMenu = onOpenMenu,
         )
         return
     }
     val rootState by root.viewModel.state.collectAsState()
-    val label = rootState.durable.settings?.threadName
+    val sessionName = rootState.durable.settings?.threadName
         ?.takeIf(String::isNotBlank)
         ?: "Session ${sessionTarget.sessionIndex}"
     SessionTabButton(
         entry = entry,
-        label = if (rootState.running) "$label *" else label,
+        sessionName = sessionName,
+        label = if (rootState.running) "$sessionName *" else sessionName,
         maximumLabelColumns = maximumLabelColumns,
-        tabMenuAnchor = tabMenuAnchor,
         onClick = onClick,
+        onOpenMenu = onOpenMenu,
     )
 }
 
 @Composable
 private fun SessionTabButton(
     entry: SessionTabViewState,
+    sessionName: String,
     label: String,
     maximumLabelColumns: Int,
-    tabMenuAnchor: TuiPopupAnchor,
     onClick: () -> Unit,
+    onOpenMenu: (SessionTabTarget, String, TuiPopupAnchor) -> Unit,
 ) {
+    val tabMenuAnchor = rememberTuiPopupAnchor()
     TuiButton(
         label = label.ellipsizeToTerminalWidth(maximumLabelColumns),
         modifier = Modifier
             .background(if (entry.selected) SessionButtonBackground else SessionTopBarBackground)
-            .then(if (entry.selected) Modifier.tuiPopupAnchor(tabMenuAnchor) else Modifier),
+            .tuiPopupAnchor(tabMenuAnchor),
         color = SessionForeground,
+        onSecondaryClick = { onOpenMenu(entry.target, sessionName, tabMenuAnchor) },
         onClick = onClick,
     )
 }
