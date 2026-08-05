@@ -130,9 +130,10 @@ public val KodexAgentStateValue.canCompact: Boolean
  * Implementations commit each storage transition before publishing its next
  * stable [state]. They publish [KodexAgentStorage.tokenCount] only when OpenAI reports it.
  *
- * Every operation that may change this state or its storage shares one fair
- * per-instance write queue. Preconditions are checked only after an operation
- * reaches the front of that queue.
+ * Every operation admission and storage commit shares one fair per-instance
+ * write queue. A model request retains logical ownership through its published
+ * [KodexAgentStateValue.RequestResponse] value while releasing that queue
+ * between storage commits.
  */
 public interface KodexAgentState : CoroutineScope {
     /**
@@ -182,6 +183,13 @@ public interface KodexAgentState : CoroutineScope {
      * compaction history. It also derives the complete model-visible tool list
      * from fixed Codex tools, current settings, and its dynamic tool-search
      * source.
+     *
+     * Collection atomically claims [KodexAgentStateValue.RequestResponse] and
+     * captures one storage snapshot, then releases the write queue during the
+     * remote stream. Each completed output commit and final state recovery
+     * reacquires that queue. Conflicting state transitions are invalid while
+     * the request value remains published; settings writes may proceed and
+     * affect the next request.
      *
      * Automatic compaction and `end_turn == false` continuation belong to
      * AgentRuntime rather than this state-layer operation.

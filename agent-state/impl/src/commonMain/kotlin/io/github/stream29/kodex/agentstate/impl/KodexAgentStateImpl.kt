@@ -139,10 +139,8 @@ private class KodexAgentStateImpl(
         }
 
     override fun requestResponseApi(): Flow<ResponsesStreamEvent> = flow {
-        mutate(
-            validate = KodexAgentStateValue::requireCanRequestResponseApi,
-            inFlight = KodexAgentStateValue.RequestResponse.Started,
-        ) {
+        val snapshotIndex = startRequestResponse()
+        try {
             var streamingOutput: StreamingOutput? = null
 
             suspend fun acceptResponseEvent(event: ResponsesStreamEvent) {
@@ -164,9 +162,6 @@ private class KodexAgentStateImpl(
                     state.value = KodexAgentStateValue.RequestResponse.Started
                 }
             }
-
-            val snapshotIndex = storage.latestIndex()
-            check(snapshotIndex >= 0) { "Cannot request a response without initial state." }
 
             val settings = storage.settings[snapshotIndex]
             val durableInput = storage.modelInputAt(snapshotIndex)
@@ -209,14 +204,18 @@ private class KodexAgentStateImpl(
                     is ResponsesStreamEvent.OutputItemDone -> {
                         val historyItem = event.item as? ResponseItem.HistoryItem
                         if (historyItem != null) {
-                            appendResponseHistoryItem(historyItem, now())
+                            writeResponseResult {
+                                appendResponseHistoryItem(historyItem, now())
+                            }
                         }
                     }
 
                     is ResponsesStreamEvent.Completed -> {
-                        storage.requireNoPendingServerToolSearch()
-                        event.response.usage?.totalTokens?.let { tokenCount ->
-                            appendTimestampAndTokenCount(tokenCount)
+                        writeResponseResult {
+                            storage.requireNoPendingServerToolSearch()
+                            event.response.usage?.totalTokens?.let { tokenCount ->
+                                appendTimestampAndTokenCount(tokenCount)
+                            }
                         }
                     }
 
@@ -228,6 +227,8 @@ private class KodexAgentStateImpl(
                 }
                 emit(event)
             }
+        } finally {
+            finishRequestResponse()
         }
     }.buffer(Channel.UNLIMITED)
 
@@ -506,6 +507,38 @@ private class KodexAgentStateImpl(
             mutableEvents.emit(event)
         }
 
+    }
+
+    private suspend fun startRequestResponse(): Int =
+        writeMutex.withLock {
+            val currentState = state.value
+            if (!currentState.isStable) {
+                throw KodexAgentStateInvalidTransitionException("start an atomic operation", currentState)
+            }
+            currentState.requireCanRequestResponseApi()
+            val snapshotIndex = storage.latestIndex()
+            check(snapshotIndex >= 0) { "Cannot request a response without initial state." }
+            state.value = KodexAgentStateValue.RequestResponse.Started
+            snapshotIndex
+        }
+
+    private suspend inline fun <T> writeResponseResult(block: () -> T): T =
+        writeMutex.withLock {
+            val currentState = state.value
+            if (currentState !is KodexAgentStateValue.RequestResponse) {
+                throw KodexAgentStateInvalidTransitionException("write a response result", currentState)
+            }
+            block()
+        }
+
+    private suspend fun finishRequestResponse() {
+        withContext(NonCancellable) {
+            writeMutex.withLock {
+                val index = storage.latestIndex()
+                latestIndex.value = index
+                state.value = storage.stateAt(index)
+            }
+        }
     }
 
     private suspend inline fun <T> mutate(
