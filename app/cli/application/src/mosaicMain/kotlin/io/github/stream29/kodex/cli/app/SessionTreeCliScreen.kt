@@ -223,6 +223,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                                     modeDropdown = modeDropdown,
                                     onCancel = {},
                                     onClearPending = {},
+                                    onResume = {},
                                     showFork = false,
                                     forkEnabled = false,
                                     onFork = {},
@@ -250,6 +251,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                                     modeDropdown = modeDropdown,
                                     onCancel = { selectedAgent.viewModel.cancel() },
                                     onClearPending = { selectedAgent.viewModel.clearPending() },
+                                    onResume = { selectedAgent.viewModel.resume() },
                                     showFork = true,
                                     forkEnabled = forkEnabled,
                                     onFork = { scope.launch { runCatching { viewModel.forkSelectedSession() } } },
@@ -677,6 +679,7 @@ private fun SessionTreeStatusBar(
     modeDropdown: TuiDropdownState,
     onCancel: () -> Unit,
     onClearPending: () -> Unit,
+    onResume: () -> Unit,
     showFork: Boolean,
     forkEnabled: Boolean,
     onFork: () -> Unit,
@@ -689,15 +692,13 @@ private fun SessionTreeStatusBar(
     val mode = settings?.collaborationMode ?: newSessionSettings.mode
     Row(modifier = Modifier.width((columns - 1).coerceAtLeast(1))) {
         agentState?.durable?.tokenCount?.let { tokenCount -> Text("${tokenCount}t ") }
-        if (agentState?.running == true) {
-            TuiButton(label = "Stop", onClick = onCancel)
-            Text(" ")
-        }
-        if (
-            agentState?.running != true &&
-            agentState?.agentState is KodexAgentStateValue.ToolPending
-        ) {
-            TuiButton(label = "Clear pending", onClick = onClearPending)
+        agentState?.runtimeControl()?.let { control ->
+            when (control) {
+                AgentRuntimeControl.Stop -> TuiButton(label = "Stop", onClick = onCancel)
+                AgentRuntimeControl.ClearPending ->
+                    TuiButton(label = "Clear pending", onClick = onClearPending)
+                AgentRuntimeControl.Resume -> TuiButton(label = "Resume", onClick = onResume)
+            }
             Text(" ")
         }
         TuiDropdownTrigger(
@@ -740,6 +741,18 @@ private fun SessionTreeStatusBar(
         notice?.let { failure -> Text(" [notice] $failure") }
         agentState?.failureMessage?.let { failure -> Text(" [error] $failure") }
     }
+}
+
+internal enum class AgentRuntimeControl {
+    Stop,
+    ClearPending,
+    Resume,
+}
+
+internal fun AgentRuntimeViewState.runtimeControl(): AgentRuntimeControl = when {
+    running -> AgentRuntimeControl.Stop
+    agentState is KodexAgentStateValue.ToolPending -> AgentRuntimeControl.ClearPending
+    else -> AgentRuntimeControl.Resume
 }
 
 @Composable
