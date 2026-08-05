@@ -143,6 +143,32 @@ class CleanEventViewTest {
     }
 
     @Test
+    fun commandToolSummaryEllipsizesByTerminalWidth() = runTest {
+        val event = StableCommandExecutionToolEvent(
+            callId = "command",
+            action = StableCommandExecutionAction.ExecCommand(
+                ExecCommandArguments(command = "A你B".repeat(30)),
+            ),
+            result = StableCommandExecutionResult.Output(
+                UnifiedExecOutput(
+                    chunkId = "chunk",
+                    wallTimeSeconds = 0.1,
+                    exitCode = 0,
+                    originalTokenCount = 1,
+                    output = "",
+                ),
+            ),
+        )
+
+        runMosaicTest {
+            val collapsed = setContentAndSnapshot {
+                Box(Modifier.width(140)) { event.render() }
+            }
+            assertEquals("> Run command: ${"A你B".repeat(23)}A...", collapsed)
+        }
+    }
+
+    @Test
     fun runningCommandReflectsItsLiveProcessCompletion() = runTest {
         val session = TestUnifiedExecProcessSession(
             sessionId = 7,

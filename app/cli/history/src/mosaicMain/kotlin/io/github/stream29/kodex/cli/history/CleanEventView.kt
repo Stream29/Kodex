@@ -62,6 +62,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolSea
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.cli.components.TuiPressable
+import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.cli.patch.PendingPatchToolEventView
 import io.github.stream29.kodex.cli.patch.StablePatchToolEventView
 import io.github.stream29.kodex.openai.AgentMessageInputContent
@@ -1539,11 +1540,7 @@ private fun String.semanticExcerpt(): String {
         .map { line -> line.trim() }
         .filter(String::isNotEmpty)
         .joinToString(" ")
-    return if (singleLine.length <= MaximumSemanticSummaryLength) {
-        singleLine
-    } else {
-        singleLine.take(MaximumSemanticSummaryLength - Ellipsis.length) + Ellipsis
-    }
+    return singleLine.ellipsizeToTerminalWidth(MaximumSemanticSummaryColumns)
 }
 
 private fun String.displayStdin(): String =
@@ -1606,5 +1603,5 @@ private fun String.safeMediaReference(): String = when {
 
 private const val MaximumInlineReferenceLength: Int = 160
 private const val MaximumInlineJsonLength: Int = 512
-private const val MaximumSemanticSummaryLength: Int = 96
+private const val MaximumSemanticSummaryColumns: Int = 96
 private const val Ellipsis: String = "..."
