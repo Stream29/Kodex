@@ -22,7 +22,10 @@ import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.history.AgentHistoryView
+import io.github.stream29.kodex.cli.newsession.NewSessionViewModel
+import io.github.stream29.kodex.cli.newsession.NewSessionViewState
 import io.github.stream29.kodex.cli.session.AgentRuntimeTreeEntry
+import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
@@ -32,12 +35,16 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun AgentRuntimeScreen(
     agent: AgentRuntimeTreeEntry,
+    runtimeState: AgentRuntimeViewState,
     columns: Int,
     rows: Int,
     newLineKey: NewLineKey,
-    statusBar: @Composable (AgentRuntimeViewState) -> Unit,
+    fallbackSettings: KodexNewSessionSettings,
+    dropdowns: RuntimeConfigurationDropdowns,
+    forkEnabled: Boolean,
+    onFork: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
-    val runtimeState by agent.viewModel.state.collectAsState()
     val requestUserInputState by agent.viewModel.requestUserInput.state.collectAsState()
     val pendingSteer by agent.viewModel.session.runtime.pendingSteer.collectAsState()
     val composer = rememberComposerInputState(agent.viewModel.composer)
@@ -106,19 +113,55 @@ internal fun AgentRuntimeScreen(
                 agent.viewModel.composer.update(value.text, value.cursorOffset)
             },
         )
-        statusBar(runtimeState)
+        AgentRuntimeStatusBar(
+            columns = columns,
+            viewModel = agent.viewModel,
+            state = runtimeState,
+            fallbackSettings = fallbackSettings,
+            dropdowns = dropdowns,
+            forkEnabled = forkEnabled,
+            onFork = onFork,
+            onOpenSettings = onOpenSettings,
+        )
     }
 }
 
 /** The only non-runtime content surface, shown before the first root Agent exists. */
 @Composable
 internal fun NewSessionScreen(
+    viewModel: NewSessionViewModel,
+    state: NewSessionViewState,
+    columns: Int,
+    rows: Int,
+    newLineKey: NewLineKey,
+    dropdowns: RuntimeConfigurationDropdowns,
+    onSubmit: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    Column(modifier = Modifier.width(columns).height(rows)) {
+        NewSessionContent(
+            composerViewModel = viewModel.composer,
+            columns = columns,
+            rows = (rows - RuntimeStatusRows).coerceAtLeast(0),
+            newLineKey = newLineKey,
+            onSubmit = onSubmit,
+        )
+        NewSessionStatusBar(
+            columns = columns,
+            state = state,
+            dropdowns = dropdowns,
+            onOpenSettings = onOpenSettings,
+        )
+    }
+}
+
+@Composable
+internal fun NewSessionContent(
     composerViewModel: ComposerViewModel,
     columns: Int,
     rows: Int,
     newLineKey: NewLineKey,
     onSubmit: () -> Unit,
-    statusBar: @Composable () -> Unit,
 ) {
     val composer = rememberComposerInputState(composerViewModel)
     val composerLayout = TextInputLayout.create(
@@ -127,7 +170,7 @@ internal fun NewSessionScreen(
         firstLinePrefix = "> ",
         continuationLinePrefix = "  ",
     )
-    val historyRows = (rows - HistoryComposerSeparatorRows - composerLayout.rowCount - RuntimeStatusRows)
+    val historyRows = (rows - HistoryComposerSeparatorRows - composerLayout.rowCount)
         .coerceAtLeast(0)
 
     Column(modifier = Modifier.width(columns).height(rows)) {
@@ -149,7 +192,6 @@ internal fun NewSessionScreen(
                 composerViewModel.update(value.text, value.cursorOffset)
             },
         )
-        statusBar()
     }
 }
 

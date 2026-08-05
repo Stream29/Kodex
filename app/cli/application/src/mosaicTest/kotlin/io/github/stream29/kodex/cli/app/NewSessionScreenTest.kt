@@ -34,10 +34,10 @@ class NewSessionScreenTest {
                 var showNewSession by remember { mutableStateOf(true) }
                 val screenScope = rememberCoroutineScope()
                 if (showNewSession) {
-                    NewSessionScreen(
+                    NewSessionContent(
                         composerViewModel = composer,
                         columns = 80,
-                        rows = 24,
+                        rows = 23,
                         newLineKey = NewLineKey.ShiftEnter,
                         onSubmit = {
                             screenScope.launch {
@@ -46,7 +46,6 @@ class NewSessionScreenTest {
                                 submitted.complete(composer.takeText())
                             }
                         },
-                        statusBar = {},
                     )
                 } else {
                     Text("Root session")

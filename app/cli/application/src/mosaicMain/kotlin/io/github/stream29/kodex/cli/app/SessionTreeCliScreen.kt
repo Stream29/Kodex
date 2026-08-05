@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -26,6 +27,7 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
+import io.github.stream29.kodex.cli.agent.AgentRuntimeViewModel
 import io.github.stream29.kodex.cli.agent.AgentRuntimeViewState
 import io.github.stream29.kodex.cli.agent.label
 import io.github.stream29.kodex.cli.agent.toRenderState
@@ -41,7 +43,6 @@ import io.github.stream29.kodex.cli.components.items
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.TuiPopupMenu
 import io.github.stream29.kodex.cli.components.TuiPopupMenuItem
-import io.github.stream29.kodex.cli.components.TuiPopupSubmenuItem
 import io.github.stream29.kodex.cli.components.TextInput
 import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
@@ -65,7 +66,6 @@ import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.cli.settings.SubmitKey
 import io.github.stream29.kodex.cli.sessiontitle.DefaultSessionTitleModel
-import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.openai.ModeKind
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -89,7 +89,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     val activeNewSession = viewModel.activeNewSession()
     val activeNewSessionState = collectNewSessionState(activeNewSession)
     val globalSettings = applicationState.globalSettings
-    val agentState by (selectedAgent?.viewModel?.state ?: rememberEmptyAgentState()).collectAsState()
+    val agentState = collectAgentState(selectedAgent?.viewModel)
     val scope = rememberCoroutineScope()
     // Keep the final column and row unused. This matches the terminal-safe bounds used by the
     // existing Mosaic screen and avoids a trailing cursor movement scrolling the frame.
@@ -104,9 +104,9 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     )
     val contentColumns = (columns - sidebarColumns).coerceAtLeast(1)
     val contentRows = (rows - SessionTabBarRows).coerceAtLeast(0)
-    val modelDropdown = rememberTuiDropdownState()
-    val tierDropdown = rememberTuiDropdownState()
-    val modeDropdown = rememberTuiDropdownState()
+    val runtimeDropdowns = RuntimeConfigurationDropdowns.remember(
+        owner = selectedAgent?.viewModel ?: activeNewSession,
+    )
     var browserOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var settingsRoute by remember { mutableStateOf(SettingsRoute.Global) }
@@ -134,10 +134,6 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
         )
         .distinct()
     val activeSettings = agentState?.durable?.settings
-    val selectedModel = activeSettings?.model ?: newSessionSettings.model
-    val selectedReasoning = activeSettings?.reasoning?.effort ?: newSessionSettings.reasoningEffort
-    val selectedTier = activeSettings?.serviceTier ?: newSessionSettings.serviceTier
-    val selectedMode = activeSettings?.collaborationMode ?: newSessionSettings.mode
     val selectedRoot = selectedTree?.agents?.firstOrNull { entry -> entry.agentId == selectedTree.rootAgentId }
     val activeSessionName = selectedRoot?.viewModel?.state?.value?.durable?.settings?.threadName
         ?.takeIf(String::isNotBlank)
@@ -204,62 +200,39 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                         val newSessionTarget = requireNotNull(
                             applicationState.activeTab as? SessionTabTarget.NewSession,
                         )
+                        val newSessionState = requireNotNull(activeNewSessionState)
                         NewSessionScreen(
-                            composerViewModel = activeNewSession.composer,
+                            viewModel = activeNewSession,
+                            state = newSessionState,
                             columns = contentColumns,
                             rows = contentRows,
                             newLineKey = globalSettings.newLineKey,
+                            dropdowns = runtimeDropdowns,
                             onSubmit = {
                                 scope.launch { viewModel.submitNewSessionComposer(newSessionTarget) }
                             },
-                            statusBar = {
-                                SessionTreeStatusBar(
-                                    columns = contentColumns,
-                                    agentState = null,
-                                    newSessionSettings = newSessionSettings,
-                                    notice = activeNewSessionState?.failureMessage,
-                                    modelDropdown = modelDropdown,
-                                    tierDropdown = tierDropdown,
-                                    modeDropdown = modeDropdown,
-                                    onCancel = {},
-                                    onClearPending = {},
-                                    onResume = {},
-                                    showFork = false,
-                                    forkEnabled = false,
-                                    onFork = {},
-                                    onOpenSettings = {
-                                        settingsRoute = SettingsRoute.Global
-                                        settingsOpen = true
-                                    },
-                                )
+                            onOpenSettings = {
+                                settingsRoute = SettingsRoute.Global
+                                settingsOpen = true
                             },
                         )
                     } else if (selectedAgent != null) {
+                        val runtimeState = requireNotNull(agentState)
                         AgentRuntimeScreen(
                             agent = selectedAgent,
+                            runtimeState = runtimeState,
                             columns = contentColumns,
                             rows = contentRows,
                             newLineKey = globalSettings.newLineKey,
-                            statusBar = { runtimeState ->
-                                SessionTreeStatusBar(
-                                    columns = contentColumns,
-                                    agentState = runtimeState,
-                                    newSessionSettings = globalSettings.newSession,
-                                    notice = null,
-                                    modelDropdown = modelDropdown,
-                                    tierDropdown = tierDropdown,
-                                    modeDropdown = modeDropdown,
-                                    onCancel = { selectedAgent.viewModel.cancel() },
-                                    onClearPending = { selectedAgent.viewModel.clearPending() },
-                                    onResume = { selectedAgent.viewModel.resume() },
-                                    showFork = true,
-                                    forkEnabled = forkEnabled,
-                                    onFork = { scope.launch { runCatching { viewModel.forkSelectedSession() } } },
-                                    onOpenSettings = {
-                                        settingsRoute = SettingsRoute.Global
-                                        settingsOpen = true
-                                    },
-                                )
+                            fallbackSettings = globalSettings.newSession,
+                            dropdowns = runtimeDropdowns,
+                            forkEnabled = forkEnabled,
+                            onFork = {
+                                scope.launch { runCatching { viewModel.forkSelectedSession() } }
+                            },
+                            onOpenSettings = {
+                                settingsRoute = SettingsRoute.Global
+                                settingsOpen = true
                             },
                         )
                     } else {
@@ -290,105 +263,24 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                     }) { Text("Close session") }
                 }
             }
-            TuiDropdownMenu(
-                dropdownState = modelDropdown,
-                backgroundColor = PopupMenuBackground,
-            ) {
-                    modelOptions.forEach { model ->
-                        val efforts = applicationState.models
-                            .firstOrNull { info -> info.slug == model }
-                            ?.supportedReasoningLevels
-                            ?.map { preset -> preset.effort }
-                            .orEmpty()
-                            .ifEmpty { listOf(selectedReasoning) }
-                        if (efforts.size == 1) {
-                            val effort = efforts.single()
-                            TuiPopupMenuItem(key = model, selected = model == selectedModel, onClick = {
-                                scope.launch {
-                                    when {
-                                        selectedAgent != null -> selectedAgent.viewModel.updateSettings { current ->
-                                            current.copy(model = model, reasoning = current.reasoning.copy(effort = effort))
-                                        }
-
-                                        activeNewSession != null -> viewModel.updateNewSessionSettings { current ->
-                                            current.copy(model = model, reasoningEffort = effort)
-                                        }
-                                    }
-                                }
-                            }) { Text(model.value) }
-                        } else {
-                            TuiPopupSubmenuItem(
-                                key = model,
-                                selected = model == selectedModel,
-                                initialSubmenuFocusedKey = selectedReasoning,
-                                submenuContent = {
-                                    efforts.forEach { effort ->
-                                        TuiPopupMenuItem(
-                                            key = effort,
-                                            selected = model == selectedModel && effort == selectedReasoning,
-                                            onClick = {
-                                                scope.launch {
-                                                    when {
-                                                        selectedAgent != null -> selectedAgent.viewModel.updateSettings { current ->
-                                                            current.copy(
-                                                                model = model,
-                                                                reasoning = current.reasoning.copy(effort = effort),
-                                                            )
-                                                        }
-
-                                                        activeNewSession != null -> viewModel.updateNewSessionSettings { current ->
-                                                            current.copy(model = model, reasoningEffort = effort)
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                        ) { Text(effort.displayName()) }
-                                    }
-                                },
-                            ) { Text(model.value) }
-                        }
-                    }
+            if (selectedAgent != null && agentState != null) {
+                AgentRuntimeStatusMenus(
+                    viewModel = selectedAgent.viewModel,
+                    state = agentState,
+                    fallbackSettings = globalSettings.newSession,
+                    models = applicationState.models,
+                    modelOptions = modelOptions,
+                    dropdowns = runtimeDropdowns,
+                )
+            } else if (activeNewSession != null && activeNewSessionState != null) {
+                NewSessionStatusMenus(
+                    viewModel = activeNewSession,
+                    state = activeNewSessionState,
+                    models = applicationState.models,
+                    modelOptions = modelOptions,
+                    dropdowns = runtimeDropdowns,
+                )
             }
-            TuiDropdownMenu(
-                dropdownState = tierDropdown,
-                options = ServiceTier.entries.toList(),
-                selected = selectedTier,
-                optionLabel = ServiceTier::displayName,
-                backgroundColor = PopupMenuBackground,
-                onSelect = { tier ->
-                    scope.launch {
-                        when {
-                            selectedAgent != null -> selectedAgent.viewModel.updateSettings { current ->
-                                current.copy(serviceTier = tier)
-                            }
-
-                            activeNewSession != null -> viewModel.updateNewSessionSettings { current ->
-                                current.copy(serviceTier = tier)
-                            }
-                        }
-                    }
-                },
-            )
-            TuiDropdownMenu(
-                dropdownState = modeDropdown,
-                options = ModeKind.entries.toList(),
-                selected = selectedMode,
-                optionLabel = { mode -> "${mode.displayName()} mode" },
-                backgroundColor = PopupMenuBackground,
-                onSelect = { mode ->
-                    scope.launch {
-                        when {
-                            selectedAgent != null -> selectedAgent.viewModel.updateSettings { current ->
-                                current.copy(collaborationMode = mode)
-                            }
-
-                            activeNewSession != null -> viewModel.updateNewSessionSettings { current ->
-                                current.copy(mode = mode)
-                            }
-                        }
-                    }
-                },
-            )
             if (browserOpen) {
                 SessionTreeBrowserDialog(
                     viewModel = viewModel,
@@ -465,7 +357,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                             settings = settings,
                             models = modelOptions,
                             dropdowns = settingsDropdowns,
-                            enabled = agentState?.running != true,
+                            enabled = !agentState.running,
                             onUpdate = { transform ->
                                 scope.launch { selectedAgent?.viewModel?.updateSettings(transform) }
                             },
@@ -516,8 +408,19 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
 @Composable
 private fun collectNewSessionState(viewModel: NewSessionViewModel?): NewSessionViewState? {
     if (viewModel == null) return null
-    val state by viewModel.state.collectAsState()
-    return state
+    return key(viewModel) {
+        val state by viewModel.state.collectAsState()
+        state
+    }
+}
+
+@Composable
+private fun collectAgentState(viewModel: AgentRuntimeViewModel?): AgentRuntimeViewState? {
+    if (viewModel == null) return null
+    return key(viewModel) {
+        val state by viewModel.state.collectAsState()
+        state
+    }
 }
 
 @Composable
@@ -562,6 +465,8 @@ private fun SessionAgentSidebar(
                     LazyColumn(modifier = Modifier.width(columns).height((rows - 2).coerceAtLeast(0))) {
                         items(visibleAgents, key = { it.agentId }) { agent ->
                             val agentState by agent.viewModel.state.collectAsState()
+                            val activeShellSessions by
+                                agent.viewModel.session.runtime.unifiedExecToolClient.activeSessions.collectAsState()
                             val background = if (agent.selected) {
                                 SettingsDialogSelectionBackground
                             } else {
@@ -614,7 +519,7 @@ private fun SessionAgentSidebar(
                                         " ".repeat(
                                             agent.depth * SessionTreeIndentColumns +
                                                 SessionTreeDisclosureColumns,
-                                        ) + agentState.toRenderState().label()
+                                        ) + agentState.toRenderState().label(activeShellSessions.size)
                                     ).ellipsizeToTerminalWidth(columns),
                                     modifier = Modifier.fillMaxWidth().background(background),
                                     color = SettingsDialogForeground,
@@ -666,93 +571,6 @@ internal fun RootSessionViewState.agentTreeNodeLabel(
     } else {
         label.substringAfterLast('/').ifBlank { label }
     }
-}
-
-@Composable
-private fun SessionTreeStatusBar(
-    columns: Int,
-    agentState: AgentRuntimeViewState?,
-    newSessionSettings: KodexNewSessionSettings,
-    notice: String?,
-    modelDropdown: TuiDropdownState,
-    tierDropdown: TuiDropdownState,
-    modeDropdown: TuiDropdownState,
-    onCancel: () -> Unit,
-    onClearPending: () -> Unit,
-    onResume: () -> Unit,
-    showFork: Boolean,
-    forkEnabled: Boolean,
-    onFork: () -> Unit,
-    onOpenSettings: () -> Unit,
-) {
-    val settings = agentState?.durable?.settings
-    val model = settings?.model ?: newSessionSettings.model
-    val reasoning = settings?.reasoning?.effort ?: newSessionSettings.reasoningEffort
-    val tier = settings?.serviceTier ?: newSessionSettings.serviceTier
-    val mode = settings?.collaborationMode ?: newSessionSettings.mode
-    Row(modifier = Modifier.width((columns - 1).coerceAtLeast(1))) {
-        agentState?.durable?.tokenCount?.let { tokenCount -> Text("${tokenCount}t ") }
-        agentState?.runtimeControl()?.let { control ->
-            when (control) {
-                AgentRuntimeControl.Stop -> TuiButton(label = "Stop", onClick = onCancel)
-                AgentRuntimeControl.ClearPending ->
-                    TuiButton(label = "Clear pending", onClick = onClearPending)
-                AgentRuntimeControl.Resume -> TuiButton(label = "Resume", onClick = onResume)
-            }
-            Text(" ")
-        }
-        TuiDropdownTrigger(
-            dropdownState = modelDropdown,
-            label = "${model.value} ${reasoning.displayName()}",
-            modifier = Modifier.background(SessionButtonBackground),
-            color = SessionForeground,
-        )
-        Text(" ")
-        TuiDropdownTrigger(
-            dropdownState = tierDropdown,
-            label = "tier: ${tier.displayName()}",
-            modifier = Modifier.background(SessionButtonBackground),
-            color = SessionForeground,
-        )
-        Text(" ")
-        TuiDropdownTrigger(
-            dropdownState = modeDropdown,
-            label = "${mode.displayName()} mode",
-            modifier = Modifier.background(SessionButtonBackground),
-            color = SessionForeground,
-        )
-        Text(" ")
-        TuiButton(
-            label = "Settings",
-            modifier = Modifier.background(SessionButtonBackground),
-            color = SessionForeground,
-            onClick = onOpenSettings,
-        )
-        if (showFork) {
-            Text(" ")
-            TuiButton(
-                label = "Fork",
-                enabled = forkEnabled,
-                modifier = Modifier.background(SessionButtonBackground),
-                color = SessionForeground,
-                onClick = onFork,
-            )
-        }
-        notice?.let { failure -> Text(" [notice] $failure") }
-        agentState?.failureMessage?.let { failure -> Text(" [error] $failure") }
-    }
-}
-
-internal enum class AgentRuntimeControl {
-    Stop,
-    ClearPending,
-    Resume,
-}
-
-internal fun AgentRuntimeViewState.runtimeControl(): AgentRuntimeControl = when {
-    running -> AgentRuntimeControl.Stop
-    agentState is KodexAgentStateValue.ToolPending -> AgentRuntimeControl.ClearPending
-    else -> AgentRuntimeControl.Resume
 }
 
 @Composable
@@ -985,7 +803,7 @@ private fun BoxScope.RenameSessionDialog(
 @Composable
 private fun BoxScope.GlobalSettingsDialog(
     state: KodexGlobalSettings,
-    agent: io.github.stream29.kodex.cli.agent.AgentRuntimeViewModel?,
+    agent: AgentRuntimeViewModel?,
     agentState: AgentRuntimeViewState?,
     models: List<OpenAiModelId>,
     route: SettingsRoute,
@@ -1465,11 +1283,6 @@ private fun SubmitKey.dialogLabel(): String = when (this) {
 private fun KodexAuthSource.dialogLabel(): String = when (this) {
     KodexAuthSource.Codex -> "Codex"
     KodexAuthSource.Kodex -> "Kodex"
-}
-
-@Composable
-private fun rememberEmptyAgentState() = remember {
-    kotlinx.coroutines.flow.MutableStateFlow<AgentRuntimeViewState?>(null)
 }
 
 private val knownReasoningEfforts: List<ReasoningEffort> = listOf(
