@@ -232,6 +232,22 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             repository.closeAndJoin()
         }
 
+        test("retries when another repository claims its next root slot") { root ->
+            val staleRepository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            val competingRepository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+
+            assertEquals(0, competingRepository.create())
+            assertEquals(1, staleRepository.create())
+            assertEquals(listOf(1), staleRepository.entries.value)
+
+            staleRepository.closeAndJoin()
+            competingRepository.closeAndJoin()
+
+            val reopened = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            assertEquals(listOf(0, 1), reopened.entries.value)
+            reopened.closeAndJoin()
+        }
+
         test("a root lease excludes another repository until shutdown") { root ->
             val first = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
             val second = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())

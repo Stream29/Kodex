@@ -12,8 +12,9 @@ import com.jakewharton.mosaic.ui.TextStyle
  * Compact bracketed command surface with terminal-native interaction feedback.
  *
  * Focus is represented by the terminal cursor, hover uses bold text, a held primary-pointer press
- * uses inverse video, and a disabled button is dim. Enter, Space, and pointer activation all
- * converge on the same command.
+ * uses inverse video, and a disabled button is dim. Enter, Space, and primary-pointer activation
+ * converge on the same command. [onSecondaryClick] optionally handles the secondary pointer button
+ * and Shift+F10.
  */
 @Composable
 public fun TuiButton(
@@ -24,6 +25,7 @@ public fun TuiButton(
     focusRequester: FocusRequester? = null,
     onKeyEvent: ((KeyEvent) -> Boolean)? = null,
     autoFocus: Boolean = false,
+    onSecondaryClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     TuiPressable(
@@ -33,6 +35,7 @@ public fun TuiButton(
         focusRequester = focusRequester,
         onKeyEvent = onKeyEvent,
         autoFocus = autoFocus,
+        onSecondaryClick = onSecondaryClick,
     ) { _, isHovered, isPressed ->
         val textStyle = when {
             isPressed -> TextStyle.Invert

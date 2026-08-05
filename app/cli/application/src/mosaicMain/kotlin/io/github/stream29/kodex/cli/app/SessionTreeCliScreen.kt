@@ -47,7 +47,7 @@ import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
-import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
+import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.session.RootSessionEntry
 import io.github.stream29.kodex.cli.session.AgentRuntimeTreeEntry
 import io.github.stream29.kodex.cli.session.RootSessionViewState
@@ -107,7 +107,6 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     val modelDropdown = rememberTuiDropdownState()
     val tierDropdown = rememberTuiDropdownState()
     val modeDropdown = rememberTuiDropdownState()
-    val tabMenuAnchor = rememberTuiPopupAnchor()
     var browserOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var settingsRoute by remember { mutableStateOf(SettingsRoute.Global) }
@@ -119,7 +118,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
         serviceTier = rememberTuiDropdownState(),
         mode = rememberTuiDropdownState(),
     )
-    var tabMenuTarget by remember { mutableStateOf<SessionTabTarget?>(null) }
+    var tabMenuRequest by remember { mutableStateOf<SessionTabMenuRequest?>(null) }
     var renameSessionRequest by remember { mutableStateOf<RenameSessionRequest?>(null) }
     var deleteSessionRequest by remember { mutableStateOf<RootSessionEntry?>(null) }
     val newSessionDefaults = globalSettings.newSession
@@ -160,9 +159,10 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                 .error { "Agent runtime operation failed for ${failureAgentState.agentId}\n$stackTrace" }
         }
     }
-    LaunchedEffect(applicationState.activeTab) {
-        if (tabMenuTarget != applicationState.activeTab) tabMenuTarget = null
-        if (renameSessionRequest?.target != applicationState.activeTab) renameSessionRequest = null
+    val openTabTargets = applicationState.tabs.map(SessionTabViewState::target)
+    LaunchedEffect(openTabTargets) {
+        tabMenuRequest = tabMenuRequest?.takeIf { request -> request.target in openTabTargets }
+        renameSessionRequest = renameSessionRequest?.takeIf { request -> request.target in openTabTargets }
     }
 
     Box(modifier = Modifier.width(columns).height(rows)) {
@@ -171,14 +171,18 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                 SessionTabBar(
                     tabs = applicationState.tabs,
                     columns = columns,
-                    tabMenuAnchor = tabMenuAnchor,
                     onSelectTab = { target ->
-                        if (target == applicationState.activeTab) {
-                            tabMenuTarget = target
-                        } else {
-                            tabMenuTarget = null
+                        tabMenuRequest = null
+                        if (target != applicationState.activeTab) {
                             scope.launch { viewModel.selectTab(target) }
                         }
+                    },
+                    onOpenTabMenu = { target, initialName, anchor ->
+                        tabMenuRequest = SessionTabMenuRequest(
+                            target = target,
+                            initialName = initialName,
+                            anchor = anchor,
+                        )
                     },
                     onCreateNewSession = { scope.launch { viewModel.createNewSessionTab() } },
                     onOpenSessions = {
@@ -263,24 +267,24 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                     }
                 }
             }
-            val openTabMenuTarget = tabMenuTarget
-            if (openTabMenuTarget != null && openTabMenuTarget == applicationState.activeTab) {
+            val openTabMenuRequest = tabMenuRequest
+            if (openTabMenuRequest != null) {
                 TuiPopupMenu(
                     expanded = true,
-                    anchor = tabMenuAnchor,
-                    onDismissRequest = { tabMenuTarget = null },
+                    anchor = openTabMenuRequest.anchor,
+                    onDismissRequest = { tabMenuRequest = null },
                     backgroundColor = PopupMenuBackground,
                 ) {
                     TuiPopupMenuItem(key = "rename-session", onClick = {
-                        tabMenuTarget = null
+                        tabMenuRequest = null
                         renameSessionRequest = RenameSessionRequest(
-                            target = openTabMenuTarget,
-                            initialName = activeSessionName,
+                            target = openTabMenuRequest.target,
+                            initialName = openTabMenuRequest.initialName,
                         )
                     }) { Text("Rename") }
                     TuiPopupMenuItem(key = "close-tab", onClick = {
-                        tabMenuTarget = null
-                        scope.launch { viewModel.closeTab(openTabMenuTarget) }
+                        tabMenuRequest = null
+                        scope.launch { viewModel.closeTab(openTabMenuRequest.target) }
                     }) { Text("Close session") }
                 }
             }
@@ -898,6 +902,12 @@ private const val SessionBrowserDialogRows: Int = 2
 private const val SessionBrowserDeleteLabel: String = "Delete"
 private const val SessionBrowserListHorizontalPaddingColumns: Int = 2
 private const val SessionBrowserItemGapColumns: Int = 1
+private data class SessionTabMenuRequest(
+    val target: SessionTabTarget,
+    val initialName: String,
+    val anchor: TuiPopupAnchor,
+)
+
 private data class RenameSessionRequest(
     val target: SessionTabTarget,
     val initialName: String,

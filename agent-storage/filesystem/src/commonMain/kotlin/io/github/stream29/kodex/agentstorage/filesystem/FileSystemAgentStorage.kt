@@ -100,12 +100,17 @@ internal val TimelineDirectories: List<String> = listOf(
 /** Directory names that make up one filesystem AgentStorage. */
 public val FileSystemAgentStorageTimelineDirectories: List<String> = TimelineDirectories
 
-/** Creates the uninitialized storage directory backing a freshly spawned AgentSession. */
+/**
+ * Creates the uninitialized storage directory backing a freshly spawned AgentSession.
+ *
+ * Set [mustCreateDirectory] to `false` only when the caller has already reserved [directory].
+ */
 public suspend fun FileSystemAgentStorage.Companion.ofEmpty(
     directory: Path,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    mustCreateDirectory: Boolean = true,
 ): FileSystemAgentStorage {
-    fileSystem.createDirectories(directory, mustCreate = true)
+    fileSystem.createDirectories(directory, mustCreate = mustCreateDirectory)
     TimelineDirectories.forEach { name ->
         fileSystem.createDirectories(Path(directory, name), mustCreate = true)
     }

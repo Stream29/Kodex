@@ -29,7 +29,8 @@ import com.jakewharton.mosaic.ui.unit.IntSize
  *
  * [content] receives the current focus, hover, and press state so it can render an appropriate
  * treatment. Focus selection, pointer focus, traversal, and cursor ownership are provided by the
- * Mosaic runtime.
+ * Mosaic runtime. An optional secondary action is available from the secondary pointer button or
+ * Shift+F10 without changing focus.
  */
 @Composable
 public fun TuiPressable(
@@ -39,6 +40,7 @@ public fun TuiPressable(
     focusRequester: FocusRequester? = null,
     onKeyEvent: ((KeyEvent) -> Boolean)? = null,
     autoFocus: Boolean = false,
+    onSecondaryClick: (() -> Unit)? = null,
     content: @Composable (isFocused: Boolean, isHovered: Boolean, isPressed: Boolean) -> Unit,
 ) {
     if (!enabled) {
@@ -51,6 +53,7 @@ public fun TuiPressable(
     val interaction = remember { TuiPressableInteraction() }
     var isFocused by remember { mutableStateOf(false) }
     val latestOnClick = rememberUpdatedState(onClick)
+    val latestOnSecondaryClick = rememberUpdatedState(onSecondaryClick)
     val latestOnKeyEvent = rememberUpdatedState(onKeyEvent)
     val requesterModifier = if (focusRequester == null) {
         Modifier
@@ -67,6 +70,11 @@ public fun TuiPressable(
             .onKeyEvent { event ->
                 when {
                     latestOnKeyEvent.value?.invoke(event) == true -> true
+                    event == SecondaryClick && latestOnSecondaryClick.value != null -> {
+                        latestOnSecondaryClick.value?.invoke()
+                        true
+                    }
+
                     event == Enter || event == Space -> {
                         latestOnClick.value()
                         true
@@ -85,24 +93,45 @@ public fun TuiPressable(
             .onPointerEvent { event ->
                 when (event.type) {
                     MouseEvent.Type.Press -> {
-                        if (event.button != MouseEvent.Button.Left) return@onPointerEvent false
-                        interaction.pointerDown = true
-                        interaction.pressed = true
-                        true
+                        when (event.button) {
+                            MouseEvent.Button.Left -> {
+                                interaction.pointerButton = MouseEvent.Button.Left
+                                interaction.pressed = true
+                                true
+                            }
+
+                            MouseEvent.Button.Right -> {
+                                if (latestOnSecondaryClick.value == null) return@onPointerEvent false
+                                interaction.pointerButton = MouseEvent.Button.Right
+                                interaction.pressed = false
+                                true
+                            }
+
+                            else -> false
+                        }
                     }
 
                     MouseEvent.Type.Drag -> {
-                        if (!interaction.pointerDown) return@onPointerEvent false
-                        interaction.pressed = interaction.contains(event.position)
+                        if (interaction.pointerButton == MouseEvent.Button.None) return@onPointerEvent false
+                        if (interaction.pointerButton == MouseEvent.Button.Left) {
+                            interaction.pressed = interaction.contains(event.position)
+                        }
                         true
                     }
 
                     MouseEvent.Type.Release -> {
-                        if (!interaction.pointerDown) return@onPointerEvent false
+                        val pointerButton = interaction.pointerButton
+                        if (pointerButton == MouseEvent.Button.None) return@onPointerEvent false
                         val shouldClick = interaction.contains(event.position)
-                        interaction.pointerDown = false
+                        interaction.pointerButton = MouseEvent.Button.None
                         interaction.pressed = false
-                        if (shouldClick) latestOnClick.value()
+                        if (shouldClick) {
+                            when (pointerButton) {
+                                MouseEvent.Button.Left -> latestOnClick.value()
+                                MouseEvent.Button.Right -> latestOnSecondaryClick.value?.invoke()
+                                else -> Unit
+                            }
+                        }
                         true
                     }
 
@@ -120,7 +149,7 @@ private class TuiPressableInteraction {
 
     var pressed: Boolean by mutableStateOf(false)
 
-    var pointerDown: Boolean = false
+    var pointerButton: MouseEvent.Button = MouseEvent.Button.None
 
     var size: IntSize = IntSize(0, 0)
 
@@ -130,3 +159,4 @@ private class TuiPressableInteraction {
 
 private val Enter: KeyEvent = KeyEvent("Enter")
 private val Space: KeyEvent = KeyEvent(" ")
+private val SecondaryClick: KeyEvent = KeyEvent("F10", shift = true)

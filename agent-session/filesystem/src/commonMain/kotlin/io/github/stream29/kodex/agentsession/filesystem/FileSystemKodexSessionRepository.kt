@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.io.IOException
 import kotlinx.io.files.Path
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -62,12 +63,31 @@ public class FileSystemKodexSessionRepository internal constructor(
 
     override suspend fun create(): Int = entriesMutex.withLock {
         requireOpen()
-        val index = smallestMissing(entries.value)
-        val directory = sessionDirectory(index)
-        FileSystemAgentStorage.ofEmpty(directory, fileSystem)
+        val (index, directory) = reserveSessionDirectory()
+        FileSystemAgentStorage.ofEmpty(
+            directory = directory,
+            fileSystem = fileSystem,
+            mustCreateDirectory = false,
+        )
         fileSystem.createDirectories(Path(directory, SubagentsDirectory), mustCreate = true)
         mutableEntries.value = (entries.value + index).sorted()
         index
+    }
+
+    private suspend fun reserveSessionDirectory(): Pair<Int, Path> {
+        val unavailable = entries.value.toMutableSet()
+        while (true) {
+            val index = smallestMissing(unavailable.toList())
+            val directory = sessionDirectory(index)
+            try {
+                fileSystem.createDirectories(directory, mustCreate = true)
+            } catch (failure: IOException) {
+                if (fileSystem.metadataOrNull(directory)?.isDirectory != true) throw failure
+                unavailable += index
+                continue
+            }
+            return index to directory
+        }
     }
 
     override suspend fun open(
