@@ -16,17 +16,3 @@ public fun AgentRuntimeRenderState.label(): String = when (this) {
     AgentRuntimeRenderState.Compacting -> "Compacting context"
     AgentRuntimeRenderState.ExternalWrite -> "Saving"
 }
-
-/** Adds orthogonal resource activity without redefining the Agent's primary execution state. */
-public fun AgentRuntimeRenderState.label(activeShellSessionCount: Int): String {
-    val shellActivity = activeShellSessionLabel(activeShellSessionCount) ?: return label()
-    return "${label()} · $shellActivity"
-}
-
-/** Compact terminal wording for Unified Exec sessions that remain in the active registry. */
-public fun activeShellSessionLabel(count: Int): String? {
-    require(count >= 0) { "Active shell session count cannot be negative." }
-    if (count == 0) return null
-    val suffix = if (count == 1) "shell session" else "shell sessions"
-    return "$count $suffix"
-}

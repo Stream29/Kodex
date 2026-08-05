@@ -10,6 +10,7 @@ kotlin {
             implementation(project(":mcp-streamable-http"))
             implementation(libs.mcp.kotlin.sdk.client)
             implementation(project(":utils-coroutines"))
+            implementation(project(":utils-logging"))
             implementation(project(":utils-process-client"))
             implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.coroutines.core)

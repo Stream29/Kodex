@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.oshai.kotlinlogging.KLogger
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentsession.filesystem.FileSystemKodexSessionRepository
 import io.github.stream29.kodex.cli.auth.KodexAuthStore
@@ -23,6 +25,7 @@ import io.github.stream29.kodex.cli.sessiontitle.OpenAiSessionTitleGenerator
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.utils.kodexhome.KodexHome
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import io.github.stream29.kodex.utils.logging.global
 import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
@@ -55,6 +58,7 @@ public class KodexApplication private constructor(
         authStore.close()
         applicationScope.cancel()
         dependencyGraph.close()
+        ApplicationLogger.info { "Application closed." }
     }
 
     public override fun close() {
@@ -66,6 +70,7 @@ public class KodexApplication private constructor(
         authStore.close()
         applicationScope.cancel()
         dependencyGraph.close()
+        ApplicationLogger.info { "Application closed." }
     }
 
     public companion object {
@@ -231,7 +236,9 @@ public class KodexApplication private constructor(
                 applicationScope = applicationScope,
                 sessionViewModel = sessionViewModel,
                 globalSettings = globalSettings,
-            )
+            ).also {
+                ApplicationLogger.info { "Application opened." }
+            }
         }
     }
 }
@@ -241,3 +248,7 @@ private fun configuredCodexHome(): Path =
         ?.takeIf(String::isNotBlank)
         ?.let(::Path)
         ?: Path(requireUserHomeDirectory(), ".codex")
+
+private val ApplicationLogger: KLogger by lazy {
+    KotlinLogging.logger {}.global()
+}

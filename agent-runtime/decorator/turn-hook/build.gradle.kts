@@ -7,10 +7,10 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-runtime-contract"))
             api(project(":hook-contract"))
+            api(libs.kotlin.logging)
             implementation(project(":agent-context-prompt-dsl"))
             implementation(project(":agent-storage-contract"))
             implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlin.logging)
         }
         commonTest.dependencies {
             implementation(project(":agent-runtime-decorator-compact"))

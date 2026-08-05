@@ -32,7 +32,9 @@ kotlin {
             implementation(project(":tool-view-image-impl"))
             implementation(project(":tool-web-run"))
             implementation(project(":utils-kodex-home"))
+            implementation(project(":utils-logging"))
             implementation(project(":utils-shell-client"))
+            implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.io.core)
         }

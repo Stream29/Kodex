@@ -9,9 +9,11 @@ kotlin {
             api(project(":hook-contract"))
             api(project(":tool-contract"))
             api(project(":tool-tool-search-impl"))
+            api(libs.kotlin.logging)
             api(libs.kotlinx.coroutines.core)
             implementation(project(":hook-tool-utils"))
             implementation(project(":openai-json-codec"))
+            implementation(project(":utils-logging"))
             implementation(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {

@@ -11,7 +11,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertSame
 
 public val scopedLoggingTest by testSuite {
-    test("derives an inherited context payload for every scope") {
+    test("derives inherited context payload for every scope") {
         val factory = RecordingLoggerFactory()
         val global = factory.logger("runtime").global()
         val session = global.session("session-1")

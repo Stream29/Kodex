@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.tool.unifiedexec
 
 import de.infix.testBalloon.framework.core.TestConfig
+import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 
@@ -478,6 +479,43 @@ val unifiedExecToolsTest by testSuite {
             } catch (_: UnifiedExecToolException) {
                 // Expected: cancellation removes the session entry.
             }
+        } finally {
+            client.close()
+        }
+    }
+}
+
+val unifiedExecSessionControlIoTest by testSuite(
+    compartment = { TestCompartment.RealTime },
+) {
+    test("closing an observable session terminates it and preserves its final read") {
+        val client = testUnifiedExecToolClient()
+        try {
+            val initial = client.execCommand(
+                ExecCommandArguments(
+                    command = delayedExecCommand,
+                    shell = unifiedExecTestShell,
+                    yieldTimeMillis = 0,
+                ),
+            )
+            val sessionId = assertNotNull(initial.sessionId)
+            val session = assertNotNull(client.activeSessions.value[sessionId])
+
+            session.close()
+
+            withTimeout(5.seconds) {
+                session.completed.first { completed -> completed }
+            }
+            assertSame(session, client.activeSessions.value[sessionId])
+
+            val final = client.writeStdin(
+                WriteStdinArguments(
+                    sessionId = sessionId,
+                    yieldTimeMillis = 0,
+                ),
+            )
+            assertNotNull(final.exitCode)
+            assertFalse(sessionId in client.activeSessions.value)
         } finally {
             client.close()
         }

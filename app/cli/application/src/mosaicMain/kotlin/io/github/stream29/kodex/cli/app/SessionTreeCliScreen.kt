@@ -17,7 +17,6 @@ import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.layout.fillMaxHeight
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.IntrinsicSize
-import com.jakewharton.mosaic.layout.onPointerHover
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.BoxScope
@@ -29,10 +28,7 @@ import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.cli.agent.AgentRuntimeViewModel
 import io.github.stream29.kodex.cli.agent.AgentRuntimeViewState
-import io.github.stream29.kodex.cli.agent.label
-import io.github.stream29.kodex.cli.agent.toRenderState
 import io.github.stream29.kodex.cli.components.TuiButton
-import io.github.stream29.kodex.cli.components.TuiPressable
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.LazyColumn
 import io.github.stream29.kodex.cli.components.LazyListState
@@ -50,8 +46,6 @@ import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.session.RootSessionEntry
-import io.github.stream29.kodex.cli.session.AgentRuntimeTreeEntry
-import io.github.stream29.kodex.cli.session.RootSessionViewState
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.newsession.NewSessionViewModel
 import io.github.stream29.kodex.cli.newsession.NewSessionViewState
@@ -70,6 +64,9 @@ import io.github.stream29.kodex.openai.ModeKind
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ServiceTier
+import io.github.stream29.kodex.utils.logging.agent
+import io.github.stream29.kodex.utils.logging.global
+import io.github.stream29.kodex.utils.logging.session
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -97,7 +94,8 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     val rows = (terminal.size.rows - 1).coerceAtLeast(1)
     var sidebarPinnedExpanded by remember { mutableStateOf(false) }
     var sidebarHovered by remember { mutableStateOf(false) }
-    val sidebarExpanded = sidebarPinnedExpanded || sidebarHovered
+    var shellSessionMenuRequest by remember { mutableStateOf<ShellSessionMenuRequest?>(null) }
+    val sidebarExpanded = sidebarPinnedExpanded || sidebarHovered || shellSessionMenuRequest != null
     val sidebarColumns by animateIntAsState(
         targetValue = if (sidebarExpanded) SessionSidebarExpandedColumns else SessionSidebarCollapsedColumns,
         label = "agent sidebar width",
@@ -149,9 +147,17 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
         selectedRoot?.viewModel?.state?.value?.let { state -> !state.running && state.latestIndex >= 0 } == true
 
     val failureAgentState = agentState
-    LaunchedEffect(failureAgentState?.failureStackTrace) {
+    val failureSessionId = selectedTree?.rootAgentId
+    LaunchedEffect(failureSessionId, failureAgentState?.failureStackTrace) {
         failureAgentState?.failureStackTrace?.let { stackTrace ->
-            KotlinLogging.logger {}
+            val failureLogger = failureSessionId
+                ?.let { sessionId ->
+                    SessionTreeLogger
+                        .session(sessionId)
+                        .agent(failureAgentState.agentId)
+                }
+                ?: SessionTreeLogger
+            failureLogger
                 .error { "Agent runtime operation failed for ${failureAgentState.agentId}\n$stackTrace" }
         }
     }
@@ -159,6 +165,9 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     LaunchedEffect(openTabTargets) {
         tabMenuRequest = tabMenuRequest?.takeIf { request -> request.target in openTabTargets }
         renameSessionRequest = renameSessionRequest?.takeIf { request -> request.target in openTabTargets }
+    }
+    LaunchedEffect(selectedAgent?.viewModel) {
+        shellSessionMenuRequest = null
     }
 
     Box(modifier = Modifier.width(columns).height(rows)) {
@@ -169,11 +178,13 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                     columns = columns,
                     onSelectTab = { target ->
                         tabMenuRequest = null
+                        shellSessionMenuRequest = null
                         if (target != applicationState.activeTab) {
                             scope.launch { viewModel.selectTab(target) }
                         }
                     },
                     onOpenTabMenu = { target, initialName, anchor ->
+                        shellSessionMenuRequest = null
                         tabMenuRequest = SessionTabMenuRequest(
                             target = target,
                             initialName = initialName,
@@ -194,7 +205,14 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                         rows = contentRows,
                         onHoverChanged = { sidebarHovered = it },
                         onToggleExpanded = { sidebarPinnedExpanded = !sidebarPinnedExpanded },
-                        onSelectAgent = viewModel::selectAgent,
+                        onSelectAgent = { agentId ->
+                            shellSessionMenuRequest = null
+                            viewModel.selectAgent(agentId)
+                        },
+                        onOpenShellSessionMenu = { request ->
+                            tabMenuRequest = null
+                            shellSessionMenuRequest = request
+                        },
                     )
                     if (activeNewSession != null) {
                         val newSessionTarget = requireNotNull(
@@ -263,6 +281,10 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                     }) { Text("Close session") }
                 }
             }
+            ShellSessionContextMenu(
+                request = shellSessionMenuRequest,
+                onDismissRequest = { shellSessionMenuRequest = null },
+            )
             if (selectedAgent != null && agentState != null) {
                 AgentRuntimeStatusMenus(
                     viewModel = selectedAgent.viewModel,
@@ -405,6 +427,10 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     }
 }
 
+private val SessionTreeLogger by lazy {
+    KotlinLogging.logger {}.global()
+}
+
 @Composable
 private fun collectNewSessionState(viewModel: NewSessionViewModel?): NewSessionViewState? {
     if (viewModel == null) return null
@@ -420,156 +446,6 @@ private fun collectAgentState(viewModel: AgentRuntimeViewModel?): AgentRuntimeVi
     return key(viewModel) {
         val state by viewModel.state.collectAsState()
         state
-    }
-}
-
-@Composable
-private fun SessionAgentSidebar(
-    tree: RootSessionViewState?,
-    expanded: Boolean,
-    columns: Int,
-    rows: Int,
-    onHoverChanged: (Boolean) -> Unit,
-    onToggleExpanded: () -> Unit,
-    onSelectAgent: (String) -> Unit,
-) {
-    var expandedAgentIds by remember(tree?.rootAgentId) {
-        mutableStateOf(tree?.rootAgentId?.let(::setOf).orEmpty())
-    }
-    val visibleAgents = tree?.visibleAgentTreeEntries(expandedAgentIds).orEmpty()
-    val agentsWithChildren = remember(tree?.agents) {
-        tree?.agents?.mapNotNull(AgentRuntimeTreeEntry::parentAgentId)?.toSet().orEmpty()
-    }
-    Column(
-        modifier = Modifier
-            .width(columns)
-            .height(rows)
-            .background(SettingsDialogNavigationBackground)
-            .onPointerHover(
-                onPointerEnter = { onHoverChanged(true) },
-                onPointerExit = { onHoverChanged(false) },
-            ),
-    ) {
-        if (expanded) {
-            TuiButton(
-                label = "←",
-                modifier = Modifier.fillMaxWidth().background(SettingsDialogHeaderBackground),
-                color = SettingsDialogForeground,
-                onClick = onToggleExpanded,
-            )
-            Text("Agent tree", color = SettingsDialogForeground)
-            Box(modifier = Modifier.width(columns).height((rows - 2).coerceAtLeast(0))) {
-                if (visibleAgents.isEmpty()) {
-                    Text("No agents", color = SettingsDialogForeground)
-                } else {
-                    LazyColumn(modifier = Modifier.width(columns).height((rows - 2).coerceAtLeast(0))) {
-                        items(visibleAgents, key = { it.agentId }) { agent ->
-                            val agentState by agent.viewModel.state.collectAsState()
-                            val activeShellSessions by
-                                agent.viewModel.session.runtime.unifiedExecToolClient.activeSessions.collectAsState()
-                            val background = if (agent.selected) {
-                                SettingsDialogSelectionBackground
-                            } else {
-                                SettingsDialogNavigationBackground
-                            }
-                            val hasChildren = agent.agentId in agentsWithChildren
-                            val nodeLabel = tree?.agentTreeNodeLabel(
-                                agent = agent,
-                                threadName = agentState.durable.settings?.threadName,
-                            ) ?: agent.agentId
-                            val label = buildString {
-                                append(nodeLabel)
-                                if (agentState.running) append(" *")
-                            }.ellipsizeToTerminalWidth(
-                                (
-                                    columns -
-                                        agent.depth * SessionTreeIndentColumns -
-                                        SessionTreeDisclosureColumns -
-                                        SessionTreeNodeButtonBorderColumns
-                                ).coerceAtLeast(1),
-                            )
-                            Column(modifier = Modifier.fillMaxWidth().background(background)) {
-                                Row(modifier = Modifier.fillMaxWidth().background(background)) {
-                                    Text(" ".repeat(agent.depth * SessionTreeIndentColumns))
-                                    if (hasChildren) {
-                                        TuiButton(
-                                            label = if (agent.agentId in expandedAgentIds) "▼" else "▶",
-                                            modifier = Modifier.background(background),
-                                            color = SettingsDialogForeground,
-                                            onClick = {
-                                                expandedAgentIds = if (agent.agentId in expandedAgentIds) {
-                                                    expandedAgentIds - agent.agentId
-                                                } else {
-                                                    expandedAgentIds + agent.agentId
-                                                }
-                                            },
-                                        )
-                                    } else {
-                                        Text(" ".repeat(SessionTreeDisclosureColumns))
-                                    }
-                                    TuiButton(
-                                        label = label,
-                                        modifier = Modifier.weight(1f).background(background),
-                                        color = SettingsDialogForeground,
-                                        onClick = { onSelectAgent(agent.agentId) },
-                                    )
-                                }
-                                Text(
-                                    value = (
-                                        " ".repeat(
-                                            agent.depth * SessionTreeIndentColumns +
-                                                SessionTreeDisclosureColumns,
-                                        ) + agentState.toRenderState().label(activeShellSessions.size)
-                                    ).ellipsizeToTerminalWidth(columns),
-                                    modifier = Modifier.fillMaxWidth().background(background),
-                                    color = SettingsDialogForeground,
-                                    textStyle = TextStyle.Dim,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            TuiPressable(
-                onClick = onToggleExpanded,
-                modifier = Modifier.fillMaxWidth().background(SettingsDialogHeaderBackground),
-            ) { _, isHovered, _ ->
-                Text(
-                    value = "→",
-                    color = SettingsDialogForeground,
-                    textStyle = if (isHovered) TextStyle.Bold else TextStyle.Unspecified,
-                )
-            }
-        }
-    }
-}
-
-internal fun RootSessionViewState.visibleAgentTreeEntries(
-    expandedAgentIds: Set<String>,
-): List<AgentRuntimeTreeEntry> {
-    val agentsById = agents.associateBy(AgentRuntimeTreeEntry::agentId)
-    return agents.filter { agent ->
-        val visited = mutableSetOf<String>()
-        var parentAgentId = agent.parentAgentId
-        while (parentAgentId != null) {
-            if (!visited.add(parentAgentId) || parentAgentId !in expandedAgentIds) return@filter false
-            val parent = agentsById[parentAgentId] ?: return@filter false
-            parentAgentId = parent.parentAgentId
-        }
-        true
-    }
-}
-
-internal fun RootSessionViewState.agentTreeNodeLabel(
-    agent: AgentRuntimeTreeEntry,
-    threadName: String?,
-): String {
-    val label = threadName?.takeIf(String::isNotBlank) ?: agent.agentId
-    return if (agent.agentId == rootAgentId) {
-        label
-    } else {
-        label.substringAfterLast('/').ifBlank { label }
     }
 }
 
@@ -1296,9 +1172,4 @@ private val knownReasoningEfforts: List<ReasoningEffort> = listOf(
     ReasoningEffort.Ultra,
 )
 
-private const val SessionSidebarExpandedColumns: Int = 28
-private const val SessionSidebarCollapsedColumns: Int = 1
-private const val SessionTreeIndentColumns: Int = 2
-private const val SessionTreeDisclosureColumns: Int = 3
-private const val SessionTreeNodeButtonBorderColumns: Int = 2
 private const val SessionTabBarRows: Int = 1

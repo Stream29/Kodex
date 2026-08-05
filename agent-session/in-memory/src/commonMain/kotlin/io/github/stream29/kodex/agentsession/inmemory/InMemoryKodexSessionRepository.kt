@@ -31,6 +31,7 @@ private typealias AgentRuntimeBuilder = (
     KodexAgentStateContract,
     KodexAgentDependencies,
     AgentPathResolver,
+    String,
 ) -> AgentRuntime
 
 /** Process-local recursive session repository for tests and transient hosts. */
@@ -120,6 +121,7 @@ public class InMemoryKodexSessionRepository internal constructor(
         node: SessionNode,
         scope: CoroutineScope,
         dependencies: KodexAgentDependencies,
+        sessionId: String,
         override val storage: MutableKodexAgentStorage,
         state: KodexAgentStateContract,
         createAgentPathResolver: (KodexAgentSession) -> AgentPathResolver,
@@ -132,10 +134,12 @@ public class InMemoryKodexSessionRepository internal constructor(
             children = node.children,
             scope = scope.supervisorChildScope(),
             dependencies = dependencies,
+            sessionId = sessionId,
             agentPathResolver = agentPathResolver,
         )
 
-        override val runtime: AgentRuntime = runtimeBuilder(state, dependencies, agentPathResolver)
+        override val runtime: AgentRuntime =
+            runtimeBuilder(state, dependencies, agentPathResolver, sessionId)
 
         companion object {
             suspend fun openRoot(
@@ -150,6 +154,7 @@ public class InMemoryKodexSessionRepository internal constructor(
                         node = node,
                         scope = scope,
                         dependencies = dependencies,
+                        sessionId = storage.id,
                         storage = storage,
                         state = scope.KodexAgentState(
                             client = dependencies.client,
@@ -160,7 +165,7 @@ public class InMemoryKodexSessionRepository internal constructor(
                         createAgentPathResolver = { rootSession ->
                             AgentPathResolverImpl(rootSession)
                         },
-                        runtimeBuilder = { state, dependencies, agentPathResolver ->
+                        runtimeBuilder = { state, dependencies, agentPathResolver, _ ->
                             state.buildMasterAgentRuntime(dependencies, agentPathResolver)
                         },
                     )
@@ -174,6 +179,7 @@ public class InMemoryKodexSessionRepository internal constructor(
                 node: SessionNode,
                 parentScope: CoroutineScope,
                 dependencies: KodexAgentDependencies,
+                sessionId: String,
                 agentPathResolver: AgentPathResolver,
             ): InMemoryKodexAgentSession {
                 val scope = parentScope.supervisorChildScope()
@@ -183,6 +189,7 @@ public class InMemoryKodexSessionRepository internal constructor(
                         node = node,
                         scope = scope,
                         dependencies = dependencies,
+                        sessionId = sessionId,
                         storage = storage,
                         state = scope.KodexAgentState(
                             client = dependencies.client,
@@ -191,8 +198,8 @@ public class InMemoryKodexSessionRepository internal constructor(
                             mcpService = dependencies.mcpService,
                         ),
                         createAgentPathResolver = { agentPathResolver },
-                        runtimeBuilder = { state, dependencies, agentPathResolver ->
-                            state.buildSubagentRuntime(dependencies, agentPathResolver)
+                        runtimeBuilder = { state, dependencies, agentPathResolver, sessionId ->
+                            state.buildSubagentRuntime(dependencies, agentPathResolver, sessionId)
                         },
                     )
                 } catch (failure: Throwable) {
@@ -207,6 +214,7 @@ public class InMemoryKodexSessionRepository internal constructor(
         private val children: MutableMap<Int, SessionNode>,
         scope: CoroutineScope,
         private val dependencies: KodexAgentDependencies,
+        private val sessionId: String,
         private val agentPathResolver: AgentPathResolver,
     ) : KodexSessionRepository, CoroutineScope by scope {
         private val entriesMutex: Mutex = Mutex()
@@ -255,6 +263,7 @@ public class InMemoryKodexSessionRepository internal constructor(
                 node = node,
                 parentScope = this@InMemorySubagentRepository,
                 dependencies = dependencies,
+                sessionId = sessionId,
                 agentPathResolver = agentPathResolver,
             ).also { session ->
                 openSessions[entryIndex] = session

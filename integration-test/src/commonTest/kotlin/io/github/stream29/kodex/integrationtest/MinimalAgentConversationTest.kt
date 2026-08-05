@@ -3,7 +3,7 @@ package io.github.stream29.kodex.integrationtest
 import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
-
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.decorator.compact.compactionRuntime
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
@@ -405,7 +405,10 @@ val minimalAgentConversationTest by testSuite {
             val requests = testRequests
             val client = testClient
             val agent = testAgent
-            val runtime = agent.compactionRuntime(testModelCatalog())
+            val runtime = agent.compactionRuntime(
+                modelCatalog = testModelCatalog(),
+                logger = KotlinLogging.logger {},
+            )
             val user = userMessage("Answer with a short greeting.")
         }
     } closeWith {

@@ -30,8 +30,9 @@ kotlin {
 
         commonMain.dependencies {
             implementation(project(":app-shared-application"))
-            implementation(libs.kotlinx.coroutines.core)
+            implementation(project(":utils-logging"))
             implementation(libs.kotlin.logging)
+            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(project(":agent-session-in-memory"))

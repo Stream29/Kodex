@@ -6,7 +6,7 @@ import io.github.oshai.kotlinlogging.Level
 import io.github.oshai.kotlinlogging.Marker
 
 /**
- * Returns this logger with immutable process-global context attached to every
+ * Returns this logger with process-global context attached to every
  * event.
  */
 public fun KLogger.global(): KLogger {
@@ -74,7 +74,13 @@ private fun KLogger.scoped(contextPayload: Map<String, Any?>): KLogger {
 private class ScopedKLogger(
     val delegate: KLogger,
     val contextPayload: Map<String, Any?>,
-) : KLogger by delegate {
+) : KLogger {
+    override val name: String
+        get() = delegate.name
+
+    override fun isLoggingEnabledFor(level: Level, marker: Marker?): Boolean =
+        delegate.isLoggingEnabledFor(level, marker)
+
     override fun at(
         level: Level,
         marker: Marker?,

@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.agentruntime.decorator.tool
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentruntime.decorator.turnhook.turnHookRuntime
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
@@ -58,6 +59,9 @@ import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import io.github.stream29.kodex.utils.logging.agent
+import io.github.stream29.kodex.utils.logging.global
+import io.github.stream29.kodex.utils.logging.session
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellSettings
 import kotlinx.coroutines.CoroutineScope
@@ -395,7 +399,10 @@ val kodexToolRuntimeTest by testSuite {
         state.appendUserMessage(listOf(ContentItem.InputText("Use the tool.")))
         val runtime = RequestOnlyRuntime(state)
             .testToolRuntime(mcpService, hooks)
-            .turnHookRuntime(NoOpTurnHooks)
+            .turnHookRuntime(
+                hooks = NoOpTurnHooks,
+                logger = TestLogger,
+            )
 
         runtime.resume().toList()
 
@@ -466,7 +473,10 @@ val kodexToolRuntimeTest by testSuite {
 
         RequestOnlyRuntime(state)
             .testToolRuntime(mcpService, hooks)
-            .turnHookRuntime(NoOpTurnHooks)
+            .turnHookRuntime(
+                hooks = NoOpTurnHooks,
+                logger = TestLogger,
+            )
             .resume()
             .toList()
 
@@ -520,7 +530,10 @@ val kodexToolRuntimeTest by testSuite {
         try {
             val runtime = RequestOnlyRuntime(fixture.state)
                 .testToolRuntime(mcpService, hooks)
-                .turnHookRuntime(NoOpTurnHooks)
+                .turnHookRuntime(
+                    hooks = NoOpTurnHooks,
+                    logger = TestLogger,
+                )
             fixture.state.updateSettings(initialSettings.copy(cwd = updatedRoot))
 
             runtime.resume().toList()
@@ -571,7 +584,10 @@ val kodexToolRuntimeTest by testSuite {
 
         RequestOnlyRuntime(fixture.state)
             .testToolRuntime(mcpService, hooks)
-            .turnHookRuntime(NoOpTurnHooks)
+            .turnHookRuntime(
+                hooks = NoOpTurnHooks,
+                logger = TestLogger,
+            )
             .resume()
             .toList()
 
@@ -732,6 +748,10 @@ private class ToolRuntimeTestContext(
             dynamicTools = mcpService.tools,
             toolSearch = toolSearch,
             toolHooks = hooks,
+            logger = TestLogger
+                .global()
+                .session(storage.id)
+                .agent(storage.id),
         )
     }
 }
@@ -900,3 +920,5 @@ private suspend fun deleteRecursively(path: Path) {
     }
     SystemCoroutineFileSystem.delete(path, mustExist = false)
 }
+
+private val TestLogger = KotlinLogging.logger {}

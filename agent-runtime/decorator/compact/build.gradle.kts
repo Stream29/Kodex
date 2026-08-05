@@ -8,6 +8,7 @@ kotlin {
             api(project(":agent-runtime-contract"))
             api(project(":hook-contract"))
             api(project(":openai-model-catalog-contract"))
+            api(libs.kotlin.logging)
             implementation(project(":agent-state-context-window"))
             implementation(libs.kotlinx.coroutines.core)
         }
