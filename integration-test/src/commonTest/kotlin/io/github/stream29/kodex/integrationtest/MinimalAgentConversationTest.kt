@@ -5,6 +5,7 @@ import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.decorator.compact.compactionRuntime
+import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
 import io.github.stream29.kodex.agentsession.contract.AgentPathResolver
@@ -12,6 +13,7 @@ import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentcontext.prefix.render.render as renderCollaborationMode
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstate.contract.RequestFinish
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
@@ -57,7 +59,6 @@ import io.github.stream29.kodex.tool.imagegeneration.ImageGenNamespace
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolName
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputTools
 import io.github.stream29.kodex.tool.viewimage.ViewImageToolArguments
@@ -71,11 +72,8 @@ import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellSettings
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withContext
@@ -127,8 +125,14 @@ private data class RecordedCodexResponse(
 private class RequestOnlyRuntime(
     private val delegate: KodexAgentStateContract,
 ) : ResumableAgentLayer, KodexAgentStateContract by delegate {
-    override fun resume(): Flow<ResponsesStreamEvent> = flow {
-        emitAll(requestResponseApi())
+    override suspend fun resume() {
+        while (true) {
+            if (state.value is KodexAgentStateValue.ToolPending) return
+            when (requestResponseApi()) {
+                RequestFinish.Resumable -> Unit
+                RequestFinish.Finish -> return
+            }
+        }
     }
 }
 
@@ -136,7 +140,7 @@ internal fun KodexAgentStateContract.integrationResumableAgent(
     client: OpenAiClient,
     modelCatalog: OpenAiModelCatalog,
     mcpService: McpService,
-): ResumableAgentLayer =
+): AgentRuntime =
     buildMasterAgentRuntime(
         dependencies = KodexAgentDependencies(
             client = client,
@@ -420,7 +424,7 @@ val minimalAgentConversationTest by testSuite {
     } asContextForEach {
         test("conversation loop persists history in storage") {
             agent.appendUserMessage(user.content)
-            runtime.resume().collect()
+            runtime.resume()
 
             assertEquals("Hello from the storage-backed loop.", storage.lastAssistantMessage())
             assertEquals(3, storage.latestIndex())
@@ -464,11 +468,11 @@ val openAiStoryContinuationProbeTest by testSuite {
                 mcpService = TestMcpService(),
             )
             agent.appendUserMessage("请用中文讲一个两句以内的微型故事，只讲故事本身。")
-            agent.requestResponseApi().collect()
+            agent.requestResponseApi()
             val firstStory = storage.lastAssistantMessage()
                 ?: fail("Expected the first response to contain an assistant story.")
             agent.appendUserMessage("请基于上一段故事继续写两句以内，不要重讲开头。")
-            agent.requestResponseApi().collect()
+            agent.requestResponseApi()
             val continuation = storage.lastAssistantMessage()
                 ?: fail("Expected the second response to contain a continuation.")
 
@@ -527,7 +531,7 @@ val openAiCurrentTimeToolRoundTripProbeTest by testSuite {
                     "你看看系统时间",
                 ).forEach { message ->
                     state.appendUserMessage(message)
-                    runtime.resume().collect()
+                    runtime.resume()
                 }
 
                 val history = storage.historyItems()
@@ -603,7 +607,7 @@ val openAiViewImageToolRuntimeProbeTest by testSuite {
                         "with that tool before answering. Then reply with exactly $ViewImageProbeMarker.",
                 )
                 withContext(Dispatchers.Default) {
-                    runtime.resume().collect()
+                    runtime.resume()
                 }
 
                 val history = storage.historyItems()
@@ -678,7 +682,7 @@ val openAiImageGenerationToolRuntimeProbeTest by testSuite {
                         "image is returned, reply with exactly $ImageGenerationProbeMarker.",
                 )
                 withContext(Dispatchers.Default) {
-                    runtime.resume().collect()
+                    runtime.resume()
                 }
 
                 val history = storage.historyItems()
@@ -758,7 +762,7 @@ val openAiWebRunToolRuntimeProbeTest by testSuite {
                         "Codex page. After the tool result is returned, reply with exactly $WebRunProbeMarker.",
                 )
                 withContext(Dispatchers.Default) {
-                    runtime.resume().collect()
+                    runtime.resume()
                 }
 
                 val history = storage.historyItems()
@@ -825,7 +829,7 @@ val openAiRequestUserInputProbeTest by testSuite {
                     "answers Yes, reply with exactly $RequestUserInputProbeMarker.",
             )
             withContext(Dispatchers.Default) {
-                runtime.resume().collect()
+                runtime.resume()
             }
 
             val pending = assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
@@ -850,7 +854,7 @@ val openAiRequestUserInputProbeTest by testSuite {
             )
             assertEquals(KodexAgentStateValue.ToolCompleted, state.state.value)
             withContext(Dispatchers.Default) {
-                runtime.resume().collect()
+                runtime.resume()
             }
 
             val history = storage.historyItems()

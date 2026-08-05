@@ -1,8 +1,6 @@
 package io.github.stream29.kodex.agentruntime.contract
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
-import io.github.stream29.kodex.openai.ResponsesStreamEvent
-import kotlinx.coroutines.flow.Flow
 
 /**
  * An [KodexAgentState] that can resume multi-step agent execution.
@@ -14,11 +12,12 @@ import kotlinx.coroutines.flow.Flow
  */
 public interface ResumableAgentLayer : KodexAgentState {
     /**
-     * Executes this layer's resume operation and exposes raw stream events.
+     * Executes this layer's resume operation.
      *
      * Each layer may perform work before or after delegating to the next one.
      * This call is the composable execution boundary; no separate turn runner
-     * or admission callback participates in control flow.
+     * or admission callback participates in control flow. Callers read the
+     * observable AgentState boundary rather than receiving a duplicated reason.
      */
-    public fun resume(): Flow<ResponsesStreamEvent>
+    public suspend fun resume()
 }

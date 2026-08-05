@@ -407,7 +407,7 @@ private fun KodexAgentSession.resumeIfIdle() {
     if (runtime.runningTurn.value != null) return
     launch(start = CoroutineStart.UNDISPATCHED) {
         try {
-            runtime.resume().collect {}
+            runtime.resume()
         } catch (_: ConcurrentAgentRuntimeResumeException) {
             // Another follow-up (or direct caller) won the runtime CAS and will consume the steer.
         }

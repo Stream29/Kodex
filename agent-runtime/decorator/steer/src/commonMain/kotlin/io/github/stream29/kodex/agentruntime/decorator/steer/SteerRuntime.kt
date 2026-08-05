@@ -3,11 +3,7 @@ package io.github.stream29.kodex.agentruntime.decorator.steer
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentstate.contract.canAppendUserMessage
-import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.flow
 
 /**
  * Delivers pending input that belongs to the current logical turn.
@@ -22,11 +18,11 @@ public class SteerRuntime internal constructor(
     private val logger: KLogger,
     private val steerProvider: SteerProvider,
 ) : ResumableAgentLayer by delegate {
-    override fun resume(): Flow<ResponsesStreamEvent> = flow {
+    override suspend fun resume() {
         if (state.value.canAppendUserMessage) {
             deliverPendingSteer()
         }
-        emitAll(delegate.resume())
+        delegate.resume()
     }
 
     private suspend fun deliverPendingSteer() {

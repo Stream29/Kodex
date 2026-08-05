@@ -20,16 +20,13 @@ import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
-import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.flow.update
@@ -58,7 +55,7 @@ val steerRuntimeTest by testSuite {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
-        runtime.resume().toList()
+        runtime.resume()
 
         assertEquals(KodexAgentStateValue.UserMessage, state.state.value)
         assertEquals(listOf(listOf("first")), storage.userTextBatches())
@@ -90,7 +87,7 @@ val steerRuntimeTest by testSuite {
             pendingSteer.value,
         )
 
-        runtime.resume().toList()
+        runtime.resume()
         assertEquals(
             listOf(listOf("initial"), listOf("first"), listOf("second")),
             storage.userTextBatches(),
@@ -102,7 +99,7 @@ val steerRuntimeTest by testSuite {
         assertEquals(turnId, storage.settings.latestValue().turnId)
         assertTrue(pendingSteer.value.isEmpty())
 
-        runtime.resume().toList()
+        runtime.resume()
         assertEquals(
             listOf(listOf("initial"), listOf("first"), listOf("second")),
             storage.userTextBatches(),
@@ -131,7 +128,7 @@ val steerRuntimeTest by testSuite {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
-        runtime.resume().toList()
+        runtime.resume()
 
         assertEquals(KodexAgentStateValue.UserMessage, state.state.value)
         assertEquals(listOf(listOf("continue")), storage.userTextBatches())
@@ -160,7 +157,7 @@ val steerRuntimeTest by testSuite {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
-        runtime.resume().toList()
+        runtime.resume()
 
         val index = storage.stable.indexes().toList().single()
         assertEquals(message, storage.stable[index])
@@ -182,7 +179,7 @@ val steerRuntimeTest by testSuite {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
-        runtime.resume().toList()
+        runtime.resume()
 
         val index = storage.stable.indexes().toList().single()
         assertEquals(message, storage.stable[index])
@@ -220,7 +217,7 @@ val steerRuntimeTest by testSuite {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
-        runtime.resume().toList()
+        runtime.resume()
 
         assertEquals(KodexAgentStateValue.UserMessage, state.state.value)
         assertEquals(
@@ -246,7 +243,7 @@ val steerRuntimeTest by testSuite {
         }
 
         assertEquals(interruptingInput, pendingSteer.getAndUpdate { emptyList() })
-        runtime.resume().toList()
+        runtime.resume()
 
         assertEquals(listOf(listOf("initial")), storage.userTextBatches())
     }
@@ -274,7 +271,7 @@ val steerRuntimeTest by testSuite {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
-        runtime.resume().toList()
+        runtime.resume()
 
         assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
         assertEquals(input, pendingSteer.value)
@@ -313,7 +310,7 @@ val steerRuntimeTest by testSuite {
 private class TestRuntime(
     private val delegate: KodexAgentState,
 ) : ResumableAgentLayer, KodexAgentState by delegate {
-    override fun resume(): Flow<ResponsesStreamEvent> = flow {}
+    override suspend fun resume(): Unit = Unit
 }
 
 private fun textContent(text: String): List<ContentItem> =

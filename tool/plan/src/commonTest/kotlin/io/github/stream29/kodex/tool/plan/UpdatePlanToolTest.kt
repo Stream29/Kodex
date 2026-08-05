@@ -65,7 +65,7 @@ val updatePlanToolTest by testSuite {
                 mcpService = TestMcpService(),
             )
             state.appendUserMessage(listOf(ContentItem.InputText("Update the plan.")))
-            state.requestResponseApi().toList()
+            state.requestResponseApi()
 
             val pending = assertIs<PendingPlanUpdate>(
                 assertIs<KodexAgentStateValue.ToolPending>(state.state.value).events.single(),

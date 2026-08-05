@@ -10,6 +10,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalid
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
+import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.hook.contract.tool.PreToolUseResult
 import io.github.stream29.kodex.hook.contract.tool.ToolHooks
@@ -18,18 +19,13 @@ import io.github.stream29.kodex.hook.toolutils.runPreToolUse
 import io.github.stream29.kodex.openai.FreeformTool
 import io.github.stream29.kodex.openai.ResponsesApiNamespace
 import io.github.stream29.kodex.openai.ResponsesApiTool
-import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.ToolName
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchEngine
 import io.github.stream29.kodex.utils.logging.tool
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.channelFlow
 
 /**
  * Executes borrowed fixed and dynamic tools plus client tool-search calls.
@@ -45,74 +41,74 @@ public class KodexToolRuntime internal constructor(
     private val toolSearch: StateFlow<ToolSearchEngine>,
     private val toolHooks: ToolHooks,
     private val logger: KLogger,
-) : ResumableAgentLayer by delegate {
+) : ResumableAgentLayer, KodexAgentState by delegate {
     private val fixedToolsByName: Map<ToolName, Tool> = fixedTools.toToolMap()
 
-    override fun resume(): Flow<ResponsesStreamEvent> = channelFlow {
+    override suspend fun resume() {
         while (true) {
-            var pending = state.value as? KodexAgentStateValue.ToolPending
+            val pending = state.value as? KodexAgentStateValue.ToolPending
             if (pending == null) {
-                delegate.resume().collect { send(it) }
-                pending = state.value as? KodexAgentStateValue.ToolPending
-                    ?: return@channelFlow
-            }
-            val toolsByName = fixedToolsByName.merge(dynamicTools.value.toToolMap())
-            var handledEvent = false
-            for (pendingEvent in pending.events) {
-                when (pendingEvent) {
-                    is PendingInvalidToolCall -> {
-                        logger
-                            .tool(pendingEvent.loggingToolName(), pendingEvent.callId)
-                            .runToolCall {
-                                warn { "Tool call input is invalid." }
-                                completeToolCall(pendingEvent.completedEvent())
-                            }
-                        handledEvent = true
-                    }
-
-                    is PendingToolSearchEvent -> {
-                        logger
-                            .tool(pendingEvent.loggingToolName(), pendingEvent.callId)
-                            .runToolCall {
-                                completeToolCall(toolSearch.value.handle(pendingEvent))
-                            }
-                        handledEvent = true
-                    }
-
-                    else -> {
-                        val toolName = pendingEvent.requireToolName()
-                        val tool = toolsByName[toolName]
-                        if (tool == null && toolName.namespace?.startsWith("mcp__") == true) {
-                            logger
-                                .tool(toolName.toString(), pendingEvent.callId)
-                                .runToolCall {
-                                    warn { "MCP tool route is no longer available." }
-                                    completeToolCall(
-                                        pendingEvent.failedEvent(
-                                            "The MCP tool is no longer available in the current catalog.",
-                                        ),
-                                    )
-                                }
-                        } else if (tool == null) {
-                            continue
-                        } else {
-                            val toolLogger = logger.tool(toolName.toString(), pendingEvent.callId)
-                            toolLogger.runToolCall {
-                                handleToolCall(tool, pendingEvent, toolLogger)
-                            }
-                        }
-                        handledEvent = true
-                    }
-                }
-            }
-            if (!handledEvent) {
-                return@channelFlow
-            }
-            if (state.value is KodexAgentStateValue.ToolPending) {
-                return@channelFlow
+                delegate.resume()
+                val nextPending = state.value as? KodexAgentStateValue.ToolPending ?: return
+                if (!handlePendingTools(nextPending)) return
+            } else {
+                if (!handlePendingTools(pending)) return
             }
         }
-    }.buffer(Channel.UNLIMITED)
+    }
+
+    private suspend fun handlePendingTools(pending: KodexAgentStateValue.ToolPending): Boolean {
+        val toolsByName = fixedToolsByName.merge(dynamicTools.value.toToolMap())
+        var handledEvent = false
+        for (pendingEvent in pending.events) {
+            when (pendingEvent) {
+                is PendingInvalidToolCall -> {
+                    logger
+                        .tool(pendingEvent.loggingToolName(), pendingEvent.callId)
+                        .runToolCall {
+                            warn { "Tool call input is invalid." }
+                            completeToolCall(pendingEvent.completedEvent())
+                        }
+                    handledEvent = true
+                }
+
+                is PendingToolSearchEvent -> {
+                    logger
+                        .tool(pendingEvent.loggingToolName(), pendingEvent.callId)
+                        .runToolCall {
+                            completeToolCall(toolSearch.value.handle(pendingEvent))
+                        }
+                    handledEvent = true
+                }
+
+                else -> {
+                    val toolName = pendingEvent.requireToolName()
+                    val tool = toolsByName[toolName]
+                    if (tool == null && toolName.namespace?.startsWith("mcp__") == true) {
+                        logger
+                            .tool(pendingEvent.loggingToolName(), pendingEvent.callId)
+                            .runToolCall {
+                                warn { "MCP tool route is no longer available." }
+                                completeToolCall(
+                                    pendingEvent.failedEvent(
+                                        "The MCP tool is no longer available in the current catalog.",
+                                    ),
+                                )
+                            }
+                    } else if (tool == null) {
+                        continue
+                    } else {
+                        val toolLogger = logger.tool(toolName.toString(), pendingEvent.callId)
+                        toolLogger.runToolCall {
+                            handleToolCall(tool, pendingEvent, toolLogger)
+                        }
+                    }
+                    handledEvent = true
+                }
+            }
+        }
+        return handledEvent && state.value !is KodexAgentStateValue.ToolPending
+    }
 
     private suspend fun handleToolCall(
         tool: Tool,

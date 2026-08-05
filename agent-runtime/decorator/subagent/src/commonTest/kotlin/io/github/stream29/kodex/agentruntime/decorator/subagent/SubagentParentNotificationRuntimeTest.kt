@@ -14,9 +14,12 @@ import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.FailedResponse
+import io.github.stream29.kodex.openai.IncompleteDetails
 import io.github.stream29.kodex.openai.IncompleteResponse
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.OpenAiModelId
+import io.github.stream29.kodex.openai.OpenAiResponseStreamFailureException
+import io.github.stream29.kodex.openai.OpenAiResponseStreamIncompleteException
 import io.github.stream29.kodex.openai.Response
 import io.github.stream29.kodex.openai.ResponseError
 import io.github.stream29.kodex.openai.ResponseItem
@@ -28,7 +31,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.toList
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
@@ -56,14 +58,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
             )
 
             runtime.appendUserMessage(listOf(ContentItem.InputText("do the work")))
-            assertEquals(
-                listOf(
-                    ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = firstAssistant),
-                    ResponsesStreamEvent.OutputItemDone(outputIndex = 1, item = lastAssistant),
-                    completed,
-                ),
-                runtime.resume().toList(),
-            )
+            runtime.resume()
 
             assertEquals(
                 listOf(
@@ -84,7 +79,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
             )
         }
 
-        test("a failed response event still reports the newest persisted assistant message") {
+        test("a failed response event is rethrown without notifying the parent") {
             val notifications = mutableListOf<StableCleanEvent.AgentMessage>()
             val assistant = assistantMessage("partial result")
             val failed = ResponsesStreamEvent.Failed(
@@ -107,21 +102,20 @@ val subagentParentNotificationRuntimeTest by testSuite {
                 ),
             )
             runtime.appendUserMessage(listOf(ContentItem.InputText("do the work")))
-            assertEquals(
-                listOf(
-                    ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = assistant),
-                    failed,
-                ),
-                runtime.resume().toList(),
-            )
+            val failure = assertFailsWith<OpenAiResponseStreamFailureException> {
+                runtime.resume()
+            }
 
-            assertEquals(listOf(parentMessage("partial result")), notifications)
+            assertEquals(failed.response.error, failure.error)
+            assertTrue(notifications.isEmpty())
         }
 
-        test("an incomplete response event still reports the newest persisted assistant message") {
+        test("an incomplete response event is rethrown without notifying the parent") {
             val notifications = mutableListOf<StableCleanEvent.AgentMessage>()
             val assistant = assistantMessage("partial result")
-            val incomplete = ResponsesStreamEvent.Incomplete(IncompleteResponse())
+            val incomplete = ResponsesStreamEvent.Incomplete(
+                IncompleteResponse(IncompleteDetails(reason = "max_output_tokens")),
+            )
             val state = stateFor(
                 ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = assistant),
                 incomplete,
@@ -132,15 +126,12 @@ val subagentParentNotificationRuntimeTest by testSuite {
             )
 
             runtime.appendUserMessage(listOf(ContentItem.InputText("do the work")))
-            assertEquals(
-                listOf(
-                    ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = assistant),
-                    incomplete,
-                ),
-                runtime.resume().toList(),
-            )
+            val failure = assertFailsWith<OpenAiResponseStreamIncompleteException> {
+                runtime.resume()
+            }
 
-            assertEquals(listOf(parentMessage("partial result")), notifications)
+            assertEquals(incomplete.response.incompleteDetails, failure.incompleteDetails)
+            assertTrue(notifications.isEmpty())
         }
 
         test("a completed response with pending tools does not notify the parent") {
@@ -160,7 +151,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
             )
 
             runtime.appendUserMessage(listOf(ContentItem.InputText("do the work")))
-            runtime.resume().toList()
+            runtime.resume()
 
             assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
             assertTrue(notifications.isEmpty())
@@ -179,13 +170,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
             )
 
             runtime.appendUserMessage(listOf(ContentItem.InputText("do the work")))
-            assertEquals(
-                listOf(
-                    ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = assistant),
-                    completed,
-                ),
-                runtime.resume().toList(),
-            )
+            runtime.resume()
         }
 
         test("an upstream runtime failure is rethrown without notifying the parent") {
@@ -204,33 +189,13 @@ val subagentParentNotificationRuntimeTest by testSuite {
 
             runtime.appendUserMessage(listOf(ContentItem.InputText("do the work")))
             val failure = assertFailsWith<IllegalStateException> {
-                runtime.resume().toList()
+                runtime.resume()
             }
 
             assertEquals("network failure", failure.message)
             assertTrue(notifications.isEmpty())
         }
 
-        test("a downstream collector failure is not reported as a child failure") {
-            val notifications = mutableListOf<StableCleanEvent.AgentMessage>()
-            val state = stateFor(
-                ResponsesStreamEvent.OutputItemDone(outputIndex = 0, item = assistantMessage("child result")),
-                ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = true)),
-            )
-            val runtime = RequestRuntime(state).subagentParentNotificationRuntime(
-                logger = TestLogger,
-                notifyParent = notifications::add,
-            )
-
-            runtime.appendUserMessage(listOf(ContentItem.InputText("do the work")))
-            assertFailsWith<CollectorFailure> {
-                runtime.resume().collect {
-                    throw CollectorFailure()
-                }
-            }
-
-            assertTrue(notifications.isEmpty())
-        }
     }
 }
 
@@ -239,7 +204,9 @@ private val TestLogger = KotlinLogging.logger {}
 private class RequestRuntime(
     private val delegate: KodexAgentState,
 ) : ResumableAgentLayer, KodexAgentState by delegate {
-    override fun resume(): Flow<ResponsesStreamEvent> = delegate.requestResponseApi()
+    override suspend fun resume() {
+        delegate.requestResponseApi()
+    }
 }
 
 private suspend fun CoroutineScope.stateFor(
@@ -267,19 +234,3 @@ private fun assistantMessage(text: String): ResponseItem.Message =
         role = MessageRole.Assistant,
         content = listOf(ContentItem.OutputText(text)),
     )
-
-private fun parentMessage(text: String): StableCleanEvent.AgentMessage =
-    StableCleanEvent.AgentMessage(
-        author = "/root/worker",
-        recipient = "/root",
-        content = listOf(
-            AgentMessageInputContent.InputText(
-                "Message Type: FINAL_ANSWER\n" +
-                    "Task name: /root\n" +
-                    "Sender: /root/worker\n" +
-                    "Payload:\n$text",
-            ),
-        ),
-    )
-
-private class CollectorFailure : IllegalStateException()

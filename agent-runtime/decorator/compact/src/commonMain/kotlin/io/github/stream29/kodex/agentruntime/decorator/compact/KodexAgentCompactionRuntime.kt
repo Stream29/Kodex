@@ -5,6 +5,7 @@ import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentstate.contextwindow.tokensUntilCompaction
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstate.contract.RequestFinish
 import io.github.stream29.kodex.hook.contract.compaction.CompactionHookRequest
 import io.github.stream29.kodex.hook.contract.compaction.CompactionHooks
 import io.github.stream29.kodex.hook.contract.compaction.HookCompactionTrigger
@@ -12,20 +13,16 @@ import io.github.stream29.kodex.hook.contract.toHookTurnContext
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
-import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.channelFlow
 
 /**
  * Basic runtime with no environment-side effects.
  *
  * It handles token-limit compaction and server-requested continuation before
- * returning control. A pending tool call ends this flow so a higher runtime
- * can execute the tool through the inherited atomic state API.
+ * returning control. A pending tool call ends this operation at the observable
+ * state boundary so a higher runtime can execute it through the inherited
+ * atomic state API.
  *
  * @param logger Agent-scoped logger for response and compaction operations.
  * @param compactionHooks Nullable because Hooks are an optional host feature;
@@ -38,44 +35,44 @@ public class KodexAgentCompactionRuntime(
     private val compactionHooks: CompactionHooks? = null,
 ) : ResumableAgentLayer, KodexAgentState by delegate {
 
-    public override fun resume(): Flow<ResponsesStreamEvent> = channelFlow {
-        if (state.value is KodexAgentStateValue.ToolPending) {
-            return@channelFlow
-        }
+    public override suspend fun resume() {
+        if (state.value is KodexAgentStateValue.ToolPending) return
 
         if (shouldAutoCompact()) {
             compactForContextLimit(CompactionPhase.PreTurn)
         }
 
         while (true) {
-            var needsFollowUp = false
             logger.info { "Agent response request started." }
-            try {
-                requestResponseApi().collect { event ->
-                    if (event is ResponsesStreamEvent.Completed && event.response.endTurn == false) {
-                        needsFollowUp = true
-                    }
-                    send(event)
+            val finishReason = try {
+                requestResponseApi().also { reason ->
+                    logger.info { "Agent response request finished (reason=$reason)." }
                 }
-                logger.info { "Agent response request finished." }
             } catch (cancellation: CancellationException) {
                 logger.info { "Agent response request cancelled." }
                 throw cancellation
             } catch (failure: Throwable) {
-                logger.error(failure) { "Agent response request failed." }
+                logger.error(failure) {
+                    "Agent response request failed " +
+                        "(type=${failure::class.simpleName}, message=${failure.message ?: "unknown"})."
+                }
                 throw failure
             }
 
-            if (state.value is KodexAgentStateValue.ToolPending || !needsFollowUp) {
-                return@channelFlow
-            }
+            if (state.value is KodexAgentStateValue.ToolPending) return
 
-            logger.info { "Agent response continuation requested." }
-            if (shouldAutoCompact()) {
-                compactForContextLimit(CompactionPhase.MidTurn)
+            when (finishReason) {
+                RequestFinish.Resumable -> {
+                    logger.info { "Agent response continuation requested." }
+                    if (shouldAutoCompact()) {
+                        compactForContextLimit(CompactionPhase.MidTurn)
+                    }
+                }
+
+                RequestFinish.Finish -> return
             }
         }
-    }.buffer(Channel.UNLIMITED)
+    }
 
     override suspend fun compact(
         trigger: CompactionTrigger,

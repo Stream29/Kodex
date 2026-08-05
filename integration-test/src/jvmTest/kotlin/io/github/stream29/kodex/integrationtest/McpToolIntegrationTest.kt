@@ -6,6 +6,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstate.contract.RequestFinish
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstorage.contract.indexes
@@ -37,9 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
@@ -103,7 +102,7 @@ val openAiMcpToolRoundTripProbeTest by testSuite {
                         ),
                     ),
                 )
-                runtime.resume().toList()
+                runtime.resume()
 
                 val history = storage.stable.indexes().toList()
                     .flatMap { index -> storage.stable[index].toResponseHistoryItems() }
@@ -177,8 +176,14 @@ private class McpRecordingOpenAiClient(
 private class McpRequestOnlyRuntime(
     private val delegate: KodexAgentStateContract,
 ) : ResumableAgentLayer, KodexAgentStateContract by delegate {
-    override fun resume(): Flow<ResponsesStreamEvent> = flow {
-        emitAll(requestResponseApi())
+    override suspend fun resume() {
+        while (true) {
+            if (state.value is KodexAgentStateValue.ToolPending) return
+            when (requestResponseApi()) {
+                RequestFinish.Resumable -> Unit
+                RequestFinish.Finish -> return
+            }
+        }
     }
 }
 

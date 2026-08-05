@@ -7,12 +7,8 @@ import io.github.stream29.kodex.agentstorage.contract.indexesDescending
 import io.github.stream29.kodex.agentstorage.contract.latestValue
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.flow.flow
 
 /**
  * Reports a spawned Agent's resume result to its direct parent.
@@ -29,9 +25,9 @@ public class SubagentParentNotificationRuntime internal constructor(
     private val logger: KLogger,
     private val notifyParent: suspend (StableCleanEvent.AgentMessage) -> Unit,
 ) : ResumableAgentLayer by delegate {
-    override fun resume(): Flow<ResponsesStreamEvent> = flow {
+    override suspend fun resume() {
         val historyStartIndex = latestIndex.value
-        emitAll(delegate.resume())
+        delegate.resume()
         val message = latestAssistantMessageSince(historyStartIndex)
         if (message != null) {
             notifyParentBestEffort(message)
@@ -71,7 +67,7 @@ public class SubagentParentNotificationRuntime internal constructor(
  * Adds parent notification to a spawned Agent runtime.
  *
  * The child path is read from this runtime's persisted settings after its resume
- * flow returns normally. [notifyParent] receives a plaintext
+ * operation returns normally. [notifyParent] receives a plaintext
  * [StableCleanEvent.AgentMessage] with the standard `FINAL_ANSWER` envelope; no
  * encrypted-content projection or parent-turn scheduling occurs here.
  *

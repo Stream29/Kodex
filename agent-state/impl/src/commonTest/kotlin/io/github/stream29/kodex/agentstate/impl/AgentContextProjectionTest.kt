@@ -68,7 +68,7 @@ val agentContextProjectionTest by testSuite {
                 val user = userMessage("hello")
 
                 assertEquals(1, agent.appendUserMessage(user.content))
-                agent.requestResponseApi().toList()
+                agent.requestResponseApi()
 
                 val input = requests.single().input
                 assertEquals(collaborationMessage(ModeKind.Default), input[0])
@@ -118,7 +118,7 @@ val agentContextProjectionTest by testSuite {
                 val user = userMessage("use a tool")
 
                 agent.appendUserMessage(user.content)
-                agent.requestResponseApi().toList()
+                agent.requestResponseApi()
 
                 val input = requests.single().input
                 val rendered = input.text()
@@ -158,7 +158,7 @@ val agentContextProjectionTest by testSuite {
                 val user = userMessage("continue")
 
                 agent.appendUserMessage(user.content)
-                agent.requestResponseApi().toList()
+                agent.requestResponseApi()
                 fixture.writeUserAgentsMd("second instructions")
                 fixture.settings.value = ProjectionContextSettings(
                     codexHome = fixture.codexHome,
@@ -166,7 +166,7 @@ val agentContextProjectionTest by testSuite {
                 )
                 agent.updateSettings(initialSettings.copy(cwd = updatedProject))
                 mcpService.tools.value = listOf(ProjectionMcpTool)
-                agent.requestResponseApi().toList()
+                agent.requestResponseApi()
 
                 assertTrue(requests[0].input.contextText().contains("first instructions"))
                 assertTrue(requests[0].input.contextText().contains("<shell>bash</shell>"))

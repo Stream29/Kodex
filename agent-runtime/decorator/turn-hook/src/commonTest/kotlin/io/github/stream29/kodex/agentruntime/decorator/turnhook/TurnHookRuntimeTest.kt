@@ -86,7 +86,7 @@ val turnHookRuntimeTest by testSuite {
                 ContentItem.InputText(" again"),
             ),
         )
-        runtime.resume().toList()
+        assertEquals(Unit, runtime.resume())
 
         assertEquals("hello again", hookRequests.single().prompt)
         assertEquals(1, requests.size)
@@ -138,7 +138,7 @@ val turnHookRuntimeTest by testSuite {
                 ),
             ),
         )
-        runtime.resume().toList()
+        assertEquals(Unit, runtime.resume())
 
         assertEquals("selected skill instructions", hookRequests.single().prompt)
     }
@@ -175,7 +175,7 @@ val turnHookRuntimeTest by testSuite {
             )
 
         runtime.appendUserMessage(listOf(ContentItem.InputText("do not store")))
-        assertEquals(emptyList(), runtime.resume().toList())
+        assertEquals(Unit, runtime.resume())
 
         assertEquals(0, requestCount)
         val history = storage.stableHistoryItems()
@@ -184,6 +184,51 @@ val turnHookRuntimeTest by testSuite {
         assertEquals(MessageRole.Developer, assertIs<ResponseItem.Message>(history[1]).role)
         assertEquals("why this was blocked", assertIs<ResponseItem.Message>(history[1]).inputText())
         assertEquals(KodexAgentStateValue.UserMessage, state.state.value)
+    }
+
+    test("pending tools stop at the state boundary without running the stop hook") {
+        var stopCalls = 0
+        val storage = InMemoryKodexAgentStorage(testSettings())
+        val state = KodexAgentState(
+            client = mockOpenAiClient {
+                createResponse {
+                    flowOf(
+                        ResponsesStreamEvent.OutputItemDone(
+                            0,
+                            ResponseItem.FunctionCall(
+                                name = "host_only",
+                                arguments = "{}",
+                                callId = "call_host_only",
+                            ),
+                        ),
+                        ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
+                    )
+                }
+            },
+            storage = storage,
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
+        )
+        val runtime = state
+            .compactionRuntime(
+                modelCatalog = testModelCatalog(),
+                logger = TestLogger,
+            )
+            .turnHookRuntime(
+                logger = TestLogger,
+                hooks = RecordingTurnHooks(
+                    stop = {
+                        stopCalls += 1
+                        StopResult.Finish
+                    },
+                ),
+            )
+
+        runtime.appendUserMessage(listOf(ContentItem.InputText("ask the host")))
+        runtime.resume()
+
+        assertEquals(0, stopCalls)
+        assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
     }
 
     test("stop hook continuation stays in one turn and persists its wire message") {
@@ -232,7 +277,7 @@ val turnHookRuntimeTest by testSuite {
             )
 
         runtime.appendUserMessage(listOf(ContentItem.InputText("start")))
-        runtime.resume().toList()
+        assertEquals(Unit, runtime.resume())
 
         assertEquals(2, requests.size)
         assertEquals(listOf(false, true), stopRequests.map(StopRequest::stopHookActive))
@@ -287,10 +332,10 @@ val turnHookRuntimeTest by testSuite {
 
         runtime.markNewTurn()
         runtime.appendUserMessage(listOf(ContentItem.InputText("one")))
-        runtime.resume().toList()
+        assertEquals(Unit, runtime.resume())
         runtime.markNewTurn()
         runtime.appendUserMessage(listOf(ContentItem.InputText("two")))
-        runtime.resume().toList()
+        assertEquals(Unit, runtime.resume())
 
         assertEquals(2, turnIds.size)
         assertNotEquals(turnIds[0], turnIds[1])

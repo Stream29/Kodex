@@ -3,6 +3,7 @@ package io.github.stream29.kodex.agentruntime.decorator.turnhook
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.stream29.kodex.agentcontext.promptdsl.promptXml
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
+import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.indexesDescending
@@ -15,12 +16,7 @@ import io.github.stream29.kodex.hook.contract.turn.TurnHooks
 import io.github.stream29.kodex.hook.contract.turn.UserPromptSubmitRequest
 import io.github.stream29.kodex.hook.contract.turn.UserPromptSubmitResult
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.takeWhile
@@ -34,8 +30,8 @@ public class TurnHookRuntime internal constructor(
     private val delegate: ResumableAgentLayer,
     private val hooks: TurnHooks,
     private val logger: KLogger,
-) : ResumableAgentLayer by delegate {
-    override fun resume(): Flow<ResponsesStreamEvent> = channelFlow {
+) : ResumableAgentLayer, KodexAgentState by delegate {
+    override suspend fun resume() {
         val context = storage.settings.latestValue().toHookTurnContext(storage.id)
         currentUserPromptTextOrNull()?.let { prompt ->
             when (
@@ -61,7 +57,7 @@ public class TurnHookRuntime internal constructor(
                 is UserPromptSubmitResult.Stop -> {
                     persistAdditionalContexts(result.additionalContexts)
                     logger.info { "Agent turn stopped by UserPromptSubmit hook." }
-                    return@channelFlow
+                    return
                 }
             }
         }
@@ -71,21 +67,10 @@ public class TurnHookRuntime internal constructor(
 
         while (true) {
             val historyStartIndex = latestIndex.value
-            var naturalCompletion = false
-            delegate.resume().collect { event ->
-                when (event) {
-                    is ResponsesStreamEvent.Completed -> naturalCompletion = true
-                    is ResponsesStreamEvent.Failed,
-                    is ResponsesStreamEvent.Incomplete,
-                    -> naturalCompletion = false
+            delegate.resume()
 
-                    else -> Unit
-                }
-                send(event)
-            }
-
-            if (!naturalCompletion || state.value != KodexAgentStateValue.AssistantMessage) {
-                return@channelFlow
+            if (state.value != KodexAgentStateValue.AssistantMessage) {
+                return
             }
             latestAssistantMessageSince(historyStartIndex)?.let { text ->
                 lastAssistantMessage = text
@@ -104,15 +89,15 @@ public class TurnHookRuntime internal constructor(
             ) {
                 // Keep the object case separate: Kotlin/Native may otherwise cast Finish to Stop
                 // while lowering this combined sealed-type branch.
-                StopResult.Finish -> return@channelFlow
+                StopResult.Finish -> return
 
                 is StopResult.Stop -> {
                     logger.info { "Agent turn stopped by Stop hook." }
-                    return@channelFlow
+                    return
                 }
 
                 is StopResult.Continue -> {
-                    if (result.fragments.isEmpty()) return@channelFlow
+                    if (result.fragments.isEmpty()) return
                     logger.info {
                         "Stop hook requested Agent continuation with " +
                             "${result.fragments.size} fragment(s)."
@@ -122,7 +107,7 @@ public class TurnHookRuntime internal constructor(
                 }
             }
         }
-    }.buffer(Channel.UNLIMITED)
+    }
 
     private suspend fun persistAdditionalContexts(contexts: List<String>) {
         if (contexts.isEmpty()) return
@@ -167,7 +152,7 @@ public class TurnHookRuntime internal constructor(
 }
 
 /**
- * Adds user-prompt and natural-completion Hooks to this outer runtime.
+ * Adds user-prompt and stop Hooks to this outer runtime.
  *
  * @param logger Agent-scoped logger for turn Hook execution.
  */
