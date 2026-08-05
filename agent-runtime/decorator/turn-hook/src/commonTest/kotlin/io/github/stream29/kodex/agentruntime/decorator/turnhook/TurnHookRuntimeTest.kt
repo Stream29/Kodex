@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.agentruntime.decorator.turnhook
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.decorator.compact.compactionRuntime
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
@@ -64,8 +65,12 @@ val turnHookRuntimeTest by testSuite {
             mcpService = TestMcpService(),
         )
         val runtime = state
-            .compactionRuntime(testModelCatalog())
+            .compactionRuntime(
+                modelCatalog = testModelCatalog(),
+                logger = TestLogger,
+            )
             .turnHookRuntime(
+                logger = TestLogger,
                 hooks = RecordingTurnHooks(
                     userPrompt = { request ->
                         hookRequests += request
@@ -111,8 +116,12 @@ val turnHookRuntimeTest by testSuite {
             mcpService = TestMcpService(),
         )
         val runtime = state
-            .compactionRuntime(testModelCatalog())
+            .compactionRuntime(
+                modelCatalog = testModelCatalog(),
+                logger = TestLogger,
+            )
             .turnHookRuntime(
+                logger = TestLogger,
                 hooks = RecordingTurnHooks(
                     userPrompt = { request ->
                         hookRequests += request
@@ -149,8 +158,12 @@ val turnHookRuntimeTest by testSuite {
             mcpService = TestMcpService(),
         )
         val runtime = state
-            .compactionRuntime(testModelCatalog())
+            .compactionRuntime(
+                modelCatalog = testModelCatalog(),
+                logger = TestLogger,
+            )
             .turnHookRuntime(
+                logger = TestLogger,
                 hooks = RecordingTurnHooks(
                     userPrompt = {
                         UserPromptSubmitResult.Stop(
@@ -193,8 +206,12 @@ val turnHookRuntimeTest by testSuite {
             mcpService = TestMcpService(),
         )
         val runtime = state
-            .compactionRuntime(testModelCatalog())
+            .compactionRuntime(
+                modelCatalog = testModelCatalog(),
+                logger = TestLogger,
+            )
             .turnHookRuntime(
+                logger = TestLogger,
                 hooks = RecordingTurnHooks(
                     stop = { request ->
                         stopRequests += request
@@ -254,8 +271,12 @@ val turnHookRuntimeTest by testSuite {
             mcpService = TestMcpService(),
         )
         val runtime = state
-            .compactionRuntime(testModelCatalog())
+            .compactionRuntime(
+                modelCatalog = testModelCatalog(),
+                logger = TestLogger,
+            )
             .turnHookRuntime(
+                logger = TestLogger,
                 hooks = RecordingTurnHooks(
                     userPrompt = { request ->
                         turnIds += request.context.turnId
@@ -315,3 +336,5 @@ private fun testModelCatalog(): OpenAiModelCatalog =
         },
         codexCliStorage = CodexCliStorage(Path(".kodex-test-model-catalog")),
     )
+
+private val TestLogger = KotlinLogging.logger {}

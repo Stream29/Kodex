@@ -49,6 +49,12 @@ public val applicationLoggingTest by testSuite {
             ).forEach { (level, message) ->
                 logger.at(level) { this.message = message }
             }
+            logger
+                .global()
+                .session("session-1")
+                .agent("agent-2")
+                .tool("mcp__local.echo", "call-3")
+                .info { "scoped-event" }
             logger.at(
                 level = Level.WARN,
                 marker = KMarkerFactory.getMarker("transport"),
@@ -84,6 +90,13 @@ public val applicationLoggingTest by testSuite {
             assertTrue(text.contains("level-error"))
             assertFalse(text.contains("level-off"))
             assertTrue(text.contains("mcp.client"))
+            assertTrue(
+                text.contains(
+                    "scoped-event " +
+                        "{scope=tool, session_id=session-1, agent_id=agent-2, " +
+                        "tool_name=mcp__local.echo, call_id=call-3}",
+                ),
+            )
             assertTrue(text.contains("[transport] connection closed"))
             assertTrue(text.contains("server=local"))
             assertTrue(text.contains("IllegalStateException"))

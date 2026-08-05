@@ -32,6 +32,7 @@ private typealias AgentRuntimeBuilder = (
     KodexAgentStateContract,
     KodexAgentDependencies,
     AgentPathResolver,
+    String,
 ) -> AgentRuntime
 
 internal class FileSystemKodexAgentSession(
@@ -41,6 +42,7 @@ internal class FileSystemKodexAgentSession(
     scope: CoroutineScope,
     override val storage: MutableKodexAgentStorage,
     dependencies: KodexAgentDependencies,
+    sessionId: String,
     state: KodexAgentStateContract,
     createAgentPathResolver: (KodexAgentSession) -> AgentPathResolver,
     runtimeBuilder: AgentRuntimeBuilder,
@@ -55,11 +57,13 @@ internal class FileSystemKodexAgentSession(
         valueCacheSize = valueCacheSize,
         scope = scope.supervisorChildScope(),
         dependencies = dependencies,
+        sessionId = sessionId,
         agentPathResolver = agentPathResolver,
         initialEntries = initialSubagentEntries,
     )
 
-    override val runtime: AgentRuntime = runtimeBuilder(state, dependencies, agentPathResolver)
+    override val runtime: AgentRuntime =
+        runtimeBuilder(state, dependencies, agentPathResolver, sessionId)
 }
 
 private class FileSystemSubagentRepository(
@@ -68,6 +72,7 @@ private class FileSystemSubagentRepository(
     private val valueCacheSize: Int,
     scope: CoroutineScope,
     private val dependencies: KodexAgentDependencies,
+    private val sessionId: String,
     private val agentPathResolver: AgentPathResolver,
     initialEntries: List<Int>,
 ) : KodexSessionRepository, CoroutineScope by scope {
@@ -130,6 +135,7 @@ private class FileSystemSubagentRepository(
                 scope = agentScope,
                 storage = storage,
                 dependencies = dependencies,
+                sessionId = sessionId,
                 state = agentScope.KodexAgentState(
                     client = dependencies.client,
                     storage = storage,
@@ -137,8 +143,8 @@ private class FileSystemSubagentRepository(
                     mcpService = dependencies.mcpService,
                 ),
                 createAgentPathResolver = { agentPathResolver },
-                runtimeBuilder = { state, dependencies, agentPathResolver ->
-                    state.buildSubagentRuntime(dependencies, agentPathResolver)
+                runtimeBuilder = { state, dependencies, agentPathResolver, sessionId ->
+                    state.buildSubagentRuntime(dependencies, agentPathResolver, sessionId)
                 },
                 initialSubagentEntries = initialSubagentEntries,
             )
@@ -201,6 +207,7 @@ internal suspend fun CoroutineScope.FileSystemKodexAgentSession(
             scope = scope,
             storage = storage,
             dependencies = dependencies,
+            sessionId = storage.id,
             state = scope.KodexAgentState(
                 client = dependencies.client,
                 storage = storage,
@@ -210,7 +217,7 @@ internal suspend fun CoroutineScope.FileSystemKodexAgentSession(
             createAgentPathResolver = { rootSession ->
                 AgentPathResolverImpl(rootSession)
             },
-            runtimeBuilder = { state, dependencies, agentPathResolver ->
+            runtimeBuilder = { state, dependencies, agentPathResolver, _ ->
                 state.buildMasterAgentRuntime(dependencies, agentPathResolver)
             },
             initialSubagentEntries = initialSubagentEntries,

@@ -1,5 +1,14 @@
 package io.github.stream29.kodex.cli.app
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.jakewharton.mosaic.layout.width
+import com.jakewharton.mosaic.modifier.Modifier
+import com.jakewharton.mosaic.terminal.MouseEvent
+import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.Column
+import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
@@ -17,6 +26,46 @@ import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.seconds
 
 class SessionAgentSidebarTest {
+    @Test
+    fun shellSessionRowsWrapTheirCommandWithoutFlatteningHardLines() {
+        assertEquals(
+            listOf(
+                "42: abcd",
+                "efghijkl",
+                "next",
+            ),
+            shellSessionSidebarLines(
+                sessionId = 42,
+                command = "abcdefghijkl\nnext",
+                columns = 8,
+            ),
+        )
+    }
+
+    @Test
+    fun shellSessionRowsOpenTheirMenuOnSecondaryClick() = runTest {
+        var menuOpened by mutableStateOf(false)
+
+        runMosaicTest {
+            val snapshot = setContentAndSnapshot {
+                Column(modifier = Modifier.width(8)) {
+                    ShellSessionSidebarRow(
+                        lines = listOf("42: abcd", "efghijkl"),
+                        onOpenMenu = { menuOpened = true },
+                    )
+                    Text(menuOpened.toString())
+                }
+            }
+            assertEquals("42: abcd\nefghijkl\nfalse", snapshot)
+
+            sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Press, MouseEvent.Button.Right))
+            sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Release))
+            awaitSnapshot()
+
+            assertEquals(true, menuOpened)
+        }
+    }
+
     @Test
     fun nestedAgentsAreLazilyExpandedAndUseTheirLastPathSegment() = runTest {
         coroutineScope {

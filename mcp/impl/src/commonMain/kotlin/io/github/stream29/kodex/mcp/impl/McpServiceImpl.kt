@@ -10,6 +10,7 @@ import io.github.stream29.kodex.mcp.streamablehttp.McpStreamableHttpClient
 import io.github.stream29.kodex.mcp.streamablehttp.openMcpStreamableHttpTransport
 import io.github.stream29.kodex.utils.coroutines.runCatchingCancellable
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
+import io.github.stream29.kodex.utils.logging.global
 import io.github.stream29.kodex.utils.processclient.ProcessClient
 import io.ktor.client.HttpClient
 import io.modelcontextprotocol.kotlin.sdk.client.Client
@@ -256,4 +257,6 @@ private data class McpServiceState(
     val activeClients: Map<String, ActiveMcpClient> = emptyMap(),
 )
 
-private val logger = KotlinLogging.logger {}
+private val logger by lazy {
+    KotlinLogging.logger {}.global()
+}

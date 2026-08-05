@@ -17,8 +17,10 @@ kotlin {
     }
 
     sourceSets {
-        named("fileLoggingMain").dependencies {
+        commonMain.dependencies {
             api(libs.kotlin.logging)
+        }
+        named("fileLoggingMain").dependencies {
             implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(libs.kermit.core)
             implementation(libs.kermit.io)

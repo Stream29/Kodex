@@ -2,8 +2,6 @@ package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -16,7 +14,6 @@ import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.cli.agent.AgentRuntimeControl
 import io.github.stream29.kodex.cli.agent.AgentRuntimeViewModel
 import io.github.stream29.kodex.cli.agent.AgentRuntimeViewState
-import io.github.stream29.kodex.cli.agent.activeShellSessionLabel
 import io.github.stream29.kodex.cli.agent.runtimeControl
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDropdownMenu
@@ -69,13 +66,8 @@ internal fun AgentRuntimeStatusBar(
 ) {
     val configuration = state.durable.settings?.configuration()
         ?: fallbackSettings.configuration()
-    val activeShellSessions by
-        viewModel.session.runtime.unifiedExecToolClient.activeSessions.collectAsState()
     Row(modifier = Modifier.width((columns - 1).coerceAtLeast(1))) {
         state.durable.tokenCount?.let { tokenCount -> Text("${tokenCount}t ") }
-        activeShellSessionLabel(activeShellSessions.size)?.let { activity ->
-            Text("$activity ")
-        }
         val control = state.runtimeControl()
         TuiButton(
             label = control.label(),

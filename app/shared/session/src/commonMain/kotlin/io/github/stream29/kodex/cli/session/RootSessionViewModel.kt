@@ -12,7 +12,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -117,10 +117,7 @@ public class RootSessionViewModel internal constructor(
             }
             if (discovered.agentId !in agentObservations) {
                 agentObservations[discovered.agentId] = discovered.session.launch {
-                    combine(
-                        viewModel.state,
-                        viewModel.session.runtime.unifiedExecToolClient.activeSessions,
-                    ) { _, _ -> Unit }.collect {
+                    viewModel.state.collect {
                         mutableState.update { current ->
                             current.copy(renderRevision = current.renderRevision + 1)
                         }

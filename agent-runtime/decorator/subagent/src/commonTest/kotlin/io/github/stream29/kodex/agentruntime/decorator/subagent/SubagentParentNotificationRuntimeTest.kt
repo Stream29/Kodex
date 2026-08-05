@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.agentruntime.decorator.subagent
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -50,6 +51,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
                 completed,
             )
             val runtime = RequestRuntime(state).subagentParentNotificationRuntime(
+                logger = TestLogger,
                 notifyParent = notifications::add,
             )
 
@@ -93,6 +95,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
                 failed,
             )
             val runtime = RequestRuntime(state).subagentParentNotificationRuntime(
+                logger = TestLogger,
                 notifyParent = notifications::add,
             )
 
@@ -124,6 +127,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
                 incomplete,
             )
             val runtime = RequestRuntime(state).subagentParentNotificationRuntime(
+                logger = TestLogger,
                 notifyParent = notifications::add,
             )
 
@@ -151,6 +155,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
                 ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = true)),
             )
             val runtime = RequestRuntime(state).subagentParentNotificationRuntime(
+                logger = TestLogger,
                 notifyParent = notifications::add,
             )
 
@@ -169,6 +174,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
                 completed,
             )
             val runtime = RequestRuntime(state).subagentParentNotificationRuntime(
+                logger = TestLogger,
                 notifyParent = { error("parent unavailable") },
             )
 
@@ -192,6 +198,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
                 },
             )
             val runtime = RequestRuntime(state).subagentParentNotificationRuntime(
+                logger = TestLogger,
                 notifyParent = notifications::add,
             )
 
@@ -211,6 +218,7 @@ val subagentParentNotificationRuntimeTest by testSuite {
                 ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = true)),
             )
             val runtime = RequestRuntime(state).subagentParentNotificationRuntime(
+                logger = TestLogger,
                 notifyParent = notifications::add,
             )
 
@@ -225,6 +233,8 @@ val subagentParentNotificationRuntimeTest by testSuite {
         }
     }
 }
+
+private val TestLogger = KotlinLogging.logger {}
 
 private class RequestRuntime(
     private val delegate: KodexAgentState,

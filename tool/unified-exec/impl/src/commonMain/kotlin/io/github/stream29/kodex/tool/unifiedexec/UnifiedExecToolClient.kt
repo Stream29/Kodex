@@ -227,18 +227,26 @@ internal class ManagedProcessSession(
             mutableCompleted.value = true
         }
     }
+
+    override fun close() {
+        session.close()
+    }
 }
 
 /**
- * Read-only facts about one active unified-exec process session.
+ * Observable control surface for one active unified-exec process session.
  *
  * Implementations retain the process and synchronization details; consumers
- * can use the original command and [completed] state for presentation only.
+ * can use the original command and [completed] state for presentation. [close]
+ * requests process-tree termination but leaves the session registered so its
+ * final output and exit code remain readable through `write_stdin`.
  */
-public interface UnifiedExecProcessSession {
+public interface UnifiedExecProcessSession : AutoCloseable {
     public val sessionId: Int
     public val arguments: ExecCommandArguments
     public val completed: StateFlow<Boolean>
+
+    override fun close()
 }
 
 private data class ProcessSessionOutput(

@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.agentruntime.decorator.steer
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -53,7 +54,7 @@ val steerRuntimeTest by testSuite {
         )
         assertEquals(KodexAgentStateValue.Empty, state.state.value)
         val pendingSteer = MutableStateFlow(userSteer("first"))
-        val runtime = TestRuntime(state).steerRuntime {
+        val runtime = TestRuntime(state).steerRuntime(logger = TestLogger) {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
@@ -75,7 +76,7 @@ val steerRuntimeTest by testSuite {
         state.appendUserMessage(textContent("initial"))
         val turnId = storage.settings.latestValue().turnId
         val pendingSteer = MutableStateFlow(emptyList<StableCleanEvent.Steerable>())
-        val runtime = TestRuntime(state).steerRuntime {
+        val runtime = TestRuntime(state).steerRuntime(logger = TestLogger) {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
@@ -126,7 +127,7 @@ val steerRuntimeTest by testSuite {
         )
         assertEquals(KodexAgentStateValue.AssistantMessage, state.state.value)
         val pendingSteer = MutableStateFlow(userSteer("continue"))
-        val runtime = TestRuntime(state).steerRuntime {
+        val runtime = TestRuntime(state).steerRuntime(logger = TestLogger) {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
@@ -155,7 +156,7 @@ val steerRuntimeTest by testSuite {
             ),
         )
         val pendingSteer = MutableStateFlow(listOf<StableCleanEvent.Steerable>(message))
-        val runtime = TestRuntime(state).steerRuntime {
+        val runtime = TestRuntime(state).steerRuntime(logger = TestLogger) {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
@@ -177,7 +178,7 @@ val steerRuntimeTest by testSuite {
         )
         val message = StableCleanEvent.UserMessage(textContent("continue"))
         val pendingSteer = MutableStateFlow(listOf<StableCleanEvent.Steerable>(message))
-        val runtime = TestRuntime(state).steerRuntime {
+        val runtime = TestRuntime(state).steerRuntime(logger = TestLogger) {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
@@ -215,7 +216,7 @@ val steerRuntimeTest by testSuite {
         )
         assertEquals(KodexAgentStateValue.ToolCompleted, state.state.value)
         val pendingSteer = MutableStateFlow(userSteer("adjust the next step"))
-        val runtime = TestRuntime(state).steerRuntime {
+        val runtime = TestRuntime(state).steerRuntime(logger = TestLogger) {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
@@ -240,7 +241,7 @@ val steerRuntimeTest by testSuite {
         state.appendUserMessage(textContent("initial"))
         val interruptingInput = userSteer("interrupt instead")
         val pendingSteer = MutableStateFlow(interruptingInput)
-        val runtime = TestRuntime(state).steerRuntime {
+        val runtime = TestRuntime(state).steerRuntime(logger = TestLogger) {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
@@ -269,7 +270,7 @@ val steerRuntimeTest by testSuite {
         assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
         val input = userSteer("wait until the tool finishes")
         val pendingSteer = MutableStateFlow(input)
-        val runtime = TestRuntime(state).steerRuntime {
+        val runtime = TestRuntime(state).steerRuntime(logger = TestLogger) {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
@@ -343,3 +344,5 @@ private suspend fun KodexAgentState.setPending(event: PendingToolEvent) {
 
 private fun testSettings(): KodexAgentSettings =
     KodexAgentSettings(OpenAiModelId("test-model"))
+
+private val TestLogger = KotlinLogging.logger {}

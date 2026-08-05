@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.agentruntime.decorator.tool
 
+import io.github.oshai.kotlinlogging.KLogger
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
@@ -22,6 +23,8 @@ import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.ToolName
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchEngine
+import io.github.stream29.kodex.utils.logging.tool
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,6 +44,7 @@ public class KodexToolRuntime internal constructor(
     private val dynamicTools: StateFlow<List<Tool>>,
     private val toolSearch: StateFlow<ToolSearchEngine>,
     private val toolHooks: ToolHooks,
+    private val logger: KLogger,
 ) : ResumableAgentLayer by delegate {
     private val fixedToolsByName: Map<ToolName, Tool> = fixedTools.toToolMap()
 
@@ -57,12 +61,21 @@ public class KodexToolRuntime internal constructor(
             for (pendingEvent in pending.events) {
                 when (pendingEvent) {
                     is PendingInvalidToolCall -> {
-                        completeToolCall(pendingEvent.completedEvent())
+                        logger
+                            .tool(pendingEvent.loggingToolName(), pendingEvent.callId)
+                            .runToolCall {
+                                warn { "Tool call input is invalid." }
+                                completeToolCall(pendingEvent.completedEvent())
+                            }
                         handledEvent = true
                     }
 
                     is PendingToolSearchEvent -> {
-                        completeToolCall(toolSearch.value.handle(pendingEvent))
+                        logger
+                            .tool(pendingEvent.loggingToolName(), pendingEvent.callId)
+                            .runToolCall {
+                                completeToolCall(toolSearch.value.handle(pendingEvent))
+                            }
                         handledEvent = true
                     }
 
@@ -70,15 +83,23 @@ public class KodexToolRuntime internal constructor(
                         val toolName = pendingEvent.requireToolName()
                         val tool = toolsByName[toolName]
                         if (tool == null && toolName.namespace?.startsWith("mcp__") == true) {
-                            completeToolCall(
-                                pendingEvent.failedEvent(
-                                    "The MCP tool is no longer available in the current catalog.",
-                                ),
-                            )
+                            logger
+                                .tool(toolName.toString(), pendingEvent.callId)
+                                .runToolCall {
+                                    warn { "MCP tool route is no longer available." }
+                                    completeToolCall(
+                                        pendingEvent.failedEvent(
+                                            "The MCP tool is no longer available in the current catalog.",
+                                        ),
+                                    )
+                                }
                         } else if (tool == null) {
                             continue
                         } else {
-                            handleToolCall(tool, pendingEvent)
+                            val toolLogger = logger.tool(toolName.toString(), pendingEvent.callId)
+                            toolLogger.runToolCall {
+                                handleToolCall(tool, pendingEvent, toolLogger)
+                            }
                         }
                         handledEvent = true
                     }
@@ -96,9 +117,11 @@ public class KodexToolRuntime internal constructor(
     private suspend fun handleToolCall(
         tool: Tool,
         pending: PendingToolEvent,
+        logger: KLogger,
     ) {
         when (val result = toolHooks.runPreToolUse(delegate.storage, pending)) {
             is PreToolUseResult.Block -> {
+                logger.warn { "Tool call blocked by PreToolUse hook." }
                 completeToolCall(pending.failedEvent(result.reason))
                 return
             }
@@ -153,12 +176,15 @@ private fun PendingInvalidToolInvocation.toStableInvocation(): InvalidToolInvoca
  * Adds a tool-execution layer over externally owned tool state.
  *
  * This runtime neither creates nor closes any supplied tool or state flow.
+ *
+ * @param logger Agent-scoped logger used to derive each Tool call logger.
  */
 public fun ResumableAgentLayer.toolRuntime(
     fixedTools: List<Tool>,
     dynamicTools: StateFlow<List<Tool>>,
     toolSearch: StateFlow<ToolSearchEngine>,
     toolHooks: ToolHooks,
+    logger: KLogger,
 ): KodexToolRuntime =
     KodexToolRuntime(
         delegate = this,
@@ -166,6 +192,7 @@ public fun ResumableAgentLayer.toolRuntime(
         dynamicTools = dynamicTools,
         toolSearch = toolSearch,
         toolHooks = toolHooks,
+        logger = logger,
     )
 
 private fun List<Tool>.toToolMap(): Map<ToolName, Tool> {
@@ -228,3 +255,27 @@ private fun ToolSearchEngine.handle(
 
 private fun PendingToolEvent.failedEvent(message: String): StableCleanEvent.CompletedTool =
     toFailedToolEvent(message)
+
+private fun PendingToolEvent.loggingToolName(): String {
+    val name = toolName ?: ClientToolSearchName
+    return toolNamespace?.let { namespace -> "$namespace.$name" } ?: name
+}
+
+private suspend fun <Result> KLogger.runToolCall(
+    block: suspend KLogger.() -> Result,
+): Result {
+    info { "Tool call started." }
+    return try {
+        block().also {
+            info { "Tool call completed." }
+        }
+    } catch (cancellation: CancellationException) {
+        info { "Tool call cancelled." }
+        throw cancellation
+    } catch (failure: Throwable) {
+        error(failure) { "Tool call failed." }
+        throw failure
+    }
+}
+
+private const val ClientToolSearchName: String = "tool_search"

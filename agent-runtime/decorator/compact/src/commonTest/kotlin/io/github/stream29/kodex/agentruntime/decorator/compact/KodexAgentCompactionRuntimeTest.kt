@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.agentruntime.decorator.compact
 
 import de.infix.testBalloon.framework.core.testSuite
-
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -64,7 +64,10 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime: ResumableAgentLayer = state.compactionRuntime(testModelCatalog())
+        val runtime: ResumableAgentLayer = state.compactionRuntime(
+            modelCatalog = testModelCatalog(),
+            logger = TestLogger,
+        )
         val agentState: KodexAgentStateContract = runtime
 
         assertSame(state.state, agentState.state)
@@ -82,7 +85,13 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime: ResumableAgentLayer = DelegatingRuntime(KodexAgentCompactionRuntime(state, testModelCatalog()))
+        val runtime: ResumableAgentLayer = DelegatingRuntime(
+            KodexAgentCompactionRuntime(
+                delegate = state,
+                modelCatalog = testModelCatalog(),
+                logger = TestLogger,
+            ),
+        )
 
         assertEquals(1, runtime.appendUserMessage(userMessage("Start.").content))
         assertSame(state.state, runtime.state)
@@ -115,7 +124,11 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime = KodexAgentCompactionRuntime(state, testModelCatalog())
+        val runtime = KodexAgentCompactionRuntime(
+            delegate = state,
+            modelCatalog = testModelCatalog(),
+            logger = TestLogger,
+        )
 
         state.appendUserMessage(userMessage("Start."))
         val runningResume = async(start = CoroutineStart.UNDISPATCHED) {
@@ -179,6 +192,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         val runtime = KodexAgentCompactionRuntime(
             delegate = state,
             modelCatalog = testModelCatalog(),
+            logger = TestLogger,
         )
         val user = userMessage("Answer briefly.")
 
@@ -244,6 +258,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         val runtime = KodexAgentCompactionRuntime(
             delegate = state,
             modelCatalog = testModelCatalog(),
+            logger = TestLogger,
             compactionHooks = hooks,
         )
         val user = userMessage("Keep this context.")
@@ -288,6 +303,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         val runtime = KodexAgentCompactionRuntime(
             delegate = state,
             modelCatalog = testModelCatalog(),
+            logger = TestLogger,
             compactionHooks = RecordingCompactionHooks(
                 pre = { request ->
                     hookRequests += request
@@ -373,7 +389,11 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime = KodexAgentCompactionRuntime(state, testModelCatalog())
+        val runtime = KodexAgentCompactionRuntime(
+            delegate = state,
+            modelCatalog = testModelCatalog(),
+            logger = TestLogger,
+        )
 
         state.appendUserMessage(user, tokenCount = 1)
         runtime.resume().toList()
@@ -411,7 +431,11 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val runtime = KodexAgentCompactionRuntime(state, testModelCatalog())
+        val runtime = KodexAgentCompactionRuntime(
+            delegate = state,
+            modelCatalog = testModelCatalog(),
+            logger = TestLogger,
+        )
         val pending = PendingCommandExecutionToolEvent(
             callId = "call_1",
             action = PendingCommandExecutionAction.ExecCommand(
@@ -444,6 +468,8 @@ private fun testModelCatalog(): OpenAiModelCatalog =
         },
         codexCliStorage = CodexCliStorage(Path(".kodex-test-model-catalog")),
     )
+
+private val TestLogger = KotlinLogging.logger {}
 
 private class DelegatingRuntime(
     private val delegate: ResumableAgentLayer,
