@@ -12,6 +12,7 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
+import com.jakewharton.mosaic.ui.TextStyle
 import de.infix.testBalloon.framework.core.testSuite
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlin.test.assertEquals
@@ -21,6 +22,22 @@ private val ansiSnapshots = SnapshotStrategy { mosaic ->
 }
 
 val tuiPressableTest by testSuite {
+    test("button applies its idle text style") {
+        runMosaicTest(snapshotStrategy = ansiSnapshots) {
+            assertEquals(
+                "\u001B[1m[Current]\u001B[0m",
+                setContentAndSnapshot {
+                    Box {
+                        TuiButton(
+                            label = "Current",
+                            idleTextStyle = TextStyle.Bold,
+                        ) {}
+                    }
+                },
+            )
+        }
+    }
+
     test("pressed button uses reverse video until release") {
         runMosaicTest(snapshotStrategy = ansiSnapshots) {
             setContentAndSnapshot {

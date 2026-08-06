@@ -7,6 +7,8 @@ import io.github.stream29.kodex.cli.agent.AgentRuntimeViewState
 import io.github.stream29.kodex.cli.agent.runtimeControl
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class AgentRuntimeControlTest {
     @Test
@@ -33,6 +35,24 @@ class AgentRuntimeControlTest {
         assertEquals(
             AgentRuntimeControl.Resume,
             runtimeState(agentState = KodexAgentStateValue.UserMessage).runtimeControl(),
+        )
+    }
+
+    @Test
+    fun historyReplacementRequiresAnIdleTurnAndStableAgentState() {
+        assertTrue(
+            runtimeState(agentState = KodexAgentStateValue.AssistantMessage)
+                .canReplaceCommittedHistory,
+        )
+        assertFalse(
+            runtimeState(
+                agentState = KodexAgentStateValue.AssistantMessage,
+                running = true,
+            ).canReplaceCommittedHistory,
+        )
+        assertFalse(
+            runtimeState(agentState = KodexAgentStateValue.ExternalWrite)
+                .canReplaceCommittedHistory,
         )
     }
 }

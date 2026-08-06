@@ -10,7 +10,10 @@ import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Row
+import com.jakewharton.mosaic.ui.RowScope
+import com.jakewharton.mosaic.ui.Spacer
 import com.jakewharton.mosaic.ui.Text
+import io.github.stream29.kodex.agentstate.contract.canCompact
 import io.github.stream29.kodex.cli.agent.AgentRuntimeControl
 import io.github.stream29.kodex.cli.agent.AgentRuntimeViewModel
 import io.github.stream29.kodex.cli.agent.AgentRuntimeViewState
@@ -31,23 +34,22 @@ import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ServiceTier
+import io.github.stream29.kodex.openai.availableServiceTiers
 import kotlinx.coroutines.launch
 
 /** Target-scoped presentation state shared by persistent triggers and host-level popup menus. */
 @Stable
 internal class RuntimeConfigurationDropdowns private constructor(
     val model: TuiDropdownState,
-    val tier: TuiDropdownState,
     val mode: TuiDropdownState,
 ) {
     companion object {
         @Composable
         fun remember(owner: Any?): RuntimeConfigurationDropdowns = key(owner) {
             val model = rememberTuiDropdownState()
-            val tier = rememberTuiDropdownState()
             val mode = rememberTuiDropdownState()
-            remember(model, tier, mode) {
-                RuntimeConfigurationDropdowns(model, tier, mode)
+            remember(model, mode) {
+                RuntimeConfigurationDropdowns(model, mode)
             }
         }
     }
@@ -60,8 +62,6 @@ internal fun AgentRuntimeStatusBar(
     state: AgentRuntimeViewState,
     fallbackSettings: KodexNewSessionSettings,
     dropdowns: RuntimeConfigurationDropdowns,
-    forkEnabled: Boolean,
-    onFork: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val configuration = state.durable.settings?.configuration()
@@ -71,6 +71,8 @@ internal fun AgentRuntimeStatusBar(
         val control = state.runtimeControl()
         TuiButton(
             label = control.label(),
+            modifier = Modifier.background(SessionButtonBackground),
+            color = SessionForeground,
             onClick = {
                 when (control) {
                     AgentRuntimeControl.Stop -> viewModel.cancel()
@@ -80,23 +82,17 @@ internal fun AgentRuntimeStatusBar(
             },
         )
         Text(" ")
+        TuiButton(
+            label = "Compact",
+            modifier = Modifier.background(SessionButtonBackground),
+            color = SessionForeground,
+            enabled = !state.running && state.agentState.canCompact,
+            onClick = { viewModel.forceCompact() },
+        )
+        Text(" ")
         RuntimeConfigurationTriggers(configuration, dropdowns)
-        Text(" ")
-        TuiButton(
-            label = "Settings",
-            modifier = Modifier.background(SessionButtonBackground),
-            color = SessionForeground,
-            onClick = onOpenSettings,
-        )
-        Text(" ")
-        TuiButton(
-            label = "Fork",
-            enabled = forkEnabled,
-            modifier = Modifier.background(SessionButtonBackground),
-            color = SessionForeground,
-            onClick = onFork,
-        )
         state.failureMessage?.let { failure -> Text(" [error] $failure") }
+        RightAlignedSettingsButton(onClick = onOpenSettings)
     }
 }
 
@@ -109,15 +105,21 @@ internal fun NewSessionStatusBar(
 ) {
     Row(modifier = Modifier.width((columns - 1).coerceAtLeast(1))) {
         RuntimeConfigurationTriggers(state.settings.configuration(), dropdowns)
-        Text(" ")
-        TuiButton(
-            label = "Settings",
-            modifier = Modifier.background(SessionButtonBackground),
-            color = SessionForeground,
-            onClick = onOpenSettings,
-        )
         state.failureMessage?.let { failure -> Text(" [notice] $failure") }
+        RightAlignedSettingsButton(onClick = onOpenSettings)
     }
+}
+
+@Composable
+private fun RowScope.RightAlignedSettingsButton(onClick: () -> Unit) {
+    Spacer(Modifier.width(1))
+    Spacer(Modifier.weight(1f))
+    TuiButton(
+        label = "Settings",
+        modifier = Modifier.background(SessionButtonBackground),
+        color = SessionForeground,
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -137,19 +139,15 @@ internal fun BoxScope.AgentRuntimeStatusMenus(
         models = models,
         modelOptions = modelOptions,
         dropdowns = dropdowns,
-        onModelSelected = { model, effort ->
+        onConfigurationSelected = { model, effort, tier ->
             scope.launch {
                 viewModel.updateSettings { current ->
                     current.copy(
                         model = model,
                         reasoning = current.reasoning.copy(effort = effort),
+                        serviceTier = tier,
                     )
                 }
-            }
-        },
-        onTierSelected = { tier ->
-            scope.launch {
-                viewModel.updateSettings { current -> current.copy(serviceTier = tier) }
             }
         },
         onModeSelected = { mode ->
@@ -174,16 +172,15 @@ internal fun BoxScope.NewSessionStatusMenus(
         models = models,
         modelOptions = modelOptions,
         dropdowns = dropdowns,
-        onModelSelected = { model, effort ->
+        onConfigurationSelected = { model, effort, tier ->
             scope.launch {
                 viewModel.updateSettings { current ->
-                    current.copy(model = model, reasoningEffort = effort)
+                    current.copy(
+                        model = model,
+                        reasoningEffort = effort,
+                        serviceTier = tier,
+                    )
                 }
-            }
-        },
-        onTierSelected = { tier ->
-            scope.launch {
-                viewModel.updateSettings { current -> current.copy(serviceTier = tier) }
             }
         },
         onModeSelected = { mode ->
@@ -195,40 +192,36 @@ internal fun BoxScope.NewSessionStatusMenus(
 }
 
 @Composable
-private fun RuntimeConfigurationTriggers(
+internal fun RuntimeConfigurationTriggers(
     configuration: RuntimeConfiguration,
     dropdowns: RuntimeConfigurationDropdowns,
 ) {
     TuiDropdownTrigger(
         dropdownState = dropdowns.model,
-        label = "${configuration.model.value} ${configuration.reasoning.displayName()}",
-        modifier = Modifier.background(SessionButtonBackground),
-        color = SessionForeground,
-    )
-    Text(" ")
-    TuiDropdownTrigger(
-        dropdownState = dropdowns.tier,
-        label = "tier: ${configuration.tier.displayName()}",
+        label = runtimeConfigurationLabel(
+            model = configuration.model,
+            reasoning = configuration.reasoning,
+            tier = configuration.tier,
+        ),
         modifier = Modifier.background(SessionButtonBackground),
         color = SessionForeground,
     )
     Text(" ")
     TuiDropdownTrigger(
         dropdownState = dropdowns.mode,
-        label = "${configuration.mode.displayName()} mode",
+        label = configuration.mode.displayName(),
         modifier = Modifier.background(SessionButtonBackground),
         color = SessionForeground,
     )
 }
 
 @Composable
-private fun BoxScope.RuntimeConfigurationMenus(
+internal fun BoxScope.RuntimeConfigurationMenus(
     configuration: RuntimeConfiguration,
     models: List<ModelInfo>,
     modelOptions: List<OpenAiModelId>,
     dropdowns: RuntimeConfigurationDropdowns,
-    onModelSelected: (OpenAiModelId, ReasoningEffort) -> Unit,
-    onTierSelected: (ServiceTier) -> Unit,
+    onConfigurationSelected: (OpenAiModelId, ReasoningEffort, ServiceTier) -> Unit,
     onModeSelected: (ModeKind) -> Unit,
 ) {
     TuiDropdownMenu(
@@ -236,63 +229,73 @@ private fun BoxScope.RuntimeConfigurationMenus(
         backgroundColor = PopupMenuBackground,
     ) {
         modelOptions.forEach { model ->
-            val efforts = models
-                .firstOrNull { info -> info.slug == model }
+            val modelInfo = models.firstOrNull { info -> info.slug == model }
+            val efforts = modelInfo
                 ?.supportedReasoningLevels
                 ?.map { preset -> preset.effort }
                 .orEmpty()
                 .ifEmpty { listOf(configuration.reasoning) }
-            if (efforts.size == 1) {
-                val effort = efforts.single()
-                TuiPopupMenuItem(
-                    key = model,
-                    selected = model == configuration.model,
-                    onClick = { onModelSelected(model, effort) },
-                ) {
-                    Text(model.value)
-                }
-            } else {
-                TuiPopupSubmenuItem(
-                    key = model,
-                    selected = model == configuration.model,
-                    initialSubmenuFocusedKey = configuration.reasoning,
-                    submenuContent = {
-                        efforts.forEach { effort ->
-                            TuiPopupMenuItem(
-                                key = effort,
-                                selected = model == configuration.model &&
-                                    effort == configuration.reasoning,
-                                onClick = { onModelSelected(model, effort) },
-                            ) {
-                                Text(effort.displayName())
-                            }
+            val tiers = modelInfo
+                ?.availableServiceTiers()
+                .orEmpty()
+                .ifEmpty { listOf(ServiceTier.Default) }
+            TuiPopupSubmenuItem(
+                key = model,
+                selected = model == configuration.model,
+                initialSubmenuFocusedKey = configuration.reasoning
+                    .takeIf { model == configuration.model && it in efforts }
+                    ?: efforts.first(),
+                backgroundColor = PopupMenuBackground,
+                submenuContent = {
+                    efforts.forEach { effort ->
+                        TuiPopupSubmenuItem(
+                            key = effort,
+                            selected = model == configuration.model &&
+                                effort == configuration.reasoning,
+                            initialSubmenuFocusedKey = configuration.tier
+                                .takeIf {
+                                    model == configuration.model &&
+                                        effort == configuration.reasoning &&
+                                        it in tiers
+                                }
+                                ?: ServiceTier.Default,
+                            backgroundColor = PopupMenuBackground,
+                            submenuContent = {
+                                tiers.forEach { tier ->
+                                    TuiPopupMenuItem(
+                                        key = tier,
+                                        selected = model == configuration.model &&
+                                            effort == configuration.reasoning &&
+                                            tier == configuration.tier,
+                                        onClick = {
+                                            onConfigurationSelected(model, effort, tier)
+                                        },
+                                    ) {
+                                        Text(tier.displayName())
+                                    }
+                                }
+                            },
+                        ) {
+                            Text(effort.displayName())
                         }
-                    },
-                ) {
-                    Text(model.value)
-                }
+                    }
+                },
+            ) {
+                Text(model.value)
             }
         }
     }
     TuiDropdownMenu(
-        dropdownState = dropdowns.tier,
-        options = ServiceTier.entries.toList(),
-        selected = configuration.tier,
-        optionLabel = ServiceTier::displayName,
-        backgroundColor = PopupMenuBackground,
-        onSelect = onTierSelected,
-    )
-    TuiDropdownMenu(
         dropdownState = dropdowns.mode,
         options = ModeKind.entries.toList(),
         selected = configuration.mode,
-        optionLabel = { mode -> "${mode.displayName()} mode" },
+        optionLabel = ModeKind::displayName,
         backgroundColor = PopupMenuBackground,
         onSelect = onModeSelected,
     )
 }
 
-private data class RuntimeConfiguration(
+internal data class RuntimeConfiguration(
     val model: OpenAiModelId,
     val reasoning: ReasoningEffort,
     val tier: ServiceTier,
@@ -312,6 +315,20 @@ private fun KodexNewSessionSettings.configuration(): RuntimeConfiguration = Runt
     tier = serviceTier,
     mode = mode,
 )
+
+internal fun runtimeConfigurationLabel(
+    model: OpenAiModelId,
+    reasoning: ReasoningEffort,
+    tier: ServiceTier,
+): String = buildString {
+    append(model.value)
+    append(' ')
+    append(reasoning.displayName())
+    if (tier != ServiceTier.Default) {
+        append(' ')
+        append(tier.displayName())
+    }
+}
 
 private fun AgentRuntimeControl.label(): String = when (this) {
     AgentRuntimeControl.Stop -> "Stop"

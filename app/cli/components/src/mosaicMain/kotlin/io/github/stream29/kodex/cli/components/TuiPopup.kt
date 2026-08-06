@@ -39,6 +39,10 @@ import com.jakewharton.mosaic.ui.unit.IntSize
 public class TuiPopupAnchor internal constructor() {
     internal var bounds: TuiPopupAnchorBounds? by mutableStateOf(null)
 
+    /** Whether this anchor currently belongs to a placed layout node. */
+    public val isPlaced: Boolean
+        get() = bounds != null
+
     internal fun update(coordinates: LayoutCoordinates) {
         val updatedBounds = TuiPopupAnchorBounds(
             position = coordinates.position,

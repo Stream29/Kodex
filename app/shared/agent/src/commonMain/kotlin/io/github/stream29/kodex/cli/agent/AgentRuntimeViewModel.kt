@@ -5,8 +5,12 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.indexes
+import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.clearPending
+import io.github.stream29.kodex.agentstate.contract.forcedCompact
 import io.github.stream29.kodex.cli.sessiontitle.AgentTitleGeneration
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -22,6 +26,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.getAndUpdate
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -44,6 +51,19 @@ public data class AgentDurableViewState(
     public val settings: KodexAgentSettings? = null,
     public val tokenCount: Long? = null,
 )
+
+/** One committed history entry awaiting destructive revert confirmation. */
+public data class AgentHistoryRevertRequest(
+    public val storageIndex: Int,
+) {
+    init {
+        require(storageIndex in 0 until Int.MAX_VALUE) {
+            "A history revert target must have a non-negative finite successor."
+        }
+    }
+
+    public val untilExclusive: Int = storageIndex + 1
+}
 
 /** Semantic kind of the current typed Responses output state. */
 public enum class AgentStreamKind {
@@ -104,8 +124,11 @@ public class AgentRuntimeViewModel internal constructor(
             running = session.runtime.runningTurn.value != null,
         ),
     )
+    private val mutablePendingHistoryRevert = MutableStateFlow<AgentHistoryRevertRequest?>(null)
 
     public val state: StateFlow<AgentRuntimeViewState> = mutableState.asStateFlow()
+    public val pendingHistoryRevert: StateFlow<AgentHistoryRevertRequest?> =
+        mutablePendingHistoryRevert.asStateFlow()
 
     init {
         scope.launch {
@@ -179,6 +202,71 @@ public class AgentRuntimeViewModel internal constructor(
             throw failure
         } catch (failure: Throwable) {
             recordFailure(failure)
+        }
+    }
+
+    /** Requests an explicit user-initiated context compaction. */
+    public fun forceCompact(): Job = scope.launch {
+        clearFailure()
+        try {
+            session.runtime.forcedCompact()
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            recordFailure(failure)
+        }
+    }
+
+    /** Opens this Agent's destructive revert confirmation for one committed entry. */
+    public fun requestHistoryRevert(storageIndex: Int) {
+        require(session.runtime.runningTurn.value == null) {
+            "Cannot request a history revert while the Agent is running."
+        }
+        require(session.runtime.state.value.canReplaceHistory) {
+            "Cannot request a history revert while Agent state is ${session.runtime.state.value}."
+        }
+        mutablePendingHistoryRevert.value = AgentHistoryRevertRequest(storageIndex)
+    }
+
+    /** Dismisses this Agent's pending history revert confirmation. */
+    public fun dismissHistoryRevert() {
+        mutablePendingHistoryRevert.value = null
+    }
+
+    /** Atomically consumes the pending revert request before executing it. */
+    public fun takeHistoryRevertRequest(): AgentHistoryRevertRequest? =
+        mutablePendingHistoryRevert.getAndUpdate { null }
+
+    /**
+     * Retains the committed entry at [storageIndex] and removes every later
+     * change point from this live Agent's storage.
+     */
+    public suspend fun revertHistory(storageIndex: Int) {
+        val request = AgentHistoryRevertRequest(storageIndex)
+        require(session.runtime.runningTurn.value == null) {
+            "Cannot revert history while the Agent is running."
+        }
+        require(session.runtime.state.value.canReplaceHistory) {
+            "Cannot revert history while Agent state is ${session.runtime.state.value}."
+        }
+        clearFailure()
+        try {
+            automaticTitle.replaceHistory {
+                session.runtime.modify { storage ->
+                    require(storage.stable.floorToIndex(request.storageIndex) == request.storageIndex) {
+                        "History entry ${request.storageIndex} is no longer committed."
+                    }
+                    val retainsAcceptedUserText = storage.hasNonblankUserTextBefore(request.untilExclusive)
+                    storage.revert(request.untilExclusive)
+                    retainsAcceptedUserText
+                }
+            }
+            session.runtime.pendingSteer.value = emptyList()
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            recordFailure(failure)
+            throw failure
         }
     }
 
@@ -313,3 +401,28 @@ private fun KodexAgentStateValue.singleRequestUserInputOrNull(): PendingRequestU
     (this as? KodexAgentStateValue.ToolPending)
         ?.events
         ?.singleOrNull() as? PendingRequestUserInputToolEvent
+
+private suspend fun MutableKodexAgentStorage.hasNonblankUserTextBefore(untilExclusive: Int): Boolean =
+    stable.indexes()
+        .takeWhile { index -> index < untilExclusive }
+        .firstOrNull { index ->
+            val event = stable[index] as? StableCleanEvent.UserMessage
+            event?.content?.any { content ->
+                (content as? ContentItem.InputText)?.text?.isNotBlank() == true
+            } == true
+        } != null
+
+private val KodexAgentStateValue.canReplaceHistory: Boolean
+    get() = when (this) {
+        KodexAgentStateValue.Empty,
+        KodexAgentStateValue.UserMessage,
+        KodexAgentStateValue.AssistantMessage,
+        is KodexAgentStateValue.ToolPending,
+        KodexAgentStateValue.ToolCompleted,
+            -> true
+
+        KodexAgentStateValue.ExternalWrite,
+        is KodexAgentStateValue.RequestResponse,
+        KodexAgentStateValue.Compacting,
+            -> false
+    }

@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.cli.history
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -8,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import com.jakewharton.mosaic.focus.FocusRequester
 import com.jakewharton.mosaic.layout.fillMaxSize
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
@@ -20,8 +22,16 @@ import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
 import io.github.stream29.kodex.cli.components.LazyColumn
+import io.github.stream29.kodex.cli.components.LazyListLayoutInfo
 import io.github.stream29.kodex.cli.components.LazyListState
+import io.github.stream29.kodex.cli.components.MutableScrollInteractionSource
+import io.github.stream29.kodex.cli.components.ScrollInputSource
+import io.github.stream29.kodex.cli.components.ScrollOrientation
+import io.github.stream29.kodex.cli.components.TuiPopupAnchor
+import io.github.stream29.kodex.cli.components.TuiPressable
 import io.github.stream29.kodex.cli.components.items
+import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
+import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import io.github.stream29.kodex.cli.components.wrapToTerminalWidth
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
@@ -31,21 +41,36 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEve
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecToolClient
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 
 /** Renders one Agent history model. */
 @Composable
 public fun AgentHistoryView(
     model: AgentHistoryViewModel,
     unifiedExecToolClient: UnifiedExecToolClient? = null,
+    onOpenEntryContextMenu: ((
+        generation: Long,
+        storageIndex: Int,
+        anchor: TuiPopupAnchor,
+    ) -> Unit)? = null,
 ) {
     val agentId = model.agentState.storage.id
     val listState = remember(agentId) { LazyListState() }
+    val scrollInteractionSource = remember(agentId) { MutableScrollInteractionSource() }
+    val entryFocusRequesters = remember(agentId) {
+        mutableMapOf<StoredHistoryKey, FocusRequester>()
+    }
     var window by remember(model, agentId) { mutableStateOf(model.window.value) }
     var requestResponse by remember(model, agentId) { mutableStateOf(model.requestResponse.value) }
     val streamingTailCount = if (requestResponse == null) 0 else 1
+    HistoryPagingFocusEffect(
+        listState = listState,
+        interactionSource = scrollInteractionSource,
+        entryFocusRequesters = entryFocusRequesters,
+    )
 
     LaunchedEffect(model, agentId, listState) {
         model.window.collect { updatedWindow ->
@@ -101,6 +126,8 @@ public fun AgentHistoryView(
             modifier = Modifier.fillMaxSize(),
             state = listState,
             reverseLayout = true,
+            interactionSource = scrollInteractionSource,
+            keyboardPageSize = { viewportSize -> (viewportSize / 2).coerceAtLeast(1) },
         ) {
             requestResponse?.let { request ->
                 item(
@@ -142,7 +169,27 @@ public fun AgentHistoryView(
                 },
                 contentType = { entry -> entry.event.historyContentType() },
             ) { entry ->
-                StoredHistoryEntry(entry, unifiedExecToolClient)
+                val entryKey = StoredHistoryKey(
+                    agentId = agentId,
+                    generation = window.generation,
+                    storageIndex = entry.index,
+                )
+                val focusRequester = remember(entryKey) { FocusRequester() }
+                DisposableEffect(entryKey, focusRequester) {
+                    entryFocusRequesters[entryKey] = focusRequester
+                    onDispose {
+                        if (entryFocusRequesters[entryKey] === focusRequester) {
+                            entryFocusRequesters.remove(entryKey)
+                        }
+                    }
+                }
+                StoredHistoryEntry(
+                    entry = entry,
+                    generation = window.generation,
+                    focusRequester = focusRequester,
+                    unifiedExecToolClient = unifiedExecToolClient,
+                    onOpenContextMenu = onOpenEntryContextMenu,
+                )
             }
 
             if (window.isLoading) {
@@ -204,11 +251,86 @@ internal fun LazyListState.requestLatestIfAtLatest() {
 }
 
 @Composable
-private fun StoredHistoryEntry(
-    entry: AgentHistoryStoredEntry,
-    unifiedExecToolClient: UnifiedExecToolClient?,
+internal fun HistoryPagingFocusEffect(
+    listState: LazyListState,
+    interactionSource: MutableScrollInteractionSource,
+    entryFocusRequesters: Map<StoredHistoryKey, FocusRequester>,
 ) {
-    entry.event.render(unifiedExecToolClient)
+    LaunchedEffect(listState, interactionSource) {
+        interactionSource.interactions
+            .filter { interaction ->
+                interaction.source == ScrollInputSource.Keyboard &&
+                    interaction.orientation == ScrollOrientation.Vertical
+            }
+            .collectLatest { interaction ->
+                val expectedAnchorIndex = listState.firstVisibleItemIndex
+                val expectedAnchorOffset = listState.firstVisibleItemScrollOffset
+                val layoutInfo = snapshotFlow { listState.layoutInfo }
+                    .first { layout ->
+                        layout.matchesAnchor(
+                            index = expectedAnchorIndex,
+                            scrollOffset = expectedAnchorOffset,
+                        )
+                    }
+                val targetKey = layoutInfo.historyPageFocusKey(
+                    towardTop = interaction.consumedDelta < 0,
+                ) ?: return@collectLatest
+
+                entryFocusRequesters[targetKey]?.requestFocus()
+            }
+    }
+}
+
+private fun LazyListLayoutInfo.matchesAnchor(
+    index: Int,
+    scrollOffset: Int,
+): Boolean {
+    val firstVisibleItem = visibleItemsInfo.firstOrNull() ?: return false
+    return firstVisibleItem.index == index &&
+        firstVisibleItem.offset == viewportStartOffset - scrollOffset
+}
+
+internal fun LazyListLayoutInfo.historyPageFocusKey(towardTop: Boolean): StoredHistoryKey? {
+    val candidates = visibleItemsInfo.filter { item ->
+        item.key is StoredHistoryKey &&
+            item.offset >= viewportStartOffset &&
+            item.offset + item.size <= viewportEndOffset
+    }
+    val target = if (towardTop) {
+        candidates.minByOrNull { item -> item.offset }
+    } else {
+        candidates.maxByOrNull { item -> item.offset + item.size }
+    }
+    return target?.key as? StoredHistoryKey
+}
+
+@Composable
+internal fun StoredHistoryEntry(
+    entry: AgentHistoryStoredEntry,
+    generation: Long,
+    focusRequester: FocusRequester? = null,
+    unifiedExecToolClient: UnifiedExecToolClient?,
+    onOpenContextMenu: ((generation: Long, storageIndex: Int, anchor: TuiPopupAnchor) -> Unit)?,
+) {
+    val menuAnchor = rememberTuiPopupAnchor()
+    TuiPressable(
+        onClick = {},
+        focusRequester = focusRequester,
+        onSecondaryClick = onOpenContextMenu?.let { openMenu ->
+            {
+                openMenu(
+                    generation,
+                    entry.index,
+                    menuAnchor,
+                )
+            }
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .tuiPopupAnchor(menuAnchor),
+    ) { _, _, _ ->
+        entry.event.render(unifiedExecToolClient)
+    }
 }
 
 @Composable
@@ -266,7 +388,7 @@ private fun StableCleanEvent.historyContentType(): HistoryContentType = when (th
     is StableCleanEvent.AssistantMessage,
     is StableCleanEvent.DeveloperMessage,
     is StableCleanEvent.AgentMessage,
-    -> HistoryContentType.Message
+        -> HistoryContentType.Message
 
     is StableCleanEvent.Reasoning -> HistoryContentType.Reasoning
     StableCleanEvent.ContextCompaction -> HistoryContentType.Context
@@ -296,17 +418,17 @@ private fun KodexAgentStateValue.RequestResponse.historyIdentity(): Any = when (
 private fun KodexAgentStateValue.RequestResponse.historyContentType(): HistoryContentType = when (this) {
     KodexAgentStateValue.RequestResponse.Started,
     is KodexAgentStateValue.RequestResponse.Unknown,
-    -> HistoryContentType.StreamingStatus
+        -> HistoryContentType.StreamingStatus
 
     is KodexAgentStateValue.RequestResponse.Message,
     is KodexAgentStateValue.RequestResponse.AgentMessage,
-    -> HistoryContentType.StreamingMessage
+        -> HistoryContentType.StreamingMessage
 
     is KodexAgentStateValue.RequestResponse.Reasoning -> HistoryContentType.StreamingReasoning
     is KodexAgentStateValue.RequestResponse.ToolCall -> HistoryContentType.StreamingTool
 }
 
-private data class StoredHistoryKey(
+internal data class StoredHistoryKey(
     val agentId: String,
     val generation: Long,
     val storageIndex: Int,

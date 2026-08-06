@@ -9,6 +9,7 @@ import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
+import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
@@ -126,6 +127,7 @@ private fun SessionTabButton(
             .background(if (entry.selected) SessionButtonBackground else SessionTopBarBackground)
             .tuiPopupAnchor(tabMenuAnchor),
         color = SessionForeground,
+        idleTextStyle = if (entry.selected) TextStyle.Bold else TextStyle.Unspecified,
         onSecondaryClick = { onOpenMenu(entry.target, sessionName, tabMenuAnchor) },
         onClick = onClick,
     )

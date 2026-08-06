@@ -691,6 +691,37 @@ val lazyColumnTest by testSuite {
         }
     }
 
+    test("pointer focus leaves a partially visible target at its current viewport position") {
+        val state = LazyListState(initialFirstVisibleItemScrollOffset = 1)
+        var focused by mutableStateOf("")
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Column {
+                    FocusableLazyItem(index = 99, onFocus = { focused = "outside" })
+                    LazyColumn(Modifier.height(3), state) {
+                        items(count = 3, key = { index -> index }) { index ->
+                            FocusableLazyItem(
+                                index = index,
+                                height = 2,
+                                onFocus = { focused = "item-$index" },
+                            )
+                        }
+                    }
+                }
+            }
+            assertEquals("outside", focused)
+            assertEquals(1, state.firstVisibleItemScrollOffset)
+
+            sendMouseEvent(MouseEvent(0, 1, MouseEvent.Type.Press, MouseEvent.Button.Left))
+            awaitSnapshot()
+
+            assertEquals("item-0", focused)
+            assertEquals(0, state.firstVisibleItemIndex)
+            assertEquals(1, state.firstVisibleItemScrollOffset)
+        }
+    }
+
     test("initial focus relocation runs after the current layout pass") {
         val state = LazyListState(initialFirstVisibleItemScrollOffset = 1)
         var focused by mutableStateOf("")

@@ -166,9 +166,9 @@ public suspend fun MutableKodexAgentStorage.revert(untilExclusive: Int) {
 /**
  * Resets [target] and copies this storage into it.
  *
- * [until] is the exclusive state boundary. Callers should pass a
- * stable turn boundary, not an arbitrary index inside an unfinished model/tool
- * exchange.
+ * [until] is the exclusive state boundary. It may immediately follow any
+ * committed stable event; callers own the product semantics of retaining a
+ * prefix that ends inside a model/tool exchange.
  *
  * @param until Exclusive state upper bound. It must be greater than zero so
  * the target retains its required initialized snapshot.

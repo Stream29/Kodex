@@ -5,16 +5,18 @@ import com.jakewharton.mosaic.layout.onKeyEvent
 import com.jakewharton.mosaic.modifier.Modifier
 
 /**
- * Interprets unmodified Page Up and Page Down keys as viewport-sized vertical scroll requests.
+ * Interprets unmodified Page Up and Page Down keys as vertical scroll requests.
  *
- * The event is consumed only when [state] consumes a non-zero number of rows. [viewportSize]
- * should report the latest measured viewport and is read when the key event arrives.
+ * [viewportSize] should report the latest measured viewport and is read when the key event arrives.
+ * [pageSize] maps that viewport to the requested row count. The event is consumed only when [state]
+ * consumes a non-zero number of rows.
  *
  * @param interactionSource `null` when the caller does not observe scroll interactions.
  */
 public fun Modifier.scrollablePaging(
     state: ScrollableState,
     viewportSize: () -> Int,
+    pageSize: (viewportSize: Int) -> Int = { it },
     enabled: Boolean = true,
     reverseDirection: Boolean = false,
     interactionSource: MutableScrollInteractionSource? = null,
@@ -27,7 +29,8 @@ public fun Modifier.scrollablePaging(
             "PageDown" -> 1
             else -> return@onKeyEvent false
         }
-        val requestedDelta = direction * viewportSize().coerceAtLeast(1) *
+        val viewport = viewportSize().coerceAtLeast(1)
+        val requestedDelta = direction * pageSize(viewport).coerceAtLeast(1) *
             if (reverseDirection) -1 else 1
         val consumedDelta = state.scrollBy(requestedDelta)
         if (consumedDelta == 0) return@onKeyEvent false
@@ -42,4 +45,3 @@ public fun Modifier.scrollablePaging(
         true
     }
 }
-
