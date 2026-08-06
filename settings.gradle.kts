@@ -18,6 +18,11 @@ dependencyResolutionManagement {
 rootProject.name = "Kodex"
 
 includeBuild("Mosaic")
+includeBuild("LuceneKmp") {
+    dependencySubstitution {
+        substitute(module("org.gnit.lucene-kmp:lucene-kmp-core")).using(project(":core"))
+    }
+}
 includeBuild("KotlinMcpSdk") {
     name = "kotlin-mcp-sdk"
 }

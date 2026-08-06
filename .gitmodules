@@ -4,3 +4,6 @@
 [submodule "KotlinMcpSdk"]
 	path = KotlinMcpSdk
 	url = git@github.com:Stream29/kotlin-mcp-sdk.git
+[submodule "LuceneKmp"]
+	path = LuceneKmp
+	url = git@github.com:Stream29/lucene-kmp.git
