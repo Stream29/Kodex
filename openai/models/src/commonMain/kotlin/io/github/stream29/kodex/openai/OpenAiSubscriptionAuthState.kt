@@ -30,11 +30,14 @@ public data class OpenAiSubscriptionTokens(
  * @property planType Nullable because Codex auth files may omit the plan type
  * or provide a value this client does not recognize; `null` means no known
  * plan type is available.
+ * @property email Nullable because an ID token may omit both supported email
+ * claims; `null` means the authenticated account has no displayable email.
  */
 public data class OpenAiSubscriptionAuthState(
     public val accessToken: String,
     public val accountId: String? = null,
     public val planType: OpenAiSubscriptionPlan? = null,
+    public val email: String? = null,
 )
 
 public enum class OpenAiSubscriptionPlan(public val rawValue: String) {

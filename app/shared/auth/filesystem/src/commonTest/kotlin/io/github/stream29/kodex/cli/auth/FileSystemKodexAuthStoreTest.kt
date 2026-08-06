@@ -47,6 +47,7 @@ val fileSystemKodexAuthStoreTest by testSuite(
                     assertEquals(source.tokens?.accessToken, auth.accessToken)
                     assertEquals("account-initial", auth.accountId)
                     assertEquals(OpenAiSubscriptionPlan.Plus, auth.planType)
+                    assertEquals("initial@example.com", auth.email)
                     assertFalse(SystemCoroutineFileSystem.exists(Path(dataDirectory, "auth.yml")))
                 } finally {
                     store.close()
@@ -117,25 +118,25 @@ val fileSystemKodexAuthStoreTest by testSuite(
             coroutineScope {
                 val store = FileSystemKodexAuthStore(dataDirectory, settings)
                 try {
-                    assertEquals(codex.tokens?.accessToken, store.authenticated().accessToken)
+                    val initialAuth = store.authenticated()
+                    assertEquals(codex.tokens?.accessToken, initialAuth.accessToken)
+                    assertEquals("codex@example.com", initialAuth.email)
 
                     settings.update { current -> current.copy(authSource = KodexAuthSource.Kodex) }
-                    assertEquals(
-                        local.tokens?.accessToken,
-                        store.awaitAuthenticatedAccessToken(
-                            requireNotNull(local.tokens).accessToken,
-                        ).accessToken,
+                    val localAuth = store.awaitAuthenticatedAccessToken(
+                        requireNotNull(local.tokens).accessToken,
                     )
+                    assertEquals(local.tokens?.accessToken, localAuth.accessToken)
+                    assertEquals("local@example.com", localAuth.email)
 
                     val external = subscriptionAuth("external")
                     writeCodexAuth(codexHome, external)
                     settings.update { current -> current.copy(authSource = KodexAuthSource.Codex) }
-                    assertEquals(
-                        external.tokens?.accessToken,
-                        store.awaitAuthenticatedAccessToken(
-                            requireNotNull(external.tokens).accessToken,
-                        ).accessToken,
+                    val externalAuth = store.awaitAuthenticatedAccessToken(
+                        requireNotNull(external.tokens).accessToken,
                     )
+                    assertEquals(external.tokens?.accessToken, externalAuth.accessToken)
+                    assertEquals("external@example.com", externalAuth.email)
                     assertEquals(local.tokens, readAuthFile(dataDirectory).tokens)
                 } finally {
                     store.close()
@@ -316,8 +317,13 @@ private fun subscriptionTokens(
         expiresAt = expiresAt,
         accountId = "account-$label",
         planType = "plus",
+        email = "$label@example.com",
     ),
-    accessToken = jwt(expiresAt),
+    accessToken = jwt(
+        expiresAt = expiresAt,
+        accountId = "access-$label",
+        email = "access-$label@example.com",
+    ),
     refreshToken = "refresh-$label",
 )
 
@@ -345,12 +351,14 @@ private fun jwt(
     expiresAt: Instant,
     accountId: String = "account",
     planType: String = "plus",
+    email: String = "account@example.com",
 ): String {
     val header = buildJsonObject {
         put("alg", "none")
     }
     val payload = buildJsonObject {
         put("exp", expiresAt.epochSeconds)
+        put("email", email)
         put(
             "https://api.openai.com/auth",
             buildJsonObject {

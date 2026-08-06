@@ -24,6 +24,7 @@ import kotlinx.io.files.Path
 /** State for one virtual New-session tab. */
 public data class NewSessionViewState(
     public val settings: KodexNewSessionSettings,
+    public val workingDirectory: Path,
     public val newLineKey: NewLineKey,
     public val codexHome: Path,
     /** A per-tab title to use when this virtual session is materialized. */
@@ -43,7 +44,7 @@ public data class NewSessionViewState(
 public class NewSessionViewModel internal constructor(
     private val globalSettings: KodexGlobalSettingsStore,
     private val sessions: SessionRepositoryViewModel,
-    private val workingDirectory: Path,
+    workingDirectory: Path,
     private val scope: CoroutineScope,
 ) : AutoCloseable {
     /** Draft editor state used before a real root Agent runtime exists. */
@@ -53,6 +54,7 @@ public class NewSessionViewModel internal constructor(
     private val mutableState = MutableStateFlow(
         NewSessionViewState(
             settings = globalSettings.settings.value.newSession.copy(),
+            workingDirectory = workingDirectory,
             newLineKey = globalSettings.settings.value.newLineKey,
             codexHome = globalSettings.settings.value.codexHome,
         ),
@@ -83,6 +85,12 @@ public class NewSessionViewModel internal constructor(
         updated
     }
 
+    /** Updates the working directory copied into this virtual tab's root session. */
+    public suspend fun updateWorkingDirectory(workingDirectory: Path): Path = creationMutex.withLock {
+        mutableState.update { current -> current.copy(workingDirectory = workingDirectory) }
+        workingDirectory
+    }
+
     /** Names this virtual tab; the title is applied when its root session is created. */
     public suspend fun renameThread(threadName: String): String {
         val normalized = threadName.trim()
@@ -103,7 +111,7 @@ public class NewSessionViewModel internal constructor(
         try {
             val state = mutableState.value
             sessions.create { sessionIndex ->
-                state.settings.toAgentSettings(sessionIndex, workingDirectory, state.threadName)
+                state.settings.toAgentSettings(sessionIndex, state.workingDirectory, state.threadName)
             }
         } catch (failure: Throwable) {
             mutableState.update { current ->

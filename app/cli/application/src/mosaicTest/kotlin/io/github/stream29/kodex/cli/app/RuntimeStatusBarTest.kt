@@ -134,6 +134,7 @@ class RuntimeStatusBarTest {
                     columns = columns,
                     state = NewSessionViewState(
                         settings = KodexNewSessionSettings(),
+                        workingDirectory = Path("."),
                         newLineKey = NewLineKey.ShiftEnter,
                         codexHome = Path("codex-home"),
                     ),

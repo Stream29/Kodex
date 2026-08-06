@@ -31,6 +31,7 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.cli.agent.AgentHistoryRevertRequest
 import io.github.stream29.kodex.cli.agent.AgentRuntimeViewModel
 import io.github.stream29.kodex.cli.agent.AgentRuntimeViewState
+import io.github.stream29.kodex.cli.auth.KodexAuthState
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.LazyColumn
@@ -91,6 +92,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     val activeNewSession = viewModel.activeNewSession()
     val activeNewSessionState = collectNewSessionState(activeNewSession)
     val globalSettings = applicationState.globalSettings
+    val authState by viewModel.authStore.state.collectAsState()
     val agentState = collectAgentState(selectedAgent?.viewModel)
     val pendingHistoryRevert = collectPendingHistoryRevert(selectedAgent?.viewModel)
     val scope = rememberCoroutineScope()
@@ -115,7 +117,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     var settingsOpen by remember { mutableStateOf(false) }
     var settingsRoute by remember { mutableStateOf(SettingsRoute.Global) }
     var openAiLoginViewModel by remember { mutableStateOf<OpenAiLoginViewModel?>(null) }
-    var directoryPickerInitialDirectory by remember { mutableStateOf<Path?>(null) }
+    var workingDirectoryPickerRequest by remember { mutableStateOf<WorkingDirectoryPickerRequest?>(null) }
     val settingsDropdowns = SettingsDropdownStates(
         model = rememberTuiDropdownState(),
         reasoning = rememberTuiDropdownState(),
@@ -250,7 +252,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                                 scope.launch { viewModel.submitNewSessionComposer(newSessionTarget) }
                             },
                             onOpenSettings = {
-                                settingsRoute = SettingsRoute.Global
+                                settingsRoute = defaultSettingsRoute(newSessionTarget)
                                 settingsOpen = true
                             },
                         )
@@ -412,14 +414,14 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
             if (settingsOpen) {
                 GlobalSettingsDialog(
                     state = globalSettings,
+                    authState = authState,
                     agent = selectedAgent?.viewModel,
                     agentState = agentState,
-                    models = modelOptions,
                     route = settingsRoute,
                     onRouteSelected = { settingsRoute = it },
                     dropdowns = settingsDropdowns,
                     onDismiss = {
-                        directoryPickerInitialDirectory = null
+                        workingDirectoryPickerRequest = null
                         openAiLoginViewModel = null
                         settingsDropdowns.dismissAll()
                         settingsRoute = SettingsRoute.Global
@@ -435,11 +437,26 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                             openAiLoginViewModel = scope.createOpenAiLoginViewModel(viewModel.authStore)
                         }
                     },
-                    onBrowseWorkingDirectory = { directory -> directoryPickerInitialDirectory = directory },
+                    onBrowseWorkingDirectory = { directory ->
+                        workingDirectoryPickerRequest = when {
+                            activeNewSession != null -> WorkingDirectoryPickerRequest(
+                                initialDirectory = directory,
+                                target = WorkingDirectoryTarget.NewSession(activeNewSession),
+                            )
+
+                            selectedAgent != null -> WorkingDirectoryPickerRequest(
+                                initialDirectory = directory,
+                                target = WorkingDirectoryTarget.Agent(selectedAgent.viewModel),
+                            )
+
+                            else -> null
+                        }
+                    },
                     newSessionSettings = newSessionDefaults,
+                    newSessionState = activeNewSessionState,
                     sessionName = activeSessionName,
                     onRenameSession = {
-                        directoryPickerInitialDirectory = null
+                        workingDirectoryPickerRequest = null
                         openAiLoginViewModel = null
                         settingsDropdowns.dismissAll()
                         settingsRoute = SettingsRoute.Global
@@ -460,9 +477,9 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                         },
                     )
 
-                    SettingsRoute.Session -> activeSettings?.let { settings ->
-                        AgentSettingsDropdownMenus(
-                            settings = settings,
+                    SettingsRoute.Session -> when {
+                        activeSettings != null -> AgentSettingsDropdownMenus(
+                            settings = activeSettings,
                             models = modelOptions,
                             dropdowns = settingsDropdowns,
                             enabled = !agentState.running,
@@ -470,6 +487,16 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                                 scope.launch { selectedAgent?.viewModel?.updateSettings(transform) }
                             },
                         )
+
+                        activeNewSession != null && activeNewSessionState != null ->
+                            NewSessionSettingsDropdownMenus(
+                                settings = activeNewSessionState.settings,
+                                models = modelOptions,
+                                dropdowns = settingsDropdowns,
+                                onUpdate = { transform ->
+                                    scope.launch { activeNewSession.updateSettings(transform) }
+                                },
+                            )
                     }
 
                     SettingsRoute.NewSession -> NewSessionSettingsDropdownMenus(
@@ -492,14 +519,20 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                     },
                 )
             }
-            directoryPickerInitialDirectory?.let { initialDirectory ->
+            workingDirectoryPickerRequest?.let { request ->
                 DirectoryPickerPopup(
-                    initialDirectory = initialDirectory,
-                    onDismissRequest = { directoryPickerInitialDirectory = null },
+                    initialDirectory = request.initialDirectory,
+                    onDismissRequest = { workingDirectoryPickerRequest = null },
                     onDirectorySelected = { directory ->
-                        directoryPickerInitialDirectory = null
+                        workingDirectoryPickerRequest = null
                         scope.launch {
-                            selectedAgent?.viewModel?.updateSettings { current -> current.copy(cwd = directory) }
+                            when (val target = request.target) {
+                                is WorkingDirectoryTarget.Agent ->
+                                    target.viewModel.updateSettings { current -> current.copy(cwd = directory) }
+
+                                is WorkingDirectoryTarget.NewSession ->
+                                    target.viewModel.updateWorkingDirectory(directory)
+                            }
                         }
                     },
                 )
@@ -900,9 +933,9 @@ private fun BoxScope.RenameSessionDialog(
 @Composable
 private fun BoxScope.GlobalSettingsDialog(
     state: KodexGlobalSettings,
+    authState: KodexAuthState,
     agent: AgentRuntimeViewModel?,
     agentState: AgentRuntimeViewState?,
-    models: List<OpenAiModelId>,
     route: SettingsRoute,
     onRouteSelected: (SettingsRoute) -> Unit,
     dropdowns: SettingsDropdownStates,
@@ -913,6 +946,7 @@ private fun BoxScope.GlobalSettingsDialog(
     onOpenLogin: () -> Unit,
     onBrowseWorkingDirectory: (Path) -> Unit,
     newSessionSettings: KodexNewSessionSettings,
+    newSessionState: NewSessionViewState?,
     sessionName: String?,
     onRenameSession: () -> Unit,
 ) {
@@ -950,6 +984,7 @@ private fun BoxScope.GlobalSettingsDialog(
                     when (route) {
                         SettingsRoute.Global -> GlobalSettingsContent(
                             state = state,
+                            authState = authState,
                             dropdowns = dropdowns,
                             onNewLineKey = onNewLineKey,
                             onAuthSource = onAuthSource,
@@ -961,19 +996,24 @@ private fun BoxScope.GlobalSettingsDialog(
                             sessionName?.let { name ->
                                 SessionNameSettingsContent(name = name, onRename = onRenameSession)
                             }
-                            if (configuration == null || agent == null) {
-                                Text(
-                                    value = "No selected session",
-                                    modifier = Modifier.fillMaxWidth().background(SettingsDialogHomeBackground),
-                                    color = SettingsDialogForeground,
-                                )
-                            } else {
-                                AgentSettingsContent(
+                            when {
+                                configuration != null && agent != null -> AgentSettingsContent(
                                     settings = configuration,
-                                    models = models,
                                     dropdowns = dropdowns,
                                     enabled = !agentState.running,
                                     onBrowseWorkingDirectory = onBrowseWorkingDirectory,
+                                )
+
+                                newSessionState != null -> NewSessionDraftSettingsContent(
+                                    state = newSessionState,
+                                    dropdowns = dropdowns,
+                                    onBrowseWorkingDirectory = onBrowseWorkingDirectory,
+                                )
+
+                                else -> Text(
+                                    value = "No selected session",
+                                    modifier = Modifier.fillMaxWidth().background(SettingsDialogHomeBackground),
+                                    color = SettingsDialogForeground,
                                 )
                             }
                         }
@@ -995,6 +1035,7 @@ private fun BoxScope.GlobalSettingsDialog(
 @Composable
 private fun GlobalSettingsContent(
     state: KodexGlobalSettings,
+    authState: KodexAuthState,
     dropdowns: SettingsDropdownStates,
     onNewLineKey: (NewLineKey) -> Unit,
     onAuthSource: (KodexAuthSource) -> Unit,
@@ -1037,15 +1078,7 @@ private fun GlobalSettingsContent(
         dropdownState = dropdowns.reasoning,
         background = SettingsDialogSubmitKeyBackground,
     )
-    Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogHomeBackground)) {
-        Text("Kodex account", color = SettingsDialogForeground)
-        TuiButton(
-            label = "Sign in",
-            modifier = Modifier.background(SettingsDialogHomeBackground),
-            color = SettingsDialogForeground,
-            onClick = onOpenLogin,
-        )
-    }
+    AuthenticationSettingsContent(authState = authState, onOpenLogin = onOpenLogin)
     Row(modifier = Modifier.fillMaxWidth().background(SettingsDialogNewLineBackground)) {
         Column(modifier = Modifier.weight(1f).background(SettingsDialogNewLineBackground)) {
             Text("New line key", color = SettingsDialogForeground)
@@ -1079,6 +1112,51 @@ private fun GlobalSettingsContent(
 }
 
 @Composable
+internal fun AuthenticationSettingsContent(
+    authState: KodexAuthState,
+    onOpenLogin: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogHomeBackground)) {
+        Text("OpenAI account", color = SettingsDialogForeground)
+        when (authState) {
+            is KodexAuthState.Authenticated -> {
+                val account = authState.value
+                val identity = account.email
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { email -> "Signed in as $email" }
+                    ?: account.accountId
+                        ?.takeIf(String::isNotBlank)
+                        ?.let { accountId -> "Signed in as account $accountId" }
+                    ?: "Signed in"
+                Text(identity, modifier = Modifier.fillMaxWidth(), color = SettingsDialogForeground)
+                account.planType?.let { plan ->
+                    Text(
+                        value = "Plan: ${plan.rawValue}",
+                        modifier = Modifier.fillMaxWidth(),
+                        color = SettingsDialogForeground,
+                    )
+                }
+            }
+
+            is KodexAuthState.Unavailable -> {
+                Text("Authentication unavailable", color = SettingsDialogForeground)
+                Text(
+                    value = authState.message,
+                    modifier = Modifier.fillMaxWidth(),
+                    color = SettingsDialogForeground,
+                )
+            }
+        }
+        TuiButton(
+            label = "Sign in",
+            modifier = Modifier.background(SettingsDialogHomeBackground),
+            color = SettingsDialogForeground,
+            onClick = onOpenLogin,
+        )
+    }
+}
+
+@Composable
 private fun SessionNameSettingsContent(
     name: String,
     onRename: () -> Unit,
@@ -1098,26 +1176,15 @@ private fun SessionNameSettingsContent(
 @Composable
 private fun AgentSettingsContent(
     settings: io.github.stream29.kodex.openai.KodexAgentSettings,
-    models: List<OpenAiModelId>,
     dropdowns: SettingsDropdownStates,
     enabled: Boolean,
     onBrowseWorkingDirectory: (Path) -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogHomeBackground)) {
-        Text("Working directory", color = SettingsDialogForeground)
-        Text(
-            value = settings.cwd.toString(),
-            modifier = Modifier.fillMaxWidth(),
-            color = SettingsDialogForeground,
-        )
-        TuiButton(
-            label = "Browse",
-            modifier = Modifier.background(SettingsDialogHomeBackground),
-            color = SettingsDialogForeground,
-            enabled = enabled,
-            onClick = { onBrowseWorkingDirectory(settings.cwd) },
-        )
-    }
+    WorkingDirectorySettingsContent(
+        workingDirectory = settings.cwd,
+        enabled = enabled,
+        onBrowse = onBrowseWorkingDirectory,
+    )
     SettingsDropdownField(
         label = "Model",
         selectedLabel = settings.model.value,
@@ -1149,33 +1216,79 @@ private fun AgentSettingsContent(
 }
 
 @Composable
+internal fun NewSessionDraftSettingsContent(
+    state: NewSessionViewState,
+    dropdowns: SettingsDropdownStates,
+    onBrowseWorkingDirectory: (Path) -> Unit,
+) {
+    WorkingDirectorySettingsContent(
+        workingDirectory = state.workingDirectory,
+        enabled = !state.creating,
+        onBrowse = onBrowseWorkingDirectory,
+    )
+    NewSessionSettingsContent(
+        settings = state.settings,
+        dropdowns = dropdowns,
+        enabled = !state.creating,
+    )
+}
+
+@Composable
+private fun WorkingDirectorySettingsContent(
+    workingDirectory: Path,
+    enabled: Boolean,
+    onBrowse: (Path) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogHomeBackground)) {
+        Text("Working directory", color = SettingsDialogForeground)
+        Text(
+            value = workingDirectory.toString(),
+            modifier = Modifier.fillMaxWidth(),
+            color = SettingsDialogForeground,
+        )
+        TuiButton(
+            label = "Browse",
+            modifier = Modifier.background(SettingsDialogHomeBackground),
+            color = SettingsDialogForeground,
+            enabled = enabled,
+            onClick = { onBrowse(workingDirectory) },
+        )
+    }
+}
+
+@Composable
 private fun NewSessionSettingsContent(
     settings: io.github.stream29.kodex.cli.settings.KodexNewSessionSettings,
     dropdowns: SettingsDropdownStates,
+    enabled: Boolean = true,
 ) {
     SettingsDropdownField(
         label = "Model",
         selectedLabel = settings.model.value,
         dropdownState = dropdowns.model,
         background = SettingsDialogHomeBackground,
+        enabled = enabled,
     )
     SettingsDropdownField(
         label = "Reasoning",
         selectedLabel = settings.reasoningEffort.displayName(),
         dropdownState = dropdowns.reasoning,
         background = SettingsDialogNewLineBackground,
+        enabled = enabled,
     )
     SettingsDropdownField(
         label = "Service tier",
         selectedLabel = settings.serviceTier.displayName(),
         dropdownState = dropdowns.serviceTier,
         background = SettingsDialogSubmitKeyBackground,
+        enabled = enabled,
     )
     SettingsDropdownField(
         label = "Mode",
         selectedLabel = settings.mode.displayName(),
         dropdownState = dropdowns.mode,
         background = SettingsDialogModeBackground,
+        enabled = enabled,
     )
 }
 
@@ -1311,7 +1424,7 @@ private fun BoxScope.SessionTitleSettingsDropdownMenus(
     )
 }
 
-private class SettingsDropdownStates(
+internal class SettingsDropdownStates(
     val model: TuiDropdownState,
     val reasoning: TuiDropdownState,
     val serviceTier: TuiDropdownState,
@@ -1323,6 +1436,17 @@ private class SettingsDropdownStates(
         serviceTier.dismiss()
         mode.dismiss()
     }
+}
+
+private data class WorkingDirectoryPickerRequest(
+    val initialDirectory: Path,
+    val target: WorkingDirectoryTarget,
+)
+
+private sealed interface WorkingDirectoryTarget {
+    data class Agent(val viewModel: AgentRuntimeViewModel) : WorkingDirectoryTarget
+
+    data class NewSession(val viewModel: NewSessionViewModel) : WorkingDirectoryTarget
 }
 
 @Composable
