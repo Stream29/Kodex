@@ -5,7 +5,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
+import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.terminal.MouseEvent
+import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Column
@@ -14,8 +16,13 @@ import io.github.stream29.kodex.cli.session.RootSessionEntry
 import kotlin.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
+
+private val ansi16Snapshots = SnapshotStrategy { mosaic ->
+    mosaic.draw().render(AnsiLevel.ANSI16, supportsKittyUnderlines = false)
+}
 
 class SessionTabBarTest {
     @Test
@@ -72,6 +79,41 @@ class SessionTabBarTest {
             }
 
             assertTrue("Research plan" in snapshot, snapshot)
+        }
+    }
+
+    @Test
+    fun selectedSessionTabIsBold() = runTest {
+        val selected = SessionTabTarget.NewSession(id = 1, ordinal = 1)
+        val inactive = SessionTabTarget.NewSession(id = 2, ordinal = 2)
+
+        runMosaicTest(snapshotStrategy = ansi16Snapshots) {
+            val snapshot = setContentAndSnapshot {
+                Box(Modifier.width(80)) {
+                    SessionTabBar(
+                        tabs = listOf(
+                            SessionTabViewState(
+                                target = selected,
+                                selected = true,
+                                newSessionName = "First",
+                            ),
+                            SessionTabViewState(
+                                target = inactive,
+                                selected = false,
+                                newSessionName = "Second",
+                            ),
+                        ),
+                        columns = 80,
+                        onSelectTab = {},
+                        onOpenTabMenu = { _, _, _ -> },
+                        onCreateNewSession = {},
+                        onOpenSessions = {},
+                    )
+                }
+            }
+
+            assertTrue(Regex("\u001B\\[(?:[0-9]+;)*1m\\[First]").containsMatchIn(snapshot), snapshot)
+            assertFalse(Regex("\u001B\\[(?:[0-9]+;)*1m\\[Second]").containsMatchIn(snapshot), snapshot)
         }
     }
 

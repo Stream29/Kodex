@@ -5,6 +5,8 @@ import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
 import io.github.stream29.kodex.agentstorage.contract.forkTo
 import io.github.stream29.kodex.agentstorage.contract.initialize
+import io.github.stream29.kodex.agentstorage.contract.latestIndex
+import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.cli.agent.AgentAutomaticTitleConfiguration
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
@@ -117,22 +119,35 @@ public class SessionRepositoryViewModel internal constructor(
         publish(entries, mutableState.value.selectedSessionIndex?.takeIf { it in indexes })
     }
 
-    /**
-     * Forks a root tree's storage at [untilExclusive] into a new root session.
-     *
-     * The boundary is supplied by the caller because turn/checkpoint UI policy is not a repository
-     * concern. Descendant trees are intentionally not copied: storage fork semantics are per Agent.
-     */
+    /** Forks one selected Agent's storage prefix into a new root session. */
     public suspend fun fork(
-        sourceSessionIndex: Int,
+        source: KodexAgentSession,
         untilExclusive: Int,
     ): RootSessionViewModel {
-        val source = repository.open(sourceSessionIndex)
+        require(source.runtime.runningTurn.value == null) {
+            "Cannot fork a running Agent."
+        }
+        require(source.runtime.state.value.canForkHistory) {
+            "Cannot fork history while Agent state is ${source.runtime.state.value}."
+        }
+        val sourceIndex = untilExclusive - 1
+        require(sourceIndex >= 0 && source.runtime.storage.latestIndex() >= sourceIndex) {
+            "Fork boundary $untilExclusive is outside the source storage."
+        }
         val targetIndex = repository.create()
         try {
             val target = repository.open(targetIndex)
             target.runtime.modify { targetStorage ->
                 source.runtime.storage.forkTo(untilExclusive, targetStorage)
+                val latestIndex = targetStorage.latestIndex()
+                check(latestIndex >= sourceIndex) {
+                    "Forked storage does not contain source history index $sourceIndex."
+                }
+                val boundarySettings = targetStorage.settings[sourceIndex]
+                val baseTitle = boundarySettings.threadName.trim().ifEmpty { "Session $targetIndex" }
+                targetStorage.settings[latestIndex + 1] = boundarySettings.copy(
+                    threadName = "[fork] $baseTitle",
+                )
             }
             return open(targetIndex)
         } catch (failure: Throwable) {
@@ -176,3 +191,18 @@ public fun CoroutineScope.SessionRepositoryViewModel(
         scope = supervisorChildScope(),
         automaticTitleConfiguration = automaticTitleConfiguration,
     )
+
+private val KodexAgentStateValue.canForkHistory: Boolean
+    get() = when (this) {
+        KodexAgentStateValue.Empty,
+        KodexAgentStateValue.UserMessage,
+        KodexAgentStateValue.AssistantMessage,
+        is KodexAgentStateValue.ToolPending,
+        KodexAgentStateValue.ToolCompleted,
+            -> true
+
+        KodexAgentStateValue.ExternalWrite,
+        is KodexAgentStateValue.RequestResponse,
+        KodexAgentStateValue.Compacting,
+            -> false
+    }

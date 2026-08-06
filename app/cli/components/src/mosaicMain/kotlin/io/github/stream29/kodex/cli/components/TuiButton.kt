@@ -13,14 +13,15 @@ import com.jakewharton.mosaic.ui.TextStyle
  *
  * Focus is represented by the terminal cursor, hover uses bold text, a held primary-pointer press
  * uses inverse video, and a disabled button is dim. Enter, Space, and primary-pointer activation
- * converge on the same command. [onSecondaryClick] optionally handles the secondary pointer button
- * and Shift+F10.
+ * converge on the same command. [idleTextStyle] applies while the enabled button is neither hovered
+ * nor pressed. [onSecondaryClick] optionally handles the secondary pointer button and Shift+F10.
  */
 @Composable
 public fun TuiButton(
     label: String,
     modifier: Modifier = Modifier,
     color: Color = Color.Unspecified,
+    idleTextStyle: TextStyle = TextStyle.Unspecified,
     enabled: Boolean = true,
     focusRequester: FocusRequester? = null,
     onKeyEvent: ((KeyEvent) -> Boolean)? = null,
@@ -37,16 +38,16 @@ public fun TuiButton(
         autoFocus = autoFocus,
         onSecondaryClick = onSecondaryClick,
     ) { _, isHovered, isPressed ->
-        val textStyle = when {
+        val resolvedTextStyle = when {
             isPressed -> TextStyle.Invert
             isHovered -> TextStyle.Bold
-            enabled -> TextStyle.Unspecified
+            enabled -> idleTextStyle
             else -> TextStyle.Dim
         }
         Text(
             value = "[$label]",
             color = color,
-            textStyle = textStyle,
+            textStyle = resolvedTextStyle,
         )
     }
 }

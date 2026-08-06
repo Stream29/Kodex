@@ -73,10 +73,14 @@ internal fun ReasoningEffort.displayName(): String = when (this) {
     ReasoningEffort.Medium -> "medium"; ReasoningEffort.High -> "high"; ReasoningEffort.XHigh -> "xhigh"
     ReasoningEffort.Max -> "max"; ReasoningEffort.Ultra -> "ultra"; is ReasoningEffort.Custom -> wireName
 }
+
 internal fun ServiceTier.displayName(): String = when (this) {
     ServiceTier.Default -> "default"; ServiceTier.Fast -> "fast"; ServiceTier.Flex -> "flex"
 }
-internal fun ModeKind.displayName(): String = when (this) { ModeKind.Default -> "default"; ModeKind.Plan -> "plan" }
+
+internal fun ModeKind.displayName(): String = when (this) {
+    ModeKind.Default -> "build"; ModeKind.Plan -> "plan"
+}
 
 internal enum class SettingsRoute(val label: String) { Global("Global"), Session("Session"), NewSession("New session") }
 

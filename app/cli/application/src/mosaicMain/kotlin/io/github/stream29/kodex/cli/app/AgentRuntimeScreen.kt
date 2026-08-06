@@ -21,6 +21,7 @@ import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
+import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.history.AgentHistoryView
 import io.github.stream29.kodex.cli.newsession.NewSessionViewModel
 import io.github.stream29.kodex.cli.newsession.NewSessionViewState
@@ -41,8 +42,11 @@ internal fun AgentRuntimeScreen(
     newLineKey: NewLineKey,
     fallbackSettings: KodexNewSessionSettings,
     dropdowns: RuntimeConfigurationDropdowns,
-    forkEnabled: Boolean,
-    onFork: () -> Unit,
+    onOpenHistoryEntryContextMenu: (
+        generation: Long,
+        storageIndex: Int,
+        anchor: TuiPopupAnchor,
+    ) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val requestUserInputState by agent.viewModel.requestUserInput.state.collectAsState()
@@ -82,6 +86,10 @@ internal fun AgentRuntimeScreen(
             AgentHistoryView(
                 model = agent.historyViewModel,
                 unifiedExecToolClient = agent.viewModel.session.runtime.unifiedExecToolClient,
+                onOpenEntryContextMenu = onOpenHistoryEntryContextMenu.takeIf {
+                    runtimeState.canReplaceCommittedHistory &&
+                        agent.viewModel.session.runtime.runningTurn.value == null
+                },
             )
         }
         if (requestUserInputRows > 0) {
@@ -119,8 +127,6 @@ internal fun AgentRuntimeScreen(
             state = runtimeState,
             fallbackSettings = fallbackSettings,
             dropdowns = dropdowns,
-            forkEnabled = forkEnabled,
-            onFork = onFork,
             onOpenSettings = onOpenSettings,
         )
     }

@@ -217,6 +217,29 @@ val scrollableStateTest by testSuite {
         )
     }
 
+    test("paging accepts a caller-defined page size") {
+        val state = ScrollState()
+        state.updateBounds(maxValue = 10, viewportSize = 5)
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Text(
+                    value = state.value.toString(),
+                    modifier = Modifier.scrollablePaging(
+                        state = state,
+                        viewportSize = { state.viewportSize },
+                        pageSize = { viewportSize -> viewportSize / 2 },
+                    ),
+                )
+            }
+
+            sendKeyEvent(KeyboardEvent(KeyboardEvent.PageDown))
+            assertEquals("2", awaitSnapshot())
+            sendKeyEvent(KeyboardEvent(KeyboardEvent.PageUp))
+            assertEquals("0", awaitSnapshot())
+        }
+    }
+
     test("modified paging is ignored and a boundary event bubbles") {
         val state = ScrollState()
         state.updateBounds(maxValue = 3, viewportSize = 2)

@@ -93,26 +93,6 @@ internal fun SessionAgentSidebar(
                 onClick = onToggleExpanded,
             )
             Text("Agent tree", color = SettingsDialogForeground)
-            if (shellSessionListRows > 0) {
-                Text("Shell sessions", color = SettingsDialogForeground)
-                LazyColumn(
-                    modifier = Modifier.width(columns).height(shellSessionListRows),
-                ) {
-                    items(shellSessionItems, key = { item -> item.session.sessionId }) { item ->
-                        ShellSessionSidebarRow(
-                            lines = item.lines,
-                            onOpenMenu = { anchor ->
-                                onOpenShellSessionMenu(
-                                    ShellSessionMenuRequest(
-                                        session = item.session,
-                                        anchor = anchor,
-                                    ),
-                                )
-                            },
-                        )
-                    }
-                }
-            }
             Box(modifier = Modifier.width(columns).height(agentTreeRows)) {
                 if (visibleAgents.isEmpty()) {
                     Text("No agents", color = SettingsDialogForeground)
@@ -180,6 +160,26 @@ internal fun SessionAgentSidebar(
                                 )
                             }
                         }
+                    }
+                }
+            }
+            if (shellSessionListRows > 0) {
+                Text("Shell sessions", color = SettingsDialogForeground)
+                LazyColumn(
+                    modifier = Modifier.width(columns).height(shellSessionListRows),
+                ) {
+                    items(shellSessionItems, key = { item -> item.session.sessionId }) { item ->
+                        ShellSessionSidebarRow(
+                            lines = item.lines,
+                            onOpenMenu = { anchor ->
+                                onOpenShellSessionMenu(
+                                    ShellSessionMenuRequest(
+                                        session = item.session,
+                                        anchor = anchor,
+                                    ),
+                                )
+                            },
+                        )
                     }
                 }
             }

@@ -3,6 +3,7 @@ package io.github.stream29.kodex.cli.app
 import io.github.stream29.kodex.cli.newsession.NewSessionViewModel
 import io.github.stream29.kodex.cli.newsession.NewSessionViewModel as createNewSessionViewModel
 import io.github.stream29.kodex.cli.auth.KodexAuthStore
+import io.github.stream29.kodex.cli.session.AgentRuntimeTreeEntry
 import io.github.stream29.kodex.cli.session.RootSessionViewModel
 import io.github.stream29.kodex.cli.session.RootSessionViewState
 import io.github.stream29.kodex.cli.session.SessionRepositoryViewModel
@@ -147,12 +148,11 @@ public class SessionTreeCliViewModel internal constructor(
         }
     }
 
-    internal suspend fun fork(sourceSessionIndex: Int, untilExclusive: Int) {
-        lifecycleMutex.withLock { forkLocked(sourceSessionIndex, untilExclusive) }
-    }
-
-    private suspend fun forkLocked(sourceSessionIndex: Int, untilExclusive: Int) {
-        val root = repository.fork(sourceSessionIndex, untilExclusive)
+    private suspend fun forkLocked(
+        source: AgentRuntimeTreeEntry,
+        untilExclusive: Int,
+    ) {
+        val root = repository.fork(source.viewModel.session, untilExclusive)
         val sessionIndex = requireNotNull(repository.state.value.selectedSessionIndex) {
             "Forking a session did not select its new root."
         }
@@ -177,7 +177,47 @@ public class SessionTreeCliViewModel internal constructor(
             val rootState = root.viewModel.state.value
             require(!rootState.running) { "Cannot fork a running root session." }
             require(rootState.latestIndex >= 0) { "Cannot fork an empty root session." }
-            forkLocked(target.sessionIndex, untilExclusive = rootState.latestIndex + 1)
+            forkLocked(root, untilExclusive = rootState.latestIndex + 1)
+        }
+    }
+
+    /** Forks the selected Agent at one exact committed history entry. */
+    public suspend fun forkHistoryEntry(
+        sessionIndex: Int,
+        agentId: String,
+        storageIndex: Int,
+    ) {
+        require(storageIndex in 0 until Int.MAX_VALUE) {
+            "A history fork target must have a non-negative finite successor."
+        }
+        lifecycleMutex.withLock {
+            val (_, agent) = requireSelectedAgent(sessionIndex, agentId)
+            require(!agent.viewModel.state.value.running) {
+                "Cannot fork a running Agent."
+            }
+            require(agent.viewModel.session.runtime.runningTurn.value == null) {
+                "Cannot fork an Agent with an active turn job."
+            }
+            require(agent.viewModel.session.storage.stable.floorToIndex(storageIndex) == storageIndex) {
+                "History entry $storageIndex is no longer committed."
+            }
+            forkLocked(agent, untilExclusive = storageIndex + 1)
+        }
+    }
+
+    /** Executes and consumes the selected Agent's pending history revert request. */
+    public suspend fun confirmHistoryRevert(
+        sessionIndex: Int,
+        agentId: String,
+    ) {
+        lifecycleMutex.withLock {
+            val (root, agent) = requireSelectedAgent(sessionIndex, agentId)
+            val request = agent.viewModel.takeHistoryRevertRequest() ?: return@withLock
+            agent.viewModel.revertHistory(request.storageIndex)
+            if (agent.agentId == root.state.value.rootAgentId) {
+                repository.refresh()
+                publishTabs(repository.state.value)
+            }
         }
     }
 
@@ -205,9 +245,10 @@ public class SessionTreeCliViewModel internal constructor(
                         "Session ${target.sessionIndex} is not open."
                     }
                     val tree = root.state.value
-                    val rootAgent = requireNotNull(tree.agents.firstOrNull { entry -> entry.agentId == tree.rootAgentId }) {
-                        "Session ${target.sessionIndex} has no root Agent."
-                    }
+                    val rootAgent =
+                        requireNotNull(tree.agents.firstOrNull { entry -> entry.agentId == tree.rootAgentId }) {
+                            "Session ${target.sessionIndex} has no root Agent."
+                        }
                     rootAgent.viewModel.renameThread(normalized)
                     repository.refresh()
                     publishTabs(repository.state.value)
@@ -256,7 +297,7 @@ public class SessionTreeCliViewModel internal constructor(
     /** Updates application-wide defaults copied into subsequently created New-session tabs. */
     public suspend fun updateNewSessionDefaults(
         transform: (io.github.stream29.kodex.cli.settings.KodexNewSessionSettings) ->
-            io.github.stream29.kodex.cli.settings.KodexNewSessionSettings,
+        io.github.stream29.kodex.cli.settings.KodexNewSessionSettings,
     ) {
         globalSettings.update { settings -> settings.copy(newSession = transform(settings.newSession)) }
     }
@@ -264,7 +305,7 @@ public class SessionTreeCliViewModel internal constructor(
     /** Updates the application-wide controls for automatic root-session titles. */
     public suspend fun updateSessionTitleSettings(
         transform: (io.github.stream29.kodex.cli.settings.SessionTitleSettings) ->
-            io.github.stream29.kodex.cli.settings.SessionTitleSettings,
+        io.github.stream29.kodex.cli.settings.SessionTitleSettings,
     ) {
         globalSettings.update { settings -> settings.copy(sessionTitle = transform(settings.sessionTitle)) }
     }
@@ -401,6 +442,26 @@ public class SessionTreeCliViewModel internal constructor(
         sessions: SessionRepositoryViewState = repository.state.value,
     ): RootSessionViewModel? =
         sessions.sessions.firstOrNull { entry -> entry.sessionIndex == sessionIndex }?.viewModel
+
+    private fun requireSelectedAgent(
+        sessionIndex: Int,
+        agentId: String,
+    ): Pair<RootSessionViewModel, AgentRuntimeTreeEntry> {
+        require(tabRegistry.activeTarget == SessionTabTarget.OpenSession(sessionIndex)) {
+            "Session $sessionIndex is no longer active."
+        }
+        val root = requireNotNull(rootViewModel(sessionIndex)) {
+            "Session $sessionIndex is not open."
+        }
+        val tree = root.state.value
+        require(tree.selectedAgentId == agentId) {
+            "Agent $agentId is no longer selected."
+        }
+        val agent = requireNotNull(tree.agents.firstOrNull { entry -> entry.agentId == agentId }) {
+            "Agent $agentId does not belong to session $sessionIndex."
+        }
+        return root to agent
+    }
 
     private fun observeSelectedTree(selected: RootSessionViewModel?) {
         selectedTreeCollection?.cancel()

@@ -529,6 +529,8 @@ private class TestUnifiedExecProcessSession(
     override val arguments: ExecCommandArguments,
 ) : UnifiedExecProcessSession {
     override val completed: MutableStateFlow<Boolean> = MutableStateFlow(false)
+
+    override fun close() = Unit
 }
 
 private suspend fun TestMosaic<String>.clickFirstRow(): String {

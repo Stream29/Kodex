@@ -91,6 +91,28 @@ public class AgentTitleGeneration(
         mutex.withLock { invalidateLocked() }
     }
 
+    /**
+     * Serializes one destructive history replacement against title generation.
+     *
+     * [replacement] performs the replacement and returns whether the retained
+     * history still contains an accepted nonblank user text. A retained text
+     * keeps the one-shot gate consumed; removing every such text makes the next
+     * accepted text eligible again.
+     */
+    public suspend fun replaceHistory(replacement: suspend () -> Boolean) {
+        mutex.withLock {
+            val previouslyConsumed = consumed
+            invalidateAttemptLocked()
+            consumed = true
+            try {
+                consumed = replacement()
+            } catch (failure: Throwable) {
+                consumed = previouslyConsumed
+                throw failure
+            }
+        }
+    }
+
     /** Serializes an explicit rename ahead of any generated title. */
     public suspend fun renameThread(
         agentState: KodexAgentState,
@@ -129,6 +151,10 @@ public class AgentTitleGeneration(
 
     private fun invalidateLocked() {
         consumed = true
+        invalidateAttemptLocked()
+    }
+
+    private fun invalidateAttemptLocked() {
         activeAttemptId = null
         activeJob?.cancel()
         activeJob = null

@@ -23,6 +23,7 @@ import com.jakewharton.mosaic.ui.unit.constrainWidth
  * item indexes extend upward. Stable keys continue to identify the same logical items.
  *
  * @param interactionSource `null` when the caller does not observe scroll interactions.
+ * @param keyboardPageSize Maps the measured viewport to the Page Up and Page Down row count.
  */
 @Composable
 public fun LazyColumn(
@@ -31,6 +32,7 @@ public fun LazyColumn(
     reverseLayout: Boolean = false,
     userScrollEnabled: Boolean = true,
     interactionSource: MutableScrollInteractionSource? = null,
+    keyboardPageSize: (viewportSize: Int) -> Int = { it },
     content: LazyListScope.() -> Unit,
 ) {
     val itemProvider = LazyListScopeImpl().apply(content).build(reverseLayout)
@@ -56,6 +58,7 @@ public fun LazyColumn(
             .scrollablePaging(
                 state = state,
                 viewportSize = { state.layoutInfo.viewportSize },
+                pageSize = keyboardPageSize,
                 enabled = userScrollEnabled,
                 interactionSource = interactionSource,
             )

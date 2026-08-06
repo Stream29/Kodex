@@ -17,6 +17,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration.Companion.seconds
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 val agentTitleGenerationTest by testSuite {
@@ -25,81 +26,166 @@ val agentTitleGenerationTest by testSuite {
     } closeWith {
         cancelAndJoin()
     } asContextForEach {
-    test("persists one generated title through the AgentState") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val sessionIndex = repository.create()
-        val root = repository.open(sessionIndex)
-        root.runtime.modify { storage ->
-            storage.initialize(
-                KodexAgentSettings(
-                    model = OpenAiModelId("test-model"),
-                    threadName = "Session $sessionIndex",
-                ),
-            )
-        }
-        val content = listOf(ContentItem.InputText("Plan the agent title handoff."))
-        root.runtime.appendUserMessage(content)
-        val capturedRequest = CompletableDeferred<Pair<OpenAiModelId, ReasoningEffort>>()
-        val generation = AgentTitleGeneration(this)
-
-        assertTrue(
-            generation.start(
-                agentState = root.runtime,
-                content = content,
-                enabled = true,
-                model = null,
-                reasoningEffort = ReasoningEffort.Low,
-                generator = SessionTitleGenerator { _, model, reasoningEffort ->
-                    capturedRequest.complete(model to reasoningEffort)
-                    SessionTitleGenerationResult.Generated("Plan agent title handoff")
-                },
-            ),
-        )
-
-        assertEquals(DefaultSessionTitleModel to ReasoningEffort.Low, capturedRequest.await())
-        val titleIndex = withContext(Dispatchers.Default.limitedParallelism(1)) {
-            withTimeout(5.seconds) {
-                root.runtime.latestIndex.first { index -> index >= 2 }
+        test("persists one generated title through the AgentState") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val sessionIndex = repository.create()
+            val root = repository.open(sessionIndex)
+            root.runtime.modify { storage ->
+                storage.initialize(
+                    KodexAgentSettings(
+                        model = OpenAiModelId("test-model"),
+                        threadName = "Session $sessionIndex",
+                    ),
+                )
             }
-        }
-        assertEquals("Plan agent title handoff", root.storage.settings[titleIndex].threadName)
-    }
+            val content = listOf(ContentItem.InputText("Plan the agent title handoff."))
+            root.runtime.appendUserMessage(content)
+            val capturedRequest = CompletableDeferred<Pair<OpenAiModelId, ReasoningEffort>>()
+            val generation = AgentTitleGeneration(this)
 
-    test("an explicit Agent rename wins over an in-flight generated title") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val sessionIndex = repository.create()
-        val root = repository.open(sessionIndex)
-        root.runtime.modify { storage ->
-            storage.initialize(
-                KodexAgentSettings(
-                    model = OpenAiModelId("test-model"),
-                    threadName = "Session $sessionIndex",
+            assertTrue(
+                generation.start(
+                    agentState = root.runtime,
+                    content = content,
+                    enabled = true,
+                    model = null,
+                    reasoningEffort = ReasoningEffort.Low,
+                    generator = SessionTitleGenerator { _, model, reasoningEffort ->
+                        capturedRequest.complete(model to reasoningEffort)
+                        SessionTitleGenerationResult.Generated("Plan agent title handoff")
+                    },
+                ),
+            )
+
+            assertEquals(DefaultSessionTitleModel to ReasoningEffort.Low, capturedRequest.await())
+            val titleIndex = withContext(Dispatchers.Default.limitedParallelism(1)) {
+                withTimeout(5.seconds) {
+                    root.runtime.latestIndex.first { index -> index >= 2 }
+                }
+            }
+            assertEquals("Plan agent title handoff", root.storage.settings[titleIndex].threadName)
+        }
+
+        test("an explicit Agent rename wins over an in-flight generated title") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val sessionIndex = repository.create()
+            val root = repository.open(sessionIndex)
+            root.runtime.modify { storage ->
+                storage.initialize(
+                    KodexAgentSettings(
+                        model = OpenAiModelId("test-model"),
+                        threadName = "Session $sessionIndex",
+                    ),
+                )
+            }
+            val content = listOf(ContentItem.InputText("Keep this explicit title."))
+            root.runtime.appendUserMessage(content)
+            val generationStarted = CompletableDeferred<Unit>()
+            val generation = AgentTitleGeneration(this)
+
+            assertTrue(
+                generation.start(
+                    agentState = root.runtime,
+                    content = content,
+                    enabled = true,
+                    model = OpenAiModelId("title-model"),
+                    reasoningEffort = ReasoningEffort.High,
+                    generator = SessionTitleGenerator { _, _, _ ->
+                        generationStarted.complete(Unit)
+                        CompletableDeferred<SessionTitleGenerationResult>().await()
+                    },
+                ),
+            )
+            generationStarted.await()
+
+            val renamedAt = generation.renameThread(root.runtime, "Manual title")
+
+            assertEquals("Manual title", root.storage.settings[renamedAt].threadName)
+        }
+
+        test("history replacement restores eligibility when no accepted text remains") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val sessionIndex = repository.create()
+            val root = repository.open(sessionIndex)
+            root.runtime.modify { storage ->
+                storage.initialize(
+                    KodexAgentSettings(
+                        model = OpenAiModelId("test-model"),
+                        threadName = "Session $sessionIndex",
+                    ),
+                )
+            }
+            val generation = AgentTitleGeneration(this)
+            val content = listOf(ContentItem.InputText("Generate a replacement title."))
+            val generator = SessionTitleGenerator { _, _, _ ->
+                SessionTitleGenerationResult.Rejected("test")
+            }
+
+            assertFalse(
+                generation.start(
+                    agentState = root.runtime,
+                    content = content,
+                    enabled = false,
+                    model = null,
+                    reasoningEffort = ReasoningEffort.Low,
+                    generator = generator,
+                ),
+            )
+
+            generation.replaceHistory { false }
+
+            assertTrue(
+                generation.start(
+                    agentState = root.runtime,
+                    content = content,
+                    enabled = true,
+                    model = null,
+                    reasoningEffort = ReasoningEffort.Low,
+                    generator = generator,
                 ),
             )
         }
-        val content = listOf(ContentItem.InputText("Keep this explicit title."))
-        root.runtime.appendUserMessage(content)
-        val generationStarted = CompletableDeferred<Unit>()
-        val generation = AgentTitleGeneration(this)
 
-        assertTrue(
-            generation.start(
-                agentState = root.runtime,
-                content = content,
-                enabled = true,
-                model = OpenAiModelId("title-model"),
-                reasoningEffort = ReasoningEffort.High,
-                generator = SessionTitleGenerator { _, _, _ ->
-                    generationStarted.complete(Unit)
-                    CompletableDeferred<SessionTitleGenerationResult>().await()
-                },
-            ),
-        )
-        generationStarted.await()
+        test("history replacement remains consumed when accepted text is retained") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val sessionIndex = repository.create()
+            val root = repository.open(sessionIndex)
+            root.runtime.modify { storage ->
+                storage.initialize(
+                    KodexAgentSettings(
+                        model = OpenAiModelId("test-model"),
+                        threadName = "Session $sessionIndex",
+                    ),
+                )
+            }
+            val generation = AgentTitleGeneration(this)
+            val content = listOf(ContentItem.InputText("Keep the existing title attempt."))
+            val generator = SessionTitleGenerator { _, _, _ ->
+                SessionTitleGenerationResult.Rejected("test")
+            }
+            assertFalse(
+                generation.start(
+                    agentState = root.runtime,
+                    content = content,
+                    enabled = false,
+                    model = null,
+                    reasoningEffort = ReasoningEffort.Low,
+                    generator = generator,
+                ),
+            )
 
-        val renamedAt = generation.renameThread(root.runtime, "Manual title")
+            generation.replaceHistory { true }
 
-        assertEquals("Manual title", root.storage.settings[renamedAt].threadName)
+            assertFalse(
+                generation.start(
+                    agentState = root.runtime,
+                    content = content,
+                    enabled = true,
+                    model = null,
+                    reasoningEffort = ReasoningEffort.Low,
+                    generator = generator,
+                ),
+            )
+        }
     }
-}
 }
