@@ -84,6 +84,11 @@ internal fun ModeKind.displayName(): String = when (this) {
 
 internal enum class SettingsRoute(val label: String) { Global("Global"), Session("Session"), NewSession("New session") }
 
+internal fun defaultSettingsRoute(target: SessionTabTarget): SettingsRoute = when (target) {
+    is SessionTabTarget.NewSession -> SettingsRoute.Session
+    is SessionTabTarget.OpenSession -> SettingsRoute.Global
+}
+
 internal val SessionForeground: Color = Color.White
 internal val SessionTopBarBackground: Color = Color(28, 68, 74)
 internal val SessionButtonBackground: Color = Color(36, 78, 84)

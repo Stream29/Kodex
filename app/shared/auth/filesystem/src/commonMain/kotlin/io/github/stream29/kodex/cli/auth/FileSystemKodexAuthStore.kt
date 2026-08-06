@@ -61,6 +61,7 @@ private data class ActiveSubscriptionAuth(
                     ?.takeIf(String::isNotBlank)
                     ?: claims.accountId,
                 planType = claims.planType,
+                email = claims.email,
             )
         }
 

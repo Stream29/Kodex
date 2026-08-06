@@ -22,6 +22,8 @@ val newSessionViewModelTest by testSuite {
             val localModel = OpenAiModelId("local-model")
             val updatedDefaultModel = OpenAiModelId("updated-default-model")
             val updatedHome = Path("updated-codex-home")
+            val initialWorkingDirectory = Path("initial-working-directory")
+            val localWorkingDirectory = Path("local-working-directory")
             val globalSettings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(
                     codexHome = Path("codex-home"),
@@ -33,13 +35,15 @@ val newSessionViewModelTest by testSuite {
             val viewModel = NewSessionViewModel(
                 globalSettings = globalSettings,
                 sessions = sessions,
-                workingDirectory = Path("."),
+                workingDirectory = initialWorkingDirectory,
             )
 
             try {
                 viewModel.updateSettings { current -> current.copy(model = localModel) }
+                viewModel.updateWorkingDirectory(localWorkingDirectory)
 
                 assertEquals(localModel, viewModel.state.value.settings.model)
+                assertEquals(localWorkingDirectory, viewModel.state.value.workingDirectory)
                 assertEquals(defaultModel, globalSettings.settings.value.newSession.model)
 
                 globalSettings.update { current ->
@@ -69,6 +73,7 @@ val newSessionViewModelTest by testSuite {
                     )
                 }
                 assertEquals(localModel, createdSettings.model)
+                assertEquals(localWorkingDirectory, createdSettings.cwd)
             } finally {
                 viewModel.close()
                 sessions.close()
