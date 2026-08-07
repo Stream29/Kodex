@@ -36,7 +36,7 @@ public fun TuiButton(
         focusRequester = focusRequester,
         onKeyEvent = onKeyEvent,
         autoFocus = autoFocus,
-        onSecondaryClick = onSecondaryClick,
+        onSecondaryClick = onSecondaryClick?.let { callback -> { _ -> callback() } },
     ) { _, isHovered, isPressed ->
         val resolvedTextStyle = when {
             isPressed -> TextStyle.Invert

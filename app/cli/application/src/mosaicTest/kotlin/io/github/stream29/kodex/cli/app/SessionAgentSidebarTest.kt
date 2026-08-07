@@ -9,6 +9,8 @@ import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
+import com.jakewharton.mosaic.ui.unit.IntOffset
+import com.jakewharton.mosaic.ui.unit.IntSize
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
@@ -23,9 +25,33 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
 class SessionAgentSidebarTest {
+    @Test
+    fun emptySidebarOmitsTheAgentTreeSection() = runTest {
+        runMosaicTest {
+            val snapshot = setContentAndSnapshot {
+                SessionAgentSidebar(
+                    tree = null,
+                    expanded = true,
+                    columns = 28,
+                    rows = 8,
+                    onHoverChanged = {},
+                    onToggleExpanded = {},
+                    onSelectAgent = {},
+                    onOpenShellSessionMenu = {},
+                )
+            }
+
+            assertTrue("←" in snapshot)
+            assertFalse("Agent tree" in snapshot)
+            assertFalse("No agents" in snapshot)
+        }
+    }
+
     @Test
     fun shellSessionRowsWrapTheirCommandWithoutFlatteningHardLines() {
         assertEquals(
@@ -43,15 +69,53 @@ class SessionAgentSidebarTest {
     }
 
     @Test
+    fun shellSessionContextMenusUseTheClickPositionAndStayInsideTheHost() {
+        val surfaceSize = IntSize(width = 30, height = 10)
+        val popupContentSize = IntSize(width = 8, height = 2)
+
+        assertEquals(
+            IntOffset(x = 9, y = 4),
+            shellSessionContextMenuPosition(
+                anchorPosition = IntOffset(x = 4, y = 3),
+                clickPosition = IntOffset(x = 5, y = 1),
+                surfaceSize = surfaceSize,
+                popupContentSize = popupContentSize,
+            ),
+        )
+        assertEquals(
+            IntOffset(x = 22, y = 8),
+            shellSessionContextMenuPosition(
+                anchorPosition = IntOffset(x = 25, y = 9),
+                clickPosition = IntOffset(x = 2, y = 1),
+                surfaceSize = surfaceSize,
+                popupContentSize = popupContentSize,
+            ),
+        )
+        assertEquals(
+            IntOffset(x = 4, y = 3),
+            shellSessionContextMenuPosition(
+                anchorPosition = IntOffset(x = 4, y = 3),
+                clickPosition = null,
+                surfaceSize = surfaceSize,
+                popupContentSize = popupContentSize,
+            ),
+        )
+    }
+
+    @Test
     fun shellSessionRowsOpenTheirMenuOnSecondaryClick() = runTest {
         var menuOpened by mutableStateOf(false)
+        var menuClickPosition: IntOffset? = null
 
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(modifier = Modifier.width(8)) {
                     ShellSessionSidebarRow(
                         lines = listOf("42: abcd", "efghijkl"),
-                        onOpenMenu = { menuOpened = true },
+                        onOpenMenu = { _, clickPosition ->
+                            menuClickPosition = clickPosition
+                            menuOpened = true
+                        },
                     )
                     Text(menuOpened.toString())
                 }
@@ -63,6 +127,7 @@ class SessionAgentSidebarTest {
             awaitSnapshot()
 
             assertEquals(true, menuOpened)
+            assertEquals(IntOffset(x = 1, y = 0), menuClickPosition)
         }
     }
 
