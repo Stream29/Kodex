@@ -13,6 +13,7 @@ import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
+import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.cli.agent.AgentRuntimeViewState
 import io.github.stream29.kodex.cli.agent.ComposerViewModel
@@ -47,6 +48,7 @@ internal fun AgentRuntimeScreen(
         generation: Long,
         storageIndex: Int,
         anchor: TuiPopupAnchor,
+        clickPosition: IntOffset?,
     ) -> Unit,
     onBrowseWorkingDirectory: (Path) -> Unit,
     onOpenSettings: () -> Unit,

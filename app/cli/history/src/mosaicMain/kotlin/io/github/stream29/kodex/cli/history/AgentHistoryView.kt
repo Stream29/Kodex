@@ -19,6 +19,7 @@ import com.jakewharton.mosaic.ui.SubcomposeLayout
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.Constraints
+import com.jakewharton.mosaic.ui.unit.IntOffset
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
 import io.github.stream29.kodex.cli.components.LazyColumn
@@ -55,6 +56,7 @@ public fun AgentHistoryView(
         generation: Long,
         storageIndex: Int,
         anchor: TuiPopupAnchor,
+        clickPosition: IntOffset?,
     ) -> Unit)? = null,
 ) {
     val agentId = model.agentState.storage.id
@@ -310,18 +312,24 @@ internal fun StoredHistoryEntry(
     generation: Long,
     focusRequester: FocusRequester? = null,
     unifiedExecToolClient: UnifiedExecToolClient?,
-    onOpenContextMenu: ((generation: Long, storageIndex: Int, anchor: TuiPopupAnchor) -> Unit)?,
+    onOpenContextMenu: ((
+        generation: Long,
+        storageIndex: Int,
+        anchor: TuiPopupAnchor,
+        clickPosition: IntOffset?,
+    ) -> Unit)?,
 ) {
     val menuAnchor = rememberTuiPopupAnchor()
     TuiPressable(
         onClick = {},
         focusRequester = focusRequester,
         onSecondaryClick = onOpenContextMenu?.let { openMenu ->
-            {
+            { clickPosition ->
                 openMenu(
                     generation,
                     entry.index,
                     menuAnchor,
+                    clickPosition,
                 )
             }
         },

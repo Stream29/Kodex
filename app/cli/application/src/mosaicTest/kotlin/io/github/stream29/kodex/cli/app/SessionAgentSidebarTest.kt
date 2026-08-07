@@ -10,7 +10,6 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
-import com.jakewharton.mosaic.ui.unit.IntSize
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
@@ -98,40 +97,6 @@ class SessionAgentSidebarTest {
                 sessionId = 42,
                 command = "abcdefghijkl\nnext",
                 columns = 8,
-            ),
-        )
-    }
-
-    @Test
-    fun shellSessionContextMenusUseTheClickPositionAndStayInsideTheHost() {
-        val surfaceSize = IntSize(width = 30, height = 10)
-        val popupContentSize = IntSize(width = 8, height = 2)
-
-        assertEquals(
-            IntOffset(x = 9, y = 4),
-            shellSessionContextMenuPosition(
-                anchorPosition = IntOffset(x = 4, y = 3),
-                clickPosition = IntOffset(x = 5, y = 1),
-                surfaceSize = surfaceSize,
-                popupContentSize = popupContentSize,
-            ),
-        )
-        assertEquals(
-            IntOffset(x = 22, y = 8),
-            shellSessionContextMenuPosition(
-                anchorPosition = IntOffset(x = 25, y = 9),
-                clickPosition = IntOffset(x = 2, y = 1),
-                surfaceSize = surfaceSize,
-                popupContentSize = popupContentSize,
-            ),
-        )
-        assertEquals(
-            IntOffset(x = 4, y = 3),
-            shellSessionContextMenuPosition(
-                anchorPosition = IntOffset(x = 4, y = 3),
-                clickPosition = null,
-                surfaceSize = surfaceSize,
-                popupContentSize = popupContentSize,
             ),
         )
     }

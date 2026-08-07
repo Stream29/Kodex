@@ -27,6 +27,7 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
+import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.cli.agent.AgentHistoryRevertRequest
 import io.github.stream29.kodex.cli.agent.AgentRuntimeViewModel
@@ -39,9 +40,9 @@ import io.github.stream29.kodex.cli.components.LazyListState
 import io.github.stream29.kodex.cli.components.TuiDropdownMenu
 import io.github.stream29.kodex.cli.components.TuiDropdownState
 import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
+import io.github.stream29.kodex.cli.components.TuiContextMenu
 import io.github.stream29.kodex.cli.components.items
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
-import io.github.stream29.kodex.cli.components.TuiPopupMenu
 import io.github.stream29.kodex.cli.components.TuiPopupMenuItem
 import io.github.stream29.kodex.cli.components.TextInput
 import io.github.stream29.kodex.cli.components.TextInputLayout
@@ -231,13 +232,14 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                             scope.launch { viewModel.selectTab(target) }
                         }
                     },
-                    onOpenTabMenu = { target, initialName, anchor ->
+                    onOpenTabMenu = { target, initialName, anchor, clickPosition ->
                         shellSessionMenuRequest = null
                         historyEntryMenuRequest = null
                         tabMenuRequest = SessionTabMenuRequest(
                             target = target,
                             initialName = initialName,
                             anchor = anchor,
+                            clickPosition = clickPosition,
                         )
                     },
                     onCreateNewSession = { scope.launch { viewModel.createNewSessionTab() } },
@@ -297,7 +299,12 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                             newLineKey = globalSettings.newLineKey,
                             fallbackSettings = globalSettings.newSession,
                             dropdowns = runtimeDropdowns,
-                            onOpenHistoryEntryContextMenu = { generation, storageIndex, anchor ->
+                            onOpenHistoryEntryContextMenu = {
+                                    generation,
+                                    storageIndex,
+                                    anchor,
+                                    clickPosition,
+                                ->
                                 val target =
                                     applicationState.activeTab as? SessionTabTarget.OpenSession
                                 if (
@@ -313,6 +320,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                                         generation = generation,
                                         storageIndex = storageIndex,
                                         anchor = anchor,
+                                        clickPosition = clickPosition,
                                     )
                                 }
                             },
@@ -332,9 +340,10 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
             }
             val openTabMenuRequest = tabMenuRequest
             if (openTabMenuRequest != null) {
-                TuiPopupMenu(
+                TuiContextMenu(
                     expanded = true,
                     anchor = openTabMenuRequest.anchor,
+                    clickPosition = openTabMenuRequest.clickPosition,
                     onDismissRequest = { tabMenuRequest = null },
                     backgroundColor = PopupMenuBackground,
                 ) {
@@ -637,9 +646,10 @@ private fun BoxScope.HistoryEntryContextMenu(
         }
         onDismissRequest()
     }
-    TuiPopupMenu(
+    TuiContextMenu(
         expanded = true,
         anchor = openRequest.anchor,
+        clickPosition = openRequest.clickPosition,
         onDismissRequest = onDismissRequest,
         backgroundColor = PopupMenuBackground,
     ) {
@@ -881,6 +891,7 @@ private data class SessionTabMenuRequest(
     val target: SessionTabTarget,
     val initialName: String,
     val anchor: TuiPopupAnchor,
+    val clickPosition: IntOffset?,
 )
 
 private data class HistoryEntryMenuRequest(
@@ -889,6 +900,7 @@ private data class HistoryEntryMenuRequest(
     val generation: Long,
     val storageIndex: Int,
     val anchor: TuiPopupAnchor,
+    val clickPosition: IntOffset?,
 )
 
 private data class RenameSessionRequest(

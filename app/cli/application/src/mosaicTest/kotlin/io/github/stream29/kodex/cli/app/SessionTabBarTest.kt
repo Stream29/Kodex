@@ -12,6 +12,7 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
+import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.cli.session.RootSessionEntry
 import kotlin.time.Instant
 import kotlin.test.Test
@@ -77,7 +78,7 @@ class SessionTabBarTest {
                         runningIndicatorFrame = fixedRunningIndicatorFrame,
                         columns = 80,
                         onSelectTab = {},
-                        onOpenTabMenu = { _, _, _ -> },
+                        onOpenTabMenu = { _, _, _, _ -> },
                         onCreateNewSession = {},
                         onOpenSessions = {},
                     )
@@ -112,7 +113,7 @@ class SessionTabBarTest {
                         runningIndicatorFrame = fixedRunningIndicatorFrame,
                         columns = 80,
                         onSelectTab = {},
-                        onOpenTabMenu = { _, _, _ -> },
+                        onOpenTabMenu = { _, _, _, _ -> },
                         onCreateNewSession = {},
                         onOpenSessions = {},
                     )
@@ -143,7 +144,7 @@ class SessionTabBarTest {
                         runningIndicatorFrame = fixedRunningIndicatorFrame,
                         columns = 80,
                         onSelectTab = {},
-                        onOpenTabMenu = { _, _, _ -> },
+                        onOpenTabMenu = { _, _, _, _ -> },
                         onCreateNewSession = {},
                         onOpenSessions = {},
                     )
@@ -163,6 +164,7 @@ class SessionTabBarTest {
         var selectedTarget by mutableStateOf<SessionTabTarget?>(null)
         var menuTarget by mutableStateOf<SessionTabTarget?>(null)
         var menuInitialName by mutableStateOf<String?>(null)
+        var menuClickPosition by mutableStateOf<IntOffset?>(null)
 
         runMosaicTest {
             setContentAndSnapshot {
@@ -183,9 +185,10 @@ class SessionTabBarTest {
                         runningIndicatorFrame = fixedRunningIndicatorFrame,
                         columns = 80,
                         onSelectTab = { target -> selectedTarget = target },
-                        onOpenTabMenu = { target, initialName, _ ->
+                        onOpenTabMenu = { target, initialName, _, clickPosition ->
                             menuTarget = target
                             menuInitialName = initialName
+                            menuClickPosition = clickPosition
                         },
                         onCreateNewSession = {},
                         onOpenSessions = {},
@@ -201,6 +204,7 @@ class SessionTabBarTest {
             assertEquals(null, selectedTarget)
             assertEquals(inactiveTarget, menuTarget)
             assertEquals("Second", menuInitialName)
+            assertEquals(IntOffset(x = 1, y = 0), menuClickPosition)
         }
     }
 
@@ -224,7 +228,7 @@ class SessionTabBarTest {
                         runningIndicatorFrame = fixedRunningIndicatorFrame,
                         columns = 80,
                         onSelectTab = { selected -> selectedTarget = selected },
-                        onOpenTabMenu = { opened, _, _ -> menuTarget = opened },
+                        onOpenTabMenu = { opened, _, _, _ -> menuTarget = opened },
                         onCreateNewSession = {},
                         onOpenSessions = {},
                     )
