@@ -24,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
@@ -73,7 +74,7 @@ public actual class ShellClient internal actual constructor(
 }
 
 private val PosixProcessIoDispatcher: CoroutineDispatcher =
-    Dispatchers.Default.limitedParallelism(64, "Kodex.ProcessIO")
+    Dispatchers.IO.limitedParallelism(Int.MAX_VALUE, "Kodex.ProcessIO")
 
 private suspend fun ShellProcessCommand.startPosixProcess(
     processClient: ProcessClient,

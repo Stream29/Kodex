@@ -23,9 +23,8 @@ public data class FileFingerprint(
  * Coroutine-friendly filesystem boundary using kotlinx-io [Path] and [FileMetadata].
  *
  * JVM uses `Dispatchers.IO` over the blocking kotlinx-io filesystem. Node.js uses
- * `node:fs/promises`. Native currently offloads blocking kotlinx-io calls to
- * a bounded `Dispatchers.Default.limitedParallelism` lane because kotlinx.coroutines
- * does not expose `Dispatchers.IO` there as a public API in this source set.
+ * `node:fs/promises`. Native offloads blocking kotlinx-io calls to its elastic
+ * `Dispatchers.IO` worker pool without consuming `Dispatchers.Default` workers.
  */
 public interface CoroutineFileSystem {
     public suspend fun exists(path: Path): Boolean
