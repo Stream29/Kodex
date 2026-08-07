@@ -86,6 +86,7 @@ import kotlin.time.Instant
 internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     val terminal = LocalTerminalState.current
     val applicationState by viewModel.state.collectAsState()
+    val historyUiStateRegistry = rememberAgentHistoryUiStateRegistry(applicationState.tabs)
     val selectedTree = applicationState.selectedTree
     val sessionTabs = collectSessionTabRenderStates(applicationState.tabs)
     val sessionSummary = summarizeOpenSessions(sessionTabs)
@@ -291,8 +292,19 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                         )
                     } else if (selectedAgent != null) {
                         val runtimeState = requireNotNull(agentState)
+                        val sessionIndex = requireNotNull(
+                            (applicationState.activeTab as? SessionTabTarget.OpenSession)?.sessionIndex,
+                        )
+                        val historyUiState = remember(
+                            historyUiStateRegistry,
+                            sessionIndex,
+                            selectedAgent.agentId,
+                        ) {
+                            historyUiStateRegistry.stateFor(sessionIndex, selectedAgent.agentId)
+                        }
                         AgentRuntimeScreen(
                             agent = selectedAgent,
+                            historyUiState = historyUiState,
                             runtimeState = runtimeState,
                             columns = contentColumns,
                             rows = contentRows,

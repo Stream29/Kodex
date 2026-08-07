@@ -51,15 +51,24 @@ public interface ScrollInteractionSource {
     public val interactions: SharedFlow<ScrollInteraction>
 }
 
-/** Mutable publisher used by scrolling input and layout adapters. */
-public class MutableScrollInteractionSource : ScrollInteractionSource {
+/**
+ * Mutable publisher used by scrolling input and layout adapters.
+ *
+ * [onInteractionCommitted] runs synchronously before the interaction is published to [interactions].
+ */
+public class MutableScrollInteractionSource(
+    private val onInteractionCommitted: ((ScrollInteraction) -> Unit)? = null,
+) : ScrollInteractionSource {
     override val interactions: SharedFlow<ScrollInteraction>
         field = MutableSharedFlow(
             extraBufferCapacity = INTERACTION_BUFFER_CAPACITY,
             onBufferOverflow = BufferOverflow.DROP_OLDEST,
         )
 
-    public fun tryEmit(interaction: ScrollInteraction): Boolean = interactions.tryEmit(interaction)
+    public fun tryEmit(interaction: ScrollInteraction): Boolean {
+        onInteractionCommitted?.invoke(interaction)
+        return interactions.tryEmit(interaction)
+    }
 
     private companion object {
         const val INTERACTION_BUFFER_CAPACITY: Int = 64

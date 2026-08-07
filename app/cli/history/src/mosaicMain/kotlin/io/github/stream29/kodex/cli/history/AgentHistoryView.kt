@@ -51,6 +51,7 @@ import kotlinx.coroutines.flow.first
 @Composable
 public fun AgentHistoryView(
     model: AgentHistoryViewModel,
+    uiState: AgentHistoryUiState,
     unifiedExecToolClient: UnifiedExecToolClient? = null,
     onOpenEntryContextMenu: ((
         generation: Long,
@@ -60,8 +61,8 @@ public fun AgentHistoryView(
     ) -> Unit)? = null,
 ) {
     val agentId = model.agentState.storage.id
-    val listState = remember(agentId) { LazyListState() }
-    val scrollInteractionSource = remember(agentId) { MutableScrollInteractionSource() }
+    val listState = uiState.listState
+    val scrollInteractionSource = uiState.interactionSource
     val entryFocusRequesters = remember(agentId) {
         mutableMapOf<StoredHistoryKey, FocusRequester>()
     }
@@ -73,19 +74,20 @@ public fun AgentHistoryView(
         interactionSource = scrollInteractionSource,
         entryFocusRequesters = entryFocusRequesters,
     )
+    HistoryFollowLatestEffect(uiState)
 
-    LaunchedEffect(model, agentId, listState) {
+    LaunchedEffect(model, agentId, uiState) {
         model.window.collect { updatedWindow ->
             if (updatedWindow != window) {
-                listState.requestLatestIfAtLatest()
+                uiState.requestLatestForContentChange()
                 window = updatedWindow
             }
         }
     }
-    LaunchedEffect(model, agentId, listState) {
+    LaunchedEffect(model, agentId, uiState) {
         model.requestResponse.collect { updatedRequestResponse ->
             if (updatedRequestResponse != requestResponse) {
-                listState.requestLatestIfAtLatest()
+                uiState.requestLatestForContentChange()
                 requestResponse = updatedRequestResponse
             }
         }
@@ -140,7 +142,7 @@ public fun AgentHistoryView(
                     contentType = request.historyContentType(),
                 ) {
                     request.renderStreamingTail(
-                        onContentChange = listState::requestLatestIfAtLatest,
+                        onContentChange = uiState::requestLatestForContentChange,
                     )
                 }
             }
@@ -242,14 +244,15 @@ public fun AgentHistoryView(
     }
 }
 
-/**
- * Requests the visual latest edge only when this reverse-layout history was already there.
- *
- * Call this before changing the items supplied to the list. In a reverse layout, the visual
- * latest edge is the logical start and has no remaining forward scroll range.
- */
-internal fun LazyListState.requestLatestIfAtLatest() {
-    if (!canScrollForward) requestScrollToStart()
+@Composable
+internal fun HistoryFollowLatestEffect(uiState: AgentHistoryUiState) {
+    LaunchedEffect(uiState) {
+        snapshotFlow {
+            uiState.followsLatest to uiState.listState.canScrollForward
+        }.collect {
+            uiState.reconcileLayout()
+        }
+    }
 }
 
 @Composable
