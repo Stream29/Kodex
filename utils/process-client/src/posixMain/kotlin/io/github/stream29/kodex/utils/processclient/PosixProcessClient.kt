@@ -22,6 +22,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,7 +66,7 @@ public actual class ProcessClient internal actual constructor(
 }
 
 private val PosixProcessIoDispatcher: CoroutineDispatcher =
-    Dispatchers.Default.limitedParallelism(64, "Kodex.ProcessClientIO")
+    Dispatchers.IO.limitedParallelism(Int.MAX_VALUE, "Kodex.ProcessClientIO")
 
 private fun ProcessCommand.startPosixProcess(ownerScope: CoroutineScope): ProcessSession =
     withPosixPipe { stdinRead, stdinWrite ->
