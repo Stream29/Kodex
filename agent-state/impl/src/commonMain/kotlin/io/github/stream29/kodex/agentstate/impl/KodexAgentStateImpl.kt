@@ -217,14 +217,14 @@ private class KodexAgentStateImpl(
                             }
                         }
                         terminalReason = if (event.response.endTurn == false) {
-                            RequestFinish.Resumable
+                            RequestFinish.Continue
                         } else {
                             RequestFinish.Finish
                         }
                     }
 
                     is ResponsesStreamEvent.Failed -> {
-                        terminalReason = RequestFinish.Resumable
+                        terminalReason = RequestFinish.Retryable
                     }
 
                     is ResponsesStreamEvent.Incomplete -> {
@@ -242,7 +242,7 @@ private class KodexAgentStateImpl(
             finishRequestResponse()
         }
 
-        return terminalReason ?: RequestFinish.Resumable
+        return terminalReason ?: RequestFinish.Retryable
     }
 
     @OptIn(ExperimentalUuidApi::class)

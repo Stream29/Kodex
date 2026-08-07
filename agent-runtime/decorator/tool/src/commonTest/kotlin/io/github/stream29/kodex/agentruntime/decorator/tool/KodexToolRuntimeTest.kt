@@ -789,7 +789,10 @@ private class RequestOnlyRuntime(
         while (true) {
             if (state.value is KodexAgentStateValue.ToolPending) return
             when (requestResponseApi()) {
-                RequestFinish.Resumable -> Unit
+                RequestFinish.Continue,
+                RequestFinish.Retryable,
+                -> Unit
+
                 RequestFinish.Finish -> return
             }
         }

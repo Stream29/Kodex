@@ -88,6 +88,8 @@ internal class KodexCurlProcessor(coroutineContext: CoroutineContext) {
 
             when (task) {
                 is KodexCurlTask.SendRequest -> handleSendRequest(api, task)
+                is KodexCurlTask.CancelRequest ->
+                    api.cancelRequest(task.request, task.cause)
                 is KodexCurlTask.SendWebSocketFrame ->
                     api.sendWebSocketFrame(task.websocket, task.flags, task.data, task.completionHandler)
                 is KodexCurlTask.CancelWebSocket ->
@@ -97,13 +99,7 @@ internal class KodexCurlProcessor(coroutineContext: CoroutineContext) {
     }
 
     private fun handleSendRequest(api: KodexCurlMultiApiHandler, task: KodexCurlTask.SendRequest) {
-        val requestHandler = api.scheduleRequest(task.requestData, task.completionHandler)
-        val requestCleaner = task.requestData.callContext.invokeOnCompletion { cause ->
-            if (cause != null) cancelRequest(requestHandler, cause)
-        }
-        task.completionHandler.invokeOnCompletion {
-            requestCleaner.dispose()
-        }
+        api.scheduleRequest(task.requestData, task.completionHandler, ::cancelRequest)
     }
 
     @OptIn(DelicateCoroutinesApi::class)
@@ -126,10 +122,9 @@ internal class KodexCurlProcessor(coroutineContext: CoroutineContext) {
         }
     }
 
-    private fun cancelRequest(easyHandle: EasyHandle, cause: Throwable) {
-        curlScope.launch {
-            curlApi!!.cancelRequest(easyHandle, cause)
-        }
+    private fun cancelRequest(request: KodexCurlRequestHandle, cause: Throwable) {
+        val sent = taskQueue.trySend(KodexCurlTask.CancelRequest(request, cause))
+        if (sent.isSuccess) curlApi!!.wakeup()
     }
 }
 
@@ -137,6 +132,11 @@ private sealed interface KodexCurlTask {
     data class SendRequest(
         val requestData: KodexCurlRequestData,
         val completionHandler: CompletableDeferred<KodexCurlSuccess>,
+    ) : KodexCurlTask
+
+    class CancelRequest(
+        val request: KodexCurlRequestHandle,
+        val cause: Throwable,
     ) : KodexCurlTask
 
     class SendWebSocketFrame(
@@ -157,6 +157,7 @@ private sealed interface KodexCurlTask {
                 completionHandler.completeExceptionally(cause)
             }
 
+            is CancelRequest -> Unit
             is SendWebSocketFrame -> completionHandler.completeExceptionally(cause)
             is CancelWebSocket -> Unit
         }

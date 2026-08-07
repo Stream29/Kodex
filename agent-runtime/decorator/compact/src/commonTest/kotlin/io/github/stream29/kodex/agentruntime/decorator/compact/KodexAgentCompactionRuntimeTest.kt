@@ -39,10 +39,12 @@ import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.io.files.Path
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -194,6 +196,76 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         assertEquals(13, storage.tokenCount[5])
         assertEquals(5, storage.latestIndex())
         assertEquals(KodexAgentStateValue.AssistantMessage, state.state.value)
+    }
+
+    test("loop limits consecutive retryable responses to four retries") {
+        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
+        val requests = mutableListOf<ResponsesApiRequest>()
+        val state = KodexAgentState(
+            client = mockOpenAiClient {
+                createResponse { request ->
+                    requests += request
+                    emptyFlow()
+                }
+            },
+            storage = storage,
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
+        )
+        val runtime = KodexAgentCompactionRuntime(
+            delegate = state,
+            modelCatalog = testModelCatalog(),
+            logger = TestLogger,
+        )
+
+        state.appendUserMessage(userMessage("Retry failed responses."))
+        val failure = assertFailsWith<AgentResponseRetryLimitExceededException> {
+            runtime.resume()
+        }
+
+        assertEquals(4, failure.maxRetries)
+        assertEquals("Agent response request failed after 4 retries.", failure.message)
+        assertEquals(5, requests.size)
+    }
+
+    test("successful continuation resets the response retry count") {
+        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
+        val requests = mutableListOf<ResponsesApiRequest>()
+        val state = KodexAgentState(
+            client = mockOpenAiClient {
+                createResponse { request ->
+                    requests += request
+                    when (requests.size) {
+                        2 -> flowOf(
+                            ResponsesStreamEvent.Completed(
+                                Response(id = "continue", endTurn = false),
+                            ),
+                        )
+
+                        7 -> flowOf(
+                            ResponsesStreamEvent.Completed(
+                                Response(id = "finish", endTurn = true),
+                            ),
+                        )
+
+                        else -> emptyFlow()
+                    }
+                }
+            },
+            storage = storage,
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
+        )
+        val runtime = KodexAgentCompactionRuntime(
+            delegate = state,
+            modelCatalog = testModelCatalog(),
+            logger = TestLogger,
+        )
+
+        state.appendUserMessage(userMessage("Continue after a recovered request."))
+        runtime.resume()
+
+        assertEquals(7, requests.size)
     }
 
     test("loop runs pre turn compaction before sampling") {

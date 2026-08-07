@@ -19,10 +19,10 @@ import kotlinx.coroutines.CancellationException
 /**
  * Basic runtime with no environment-side effects.
  *
- * It handles token-limit compaction and server-requested continuation before
- * returning control. A pending tool call ends this operation at the observable
- * state boundary so a higher runtime can execute it through the inherited
- * atomic state API.
+ * It handles token-limit compaction, server-requested continuation, and bounded
+ * response retries before returning control. A pending tool call ends this
+ * operation at the observable state boundary so a higher runtime can execute
+ * it through the inherited atomic state API.
  *
  * @param logger Agent-scoped logger for response and compaction operations.
  * @param compactionHooks Nullable because Hooks are an optional host feature;
@@ -42,6 +42,7 @@ public class KodexAgentCompactionRuntime(
             compactForContextLimit(CompactionPhase.PreTurn)
         }
 
+        var responseRetryCount = 0
         while (true) {
             logger.info { "Agent response request started." }
             val finishReason = try {
@@ -62,14 +63,31 @@ public class KodexAgentCompactionRuntime(
             if (state.value is KodexAgentStateValue.ToolPending) return
 
             when (finishReason) {
-                RequestFinish.Resumable -> {
+                RequestFinish.Continue -> {
+                    responseRetryCount = 0
                     logger.info { "Agent response continuation requested." }
-                    if (shouldAutoCompact()) {
-                        compactForContextLimit(CompactionPhase.MidTurn)
+                }
+
+                RequestFinish.Retryable -> {
+                    if (responseRetryCount >= MaxResponseRetries) {
+                        val failure = AgentResponseRetryLimitExceededException(MaxResponseRetries)
+                        logger.error(failure) {
+                            "Agent response retry limit exceeded (maxRetries=$MaxResponseRetries)."
+                        }
+                        throw failure
+                    }
+                    responseRetryCount += 1
+                    logger.info {
+                        "Agent response retry requested " +
+                            "(retry=$responseRetryCount/$MaxResponseRetries)."
                     }
                 }
 
                 RequestFinish.Finish -> return
+            }
+
+            if (shouldAutoCompact()) {
+                compactForContextLimit(CompactionPhase.MidTurn)
             }
         }
     }
@@ -129,7 +147,20 @@ public class KodexAgentCompactionRuntime(
 }
 
 /**
- * Adds automatic compaction and server-requested continuation to this state.
+ * Raised after every retry allowed for one Responses sampling request has also
+ * returned a retryable result.
+ */
+public class AgentResponseRetryLimitExceededException(
+    public val maxRetries: Int,
+) : IllegalStateException(
+    "Agent response request failed after $maxRetries retries.",
+)
+
+private const val MaxResponseRetries: Int = 4
+
+/**
+ * Adds automatic compaction, server-requested continuation, and bounded
+ * response retry to this state.
  *
  * @param logger Agent-scoped logger for response and compaction operations.
  * @param compactionHooks Nullable because Hooks are optional; `null` disables

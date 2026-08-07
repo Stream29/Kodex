@@ -61,8 +61,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerT
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.cli.components.EllipsizedText
 import io.github.stream29.kodex.cli.components.TuiPressable
-import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.cli.patch.PendingPatchToolEventView
 import io.github.stream29.kodex.cli.patch.StablePatchToolEventView
 import io.github.stream29.kodex.openai.AgentMessageInputContent
@@ -667,8 +667,9 @@ internal fun ToolEvent(
             onClick = { expanded = !expanded },
             modifier = Modifier.fillMaxWidth(),
         ) { isFocused, isHovered, isPressed ->
-            WrappedHistoryText(
+            EllipsizedText(
                 value = "${if (expanded) "v" else ">"} $summary",
+                modifier = Modifier.fillMaxWidth(),
                 color = headerColor,
                 textStyle = when {
                     isPressed -> TextStyle.Invert
@@ -1432,7 +1433,7 @@ private fun PendingCommandExecutionAction.toolSummary(
 }
 
 private fun ExecCommandArguments.toolSummary(): String =
-    command.semanticExcerpt()
+    command.singleLineSummary()
         .takeIf(String::isNotBlank)
         ?.let { command -> "Run command: $command" }
         ?: "Run a command"
@@ -1440,7 +1441,7 @@ private fun ExecCommandArguments.toolSummary(): String =
 private fun WriteStdinArguments.toolSummary(sourceArguments: ExecCommandArguments? = null): String {
     val command = sourceArguments
         ?.command
-        ?.semanticExcerpt()
+        ?.singleLineSummary()
         ?.takeIf(String::isNotBlank)
     return when {
         command == null && chars.isEmpty() -> "Wait for terminal session $sessionId"
@@ -1453,13 +1454,13 @@ private fun WriteStdinArguments.toolSummary(sourceArguments: ExecCommandArgument
 private fun ImageGenToolArguments.toolSummary(): String = prompt.imageGenerationSummary()
 
 private fun String.imageGenerationSummary(): String =
-    semanticExcerpt()
+    singleLineSummary()
         .takeIf(String::isNotBlank)
         ?.let { prompt -> "Generate an image: $prompt" }
         ?: "Generate an image"
 
 private fun ViewImageToolArguments.toolSummary(): String =
-    path.semanticExcerpt()
+    path.singleLineSummary()
         .takeIf(String::isNotBlank)
         ?.let { path -> "View image: $path" }
         ?: "View an image"
@@ -1467,24 +1468,24 @@ private fun ViewImageToolArguments.toolSummary(): String =
 private fun RequestUserInputArgs.toolSummary(): String =
     questions.firstOrNull()
         ?.question
-        ?.semanticExcerpt()
+        ?.singleLineSummary()
         ?.takeIf(String::isNotBlank)
         ?.let { question -> "Ask the user: $question" }
         ?: "Ask the user for input"
 
 private fun SearchToolCallParams.toolSummary(): String =
-    query.semanticExcerpt()
+    query.singleLineSummary()
         .takeIf(String::isNotBlank)
         ?.let { query -> "Search available tools: $query" }
         ?: "Search available tools"
 
 private fun SearchCommands.toolSummary(): String = when {
-    !searchQuery.isNullOrEmpty() -> searchQuery.orEmpty().first().q.semanticExcerpt()
+    !searchQuery.isNullOrEmpty() -> searchQuery.orEmpty().first().q.singleLineSummary()
         .takeIf(String::isNotBlank)
         ?.let { query -> "Search the web: $query" }
         ?: "Search the web"
 
-    !imageQuery.isNullOrEmpty() -> imageQuery.orEmpty().first().q.semanticExcerpt()
+    !imageQuery.isNullOrEmpty() -> imageQuery.orEmpty().first().q.singleLineSummary()
         .takeIf(String::isNotBlank)
         ?.let { query -> "Search images: $query" }
         ?: "Search images"
@@ -1502,7 +1503,7 @@ private fun SearchCommands.toolSummary(): String = when {
 
 private fun WebSearchAction.toolSummary(): String = when (this) {
     is WebSearchAction.Search -> (query ?: queries?.firstOrNull())
-        ?.semanticExcerpt()
+        ?.singleLineSummary()
         ?.takeIf(String::isNotBlank)
         ?.let { query -> "Search the web: $query" }
         ?: "Search the web"
@@ -1512,18 +1513,18 @@ private fun WebSearchAction.toolSummary(): String = when (this) {
     WebSearchAction.Other -> "Use web search"
 }
 
-private fun SpawnAgentArgs.toolSummary(): String = "Start agent: ${taskName.semanticExcerpt()}"
+private fun SpawnAgentArgs.toolSummary(): String = "Start agent: ${taskName.singleLineSummary()}"
 
-private fun SendMessageArgs.toolSummary(): String = "Message agent: ${target.semanticExcerpt()}"
+private fun SendMessageArgs.toolSummary(): String = "Message agent: ${target.singleLineSummary()}"
 
-private fun FollowupTaskArgs.toolSummary(): String = "Continue task for agent: ${target.semanticExcerpt()}"
+private fun FollowupTaskArgs.toolSummary(): String = "Continue task for agent: ${target.singleLineSummary()}"
 
 private fun WaitAgentArgs.toolSummary(): String = "Wait for an agent"
 
-private fun InterruptAgentArgs.toolSummary(): String = "Interrupt agent: ${target.semanticExcerpt()}"
+private fun InterruptAgentArgs.toolSummary(): String = "Interrupt agent: ${target.singleLineSummary()}"
 
 private fun ListAgentsArgs.toolSummary(): String =
-    pathPrefix?.semanticExcerpt()?.takeIf(String::isNotBlank)?.let { prefix -> "List agents under: $prefix" }
+    pathPrefix?.singleLineSummary()?.takeIf(String::isNotBlank)?.let { prefix -> "List agents under: $prefix" }
         ?: "List agents"
 
 private fun PendingMultiAgentInvocation.toolSummary(): String = when (this) {
@@ -1535,13 +1536,11 @@ private fun PendingMultiAgentInvocation.toolSummary(): String = when (this) {
     is PendingMultiAgentInvocation.ListAgents -> arguments.toolSummary()
 }
 
-private fun String.semanticExcerpt(): String {
-    val singleLine = lineSequence()
+private fun String.singleLineSummary(): String =
+    lineSequence()
         .map { line -> line.trim() }
         .filter(String::isNotEmpty)
         .joinToString(" ")
-    return singleLine.ellipsizeToTerminalWidth(MaximumSemanticSummaryColumns)
-}
 
 private fun String.displayStdin(): String =
     if (isEmpty()) "[poll]" else replace("\r", "\\r").replace("\n", "\\n")
@@ -1603,5 +1602,4 @@ private fun String.safeMediaReference(): String = when {
 
 private const val MaximumInlineReferenceLength: Int = 160
 private const val MaximumInlineJsonLength: Int = 512
-private const val MaximumSemanticSummaryColumns: Int = 96
 private const val Ellipsis: String = "..."
