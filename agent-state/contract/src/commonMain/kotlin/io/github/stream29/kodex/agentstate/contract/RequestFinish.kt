@@ -6,13 +6,17 @@ package io.github.stream29.kodex.agentstate.contract
  * This is deliberately separate from the state-side streaming output. The
  * active output SharedFlow is released at `OutputItemDone`, while protocol
  * completion arrives later and determines whether the runtime should issue
- * another request. Failed and incomplete terminal events are raised as
- * exceptions; a stream that ends without a terminal event is resumable.
+ * another request. A failed terminal event or a stream that ends without a
+ * terminal event is retryable; an incomplete terminal event is raised as an
+ * exception.
  */
 public enum class RequestFinish {
     /** The server completed this request and ended the logical turn. */
     Finish,
 
-    /** The request requires another response or its stream ended without a terminal event. */
-    Resumable,
+    /** The server completed this request and explicitly requested another response. */
+    Continue,
+
+    /** The request failed transiently and may be attempted again. */
+    Retryable,
 }

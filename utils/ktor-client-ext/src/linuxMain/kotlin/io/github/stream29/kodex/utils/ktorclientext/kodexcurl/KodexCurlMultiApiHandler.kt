@@ -17,6 +17,7 @@ import kotlinx.cinterop.*
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.DisposableHandle
 import kotlinx.io.IOException
 import kotlinx.io.readByteArray
 import libcurl.*
@@ -25,19 +26,29 @@ import platform.posix.size_tVar
 
 @OptIn(ExperimentalForeignApi::class)
 private class RequestHolder(
+    val token: Any,
     val responseCompletable: CompletableDeferred<KodexCurlSuccess>,
     val requestHeaders: CPointer<curl_slist>,
     val responseDataRef: StableRef<KodexCurlResponseBuilder>,
     val requestWrapper: StableRef<KodexCurlRequestBodyData>,
     val responseWrapper: StableRef<KodexCurlResponseBodyData>,
 ) {
+    var cancellationHandler: DisposableHandle? = null
+
     fun dispose() {
+        cancellationHandler?.dispose()
         curl_slist_free_all(requestHeaders)
         responseDataRef.dispose()
         requestWrapper.dispose()
         responseWrapper.dispose()
     }
 }
+
+@OptIn(ExperimentalForeignApi::class)
+internal class KodexCurlRequestHandle(
+    val easyHandle: EasyHandle,
+    val token: Any,
+)
 
 @OptIn(InternalAPI::class, ExperimentalForeignApi::class)
 internal class KodexCurlMultiApiHandler : Closeable {
@@ -47,6 +58,11 @@ internal class KodexCurlMultiApiHandler : Closeable {
 
     private val multiHandle: MultiHandle = curl_multi_init()
         ?: error("Could not initialize a Curl multi handle")
+
+    init {
+        // Keep long-lived streams on separate connections and failure domains.
+        curl_multi_setopt(multiHandle, CURLMOPT_PIPELINING, CURLPIPE_NOTHING).verify()
+    }
 
     private val easyHandlesToUnpauseLock = SynchronizedObject()
     private val easyHandlesToUnpause: MutableList<EasyHandle> = mutableListOf()
@@ -82,7 +98,8 @@ internal class KodexCurlMultiApiHandler : Closeable {
     fun scheduleRequest(
         request: KodexCurlRequestData,
         deferred: CompletableDeferred<KodexCurlSuccess>,
-    ): EasyHandle {
+        onCancellation: (KodexCurlRequestHandle, Throwable) -> Unit,
+    ) {
         val easyHandle = curl_easy_init()
         if (easyHandle == null) {
             request.dispose()
@@ -108,6 +125,7 @@ internal class KodexCurlMultiApiHandler : Closeable {
         var requestHeaders: CPointer<curl_slist>? = null
         var requestHolder: RequestHolder? = null
         var addedToMulti = false
+        val requestHandle = KodexCurlRequestHandle(easyHandle, Any())
 
         try {
             responseDataRef = StableRef.create(responseData)
@@ -124,6 +142,7 @@ internal class KodexCurlMultiApiHandler : Closeable {
             requestHeaders = request.takeHeaders()
             val requestHeadersPointer = checkNotNull(requestHeaders)
             val holder = RequestHolder(
+                token = requestHandle.token,
                 responseCompletable = deferred,
                 requestHeaders = requestHeadersPointer,
                 responseDataRef = checkNotNull(responseDataRef),
@@ -142,6 +161,9 @@ internal class KodexCurlMultiApiHandler : Closeable {
                 activeHolder.responseCompletable.complete(result)
             }
             activeHandles[easyHandle] = holder
+            holder.cancellationHandler = request.callContext.invokeOnCompletion { cause ->
+                if (cause != null) onCancellation(requestHandle, cause)
+            }
 
             setupMethod(easyHandle, request.method, request.contentLength)
             easyHandle.apply {
@@ -196,13 +218,13 @@ internal class KodexCurlMultiApiHandler : Closeable {
             }
             throw cause
         }
-
-        return easyHandle
     }
 
-    fun cancelRequest(easyHandle: EasyHandle, cause: Throwable) {
+    fun cancelRequest(request: KodexCurlRequestHandle, cause: Throwable) {
         if (closed.value) return
-        cancelledHandles += easyHandle to cause
+        val holder = activeHandles[request.easyHandle] ?: return
+        if (holder.token !== request.token) return
+        cancelledHandles += request.easyHandle to cause
     }
 
     fun cancelWebSocket(websocket: KodexCurlWebSocketResponseBody, cause: Throwable) {
@@ -333,7 +355,12 @@ internal class KodexCurlMultiApiHandler : Closeable {
         try {
             closeResponse(holder.responseDataRef.get(), cause)
         } finally {
-            cleanupEasyHandle(easyHandle)
+            try {
+                // A cancelled transfer can leave its connection half-open.
+                easyHandle.option(CURLOPT_FORBID_REUSE, 1L)
+            } finally {
+                cleanupEasyHandle(easyHandle)
+            }
         }
     }
 

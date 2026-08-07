@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.history
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.AnsiLevel
@@ -143,7 +146,7 @@ class CleanEventViewTest {
     }
 
     @Test
-    fun commandToolSummaryEllipsizesByTerminalWidth() = runTest {
+    fun commandToolSummaryEllipsizesToAvailableHistoryWidth() = runTest {
         val event = StableCommandExecutionToolEvent(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
@@ -159,12 +162,16 @@ class CleanEventViewTest {
                 ),
             ),
         )
+        var width by mutableIntStateOf(140)
 
         runMosaicTest {
             val collapsed = setContentAndSnapshot {
-                Box(Modifier.width(140)) { event.render() }
+                Box(Modifier.width(width)) { event.render() }
             }
-            assertEquals("> Run command: ${"A你B".repeat(23)}A...", collapsed)
+            assertEquals("> Run command: ${"A你B".repeat(30)}", collapsed)
+
+            width = 42
+            assertEquals("> Run command: ${"A你B".repeat(6)}...", awaitSnapshot())
         }
     }
 

@@ -291,7 +291,7 @@ val kodexAgentStateImplTest by testSuite {
                 ),
             )
             assertEquals(
-                RequestFinish.Resumable,
+                RequestFinish.Continue,
                 requestFinishReason(
                     listOf(ResponsesStreamEvent.Completed(Response(id = "continue", endTurn = false))),
                 ),
@@ -303,7 +303,7 @@ val kodexAgentStateImplTest by testSuite {
                 type = "invalid_request_error",
             )
             assertEquals(
-                RequestFinish.Resumable,
+                RequestFinish.Retryable,
                 requestFinishReason(
                     listOf(ResponsesStreamEvent.Failed(FailedResponse(responseError))),
                 ),
@@ -326,7 +326,7 @@ val kodexAgentStateImplTest by testSuite {
             )
 
             assertEquals(
-                RequestFinish.Resumable,
+                RequestFinish.Retryable,
                 requestFinishReason(emptyList()),
             )
         }
@@ -361,7 +361,7 @@ val kodexAgentStateImplTest by testSuite {
                 storage.unstable[2],
             )
             assertEquals(
-                RequestFinish.Resumable,
+                RequestFinish.Continue,
                 finishReason,
             )
             assertEquals(KodexAgentStateValue.ToolPending(listOf(pendingTool(call))), agent.state.value)
