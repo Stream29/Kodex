@@ -25,8 +25,7 @@ public class DirectoryPickerBrowser(
         }
 
         val children = mutableListOf<Path>()
-        for (candidate in fileSystem.list(resolved)) {
-            val child = fileSystem.resolve(candidate)
+        for (child in fileSystem.list(resolved)) {
             if (fileSystem.metadataOrNull(child)?.isDirectory == true) children += child
         }
         return DirectoryPickerListing(
