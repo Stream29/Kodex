@@ -8,6 +8,27 @@ import kotlin.random.Random
 import kotlin.test.assertEquals
 
 val directoryPickerBrowserTest by testSuite {
+    test("expands current user home shorthand before resolving a directory") {
+        val unresolvedRoot = temporaryDirectory("directory-picker-home")
+        SystemCoroutineFileSystem.createDirectories(unresolvedRoot)
+        val root = SystemCoroutineFileSystem.resolve(unresolvedRoot)
+        val home = Path(root, "home")
+        val workspace = Path(home, "workspace")
+        try {
+            SystemCoroutineFileSystem.createDirectories(workspace)
+            val browser = DirectoryPickerBrowser(userHome = home)
+
+            val homeListing = browser.load(Path("~"))
+            val workspaceListing = browser.load(Path("~", "workspace"))
+
+            assertEquals(home, homeListing.directory)
+            assertEquals(listOf(workspace), homeListing.children)
+            assertEquals(workspace, workspaceListing.directory)
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
     test("resolves a directory and lists only its child directories in name order") {
         val unresolvedRoot = temporaryDirectory("directory-picker-browser")
         SystemCoroutineFileSystem.createDirectories(unresolvedRoot)
