@@ -30,7 +30,8 @@ import com.jakewharton.mosaic.ui.unit.IntSize
  * [content] receives the current focus, hover, and press state so it can render an appropriate
  * treatment. Focus selection, pointer focus, traversal, and cursor ownership are provided by the
  * Mosaic runtime. An optional secondary action is available from the secondary pointer button or
- * Shift+F10 without changing focus.
+ * Shift+F10 without changing focus. Its position is local to this surface for pointer activation
+ * and `null` for keyboard activation.
  */
 @Composable
 public fun TuiPressable(
@@ -40,7 +41,7 @@ public fun TuiPressable(
     focusRequester: FocusRequester? = null,
     onKeyEvent: ((KeyEvent) -> Boolean)? = null,
     autoFocus: Boolean = false,
-    onSecondaryClick: (() -> Unit)? = null,
+    onSecondaryClick: ((IntOffset?) -> Unit)? = null,
     content: @Composable (isFocused: Boolean, isHovered: Boolean, isPressed: Boolean) -> Unit,
 ) {
     if (!enabled) {
@@ -71,7 +72,7 @@ public fun TuiPressable(
                 when {
                     latestOnKeyEvent.value?.invoke(event) == true -> true
                     event == SecondaryClick && latestOnSecondaryClick.value != null -> {
-                        latestOnSecondaryClick.value?.invoke()
+                        latestOnSecondaryClick.value?.invoke(null)
                         true
                     }
 
@@ -128,7 +129,7 @@ public fun TuiPressable(
                         if (shouldClick) {
                             when (pointerButton) {
                                 MouseEvent.Button.Left -> latestOnClick.value()
-                                MouseEvent.Button.Right -> latestOnSecondaryClick.value?.invoke()
+                                MouseEvent.Button.Right -> latestOnSecondaryClick.value?.invoke(event.position)
                                 else -> Unit
                             }
                         }

@@ -13,6 +13,7 @@ import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
+import com.jakewharton.mosaic.ui.unit.IntOffset
 import de.infix.testBalloon.framework.core.testSuite
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlin.test.assertEquals
@@ -186,6 +187,44 @@ val tuiPressableTest by testSuite {
             awaitSnapshotAfter("Shift F10")
             assertEquals(0, primaryCount)
             assertEquals(2, secondaryCount)
+        }
+    }
+
+    test("secondary callback distinguishes pointer position from keyboard activation") {
+        var invocationCount by mutableStateOf(0)
+        var position: IntOffset? by mutableStateOf(IntOffset(x = -1, y = -1))
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Row {
+                    TuiPressable(
+                        onClick = {},
+                        onSecondaryClick = { clickPosition ->
+                            invocationCount++
+                            position = clickPosition
+                        },
+                    ) { _, _, _ ->
+                        Text("Session")
+                    }
+                    Text(" $invocationCount")
+                }
+            }
+
+            sendMouseEvent(MouseEvent(3, 0, MouseEvent.Type.Press, MouseEvent.Button.Right))
+            sendMouseEvent(MouseEvent(3, 0, MouseEvent.Type.Release))
+            awaitSnapshotAfter("secondary pointer position")
+            assertEquals(1, invocationCount)
+            assertEquals(IntOffset(x = 3, y = 0), position)
+
+            sendKeyEvent(
+                KeyboardEvent(
+                    codepoint = KeyboardEvent.F10,
+                    modifiers = KeyboardEvent.ModifierShift,
+                ),
+            )
+            awaitSnapshotAfter("secondary keyboard activation")
+            assertEquals(2, invocationCount)
+            assertEquals(null, position)
         }
     }
 }

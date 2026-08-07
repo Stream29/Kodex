@@ -20,6 +20,8 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
+import com.jakewharton.mosaic.ui.unit.IntOffset
+import com.jakewharton.mosaic.ui.unit.IntSize
 import io.github.stream29.kodex.cli.agent.label
 import io.github.stream29.kodex.cli.agent.toRenderState
 import io.github.stream29.kodex.cli.components.LazyColumn
@@ -53,6 +55,7 @@ internal fun SessionAgentSidebar(
         mutableStateOf(tree?.rootAgentId?.let(::setOf).orEmpty())
     }
     val visibleAgents = tree?.visibleAgentTreeEntries(expandedAgentIds).orEmpty()
+    val hasAgentTree = visibleAgents.isNotEmpty()
     val agentsWithChildren = remember(tree?.agents) {
         tree?.agents?.mapNotNull(AgentRuntimeTreeEntry::parentAgentId)?.toSet().orEmpty()
     }
@@ -92,11 +95,9 @@ internal fun SessionAgentSidebar(
                 color = SettingsDialogForeground,
                 onClick = onToggleExpanded,
             )
-            Text("Agent tree", color = SettingsDialogForeground)
-            Box(modifier = Modifier.width(columns).height(agentTreeRows)) {
-                if (visibleAgents.isEmpty()) {
-                    Text("No agents", color = SettingsDialogForeground)
-                } else {
+            if (hasAgentTree) {
+                Text("Agent tree", color = SettingsDialogForeground)
+                Box(modifier = Modifier.width(columns).height(agentTreeRows)) {
                     LazyColumn(modifier = Modifier.width(columns).height(agentTreeRows)) {
                         items(visibleAgents, key = { it.agentId }) { agent ->
                             val agentState by agent.viewModel.state.collectAsState()
@@ -171,11 +172,12 @@ internal fun SessionAgentSidebar(
                     items(shellSessionItems, key = { item -> item.session.sessionId }) { item ->
                         ShellSessionSidebarRow(
                             lines = item.lines,
-                            onOpenMenu = { anchor ->
+                            onOpenMenu = { anchor, clickPosition ->
                                 onOpenShellSessionMenu(
                                     ShellSessionMenuRequest(
                                         session = item.session,
                                         anchor = anchor,
+                                        clickPosition = clickPosition,
                                     ),
                                 )
                             },
@@ -201,12 +203,12 @@ internal fun SessionAgentSidebar(
 @Composable
 internal fun ShellSessionSidebarRow(
     lines: List<String>,
-    onOpenMenu: (TuiPopupAnchor) -> Unit,
+    onOpenMenu: (TuiPopupAnchor, IntOffset?) -> Unit,
 ) {
     val menuAnchor = rememberTuiPopupAnchor()
     TuiPressable(
         onClick = {},
-        onSecondaryClick = { onOpenMenu(menuAnchor) },
+        onSecondaryClick = { clickPosition -> onOpenMenu(menuAnchor, clickPosition) },
         modifier = Modifier
             .fillMaxWidth()
             .tuiPopupAnchor(menuAnchor),
@@ -240,12 +242,22 @@ internal fun BoxScope.ShellSessionContextMenu(
         if (completed) onDismissRequest()
     }
     if (completed) return
+    val positionProvider = remember(openRequest.clickPosition) {
+        TuiPopupPositionProvider { anchorBounds, surfaceSize, popupContentSize ->
+            shellSessionContextMenuPosition(
+                anchorPosition = anchorBounds.position,
+                clickPosition = openRequest.clickPosition,
+                surfaceSize = surfaceSize,
+                popupContentSize = popupContentSize,
+            )
+        }
+    }
     TuiPopupMenu(
         expanded = true,
         anchor = openRequest.anchor,
         onDismissRequest = onDismissRequest,
-        positionProvider = TuiPopupPositionProvider.EndTop,
-        backgroundColor = PopupMenuBackground,
+        positionProvider = positionProvider,
+        backgroundColor = SettingsDialogHomeBackground,
     ) {
         TuiPopupMenuItem(
             key = "close-shell-session",
@@ -280,7 +292,27 @@ private fun collectOngoingShellSessions(
 internal data class ShellSessionMenuRequest(
     val session: UnifiedExecProcessSession,
     val anchor: TuiPopupAnchor,
+    val clickPosition: IntOffset?,
 )
+
+internal fun shellSessionContextMenuPosition(
+    anchorPosition: IntOffset,
+    clickPosition: IntOffset?,
+    surfaceSize: IntSize,
+    popupContentSize: IntSize,
+): IntOffset {
+    val requestedPosition = anchorPosition + (clickPosition ?: IntOffset.Zero)
+    return IntOffset(
+        x = requestedPosition.x.coerceIn(
+            minimumValue = 0,
+            maximumValue = (surfaceSize.width - popupContentSize.width).coerceAtLeast(0),
+        ),
+        y = requestedPosition.y.coerceIn(
+            minimumValue = 0,
+            maximumValue = (surfaceSize.height - popupContentSize.height).coerceAtLeast(0),
+        ),
+    )
+}
 
 private data class ShellSessionSidebarItem(
     val session: UnifiedExecProcessSession,
