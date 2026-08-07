@@ -148,7 +148,7 @@ public class McpServiceImpl internal constructor(
         name: String,
         configuration: McpServerConfiguration,
     ): Result<ActiveMcpClient> {
-        val client = Client(Implementation(name = "kodex", version = "0.1.0"))
+        val client = Client(Implementation(name = "kodex", version = "0.2.0"))
         client.setNotificationHandler<ToolListChangedNotification>(
             Method.Defined.NotificationsToolsListChanged,
         ) {
