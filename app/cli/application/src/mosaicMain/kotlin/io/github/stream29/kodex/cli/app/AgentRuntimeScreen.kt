@@ -24,6 +24,7 @@ import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.history.AgentHistoryView
+import io.github.stream29.kodex.cli.history.AgentHistoryUiState
 import io.github.stream29.kodex.cli.newsession.NewSessionViewModel
 import io.github.stream29.kodex.cli.newsession.NewSessionViewState
 import io.github.stream29.kodex.cli.session.AgentRuntimeTreeEntry
@@ -38,6 +39,7 @@ import kotlinx.io.files.Path
 @Composable
 internal fun AgentRuntimeScreen(
     agent: AgentRuntimeTreeEntry,
+    historyUiState: AgentHistoryUiState,
     runtimeState: AgentRuntimeViewState,
     columns: Int,
     rows: Int,
@@ -89,6 +91,7 @@ internal fun AgentRuntimeScreen(
         Box(modifier = Modifier.width(columns).height(historyRows)) {
             AgentHistoryView(
                 model = agent.historyViewModel,
+                uiState = historyUiState,
                 unifiedExecToolClient = agent.viewModel.session.runtime.unifiedExecToolClient,
                 onOpenEntryContextMenu = onOpenHistoryEntryContextMenu.takeIf {
                     runtimeState.canReplaceCommittedHistory &&

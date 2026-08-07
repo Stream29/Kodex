@@ -106,6 +106,28 @@ val scrollableStateTest by testSuite {
         )
     }
 
+    test("committed interaction observer runs synchronously and preserves flow publication") {
+        val observed = mutableListOf<ScrollInteraction>()
+        val interactionSource = MutableScrollInteractionSource { interaction ->
+            observed += interaction
+        }
+        val published = mutableListOf<ScrollInteraction>()
+        val collector = launch(start = CoroutineStart.UNDISPATCHED) {
+            interactionSource.interactions.take(1).toList(published)
+        }
+        val interaction = ScrollInteraction(
+            source = ScrollInputSource.Pointer,
+            orientation = ScrollOrientation.Vertical,
+            requestedDelta = -3,
+            consumedDelta = -2,
+        )
+
+        assertTrue(interactionSource.tryEmit(interaction))
+        assertEquals(listOf(interaction), observed)
+        collector.join()
+        assertEquals(listOf(interaction), published)
+    }
+
     test("disabled and reversed scrolling preserve direction semantics") {
         val state = ScrollState()
         state.updateBounds(maxValue = 4, viewportSize = 2)
