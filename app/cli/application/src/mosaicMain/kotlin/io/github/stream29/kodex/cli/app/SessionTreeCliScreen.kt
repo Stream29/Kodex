@@ -86,6 +86,19 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     val terminal = LocalTerminalState.current
     val applicationState by viewModel.state.collectAsState()
     val selectedTree = applicationState.selectedTree
+    val sessionTabs = collectSessionTabRenderStates(applicationState.tabs)
+    val sessionSummary = summarizeOpenSessions(sessionTabs)
+    val selectedTreeHasRunningAgent = selectedTree
+        ?.agents
+        ?.any { entry -> entry.viewModel.state.value.running }
+        ?: false
+    val runningIndicatorFrame = rememberRunningIndicatorFrame(
+        active = sessionSummary.runningSessionCount > 0 || selectedTreeHasRunningAgent,
+    )
+    TerminalTitleEffect(
+        sessionCount = sessionSummary.sessionCount,
+        runningCount = sessionSummary.runningSessionCount,
+    )
     val selectedAgent = selectedTree
         ?.agents
         ?.firstOrNull { entry -> entry.selected }
@@ -152,6 +165,21 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
 
             is SessionTabTarget.OpenSession -> "Session ${target.sessionIndex}"
         }
+    val openWorkingDirectoryPicker: (Path) -> Unit = { directory ->
+        workingDirectoryPickerRequest = when {
+            activeNewSession != null -> WorkingDirectoryPickerRequest(
+                initialDirectory = directory,
+                target = WorkingDirectoryTarget.NewSession(activeNewSession),
+            )
+
+            selectedAgent != null -> WorkingDirectoryPickerRequest(
+                initialDirectory = directory,
+                target = WorkingDirectoryTarget.Agent(selectedAgent.viewModel),
+            )
+
+            else -> null
+        }
+    }
     val failureAgentState = agentState
     val failureSessionId = selectedTree?.rootAgentId
     LaunchedEffect(failureSessionId, failureAgentState?.failureStackTrace) {
@@ -192,7 +220,8 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
         TuiPopupHost(modifier = Modifier.width(columns).height(rows)) {
             Column(modifier = Modifier.width(columns).height(rows)) {
                 SessionTabBar(
-                    tabs = applicationState.tabs,
+                    tabs = sessionTabs,
+                    runningIndicatorFrame = runningIndicatorFrame,
                     columns = columns,
                     onSelectTab = { target ->
                         tabMenuRequest = null
@@ -223,6 +252,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                         expanded = sidebarExpanded,
                         columns = sidebarColumns,
                         rows = contentRows,
+                        runningIndicatorFrame = runningIndicatorFrame,
                         onHoverChanged = { sidebarHovered = it },
                         onToggleExpanded = { sidebarPinnedExpanded = !sidebarPinnedExpanded },
                         onSelectAgent = { agentId ->
@@ -251,6 +281,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                             onSubmit = {
                                 scope.launch { viewModel.submitNewSessionComposer(newSessionTarget) }
                             },
+                            onBrowseWorkingDirectory = openWorkingDirectoryPicker,
                             onOpenSettings = {
                                 settingsRoute = defaultSettingsRoute(newSessionTarget)
                                 settingsOpen = true
@@ -285,6 +316,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                                     )
                                 }
                             },
+                            onBrowseWorkingDirectory = openWorkingDirectoryPicker,
                             onOpenSettings = {
                                 historyEntryMenuRequest = null
                                 settingsRoute = SettingsRoute.Global
@@ -437,21 +469,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                             openAiLoginViewModel = scope.createOpenAiLoginViewModel(viewModel.authStore)
                         }
                     },
-                    onBrowseWorkingDirectory = { directory ->
-                        workingDirectoryPickerRequest = when {
-                            activeNewSession != null -> WorkingDirectoryPickerRequest(
-                                initialDirectory = directory,
-                                target = WorkingDirectoryTarget.NewSession(activeNewSession),
-                            )
-
-                            selectedAgent != null -> WorkingDirectoryPickerRequest(
-                                initialDirectory = directory,
-                                target = WorkingDirectoryTarget.Agent(selectedAgent.viewModel),
-                            )
-
-                            else -> null
-                        }
-                    },
+                    onBrowseWorkingDirectory = openWorkingDirectoryPicker,
                     newSessionSettings = newSessionDefaults,
                     newSessionState = activeNewSessionState,
                     sessionName = activeSessionName,
@@ -528,10 +546,14 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                         scope.launch {
                             when (val target = request.target) {
                                 is WorkingDirectoryTarget.Agent ->
-                                    target.viewModel.updateSettings { current -> current.copy(cwd = directory) }
+                                    if (!target.viewModel.state.value.running) {
+                                        target.viewModel.updateSettings { current -> current.copy(cwd = directory) }
+                                    }
 
                                 is WorkingDirectoryTarget.NewSession ->
-                                    target.viewModel.updateWorkingDirectory(directory)
+                                    if (!target.viewModel.state.value.creating) {
+                                        target.viewModel.updateWorkingDirectory(directory)
+                                    }
                             }
                         }
                     },

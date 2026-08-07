@@ -17,6 +17,7 @@ import kotlinx.cinterop.*
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.CancellationException
+import kotlinx.io.IOException
 import kotlinx.io.readByteArray
 import libcurl.*
 import platform.posix.getenv
@@ -397,7 +398,7 @@ internal class KodexCurlMultiApiHandler : Closeable {
             )
         }
         return KodexCurlFail(
-            IllegalStateException("Connection failed for request: $request. Reason: $errorMessage"),
+            IOException("Connection failed for request: $request. Reason: $errorMessage"),
         )
     }
 

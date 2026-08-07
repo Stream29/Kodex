@@ -24,6 +24,8 @@ private val ansi16Snapshots = SnapshotStrategy { mosaic ->
     mosaic.draw().render(AnsiLevel.ANSI16, supportsKittyUnderlines = false)
 }
 
+private val fixedRunningIndicatorFrame = mutableStateOf("⠋")
+
 class SessionTabBarTest {
     @Test
     fun sessionBrowserUsesTheCatalogTitleAndLastActivityWithANumericFallback() {
@@ -61,14 +63,18 @@ class SessionTabBarTest {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Box(Modifier.width(80)) {
-                    SessionTabBar(
-                        tabs = listOf(
+                    val tabs = collectSessionTabRenderStates(
+                        listOf(
                             SessionTabViewState(
                                 target = target,
                                 selected = true,
                                 newSessionName = "Research plan",
                             ),
                         ),
+                    )
+                    SessionTabBar(
+                        tabs = tabs,
+                        runningIndicatorFrame = fixedRunningIndicatorFrame,
                         columns = 80,
                         onSelectTab = {},
                         onOpenTabMenu = { _, _, _ -> },
@@ -92,17 +98,18 @@ class SessionTabBarTest {
                 Box(Modifier.width(80)) {
                     SessionTabBar(
                         tabs = listOf(
-                            SessionTabViewState(
+                            SessionTabRenderState(
                                 target = selected,
                                 selected = true,
-                                newSessionName = "First",
+                                sessionName = "First",
                             ),
-                            SessionTabViewState(
+                            SessionTabRenderState(
                                 target = inactive,
                                 selected = false,
-                                newSessionName = "Second",
+                                sessionName = "Second",
                             ),
                         ),
+                        runningIndicatorFrame = fixedRunningIndicatorFrame,
                         columns = 80,
                         onSelectTab = {},
                         onOpenTabMenu = { _, _, _ -> },
@@ -114,6 +121,38 @@ class SessionTabBarTest {
 
             assertTrue(Regex("\u001B\\[(?:[0-9]+;)*1m\\[First]").containsMatchIn(snapshot), snapshot)
             assertFalse(Regex("\u001B\\[(?:[0-9]+;)*1m\\[Second]").containsMatchIn(snapshot), snapshot)
+        }
+    }
+
+    @Test
+    fun runningSessionTabPrefixesTheSpinnerBeforeTruncatingTheName() = runTest {
+        val target = SessionTabTarget.OpenSession(sessionIndex = 7)
+
+        runMosaicTest {
+            val snapshot = setContentAndSnapshot {
+                Box(Modifier.width(80)) {
+                    SessionTabBar(
+                        tabs = listOf(
+                            SessionTabRenderState(
+                                target = target,
+                                selected = true,
+                                sessionName = "abcdefghijklmnopqrstuv",
+                                running = true,
+                            ),
+                        ),
+                        runningIndicatorFrame = fixedRunningIndicatorFrame,
+                        columns = 80,
+                        onSelectTab = {},
+                        onOpenTabMenu = { _, _, _ -> },
+                        onCreateNewSession = {},
+                        onOpenSessions = {},
+                    )
+                }
+            }
+
+            assertTrue("[⠋abcdefghijklmnop...]" in snapshot, snapshot)
+            assertFalse(" *" in snapshot, snapshot)
+            assertFalse("⠋ " in snapshot, snapshot)
         }
     }
 
@@ -130,17 +169,18 @@ class SessionTabBarTest {
                 Column {
                     SessionTabBar(
                         tabs = listOf(
-                            SessionTabViewState(
+                            SessionTabRenderState(
                                 target = activeTarget,
                                 selected = true,
-                                newSessionName = "First",
+                                sessionName = "First",
                             ),
-                            SessionTabViewState(
+                            SessionTabRenderState(
                                 target = inactiveTarget,
                                 selected = false,
-                                newSessionName = "Second",
+                                sessionName = "Second",
                             ),
                         ),
+                        runningIndicatorFrame = fixedRunningIndicatorFrame,
                         columns = 80,
                         onSelectTab = { target -> selectedTarget = target },
                         onOpenTabMenu = { target, initialName, _ ->
@@ -175,12 +215,13 @@ class SessionTabBarTest {
                 Column {
                     SessionTabBar(
                         tabs = listOf(
-                            SessionTabViewState(
+                            SessionTabRenderState(
                                 target = target,
                                 selected = true,
-                                newSessionName = "First",
+                                sessionName = "First",
                             ),
                         ),
+                        runningIndicatorFrame = fixedRunningIndicatorFrame,
                         columns = 80,
                         onSelectTab = { selected -> selectedTarget = selected },
                         onOpenTabMenu = { opened, _, _ -> menuTarget = opened },

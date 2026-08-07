@@ -35,7 +35,10 @@ import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.openai.availableServiceTiers
+import io.github.stream29.kodex.utils.terminaltext.takeLastFittingTerminalWidth
+import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 import kotlinx.coroutines.launch
+import kotlinx.io.files.Path
 
 /** Target-scoped presentation state shared by persistent triggers and host-level popup menus. */
 @Stable
@@ -62,9 +65,11 @@ internal fun AgentRuntimeStatusBar(
     state: AgentRuntimeViewState,
     fallbackSettings: KodexNewSessionSettings,
     dropdowns: RuntimeConfigurationDropdowns,
+    onBrowseWorkingDirectory: (Path) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    val configuration = state.durable.settings?.configuration()
+    val settings = state.durable.settings
+    val configuration = settings?.configuration()
         ?: fallbackSettings.configuration()
     Row(modifier = Modifier.width((columns - 1).coerceAtLeast(1))) {
         state.durable.tokenCount?.let { tokenCount -> Text("${tokenCount}t ") }
@@ -92,7 +97,13 @@ internal fun AgentRuntimeStatusBar(
         Text(" ")
         RuntimeConfigurationTriggers(configuration, dropdowns)
         state.failureMessage?.let { failure -> Text(" [error] $failure") }
-        RightAlignedSettingsButton(onClick = onOpenSettings)
+        StatusBarEndActions(
+            columns = columns,
+            workingDirectory = settings?.cwd,
+            workingDirectoryEnabled = !state.running,
+            onBrowseWorkingDirectory = onBrowseWorkingDirectory,
+            onOpenSettings = onOpenSettings,
+        )
     }
 }
 
@@ -101,24 +112,62 @@ internal fun NewSessionStatusBar(
     columns: Int,
     state: NewSessionViewState,
     dropdowns: RuntimeConfigurationDropdowns,
+    onBrowseWorkingDirectory: (Path) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     Row(modifier = Modifier.width((columns - 1).coerceAtLeast(1))) {
         RuntimeConfigurationTriggers(state.settings.configuration(), dropdowns)
         state.failureMessage?.let { failure -> Text(" [notice] $failure") }
-        RightAlignedSettingsButton(onClick = onOpenSettings)
+        StatusBarEndActions(
+            columns = columns,
+            workingDirectory = state.workingDirectory,
+            workingDirectoryEnabled = !state.creating,
+            onBrowseWorkingDirectory = onBrowseWorkingDirectory,
+            onOpenSettings = onOpenSettings,
+        )
     }
 }
 
 @Composable
-private fun RowScope.RightAlignedSettingsButton(onClick: () -> Unit) {
+private fun RowScope.StatusBarEndActions(
+    columns: Int,
+    workingDirectory: Path?,
+    workingDirectoryEnabled: Boolean,
+    onBrowseWorkingDirectory: (Path) -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    workingDirectory?.let { directory ->
+        Text(" ")
+        WorkingDirectoryStatusButton(
+            columns = columns,
+            workingDirectory = directory,
+            enabled = workingDirectoryEnabled,
+            onBrowse = onBrowseWorkingDirectory,
+        )
+    }
     Spacer(Modifier.width(1))
     Spacer(Modifier.weight(1f))
     TuiButton(
         label = "Settings",
         modifier = Modifier.background(SessionButtonBackground),
         color = SessionForeground,
-        onClick = onClick,
+        onClick = onOpenSettings,
+    )
+}
+
+@Composable
+internal fun WorkingDirectoryStatusButton(
+    columns: Int,
+    workingDirectory: Path,
+    enabled: Boolean,
+    onBrowse: (Path) -> Unit,
+) {
+    TuiButton(
+        label = workingDirectoryStatusLabel(workingDirectory, columns),
+        modifier = Modifier.background(SessionButtonBackground),
+        color = SessionForeground,
+        enabled = enabled,
+        onClick = { onBrowse(workingDirectory) },
     )
 }
 
@@ -330,8 +379,33 @@ internal fun runtimeConfigurationLabel(
     }
 }
 
+internal fun workingDirectoryStatusLabel(
+    workingDirectory: Path,
+    columns: Int,
+): String {
+    if (columns < WorkingDirectoryExpandedLabelMinimumColumns) return "cwd"
+
+    val path = workingDirectory.toString()
+    val maximumPathWidth = if (columns >= WorkingDirectoryWideLabelMinimumColumns) {
+        WorkingDirectoryWidePathMaximumWidth
+    } else {
+        WorkingDirectoryPathMaximumWidth
+    }
+    val displayPath = if (path.terminalCellWidth() <= maximumPathWidth) {
+        path
+    } else {
+        "…" + path.takeLastFittingTerminalWidth(maximumPathWidth - 1)
+    }
+    return "cwd: $displayPath"
+}
+
 private fun AgentRuntimeControl.label(): String = when (this) {
     AgentRuntimeControl.Stop -> "Stop"
     AgentRuntimeControl.ClearPending -> "Clear pending"
     AgentRuntimeControl.Resume -> "Resume"
 }
+
+private const val WorkingDirectoryExpandedLabelMinimumColumns: Int = 72
+private const val WorkingDirectoryWideLabelMinimumColumns: Int = 112
+private const val WorkingDirectoryPathMaximumWidth: Int = 16
+private const val WorkingDirectoryWidePathMaximumWidth: Int = 28

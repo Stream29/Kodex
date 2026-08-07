@@ -29,6 +29,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
+private val fixedSidebarRunningIndicatorFrame = mutableStateOf("⠋")
+
 class SessionAgentSidebarTest {
     @Test
     fun emptySidebarOmitsTheAgentTreeSection() = runTest {
@@ -39,6 +41,7 @@ class SessionAgentSidebarTest {
                     expanded = true,
                     columns = 28,
                     rows = 8,
+                    runningIndicatorFrame = fixedSidebarRunningIndicatorFrame,
                     onHoverChanged = {},
                     onToggleExpanded = {},
                     onSelectAgent = {},
@@ -50,6 +53,37 @@ class SessionAgentSidebarTest {
             assertFalse("Agent tree" in snapshot)
             assertFalse("No agents" in snapshot)
         }
+    }
+
+    @Test
+    fun runningAgentTreeLabelPrefixesTheSpinnerWithoutSpacing() {
+        assertEquals(
+            "⠋worker",
+            agentTreeNodeDisplayLabel(
+                nodeLabel = "worker",
+                running = true,
+                runningIndicatorFrame = "⠋",
+                maximumColumns = 20,
+            ),
+        )
+        assertEquals(
+            "worker",
+            agentTreeNodeDisplayLabel(
+                nodeLabel = "worker",
+                running = false,
+                runningIndicatorFrame = "⠋",
+                maximumColumns = 20,
+            ),
+        )
+        assertEquals(
+            "⠋abcdefghijklmnop...",
+            agentTreeNodeDisplayLabel(
+                nodeLabel = "abcdefghijklmnopqrstuv",
+                running = true,
+                runningIndicatorFrame = "⠋",
+                maximumColumns = 20,
+            ),
+        )
     }
 
     @Test

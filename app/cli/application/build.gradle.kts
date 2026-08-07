@@ -67,6 +67,7 @@ kotlin {
                 implementation(project(":utils-terminal-text"))
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.kotlinx.io.core)
+                implementation(libs.mosaic.animation)
                 implementation(libs.mosaic.runtime)
             }
         }
