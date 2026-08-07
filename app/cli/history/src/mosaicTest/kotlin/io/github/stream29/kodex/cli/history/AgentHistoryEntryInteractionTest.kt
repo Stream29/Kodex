@@ -13,6 +13,7 @@ import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
+import com.jakewharton.mosaic.ui.unit.IntOffset
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
@@ -31,6 +32,7 @@ val agentHistoryEntryInteractionTest by testSuite {
         var capturedGeneration: Long? = null
         var capturedIndex: Int? = null
         var capturedAnchorPlaced = false
+        var capturedClickPosition: IntOffset? = IntOffset(x = -1, y = -1)
         val entry = AgentHistoryStoredEntry(
             index = 17,
             event = StableCleanEvent.AssistantMessage(
@@ -45,10 +47,11 @@ val agentHistoryEntryInteractionTest by testSuite {
                         entry = entry,
                         generation = 4,
                         unifiedExecToolClient = null,
-                        onOpenContextMenu = { generation, storageIndex, anchor ->
+                        onOpenContextMenu = { generation, storageIndex, anchor, clickPosition ->
                             capturedGeneration = generation
                             capturedIndex = storageIndex
                             capturedAnchorPlaced = anchor.isPlaced
+                            capturedClickPosition = clickPosition
                             callbackCount++
                         },
                     )
@@ -71,6 +74,7 @@ val agentHistoryEntryInteractionTest by testSuite {
             assertEquals(4, capturedGeneration)
             assertEquals(17, capturedIndex)
             assertTrue(capturedAnchorPlaced)
+            assertEquals(IntOffset(x = 6, y = 2), capturedClickPosition)
 
             sendKeyEvent(
                 KeyboardEvent(
@@ -81,6 +85,7 @@ val agentHistoryEntryInteractionTest by testSuite {
             awaitSnapshot()
 
             assertEquals(2, callbackCount)
+            assertEquals(null, capturedClickPosition)
         }
     }
 
@@ -104,7 +109,7 @@ val agentHistoryEntryInteractionTest by testSuite {
                         entry = entry,
                         generation = 8,
                         unifiedExecToolClient = null,
-                        onOpenContextMenu = { _, _, _ -> callbackCount++ },
+                        onOpenContextMenu = { _, _, _, _ -> callbackCount++ },
                     )
                     Text("callbacks=$callbackCount")
                 }

@@ -12,6 +12,7 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
+import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
@@ -114,7 +115,7 @@ internal fun SessionTabBar(
     runningIndicatorFrame: State<String>,
     columns: Int,
     onSelectTab: (SessionTabTarget) -> Unit,
-    onOpenTabMenu: (SessionTabTarget, String, TuiPopupAnchor) -> Unit,
+    onOpenTabMenu: (SessionTabTarget, String, TuiPopupAnchor, IntOffset?) -> Unit,
     onCreateNewSession: () -> Unit,
     onOpenSessions: () -> Unit,
 ) {
@@ -157,7 +158,7 @@ private fun SessionTab(
     runningIndicatorFrame: State<String>,
     maximumLabelColumns: Int,
     onClick: () -> Unit,
-    onOpenMenu: (SessionTabTarget, String, TuiPopupAnchor) -> Unit,
+    onOpenMenu: (SessionTabTarget, String, TuiPopupAnchor, IntOffset?) -> Unit,
 ) {
     val label = if (entry.running) {
         runningIndicatorLabel(
@@ -185,7 +186,7 @@ private fun SessionTabButton(
     label: String,
     maximumLabelColumns: Int,
     onClick: () -> Unit,
-    onOpenMenu: (SessionTabTarget, String, TuiPopupAnchor) -> Unit,
+    onOpenMenu: (SessionTabTarget, String, TuiPopupAnchor, IntOffset?) -> Unit,
 ) {
     val tabMenuAnchor = rememberTuiPopupAnchor()
     TuiButton(
@@ -195,7 +196,9 @@ private fun SessionTabButton(
             .tuiPopupAnchor(tabMenuAnchor),
         color = SessionForeground,
         idleTextStyle = if (entry.selected) TextStyle.Bold else TextStyle.Unspecified,
-        onSecondaryClick = { onOpenMenu(entry.target, sessionName, tabMenuAnchor) },
+        onSecondaryClick = { clickPosition ->
+            onOpenMenu(entry.target, sessionName, tabMenuAnchor, clickPosition)
+        },
         onClick = onClick,
     )
 }

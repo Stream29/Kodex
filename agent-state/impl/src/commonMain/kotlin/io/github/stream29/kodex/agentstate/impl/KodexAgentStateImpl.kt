@@ -37,7 +37,6 @@ import io.github.stream29.kodex.openai.CompactionStrategy
 import io.github.stream29.kodex.openai.CompactionTurnMetadata
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
-import io.github.stream29.kodex.openai.OpenAiResponseStreamFailureException
 import io.github.stream29.kodex.openai.OpenAiResponseStreamIncompleteException
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
@@ -225,7 +224,7 @@ private class KodexAgentStateImpl(
                     }
 
                     is ResponsesStreamEvent.Failed -> {
-                        throw OpenAiResponseStreamFailureException(event.response.error)
+                        terminalReason = RequestFinish.Resumable
                     }
 
                     is ResponsesStreamEvent.Incomplete -> {

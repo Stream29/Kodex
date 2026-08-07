@@ -154,7 +154,7 @@ val tuiPressableTest by testSuite {
         }
     }
 
-    test("secondary pointer and Shift F10 invoke only the secondary callback") {
+    test("secondary pointer Shift F10 and Menu invoke only the secondary callback") {
         var primaryCount by mutableStateOf(0)
         var secondaryCount by mutableStateOf(0)
 
@@ -187,6 +187,11 @@ val tuiPressableTest by testSuite {
             awaitSnapshotAfter("Shift F10")
             assertEquals(0, primaryCount)
             assertEquals(2, secondaryCount)
+
+            sendKeyEvent(KeyboardEvent(codepoint = KeyboardEvent.Menu))
+            awaitSnapshotAfter("Menu")
+            assertEquals(0, primaryCount)
+            assertEquals(3, secondaryCount)
         }
     }
 
@@ -224,6 +229,11 @@ val tuiPressableTest by testSuite {
             )
             awaitSnapshotAfter("secondary keyboard activation")
             assertEquals(2, invocationCount)
+            assertEquals(null, position)
+
+            sendKeyEvent(KeyboardEvent(codepoint = KeyboardEvent.Menu))
+            awaitSnapshotAfter("Menu activation")
+            assertEquals(3, invocationCount)
             assertEquals(null, position)
         }
     }

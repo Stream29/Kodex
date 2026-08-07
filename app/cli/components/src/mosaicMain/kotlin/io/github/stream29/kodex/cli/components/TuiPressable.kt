@@ -30,8 +30,8 @@ import com.jakewharton.mosaic.ui.unit.IntSize
  * [content] receives the current focus, hover, and press state so it can render an appropriate
  * treatment. Focus selection, pointer focus, traversal, and cursor ownership are provided by the
  * Mosaic runtime. An optional secondary action is available from the secondary pointer button or
- * Shift+F10 without changing focus. Its position is local to this surface for pointer activation
- * and `null` for keyboard activation.
+ * Shift+F10 or the Menu/Application key without changing focus. Its position is local to this
+ * surface for pointer activation and `null` for keyboard activation.
  */
 @Composable
 public fun TuiPressable(
@@ -71,7 +71,8 @@ public fun TuiPressable(
             .onKeyEvent { event ->
                 when {
                     latestOnKeyEvent.value?.invoke(event) == true -> true
-                    event == SecondaryClick && latestOnSecondaryClick.value != null -> {
+                    (event == ShiftF10 || event == ContextMenu) &&
+                        latestOnSecondaryClick.value != null -> {
                         latestOnSecondaryClick.value?.invoke(null)
                         true
                     }
@@ -160,4 +161,5 @@ private class TuiPressableInteraction {
 
 private val Enter: KeyEvent = KeyEvent("Enter")
 private val Space: KeyEvent = KeyEvent(" ")
-private val SecondaryClick: KeyEvent = KeyEvent("F10", shift = true)
+private val ShiftF10: KeyEvent = KeyEvent("F10", shift = true)
+private val ContextMenu: KeyEvent = KeyEvent("ContextMenu")

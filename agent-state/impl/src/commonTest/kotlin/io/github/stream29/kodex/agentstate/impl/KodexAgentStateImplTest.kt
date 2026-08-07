@@ -25,7 +25,6 @@ import io.github.stream29.kodex.openai.IncompleteDetails
 import io.github.stream29.kodex.openai.IncompleteResponse
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.OpenAiModelId
-import io.github.stream29.kodex.openai.OpenAiResponseStreamFailureException
 import io.github.stream29.kodex.openai.OpenAiResponseStreamIncompleteException
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
 import io.github.stream29.kodex.openai.ReasoningItemReasoningSummary
@@ -271,7 +270,7 @@ val kodexAgentStateImplTest by testSuite {
             assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
         }
 
-        test("response request returns finish dispositions and throws unsuccessful terminals") {
+        test("response request maps retryable terminals and throws incomplete responses") {
             suspend fun requestFinishReason(
                 events: List<ResponsesStreamEvent>,
             ): RequestFinish {
@@ -303,18 +302,11 @@ val kodexAgentStateImplTest by testSuite {
                 code = "context_length_exceeded",
                 type = "invalid_request_error",
             )
-            val failed = assertFailsWith<OpenAiResponseStreamFailureException> {
+            assertEquals(
+                RequestFinish.Resumable,
                 requestFinishReason(
                     listOf(ResponsesStreamEvent.Failed(FailedResponse(responseError))),
-                )
-            }
-            assertEquals(responseError, failed.error)
-            assertEquals(
-                "OpenAI response stream failed " +
-                    "(code=context_length_exceeded, " +
-                    "type=invalid_request_error, " +
-                    "message=Context limit exceeded.).",
-                failed.message,
+                ),
             )
 
             val incompleteDetails = IncompleteDetails(reason = "max_output_tokens")

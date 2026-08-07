@@ -22,16 +22,14 @@ import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
-import com.jakewharton.mosaic.ui.unit.IntSize
 import io.github.stream29.kodex.cli.agent.label
 import io.github.stream29.kodex.cli.agent.toRenderState
 import io.github.stream29.kodex.cli.components.LazyColumn
 import io.github.stream29.kodex.cli.components.TuiButton
+import io.github.stream29.kodex.cli.components.TuiContextMenu
 import io.github.stream29.kodex.cli.components.TuiPressable
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
-import io.github.stream29.kodex.cli.components.TuiPopupMenu
 import io.github.stream29.kodex.cli.components.TuiPopupMenuItem
-import io.github.stream29.kodex.cli.components.TuiPopupPositionProvider
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.cli.components.items
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
@@ -259,21 +257,11 @@ internal fun BoxScope.ShellSessionContextMenu(
         if (completed) onDismissRequest()
     }
     if (completed) return
-    val positionProvider = remember(openRequest.clickPosition) {
-        TuiPopupPositionProvider { anchorBounds, surfaceSize, popupContentSize ->
-            shellSessionContextMenuPosition(
-                anchorPosition = anchorBounds.position,
-                clickPosition = openRequest.clickPosition,
-                surfaceSize = surfaceSize,
-                popupContentSize = popupContentSize,
-            )
-        }
-    }
-    TuiPopupMenu(
+    TuiContextMenu(
         expanded = true,
         anchor = openRequest.anchor,
+        clickPosition = openRequest.clickPosition,
         onDismissRequest = onDismissRequest,
-        positionProvider = positionProvider,
         backgroundColor = SettingsDialogHomeBackground,
     ) {
         TuiPopupMenuItem(
@@ -311,25 +299,6 @@ internal data class ShellSessionMenuRequest(
     val anchor: TuiPopupAnchor,
     val clickPosition: IntOffset?,
 )
-
-internal fun shellSessionContextMenuPosition(
-    anchorPosition: IntOffset,
-    clickPosition: IntOffset?,
-    surfaceSize: IntSize,
-    popupContentSize: IntSize,
-): IntOffset {
-    val requestedPosition = anchorPosition + (clickPosition ?: IntOffset.Zero)
-    return IntOffset(
-        x = requestedPosition.x.coerceIn(
-            minimumValue = 0,
-            maximumValue = (surfaceSize.width - popupContentSize.width).coerceAtLeast(0),
-        ),
-        y = requestedPosition.y.coerceIn(
-            minimumValue = 0,
-            maximumValue = (surfaceSize.height - popupContentSize.height).coerceAtLeast(0),
-        ),
-    )
-}
 
 private data class ShellSessionSidebarItem(
     val session: UnifiedExecProcessSession,
