@@ -64,6 +64,55 @@ val multiAgentToolsTest by testSuite {
         assertFalse("required" in MultiAgentTools.listAgentsSpec.parameters.jsonObject())
     }
 
+    test("static tool descriptions match the Multi-agent V2 contract") {
+        assertEquals(
+            """
+                Spawns an agent to work on the specified task. If your current task is `/root/task1` and you spawn_agent with task_name "task_3" the agent will have canonical task name `/root/task1/task_3`.
+                The spawned agent will have the same tools as you and the ability to spawn its own subagents.
+                Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed.
+                Only call this tool for a concrete, bounded subtask that can run independently alongside useful local work; otherwise continue locally.
+                It will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.
+                The new agent's canonical task name will be provided to it along with the message.
+
+                Note that passing `fork_turns="none"` will not pass any surrounding context to the spawned subagent, which may cause the agent to lack the context it needs to complete its task, whereas `fork_turns="all"` will provide the subagent with all surrounding context.
+            """.trimIndent(),
+            MultiAgentTools.spawnAgentSpec.description,
+        )
+        assertEquals(
+            "Send a message to an existing agent. The message will be delivered promptly. " +
+                "Does not trigger a new turn.",
+            MultiAgentTools.sendMessageSpec.description,
+        )
+        assertEquals(
+            "Send a follow-up task to an existing non-root target agent and trigger a turn if it " +
+                "is idle. If the target is already running, deliver the task promptly at message " +
+                "boundaries while sampling, or after the pending tool call completes.",
+            MultiAgentTools.followupTaskSpec.description,
+        )
+        assertEquals(
+            "Wait for a pending steering message from any live agent, including queued messages " +
+                "and final-status notifications. Does not return final content; it returns an " +
+                "activity or timeout summary.",
+            MultiAgentTools.waitAgentSpec.description,
+        )
+        assertEquals(
+            "Interrupt an agent's current turn, if any, and return its previous status. The agent " +
+                "remains available for messages and follow-up tasks.",
+            MultiAgentTools.interruptAgentSpec.description,
+        )
+        assertEquals(
+            "List live agents in the current root thread tree. Optionally filter by task-path prefix.",
+            MultiAgentTools.listAgentsSpec.description,
+        )
+        assertEquals(
+            "Timeout in milliseconds. Defaults to 30000, min 10000, max 3600000.",
+            MultiAgentTools.waitAgentSpec.parameters.jsonObject()
+                .getValue("properties").jsonObject
+                .getValue("timeout_ms").jsonObject
+                .getValue("description").jsonPrimitive.content,
+        )
+    }
+
     test("list_agents omits task-message previews") {
         val agentSchema = requireNotNull(MultiAgentTools.listAgentsSpec.outputSchema)
             .jsonObject()

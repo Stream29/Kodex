@@ -17,7 +17,7 @@ public val ExecCommandParametersSchema: ObjectPropertyDefinition =
             boolean { description = "True allocates a PTY for the command; false or omitted uses plain pipes." }
         }
         property("yield_time_ms") {
-            integer { description = "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms." }
+            integer { description = renderExecCommandYieldTimeDescription(execCommandHostPlatform) }
         }
         property("max_output_tokens") {
             integer { description = "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy." }

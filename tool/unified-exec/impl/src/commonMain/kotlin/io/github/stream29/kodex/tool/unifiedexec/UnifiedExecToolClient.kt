@@ -23,6 +23,7 @@ import kotlin.time.TimeSource
 
 public const val UnifiedExecMinimumYieldTimeMillis: Long = 250L
 public const val UnifiedExecMaximumYieldTimeMillis: Long = 30_000L
+internal const val UnifiedExecWindowsMinimumYieldTimeMillis: Long = 10_000L
 public const val UnifiedExecMinimumEmptyPollYieldTimeMillis: Long = 5_000L
 public const val UnifiedExecMaximumEmptyPollYieldTimeMillis: Long = 300_000L
 public const val UnifiedExecMaximumOutputByteCount: Int = 1_024 * 1_024
@@ -291,7 +292,20 @@ private fun ExecCommandArguments.toShellProcessCommand(
     )
 
 private fun Long.normalizedExecYieldTime(): Duration =
-    coerceIn(UnifiedExecMinimumYieldTimeMillis, UnifiedExecMaximumYieldTimeMillis).milliseconds
+    normalizedExecYieldTimeMillis(this, execCommandHostPlatform).milliseconds
+
+internal fun normalizedExecYieldTimeMillis(
+    requestedMillis: Long,
+    platform: ExecCommandHostPlatform,
+): Long =
+    requestedMillis.coerceIn(
+        minimumValue = if (platform == ExecCommandHostPlatform.Windows) {
+            UnifiedExecWindowsMinimumYieldTimeMillis
+        } else {
+            UnifiedExecMinimumYieldTimeMillis
+        },
+        maximumValue = UnifiedExecMaximumYieldTimeMillis,
+    )
 
 private fun Long.normalizedWriteYieldTime(isEmptyPoll: Boolean): Duration =
     if (isEmptyPoll) {
