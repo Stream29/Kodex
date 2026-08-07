@@ -17,7 +17,7 @@ public object MultiAgentTools {
 
     public val spawnAgentSpec: ResponsesApiTool = ResponsesApiTool(
         name = SpawnAgentName,
-        description = "Spawns an agent to work on a concrete, bounded task. The child receives its full canonical Agent path and can use the same Multi-agent tools as its parent. It inherits the current model by default; use fork_turns to select none, all, or a positive number of recent turns.",
+        description = SpawnAgentDescription,
         parameters = SpawnAgentParametersSchema,
         outputSchema = SpawnAgentOutputSchema,
     )
@@ -30,7 +30,7 @@ public object MultiAgentTools {
 
     public val followupTaskSpec: ResponsesApiTool = ResponsesApiTool(
         name = FollowupTaskName,
-        description = "Send a follow-up task to an existing non-root target agent and trigger a turn if it is idle. If the target is already running, deliver the task after its current operation reaches a stable boundary.",
+        description = "Send a follow-up task to an existing non-root target agent and trigger a turn if it is idle. If the target is already running, deliver the task promptly at message boundaries while sampling, or after the pending tool call completes.",
         parameters = FollowupTaskParametersSchema,
     )
 
@@ -64,3 +64,14 @@ public object MultiAgentTools {
         listAgentsSpec,
     )
 }
+
+private val SpawnAgentDescription: String = """
+    Spawns an agent to work on the specified task. If your current task is `/root/task1` and you spawn_agent with task_name "task_3" the agent will have canonical task name `/root/task1/task_3`.
+    The spawned agent will have the same tools as you and the ability to spawn its own subagents.
+    Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed.
+    Only call this tool for a concrete, bounded subtask that can run independently alongside useful local work; otherwise continue locally.
+    It will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.
+    The new agent's canonical task name will be provided to it along with the message.
+
+    Note that passing `fork_turns="none"` will not pass any surrounding context to the spawned subagent, which may cause the agent to lack the context it needs to complete its task, whereas `fork_turns="all"` will provide the subagent with all surrounding context.
+""".trimIndent()

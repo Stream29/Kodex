@@ -190,6 +190,49 @@ val unifiedExecToolsTest by testSuite {
         assertEquals(UnifiedExecTools.ExecCommandDescription, linux)
     }
 
+    test("exec_command describes platform-specific yield timing exactly") {
+        assertEquals(
+            "Maximum time to wait before returning a session ID for a still-running command. " +
+                "Commands that finish sooner return immediately. For ordinary commands, omit this " +
+                "parameter to use the 10000 ms default. Effective range on Windows is 10000-30000 ms.",
+            renderExecCommandYieldTimeDescription(ExecCommandHostPlatform.Windows),
+        )
+        val posixDescription =
+            "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms."
+        assertEquals(
+            posixDescription,
+            renderExecCommandYieldTimeDescription(ExecCommandHostPlatform.Macos),
+        )
+        assertEquals(
+            posixDescription,
+            renderExecCommandYieldTimeDescription(ExecCommandHostPlatform.Linux),
+        )
+    }
+
+    test("exec_command clamps Windows yield timing to its documented range") {
+        assertEquals(
+            UnifiedExecWindowsMinimumYieldTimeMillis,
+            normalizedExecYieldTimeMillis(
+                requestedMillis = UnifiedExecMinimumYieldTimeMillis,
+                platform = ExecCommandHostPlatform.Windows,
+            ),
+        )
+        assertEquals(
+            UnifiedExecMinimumYieldTimeMillis,
+            normalizedExecYieldTimeMillis(
+                requestedMillis = UnifiedExecMinimumYieldTimeMillis,
+                platform = ExecCommandHostPlatform.Linux,
+            ),
+        )
+        assertEquals(
+            UnifiedExecMaximumYieldTimeMillis,
+            normalizedExecYieldTimeMillis(
+                requestedMillis = Long.MAX_VALUE,
+                platform = ExecCommandHostPlatform.Windows,
+            ),
+        )
+    }
+
     test("exec_command decodes a shell string into a path-preserving shell") {
         val arguments = ToolBuilderJson.decodeFromString<ExecCommandArguments>(
             """{"cmd":"echo test","shell":"/opt/codex/bash"}""",
@@ -322,7 +365,6 @@ val unifiedExecToolsTest by testSuite {
 
             val sessionId = assertNotNull(initial.sessionId)
             assertEquals(null, initial.exitCode)
-            assertTrue(initial.output.contains("ready"))
 
             var completed = write.write(
                 WriteStdinArguments(
@@ -332,16 +374,18 @@ val unifiedExecToolsTest by testSuite {
                 ),
             ).requireUnifiedExecOutput()
             val output = StringBuilder(initial.output).append(completed.output)
-            if (completed.exitCode == null) {
+            repeat(10) {
+                if (completed.exitCode != null) return@repeat
                 completed = write.write(
                     WriteStdinArguments(sessionId = sessionId),
                 ).requireUnifiedExecOutput()
                 output.append(completed.output)
             }
 
-            assertEquals(0, completed.exitCode)
+            assertEquals(0, completed.exitCode, "Command output: $output")
             assertEquals(null, completed.sessionId)
-            assertTrue(output.contains("received:hello from tty"))
+            assertTrue(output.contains("ready"), "Command output: $output")
+            assertTrue(output.contains("received:hello from tty"), "Command output: $output")
         } finally {
             client.close()
         }
@@ -417,7 +461,7 @@ val unifiedExecToolsTest by testSuite {
             val exec = UnifiedExecTools.createTools(client).toolNamed(UnifiedExecTools.ExecCommandName)
             val output = exec.exec(
                 ExecCommandArguments(
-                    command = delayedExecCommand,
+                    command = interactiveExecCommand,
                     shell = unifiedExecTestShell,
                     yieldTimeMillis = 0,
                 ),
@@ -493,7 +537,7 @@ val unifiedExecSessionControlIoTest by testSuite(
         try {
             val initial = client.execCommand(
                 ExecCommandArguments(
-                    command = delayedExecCommand,
+                    command = interactiveExecCommand,
                     shell = unifiedExecTestShell,
                     yieldTimeMillis = 0,
                 ),

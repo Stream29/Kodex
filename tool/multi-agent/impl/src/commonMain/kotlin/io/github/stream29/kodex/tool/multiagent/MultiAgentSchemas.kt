@@ -66,7 +66,7 @@ public val WaitAgentParametersSchema: ObjectPropertyDefinition =
         additionalProperties = false
         property("timeout_ms") {
             integer {
-                description = "Maximum wait duration in milliseconds."
+                description = "Timeout in milliseconds. Defaults to 30000, min 10000, max 3600000."
                 minimum = MultiAgentTools.MinWaitTimeoutMillis.toDouble()
                 maximum = MultiAgentTools.MaxWaitTimeoutMillis.toDouble()
             }
