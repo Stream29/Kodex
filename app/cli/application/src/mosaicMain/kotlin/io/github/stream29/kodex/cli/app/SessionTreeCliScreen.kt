@@ -1193,12 +1193,14 @@ internal fun AuthenticationSettingsContent(
                 )
             }
         }
-        TuiButton(
-            label = "Sign in",
-            modifier = Modifier.background(SettingsDialogHomeBackground),
-            color = SettingsDialogForeground,
-            onClick = onOpenLogin,
-        )
+        if (authState is KodexAuthState.Unavailable) {
+            TuiButton(
+                label = "Sign in",
+                modifier = Modifier.background(SettingsDialogHomeBackground),
+                color = SettingsDialogForeground,
+                onClick = onOpenLogin,
+            )
+        }
     }
 }
 

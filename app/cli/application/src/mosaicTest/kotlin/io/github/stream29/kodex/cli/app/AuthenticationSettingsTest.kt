@@ -36,6 +36,7 @@ class AuthenticationSettingsTest {
             assertTrue("Plan: pro" in snapshot, snapshot)
             assertFalse("secret-access-token" in snapshot, snapshot)
             assertFalse("account-id" in snapshot, snapshot)
+            assertFalse("[Sign in]" in snapshot, snapshot)
         }
     }
 
@@ -74,6 +75,7 @@ class AuthenticationSettingsTest {
 
             assertTrue("Authentication unavailable" in snapshot, snapshot)
             assertTrue("Selected credentials are missing." in snapshot, snapshot)
+            assertTrue("[Sign in]" in snapshot, snapshot)
         }
     }
 }
