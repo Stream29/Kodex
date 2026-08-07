@@ -2,6 +2,7 @@ package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -46,6 +47,7 @@ internal fun SessionAgentSidebar(
     expanded: Boolean,
     columns: Int,
     rows: Int,
+    runningIndicatorFrame: State<String>,
     onHoverChanged: (Boolean) -> Unit,
     onToggleExpanded: () -> Unit,
     onSelectAgent: (String) -> Unit,
@@ -111,11 +113,15 @@ internal fun SessionAgentSidebar(
                                 agent = agent,
                                 threadName = agentState.durable.settings?.threadName,
                             ) ?: agent.agentId
-                            val label = buildString {
-                                append(nodeLabel)
-                                if (agentState.running) append(" *")
-                            }.ellipsizeToTerminalWidth(
-                                (
+                            val label = agentTreeNodeDisplayLabel(
+                                nodeLabel = nodeLabel,
+                                running = agentState.running,
+                                runningIndicatorFrame = if (agentState.running) {
+                                    runningIndicatorFrame.value
+                                } else {
+                                    ""
+                                },
+                                maximumColumns = (
                                     columns -
                                         agent.depth * SessionTreeIndentColumns -
                                         SessionTreeDisclosureColumns -
@@ -199,6 +205,17 @@ internal fun SessionAgentSidebar(
         }
     }
 }
+
+internal fun agentTreeNodeDisplayLabel(
+    nodeLabel: String,
+    running: Boolean,
+    runningIndicatorFrame: String,
+    maximumColumns: Int,
+): String = runningIndicatorLabel(
+    name = nodeLabel,
+    running = running,
+    frame = runningIndicatorFrame,
+).ellipsizeToTerminalWidth(maximumColumns)
 
 @Composable
 internal fun ShellSessionSidebarRow(

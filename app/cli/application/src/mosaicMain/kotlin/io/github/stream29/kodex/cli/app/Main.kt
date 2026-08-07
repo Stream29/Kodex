@@ -23,38 +23,42 @@ public fun main() {
         return
     }
     runBlocking(CliCoroutineExceptionLogger) {
-    val application = try {
-        val codexDirectory = environmentVariable("CODEX_HOME")
-            ?.takeIf(String::isNotBlank)
-            ?.let(::Path)
-            ?: Path(requireUserHomeDirectory(), ".codex")
-        KodexApplication.open(codexDirectory = codexDirectory)
-    } catch (failure: Throwable) {
-        println("Unable to start Kodex: ${failure.message ?: failure}")
-        return@runBlocking
-    }
-    try {
-        coroutineScope {
-            val exitRequested = CompletableDeferred<Unit>()
-            val exitWatcher = launch {
-                application.sessionViewModel.state.first { it.exitRequested }
-                exitRequested.complete(Unit)
-            }
-            val mosaic = launch {
-                com.jakewharton.mosaic.runMosaic(
-                    mouseTracking = MouseTracking.AnyEvents,
-                    screen = TerminalScreen.Alternate,
-                ) {
-                    SessionTreeCliScreen(application.sessionViewModel)
-                }
-            }
-            mosaic.invokeOnCompletion { exitRequested.complete(Unit) }
-            exitRequested.await()
-            if (mosaic.isActive) mosaic.cancelAndJoin()
-            exitWatcher.cancel()
+        val application = try {
+            val codexDirectory = environmentVariable("CODEX_HOME")
+                ?.takeIf(String::isNotBlank)
+                ?.let(::Path)
+                ?: Path(requireUserHomeDirectory(), ".codex")
+            KodexApplication.open(codexDirectory = codexDirectory)
+        } catch (failure: Throwable) {
+            println("Unable to start Kodex: ${failure.message ?: failure}")
+            return@runBlocking
         }
-    } finally {
-        application.shutdown()
-    }
+        try {
+            coroutineScope {
+                val exitRequested = CompletableDeferred<Unit>()
+                val exitWatcher = launch {
+                    application.sessionViewModel.state.first { it.exitRequested }
+                    exitRequested.complete(Unit)
+                }
+                val mosaic = launch {
+                    try {
+                        com.jakewharton.mosaic.runMosaic(
+                            mouseTracking = MouseTracking.AnyEvents,
+                            screen = TerminalScreen.Alternate,
+                        ) {
+                            SessionTreeCliScreen(application.sessionViewModel)
+                        }
+                    } finally {
+                        writeTerminalTitle("")
+                    }
+                }
+                mosaic.invokeOnCompletion { exitRequested.complete(Unit) }
+                exitRequested.await()
+                if (mosaic.isActive) mosaic.cancelAndJoin()
+                exitWatcher.cancel()
+            }
+        } finally {
+            application.shutdown()
+        }
     }
 }

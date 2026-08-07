@@ -31,6 +31,7 @@ import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
 import kotlinx.coroutines.launch
+import kotlinx.io.files.Path
 
 /** The complete content surface for one selected Agent runtime. */
 @Composable
@@ -47,6 +48,7 @@ internal fun AgentRuntimeScreen(
         storageIndex: Int,
         anchor: TuiPopupAnchor,
     ) -> Unit,
+    onBrowseWorkingDirectory: (Path) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val requestUserInputState by agent.viewModel.requestUserInput.state.collectAsState()
@@ -127,6 +129,7 @@ internal fun AgentRuntimeScreen(
             state = runtimeState,
             fallbackSettings = fallbackSettings,
             dropdowns = dropdowns,
+            onBrowseWorkingDirectory = onBrowseWorkingDirectory,
             onOpenSettings = onOpenSettings,
         )
     }
@@ -142,6 +145,7 @@ internal fun NewSessionScreen(
     newLineKey: NewLineKey,
     dropdowns: RuntimeConfigurationDropdowns,
     onSubmit: () -> Unit,
+    onBrowseWorkingDirectory: (Path) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     Column(modifier = Modifier.width(columns).height(rows)) {
@@ -156,6 +160,7 @@ internal fun NewSessionScreen(
             columns = columns,
             state = state,
             dropdowns = dropdowns,
+            onBrowseWorkingDirectory = onBrowseWorkingDirectory,
             onOpenSettings = onOpenSettings,
         )
     }
