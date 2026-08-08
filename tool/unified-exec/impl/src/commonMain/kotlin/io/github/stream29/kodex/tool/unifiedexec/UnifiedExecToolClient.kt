@@ -7,6 +7,7 @@ import io.github.stream29.kodex.utils.shellclient.ShellClient
 import io.github.stream29.kodex.utils.shellclient.ShellProcessCommand
 import io.github.stream29.kodex.utils.shellclient.ShellSettings
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -198,6 +199,8 @@ public class UnifiedExecToolClient internal constructor(
             block()
         } catch (failure: ProcessException) {
             throw UnifiedExecToolException(failure.message ?: "Local process operation failed.")
+        } catch (failure: ClosedSendChannelException) {
+            throw UnifiedExecToolException(failure.message ?: "Process standard input is closed.")
         }
 }
 
