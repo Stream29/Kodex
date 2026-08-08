@@ -46,6 +46,7 @@ kotlin {
         val mosaicMain by creating {
             dependsOn(commonMain)
             dependencies {
+                implementation(project(":openai-account-usage-contract"))
                 implementation(project(":agent-state-contract"))
                 implementation(project(":app-shared-agent"))
                 implementation(project(":app-shared-auth-contract"))

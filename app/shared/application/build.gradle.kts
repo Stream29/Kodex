@@ -5,6 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            api(project(":openai-account-usage-contract"))
             implementation(project(":app-shared-new-session"))
             implementation(project(":app-shared-session"))
             implementation(project(":app-shared-auth-filesystem"))
@@ -12,6 +13,7 @@ kotlin {
             implementation(project(":agent-session-contract"))
             implementation(project(":agent-session-filesystem"))
             implementation(project(":openai-client"))
+            implementation(project(":openai-account-usage-impl"))
             implementation(project(":openai-codex-cli-storage"))
             implementation(project(":openai-model-catalog-impl"))
             implementation(project(":openai-models"))

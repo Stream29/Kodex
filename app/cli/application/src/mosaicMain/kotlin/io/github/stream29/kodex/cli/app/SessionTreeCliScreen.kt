@@ -70,6 +70,9 @@ import io.github.stream29.kodex.openai.ModeKind
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ServiceTier
+import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageState
+import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageStore
+import io.github.stream29.kodex.openai.accountusage.snapshotOrNull
 import io.github.stream29.kodex.utils.logging.agent
 import io.github.stream29.kodex.utils.logging.global
 import io.github.stream29.kodex.utils.logging.session
@@ -83,7 +86,10 @@ import kotlin.time.Instant
 
 /** Existing terminal surface backed by session-tree, Agent, and new-session ViewModels. */
 @Composable
-internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
+internal fun SessionTreeCliScreen(
+    viewModel: SessionTreeCliViewModel,
+    accountUsageStore: CodexAccountUsageStore,
+) {
     val terminal = LocalTerminalState.current
     val applicationState by viewModel.state.collectAsState()
     val historyUiStateRegistry = rememberAgentHistoryUiStateRegistry(applicationState.tabs)
@@ -108,6 +114,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     val activeNewSessionState = collectNewSessionState(activeNewSession)
     val globalSettings = applicationState.globalSettings
     val authState by viewModel.authStore.state.collectAsState()
+    val accountUsageState by accountUsageStore.state.collectAsState()
     val agentState = collectAgentState(selectedAgent?.viewModel)
     val pendingHistoryRevert = collectPendingHistoryRevert(selectedAgent?.viewModel)
     val scope = rememberCoroutineScope()
@@ -131,6 +138,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     var browserOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var settingsRoute by remember { mutableStateOf(SettingsRoute.Global) }
+    var usageResetRequest by remember { mutableStateOf<UsageResetRequest?>(null) }
     var openAiLoginViewModel by remember { mutableStateOf<OpenAiLoginViewModel?>(null) }
     var workingDirectoryPickerRequest by remember { mutableStateOf<WorkingDirectoryPickerRequest?>(null) }
     val settingsDropdowns = SettingsDropdownStates(
@@ -209,6 +217,29 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
     LaunchedEffect(selectedAgent?.viewModel, agentState?.running) {
         if (agentState?.running == true) {
             selectedAgent?.viewModel?.dismissHistoryRevert()
+        }
+    }
+    LaunchedEffect(settingsOpen, settingsRoute) {
+        if (
+            settingsOpen &&
+            settingsRoute == SettingsRoute.Global &&
+            accountUsageStore.state.value !is CodexAccountUsageState.Loading
+        ) {
+            accountUsageStore.refresh()
+        }
+    }
+    LaunchedEffect(accountUsageState) {
+        val currentAccountUsageState = accountUsageState
+        val accountUnavailable = when (currentAccountUsageState) {
+            is CodexAccountUsageState.Unavailable -> true
+            is CodexAccountUsageState.Loading -> currentAccountUsageState.previous == null
+            is CodexAccountUsageState.Available,
+            is CodexAccountUsageState.Failed,
+            is CodexAccountUsageState.Redeeming,
+                -> false
+        }
+        if (usageResetRequest != null && accountUnavailable) {
+            usageResetRequest = null
         }
     }
     DisposableEffect(selectedAgent?.viewModel) {
@@ -468,27 +499,43 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                 GlobalSettingsDialog(
                     state = globalSettings,
                     authState = authState,
+                    accountUsageState = accountUsageState,
                     agent = selectedAgent?.viewModel,
                     agentState = agentState,
                     route = settingsRoute,
-                    onRouteSelected = { settingsRoute = it },
+                    onRouteSelected = { selectedRoute ->
+                        usageResetRequest = null
+                        settingsRoute = selectedRoute
+                    },
                     dropdowns = settingsDropdowns,
                     onDismiss = {
                         workingDirectoryPickerRequest = null
                         openAiLoginViewModel = null
+                        usageResetRequest = null
                         settingsDropdowns.dismissAll()
                         settingsRoute = SettingsRoute.Global
                         settingsOpen = false
                     },
                     onNewLineKey = { key -> scope.launch { viewModel.updateNewLineKey(key) } },
-                    onAuthSource = { source -> scope.launch { viewModel.updateAuthSource(source) } },
+                    onAuthSource = { source ->
+                        usageResetRequest = null
+                        scope.launch { viewModel.updateAuthSource(source) }
+                    },
                     onUpdateSessionTitle = { transform ->
                         scope.launch { viewModel.updateSessionTitleSettings(transform) }
                     },
                     onOpenLogin = {
+                        usageResetRequest = null
                         if (openAiLoginViewModel == null) {
                             openAiLoginViewModel = scope.createOpenAiLoginViewModel(viewModel.authStore)
                         }
+                    },
+                    onRefreshUsage = { scope.launch { accountUsageStore.refresh() } },
+                    onUseUsageReset = {
+                        settingsDropdowns.dismissAll()
+                        usageResetRequest = accountUsageState
+                            .snapshotOrNull()
+                            ?.usageResetRequestOrNull()
                     },
                     onBrowseWorkingDirectory = openWorkingDirectoryPicker,
                     newSessionSettings = newSessionDefaults,
@@ -497,6 +544,7 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                     onRenameSession = {
                         workingDirectoryPickerRequest = null
                         openAiLoginViewModel = null
+                        usageResetRequest = null
                         settingsDropdowns.dismissAll()
                         settingsRoute = SettingsRoute.Global
                         settingsOpen = false
@@ -545,6 +593,13 @@ internal fun SessionTreeCliScreen(viewModel: SessionTreeCliViewModel) {
                         onUpdate = { transform ->
                             scope.launch { viewModel.updateNewSessionDefaults(transform) }
                         },
+                    )
+                }
+                usageResetRequest?.let { request ->
+                    UsageResetDialogHost(
+                        request = request,
+                        store = accountUsageStore,
+                        onDismiss = { usageResetRequest = null },
                     )
                 }
             }
@@ -980,6 +1035,7 @@ private fun BoxScope.RenameSessionDialog(
 private fun BoxScope.GlobalSettingsDialog(
     state: KodexGlobalSettings,
     authState: KodexAuthState,
+    accountUsageState: CodexAccountUsageState,
     agent: AgentRuntimeViewModel?,
     agentState: AgentRuntimeViewState?,
     route: SettingsRoute,
@@ -990,6 +1046,8 @@ private fun BoxScope.GlobalSettingsDialog(
     onAuthSource: (KodexAuthSource) -> Unit,
     onUpdateSessionTitle: ((SessionTitleSettings) -> SessionTitleSettings) -> Unit,
     onOpenLogin: () -> Unit,
+    onRefreshUsage: () -> Unit,
+    onUseUsageReset: () -> Unit,
     onBrowseWorkingDirectory: (Path) -> Unit,
     newSessionSettings: KodexNewSessionSettings,
     newSessionState: NewSessionViewState?,
@@ -1031,11 +1089,14 @@ private fun BoxScope.GlobalSettingsDialog(
                         SettingsRoute.Global -> GlobalSettingsContent(
                             state = state,
                             authState = authState,
+                            accountUsageState = accountUsageState,
                             dropdowns = dropdowns,
                             onNewLineKey = onNewLineKey,
                             onAuthSource = onAuthSource,
                             onUpdateSessionTitle = onUpdateSessionTitle,
                             onOpenLogin = onOpenLogin,
+                            onRefreshUsage = onRefreshUsage,
+                            onUseUsageReset = onUseUsageReset,
                         )
 
                         SettingsRoute.Session -> {
@@ -1082,11 +1143,14 @@ private fun BoxScope.GlobalSettingsDialog(
 private fun GlobalSettingsContent(
     state: KodexGlobalSettings,
     authState: KodexAuthState,
+    accountUsageState: CodexAccountUsageState,
     dropdowns: SettingsDropdownStates,
     onNewLineKey: (NewLineKey) -> Unit,
     onAuthSource: (KodexAuthSource) -> Unit,
     onUpdateSessionTitle: ((SessionTitleSettings) -> SessionTitleSettings) -> Unit,
     onOpenLogin: () -> Unit,
+    onRefreshUsage: () -> Unit,
+    onUseUsageReset: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogHomeBackground)) {
         Text("Codex home", color = SettingsDialogForeground)
@@ -1125,6 +1189,11 @@ private fun GlobalSettingsContent(
         background = SettingsDialogSubmitKeyBackground,
     )
     AuthenticationSettingsContent(authState = authState, onOpenLogin = onOpenLogin)
+    CodexAccountUsageSettingsContent(
+        state = accountUsageState,
+        onRefresh = onRefreshUsage,
+        onUseReset = onUseUsageReset,
+    )
     Row(modifier = Modifier.fillMaxWidth().background(SettingsDialogNewLineBackground)) {
         Column(modifier = Modifier.weight(1f).background(SettingsDialogNewLineBackground)) {
             Text("New line key", color = SettingsDialogForeground)

@@ -2,6 +2,11 @@ package io.github.stream29.kodex.openai.client
 
 import io.github.stream29.kodex.cli.auth.KodexAuthStore
 import io.github.stream29.kodex.cli.auth.KodexAuthState
+import io.github.stream29.kodex.openai.CodexAccountUsageResponse
+import io.github.stream29.kodex.openai.CodexRateLimitResetConsumeRequest
+import io.github.stream29.kodex.openai.CodexRateLimitResetConsumeResponse
+import io.github.stream29.kodex.openai.CodexRateLimitResetCreditsResponse
+import io.github.stream29.kodex.openai.CodexTokenUsageProfile
 import io.github.stream29.kodex.openai.ImageEditRequest
 import io.github.stream29.kodex.openai.ImageGenerationRequest
 import io.github.stream29.kodex.openai.ImageResponse
@@ -10,6 +15,7 @@ import io.github.stream29.kodex.openai.OpenAiErrorResponse
 import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.OpenAiResultSerializer
 import io.github.stream29.kodex.openai.OpenAiResponseResult
+import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
 import io.github.stream29.kodex.openai.Response
 import io.github.stream29.kodex.openai.ResponsesApiRequest
@@ -96,22 +102,12 @@ public class OpenAiClient(
             headers[HttpHeaders.CodexOriginator] = config.originator
             headers[HttpHeaders.UserAgent] = config.userAgent
             headers.addAll(config.defaultHeaders)
-            val auth = when (val state = authStore.state.value) {
-                is KodexAuthState.Authenticated -> state.value
-                is KodexAuthState.Unavailable -> {
-                    throw IllegalStateException(
-                        "OpenAI authentication is unavailable: " + state.message,
-                    )
-                }
-            }
-            val (accessToken, accountId) = auth
-            bearerAuth(accessToken)
-            headers[HttpHeaders.ChatGptAccountId] = accountId
         }
     }
 
     override suspend fun listModels(): OpenAiResponseResult<ModelsResponse> {
         val response = httpClient.get {
+            authenticate()
             url {
                 appendPathSegments("models")
             }
@@ -121,8 +117,47 @@ public class OpenAiClient(
         return response.openAiResponseResult(ModelsResponse.serializer())
     }
 
+    override suspend fun getCodexAccountUsage(): OpenAiResponseResult<CodexAccountUsageResponse> {
+        val response = httpClient.get(accountEndpoint("wham/usage")) {
+            authenticate()
+            accept(ContentType.Application.Json)
+        }
+        return response.httpStatusResponseResult(CodexAccountUsageResponse.serializer())
+    }
+
+    override suspend fun listCodexRateLimitResetCredits():
+        OpenAiResponseResult<CodexRateLimitResetCreditsResponse> {
+        val response = httpClient.get(accountEndpoint("wham/rate-limit-reset-credits")) {
+            authenticate()
+            accept(ContentType.Application.Json)
+        }
+        return response.httpStatusResponseResult(CodexRateLimitResetCreditsResponse.serializer())
+    }
+
+    override suspend fun consumeCodexRateLimitResetCredit(
+        request: CodexRateLimitResetConsumeRequest,
+        expectedAccount: OpenAiSubscriptionAuthState,
+    ): OpenAiResponseResult<CodexRateLimitResetConsumeResponse> {
+        val response = httpClient.post(accountEndpoint("wham/rate-limit-reset-credits/consume")) {
+            authenticate(expectedAccount)
+            accept(ContentType.Application.Json)
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }
+        return response.httpStatusResponseResult(CodexRateLimitResetConsumeResponse.serializer())
+    }
+
+    override suspend fun getCodexTokenUsageProfile(): OpenAiResponseResult<CodexTokenUsageProfile> {
+        val response = httpClient.get(accountEndpoint("wham/profiles/me")) {
+            authenticate()
+            accept(ContentType.Application.Json)
+        }
+        return response.httpStatusResponseResult(CodexTokenUsageProfile.serializer())
+    }
+
     override suspend fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent> {
         return httpClient.streamResponseEvents {
+            authenticate()
             url {
                 appendPathSegments("responses")
             }
@@ -138,6 +173,7 @@ public class OpenAiClient(
         windowId: String,
     ): Flow<ResponsesStreamEvent> {
         return httpClient.streamResponseEvents {
+            authenticate()
             url {
                 appendPathSegments("responses")
             }
@@ -157,6 +193,7 @@ public class OpenAiClient(
     ): RemoteCompactionV2Response =
         retryOpenAiStreamingTransport(config.retry) {
             httpClient.streamResponseEvents {
+                authenticate()
                 url {
                     appendPathSegments("responses")
                 }
@@ -173,6 +210,7 @@ public class OpenAiClient(
 
     override suspend fun generateImage(request: ImageGenerationRequest): OpenAiResponseResult<ImageResponse> {
         val response = httpClient.post {
+            authenticate()
             url {
                 appendPathSegments("images", "generations")
             }
@@ -185,6 +223,7 @@ public class OpenAiClient(
 
     override suspend fun editImage(request: ImageEditRequest): OpenAiResponseResult<ImageResponse> {
         val response = httpClient.post {
+            authenticate()
             url {
                 appendPathSegments("images", "edits")
             }
@@ -197,6 +236,7 @@ public class OpenAiClient(
 
     override suspend fun search(request: SearchRequest): OpenAiResponseResult<SearchResponse> {
         val response = httpClient.post {
+            authenticate()
             url {
                 appendPathSegments("alpha", "search")
             }
@@ -212,6 +252,28 @@ public class OpenAiClient(
         httpClient.close()
     }
 
+    private fun accountEndpoint(path: String): String =
+        "${config.accountBaseUrl.trimEnd('/')}/${path.trimStart('/')}"
+
+    private fun HttpRequestBuilder.authenticate(
+        expectedAccount: OpenAiSubscriptionAuthState? = null,
+    ) {
+        val account = when (val state = authStore.state.value) {
+            is KodexAuthState.Authenticated -> state.value
+            is KodexAuthState.Unavailable -> {
+                throw IllegalStateException(
+                    "OpenAI authentication is unavailable: " + state.message,
+                )
+            }
+        }
+        check(expectedAccount == null || account == expectedAccount) {
+            "The authenticated OpenAI account changed before the request started."
+        }
+        bearerAuth(account.accessToken)
+        account.accountId
+            ?.takeIf(String::isNotBlank)
+            ?.let { accountId -> headers[HttpHeaders.ChatGptAccountId] = accountId }
+    }
 }
 
 private const val RemoteCompactionV2Feature: String = "remote_compaction_v2"
@@ -285,6 +347,30 @@ private suspend fun <Success> HttpResponse.openAiResponseResult(
         payload = body<JsonElement>(),
         successSerializer = successSerializer,
     )
+
+private suspend fun <Success> HttpResponse.httpStatusResponseResult(
+    successSerializer: KSerializer<Success>,
+): OpenAiResponseResult<Success> =
+    decodeHttpStatusResponseResult(
+        status = status,
+        payload = body<JsonElement>(),
+        successSerializer = successSerializer,
+    )
+
+internal fun <Success> decodeHttpStatusResponseResult(
+    status: HttpStatusCode,
+    payload: JsonElement,
+    successSerializer: KSerializer<Success>,
+): OpenAiResponseResult<Success> {
+    if (status.value !in 200..299) {
+        return OpenAiResult.Failure(
+            OpenAiJsonCodec.decodeFromJsonElement(OpenAiErrorResponse.serializer(), payload),
+        )
+    }
+    return OpenAiResult.Success(
+        OpenAiJsonCodec.decodeFromJsonElement(successSerializer, payload),
+    )
+}
 
 internal fun <Success> decodeOpenAiResponseResult(
     status: HttpStatusCode,

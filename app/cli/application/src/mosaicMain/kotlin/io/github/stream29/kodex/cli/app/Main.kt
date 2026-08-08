@@ -46,7 +46,10 @@ public fun main() {
                             mouseTracking = MouseTracking.AnyEvents,
                             screen = TerminalScreen.Alternate,
                         ) {
-                            SessionTreeCliScreen(application.sessionViewModel)
+                            SessionTreeCliScreen(
+                                viewModel = application.sessionViewModel,
+                                accountUsageStore = application.accountUsageStore,
+                            )
                         }
                     } finally {
                         writeTerminalTitle("")

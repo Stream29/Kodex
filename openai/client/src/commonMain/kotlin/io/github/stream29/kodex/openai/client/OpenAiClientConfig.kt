@@ -2,6 +2,7 @@ package io.github.stream29.kodex.openai.client
 
 public data class OpenAiClientConfig(
     public val baseUrl: String = "https://chatgpt.com/backend-api/codex",
+    public val accountBaseUrl: String = "https://chatgpt.com/backend-api",
     public val clientVersion: String = "0.1.0",
     public val originator: String = DefaultCodexOriginator,
     public val userAgent: String = codexUserAgent(originator, clientVersion),
