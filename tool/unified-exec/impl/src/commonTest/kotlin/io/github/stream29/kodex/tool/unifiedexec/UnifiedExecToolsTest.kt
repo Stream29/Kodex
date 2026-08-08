@@ -564,4 +564,42 @@ val unifiedExecSessionControlIoTest by testSuite(
             client.close()
         }
     }
+
+    test("write_stdin reports closed process input as a tool failure") {
+        val client = testUnifiedExecToolClient()
+        try {
+            val tools = UnifiedExecTools.createTools(client)
+            val exec = tools.toolNamed(UnifiedExecTools.ExecCommandName)
+            val write = tools.toolNamed(UnifiedExecTools.WriteStdinName)
+            val initial = exec.exec(
+                ExecCommandArguments(
+                    command = interactiveExecCommand,
+                    shell = unifiedExecTestShell,
+                    yieldTimeMillis = 0,
+                ),
+            ).requireUnifiedExecOutput()
+            val sessionId = assertNotNull(initial.sessionId)
+            val session = assertNotNull(client.activeSessions.value[sessionId])
+            val managed = assertIs<ManagedProcessSession>(session)
+
+            managed.session.stdin.send("complete\n")
+            withTimeout(5.seconds) {
+                session.completed.first { completed -> completed }
+            }
+
+            val completed = write.write(
+                WriteStdinArguments(
+                    sessionId = sessionId,
+                    chars = "\u0003",
+                    yieldTimeMillis = 0,
+                ),
+            )
+            val failure = assertIs<StableCommandExecutionResult.Failure>(completed.result)
+
+            assertEquals("Process standard input is closed.", failure.message)
+            assertFalse(sessionId in client.activeSessions.value)
+        } finally {
+            client.close()
+        }
+    }
 }
