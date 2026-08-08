@@ -16,6 +16,8 @@ import io.github.stream29.kodex.cli.settings.openGlobalSettings
 import io.github.stream29.kodex.hook.impl.KodexHooksImpl
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.impl.McpServiceImpl
+import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageStore
+import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageStore as createCodexAccountUsageStore
 import io.github.stream29.kodex.openai.client.OpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiClientConfig
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient as OpenAiClientContract
@@ -42,6 +44,7 @@ public class KodexApplication private constructor(
     private val dependencies: KodexAgentDependencies,
     private val sessionRepository: FileSystemKodexSessionRepository,
     private val authStore: KodexAuthStore,
+    public val accountUsageStore: CodexAccountUsageStore,
     private val applicationScope: CoroutineScope,
     public val sessionViewModel: SessionTreeCliViewModel,
     internal val globalSettings: KodexGlobalSettingsStore,
@@ -54,6 +57,7 @@ public class KodexApplication private constructor(
         closed = true
         sessionViewModel.close()
         sessionRepository.cancel()
+        accountUsageStore.close()
         dependencies.close()
         authStore.close()
         applicationScope.cancel()
@@ -66,6 +70,7 @@ public class KodexApplication private constructor(
         closed = true
         sessionViewModel.close()
         sessionRepository.cancel()
+        accountUsageStore.close()
         dependencies.close()
         authStore.close()
         applicationScope.cancel()
@@ -135,6 +140,12 @@ public class KodexApplication private constructor(
                             single<KodexAuthStore> { authStore }
                             single { OpenAiClient(get(), clientConfig) }
                             single<OpenAiClientContract> { get<OpenAiClient>() }
+                            single<CodexAccountUsageStore> {
+                                createCodexAccountUsageStore(
+                                    client = get<OpenAiClientContract>(),
+                                    authStore = get(),
+                                )
+                            }
                             single { OpenAiModelCatalog(get(), get()) }
                             single<McpService> { mcpService }
                         },
@@ -180,9 +191,26 @@ public class KodexApplication private constructor(
                 mcpService = mcpService,
                 hooks = hooks,
             )
+            val accountUsageStore: CodexAccountUsageStore = try {
+                koin.koin.get()
+            } catch (failure: Throwable) {
+                try {
+                    dependencies.close()
+                } catch (closeFailure: Throwable) {
+                    failure.addSuppressed(closeFailure)
+                }
+                applicationScope.cancel()
+                koin.close()
+                throw failure
+            }
             val sessionRepository = try {
                 applicationScope.sessionRepositoryFactory(dataDirectory, dependencies)
             } catch (failure: Throwable) {
+                try {
+                    accountUsageStore.close()
+                } catch (closeFailure: Throwable) {
+                    failure.addSuppressed(closeFailure)
+                }
                 try {
                     dependencies.close()
                 } catch (closeFailure: Throwable) {
@@ -220,6 +248,11 @@ public class KodexApplication private constructor(
             } catch (failure: Throwable) {
                 sessionRepository.cancel()
                 try {
+                    accountUsageStore.close()
+                } catch (closeFailure: Throwable) {
+                    failure.addSuppressed(closeFailure)
+                }
+                try {
                     dependencies.close()
                 } catch (closeFailure: Throwable) {
                     failure.addSuppressed(closeFailure)
@@ -233,6 +266,7 @@ public class KodexApplication private constructor(
                 dependencies = dependencies,
                 sessionRepository = sessionRepository,
                 authStore = authStore,
+                accountUsageStore = accountUsageStore,
                 applicationScope = applicationScope,
                 sessionViewModel = sessionViewModel,
                 globalSettings = globalSettings,

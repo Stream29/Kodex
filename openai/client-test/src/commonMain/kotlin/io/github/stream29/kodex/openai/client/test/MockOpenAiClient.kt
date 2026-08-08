@@ -1,10 +1,16 @@
 package io.github.stream29.kodex.openai.client.test
 
+import io.github.stream29.kodex.openai.CodexAccountUsageResponse
+import io.github.stream29.kodex.openai.CodexRateLimitResetConsumeRequest
+import io.github.stream29.kodex.openai.CodexRateLimitResetConsumeResponse
+import io.github.stream29.kodex.openai.CodexRateLimitResetCreditsResponse
+import io.github.stream29.kodex.openai.CodexTokenUsageProfile
 import io.github.stream29.kodex.openai.ImageEditRequest
 import io.github.stream29.kodex.openai.ImageGenerationRequest
 import io.github.stream29.kodex.openai.ImageResponse
 import io.github.stream29.kodex.openai.ModelsResponse
 import io.github.stream29.kodex.openai.OpenAiResponseResult
+import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
 import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
@@ -20,6 +26,23 @@ public fun mockOpenAiClient(
 
 public class MockOpenAiClientBuilder {
     private var listModelsHandler: suspend () -> OpenAiResponseResult<ModelsResponse> = { missingHandler("listModels") }
+    private var getCodexAccountUsageHandler: suspend () -> OpenAiResponseResult<CodexAccountUsageResponse> = {
+        missingHandler("getCodexAccountUsage")
+    }
+    private var listCodexRateLimitResetCreditsHandler:
+        suspend () -> OpenAiResponseResult<CodexRateLimitResetCreditsResponse> = {
+            missingHandler("listCodexRateLimitResetCredits")
+        }
+    private var consumeCodexRateLimitResetCreditHandler:
+        suspend (
+            CodexRateLimitResetConsumeRequest,
+            OpenAiSubscriptionAuthState,
+        ) -> OpenAiResponseResult<CodexRateLimitResetConsumeResponse> = { _, _ ->
+            missingHandler("consumeCodexRateLimitResetCredit")
+        }
+    private var getCodexTokenUsageProfileHandler: suspend () -> OpenAiResponseResult<CodexTokenUsageProfile> = {
+        missingHandler("getCodexTokenUsageProfile")
+    }
     private var createResponseHandler: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent> = {
         missingHandler("createResponse")
     }
@@ -43,6 +66,35 @@ public class MockOpenAiClientBuilder {
 
     public fun listModels(handler: suspend () -> OpenAiResponseResult<ModelsResponse>): Unit {
         listModelsHandler = handler
+    }
+
+    public fun getCodexAccountUsage(
+        handler: suspend () -> OpenAiResponseResult<CodexAccountUsageResponse>,
+    ): Unit {
+        getCodexAccountUsageHandler = handler
+    }
+
+    public fun listCodexRateLimitResetCredits(
+        handler: suspend () -> OpenAiResponseResult<CodexRateLimitResetCreditsResponse>,
+    ): Unit {
+        listCodexRateLimitResetCreditsHandler = handler
+    }
+
+    public fun consumeCodexRateLimitResetCredit(
+        handler:
+            suspend (
+                CodexRateLimitResetConsumeRequest,
+                OpenAiSubscriptionAuthState,
+            ) ->
+                OpenAiResponseResult<CodexRateLimitResetConsumeResponse>,
+    ): Unit {
+        consumeCodexRateLimitResetCreditHandler = handler
+    }
+
+    public fun getCodexTokenUsageProfile(
+        handler: suspend () -> OpenAiResponseResult<CodexTokenUsageProfile>,
+    ): Unit {
+        getCodexTokenUsageProfileHandler = handler
     }
 
     public fun createResponse(handler: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent>): Unit {
@@ -76,6 +128,10 @@ public class MockOpenAiClientBuilder {
     public fun build(): OpenAiClient =
         MockOpenAiClient(
             listModelsHandler = listModelsHandler,
+            getCodexAccountUsageHandler = getCodexAccountUsageHandler,
+            listCodexRateLimitResetCreditsHandler = listCodexRateLimitResetCreditsHandler,
+            consumeCodexRateLimitResetCreditHandler = consumeCodexRateLimitResetCreditHandler,
+            getCodexTokenUsageProfileHandler = getCodexTokenUsageProfileHandler,
             createResponseHandler = createResponseHandler,
             codexResponseHandler = codexResponseHandler,
             createRemoteCompactionV2ResponseHandler = createRemoteCompactionV2ResponseHandler,
@@ -87,6 +143,15 @@ public class MockOpenAiClientBuilder {
 
 private class MockOpenAiClient(
     private val listModelsHandler: suspend () -> OpenAiResponseResult<ModelsResponse>,
+    private val getCodexAccountUsageHandler: suspend () -> OpenAiResponseResult<CodexAccountUsageResponse>,
+    private val listCodexRateLimitResetCreditsHandler:
+        suspend () -> OpenAiResponseResult<CodexRateLimitResetCreditsResponse>,
+    private val consumeCodexRateLimitResetCreditHandler:
+        suspend (
+            CodexRateLimitResetConsumeRequest,
+            OpenAiSubscriptionAuthState,
+        ) -> OpenAiResponseResult<CodexRateLimitResetConsumeResponse>,
+    private val getCodexTokenUsageProfileHandler: suspend () -> OpenAiResponseResult<CodexTokenUsageProfile>,
     private val createResponseHandler: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent>,
     private val codexResponseHandler: suspend (ResponsesApiRequest, String?, String, String) -> Flow<ResponsesStreamEvent>,
     private val createRemoteCompactionV2ResponseHandler:
@@ -97,6 +162,22 @@ private class MockOpenAiClient(
 ) : OpenAiClient {
     override suspend fun listModels(): OpenAiResponseResult<ModelsResponse> =
         listModelsHandler()
+
+    override suspend fun getCodexAccountUsage(): OpenAiResponseResult<CodexAccountUsageResponse> =
+        getCodexAccountUsageHandler()
+
+    override suspend fun listCodexRateLimitResetCredits():
+        OpenAiResponseResult<CodexRateLimitResetCreditsResponse> =
+        listCodexRateLimitResetCreditsHandler()
+
+    override suspend fun consumeCodexRateLimitResetCredit(
+        request: CodexRateLimitResetConsumeRequest,
+        expectedAccount: OpenAiSubscriptionAuthState,
+    ): OpenAiResponseResult<CodexRateLimitResetConsumeResponse> =
+        consumeCodexRateLimitResetCreditHandler(request, expectedAccount)
+
+    override suspend fun getCodexTokenUsageProfile(): OpenAiResponseResult<CodexTokenUsageProfile> =
+        getCodexTokenUsageProfileHandler()
 
     override suspend fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent> =
         createResponseHandler(request)
