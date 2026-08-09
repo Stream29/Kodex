@@ -219,8 +219,9 @@ public fun BoxScope.TuiPopup(
  *
  * The dialog traps keyboard focus within its content, consumes pointer events that are not handled
  * by its content, and restores the prior focus when removed. An unmodified Escape invokes
- * [onDismissRequest] before focused content handles it. A primary click outside [content] also
- * invokes it when [dismissOnOutsideClick]
+ * [onEscapeRequest] before focused content handles it. By default, this delegates to
+ * [onDismissRequest]. A primary click outside [content] invokes [onDismissRequest] when
+ * [dismissOnOutsideClick]
  * is `true`.
  *
  * The dialog clears every character cell inside its measured bounds before drawing [content].
@@ -230,14 +231,16 @@ public fun BoxScope.TuiPopup(
 public fun BoxScope.TuiDialog(
     onDismissRequest: () -> Unit,
     dismissOnOutsideClick: Boolean = true,
+    onEscapeRequest: () -> Unit = onDismissRequest,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     requireTuiPopupHost()
     val latestOnDismissRequest = rememberUpdatedState(onDismissRequest)
+    val latestOnEscapeRequest = rememberUpdatedState(onEscapeRequest)
     val dismissOnEscapeModifier = Modifier.onPreviewKeyEvent { event ->
         if (event != Escape) return@onPreviewKeyEvent false
-        latestOnDismissRequest.value()
+        latestOnEscapeRequest.value()
         true
     }
     val barrierModifier = Modifier.onPointerEvent { event ->

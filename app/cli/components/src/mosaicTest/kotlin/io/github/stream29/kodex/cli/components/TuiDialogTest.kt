@@ -151,6 +151,41 @@ val tuiDialogTest by testSuite {
         assertFalse(expanded)
     }
 
+    test("escape can use a callback separate from outside dismissal") {
+        var escapeRequests by mutableStateOf(0)
+        var dismissRequests by mutableStateOf(0)
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Box {
+                    TuiPopupHost(
+                        modifier = Modifier
+                            .width(24)
+                            .height(8),
+                    ) {
+                        TuiDialog(
+                            onDismissRequest = { dismissRequests++ },
+                            onEscapeRequest = { escapeRequests++ },
+                        ) {
+                            Text(
+                                "$dismissRequests:$escapeRequests",
+                                modifier = Modifier.focusable(),
+                            )
+                        }
+                    }
+                }
+            }
+
+            sendKeyEvent(KeyboardEvent(codepoint = 27))
+            awaitSnapshotContaining("0:1")
+            sendMouseEvent(MouseEvent(0, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
+            awaitSnapshotContaining("1:1")
+        }
+
+        assertEquals(1, escapeRequests)
+        assertEquals(1, dismissRequests)
+    }
+
     test("button dismissal restores the prior focus target") {
         var expanded by mutableStateOf(false)
         var backgroundFocused by mutableStateOf(false)
