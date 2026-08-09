@@ -5,7 +5,7 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 
 internal fun Project.configureCoordinates() {
     group = "io.github.stream29"
-    version = "0.2.0"
+    version = "0.2.1"
 }
 
 internal fun KotlinMultiplatformExtension.configureCompiler() {
