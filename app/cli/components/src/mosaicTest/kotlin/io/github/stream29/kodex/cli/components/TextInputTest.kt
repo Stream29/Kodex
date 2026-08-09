@@ -56,6 +56,31 @@ val textInputTest by testSuite {
         }
     }
 
+    test("standalone Shift does not insert its Kitty functional key codepoint") {
+        val state = TextInputState()
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                TextInput(
+                    state = state,
+                    layout = TextInputLayout.create(value = state.value, width = 80),
+                    autoFocus = true,
+                )
+            }
+
+            sendKeyEvent(
+                KeyboardEvent(
+                    codepoint = 57441,
+                    modifiers = KeyboardEvent.ModifierShift,
+                ),
+            )
+            sendKeyEvent(KeyboardEvent(codepoint = 'x'.code))
+            awaitSnapshot()
+
+            assertEquals(TextInputValue(text = "x", cursorOffset = 1), state.value)
+        }
+    }
+
     test("editing notifies a caller that owns the draft") {
         val state = TextInputState()
         var observed: TextInputValue? = null
