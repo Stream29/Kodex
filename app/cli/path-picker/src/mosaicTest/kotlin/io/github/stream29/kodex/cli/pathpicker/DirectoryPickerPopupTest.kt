@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
+import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
@@ -53,9 +54,9 @@ val directoryPickerPopupTest by testSuite {
 
                 val snapshot = awaitSnapshotContaining("[child/]")
                 assertTrue("file.txt" !in snapshot, snapshot)
-                sendMouseEvent(MouseEvent(8, 4, MouseEvent.Type.Press, MouseEvent.Button.Left))
+                sendMouseEvent(MouseEvent(8, 5, MouseEvent.Type.Press, MouseEvent.Button.Left))
                 awaitSnapshot()
-                sendMouseEvent(MouseEvent(8, 4, MouseEvent.Type.Release))
+                sendMouseEvent(MouseEvent(8, 5, MouseEvent.Type.Release))
                 awaitSnapshot()
             }
 
@@ -65,11 +66,146 @@ val directoryPickerPopupTest by testSuite {
             deleteRecursively(root)
         }
     }
+
+    test("mouse button 8 navigates to the parent and clears the filter") {
+        val unresolvedRoot = temporaryDirectory("directory-picker-button-8")
+        SystemCoroutineFileSystem.createDirectories(unresolvedRoot)
+        val root = SystemCoroutineFileSystem.resolve(unresolvedRoot)
+        val directory = Path(root, "workspace")
+        try {
+            SystemCoroutineFileSystem.createDirectories(Path(directory, "needle"))
+            SystemCoroutineFileSystem.createDirectories(Path(root, "sibling"))
+
+            runMosaicTest {
+                setContentAndSnapshot {
+                    Box {
+                        TuiPopupHost(modifier = Modifier.width(80).height(24)) {
+                            DirectoryPickerPopup(
+                                initialDirectory = directory,
+                                onDismissRequest = {},
+                                onDirectorySelected = {},
+                            )
+                        }
+                    }
+                }
+
+                awaitSnapshotContaining("[needle/]")
+                sendKeyEvent(KeyboardEvent(codepoint = 'n'.code))
+                awaitSnapshotContaining("Filter: n")
+                sendMouseEvent(
+                    MouseEvent(
+                        x = 40,
+                        y = 12,
+                        type = MouseEvent.Type.Press,
+                        button = MouseEvent.Button.Button8,
+                    )
+                )
+                val parent = awaitSnapshotContaining("[workspace/]")
+                assertTrue("[sibling/]" in parent, parent)
+                assertTrue("Filter: type letters" in parent, parent)
+            }
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    test("typing filters case-insensitively and enter opens the first match") {
+        val unresolvedRoot = temporaryDirectory("directory-picker-filter")
+        SystemCoroutineFileSystem.createDirectories(unresolvedRoot)
+        val root = SystemCoroutineFileSystem.resolve(unresolvedRoot)
+        try {
+            SystemCoroutineFileSystem.createDirectories(Path(root, "alpha", "inside-alpha"))
+            SystemCoroutineFileSystem.createDirectories(Path(root, "beta", "inside-beta"))
+            SystemCoroutineFileSystem.createDirectories(Path(root, "zulu"))
+
+            runMosaicTest {
+                setContentAndSnapshot {
+                    Box {
+                        TuiPopupHost(modifier = Modifier.width(80).height(24)) {
+                            DirectoryPickerPopup(
+                                initialDirectory = root,
+                                onDismissRequest = {},
+                                onDirectorySelected = {},
+                            )
+                        }
+                    }
+                }
+
+                awaitSnapshotContaining("[zulu/]")
+                sendKeyEvent(
+                    KeyboardEvent(
+                        codepoint = 'A'.code,
+                        modifiers = KeyboardEvent.ModifierShift,
+                    )
+                )
+                val filtered = awaitSnapshotContaining("Filter: A")
+                assertTrue("[alpha/]" in filtered, filtered)
+                assertTrue("[beta/]" in filtered, filtered)
+                assertTrue("[zulu/]" !in filtered, filtered)
+                awaitSnapshot()
+
+                sendKeyEvent(KeyboardEvent(codepoint = 13))
+                val opened = awaitSnapshotContaining("[inside-alpha/]")
+                assertTrue("[inside-beta/]" !in opened, opened)
+                assertTrue("Filter: type letters" in opened, opened)
+            }
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    test("backspace edits the filter and escape clears it before dismissing") {
+        val unresolvedRoot = temporaryDirectory("directory-picker-filter-escape")
+        SystemCoroutineFileSystem.createDirectories(unresolvedRoot)
+        val root = SystemCoroutineFileSystem.resolve(unresolvedRoot)
+        try {
+            SystemCoroutineFileSystem.createDirectories(Path(root, "alpha"))
+            SystemCoroutineFileSystem.createDirectories(Path(root, "beta"))
+            var expanded by mutableStateOf(true)
+
+            runMosaicTest {
+                setContentAndSnapshot {
+                    Box {
+                        TuiPopupHost(modifier = Modifier.width(80).height(24)) {
+                            if (expanded) {
+                                DirectoryPickerPopup(
+                                    initialDirectory = root,
+                                    onDismissRequest = { expanded = false },
+                                    onDirectorySelected = {},
+                                )
+                            }
+                        }
+                    }
+                }
+
+                awaitSnapshotContaining("[beta/]")
+                sendKeyEvent(KeyboardEvent(codepoint = 'z'.code))
+                awaitSnapshotContaining("No matching directories")
+                sendKeyEvent(KeyboardEvent(codepoint = 127))
+                val restored = awaitSnapshotContaining("[alpha/]")
+                assertTrue("Filter: type letters" in restored, restored)
+
+                sendKeyEvent(KeyboardEvent(codepoint = 'b'.code))
+                awaitSnapshotContaining("Filter: b")
+                sendKeyEvent(KeyboardEvent(codepoint = 27))
+                val cleared = awaitSnapshotContaining("[alpha/]")
+                assertTrue(expanded)
+                assertTrue("Filter: type letters" in cleared, cleared)
+
+                sendKeyEvent(KeyboardEvent(codepoint = 27))
+                awaitSnapshot()
+            }
+
+            assertFalse(expanded)
+        } finally {
+            deleteRecursively(root)
+        }
+    }
 }
 
 private suspend fun TestMosaic<String>.awaitSnapshotContaining(expected: String): String {
     var latest = ""
-    repeat(3) {
+    repeat(10) {
         latest = try {
             awaitSnapshot()
         } catch (_: TimeoutCancellationException) {
