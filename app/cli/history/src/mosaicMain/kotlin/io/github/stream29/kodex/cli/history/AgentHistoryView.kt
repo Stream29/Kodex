@@ -67,8 +67,8 @@ public fun AgentHistoryView(
         mutableMapOf<StoredHistoryKey, FocusRequester>()
     }
     var window by remember(model, agentId) { mutableStateOf(model.window.value) }
-    var requestResponse by remember(model, agentId) { mutableStateOf(model.requestResponse.value) }
-    val streamingTailCount = if (requestResponse == null) 0 else 1
+    var transientTail by remember(model, agentId) { mutableStateOf(model.transientTail.value) }
+    val transientTailCount = if (transientTail == null) 0 else 1
     HistoryPagingFocusEffect(
         listState = listState,
         interactionSource = scrollInteractionSource,
@@ -85,10 +85,10 @@ public fun AgentHistoryView(
         }
     }
     LaunchedEffect(model, agentId, uiState) {
-        model.requestResponse.collect { updatedRequestResponse ->
-            if (updatedRequestResponse != requestResponse) {
+        model.transientTail.collect { updatedTransientTail ->
+            if (updatedTransientTail != transientTail) {
                 uiState.requestLatestForContentChange()
-                requestResponse = updatedRequestResponse
+                transientTail = updatedTransientTail
             }
         }
     }
@@ -98,7 +98,7 @@ public fun AgentHistoryView(
         agentId,
         listState,
         window.generation,
-        streamingTailCount,
+        transientTailCount,
         window.pending.size,
         window.entries.size,
         window.hasOlderEntries,
@@ -113,7 +113,7 @@ public fun AgentHistoryView(
         }
 
         val loadBoundary = (
-            streamingTailCount + window.pending.size + window.entries.lastIndex - HistoryPrefetchDistance
+            transientTailCount + window.pending.size + window.entries.lastIndex - HistoryPrefetchDistance
             ).coerceAtLeast(0)
         snapshotFlow {
             listState.layoutInfo.visibleItemsInfo.any { item ->
@@ -133,15 +133,15 @@ public fun AgentHistoryView(
             interactionSource = scrollInteractionSource,
             keyboardPageSize = { viewportSize -> (viewportSize / 2).coerceAtLeast(1) },
         ) {
-            requestResponse?.let { request ->
+            transientTail?.let { tail ->
                 item(
                     key = StreamingHistoryKey(
                         agentId = agentId,
-                        identity = request.historyIdentity(),
+                        identity = tail.historyIdentity(),
                     ),
-                    contentType = request.historyContentType(),
+                    contentType = tail.historyContentType(),
                 ) {
-                    request.renderStreamingTail(
+                    tail.renderTransientTail(
                         onContentChange = uiState::requestLatestForContentChange,
                     )
                 }
@@ -223,7 +223,7 @@ public fun AgentHistoryView(
             }
 
             if (
-                requestResponse == null &&
+                transientTail == null &&
                 window.entries.isEmpty() &&
                 window.pending.isEmpty() &&
                 !window.isLoading &&
@@ -417,6 +417,16 @@ private fun UnstableCleanEvent.historyIdentity(position: Int): String = when (th
     is PendingServerToolSearch -> "server:${call.id?.value ?: position}"
 }
 
+private fun AgentHistoryTransientTail.historyIdentity(): Any = when (this) {
+    is AgentHistoryTransientTail.RequestResponse -> value.historyIdentity()
+    AgentHistoryTransientTail.Compacting -> CompactingHistoryKey
+}
+
+private fun AgentHistoryTransientTail.historyContentType(): HistoryContentType = when (this) {
+    is AgentHistoryTransientTail.RequestResponse -> value.historyContentType()
+    AgentHistoryTransientTail.Compacting -> HistoryContentType.StreamingStatus
+}
+
 private fun KodexAgentStateValue.RequestResponse.historyIdentity(): Any = when (this) {
     KodexAgentStateValue.RequestResponse.Started -> StreamingStartedHistoryKey
     is KodexAgentStateValue.RequestResponse.Message -> events
@@ -483,6 +493,7 @@ private enum class HistoryContentType {
 }
 
 private data object StreamingStartedHistoryKey
+private data object CompactingHistoryKey
 
 private data object WrappedHistoryTextSlot
 

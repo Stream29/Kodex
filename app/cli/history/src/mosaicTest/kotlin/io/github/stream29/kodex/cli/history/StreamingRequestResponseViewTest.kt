@@ -274,6 +274,20 @@ class StreamingRequestResponseViewTest {
             )
         }
     }
+
+    @Test
+    fun compactingContextHasAStandaloneTail() = runTest {
+        runMosaicTest {
+            assertEquals(
+                "Compacting context…",
+                setContentAndSnapshot {
+                    Box(Modifier.width(40)) {
+                        AgentHistoryTransientTail.Compacting.renderTransientTail()
+                    }
+                },
+            )
+        }
+    }
 }
 
 private fun replayingEvents(

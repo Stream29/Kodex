@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.cli.history
 
+import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
@@ -27,6 +28,21 @@ public data class AgentHistoryStoredEntry(
     public val index: Int,
     public val event: StableCleanEvent,
 )
+
+/** One active operation rendered after the persisted and pending history tails. */
+public sealed interface AgentHistoryTransientTail {
+    public data class RequestResponse(
+        public val value: KodexAgentStateValue.RequestResponse,
+    ) : AgentHistoryTransientTail
+
+    public data object Compacting : AgentHistoryTransientTail
+}
+
+internal fun KodexAgentStateValue.toHistoryTransientTail(): AgentHistoryTransientTail? = when (this) {
+    is KodexAgentStateValue.RequestResponse -> AgentHistoryTransientTail.RequestResponse(this)
+    KodexAgentStateValue.Compacting -> AgentHistoryTransientTail.Compacting
+    else -> null
+}
 
 internal data class LoadedHistoryBatch(
     val entries: List<AgentHistoryStoredEntry>,
