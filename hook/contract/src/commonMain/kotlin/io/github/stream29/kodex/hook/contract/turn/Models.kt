@@ -38,11 +38,14 @@ public sealed interface UserPromptSubmitResult {
 }
 
 /**
- * Input inspected at a natural end candidate within one outermost turn.
+ * Input inspected at a stop candidate within one outermost turn.
  *
- * @property lastAssistantMessage Nullable because a turn can end without an
- * assistant text message; `null` means no assistant text is available to the
- * hook.
+ * A candidate can be a natural assistant completion or a host-visible user
+ * input wait that pauses the outer runtime.
+ *
+ * @property lastAssistantMessage Nullable because a stop candidate can occur
+ * without an assistant text message; `null` means no assistant text is
+ * available to the hook.
  */
 public data class StopRequest(
     public val context: HookTurnContext,
@@ -50,9 +53,9 @@ public data class StopRequest(
     public val lastAssistantMessage: String?,
 )
 
-/** Result of inspecting a natural turn-end candidate. */
+/** Result of inspecting the current stop candidate. */
 public sealed interface StopResult {
-    /** Accepts the natural end candidate. */
+    /** Accepts the current stop candidate. */
     public data object Finish : StopResult
 
     /** Continues the same turn with model-visible hook feedback. */

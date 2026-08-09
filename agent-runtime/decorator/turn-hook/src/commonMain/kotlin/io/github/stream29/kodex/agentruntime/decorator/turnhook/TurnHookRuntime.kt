@@ -5,7 +5,9 @@ import io.github.stream29.kodex.agentcontext.promptdsl.promptXml
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.contract.indexesDescending
 import io.github.stream29.kodex.agentstorage.contract.latestValue
 import io.github.stream29.kodex.hook.contract.turn.HookPromptFragment
@@ -69,7 +71,9 @@ public class TurnHookRuntime internal constructor(
             val historyStartIndex = latestIndex.value
             delegate.resume()
 
-            if (state.value != KodexAgentStateValue.AssistantMessage) {
+            val currentState = state.value
+            val pendingRequestUserInput = currentState.singleRequestUserInputOrNull()
+            if (currentState != KodexAgentStateValue.AssistantMessage && pendingRequestUserInput == null) {
                 return
             }
             latestAssistantMessageSince(historyStartIndex)?.let { text ->
@@ -92,12 +96,18 @@ public class TurnHookRuntime internal constructor(
                 StopResult.Finish -> return
 
                 is StopResult.Stop -> {
+                    pendingRequestUserInput?.let { pending ->
+                        completeToolCall(pending.toFailedToolEvent(RequestUserInputCancelledByStopHook))
+                    }
                     logger.info { "Agent turn stopped by Stop hook." }
                     return
                 }
 
                 is StopResult.Continue -> {
                     if (result.fragments.isEmpty()) return
+                    pendingRequestUserInput?.let { pending ->
+                        completeToolCall(pending.toFailedToolEvent(RequestUserInputCancelledByStopHook))
+                    }
                     logger.info {
                         "Stop hook requested Agent continuation with " +
                             "${result.fragments.size} fragment(s)."
@@ -188,6 +198,14 @@ private fun StableCleanEvent.AssistantMessage.assistantOutputText(): String? {
     return output.takeIf(List<ContentItem.OutputText>::isNotEmpty)
         ?.joinToString(separator = "", transform = ContentItem.OutputText::text)
 }
+
+private fun KodexAgentStateValue.singleRequestUserInputOrNull(): PendingRequestUserInputToolEvent? =
+    (this as? KodexAgentStateValue.ToolPending)
+        ?.events
+        ?.singleOrNull() as? PendingRequestUserInputToolEvent
+
+private const val RequestUserInputCancelledByStopHook: String =
+    "request_user_input cancelled by Stop hook"
 
 private fun List<HookPromptFragment>.toHookPromptEvent(): StableCleanEvent.UserMessage =
     StableCleanEvent.UserMessage(
