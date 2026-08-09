@@ -11,7 +11,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -20,8 +19,8 @@ import kotlinx.coroutines.launch
  *
  * This first implementation keeps a finite committed-history window. It loads the
  * committed tail first and extends the same window toward older storage
- * indexes on demand. The current request-response substate stays separate
- * from that window so replayed stream deltas never replace stable history.
+ * indexes on demand. The current response or compaction tail stays separate
+ * from that window so transient operations never replace stable history.
  */
 public class AgentHistoryViewModel internal constructor(
     public val agentState: KodexAgentState,
@@ -29,14 +28,12 @@ public class AgentHistoryViewModel internal constructor(
 ) : AutoCloseable {
     private val commands = Channel<HistoryCommand>(Channel.UNLIMITED)
     private val mutableWindow = MutableStateFlow(AgentHistoryWindow())
-    private val mutableRequestResponse = MutableStateFlow(
-        agentState.state.value as? KodexAgentStateValue.RequestResponse,
-    )
+    private val mutableTransientTail = MutableStateFlow(agentState.state.value.toHistoryTransientTail())
 
     public val window: StateFlow<AgentHistoryWindow> = mutableWindow.asStateFlow()
-    /** Current replayable output substate, independent of the persisted history window. */
-    public val requestResponse: StateFlow<KodexAgentStateValue.RequestResponse?> =
-        mutableRequestResponse.asStateFlow()
+
+    /** Current response or compaction operation, independent of the persisted history window. */
+    public val transientTail: StateFlow<AgentHistoryTransientTail?> = mutableTransientTail.asStateFlow()
 
     init {
         scope.launch { runHistoryLoop() }
@@ -48,7 +45,7 @@ public class AgentHistoryViewModel internal constructor(
         scope.launch {
             var externalWriteStart: Int? = null
             agentState.state.collect { state ->
-                mutableRequestResponse.value = state as? KodexAgentStateValue.RequestResponse
+                mutableTransientTail.value = state.toHistoryTransientTail()
                 if (state == KodexAgentStateValue.ExternalWrite) {
                     if (externalWriteStart == null) {
                         externalWriteStart = agentState.latestIndex.value

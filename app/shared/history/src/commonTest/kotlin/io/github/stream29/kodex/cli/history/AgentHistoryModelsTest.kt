@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.cli.history
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
@@ -69,6 +70,18 @@ val agentHistoryModelsTest by testSuite {
 
         assertEquals(emptyList(), loadPendingTail(storage, 3))
         assertEquals(listOf(pending), loadPendingTail(storage, 9))
+    }
+
+    test("projects response and compaction operations into the transient tail") {
+        assertEquals(
+            expected = AgentHistoryTransientTail.RequestResponse(KodexAgentStateValue.RequestResponse.Started),
+            actual = KodexAgentStateValue.RequestResponse.Started.toHistoryTransientTail(),
+        )
+        assertEquals(
+            expected = AgentHistoryTransientTail.Compacting,
+            actual = KodexAgentStateValue.Compacting.toHistoryTransientTail(),
+        )
+        assertNull(KodexAgentStateValue.AssistantMessage.toHistoryTransientTail())
     }
 }
 

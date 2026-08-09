@@ -18,7 +18,17 @@ import io.github.stream29.kodex.openai.ReasoningItemReasoningSummary
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.collect
+
+/** Renders the one active operation that belongs after the persisted history tail. */
+@Composable
+internal fun AgentHistoryTransientTail.renderTransientTail(
+    onContentChange: () -> Unit = {},
+) {
+    when (this) {
+        is AgentHistoryTransientTail.RequestResponse -> value.renderStreamingTail(onContentChange)
+        AgentHistoryTransientTail.Compacting -> StreamingStatusTail("Compacting context…")
+    }
+}
 
 /**
  * Renders the one replayable Responses output currently owned by AgentState.
