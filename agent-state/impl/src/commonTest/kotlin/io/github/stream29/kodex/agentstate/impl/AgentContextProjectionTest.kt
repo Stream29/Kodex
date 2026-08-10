@@ -8,6 +8,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
+import io.github.stream29.kodex.mcp.contract.McpClient
+import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -38,7 +40,6 @@ import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.toList
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
@@ -165,7 +166,7 @@ val agentContextProjectionTest by testSuite {
                     shell = Shell(ShellType.Zsh, Path("/bin/zsh")),
                 )
                 agent.updateSettings(initialSettings.copy(cwd = updatedProject))
-                mcpService.tools.value = listOf(ProjectionMcpTool)
+                mcpService.clients.value = mapOf("projection" to ProjectionMcpClient)
                 agent.requestResponseApi()
 
                 assertTrue(requests[0].input.contextText().contains("first instructions"))
@@ -354,11 +355,37 @@ private data class ProjectionContextSettings(
 private class ProjectionMcpService(
     initialTools: List<McpTool> = emptyList(),
 ) : McpService {
-    override val tools = MutableStateFlow(initialTools.toList())
+    override val clients: MutableStateFlow<Map<String, McpClient>> = MutableStateFlow(
+        initialTools
+            .groupBy(McpTool::serverName)
+            .mapValues { (serverName, tools) ->
+                FixedProjectionMcpClient(serverName, tools)
+            },
+    )
 
     override suspend fun refresh() = Unit
 
     override fun close() = Unit
+}
+
+private class FixedProjectionMcpClient(
+    override val serverName: String,
+    private val tools: List<McpTool>,
+) : McpClient {
+    override val state = MutableStateFlow<McpClientState>(McpClientState.Healthy)
+
+    override fun listTools(): List<McpTool> = tools
+
+    override suspend fun reconnect() = Unit
+}
+
+private object ProjectionMcpClient : McpClient {
+    override val serverName: String = "projection"
+    override val state = MutableStateFlow<McpClientState>(McpClientState.Healthy)
+
+    override fun listTools(): List<McpTool> = listOf(ProjectionMcpTool)
+
+    override suspend fun reconnect() = Unit
 }
 
 private object ProjectionMcpTool : McpTool {

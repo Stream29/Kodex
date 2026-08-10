@@ -49,6 +49,7 @@ public fun main() {
                             SessionTreeCliScreen(
                                 viewModel = application.sessionViewModel,
                                 accountUsageStore = application.accountUsageStore,
+                                mcpService = application.mcpService,
                             )
                         }
                     } finally {

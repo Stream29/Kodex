@@ -3,16 +3,22 @@ package io.github.stream29.kodex.mcp.contract
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Provides the currently available MCP tools.
+ * Owns the application-wide set of configured MCP clients.
  *
- * Each published [McpTool] contains both its model-visible specification and its
- * handler. Implementations retain ownership of MCP connections; published
- * tools must not require callers to manage connection lifetimes.
+ * Implementations retain ownership of client and connection lifetimes. Enabled
+ * configurations remain present while connecting or failed so consumers can
+ * observe their state and request reconnects.
  */
 public interface McpService : AutoCloseable {
-    /** Current immutable MCP tool list. */
-    public val tools: StateFlow<List<McpTool>>
+    /** Current enabled clients keyed by their exact global-settings server name. */
+    public val clients: StateFlow<Map<String, McpClient>>
 
-    /** Refreshes the current MCP servers and publishes the resulting tool list. */
+    /**
+     * Refreshes catalogs through healthy connections.
+     *
+     * Each successful catalog replaces that client's published generation.
+     * Failures retain the previous generation; a detected connection loss also
+     * updates that client's connection state.
+     */
     public suspend fun refresh()
 }

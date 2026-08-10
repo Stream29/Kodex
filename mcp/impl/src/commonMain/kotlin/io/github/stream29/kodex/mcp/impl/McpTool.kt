@@ -4,14 +4,13 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEve
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
+import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
+import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.ResponsesApiNamespace
 import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.openai.ToolSpec
-import io.github.stream29.kodex.utils.coroutines.runCatchingCancellable
-import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpError
 import io.modelcontextprotocol.kotlin.sdk.shared.RequestOptions
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
@@ -23,38 +22,22 @@ import kotlinx.schema.json.ArrayPropertyDefinition
 import kotlinx.schema.json.BooleanPropertyDefinition
 import kotlinx.schema.json.GenericPropertyDefinition
 import kotlinx.schema.json.ObjectPropertyDefinition
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import io.modelcontextprotocol.kotlin.sdk.types.Tool as SdkTool
 
-internal data class ActiveMcpClient(
-    val configuration: McpServerConfiguration,
-    val name: String,
-    val client: Client,
-    val instructions: String,
-    val tools: List<SdkTool>,
-)
-
-internal fun Map<String, ActiveMcpClient>.toMcpTools(): List<McpTool> =
-    values.flatMap { activeClient ->
-        activeClient.tools
-            .distinctBy(SdkTool::name)
-            .map { tool -> McpToolImpl(activeClient, tool) }
-    }
-
-private class McpToolImpl(
-    private val activeClient: ActiveMcpClient,
+internal class McpToolImpl(
+    private val owner: McpClientImpl,
+    override val serverInstructions: String,
     private val tool: SdkTool,
 ) : McpTool {
-    override val serverName: String = activeClient.name
-    override val serverInstructions: String = activeClient.instructions
+    override val serverName: String = owner.serverName
 
     override val spec: ToolSpec = ResponsesApiNamespace(
-        name = "mcp__${activeClient.name.toModelToolName()}",
-        description = activeClient.instructions,
+        name = "mcp__${owner.serverName.toModelToolName()}",
+        description = serverInstructions,
         tools = listOf(
             ResponsesApiTool(
                 name = tool.name.toModelToolName(),
@@ -80,18 +63,25 @@ private class McpToolImpl(
             )
         }
 
-        val result = runCatchingCancellable {
-            activeClient.client.callTool(
-                request = CallToolRequest(
-                    CallToolRequestParams(
-                        name = tool.name,
-                        arguments = arguments,
+        val result = when (
+            val call = owner.call { client ->
+                client.callTool(
+                    request = CallToolRequest(
+                        CallToolRequestParams(
+                            name = tool.name,
+                            arguments = arguments,
+                        ),
                     ),
-                ),
-                options = RequestOptions(),
-            ).toOpenAiResult()
-        }.getOrElse { failure ->
-            failureResult(failure.toMcpFailureMessage(activeClient.name))
+                    options = RequestOptions(),
+                )
+            }
+        ) {
+            is McpClientCallResult.Success -> call.value.toOpenAiResult()
+            is McpClientCallResult.Failure ->
+                failureResult(call.cause.toMcpFailureMessage(owner.serverName))
+
+            is McpClientCallResult.Unavailable ->
+                failureResult(call.state.toUnavailableMessage(owner.serverName))
         }
         return completed(
             pending = mcpPending,
@@ -122,6 +112,7 @@ private fun String.toModelToolName(): String =
             in 'A'..'Z',
             in '0'..'9',
             '_' -> character
+
             else -> '_'
         }
     }.joinToString(separator = "").ifEmpty { "_" }
@@ -170,4 +161,22 @@ private fun Throwable.toMcpFailureMessage(serverName: String): String =
         is StreamableHttpError -> "MCP server $serverName returned HTTP $code: ${message.orEmpty()}"
         is McpException -> "MCP server $serverName returned error $code: ${message.orEmpty()}"
         else -> message ?: toString()
+    }
+
+private fun McpClientState.toUnavailableMessage(serverName: String): String =
+    when (this) {
+        McpClientState.Connecting -> "MCP server $serverName is connecting and is not available."
+        McpClientState.Closed -> "MCP server $serverName is closed and is not available."
+        is McpClientState.Failed ->
+            "MCP server $serverName is not available: ${reason.agentMessage()}."
+
+        McpClientState.Healthy -> "MCP server $serverName is not available."
+    }
+
+private fun McpClientFailureReason.agentMessage(): String =
+    when (this) {
+        McpClientFailureReason.Transport -> "its transport could not be opened"
+        McpClientFailureReason.Initialization -> "initialization failed"
+        McpClientFailureReason.ConnectionLost -> "the connection was lost"
+        McpClientFailureReason.ToolCatalog -> "its tool catalog could not be loaded"
     }

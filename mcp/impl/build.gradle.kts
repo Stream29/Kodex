@@ -13,6 +13,7 @@ kotlin {
             implementation(project(":utils-coroutines"))
             implementation(project(":utils-logging"))
             implementation(project(":utils-process-client"))
+            implementation(project(":utils-read-write-mutex"))
             implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.schema.json)
             implementation(libs.kotlinx.serialization.json)

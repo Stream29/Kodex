@@ -59,6 +59,7 @@ kotlin {
                 implementation(project(":app-cli-history"))
                 implementation(project(":app-cli-path-picker"))
                 implementation(project(":app-cli-settings-login"))
+                implementation(project(":mcp-contract"))
                 implementation(project(":openai-models"))
                 implementation(project(":utils-coroutines"))
                 implementation(project(":utils-kodex-home"))

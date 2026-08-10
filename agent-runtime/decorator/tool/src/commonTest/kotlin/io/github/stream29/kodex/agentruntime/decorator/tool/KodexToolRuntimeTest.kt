@@ -224,7 +224,7 @@ val kodexToolRuntimeTest by testSuite {
 
         state.appendUserMessage(listOf(ContentItem.InputText("Use alpha.")))
         runtime.resume()
-        mcpService.tools.value = listOf(beta)
+        mcpService.replaceTools(listOf(beta))
         state.appendUserMessage(listOf(ContentItem.InputText("Use beta.")))
         runtime.resume()
 
@@ -760,18 +760,26 @@ private class ToolRuntimeTestContext(
         coroutineContext.job.invokeOnCompletion {
             fixedTools.asReversed().forEach { tool -> runCatching { tool.close() } }
         }
-        val toolSearch = mcpService.tools
+        val mcpTools = mcpService.clients
+            .map { clients -> clients.values.flatMap { client -> client.listTools() } }
+            .stateIn(
+                scope = this@ToolRuntimeTestContext,
+                started = SharingStarted.Eagerly,
+                initialValue = mcpService.clients.value.values
+                    .flatMap { client -> client.listTools() },
+            )
+        val toolSearch = mcpTools
             .map { tools -> ToolSearchEngine(tools.toDeferredToolSearchDocuments()) }
             .stateIn(
                 scope = this@ToolRuntimeTestContext,
                 started = SharingStarted.Eagerly,
                 initialValue = ToolSearchEngine(
-                    mcpService.tools.value.toDeferredToolSearchDocuments(),
+                    mcpTools.value.toDeferredToolSearchDocuments(),
                 ),
             )
         return toolRuntime(
             fixedTools = fixedTools,
-            dynamicTools = mcpService.tools,
+            dynamicTools = mcpTools,
             toolSearch = toolSearch,
             toolHooks = hooks,
             logger = TestLogger

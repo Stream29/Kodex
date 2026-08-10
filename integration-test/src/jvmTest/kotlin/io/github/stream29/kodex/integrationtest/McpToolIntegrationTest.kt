@@ -11,6 +11,7 @@ import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstorage.contract.indexes
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
+import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpSettings
 import io.github.stream29.kodex.mcp.impl.McpServiceImpl
@@ -75,7 +76,10 @@ val openAiMcpToolRoundTripProbeTest by testSuite {
             var state: KodexAgentStateContract? = null
             try {
                 withTimeout(20.seconds) {
-                    service.tools.first { tools -> tools.isNotEmpty() }
+                    val mcpClient = service.clients.first { clients ->
+                        clients.values.any { client -> client.listTools().isNotEmpty() }
+                    }.values.single()
+                    mcpClient.state.first { clientState -> clientState == McpClientState.Healthy }
                 }
                 val storage = InMemoryKodexAgentStorage(
                     KodexAgentSettings(

@@ -4,8 +4,12 @@ import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
+import io.github.stream29.kodex.mcp.contract.McpClient
+import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
+import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpSettings
+import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.openai.ResponsesApiNamespace
 import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.ktor.http.ContentType
@@ -24,7 +28,6 @@ import io.ktor.server.routing.routing
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
@@ -37,11 +40,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotSame
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 val mcpServiceImplIoTest by testSuite(
@@ -60,12 +65,25 @@ val mcpServiceImplIoTest by testSuite(
         val scope = CoroutineScope(currentCoroutineContext())
         val service = scope.McpServiceImpl(settings)
         try {
-            val initialTools = withTimeout(10.seconds) {
-                service.tools.first { tools -> tools.size == 2 }
+            val initialClients = withTimeout(10.seconds) {
+                service.clients.first { clients ->
+                    clients.size == 2 &&
+                        clients.allTools().size == 2
+                }
             }
-            assertEquals(setOf("mcp__alpha", "mcp__beta"), initialTools.namespaceNames())
+            initialClients.values.forEach { client ->
+                withTimeout(10.seconds) {
+                    client.state.first { state -> state == McpClientState.Healthy }
+                }
+            }
+            assertEquals(
+                setOf("mcp__alpha", "mcp__beta"),
+                initialClients.allTools().namespaceNames(),
+            )
             assertEquals(1, fixture.initializeCount("alpha"))
             assertEquals(1, fixture.initializeCount("beta"))
+            val initialAlpha = initialClients.getValue("alpha")
+            val initialBeta = initialClients.getValue("beta")
 
             settings.value = TestMcpSettings(
                 mapOf(
@@ -73,10 +91,22 @@ val mcpServiceImplIoTest by testSuite(
                     "beta" to fixture.configuration("beta", "stable"),
                 ),
             )
-            awaitCondition {
-                fixture.initializeCount("alpha") == 2 &&
-                    fixture.toolsListCount("alpha") == 2
+            val reconfiguredClients = withTimeout(10.seconds) {
+                service.clients.first { clients ->
+                    clients["alpha"]?.let { client ->
+                        client !== initialAlpha &&
+                            client.listTools().size == 1
+                    } == true
+                }
             }
+            withTimeout(10.seconds) {
+                reconfiguredClients.getValue("alpha").state.first { state ->
+                    state == McpClientState.Healthy
+                }
+            }
+            assertNotSame(initialAlpha, reconfiguredClients.getValue("alpha"))
+            assertSame(initialBeta, reconfiguredClients.getValue("beta"))
+            assertEquals(McpClientState.Closed, initialAlpha.state.value)
             assertEquals(1, fixture.initializeCount("beta"))
             assertEquals(1, fixture.toolsListCount("beta"))
 
@@ -86,11 +116,20 @@ val mcpServiceImplIoTest by testSuite(
             assertEquals(1, fixture.initializeCount("beta"))
             assertEquals(3, fixture.toolsListCount("alpha"))
             assertEquals(2, fixture.toolsListCount("beta"))
-            assertEquals(4, service.tools.value.sumOf { tool ->
+            val refreshedClients = service.clients.value
+            assertNotSame(
+                reconfiguredClients.getValue("alpha"),
+                refreshedClients.getValue("alpha"),
+            )
+            assertNotSame(
+                reconfiguredClients.getValue("beta"),
+                refreshedClients.getValue("beta"),
+            )
+            assertEquals(4, refreshedClients.allTools().sumOf { tool ->
                 assertIs<ResponsesApiNamespace>(tool.spec).tools.size
             })
 
-            val alphaTool = service.tools.value.single { tool ->
+            val alphaTool = refreshedClients.allTools().single { tool ->
                 val namespace = assertIs<ResponsesApiNamespace>(tool.spec)
                 namespace.name == "mcp__alpha" &&
                     assertIs<ResponsesApiTool>(namespace.tools.single()).name == "echo"
@@ -119,16 +158,85 @@ val mcpServiceImplIoTest by testSuite(
                 ),
             )
             val remaining = withTimeout(10.seconds) {
-                service.tools.first { tools -> tools.namespaceNames() == setOf("mcp__alpha") }
+                service.clients.first { clients -> clients.keys == setOf("alpha") }
             }
-            assertEquals(setOf("mcp__alpha"), remaining.namespaceNames())
+            assertEquals(setOf("mcp__alpha"), remaining.allTools().namespaceNames())
         } finally {
             service.close()
             service.coroutineContext[Job]?.join()
             fixture.stop()
         }
 
-        assertTrue(service.tools.value.isEmpty())
+        assertTrue(service.clients.value.isEmpty())
+    }
+
+    test("connection loss retains tools and reconnect refreshes the catalog") {
+        val fixture = McpServiceHttpFixture().start()
+        val service = CoroutineScope(currentCoroutineContext()).McpServiceImpl(
+            MutableStateFlow(
+                TestMcpSettings(
+                    mapOf("alpha" to fixture.configuration("alpha", "stable")),
+                ),
+            ),
+        )
+        try {
+            val originalClient = withTimeout(10.seconds) {
+                service.clients.first { clients ->
+                    clients["alpha"]?.let { client ->
+                        client.listTools().size == 1
+                    } == true
+                }.getValue("alpha")
+            }
+            withTimeout(10.seconds) {
+                originalClient.state.first { state -> state == McpClientState.Healthy }
+            }
+            val originalTool = originalClient.listTools().single()
+
+            fixture.available.set(false)
+            val unavailable = assertIs<StableMcpToolEvent>(
+                originalTool.handle(
+                    PendingMcpToolEvent(
+                        callId = "unavailable-call",
+                        name = "echo",
+                        namespace = "mcp__alpha",
+                        arguments = buildJsonObject { put("name", "Ada") },
+                    ),
+                ),
+            )
+
+            assertEquals(
+                McpClientState.Failed(McpClientFailureReason.ConnectionLost),
+                originalClient.state.value,
+            )
+            assertSame(originalClient, service.clients.value.getValue("alpha"))
+            assertSame(originalTool, originalClient.listTools().single())
+            assertTrue(unavailable.result.isError == true)
+            assertTrue(
+                unavailable.result.content.single()
+                    .jsonObject
+                    .getValue("text")
+                    .jsonPrimitive
+                    .content
+                    .contains("is not available"),
+            )
+
+            fixture.catalogVersion.set(2)
+            fixture.available.set(true)
+            originalClient.reconnect()
+
+            val replacement = service.clients.value.getValue("alpha")
+            assertNotSame(originalClient, replacement)
+            assertSame(originalClient.state, replacement.state)
+            assertEquals(McpClientState.Healthy, replacement.state.value)
+            assertEquals(1, originalClient.listTools().size)
+            assertEquals(2, replacement.listTools().size)
+            assertEquals(2, fixture.initializeCount("alpha"))
+            assertEquals(2, fixture.toolsListCount("alpha"))
+        } finally {
+            service.close()
+            service.coroutineContext[Job]?.join()
+            fixture.stop()
+        }
     }
 }
 
@@ -138,12 +246,17 @@ private data class TestMcpSettings(
 
 private class McpServiceHttpFixture {
     val catalogVersion: AtomicInteger = AtomicInteger(1)
+    val available: AtomicBoolean = AtomicBoolean(true)
 
     private val initializeCounts = ConcurrentHashMap<String, AtomicInteger>()
     private val toolsListCounts = ConcurrentHashMap<String, AtomicInteger>()
     private val server: EmbeddedServer<*, *> = embeddedServer(CIO, host = Host, port = 0) {
         routing {
             post("/mcp/{server}") {
+                if (!available.get()) {
+                    call.respond(HttpStatusCode.ServiceUnavailable)
+                    return@post
+                }
                 val serverName = checkNotNull(call.parameters["server"])
                 val request = TestJson.parseToJsonElement(call.receiveText()).jsonObject
                 val method = request["method"]?.jsonPrimitive?.content
@@ -295,11 +408,8 @@ private fun ConcurrentHashMap<String, AtomicInteger>.count(name: String): Atomic
 private fun List<io.github.stream29.kodex.tool.contract.Tool>.namespaceNames(): Set<String> =
     mapTo(mutableSetOf()) { tool -> assertIs<ResponsesApiNamespace>(tool.spec).name }
 
-private suspend fun awaitCondition(condition: () -> Boolean) {
-    withTimeout(10.seconds) {
-        while (!condition()) delay(10.milliseconds)
-    }
-}
+private fun Map<String, McpClient>.allTools(): List<McpTool> =
+    values.flatMap(McpClient::listTools)
 
 private const val Host: String = "127.0.0.1"
 private const val SessionHeader: String = "mcp-session-id"

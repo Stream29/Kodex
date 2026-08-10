@@ -66,6 +66,8 @@ import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.cli.settings.SubmitKey
 import io.github.stream29.kodex.cli.sessiontitle.DefaultSessionTitleModel
+import io.github.stream29.kodex.mcp.contract.McpClient
+import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.openai.ModeKind
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -89,6 +91,7 @@ import kotlin.time.Instant
 internal fun SessionTreeCliScreen(
     viewModel: SessionTreeCliViewModel,
     accountUsageStore: CodexAccountUsageStore,
+    mcpService: McpService,
 ) {
     val terminal = LocalTerminalState.current
     val applicationState by viewModel.state.collectAsState()
@@ -115,6 +118,7 @@ internal fun SessionTreeCliScreen(
     val globalSettings = applicationState.globalSettings
     val authState by viewModel.authStore.state.collectAsState()
     val accountUsageState by accountUsageStore.state.collectAsState()
+    val mcpClients by mcpService.clients.collectAsState()
     val agentState = collectAgentState(selectedAgent?.viewModel)
     val pendingHistoryRevert = collectPendingHistoryRevert(selectedAgent?.viewModel)
     val scope = rememberCoroutineScope()
@@ -500,6 +504,7 @@ internal fun SessionTreeCliScreen(
                     state = globalSettings,
                     authState = authState,
                     accountUsageState = accountUsageState,
+                    mcpClients = mcpClients,
                     agent = selectedAgent?.viewModel,
                     agentState = agentState,
                     route = settingsRoute,
@@ -536,6 +541,9 @@ internal fun SessionTreeCliScreen(
                         usageResetRequest = accountUsageState
                             .snapshotOrNull()
                             ?.usageResetRequestOrNull()
+                    },
+                    onReconnectMcpClient = { client ->
+                        scope.launch { client.reconnect() }
                     },
                     onBrowseWorkingDirectory = openWorkingDirectoryPicker,
                     newSessionSettings = newSessionDefaults,
@@ -1036,6 +1044,7 @@ private fun BoxScope.GlobalSettingsDialog(
     state: KodexGlobalSettings,
     authState: KodexAuthState,
     accountUsageState: CodexAccountUsageState,
+    mcpClients: Map<String, McpClient>,
     agent: AgentRuntimeViewModel?,
     agentState: AgentRuntimeViewState?,
     route: SettingsRoute,
@@ -1048,6 +1057,7 @@ private fun BoxScope.GlobalSettingsDialog(
     onOpenLogin: () -> Unit,
     onRefreshUsage: () -> Unit,
     onUseUsageReset: () -> Unit,
+    onReconnectMcpClient: (McpClient) -> Unit,
     onBrowseWorkingDirectory: (Path) -> Unit,
     newSessionSettings: KodexNewSessionSettings,
     newSessionState: NewSessionViewState?,
@@ -1090,6 +1100,7 @@ private fun BoxScope.GlobalSettingsDialog(
                             state = state,
                             authState = authState,
                             accountUsageState = accountUsageState,
+                            mcpClients = mcpClients,
                             dropdowns = dropdowns,
                             onNewLineKey = onNewLineKey,
                             onAuthSource = onAuthSource,
@@ -1097,6 +1108,7 @@ private fun BoxScope.GlobalSettingsDialog(
                             onOpenLogin = onOpenLogin,
                             onRefreshUsage = onRefreshUsage,
                             onUseUsageReset = onUseUsageReset,
+                            onReconnectMcpClient = onReconnectMcpClient,
                         )
 
                         SettingsRoute.Session -> {
@@ -1144,6 +1156,7 @@ private fun GlobalSettingsContent(
     state: KodexGlobalSettings,
     authState: KodexAuthState,
     accountUsageState: CodexAccountUsageState,
+    mcpClients: Map<String, McpClient>,
     dropdowns: SettingsDropdownStates,
     onNewLineKey: (NewLineKey) -> Unit,
     onAuthSource: (KodexAuthSource) -> Unit,
@@ -1151,11 +1164,17 @@ private fun GlobalSettingsContent(
     onOpenLogin: () -> Unit,
     onRefreshUsage: () -> Unit,
     onUseUsageReset: () -> Unit,
+    onReconnectMcpClient: (McpClient) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogHomeBackground)) {
         Text("Codex home", color = SettingsDialogForeground)
         Text(state.codexHome.toString(), modifier = Modifier.fillMaxWidth(), color = SettingsDialogForeground)
     }
+    McpSettingsContent(
+        configurations = state.mcpServers,
+        clients = mcpClients,
+        onReconnect = onReconnectMcpClient,
+    )
     SettingsChoiceGroup(
         label = "Authentication",
         options = KodexAuthSource.entries.toList(),
