@@ -8,9 +8,9 @@ kotlin {
             api(project(":app-shared-agent"))
             api(project(":app-shared-history"))
             api(project(":agent-session-contract"))
+            api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-storage-contract"))
             implementation(project(":utils-coroutines"))
-            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(project(":agent-session-in-memory"))

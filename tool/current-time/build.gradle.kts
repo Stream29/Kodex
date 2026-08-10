@@ -6,9 +6,10 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":tool-contract"))
-            api(project(":tool-tool-builder"))
             api(libs.kotlinx.datetime)
-            implementation(libs.kotlinx.schema.json)
+            api(libs.kotlinx.schema.json)
+            implementation(project(":tool-tool-builder"))
+            implementation(libs.kotlinx.serialization.core)
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.serialization.json)

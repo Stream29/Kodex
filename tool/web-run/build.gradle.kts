@@ -1,6 +1,5 @@
 plugins {
     id("kodex.kmp-host")
-    alias(libs.plugins.kotlin.serialization)
 }
 
 kotlin {
@@ -9,8 +8,7 @@ kotlin {
             api(project(":openai-client-contract"))
             api(project(":openai-models"))
             api(project(":tool-contract"))
-            api(project(":tool-tool-builder"))
-            implementation(libs.kotlinx.schema.json)
+            api(libs.kotlinx.schema.json)
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.core)

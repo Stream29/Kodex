@@ -6,8 +6,8 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":app-shared-auth-contract"))
+            api(libs.kotlinx.coroutines.core)
             implementation(project(":utils-coroutines"))
-            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)

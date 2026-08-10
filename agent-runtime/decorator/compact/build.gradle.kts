@@ -9,16 +9,16 @@ kotlin {
             api(project(":hook-contract"))
             api(project(":openai-model-catalog-contract"))
             api(libs.kotlin.logging)
+            api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-state-context-window"))
-            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
-            implementation(project(":agent-context-prefix-render"))
+            implementation(project(":agent-state-impl"))
             implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-in-memory"))
             implementation(project(":openai-client-test"))
             implementation(project(":openai-model-catalog-impl"))
-            implementation(project(":tool-tool-search-impl"))
+            implementation(project(":utils-coroutines"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

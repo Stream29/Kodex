@@ -4,7 +4,6 @@ import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
 
 plugins {
     id("kodex.kmp-host")
-    alias(libs.plugins.kotlin.serialization)
 }
 
 kotlin {
@@ -22,14 +21,14 @@ kotlin {
         commonMain.dependencies {
             api(project(":tool-unified-exec-contract"))
             api(project(":tool-contract"))
-            api(project(":tool-tool-builder"))
             api(project(":utils-shell-client"))
-            implementation(libs.kotlinx.schema.json)
+            api(libs.kotlinx.schema.json)
         }
         jsMain.dependencies {
             implementation(libs.kotlin.wrappers.node)
         }
         commonTest.dependencies {
+            implementation(project(":tool-tool-builder"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
         }

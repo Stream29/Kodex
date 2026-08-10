@@ -6,6 +6,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":mcp-contract"))
+            api(libs.kotlinx.coroutines.core)
             implementation(project(":mcp-stdio"))
             implementation(project(":mcp-streamable-http"))
             implementation(libs.mcp.kotlin.sdk.client)
@@ -13,7 +14,6 @@ kotlin {
             implementation(project(":utils-logging"))
             implementation(project(":utils-process-client"))
             implementation(libs.kotlin.logging)
-            implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.schema.json)
             implementation(libs.kotlinx.serialization.json)
         }

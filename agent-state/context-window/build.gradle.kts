@@ -11,10 +11,12 @@ kotlin {
             implementation(project(":agent-storage-contract"))
         }
         commonTest.dependencies {
+            implementation(project(":agent-state-impl"))
             implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-in-memory"))
             implementation(project(":openai-client-test"))
             implementation(project(":openai-model-catalog-impl"))
+            implementation(project(":utils-coroutines"))
         }
     }
 }

@@ -6,12 +6,12 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":agent-session-contract"))
+            api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-runtime-impl"))
             implementation(project(":agent-session-multi-agent"))
             implementation(project(":agent-state-impl"))
             implementation(project(":agent-storage-in-memory"))
             implementation(project(":utils-coroutines"))
-            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(project(":agent-session-test"))

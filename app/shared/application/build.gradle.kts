@@ -5,19 +5,21 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            api(project(":agent-session-contract"))
+            api(project(":agent-session-filesystem"))
+            api(project(":app-shared-new-session"))
+            api(project(":app-shared-session"))
+            api(project(":app-shared-session-title"))
             api(project(":openai-account-usage-contract"))
-            implementation(project(":app-shared-new-session"))
-            implementation(project(":app-shared-session"))
+            api(project(":openai-models"))
+            api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.io.core)
             implementation(project(":app-shared-auth-filesystem"))
             implementation(project(":app-shared-settings-filesystem"))
-            implementation(project(":agent-session-contract"))
-            implementation(project(":agent-session-filesystem"))
             implementation(project(":openai-client"))
             implementation(project(":openai-account-usage-impl"))
             implementation(project(":openai-codex-cli-storage"))
             implementation(project(":openai-model-catalog-impl"))
-            implementation(project(":openai-models"))
-            implementation(project(":app-shared-session-title"))
             implementation(project(":mcp-contract"))
             implementation(project(":mcp-impl"))
             implementation(project(":hook-impl"))
@@ -28,9 +30,7 @@ kotlin {
             implementation(project(":utils-os-environment"))
             implementation(libs.koin.core)
             implementation(libs.kotlin.logging)
-            implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.datetime)
-            implementation(libs.kotlinx.io.core)
         }
         commonTest.dependencies {
             implementation(project(":agent-session-in-memory"))
