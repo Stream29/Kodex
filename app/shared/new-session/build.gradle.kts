@@ -7,10 +7,10 @@ kotlin {
         commonMain.dependencies {
             api(project(":app-shared-session"))
             api(project(":app-shared-settings-contract"))
+            api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.io.core)
             implementation(project(":openai-models"))
             implementation(project(":utils-coroutines"))
-            implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlinx.io.core)
         }
         commonTest.dependencies {
             implementation(project(":agent-session-in-memory"))

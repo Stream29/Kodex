@@ -9,9 +9,9 @@ kotlin {
             api(project(":openai-models"))
             api(project(":openai-model-catalog-contract"))
             api(project(":tool-contract"))
+            api(libs.kotlinx.schema.json)
             implementation(project(":agent-state-context-window"))
             implementation(project(":tool-tool-builder"))
-            implementation(libs.kotlinx.schema.json)
             implementation(libs.kotlinx.serialization.core)
         }
         commonTest.dependencies {

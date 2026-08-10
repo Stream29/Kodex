@@ -7,7 +7,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":tool-contract"))
             api(project(":utils-kotlinx-io-coroutines"))
-            implementation(project(":utils-patch"))
+            api(project(":utils-patch"))
         }
     }
 }

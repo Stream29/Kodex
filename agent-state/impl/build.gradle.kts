@@ -8,13 +8,13 @@ kotlin {
             api(project(":agent-state-contract"))
             api(project(":agent-context-contract"))
             api(project(":mcp-contract"))
+            api(project(":openai-client-contract"))
+            api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-context-prefix-impl"))
             implementation(project(":agent-context-prefix-render"))
             implementation(project(":agent-state-tool"))
-            implementation(project(":openai-client-contract"))
             implementation(project(":openai-json-codec"))
             implementation(project(":utils-coroutines"))
-            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(project(":agent-context-prefix-render"))

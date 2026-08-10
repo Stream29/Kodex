@@ -40,7 +40,6 @@ kotlin {
             implementation(project(":agent-storage-contract"))
             implementation(project(":app-shared-auth-contract"))
             implementation(project(":app-shared-settings-contract"))
-            implementation(project(":openai-client-test"))
             implementation(libs.kotlinx.coroutines.test)
         }
         val mosaicMain by creating {

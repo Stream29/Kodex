@@ -7,11 +7,11 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-runtime-contract"))
             api(project(":agent-session-contract"))
+            api(project(":app-shared-session-title"))
             api(project(":tool-request-user-input-contract"))
-            implementation(project(":app-shared-session-title"))
+            api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-storage-clean-models"))
             implementation(project(":utils-coroutines"))
-            implementation(libs.kotlinx.coroutines.core)
         }
     }
 }

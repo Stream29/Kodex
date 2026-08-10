@@ -6,8 +6,8 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":agent-state-contract"))
+            api(libs.kotlinx.coroutines.core)
             implementation(project(":utils-coroutines"))
-            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(project(":agent-storage-in-memory"))

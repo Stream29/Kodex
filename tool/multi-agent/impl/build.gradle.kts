@@ -1,6 +1,5 @@
 plugins {
     id("kodex.kmp-host")
-    alias(libs.plugins.kotlin.serialization)
 }
 
 kotlin {
@@ -11,11 +10,10 @@ kotlin {
             api(project(":agent-state-contract"))
             api(project(":openai-models"))
             api(project(":tool-contract"))
+            api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.schema.json)
             implementation(project(":agent-storage-contract"))
             implementation(project(":tool-tool-builder"))
-            implementation(libs.kotlinx.schema.json)
-            implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {
             implementation(project(":openai-json-codec"))

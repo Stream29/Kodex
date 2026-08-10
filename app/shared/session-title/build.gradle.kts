@@ -9,8 +9,8 @@ kotlin {
             api(project(":agent-state-contract"))
             api(project(":openai-client-contract"))
             api(project(":openai-models"))
+            api(libs.kotlinx.coroutines.core)
             implementation(project(":openai-json-codec"))
-            implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.schema.json)
             implementation(libs.kotlinx.serialization.json)
         }

@@ -12,9 +12,9 @@ kotlin {
         commonMain.dependencies {
             api(project(":hook-contract"))
             api(project(":openai-codex-cli-storage"))
+            api(libs.kotlinx.coroutines.core)
             implementation(project(":utils-coroutines"))
             implementation(project(":utils-shell-client"))
-            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(project(":utils-kotlinx-io-coroutines"))
