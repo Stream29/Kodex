@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.agentstate.tool
 
+import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -43,7 +44,9 @@ private val LocalDeferredToolSearchDocuments: List<ToolSearchDocument> =
 public fun McpService.visibleToolSpecs(
     settings: KodexAgentSettings,
 ): List<ToolSpec> {
-    val deferredDocuments = tools.value.toDeferredToolSearchDocuments()
+    val deferredDocuments = clients.value.values
+        .flatMap(McpClient::listTools)
+        .toDeferredToolSearchDocuments()
     return buildList {
         addAll(DirectToolSpecs)
         if (settings.collaborationMode == ModeKind.Default) {

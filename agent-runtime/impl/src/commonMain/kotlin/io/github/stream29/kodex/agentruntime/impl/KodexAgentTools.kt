@@ -6,7 +6,9 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.tool.toDeferredToolSearchDocuments
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.latestValue
+import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpService
+import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchToolClient
@@ -111,10 +113,21 @@ internal fun KodexAgentState.fixedTools(
     }
 }
 
-internal fun KodexAgentState.toolSearchState(
+internal fun KodexAgentState.mcpToolsState(
     mcpService: McpService,
+): StateFlow<List<McpTool>> =
+    mcpService.clients
+        .map { clients -> clients.listTools() }
+        .stateIn(
+            scope = this,
+            started = SharingStarted.Eagerly,
+            initialValue = mcpService.clients.value.listTools(),
+        )
+
+internal fun KodexAgentState.toolSearchState(
+    mcpTools: StateFlow<List<McpTool>>,
 ): StateFlow<ToolSearchEngine> =
-    mcpService.tools
+    mcpTools
         .map { tools ->
             ToolSearchEngine(tools.toDeferredToolSearchDocuments())
         }
@@ -122,9 +135,12 @@ internal fun KodexAgentState.toolSearchState(
             scope = this,
             started = SharingStarted.Eagerly,
             initialValue = ToolSearchEngine(
-                mcpService.tools.value.toDeferredToolSearchDocuments(),
+                mcpTools.value.toDeferredToolSearchDocuments(),
             ),
         )
+
+private fun Map<String, McpClient>.listTools(): List<McpTool> =
+    values.flatMap(McpClient::listTools)
 
 private inline fun <Resource : AutoCloseable, Result> Resource.closeOnFailure(
     block: () -> Result,

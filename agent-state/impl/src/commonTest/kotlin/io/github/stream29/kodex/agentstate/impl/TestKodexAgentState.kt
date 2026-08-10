@@ -3,8 +3,8 @@ package io.github.stream29.kodex.agentstate.impl
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpService
-import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellType
@@ -33,7 +33,7 @@ internal val TestAgentContextSettings: StateFlow<AgentContextSettings> =
     )
 
 internal object TestMcpService : McpService {
-    override val tools: StateFlow<List<McpTool>> = MutableStateFlow(emptyList())
+    override val clients: StateFlow<Map<String, McpClient>> = MutableStateFlow(emptyMap())
 
     override suspend fun refresh() = Unit
 

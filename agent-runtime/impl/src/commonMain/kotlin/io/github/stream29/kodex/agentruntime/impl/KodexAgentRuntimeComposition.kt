@@ -72,7 +72,8 @@ private fun KodexAgentState.masterRuntimeLayer(
     pendingSteer: MutableStateFlow<List<StableCleanEvent.Steerable>>,
     logger: KLogger,
 ): AgentRuntimeLayer {
-    val toolSearch = toolSearchState(dependencies.mcpService)
+    val mcpTools = mcpToolsState(dependencies.mcpService)
+    val toolSearch = toolSearchState(mcpTools)
     val fixedTools = fixedTools(dependencies, agentPathResolver, pendingSteer)
     return fixedTools.tools.closeOnFailure {
         AgentRuntimeLayer(
@@ -86,7 +87,7 @@ private fun KodexAgentState.masterRuntimeLayer(
                 }
                 .toolRuntime(
                     fixedTools = fixedTools.tools,
-                    dynamicTools = dependencies.mcpService.tools,
+                    dynamicTools = mcpTools,
                     toolSearch = toolSearch,
                     toolHooks = dependencies.hooks,
                     logger = logger,
@@ -128,7 +129,8 @@ private fun KodexAgentState.subagentRuntimeLayer(
     pendingSteer: MutableStateFlow<List<StableCleanEvent.Steerable>>,
     logger: KLogger,
 ): AgentRuntimeLayer {
-    val toolSearch = toolSearchState(dependencies.mcpService)
+    val mcpTools = mcpToolsState(dependencies.mcpService)
+    val toolSearch = toolSearchState(mcpTools)
     val fixedTools = fixedTools(dependencies, agentPathResolver, pendingSteer)
     return fixedTools.tools.closeOnFailure {
         AgentRuntimeLayer(
@@ -142,7 +144,7 @@ private fun KodexAgentState.subagentRuntimeLayer(
                 }
                 .toolRuntime(
                     fixedTools = fixedTools.tools,
-                    dynamicTools = dependencies.mcpService.tools,
+                    dynamicTools = mcpTools,
                     toolSearch = toolSearch,
                     toolHooks = dependencies.hooks,
                     logger = logger,

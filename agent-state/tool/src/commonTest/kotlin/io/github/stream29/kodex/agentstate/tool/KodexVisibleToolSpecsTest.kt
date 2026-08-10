@@ -3,6 +3,8 @@ package io.github.stream29.kodex.agentstate.tool
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.mcp.contract.McpClient
+import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -69,7 +71,7 @@ val kodexVisibleToolSpecsTest by testSuite {
         val service = TestMcpService()
 
         val withoutMcp = assertIs<ToolSpec.ToolSearch>(service.visibleToolSpecs(testSettings()).last())
-        service.tools.value = listOf(TestMcpTool)
+        service.clients.value = mapOf("calendar" to TestMcpClient)
         val withMcp = assertIs<ToolSpec.ToolSearch>(service.visibleToolSpecs(testSettings()).last())
 
         assertTrue(withoutMcp.description.contains("None currently enabled."))
@@ -81,11 +83,20 @@ private fun testSettings(): KodexAgentSettings =
     KodexAgentSettings(model = OpenAiModelId("test-model"))
 
 private class TestMcpService : McpService {
-    override val tools = MutableStateFlow<List<McpTool>>(emptyList())
+    override val clients = MutableStateFlow<Map<String, McpClient>>(emptyMap())
 
     override suspend fun refresh() = Unit
 
     override fun close() = Unit
+}
+
+private object TestMcpClient : McpClient {
+    override val serverName: String = "calendar"
+    override val state = MutableStateFlow<McpClientState>(McpClientState.Healthy)
+
+    override fun listTools(): List<McpTool> = listOf(TestMcpTool)
+
+    override suspend fun reconnect() = Unit
 }
 
 private object TestMcpTool : McpTool {

@@ -4,6 +4,7 @@ import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
+import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpSettings
 import io.github.stream29.kodex.mcp.impl.McpServiceImpl
@@ -50,7 +51,14 @@ val mcpStdioTransportIoTest by testSuite(
         )
         try {
             val tool = withTimeout(10.seconds) {
-                service.tools.first(List<*>::isNotEmpty).single()
+                val client = service.clients
+                    .first { clients ->
+                        clients.values.any { client -> client.listTools().isNotEmpty() }
+                    }
+                    .values
+                    .single()
+                client.state.first { state -> state == McpClientState.Healthy }
+                client.listTools().single()
             }
             val completed = assertIs<StableMcpToolEvent>(
                 tool.handle(
