@@ -4,6 +4,7 @@ import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ServiceTier
@@ -27,6 +28,7 @@ public enum class AgentComposerSubmissionResult {
  */
 public interface AgentSettingsViewModel {
     public val settings: StateFlow<KodexAgentSettings>
+    public val models: StateFlow<List<ModelInfo>>
 
     public suspend fun updateModel(model: OpenAiModelId): Unit
 
@@ -37,6 +39,13 @@ public interface AgentSettingsViewModel {
     public suspend fun updateServiceTier(serviceTier: ServiceTier): Unit
 
     public suspend fun updateMode(mode: ModeKind): Unit
+
+    /** Atomically updates the three fields selected by the runtime model menu. */
+    public suspend fun updateModelConfiguration(
+        model: OpenAiModelId,
+        reasoningEffort: ReasoningEffort,
+        serviceTier: ServiceTier,
+    ): Unit
 }
 
 /**
@@ -74,13 +83,18 @@ public interface AgentViewModel :
         expectedRevision: Long,
     ): AgentComposerSubmissionResult
 
-    public suspend fun resume(): Unit
+    /**
+     * Starts continuation work in this ViewModel's lifetime and returns after
+     * the owned operation has started.
+     */
+    public fun resume(): Unit
 
     public fun cancel(): Unit
 
-    public suspend fun clearPending(): Unit
+    public fun clearPending(): Unit
 
-    public suspend fun forceCompact(): Unit
+    /** Starts compaction in this ViewModel's lifetime. */
+    public fun forceCompact(): Unit
 
     /** Updates only the thread name on the latest persisted settings snapshot. */
     public suspend fun renameThread(threadName: String): Unit
@@ -93,8 +107,13 @@ public interface AgentViewModel :
 
     public fun dismissHistoryRevert(requestId: Long): Unit
 
-    /** Executes the exact still-pending revert request. */
-    public suspend fun confirmHistoryRevert(requestId: Long): Unit
+    /**
+     * Accepts the exact still-pending revert request.
+     *
+     * The accepted operation executes in this ViewModel's lifetime and this
+     * command returns after that ownership transfer.
+     */
+    public fun confirmHistoryRevert(requestId: Long): Unit
 
     public fun dismissNotification(notificationId: Long): Unit
 

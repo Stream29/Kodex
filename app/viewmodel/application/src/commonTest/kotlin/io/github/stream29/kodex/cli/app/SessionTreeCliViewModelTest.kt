@@ -3,6 +3,10 @@ package io.github.stream29.kodex.cli.app
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.contract.initialize
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerEffect
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerLoadState
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerState
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -11,9 +15,13 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
+import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
@@ -87,6 +95,34 @@ val sessionTreeCliViewModelTest by testSuite {
         }
     }
 
+    test("working-directory popup updates only its captured settings owner") {
+        coroutineScope {
+            lateinit var picker: TestDirectoryPickerViewModel
+            val fixture = applicationFixture { initialDirectory ->
+                TestDirectoryPickerViewModel(initialDirectory).also { picker = it }
+            }
+            try {
+                val first = assertIs<NewSessionViewModel>(
+                    fixture.viewModel.navigation.value.selected,
+                )
+                val open = fixture.viewModel.openWorkingDirectoryPopup(first)
+                val second = fixture.viewModel.createNewSessionTab()
+                val selectedDirectory = Path("captured-directory")
+
+                open.viewModel.select(selectedDirectory)
+
+                assertSame(first, open.viewModel.target)
+                assertEquals(selectedDirectory, first.settings.value.cwd)
+                assertEquals(Path("."), second.settings.value.cwd)
+                assertTrue(picker.closed)
+                assertTrue(fixture.viewModel.closeTab(first))
+                assertIs<ApplicationPopupState.Closed>(fixture.viewModel.popup.value)
+            } finally {
+                fixture.close()
+            }
+        }
+    }
+
     test("child-owned changes do not republish application state") {
         coroutineScope {
             val fixture = applicationFixture()
@@ -137,5 +173,39 @@ val sessionTreeCliViewModelTest by testSuite {
                 fixture.close()
             }
         }
+    }
+}
+
+private class TestDirectoryPickerViewModel(
+    initialDirectory: Path,
+) : DirectoryPickerViewModel {
+    override val state: StateFlow<DirectoryPickerState> = MutableStateFlow(
+        DirectoryPickerState(
+            loadState = DirectoryPickerLoadState.Ready(
+                requestId = 1,
+                requestedDirectory = initialDirectory,
+                directory = initialDirectory,
+                children = emptyList(),
+            ),
+        ),
+    )
+    override val effects: Flow<DirectoryPickerEffect> = emptyFlow()
+    var closed: Boolean = false
+        private set
+
+    override fun navigateTo(directory: Path): Unit = Unit
+
+    override fun navigateUp(): Unit = Unit
+
+    override fun updateFilter(query: String): Unit = Unit
+
+    override fun clearFilter(): Unit = Unit
+
+    override fun retry(): Unit = Unit
+
+    override fun confirm(): Unit = Unit
+
+    override fun close() {
+        closed = true
     }
 }

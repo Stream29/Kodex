@@ -40,11 +40,13 @@ internal fun AgentRuntimeScreen(
     columns: Int,
     rows: Int,
     newLineKey: NewLineKey,
+    dropdowns: RuntimeConfigurationDropdowns,
     onOpenHistoryEntryContextMenu: (
         target: AgentHistoryTarget,
         anchor: TuiPopupAnchor,
         clickPosition: IntOffset?,
     ) -> Unit,
+    onBrowseWorkingDirectory: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val execution by viewModel.execution.collectAsState()
@@ -89,7 +91,10 @@ internal fun AgentRuntimeScreen(
                 stream = stream,
                 uiState = historyUiState,
                 shellSessions = viewModel.shellSessions,
-                onOpenEntryContextMenu = if (execution.capabilities.canReplaceHistory) {
+                onOpenEntryContextMenu = if (
+                    execution.capabilities.canReplaceHistory &&
+                    execution.capabilities.canForkHistory
+                ) {
                     { generation, storageIndex, anchor, position ->
                         onOpenHistoryEntryContextMenu(
                             AgentHistoryTarget(generation, storageIndex),
@@ -136,6 +141,8 @@ internal fun AgentRuntimeScreen(
             execution = execution,
             settings = settings,
             tokenCount = tokenCount,
+            dropdowns = dropdowns,
+            onBrowseWorkingDirectory = onBrowseWorkingDirectory,
             onOpenSettings = onOpenSettings,
         )
     }
@@ -147,7 +154,9 @@ internal fun NewSessionScreen(
     columns: Int,
     rows: Int,
     newLineKey: NewLineKey,
+    dropdowns: RuntimeConfigurationDropdowns,
     onSubmit: () -> Unit,
+    onBrowseWorkingDirectory: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val settings by viewModel.settings.collectAsState()
@@ -161,8 +170,9 @@ internal fun NewSessionScreen(
         )
         NewSessionStatusBar(
             columns = columns,
-            viewModel = viewModel,
             settings = settings,
+            dropdowns = dropdowns,
+            onBrowseWorkingDirectory = onBrowseWorkingDirectory,
             onOpenSettings = onOpenSettings,
         )
     }

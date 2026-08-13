@@ -23,12 +23,15 @@ import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -353,6 +356,9 @@ val rootSessionViewModelTest by testSuite {
                 releaseStream.complete(Unit)
                 withContext(Dispatchers.Default) {
                     withTimeout(10.seconds) { submission.await() }
+                    withTimeout(10.seconds) {
+                        model.rootAgent.execution.first { execution -> !execution.running }
+                    }
                 }
                 assertTrue(!model.rootAgent.execution.value.running)
             } finally {
@@ -362,6 +368,242 @@ val rootSessionViewModelTest by testSuite {
                     withTimeout(10.seconds) { submission?.join() }
                     collectors.forEach(Job::cancel)
                     collectors.forEach { collector -> collector.join() }
+                    store.shutdown()
+                    repository.cancelAndJoin()
+                }
+            }
+        }
+    }
+
+    test("a live Agent ViewModel keeps its turn when the view caller is cancelled") {
+        coroutineScope {
+            val streamOpened = CompletableDeferred<Unit>()
+            val releaseStream = CompletableDeferred<Unit>()
+            val client = mockOpenAiClient {
+                createResponse {
+                    kotlinx.coroutines.flow.flow {
+                        val item = ResponseItem.Message(
+                            id = ResponseItemId("background-message"),
+                            role = MessageRole.Assistant,
+                            content = emptyList(),
+                        )
+                        emit(
+                            ResponsesStreamEvent.OutputItemAdded(
+                                outputIndex = 0,
+                                item = item,
+                            ),
+                        )
+                        streamOpened.complete(Unit)
+                        releaseStream.await()
+                        emit(
+                            ResponsesStreamEvent.OutputItemDone(
+                                outputIndex = 0,
+                                item = item.copy(
+                                    content = listOf(ContentItem.OutputText("completed in background")),
+                                ),
+                            ),
+                        )
+                        emit(
+                            ResponsesStreamEvent.Completed(
+                                Response(
+                                    id = "background-response",
+                                    endTurn = true,
+                                ),
+                            ),
+                        )
+                    }
+                }
+            }
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies(client))
+            val sessionIndex = initializedRoot(repository, "Background")
+            val store = testSessionViewModelRegistry(repository, this)
+            val model = store.open(sessionIndex)
+            val frontendScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            val keepFrontendCallerActive = CompletableDeferred<Unit>()
+            try {
+                val submission = frontendScope.async {
+                    model.rootAgent.submit(
+                        listOf(ContentItem.InputText("keep running after renderer switch")),
+                    )
+                    keepFrontendCallerActive.await()
+                }
+                withContext(Dispatchers.Default) {
+                    withTimeout(10.seconds) { streamOpened.await() }
+                }
+                assertSame(model, store.open(sessionIndex))
+                assertSame(model.rootAgent, store.open(sessionIndex).rootAgent)
+
+                frontendScope.cancel()
+                submission.join()
+                yield()
+
+                assertTrue(model.rootAgent.execution.value.running)
+                assertTrue(model.summary.value.rootRunning)
+
+                releaseStream.complete(Unit)
+                withContext(Dispatchers.Default) {
+                    withTimeout(10.seconds) {
+                        model.rootAgent.execution.first { execution -> !execution.running }
+                    }
+                }
+                assertEquals(AgentExecutionPhase.AssistantMessage, model.rootAgent.execution.value.phase)
+            } finally {
+                frontendScope.cancel()
+                keepFrontendCallerActive.complete(Unit)
+                releaseStream.complete(Unit)
+                withContext(NonCancellable) {
+                    store.shutdown()
+                    repository.cancelAndJoin()
+                }
+            }
+        }
+    }
+
+    test("explicit Agent cancellation stops the ViewModel-owned turn") {
+        coroutineScope {
+            val streamOpened = CompletableDeferred<Unit>()
+            val releaseStream = CompletableDeferred<Unit>()
+            val client = mockOpenAiClient {
+                createResponse {
+                    kotlinx.coroutines.flow.flow {
+                        streamOpened.complete(Unit)
+                        releaseStream.await()
+                    }
+                }
+            }
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies(client))
+            val sessionIndex = initializedRoot(repository, "Explicit cancellation")
+            val store = testSessionViewModelRegistry(repository, this)
+            val model = store.open(sessionIndex)
+            try {
+                model.rootAgent.submit(
+                    listOf(ContentItem.InputText("wait until explicitly cancelled")),
+                )
+                withContext(Dispatchers.Default) {
+                    withTimeout(10.seconds) { streamOpened.await() }
+                }
+                assertTrue(model.rootAgent.execution.value.running)
+                assertEquals(AgentLifecycleState.Open, model.rootAgent.lifecycle.value)
+
+                model.rootAgent.cancel()
+
+                withContext(Dispatchers.Default) {
+                    withTimeout(10.seconds) {
+                        model.rootAgent.execution.first { execution -> !execution.running }
+                    }
+                }
+                assertTrue(!model.rootAgent.execution.value.running)
+                assertEquals(AgentLifecycleState.Open, model.rootAgent.lifecycle.value)
+            } finally {
+                releaseStream.complete(Unit)
+                withContext(NonCancellable) {
+                    store.shutdown()
+                    repository.cancelAndJoin()
+                }
+            }
+        }
+    }
+
+    test("settings remain writable while the Agent is running") {
+        coroutineScope {
+            val streamOpened = CompletableDeferred<Unit>()
+            val releaseStream = CompletableDeferred<Unit>()
+            val client = mockOpenAiClient {
+                createResponse {
+                    kotlinx.coroutines.flow.flow {
+                        streamOpened.complete(Unit)
+                        releaseStream.await()
+                        emit(
+                            ResponsesStreamEvent.Completed(
+                                Response(
+                                    id = "concurrent-settings-response",
+                                    endTurn = true,
+                                ),
+                            ),
+                        )
+                    }
+                }
+            }
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies(client))
+            val sessionIndex = initializedRoot(repository, "Concurrent settings")
+            val store = testSessionViewModelRegistry(repository, this)
+            val model = store.open(sessionIndex)
+            val updatedModel = OpenAiModelId("next-turn-model")
+            try {
+                model.rootAgent.submit(
+                    listOf(ContentItem.InputText("keep running while settings change")),
+                )
+                withContext(Dispatchers.Default) {
+                    withTimeout(10.seconds) { streamOpened.await() }
+                }
+                assertTrue(model.rootAgent.execution.value.running)
+
+                model.rootAgent.updateModel(updatedModel)
+
+                assertTrue(model.rootAgent.execution.value.running)
+                assertEquals(updatedModel, model.rootAgent.settings.value.model)
+                assertEquals(
+                    updatedModel,
+                    repository.open(sessionIndex).storage.settings[
+                        repository.open(sessionIndex).runtime.latestIndex.value
+                    ].model,
+                )
+            } finally {
+                releaseStream.complete(Unit)
+                withContext(NonCancellable) {
+                    withTimeout(10.seconds) {
+                        model.rootAgent.execution.first { execution -> !execution.running }
+                    }
+                    store.shutdown()
+                    repository.cancelAndJoin()
+                }
+            }
+        }
+    }
+
+    test("releasing a Session closes its Agent ViewModel and cancels its owned turn") {
+        coroutineScope {
+            val streamOpened = CompletableDeferred<Unit>()
+            val releaseStream = CompletableDeferred<Unit>()
+            val streamCancelled = CompletableDeferred<Unit>()
+            val client = mockOpenAiClient {
+                createResponse {
+                    kotlinx.coroutines.flow.flow {
+                        streamOpened.complete(Unit)
+                        try {
+                            releaseStream.await()
+                        } finally {
+                            streamCancelled.complete(Unit)
+                        }
+                    }
+                }
+            }
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies(client))
+            val sessionIndex = initializedRoot(repository, "Session release")
+            val store = testSessionViewModelRegistry(repository, this)
+            val model = store.open(sessionIndex)
+            try {
+                model.rootAgent.submit(
+                    listOf(ContentItem.InputText("run until the Session closes")),
+                )
+                withContext(Dispatchers.Default) {
+                    withTimeout(10.seconds) { streamOpened.await() }
+                }
+                assertTrue(model.rootAgent.execution.value.running)
+
+                store.release(sessionIndex)
+
+                withContext(Dispatchers.Default) {
+                    withTimeout(10.seconds) { streamCancelled.await() }
+                    withTimeout(10.seconds) {
+                        repository.open(sessionIndex).runtime.runningTurn.first { turn -> turn == null }
+                    }
+                }
+                assertEquals(PersistedSessionLifecycleState.Closed, model.lifecycle.value)
+                assertEquals(AgentLifecycleState.Closed, model.rootAgent.lifecycle.value)
+            } finally {
+                releaseStream.complete(Unit)
+                withContext(NonCancellable) {
                     store.shutdown()
                     repository.cancelAndJoin()
                 }

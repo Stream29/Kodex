@@ -40,13 +40,8 @@ internal class ContractSessionSettingsDataSource(
 
     init {
         scope.launch {
-            combine(target.name, target.settings) { _, _ -> Unit }.collect {
+            combine(target.name, target.settings) { _, _ -> }.collect {
                 publish()
-            }
-        }
-        if (target is PersistedSessionViewModel) {
-            scope.launch {
-                target.rootAgent.execution.collect { publish() }
             }
         }
     }
@@ -56,7 +51,7 @@ internal class ContractSessionSettingsDataSource(
         configuration: SessionSettingsConfiguration,
     ): Boolean = commandMutex.withLock {
         val expected = expected(expectedRevision) ?: return@withLock false
-        if (!expected.editable || !target.isWritable) return@withLock false
+        if (!expected.editable) return@withLock false
         if (target.settings.value.toConfiguration() != expected.configuration) {
             return@withLock false
         }
@@ -130,7 +125,7 @@ internal class ContractSessionSettingsDataSource(
         },
         sessionName = nameOverride ?: target.name.value,
         configuration = configurationOverride ?: target.settings.value.toConfiguration(),
-        editable = target.isWritable,
+        editable = true,
     )
 
     private fun expected(expectedRevision: Long): SessionSettingsSnapshot? {
@@ -139,11 +134,6 @@ internal class ContractSessionSettingsDataSource(
         return current.snapshot.takeIf { snapshot -> snapshot.revision == expectedRevision }
     }
 
-    private val SessionViewModel.isWritable: Boolean
-        get() = when (this) {
-            is NewSessionViewModel -> true
-            is PersistedSessionViewModel -> !rootAgent.execution.value.running
-        }
 }
 
 private fun KodexAgentSettings.toConfiguration(): SessionSettingsConfiguration =

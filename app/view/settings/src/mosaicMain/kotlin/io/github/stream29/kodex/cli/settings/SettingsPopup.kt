@@ -24,7 +24,6 @@ import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsEffect
-import io.github.stream29.kodex.app.settings.contract.GlobalSettingsState
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.NewSessionSettingsState
 import io.github.stream29.kodex.app.settings.contract.NewSessionSettingsViewModel
@@ -46,15 +45,11 @@ import io.github.stream29.kodex.cli.components.TuiDropdownMenu
 import io.github.stream29.kodex.cli.components.TuiDropdownState
 import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
-import io.github.stream29.kodex.cli.settings.KodexAuthSource
-import io.github.stream29.kodex.cli.settings.NewLineKey
-import io.github.stream29.kodex.cli.settings.SubmitKey
 import io.github.stream29.kodex.openai.ModeKind
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ServiceTier
-import kotlinx.coroutines.flow.collect
 
 /**
  * Direct renderer for one Settings ViewModel and its three stable page children.
@@ -660,7 +655,6 @@ private fun BoxScope.RenameSessionDialog(
             ),
         )
     }
-    val normalizedName = input.value.text.trim()
     val layout = TextInputLayout.create(value = input.value, width = width)
     fun confirm() {
         input.value.text.trim().takeIf(String::isNotEmpty)?.let(onRename)
@@ -692,20 +686,6 @@ private fun BoxScope.RenameSessionDialog(
                     }
                 },
             )
-            Row(modifier = Modifier.fillMaxWidth().background(SettingsActionBackground)) {
-                TuiButton(
-                    label = "Save",
-                    color = SettingsForeground,
-                    enabled = normalizedName.isNotEmpty(),
-                    onClick = ::confirm,
-                )
-                Text(" ")
-                TuiButton(
-                    label = "Cancel",
-                    color = SettingsForeground,
-                    onClick = onDismiss,
-                )
-            }
         }
     }
 }
@@ -763,14 +743,19 @@ private fun OpenAiAuthState.Unavailable.settingsDescription(): String =
     when (this) {
         OpenAiAuthState.Unavailable.NotLoaded ->
             "Authentication credentials have not been loaded yet."
+
         OpenAiAuthState.Unavailable.CredentialsNotFound ->
             "No credentials were found in the selected authentication source."
+
         OpenAiAuthState.Unavailable.UnsupportedAuthMode ->
             "The selected credentials use an unsupported authentication mode."
+
         OpenAiAuthState.Unavailable.InvalidCredentials ->
             "The selected credentials are malformed or incomplete."
+
         OpenAiAuthState.Unavailable.CredentialSourceUnavailable ->
             "The selected credential source could not be read."
+
         OpenAiAuthState.Unavailable.UnexpectedFailure ->
             "Authentication failed because of an unexpected internal error."
     }

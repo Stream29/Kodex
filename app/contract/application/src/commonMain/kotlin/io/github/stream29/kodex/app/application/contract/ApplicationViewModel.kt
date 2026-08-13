@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.app.application.contract
 
+import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
@@ -84,6 +85,11 @@ public interface ApplicationViewModel : AutoCloseable {
 
     /** Creates and opens one independently disposable OpenAI login child. */
     public suspend fun openLoginPopup(): ApplicationPopupState.Login
+
+    /** Opens a directory picker bound to the exact settings-owning [target]. */
+    public suspend fun openWorkingDirectoryPopup(
+        target: AgentSettingsViewModel,
+    ): ApplicationPopupState.WorkingDirectory
 
     /**
      * Dismisses and closes [expected] only while it is still the current popup.

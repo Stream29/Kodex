@@ -1,27 +1,27 @@
 package io.github.stream29.kodex.cli.newsession
 
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
-import io.github.stream29.kodex.cli.agent.AgentRuntimeHistoryViewModelFactory
+import io.github.stream29.kodex.cli.agent.AgentAutomaticTitleConfiguration
 import io.github.stream29.kodex.cli.agent.DefaultComposerViewModelFactory
 import io.github.stream29.kodex.cli.agent.createAgentRuntimeViewModel
 import io.github.stream29.kodex.cli.history.createAgentHistoryViewModel
 import io.github.stream29.kodex.cli.session.DefaultPersistedSessionViewModelRegistry
-import io.github.stream29.kodex.cli.session.PersistedSessionAgentViewModelFactory
 import kotlinx.coroutines.CoroutineScope
 
 internal fun testSessionViewModelRegistry(
     repository: KodexSessionRepository,
     scope: CoroutineScope,
+    automaticTitleConfiguration: AgentAutomaticTitleConfiguration? = null,
 ): DefaultPersistedSessionViewModelRegistry =
     DefaultPersistedSessionViewModelRegistry(
         repository = repository,
         scope = scope,
-        agentFactory = PersistedSessionAgentViewModelFactory {
+        agentFactory = {
                 session,
                 address,
                 parentAddress,
                 ownerScope,
-                _,
+                isRoot,
             ->
             createAgentRuntimeViewModel(
                 session = session,
@@ -29,12 +29,13 @@ internal fun testSessionViewModelRegistry(
                 parentAddress = parentAddress,
                 ownerScope = ownerScope,
                 composerFactory = DefaultComposerViewModelFactory,
-                historyFactory = AgentRuntimeHistoryViewModelFactory {
+                historyFactory = {
                         agentSession,
                         childScope,
                     ->
                     createAgentHistoryViewModel(agentSession.runtime, childScope)
                 },
+                automaticTitleConfiguration = automaticTitleConfiguration.takeIf { isRoot },
             )
         },
     )

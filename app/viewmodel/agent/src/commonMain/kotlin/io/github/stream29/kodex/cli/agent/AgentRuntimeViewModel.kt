@@ -36,6 +36,7 @@ import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ServiceTier
@@ -43,11 +44,13 @@ import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecProcessSession
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
@@ -82,15 +85,26 @@ internal class AgentRuntimeViewModel(
     override val parentAddress: AgentAddress?,
     private val scope: CoroutineScope,
     initialSettings: KodexAgentSettings,
+    override val models: StateFlow<List<ModelInfo>>,
     override val composer: ComposerViewModel,
     override val history: AgentHistoryViewModel,
     private val automaticTitleConfiguration: AgentAutomaticTitleConfiguration? = null,
 ) : AgentViewModel {
-    private val requestUserInputImpl = RequestUserInputViewModelImpl(session.runtime)
+    private val requestUserInputImpl = RequestUserInputViewModelImpl(
+        runtime = session.runtime,
+        ownerScope = scope,
+        resumeRuntime = {
+            launchRuntimeOperation("Unable to resume Agent.") {
+                session.runtime.resume()
+            }
+        },
+    )
     private val automaticTitle = AgentTitleGeneration(scope)
     private val commandMutex = Mutex()
     private val mutableSettings = MutableStateFlow(initialSettings)
     private val mutableTokenCount = MutableStateFlow<Long?>(null)
+    private val mutableRuntimeOperation = MutableStateFlow<Job?>(null)
+    private val mutableHistoryOperation = MutableStateFlow<Job?>(null)
     private val mutableExecution = MutableStateFlow(projectExecution(activityVersion = 0))
     private val mutableStream = MutableStateFlow(AgentStreamState())
     private val mutableChildren = MutableStateFlow<AgentChildrenState>(AgentChildrenState.Unloaded)
@@ -150,35 +164,39 @@ internal class AgentRuntimeViewModel(
         }
     }
 
-    override suspend fun submit(content: List<ContentItem>) {
-        ensureOpen()
-        require(content.isNotEmpty()) { "A submitted turn must contain content." }
-        clearNotification()
-        session.runtime.markNewTurn()
-        session.runtime.appendUserMessage(content)
-        session.runtime.resume()
-        startAutomaticTitle(content)
+    override suspend fun submit(content: List<ContentItem>) = runInOwnerScope {
+        try {
+            acceptNewTurn(content, "Unable to submit Agent content.")
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            publishFailure("Unable to submit Agent content.", failure)
+            throw failure
+        }
     }
 
     override suspend fun submitComposer(
         expectedRevision: Long,
-    ): AgentComposerSubmissionResult {
+    ): AgentComposerSubmissionResult = runInOwnerScope {
         ensureOpen()
         val current = composer.state.value
-        if (current.revision != expectedRevision) return AgentComposerSubmissionResult.Stale
+        if (current.revision != expectedRevision) {
+            return@runInOwnerScope AgentComposerSubmissionResult.Stale
+        }
         val text = current.text.trim()
-        if (text.isEmpty()) return AgentComposerSubmissionResult.Empty
-        if (!composer.clear(expectedRevision)) return AgentComposerSubmissionResult.Stale
-        val consumed = text
-        val content = listOf(ContentItem.InputText(consumed))
-        return try {
-            if (session.runtime.runningTurn.value != null) {
+        if (text.isEmpty()) return@runInOwnerScope AgentComposerSubmissionResult.Empty
+        if (!composer.clear(expectedRevision)) {
+            return@runInOwnerScope AgentComposerSubmissionResult.Stale
+        }
+        val content = listOf(ContentItem.InputText(text))
+        try {
+            if (execution.value.running) {
                 session.runtime.pendingSteer.update { pending ->
                     pending + StableCleanEvent.UserMessage(content)
                 }
                 AgentComposerSubmissionResult.QueuedAsSteer
             } else {
-                submit(content)
+                acceptNewTurn(content, "Unable to submit Agent composer.")
                 AgentComposerSubmissionResult.Submitted
             }
         } catch (failure: CancellationException) {
@@ -189,27 +207,31 @@ internal class AgentRuntimeViewModel(
         }
     }
 
-    override suspend fun resume() {
+    override fun resume() {
         ensureOpen()
-        clearNotification()
-        runOperation("Unable to resume Agent.") { session.runtime.resume() }
+        launchRuntimeOperation("Unable to resume Agent.") {
+            session.runtime.resume()
+        }
     }
 
     override fun cancel() {
         if (closed) return
+        mutableRuntimeOperation.value?.cancel()
         session.runtime.runningTurn.value?.cancel()
     }
 
-    override suspend fun clearPending() {
+    override fun clearPending() {
         ensureOpen()
-        clearNotification()
-        runOperation("Unable to clear pending tool calls.") { session.runtime.clearPending() }
+        launchOwnedOperation("Unable to clear pending tool calls.") {
+            session.runtime.clearPending()
+        }
     }
 
-    override suspend fun forceCompact() {
+    override fun forceCompact() {
         ensureOpen()
-        clearNotification()
-        runOperation("Unable to compact Agent context.") { session.runtime.forcedCompact() }
+        launchRuntimeOperation("Unable to compact Agent context.") {
+            session.runtime.forcedCompact()
+        }
     }
 
     override suspend fun updateModel(model: OpenAiModelId) {
@@ -232,6 +254,20 @@ internal class AgentRuntimeViewModel(
 
     override suspend fun updateMode(mode: ModeKind) {
         updateSettings { current -> current.copy(collaborationMode = mode) }
+    }
+
+    override suspend fun updateModelConfiguration(
+        model: OpenAiModelId,
+        reasoningEffort: ReasoningEffort,
+        serviceTier: ServiceTier,
+    ) {
+        updateSettings { current ->
+            current.copy(
+                model = model,
+                reasoning = current.reasoning.copy(effort = reasoningEffort),
+                serviceTier = serviceTier,
+            )
+        }
     }
 
     override suspend fun renameThread(threadName: String) {
@@ -277,9 +313,18 @@ internal class AgentRuntimeViewModel(
 
     override fun requestHistoryRevert(target: AgentHistoryTarget): Long {
         ensureOpen()
-        val state = execution.value
+        val state = projectExecution(execution.value.activityVersion)
         require(!state.running && state.capabilities.canReplaceHistory) {
             "Cannot request a history revert in Agent phase ${state.phase}."
+        }
+        val window = history.window.value
+        require(
+            window.generation == target.generation &&
+                window.entries.any { entry ->
+                    entry.key.primaryStorageIndex == target.storageIndex
+                },
+        ) {
+            "History revert target is no longer present in the current window."
         }
         val requestId = nextHistoryRequestId
         check(requestId < Long.MAX_VALUE) { "Agent history request ids are exhausted." }
@@ -295,42 +340,77 @@ internal class AgentRuntimeViewModel(
         }
     }
 
-    override suspend fun confirmHistoryRevert(requestId: Long) {
+    override fun confirmHistoryRevert(requestId: Long) {
+        ensureOpen()
         val request = mutableHistoryAction.value as? AgentHistoryActionState.ConfirmRevert
             ?: return
         require(request.requestId == requestId) { "History revert request is stale." }
-        if (!mutableHistoryAction.compareAndSet(request, AgentHistoryActionState.None)) return
-        commandMutex.withLock {
-            ensureOpen()
-            val target = request.target
-            require(target.generation == history.window.value.generation) {
-                "History revert target generation is stale."
-            }
-            val state = execution.value
-            require(!state.running && state.capabilities.canReplaceHistory) {
-                "Cannot revert history in Agent phase ${state.phase}."
-            }
+        val state = projectExecution(execution.value.activityVersion)
+        require(!state.running && state.capabilities.canReplaceHistory) {
+            "Cannot revert history in Agent phase ${state.phase}."
+        }
+        val window = history.window.value
+        require(
+            window.generation == request.target.generation &&
+                window.entries.any { entry ->
+                    entry.key.primaryStorageIndex == request.target.storageIndex
+                },
+        ) {
+            "History revert target is no longer present in the current window."
+        }
+        val operation = scope.launch(start = CoroutineStart.LAZY) {
             try {
-                automaticTitle.replaceHistory {
-                    session.runtime.modify { storage ->
-                        require(
-                            storage.stable.floorToIndex(target.storageIndex) == target.storageIndex,
-                        ) {
-                            "History entry ${target.storageIndex} is no longer committed."
-                        }
-                        val retainsAcceptedUserText =
-                            storage.hasNonblankUserTextBefore(target.untilExclusive)
-                        storage.revert(target.untilExclusive)
-                        retainsAcceptedUserText
-                    }
-                }
-                session.runtime.pendingSteer.value = emptyList()
+                executeHistoryRevert(request.target)
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Throwable) {
                 publishFailure("Unable to revert Agent history.", failure)
-                throw failure
             }
+        }
+        if (!mutableHistoryOperation.compareAndSet(null, operation)) {
+            operation.cancel()
+            throw IllegalStateException("This Agent already has a history operation.")
+        }
+        if (!mutableHistoryAction.compareAndSet(request, AgentHistoryActionState.None)) {
+            mutableHistoryOperation.compareAndSet(operation, null)
+            operation.cancel()
+            return
+        }
+        clearNotification()
+        operation.invokeOnCompletion {
+            mutableHistoryOperation.compareAndSet(operation, null)
+            publishExecution()
+        }
+        publishExecution()
+        operation.start()
+    }
+
+    private suspend fun executeHistoryRevert(target: AgentHistoryTarget) {
+        commandMutex.withLock {
+            ensureOpen()
+            require(target.generation == history.window.value.generation) {
+                "History revert target generation is stale."
+            }
+            val value = session.runtime.state.value
+            val runtimeRunning =
+                session.runtime.runningTurn.value != null || mutableRuntimeOperation.value != null
+            require(!runtimeRunning && value.canReplaceHistory) {
+                "Cannot revert history in Agent phase ${value.toExecutionPhase()}."
+            }
+            automaticTitle.replaceHistory {
+                session.runtime.modify { storage ->
+                    require(
+                        storage.stable.floorToIndex(target.storageIndex) == target.storageIndex,
+                    ) {
+                        "History entry ${target.storageIndex} is no longer committed."
+                    }
+                    val retainsAcceptedUserText =
+                        storage.hasNonblankUserTextBefore(target.untilExclusive)
+                    storage.revert(target.untilExclusive)
+                    retainsAcceptedUserText
+                }
+            }
+            session.runtime.pendingSteer.value = emptyList()
         }
     }
 
@@ -390,13 +470,15 @@ internal class AgentRuntimeViewModel(
 
     private fun projectExecution(activityVersion: Long): AgentExecutionState {
         val value = session.runtime.state.value
-        val running = session.runtime.runningTurn.value != null
+        val cancelable =
+            session.runtime.runningTurn.value != null || mutableRuntimeOperation.value != null
+        val running = cancelable || mutableHistoryOperation.value != null
         return AgentExecutionState(
             phase = value.toExecutionPhase(),
             running = running,
             latestStorageIndex = session.runtime.latestIndex.value,
             activityVersion = activityVersion,
-            capabilities = value.toCapabilities(running),
+            capabilities = value.toCapabilities(running, cancelable),
         )
     }
 
@@ -442,16 +524,72 @@ internal class AgentRuntimeViewModel(
         }
     }
 
-    private suspend fun runOperation(message: String, block: suspend () -> Unit) {
-        try {
-            block()
-        } catch (failure: CancellationException) {
-            throw failure
-        } catch (failure: Throwable) {
-            publishFailure(message, failure)
-            throw failure
+    private suspend fun acceptNewTurn(
+        content: List<ContentItem>,
+        failureMessage: String,
+    ) {
+        ensureOpen()
+        require(content.isNotEmpty()) { "A submitted turn must contain content." }
+        commandMutex.withLock {
+            ensureOpen()
+            require(!execution.value.running) {
+                "Cannot submit a new turn while this Agent is running."
+            }
+            clearNotification()
+            session.runtime.markNewTurn()
+            session.runtime.appendUserMessage(content)
+            launchOwnedOperation(
+                failureMessage = failureMessage,
+                runtimeOperation = true,
+            ) {
+                session.runtime.resume()
+            }
+            startAutomaticTitle(content)
         }
     }
+
+    private fun launchRuntimeOperation(
+        failureMessage: String,
+        block: suspend () -> Unit,
+    ) {
+        launchOwnedOperation(
+            failureMessage = failureMessage,
+            runtimeOperation = true,
+            block = block,
+        )
+    }
+
+    private fun launchOwnedOperation(
+        failureMessage: String,
+        runtimeOperation: Boolean = false,
+        block: suspend () -> Unit,
+    ) {
+        clearNotification()
+        val operation = scope.launch(start = CoroutineStart.LAZY) {
+            try {
+                block()
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Throwable) {
+                publishFailure(failureMessage, failure)
+            }
+        }
+        if (runtimeOperation && !mutableRuntimeOperation.compareAndSet(null, operation)) {
+            operation.cancel()
+            throw IllegalStateException("This Agent already has a running operation.")
+        }
+        operation.invokeOnCompletion {
+            if (runtimeOperation) {
+                mutableRuntimeOperation.compareAndSet(operation, null)
+                publishExecution()
+            }
+        }
+        if (runtimeOperation) publishExecution()
+        operation.start()
+    }
+
+    private suspend fun <T> runInOwnerScope(block: suspend () -> T): T =
+        scope.async(start = CoroutineStart.UNDISPATCHED) { block() }.await()
 
     private fun clearNotification() {
         mutableNotification.value = null
@@ -481,6 +619,7 @@ public suspend fun createAgentRuntimeViewModel(
     ownerScope: CoroutineScope,
     composerFactory: ComposerViewModelFactory,
     historyFactory: AgentRuntimeHistoryViewModelFactory,
+    models: StateFlow<List<ModelInfo>> = MutableStateFlow(emptyList()),
     automaticTitleConfiguration: AgentAutomaticTitleConfiguration? = null,
 ): AgentViewModel {
     val latestIndex = session.runtime.latestIndex.value
@@ -500,6 +639,7 @@ public suspend fun createAgentRuntimeViewModel(
         parentAddress = parentAddress,
         scope = childScope,
         initialSettings = session.storage.settings[latestIndex],
+        models = models,
         composer = composer,
         history = history,
         automaticTitleConfiguration = automaticTitleConfiguration,
@@ -520,6 +660,7 @@ public data class AgentRuntimeViewModelArguments(
     public val address: AgentAddress,
     public val parentAddress: AgentAddress?,
     public val ownerScope: CoroutineScope,
+    public val models: StateFlow<List<ModelInfo>>,
     public val automaticTitleConfiguration: AgentAutomaticTitleConfiguration?,
 )
 
@@ -538,6 +679,7 @@ public class DefaultAgentRuntimeViewModelFactory(
             ownerScope = arguments.ownerScope,
             composerFactory = composerFactory,
             historyFactory = historyFactory,
+            models = arguments.models,
             automaticTitleConfiguration = arguments.automaticTitleConfiguration,
         )
 }
@@ -573,6 +715,7 @@ private fun KodexAgentStateValue.toExecutionPhase(): AgentExecutionPhase = when 
 
 private fun KodexAgentStateValue.toCapabilities(
     running: Boolean,
+    cancelable: Boolean,
 ): AgentExecutionCapabilities = AgentExecutionCapabilities(
     canSubmit = !running && (
         this == KodexAgentStateValue.Empty ||
@@ -586,7 +729,7 @@ private fun KodexAgentStateValue.toCapabilities(
             this == KodexAgentStateValue.ToolCompleted ||
             this is KodexAgentStateValue.ToolPending
         ),
-    canCancel = running,
+    canCancel = cancelable,
     canClearPending = !running && this is KodexAgentStateValue.ToolPending,
     canCompact = !running && (
         this == KodexAgentStateValue.UserMessage ||
@@ -616,14 +759,19 @@ private fun KodexAgentStateValue.toStreamTail(): AgentStreamTail? = when (this) 
     KodexAgentStateValue.RequestResponse.Started -> AgentStreamTail.Started
     is KodexAgentStateValue.RequestResponse.Message ->
         AgentStreamTail.Output(AgentStreamKind.Message, events)
+
     is KodexAgentStateValue.RequestResponse.AgentMessage ->
         AgentStreamTail.Output(AgentStreamKind.AgentMessage, events)
+
     is KodexAgentStateValue.RequestResponse.Reasoning ->
         AgentStreamTail.Output(AgentStreamKind.Reasoning, events)
+
     is KodexAgentStateValue.RequestResponse.ToolCall ->
         AgentStreamTail.Output(AgentStreamKind.ToolCall, events)
+
     is KodexAgentStateValue.RequestResponse.Unknown ->
         AgentStreamTail.Output(AgentStreamKind.Unknown, events)
+
     KodexAgentStateValue.Compacting -> AgentStreamTail.Compacting
     else -> null
 }

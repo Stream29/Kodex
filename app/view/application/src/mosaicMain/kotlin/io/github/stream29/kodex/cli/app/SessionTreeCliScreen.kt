@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -24,12 +25,12 @@ import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
+import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
+import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
-import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
-import io.github.stream29.kodex.app.application.contract.DeleteSessionPopupViewModel
-import io.github.stream29.kodex.app.application.contract.RenameSessionPopupViewModel
+import io.github.stream29.kodex.app.history.contract.AgentHistoryWindowSnapshot
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
@@ -45,11 +46,14 @@ import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.TuiPopupMenuItem
-import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.cli.components.items
+import io.github.stream29.kodex.cli.pathpicker.DirectoryPickerPopup
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.OpenAiLoginPopup
 import io.github.stream29.kodex.cli.settings.SettingsPopup
+import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.openai.ModelInfo
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
@@ -95,6 +99,11 @@ public fun SessionTreeCliScreen(
     val selectedPersisted = selected as? PersistedSessionViewModel
     val selectedAgent = collectSelectedAgent(selectedPersisted)
     val topology = collectTopology(selectedPersisted)
+    val settingsOwner: AgentSettingsViewModel? =
+        selectedAgent ?: (selected as? NewSessionViewModel)
+    val runtimeDropdowns = RuntimeConfigurationDropdowns.remember(settingsOwner)
+    val runtimeSettings = collectRuntimeSettings(settingsOwner)
+    val runtimeModels = collectRuntimeModels(settingsOwner)
 
     TuiPopupHost {
         Column(modifier = Modifier.width(columns).height(rows)) {
@@ -103,16 +112,21 @@ public fun SessionTreeCliScreen(
                 runningIndicatorFrame = runningFrame,
                 columns = columns,
                 onSelectTab = { target ->
+                    historyMenu = null
                     val index = navigation.tabs.indexOfFirst { child -> child === target }
                     if (index >= 0) scope.launch { viewModel.selectTab(index) }
                 },
                 onOpenTabMenu = { target, name, anchor, position ->
+                    shellSessionMenu = null
+                    historyMenu = null
                     tabMenu = SessionTabMenuRequest(target, name, anchor, position)
                 },
                 onCreateNewSession = {
+                    historyMenu = null
                     scope.launch { viewModel.createNewSessionTab() }
                 },
                 onOpenSessions = {
+                    historyMenu = null
                     scope.launch { viewModel.openSessionCatalogPopup() }
                 },
             )
@@ -135,11 +149,16 @@ public fun SessionTreeCliScreen(
                         }
                     },
                     onSelectAgent = { address ->
+                        historyMenu = null
                         selectedPersisted?.let { session ->
                             scope.launch { session.selectAgent(address) }
                         }
                     },
-                    onOpenShellSessionMenu = { shellSessionMenu = it },
+                    onOpenShellSessionMenu = { request ->
+                        tabMenu = null
+                        historyMenu = null
+                        shellSessionMenu = request
+                    },
                 )
                 Box(modifier = Modifier.width(contentColumns).height(contentRows)) {
                     when (selected) {
@@ -148,10 +167,16 @@ public fun SessionTreeCliScreen(
                             columns = contentColumns,
                             rows = contentRows,
                             newLineKey = currentNewLineKey,
+                            dropdowns = runtimeDropdowns,
                             onSubmit = {
                                 val index = navigation.tabs.indexOfFirst { it === selected }
                                 if (index >= 0) {
                                     scope.launch { viewModel.materializeNewSession(index) }
+                                }
+                            },
+                            onBrowseWorkingDirectory = {
+                                scope.launch {
+                                    viewModel.openWorkingDirectoryPopup(selected)
                                 }
                             },
                             onOpenSettings = {
@@ -172,7 +197,10 @@ public fun SessionTreeCliScreen(
                                     columns = contentColumns,
                                     rows = contentRows,
                                     newLineKey = currentNewLineKey,
+                                    dropdowns = runtimeDropdowns,
                                     onOpenHistoryEntryContextMenu = { target, anchor, position ->
+                                        tabMenu = null
+                                        shellSessionMenu = null
                                         historyMenu = HistoryEntryMenuRequest(
                                             session = selected,
                                             agent = agent,
@@ -180,6 +208,11 @@ public fun SessionTreeCliScreen(
                                             anchor = anchor,
                                             clickPosition = position,
                                         )
+                                    },
+                                    onBrowseWorkingDirectory = {
+                                        scope.launch {
+                                            viewModel.openWorkingDirectoryPopup(agent)
+                                        }
                                     },
                                     onOpenSettings = {
                                         scope.launch {
@@ -218,20 +251,38 @@ public fun SessionTreeCliScreen(
         )
         HistoryEntryContextMenu(
             request = historyMenu,
+            selectedSession = selectedPersisted,
+            selectedAgent = selectedAgent,
             onDismiss = { historyMenu = null },
             onRevert = { request ->
                 historyMenu = null
-                request.agent.requestHistoryRevert(request.target)
+                runCatching {
+                    request.agent.requestHistoryRevert(request.target)
+                }
             },
             onFork = { request ->
                 historyMenu = null
                 scope.launch {
-                    val index = request.session.fork(request.agent, request.target)
-                    viewModel.openSession(index)
+                    try {
+                        val index = request.session.fork(request.agent, request.target)
+                        viewModel.openSession(index)
+                    } catch (failure: CancellationException) {
+                        throw failure
+                    } catch (_: Throwable) {
+                        // The owning Session publishes the operation failure.
+                    }
                 }
             },
         )
         AgentHistoryRevertDialog(selectedAgent)
+        if (settingsOwner != null && runtimeSettings != null) {
+            RuntimeConfigurationMenus(
+                viewModel = settingsOwner,
+                settings = runtimeSettings,
+                models = runtimeModels,
+                dropdowns = runtimeDropdowns,
+            )
+        }
 
         when (val open = popup) {
             ApplicationPopupState.Closed -> Unit
@@ -256,8 +307,41 @@ public fun SessionTreeCliScreen(
                 viewModel = open.viewModel,
                 onDismissRequest = { viewModel.dismissPopup(open) },
             )
+
+            is ApplicationPopupState.WorkingDirectory -> DirectoryPickerPopup(
+                viewModel = open.viewModel.picker,
+                onDismissRequest = { viewModel.dismissPopup(open) },
+                onDirectorySelected = { directory ->
+                    scope.launch {
+                        open.viewModel.select(directory)
+                        viewModel.dismissPopup(open)
+                    }
+                },
+            )
         }
 
+    }
+}
+
+@Composable
+private fun collectRuntimeSettings(
+    viewModel: AgentSettingsViewModel?,
+): KodexAgentSettings? {
+    if (viewModel == null) return null
+    return key(viewModel) {
+        val settings by viewModel.settings.collectAsState()
+        settings
+    }
+}
+
+@Composable
+private fun collectRuntimeModels(
+    viewModel: AgentSettingsViewModel?,
+): List<ModelInfo> {
+    if (viewModel == null) return emptyList()
+    return key(viewModel) {
+        val models by viewModel.models.collectAsState()
+        models
     }
 }
 
@@ -357,31 +441,51 @@ private fun BoxScope.RenameSessionPopup(
         onDismissRequest = { application.dismissPopup(open) },
         modifier = Modifier.width(RenameDialogWidth).background(SettingsDialogHomeBackground),
     ) {
-        Column {
-            Text("Rename session", textStyle = TextStyle.Bold)
-            TextInput(
-                state = input,
-                layout = TextInputLayout.create(input.value, RenameDialogWidth - 2, "> ", "  "),
-                onValueChanged = { value -> open.viewModel.updateDraftName(value.text) },
-            )
-            Row {
-                TuiButton(
-                    label = "Rename",
-                    enabled = draft.isNotBlank(),
-                    onClick = {
-                        scope.launch {
-                            open.viewModel.rename()
-                            application.dismissPopup(open)
-                        }
-                    },
-                )
-                Text(" ")
-                TuiButton(
-                    label = "Cancel",
-                    onClick = { application.dismissPopup(open) },
-                )
-            }
-        }
+        SessionRenameEditor(
+            draftName = draft,
+            input = input,
+            width = RenameDialogWidth - 2,
+            onDraftNameChanged = open.viewModel::updateDraftName,
+            onSubmit = {
+                scope.launch {
+                    open.viewModel.rename()
+                    application.dismissPopup(open)
+                }
+            },
+        )
+    }
+}
+
+@Composable
+internal fun SessionRenameEditor(
+    draftName: String,
+    input: TextInputState,
+    width: Int,
+    onDraftNameChanged: (String) -> Unit,
+    onSubmit: () -> Unit,
+) {
+    Column {
+        Text("Rename session", textStyle = TextStyle.Bold)
+        TextInput(
+            state = input,
+            layout = TextInputLayout.create(input.value, width, "> ", "  "),
+            onValueChanged = { value -> onDraftNameChanged(value.text) },
+            autoFocus = true,
+            onKeyEvent = { event ->
+                if (
+                    draftName.isNotBlank() &&
+                    event.key == "Enter" &&
+                    !event.shift &&
+                    !event.ctrl &&
+                    !event.alt
+                ) {
+                    onSubmit()
+                    true
+                } else {
+                    false
+                }
+            },
+        )
     }
 }
 
@@ -452,23 +556,57 @@ private fun BoxScope.SessionTabContextMenu(
 @Composable
 private fun BoxScope.HistoryEntryContextMenu(
     request: HistoryEntryMenuRequest?,
+    selectedSession: PersistedSessionViewModel?,
+    selectedAgent: AgentViewModel?,
     onDismiss: () -> Unit,
     onRevert: (HistoryEntryMenuRequest) -> Unit,
     onFork: (HistoryEntryMenuRequest) -> Unit,
 ) {
     val current = request ?: return
-    TuiContextMenu(
-        expanded = true,
+    val execution by current.agent.execution.collectAsState()
+    val window by current.agent.history.window.collectAsState()
+    val targetMatches =
+        current.session === selectedSession &&
+            current.agent === selectedAgent &&
+            !execution.running &&
+            execution.capabilities.canReplaceHistory &&
+            execution.capabilities.canForkHistory &&
+            current.target.isCurrentIn(window)
+    val anchorPlaced = current.anchor.isPlaced
+    LaunchedEffect(current, targetMatches, anchorPlaced) {
+        if (!targetMatches || !anchorPlaced) onDismiss()
+    }
+    if (!targetMatches || !anchorPlaced) return
+
+    HistoryEntryContextMenuPopup(
         anchor = current.anchor,
         clickPosition = current.clickPosition,
+        onDismiss = onDismiss,
+        onRevert = { onRevert(current) },
+        onFork = { onFork(current) },
+    )
+}
+
+@Composable
+internal fun BoxScope.HistoryEntryContextMenuPopup(
+    anchor: TuiPopupAnchor,
+    clickPosition: IntOffset?,
+    onDismiss: () -> Unit,
+    onRevert: () -> Unit,
+    onFork: () -> Unit,
+) {
+    TuiContextMenu(
+        expanded = true,
+        anchor = anchor,
+        clickPosition = clickPosition,
         onDismissRequest = onDismiss,
         backgroundColor = PopupMenuBackground,
     ) {
-        TuiPopupMenuItem(key = "revert", onClick = { onRevert(current) }) {
-            Text("Revert through here")
+        TuiPopupMenuItem(key = "revert-to-here", onClick = onRevert) {
+            Text("Revert to here")
         }
-        TuiPopupMenuItem(key = "fork", onClick = { onFork(current) }) {
-            Text("Fork through here")
+        TuiPopupMenuItem(key = "fork-from-here", onClick = onFork) {
+            Text("Fork from here")
         }
     }
 }
@@ -478,35 +616,64 @@ private fun BoxScope.AgentHistoryRevertDialog(agent: AgentViewModel?) {
     if (agent == null) return
     val action by agent.historyAction.collectAsState()
     val confirm =
-        action as? io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState.ConfirmRevert
+        action as? AgentHistoryActionState.ConfirmRevert
             ?: return
-    val scope = rememberCoroutineScope()
+    val execution by agent.execution.collectAsState()
+    val window by agent.history.window.collectAsState()
+    val targetMatches =
+        !execution.running &&
+            execution.capabilities.canReplaceHistory &&
+            confirm.target.isCurrentIn(window)
+    LaunchedEffect(agent, confirm.requestId, targetMatches) {
+        if (!targetMatches) agent.dismissHistoryRevert(confirm.requestId)
+    }
+    if (!targetMatches) return
+    DisposableEffect(agent, confirm.requestId) {
+        onDispose {
+            agent.dismissHistoryRevert(confirm.requestId)
+        }
+    }
     TuiDialog(
         onDismissRequest = { agent.dismissHistoryRevert(confirm.requestId) },
         modifier = Modifier.width(RevertDialogWidth).background(SettingsDialogHomeBackground),
     ) {
         Column {
-            Text("Revert history?", textStyle = TextStyle.Bold)
+            Text("Revert history to here?", textStyle = TextStyle.Bold)
             Text(
-                "Committed items after ${confirm.target.storageIndex} will be removed.",
+                "Keep the selected history entry and remove everything after it.",
+                textStyle = TextStyle.Dim,
+            )
+            Text(
+                "This cannot be undone.",
                 textStyle = TextStyle.Dim,
             )
             Row {
                 TuiButton(
                     label = "Revert",
                     onClick = {
-                        scope.launch { agent.confirmHistoryRevert(confirm.requestId) }
+                        runCatching {
+                            agent.confirmHistoryRevert(confirm.requestId)
+                        }
                     },
                 )
                 Text(" ")
                 TuiButton(
                     label = "Cancel",
+                    autoFocus = true,
                     onClick = { agent.dismissHistoryRevert(confirm.requestId) },
                 )
             }
         }
     }
 }
+
+internal fun AgentHistoryTarget.isCurrentIn(
+    window: AgentHistoryWindowSnapshot,
+): Boolean =
+    generation == window.generation &&
+        window.entries.any { entry ->
+            entry.key.primaryStorageIndex == storageIndex
+        }
 
 private data class SessionTabMenuRequest(
     val target: SessionViewModel,
