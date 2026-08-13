@@ -25,6 +25,7 @@ import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewMo
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ServiceTier
@@ -163,6 +164,8 @@ private class PersistedSessionViewModelImpl(
     override val name: StateFlow<String> = mutableName.asStateFlow()
     override val settings: StateFlow<KodexAgentSettings>
         get() = rootAgent.settings
+    override val models: StateFlow<List<ModelInfo>>
+        get() = rootAgent.models
     override val selectedAgent: StateFlow<AgentViewModel>
         get() = mutableSelectedAgent.asStateFlow()
     override val summary: StateFlow<PersistedSessionSummaryState> = mutableSummary.asStateFlow()
@@ -242,6 +245,11 @@ private class PersistedSessionViewModelImpl(
         require(sourceSession.runtime.storage.latestIndex() >= sourceIndex) {
             "Fork boundary is outside the source storage."
         }
+        require(
+            sourceSession.runtime.storage.stable.floorToIndex(sourceIndex) == sourceIndex,
+        ) {
+            "Fork history entry $sourceIndex is no longer committed."
+        }
         val targetIndex = repository.create()
         try {
             val targetSession = repository.open(targetIndex)
@@ -287,6 +295,12 @@ private class PersistedSessionViewModelImpl(
         rootAgent.updateServiceTier(serviceTier)
 
     override suspend fun updateMode(mode: ModeKind) = rootAgent.updateMode(mode)
+
+    override suspend fun updateModelConfiguration(
+        model: OpenAiModelId,
+        reasoningEffort: ReasoningEffort,
+        serviceTier: ServiceTier,
+    ) = rootAgent.updateModelConfiguration(model, reasoningEffort, serviceTier)
 
     override fun dismissNotification(notificationId: Long) {
         val current = mutableNotification.value ?: return

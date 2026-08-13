@@ -4,6 +4,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory
@@ -81,12 +82,16 @@ internal data class ApplicationTestFixture(
 
 internal suspend fun kotlinx.coroutines.CoroutineScope.applicationFixture(
     newSessionFactory: NewSessionViewModelFactory? = null,
+    createDirectoryPicker: (Path) -> DirectoryPickerViewModel = {
+        error("Directory picker is not used by this fixture.")
+    },
 ): ApplicationTestFixture {
     val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
     val sessions = testSessionViewModelRegistry(repository, this)
     val drafts = newSessionFactory ?: DefaultNewSessionViewModelFactory(
         sessions,
         DefaultComposerViewModelFactory,
+        MutableStateFlow(emptyList()),
     )
     val viewModel = ApplicationViewModelImpl(
         sessions = sessions,
@@ -98,6 +103,7 @@ internal suspend fun kotlinx.coroutines.CoroutineScope.applicationFixture(
         loginFactory = OpenAiLoginViewModelFactory {
             error("Login is not used by this fixture.")
         },
+        createDirectoryPicker = createDirectoryPicker,
         newSessionArguments = { ordinal ->
             NewSessionViewModelArguments(
                 defaultName = if (ordinal == 1) "New Session" else "New Session $ordinal",

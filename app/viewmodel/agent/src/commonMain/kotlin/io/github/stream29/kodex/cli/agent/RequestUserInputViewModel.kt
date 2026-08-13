@@ -15,6 +15,9 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,6 +25,8 @@ import kotlinx.coroutines.flow.asStateFlow
 /** Revision-bound answer drafts for one Agent's current blocking interaction. */
 internal class RequestUserInputViewModelImpl(
     private val runtime: AgentRuntime,
+    private val ownerScope: CoroutineScope,
+    private val resumeRuntime: () -> Unit,
 ) : RequestUserInputViewModel {
     private var pendingEvent: PendingRequestUserInputToolEvent? = null
     private val mutableState = MutableStateFlow<RequestUserInputState>(RequestUserInputState.Idle)
@@ -78,21 +83,27 @@ internal class RequestUserInputViewModelImpl(
     override suspend fun submit(
         callId: String,
         expectedRevision: Long,
-    ): RequestUserInputSubmissionResult {
-        if (closed) return RequestUserInputSubmissionResult.StaleCall
+    ): RequestUserInputSubmissionResult = ownerScope.async(
+        start = CoroutineStart.UNDISPATCHED,
+    ) {
+        if (closed) return@async RequestUserInputSubmissionResult.StaleCall
         val event = pendingEvent
             ?.takeIf { pending -> pending.callId == callId }
-            ?: return RequestUserInputSubmissionResult.StaleCall
+            ?: return@async RequestUserInputSubmissionResult.StaleCall
         val captured = state.value as? RequestUserInputState.Pending
-            ?: return RequestUserInputSubmissionResult.StaleCall
-        if (captured.callId != callId) return RequestUserInputSubmissionResult.StaleCall
+            ?: return@async RequestUserInputSubmissionResult.StaleCall
+        if (captured.callId != callId) {
+            return@async RequestUserInputSubmissionResult.StaleCall
+        }
         if (captured.revision != expectedRevision) {
-            return RequestUserInputSubmissionResult.StaleRevision
+            return@async RequestUserInputSubmissionResult.StaleRevision
         }
         if (captured.submission is RequestUserInputSubmissionState.Submitting) {
-            return RequestUserInputSubmissionResult.Busy
+            return@async RequestUserInputSubmissionResult.Busy
         }
-        if (!captured.canSubmit) return RequestUserInputSubmissionResult.Incomplete
+        if (!captured.canSubmit) {
+            return@async RequestUserInputSubmissionResult.Incomplete
+        }
         val response = captured.arguments.toResponse(captured.answers)
         val submitting = captured.copy(
             revision = captured.nextRevision(),
@@ -100,13 +111,13 @@ internal class RequestUserInputViewModelImpl(
         )
         if (!mutableState.compareAndSet(captured, submitting)) {
             val latest = state.value as? RequestUserInputState.Pending
-            return if (latest?.callId != callId) {
+            return@async if (latest?.callId != callId) {
                 RequestUserInputSubmissionResult.StaleCall
             } else {
                 RequestUserInputSubmissionResult.StaleRevision
             }
         }
-        return try {
+        try {
             runtime.completeToolCall(
                 StableRequestUserInputToolEvent(
                     callId = event.callId,
@@ -117,7 +128,7 @@ internal class RequestUserInputViewModelImpl(
             )
             pendingEvent = null
             mutableState.compareAndSet(submitting, RequestUserInputState.Idle)
-            runtime.resume()
+            resumeRuntime()
             RequestUserInputSubmissionResult.Submitted
         } catch (failure: CancellationException) {
             throw failure
@@ -132,7 +143,7 @@ internal class RequestUserInputViewModelImpl(
             )
             RequestUserInputSubmissionResult.Failed(message)
         }
-    }
+    }.await()
 
     internal fun synchronize(pending: PendingRequestUserInputToolEvent?) {
         if (closed || pendingEvent?.callId == pending?.callId) return

@@ -4,7 +4,10 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
+import io.github.stream29.kodex.cli.agent.AgentAutomaticTitleConfiguration
+import io.github.stream29.kodex.cli.agent.AgentAutomaticTitleSettings
 import io.github.stream29.kodex.cli.agent.DefaultComposerViewModelFactory
+import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerationResult
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -15,11 +18,16 @@ import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
+import kotlin.time.Duration.Companion.seconds
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
@@ -70,6 +78,7 @@ val newSessionViewModelTest by testSuite {
                 ),
                 sessions = store,
                 composerFactory = DefaultComposerViewModelFactory,
+                models = MutableStateFlow(emptyList()),
             )
             try {
                 model.updateModel(OpenAiModelId("local-model"))
@@ -96,6 +105,81 @@ val newSessionViewModelTest by testSuite {
                 store.shutdown()
                 repository.cancelAndJoin()
                 kotlinx.io.files.SystemFileSystem.delete(workingDirectory, mustExist = false)
+            }
+        }
+    }
+
+    test("numbered draft keeps its display label but materializes an auto-title eligible name") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(
+                testKodexAgentDependencies(
+                    mockOpenAiClient {
+                        createResponse {
+                            flowOf(
+                                ResponsesStreamEvent.Completed(
+                                    Response(id = "response", endTurn = true),
+                                ),
+                            )
+                        }
+                    },
+                ),
+            )
+            val generatedTitle = "Restore automatic session titles"
+            val generatedFrom = MutableStateFlow<String?>(null)
+            val allowGeneratedTitle = CompletableDeferred<Unit>()
+            val automaticTitles = AgentAutomaticTitleConfiguration(
+                generator = { userText, _, _ ->
+                    generatedFrom.value = userText
+                    allowGeneratedTitle.await()
+                    SessionTitleGenerationResult.Generated(generatedTitle)
+                },
+                settingsProvider = {
+                    AgentAutomaticTitleSettings(
+                        enabled = true,
+                        model = null,
+                    )
+                },
+            )
+            val store = testSessionViewModelRegistry(
+                repository = repository,
+                scope = this,
+                automaticTitleConfiguration = automaticTitles,
+            )
+            val model = NewSessionViewModelImpl(
+                arguments = NewSessionViewModelArguments(
+                    defaultName = "New Session 2",
+                    initialSettings = KodexAgentSettings(
+                        model = OpenAiModelId("default-model"),
+                        cwd = Path("."),
+                    ),
+                ),
+                sessions = store,
+                composerFactory = DefaultComposerViewModelFactory,
+                models = MutableStateFlow(emptyList()),
+            )
+            try {
+                assertEquals("New Session 2", model.name.value)
+                model.composer.update("Fix automatic titles", "Fix automatic titles".length)
+
+                val persisted = model.materialize()
+
+                withTimeout(5.seconds) {
+                    generatedFrom.first { userText -> userText != null }
+                }
+                assertEquals(
+                    "Session ${persisted.sessionIndex}",
+                    persisted.settings.value.threadName,
+                )
+                allowGeneratedTitle.complete(Unit)
+                withTimeout(5.seconds) {
+                    persisted.name.first { name -> name == generatedTitle }
+                }
+                assertEquals("Fix automatic titles", generatedFrom.value)
+                assertEquals(generatedTitle, persisted.settings.value.threadName)
+            } finally {
+                model.close()
+                store.shutdown()
+                repository.cancelAndJoin()
             }
         }
     }

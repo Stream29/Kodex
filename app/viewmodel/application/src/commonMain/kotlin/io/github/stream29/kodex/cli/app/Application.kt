@@ -13,6 +13,7 @@ import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
 import io.github.stream29.kodex.app.pathpicker.createDirectoryPickerViewModel
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.settings.DefaultOpenAiLoginViewModelFactory
 import io.github.stream29.kodex.app.settings.DefaultSettingsViewModelFactory
 import io.github.stream29.kodex.app.settings.SettingsViewModelDependencies
@@ -203,6 +204,7 @@ public class KodexApplication private constructor(
                                 address = address,
                                 parentAddress = parentAddress,
                                 ownerScope = ownerScope,
+                                models = modelCatalog.models,
                                 automaticTitleConfiguration = automaticTitles.takeIf { isRoot },
                             ),
                             agentHistoryFactory,
@@ -217,7 +219,7 @@ public class KodexApplication private constructor(
                 }
                 val composerFactory = graph.koin.get<ComposerViewModelFactory>()
                 val newSessionFactory = graph.koin.get<NewSessionViewModelFactory> {
-                    parametersOf(store, composerFactory)
+                    parametersOf(store, composerFactory, modelCatalog.models)
                 }
                 val settingsFactory = SettingsViewModelFactory { arguments ->
                     val pickerFactory = { initialDirectory: Path ->
@@ -254,6 +256,9 @@ public class KodexApplication private constructor(
                         catalogFactory,
                         settingsFactory,
                         loginFactory,
+                        { initialDirectory: Path ->
+                            createDirectoryPickerViewModel(initialDirectory, scope)
+                        },
                         NewSessionViewModelArgumentsProvider(
                             globalSettings = globalSettings,
                             workingDirectory = resolvedWorkingDirectory,
@@ -331,6 +336,7 @@ internal fun createApplicationViewModel(
     @InjectedParam catalogFactory: SessionCatalogViewModelFactory,
     @InjectedParam settingsFactory: SettingsViewModelFactory,
     @InjectedParam loginFactory: OpenAiLoginViewModelFactory,
+    @InjectedParam createDirectoryPicker: (Path) -> DirectoryPickerViewModel,
     @InjectedParam newSessionArguments: NewSessionViewModelArgumentsProvider,
 ): ApplicationViewModel = ApplicationViewModelImpl(
     sessions = sessions,
@@ -338,6 +344,7 @@ internal fun createApplicationViewModel(
     catalogFactory = catalogFactory,
     settingsFactory = settingsFactory,
     loginFactory = loginFactory,
+    createDirectoryPicker = createDirectoryPicker,
     newSessionArguments = newSessionArguments::create,
 )
 

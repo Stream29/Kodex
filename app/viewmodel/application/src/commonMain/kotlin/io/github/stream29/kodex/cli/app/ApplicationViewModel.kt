@@ -1,10 +1,14 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
+import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.app.application.contract.DeleteSessionPopupViewModel
 import io.github.stream29.kodex.app.application.contract.RenameSessionPopupViewModel
+import io.github.stream29.kodex.app.application.contract.WorkingDirectoryPopupViewModel
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory
@@ -21,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.io.files.Path
 
 /**
  * Owns only application navigation, popup identity, and child lifetimes.
@@ -35,6 +40,7 @@ internal class ApplicationViewModelImpl(
     private val catalogFactory: SessionCatalogViewModelFactory,
     private val settingsFactory: SettingsViewModelFactory,
     private val loginFactory: OpenAiLoginViewModelFactory,
+    private val createDirectoryPicker: (Path) -> DirectoryPickerViewModel,
     private val newSessionArguments: (ordinal: Int) -> NewSessionViewModelArguments,
 ) : ApplicationViewModel {
     private val commandMutex = Mutex()
@@ -197,6 +203,21 @@ internal class ApplicationViewModelImpl(
             installPopup(ApplicationPopupState.Login(loginFactory.create()))
         }
 
+    override suspend fun openWorkingDirectoryPopup(
+        target: AgentSettingsViewModel,
+    ): ApplicationPopupState.WorkingDirectory = commandMutex.withLock {
+        ensureOpen()
+        requireOwned(target)
+        installPopup(
+            ApplicationPopupState.WorkingDirectory(
+                WorkingDirectoryPopupViewModelImpl(
+                    target = target,
+                    picker = createDirectoryPicker(target.settings.value.cwd),
+                ),
+            ),
+        )
+    }
+
     override fun dismissPopup(expected: ApplicationPopupState.Open): Boolean {
         val current = mutablePopup.value
         if (current !== expected) return false
@@ -234,6 +255,9 @@ internal class ApplicationViewModelImpl(
         val ownsTarget = when (current) {
             is ApplicationPopupState.Settings -> current.target === target
             is ApplicationPopupState.RenameSession -> current.viewModel.target === target
+            is ApplicationPopupState.WorkingDirectory ->
+                current.viewModel.target.belongsTo(target)
+
             is ApplicationPopupState.DeleteSession,
             is ApplicationPopupState.Login,
             is ApplicationPopupState.SessionCatalog,
@@ -243,6 +267,14 @@ internal class ApplicationViewModelImpl(
             mutablePopup.value = ApplicationPopupState.Closed
             current.closeChild()
         }
+    }
+
+    private fun AgentSettingsViewModel.belongsTo(target: SessionViewModel): Boolean = when {
+        this === target -> true
+        this is AgentViewModel && target is PersistedSessionViewModel ->
+            address.sessionIndex == target.sessionIndex
+
+        else -> false
     }
 
     private fun closeDeletePopupFor(sessionIndex: Int) {
@@ -280,6 +312,17 @@ internal class ApplicationViewModelImpl(
     private fun requireOwned(target: SessionViewModel) {
         require(mutableNavigation.value.tabs.any { child -> child === target }) {
             "Popup target is not owned by this application."
+        }
+    }
+
+    private fun requireOwned(target: AgentSettingsViewModel) {
+        require(
+            mutableNavigation.value.tabs.any { child ->
+                child === target ||
+                    (child as? PersistedSessionViewModel)?.selectedAgent?.value === target
+            },
+        ) {
+            "Working-directory target is not owned by this application."
         }
     }
 
@@ -334,6 +377,25 @@ private class DeleteSessionPopupViewModelImpl(
     }
 }
 
+private class WorkingDirectoryPopupViewModelImpl(
+    override val target: AgentSettingsViewModel,
+    override val picker: DirectoryPickerViewModel,
+) : WorkingDirectoryPopupViewModel {
+    private var closed = false
+
+    override suspend fun select(directory: Path) {
+        check(!closed) { "Working-directory popup is closed." }
+        target.updateWorkingDirectory(directory)
+        close()
+    }
+
+    override fun close() {
+        if (closed) return
+        closed = true
+        picker.close()
+    }
+}
+
 private fun ApplicationPopupState.Open.closeChild() {
     when (this) {
         is ApplicationPopupState.DeleteSession -> viewModel.close()
@@ -341,5 +403,6 @@ private fun ApplicationPopupState.Open.closeChild() {
         is ApplicationPopupState.RenameSession -> viewModel.close()
         is ApplicationPopupState.SessionCatalog -> viewModel.close()
         is ApplicationPopupState.Settings -> viewModel.close()
+        is ApplicationPopupState.WorkingDirectory -> viewModel.close()
     }
 }

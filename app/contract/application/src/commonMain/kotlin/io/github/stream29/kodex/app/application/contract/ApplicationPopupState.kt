@@ -1,10 +1,13 @@
 package io.github.stream29.kodex.app.application.contract
 
+import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.io.files.Path
 
 /**
  * The one application-level popup surface.
@@ -40,6 +43,21 @@ public sealed interface ApplicationPopupState {
     public class Login(
         public val viewModel: OpenAiLoginViewModel,
     ) : Open
+
+    public class WorkingDirectory(
+        public val viewModel: WorkingDirectoryPopupViewModel,
+    ) : Open
+}
+
+/** Captured settings target and directory-picker child for one cwd popup. */
+public interface WorkingDirectoryPopupViewModel : AutoCloseable {
+    public val target: AgentSettingsViewModel
+    public val picker: DirectoryPickerViewModel
+
+    /** Applies [directory] to the captured target, then closes this child. */
+    public suspend fun select(directory: Path): Unit
+
+    override fun close(): Unit
 }
 
 /** Editable state and command boundary for one Rename Session popup. */
@@ -52,8 +70,8 @@ public interface RenameSessionPopupViewModel : AutoCloseable {
     /**
      * Trims and applies the latest [draftName] to [target].
      *
-     * A successful rename does not dismiss the parent popup. The frontend
-     * dismisses the exact open handle after this command returns.
+     * The frontend submits this command directly from the text input's Enter
+     * key and dismisses the exact open handle after it returns.
      */
     public suspend fun rename(): Unit
 

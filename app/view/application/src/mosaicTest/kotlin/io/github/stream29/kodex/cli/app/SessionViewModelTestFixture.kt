@@ -12,6 +12,7 @@ import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 
 internal class SessionViewModelTestFixture private constructor(
     private val repository: InMemoryKodexSessionRepository,
@@ -21,6 +22,7 @@ internal class SessionViewModelTestFixture private constructor(
     private val draftFactory = DefaultNewSessionViewModelFactory(
         store,
         DefaultComposerViewModelFactory,
+        MutableStateFlow(emptyList()),
     )
 
     fun newSession(name: String): NewSessionViewModel =

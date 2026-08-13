@@ -10,6 +10,7 @@ import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ServiceTier
@@ -35,6 +36,7 @@ internal class NewSessionViewModelImpl(
     arguments: NewSessionViewModelArguments,
     private val sessions: PersistedSessionViewModelRegistry,
     composerFactory: ComposerViewModelFactory,
+    override val models: StateFlow<List<ModelInfo>>,
 ) : NewSessionViewModel {
     private val commandMutex = Mutex()
     private val defaultName = arguments.defaultName.trim()
@@ -92,6 +94,20 @@ internal class NewSessionViewModelImpl(
         updateSettings { current -> current.copy(collaborationMode = mode) }
     }
 
+    override suspend fun updateModelConfiguration(
+        model: OpenAiModelId,
+        reasoningEffort: ReasoningEffort,
+        serviceTier: ServiceTier,
+    ) {
+        updateSettings { current ->
+            current.copy(
+                model = model,
+                reasoning = current.reasoning.copy(effort = reasoningEffort),
+                serviceTier = serviceTier,
+            )
+        }
+    }
+
     override suspend fun materialize(): PersistedSessionViewModel = commandMutex.withLock {
         ensureEditable()
         val capturedSettings = mutableSettings.value.copy(threadName = mutableName.value)
@@ -141,8 +157,7 @@ internal class NewSessionViewModelImpl(
         }
     }
 
-    private fun defaultNameForIndex(sessionIndex: Int): String =
-        if (defaultName == DEFAULT_NEW_SESSION_NAME) "Session $sessionIndex" else defaultName
+    private fun defaultNameForIndex(sessionIndex: Int): String = "Session $sessionIndex"
 
     private fun ensureEditable() {
         check(!closed) { "New Session ViewModel is closed." }
@@ -154,12 +169,14 @@ internal class NewSessionViewModelImpl(
 public class DefaultNewSessionViewModelFactory(
     @InjectedParam private val sessions: PersistedSessionViewModelRegistry,
     @InjectedParam private val composerFactory: ComposerViewModelFactory,
+    @InjectedParam private val models: StateFlow<List<ModelInfo>>,
 ) : NewSessionViewModelFactory {
     override fun create(arguments: NewSessionViewModelArguments): NewSessionViewModel =
         NewSessionViewModelImpl(
             arguments = arguments,
             sessions = sessions,
             composerFactory = composerFactory,
+            models = models,
         )
 }
 
