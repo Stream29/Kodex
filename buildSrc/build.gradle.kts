@@ -3,7 +3,7 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(26)
 }
 
 repositories {
@@ -14,5 +14,7 @@ repositories {
 
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")
+    implementation(libs.kotlin.compose.compiler.gradle.plugin)
+    implementation("io.insert-koin:koin-compiler-gradle-plugin:1.0.1")
     implementation(libs.test.balloon.gradle.plugin)
 }

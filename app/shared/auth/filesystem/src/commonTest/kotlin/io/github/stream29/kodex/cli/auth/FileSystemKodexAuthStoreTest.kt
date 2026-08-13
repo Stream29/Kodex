@@ -5,6 +5,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
 import io.github.stream29.kodex.cli.settings.InMemoryKodexGlobalSettings
+import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiSubscriptionPlan
 import io.github.stream29.kodex.openai.OpenAiSubscriptionTokenRefresh
 import io.github.stream29.kodex.openai.OpenAiSubscriptionTokens
@@ -49,6 +50,98 @@ val fileSystemKodexAuthStoreTest by testSuite(
                     assertEquals(OpenAiSubscriptionPlan.Plus, auth.planType)
                     assertEquals("initial@example.com", auth.email)
                     assertFalse(SystemCoroutineFileSystem.exists(Path(dataDirectory, "auth.yml")))
+                } finally {
+                    store.close()
+                }
+            }
+        }
+    }
+
+    test("missing Codex credentials publish the credentials-not-found state") {
+        withAuthDirectories("missing-codex") { codexHome, dataDirectory ->
+            val settings = InMemoryKodexGlobalSettings(
+                KodexGlobalSettings(codexHome = codexHome),
+            )
+
+            coroutineScope {
+                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                try {
+                    assertEquals(
+                        OpenAiAuthState.Unavailable.CredentialsNotFound,
+                        store.state.value,
+                    )
+                } finally {
+                    store.close()
+                }
+            }
+        }
+    }
+
+    test("unsupported Codex auth mode publishes the unsupported-mode state") {
+        withAuthDirectories("unsupported-codex-mode") { codexHome, dataDirectory ->
+            writeCodexAuth(
+                codexHome,
+                CodexAuthJson(
+                    openAiApiKey = "test-api-key",
+                    authMode = CodexAuthMode.ApiKey,
+                ),
+            )
+            val settings = InMemoryKodexGlobalSettings(
+                KodexGlobalSettings(codexHome = codexHome),
+            )
+
+            coroutineScope {
+                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                try {
+                    assertEquals(
+                        OpenAiAuthState.Unavailable.UnsupportedAuthMode,
+                        store.state.value,
+                    )
+                } finally {
+                    store.close()
+                }
+            }
+        }
+    }
+
+    test("incomplete Codex credentials publish the invalid-credentials state") {
+        withAuthDirectories("incomplete-codex") { codexHome, dataDirectory ->
+            writeCodexAuth(
+                codexHome,
+                CodexAuthJson(authMode = CodexAuthMode.Chatgpt),
+            )
+            val settings = InMemoryKodexGlobalSettings(
+                KodexGlobalSettings(codexHome = codexHome),
+            )
+
+            coroutineScope {
+                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                try {
+                    assertEquals(
+                        OpenAiAuthState.Unavailable.InvalidCredentials,
+                        store.state.value,
+                    )
+                } finally {
+                    store.close()
+                }
+            }
+        }
+    }
+
+    test("malformed Codex credentials publish the invalid-credentials state") {
+        withAuthDirectories("malformed-codex") { codexHome, dataDirectory ->
+            SystemCoroutineFileSystem.writeString(Path(codexHome, "auth.json"), "{")
+            val settings = InMemoryKodexGlobalSettings(
+                KodexGlobalSettings(codexHome = codexHome),
+            )
+
+            coroutineScope {
+                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                try {
+                    assertEquals(
+                        OpenAiAuthState.Unavailable.InvalidCredentials,
+                        store.state.value,
+                    )
                 } finally {
                     store.close()
                 }
@@ -145,7 +238,7 @@ val fileSystemKodexAuthStoreTest by testSuite(
         }
     }
 
-    test("missing Kodex credentials publish an unavailable state") {
+    test("missing Kodex credentials publish the credentials-not-found state") {
         withAuthDirectories("missing-local") { codexHome, dataDirectory ->
             val settings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(
@@ -157,7 +250,10 @@ val fileSystemKodexAuthStoreTest by testSuite(
             coroutineScope {
                 val store = FileSystemKodexAuthStore(dataDirectory, settings)
                 try {
-                    assertIs<KodexAuthState.Unavailable>(store.state.value)
+                    assertEquals(
+                        OpenAiAuthState.Unavailable.CredentialsNotFound,
+                        store.state.value,
+                    )
                     assertFalse(SystemCoroutineFileSystem.exists(Path(dataDirectory, "auth.yml")))
                 } finally {
                     store.close()
@@ -289,15 +385,15 @@ private fun CodexAuthJson.toKodexAuthFile(): KodexAuthFile =
     )
 
 private fun KodexAuthStore.authenticated() =
-    assertIs<KodexAuthState.Authenticated>(state.value).value
+    assertIs<OpenAiAuthState.Authenticated>(state.value).credentials
 
 private suspend fun KodexAuthStore.awaitAuthenticatedAccessToken(accessToken: String) =
     withTimeout(1_000) {
-        assertIs<KodexAuthState.Authenticated>(
+        assertIs<OpenAiAuthState.Authenticated>(
             state.first { current ->
-                (current as? KodexAuthState.Authenticated)?.value?.accessToken == accessToken
+                (current as? OpenAiAuthState.Authenticated)?.credentials?.accessToken == accessToken
             },
-        ).value
+        ).credentials
     }
 
 private fun subscriptionAuth(label: String): CodexAuthJson {

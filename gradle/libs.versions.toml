@@ -17,6 +17,7 @@ pty4j = "0.13.12"
 node-pty = "1.2.0-beta.12"
 mosaic = "0.19.0-SNAPSHOT"
 koin = "4.2.2"
+koin-plugin = "1.0.1"
 poko = "0.22.1"
 mcp-kotlin-sdk = "0.14.0"
 unicode-kotlin = "0.1.1"
@@ -27,6 +28,7 @@ kermit = "2.1.0"
 cache4k = "0.14.0"
 
 [libraries]
+kotlin-compose-compiler-gradle-plugin = { module = "org.jetbrains.kotlin:compose-compiler-gradle-plugin", version.ref = "kotlin" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
 kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "kotlinx-serialization" }
@@ -59,6 +61,7 @@ mosaic-runtime = { module = "com.jakewharton.mosaic:mosaic-runtime", version.ref
 mosaic-animation = { module = "com.jakewharton.mosaic:mosaic-animation", version.ref = "mosaic" }
 mosaic-testing = { module = "com.jakewharton.mosaic:mosaic-testing", version.ref = "mosaic" }
 koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
+koin-annotations = { module = "io.insert-koin:koin-annotations", version.ref = "koin" }
 mcp-kotlin-sdk-client = { module = "io.modelcontextprotocol:kotlin-sdk-client", version.ref = "mcp-kotlin-sdk" }
 mcp-kotlin-sdk-server = { module = "io.modelcontextprotocol:kotlin-sdk-server", version.ref = "mcp-kotlin-sdk" }
 unicode-segmentation-kotlin = { module = "io.github.kotlinmania:unicode-segmentation-kotlin", version.ref = "unicode-kotlin" }
@@ -81,4 +84,5 @@ ktor-client-mingw-engines = ["ktor-client-winhttp"]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+koin-compiler = { id = "io.insert-koin.compiler.plugin", version.ref = "koin-plugin" }
 poko = { id = "dev.drewhamilton.poko", version.ref = "poko" }

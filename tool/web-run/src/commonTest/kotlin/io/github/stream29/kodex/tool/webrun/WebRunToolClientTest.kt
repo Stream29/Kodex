@@ -4,7 +4,6 @@ import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.kodex.cli.auth.InMemoryKodexAuthStore
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
@@ -28,6 +27,7 @@ import io.github.stream29.kodex.openai.WeatherOperation
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.kodex.openai.client.OpenAiClient
+import io.github.stream29.kodex.openai.client.test.InMemoryOpenAiAuthStore
 import io.github.stream29.kodex.openai.client.OpenAiClientConfig
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
 import io.github.stream29.kodex.utils.osenvironment.userHomeDirectory
@@ -51,7 +51,7 @@ private suspend fun realWebRunClient(): OpenAiClient {
         ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
         ?: "0.1.0"
     return OpenAiClient(
-        authStore = InMemoryKodexAuthStore(storage.readAuthOrNull().toSubscriptionAuthStateOrThrow()),
+        authStore = InMemoryOpenAiAuthStore(storage.readAuthOrNull().toSubscriptionAuthStateOrThrow()),
         config = OpenAiClientConfig(clientVersion = clientVersion),
     )
 }

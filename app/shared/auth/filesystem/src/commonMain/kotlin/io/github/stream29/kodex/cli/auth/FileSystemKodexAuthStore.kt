@@ -4,6 +4,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettingsStore
+import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.kodex.openai.OpenAiSubscriptionTokenRefresh
 import io.github.stream29.kodex.openai.OpenAiSubscriptionTokens
@@ -35,7 +36,9 @@ import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.io.IOException
 import kotlinx.io.files.Path
+import kotlinx.serialization.SerializationException
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
@@ -78,6 +81,17 @@ private data class ActiveSubscriptionAuth(
     )
 }
 
+private sealed interface AuthLoadResult {
+    data class Loaded(
+        val auth: ActiveSubscriptionAuth,
+    ) : AuthLoadResult
+
+    data class Unavailable(
+        val reason: OpenAiAuthState.Unavailable,
+        val failure: Throwable? = null,
+    ) : AuthLoadResult
+}
+
 @OptIn(ExperimentalCoroutinesApi::class)
 private class FileSystemKodexAuthStoreImpl(
     scope: CoroutineScope,
@@ -92,9 +106,9 @@ private class FileSystemKodexAuthStoreImpl(
     private val activeAuth = MutableStateFlow<ActiveSubscriptionAuth?>(null)
     private var activeLogin: LocalKodexLoginAttempt? = null
 
-    override val state: StateFlow<KodexAuthState>
-        field = MutableStateFlow<KodexAuthState>(
-            KodexAuthState.Unavailable("Authentication has not been loaded."),
+    override val state: StateFlow<OpenAiAuthState>
+        field = MutableStateFlow<OpenAiAuthState>(
+            OpenAiAuthState.Unavailable.NotLoaded,
         )
 
     init {
@@ -120,7 +134,10 @@ private class FileSystemKodexAuthStoreImpl(
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            publishUnavailable(failure)
+            publishUnavailable(
+                reason = OpenAiAuthState.Unavailable.UnexpectedFailure,
+                failure = failure,
+            )
         }
     }
 
@@ -183,13 +200,12 @@ private class FileSystemKodexAuthStoreImpl(
             reloadWithinLock()
             return@withLock
         }
-        val current = try {
-            readAuthFile().toActiveAuth()
-        } catch (failure: CancellationException) {
-            throw failure
-        } catch (failure: Throwable) {
-            publishUnavailable(failure)
-            return@withLock
+        val current = when (val result = resolveKodexAuth()) {
+            is AuthLoadResult.Loaded -> result.auth
+            is AuthLoadResult.Unavailable -> {
+                publishUnavailable(result.reason, result.failure)
+                return@withLock
+            }
         }
         if (subscriptionRefreshAt(current.tokens, current.lastRefresh) > Clock.System.now()) {
             publish(current)
@@ -212,14 +228,56 @@ private class FileSystemKodexAuthStoreImpl(
         }
     }
 
-    private suspend fun resolveAuth(settings: KodexGlobalSettings): ActiveSubscriptionAuth =
-        when (settings.authSource) {
-            KodexAuthSource.Codex -> readCodexAuth(settings.codexHome)
-            KodexAuthSource.Kodex -> readAuthFile().toActiveAuth()
+    private suspend fun resolveAuth(settings: KodexGlobalSettings): AuthLoadResult =
+        loadAuthCatching {
+            when (settings.authSource) {
+                KodexAuthSource.Codex ->
+                    CodexCliStorage(settings.codexHome, fileSystem)
+                        .readAuthOrNull()
+                        ?.toAuthLoadResult()
+                        ?: AuthLoadResult.Unavailable(
+                            OpenAiAuthState.Unavailable.CredentialsNotFound,
+                        )
+
+                KodexAuthSource.Kodex -> resolveKodexAuthFile()
+            }
         }
 
-    private suspend fun readCodexAuth(codexHome: Path): ActiveSubscriptionAuth =
-        CodexCliStorage(codexHome, fileSystem).readActiveSubscriptionAuth()
+    private suspend fun resolveKodexAuth(): AuthLoadResult =
+        loadAuthCatching(::resolveKodexAuthFile)
+
+    private suspend fun resolveKodexAuthFile(): AuthLoadResult {
+        if (!fileSystem.exists(authPath)) {
+            return AuthLoadResult.Unavailable(
+                OpenAiAuthState.Unavailable.CredentialsNotFound,
+            )
+        }
+        return readAuthFile().toAuthLoadResult()
+    }
+
+    private suspend fun loadAuthCatching(
+        load: suspend () -> AuthLoadResult,
+    ): AuthLoadResult =
+        try {
+            load()
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: SerializationException) {
+            AuthLoadResult.Unavailable(
+                reason = OpenAiAuthState.Unavailable.InvalidCredentials,
+                failure = failure,
+            )
+        } catch (failure: IOException) {
+            AuthLoadResult.Unavailable(
+                reason = OpenAiAuthState.Unavailable.CredentialSourceUnavailable,
+                failure = failure,
+            )
+        } catch (failure: Throwable) {
+            AuthLoadResult.Unavailable(
+                reason = OpenAiAuthState.Unavailable.UnexpectedFailure,
+                failure = failure,
+            )
+        }
 
     private suspend fun readAuthFile(): KodexAuthFile =
         AuthYaml.decodeFromString(
@@ -269,15 +327,30 @@ private class FileSystemKodexAuthStoreImpl(
 
     private fun publish(auth: ActiveSubscriptionAuth) {
         activeAuth.value = auth
-        state.value = KodexAuthState.Authenticated(auth.publicState)
+        state.value = OpenAiAuthState.Authenticated(auth.publicState)
         maintenanceSignal.trySend(Unit)
     }
 
-    private fun publishUnavailable(failure: Throwable) {
+    private fun publish(result: AuthLoadResult) {
+        when (result) {
+            is AuthLoadResult.Loaded -> publish(result.auth)
+            is AuthLoadResult.Unavailable ->
+                publishUnavailable(result.reason, result.failure)
+        }
+    }
+
+    private fun publishUnavailable(
+        reason: OpenAiAuthState.Unavailable,
+        failure: Throwable? = null,
+    ) {
+        if (failure != null) {
+            logger.warn(failure) {
+                "Authentication source ${globalSettings.settings.value.authSource} " +
+                    "is unavailable ($reason)."
+            }
+        }
         activeAuth.value = null
-        state.value = KodexAuthState.Unavailable(
-            failure.message ?: "The selected authentication source is unavailable.",
-        )
+        state.value = reason
         maintenanceSignal.trySend(Unit)
     }
 
@@ -318,32 +391,35 @@ internal suspend fun CoroutineScope.FileSystemKodexAuthStore(
     ).also { store -> store.reload() }
 }
 
-private fun CodexAuthJson.toActiveAuth(): ActiveSubscriptionAuth {
+private fun CodexAuthJson.toAuthLoadResult(): AuthLoadResult {
     val mode = authMode ?: CodexAuthMode.Chatgpt
-    require(mode == CodexAuthMode.Chatgpt || mode == CodexAuthMode.ChatgptAuthTokens) {
-        "Subscription auth requires Codex auth mode chatgpt or chatgptAuthTokens, but found $mode."
+    if (mode != CodexAuthMode.Chatgpt && mode != CodexAuthMode.ChatgptAuthTokens) {
+        return AuthLoadResult.Unavailable(
+            OpenAiAuthState.Unavailable.UnsupportedAuthMode,
+        )
     }
-    val tokenData = requireNotNull(tokens) {
-        "Subscription auth requires a complete token object."
-    }
-    return ActiveSubscriptionAuth(
-        tokens = tokenData,
-        lastRefresh = lastRefresh ?: Clock.System.now(),
+    val tokenData = tokens ?: return AuthLoadResult.Unavailable(
+        OpenAiAuthState.Unavailable.InvalidCredentials,
+    )
+    return AuthLoadResult.Loaded(
+        ActiveSubscriptionAuth(
+            tokens = tokenData,
+            lastRefresh = lastRefresh ?: Clock.System.now(),
+        ),
     )
 }
 
-private suspend fun CodexCliStorage.readActiveSubscriptionAuth(): ActiveSubscriptionAuth =
-    requireNotNull(readAuthOrNull()) {
-        "Codex CLI auth.json is required when global settings select Codex authentication."
-    }.toActiveAuth()
-
-private fun KodexAuthFile.toActiveAuth(): ActiveSubscriptionAuth {
-    require(authMode == CodexAuthMode.Chatgpt) {
-        "Kodex-managed subscription auth requires auth_mode: chatgpt, but found $authMode."
+private fun KodexAuthFile.toAuthLoadResult(): AuthLoadResult {
+    if (authMode != CodexAuthMode.Chatgpt) {
+        return AuthLoadResult.Unavailable(
+            OpenAiAuthState.Unavailable.UnsupportedAuthMode,
+        )
     }
-    return ActiveSubscriptionAuth(
-        tokens = tokens,
-        lastRefresh = lastRefresh,
+    return AuthLoadResult.Loaded(
+        ActiveSubscriptionAuth(
+            tokens = tokens,
+            lastRefresh = lastRefresh,
+        ),
     )
 }
 

@@ -26,7 +26,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUse
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
-import io.github.stream29.kodex.cli.auth.InMemoryKodexAuthStore
 import io.github.stream29.kodex.hook.contract.NoOpKodexHooks
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.openai.ContentItem
@@ -51,6 +50,7 @@ import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiClient as RealOpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiClientConfig
+import io.github.stream29.kodex.openai.client.test.InMemoryOpenAiAuthStore
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
@@ -180,7 +180,7 @@ private suspend fun OpenAiClient.collectResponseProbe(input: List<ResponseItem>)
 
 internal suspend fun realOpenAiClient(): RealOpenAiClient =
     RealOpenAiClient(
-        authStore = InMemoryKodexAuthStore(
+        authStore = InMemoryOpenAiAuthStore(
             testCodexStorage().readAuthOrNull().toSubscriptionAuthStateOrThrow(),
         ),
         config = OpenAiClientConfig(

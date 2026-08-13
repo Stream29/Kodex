@@ -1,11 +1,11 @@
 package io.github.stream29.kodex.openai.client
 
-import io.github.stream29.kodex.cli.auth.KodexAuthStore
-import io.github.stream29.kodex.cli.auth.InMemoryKodexAuthStore
 import io.github.stream29.kodex.openai.OpenAiErrorResponse
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
+import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
+import io.github.stream29.kodex.openai.client.test.InMemoryOpenAiAuthStore
 import io.github.stream29.kodex.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
@@ -21,8 +21,8 @@ internal fun <T> OpenAiResult<T, OpenAiErrorResponse>.successOrFail(): T =
         is OpenAiResult.Failure -> fail("OpenAI request failed: ${error.messageText ?: error}")
     }
 
-internal suspend fun kodexAuthStore(): KodexAuthStore =
-    InMemoryKodexAuthStore(
+internal suspend fun kodexAuthStore(): OpenAiAuthStore =
+    InMemoryOpenAiAuthStore(
         testCodexStorage().readAuthOrNull().toSubscriptionAuthStateOrThrow(),
     )
 

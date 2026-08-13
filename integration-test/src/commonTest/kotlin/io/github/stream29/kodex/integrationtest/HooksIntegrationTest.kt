@@ -8,7 +8,6 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.contract.initialize
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
-import io.github.stream29.kodex.cli.auth.InMemoryKodexAuthStore
 import io.github.stream29.kodex.hook.contract.HookConfiguration
 import io.github.stream29.kodex.hook.contract.HookSettings
 import io.github.stream29.kodex.hook.impl.KodexHooksImpl
@@ -18,6 +17,7 @@ import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.kodex.openai.client.OpenAiClient as RealOpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiClientConfig
+import io.github.stream29.kodex.openai.client.test.InMemoryOpenAiAuthStore
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliHookSourceKind
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
@@ -193,7 +193,7 @@ private suspend fun realOpenAiClient(storage: CodexCliStorage): RealOpenAiClient
         ?.takeIf { version -> version.matches(Regex("""\d+\.\d+\.\d+""")) }
         ?: "0.1.0"
     return RealOpenAiClient(
-        authStore = InMemoryKodexAuthStore(
+        authStore = InMemoryOpenAiAuthStore(
             OpenAiSubscriptionAuthState(
                 accessToken = tokens.accessToken,
                 accountId = tokens.accountId?.takeIf(String::isNotBlank),

@@ -3,7 +3,6 @@ package io.github.stream29.kodex.openai.modelcatalog
 import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.cli.auth.InMemoryKodexAuthStore
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ModelsResponse
 import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
@@ -12,6 +11,7 @@ import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.contextWindowTokenStatus
 import io.github.stream29.kodex.openai.client.OpenAiClient
+import io.github.stream29.kodex.openai.client.test.InMemoryOpenAiAuthStore
 import io.github.stream29.kodex.openai.client.OpenAiClientConfig
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
@@ -87,7 +87,7 @@ private fun testCodexDirectory(): Path =
 private suspend fun liveCatalog(): LiveCatalogFixture {
     val storage = CodexCliStorage(testCodexDirectory())
     val client = OpenAiClient(
-        authStore = InMemoryKodexAuthStore(storage.readAuthOrNull().toSubscriptionAuthStateOrThrow()),
+        authStore = InMemoryOpenAiAuthStore(storage.readAuthOrNull().toSubscriptionAuthStateOrThrow()),
         config = OpenAiClientConfig(
             clientVersion = storage.readModelsCacheOrNull()?.clientVersion
                 ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
