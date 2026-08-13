@@ -7,7 +7,7 @@ import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
 
 internal fun Project.configureCoordinates() {
     group = "io.github.stream29"
-    version = "0.2.1"
+    version = "0.2.2"
 }
 
 internal fun KotlinMultiplatformExtension.configureCompiler() {
