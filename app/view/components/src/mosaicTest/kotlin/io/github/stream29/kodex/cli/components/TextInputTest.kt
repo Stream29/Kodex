@@ -81,6 +81,36 @@ val textInputTest by testSuite {
         }
     }
 
+    test("Caps Lock does not insert its Kitty functional key codepoint") {
+        val state = TextInputState()
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                TextInput(
+                    state = state,
+                    layout = TextInputLayout.create(value = state.value, width = 80),
+                    autoFocus = true,
+                )
+            }
+
+            sendKeyEvent(
+                KeyboardEvent(
+                    codepoint = 57358,
+                    modifiers = KeyboardEvent.ModifierCapsLock,
+                ),
+            )
+            sendKeyEvent(
+                KeyboardEvent(
+                    codepoint = 'X'.code,
+                    modifiers = KeyboardEvent.ModifierCapsLock,
+                ),
+            )
+            awaitSnapshot()
+
+            assertEquals(TextInputValue(text = "X", cursorOffset = 1), state.value)
+        }
+    }
+
     test("editing notifies a caller that owns the draft") {
         val state = TextInputState()
         var observed: TextInputValue? = null
