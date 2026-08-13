@@ -1,21 +1,10 @@
 package io.github.stream29.kodex.cli.auth
 
+import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
+import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-
-/** Current availability of the subscription credentials selected in global settings. */
-public sealed interface KodexAuthState {
-    /** Complete credentials ready for an OpenAI request. */
-    public data class Authenticated(
-        public val value: OpenAiSubscriptionAuthState,
-    ) : KodexAuthState
-
-    /** The selected source cannot currently provide credentials. */
-    public data class Unavailable(
-        public val message: String,
-    ) : KodexAuthState
-}
 
 /**
  * Resolves the authentication source selected by global settings and publishes
@@ -24,10 +13,7 @@ public sealed interface KodexAuthState {
  * The source selection itself belongs to global settings. Implementations own
  * only credential loading and Kodex-managed refresh.
  */
-public interface KodexAuthStore : AutoCloseable {
-    /** Latest availability and credentials for an OpenAI request. */
-    public val state: StateFlow<KodexAuthState>
-
+public interface KodexAuthStore : OpenAiAuthStore, AutoCloseable {
     /** Reloads the configured authentication source and publishes its credentials. */
     public suspend fun reload()
 
@@ -51,8 +37,8 @@ public interface KodexAuthLoginAttempt {
 public class InMemoryKodexAuthStore(
     initialAuth: OpenAiSubscriptionAuthState,
 ) : KodexAuthStore {
-    override val state: StateFlow<KodexAuthState>
-        field = MutableStateFlow(KodexAuthState.Authenticated(initialAuth))
+    override val state: StateFlow<OpenAiAuthState>
+        field = MutableStateFlow(OpenAiAuthState.Authenticated(initialAuth))
 
     override suspend fun reload(): Unit = Unit
 

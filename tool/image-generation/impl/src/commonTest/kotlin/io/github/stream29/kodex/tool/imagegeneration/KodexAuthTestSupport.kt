@@ -2,9 +2,9 @@
 
 package io.github.stream29.kodex.tool.imagegeneration
 
-import io.github.stream29.kodex.cli.auth.KodexAuthStore
-import io.github.stream29.kodex.cli.auth.InMemoryKodexAuthStore
 import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
+import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
+import io.github.stream29.kodex.openai.client.test.InMemoryOpenAiAuthStore
 import io.github.stream29.kodex.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
@@ -12,8 +12,8 @@ import io.github.stream29.kodex.utils.osenvironment.userHomeDirectory
 import kotlinx.io.files.Path
 import kotlin.io.encoding.Base64
 
-internal suspend fun kodexAuthStore(): KodexAuthStore =
-    InMemoryKodexAuthStore(
+internal suspend fun kodexAuthStore(): OpenAiAuthStore =
+    InMemoryOpenAiAuthStore(
         CodexCliStorage(testCodexDirectory()).readAuthOrNull().toSubscriptionAuthStateOrThrow(),
     )
 

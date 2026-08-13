@@ -1,7 +1,5 @@
 package io.github.stream29.kodex.openai.client
 
-import io.github.stream29.kodex.cli.auth.KodexAuthStore
-import io.github.stream29.kodex.cli.auth.KodexAuthState
 import io.github.stream29.kodex.openai.CodexAccountUsageResponse
 import io.github.stream29.kodex.openai.CodexRateLimitResetConsumeRequest
 import io.github.stream29.kodex.openai.CodexRateLimitResetConsumeResponse
@@ -11,6 +9,7 @@ import io.github.stream29.kodex.openai.ImageEditRequest
 import io.github.stream29.kodex.openai.ImageGenerationRequest
 import io.github.stream29.kodex.openai.ImageResponse
 import io.github.stream29.kodex.openai.ModelsResponse
+import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiErrorResponse
 import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.OpenAiResultSerializer
@@ -24,6 +23,7 @@ import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.SearchRequest
 import io.github.stream29.kodex.openai.SearchResponse
 import io.github.stream29.kodex.openai.throwIfFailure
+import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient as OpenAiClientContract
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.ktorclientext.ChatGptAccountId
@@ -68,7 +68,7 @@ import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
 
 public class OpenAiClient(
-    private val authStore: KodexAuthStore,
+    private val authStore: OpenAiAuthStore,
     private val config: OpenAiClientConfig = OpenAiClientConfig(),
 ) : OpenAiClientContract {
     private val httpClient: HttpClient = HttpClient {
@@ -259,11 +259,9 @@ public class OpenAiClient(
         expectedAccount: OpenAiSubscriptionAuthState? = null,
     ) {
         val account = when (val state = authStore.state.value) {
-            is KodexAuthState.Authenticated -> state.value
-            is KodexAuthState.Unavailable -> {
-                throw IllegalStateException(
-                    "OpenAI authentication is unavailable: " + state.message,
-                )
+            is OpenAiAuthState.Authenticated -> state.credentials
+            is OpenAiAuthState.Unavailable -> {
+                throw IllegalStateException(state.requestFailureMessage())
             }
         }
         check(expectedAccount == null || account == expectedAccount) {
@@ -275,6 +273,21 @@ public class OpenAiClient(
             ?.let { accountId -> headers[HttpHeaders.ChatGptAccountId] = accountId }
     }
 }
+
+private fun OpenAiAuthState.Unavailable.requestFailureMessage(): String =
+    "OpenAI authentication is unavailable: " +
+        when (this) {
+            OpenAiAuthState.Unavailable.NotLoaded -> "credentials have not been loaded."
+            OpenAiAuthState.Unavailable.CredentialsNotFound -> "credentials were not found."
+            OpenAiAuthState.Unavailable.UnsupportedAuthMode ->
+                "the selected credentials use an unsupported authentication mode."
+            OpenAiAuthState.Unavailable.InvalidCredentials ->
+                "the selected credentials are malformed or incomplete."
+            OpenAiAuthState.Unavailable.CredentialSourceUnavailable ->
+                "the credential source could not be read."
+            OpenAiAuthState.Unavailable.UnexpectedFailure ->
+                "credential loading failed unexpectedly."
+        }
 
 private const val RemoteCompactionV2Feature: String = "remote_compaction_v2"
 private const val HeaderCodexBetaFeatures: String = "x-codex-beta-features"

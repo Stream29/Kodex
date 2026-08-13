@@ -116,6 +116,6 @@ val codexAccountUsageSnapshotTest by testSuite {
                 CodexRateLimitResetAttempt("attempt"),
             ).snapshotOrNull(),
         )
-        assertNull(CodexAccountUsageState.Unavailable("unavailable").snapshotOrNull())
+        assertNull(CodexAccountUsageState.Unavailable.snapshotOrNull())
     }
 }

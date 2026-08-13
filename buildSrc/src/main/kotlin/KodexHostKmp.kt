@@ -1,7 +1,9 @@
 import org.gradle.api.Project
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.kotlin.dsl.kotlin
+import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
+import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
 
 internal fun Project.configureCoordinates() {
     group = "io.github.stream29"
@@ -10,7 +12,7 @@ internal fun Project.configureCoordinates() {
 
 internal fun KotlinMultiplatformExtension.configureCompiler() {
     explicitApi()
-    jvmToolchain(21)
+    jvmToolchain(26)
 
     compilerOptions {
         allWarningsAsErrors.set(true)
@@ -26,6 +28,21 @@ internal fun KotlinMultiplatformExtension.configureHostTargets() {
     mingwX64 {
         binaries.all {
             linkerOpts("-lole32")
+        }
+    }
+}
+
+@OptIn(ExperimentalKotlinGradlePluginApi::class)
+internal fun KotlinMultiplatformExtension.configureMosaicHierarchy() {
+    applyHierarchyTemplate(KotlinHierarchyTemplate.default) {
+        common {
+            group("mosaic") {
+                withJvm()
+                withLinuxX64()
+                withLinuxArm64()
+                withMacosArm64()
+                withMingwX64()
+            }
         }
     }
 }

@@ -7,6 +7,7 @@ import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
+import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.Reasoning
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -47,8 +48,8 @@ val openAiResponsesProbeJvmTest by testSuite(
             globalSettings = settings,
         )
         val auth = try {
-            (loader.state.value as? KodexAuthState.Authenticated)
-                ?.value
+            (loader.state.value as? OpenAiAuthState.Authenticated)
+                ?.credentials
                 ?: error("Kodex credentials could not be loaded: ${loader.state.value}")
         } finally {
             loader.close()

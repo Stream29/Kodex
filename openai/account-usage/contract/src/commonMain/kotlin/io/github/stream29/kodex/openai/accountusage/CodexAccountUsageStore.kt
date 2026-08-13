@@ -27,9 +27,7 @@ public interface CodexAccountUsageStore : AutoCloseable {
 /** Loading and operation state for the current Codex account usage snapshot. */
 public sealed interface CodexAccountUsageState {
     /** Authentication cannot currently provide an account for usage requests. */
-    public data class Unavailable(
-        public val message: String,
-    ) : CodexAccountUsageState
+    public data object Unavailable : CodexAccountUsageState
 
     /** A snapshot is being loaded; [previous] remains account-safe fallback data when present. */
     public data class Loading(

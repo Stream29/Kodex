@@ -1,14 +1,14 @@
 package io.github.stream29.kodex.openai.accountusage
 
-import io.github.stream29.kodex.cli.auth.KodexAuthState
-import io.github.stream29.kodex.cli.auth.KodexAuthStore
 import io.github.stream29.kodex.openai.CodexAccountUsageResponse
 import io.github.stream29.kodex.openai.CodexRateLimitResetConsumeCode
 import io.github.stream29.kodex.openai.CodexRateLimitResetConsumeRequest
 import io.github.stream29.kodex.openai.CodexRateLimitResetCreditsResponse
 import io.github.stream29.kodex.openai.CodexTokenUsageProfile
 import io.github.stream29.kodex.openai.CodexTokenUsageProfileStats
+import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
+import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.getOrThrow
 import kotlinx.coroutines.CancellationException
@@ -31,7 +31,7 @@ import kotlin.uuid.Uuid
 
 internal class CodexAccountUsageStoreImpl(
     private val client: OpenAiClient,
-    private val authStore: KodexAuthStore,
+    private val authStore: OpenAiAuthStore,
 ) : CodexAccountUsageStore {
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val operationMutex = Mutex()
@@ -40,7 +40,7 @@ internal class CodexAccountUsageStoreImpl(
 
     override val state: StateFlow<CodexAccountUsageState>
         field = MutableStateFlow<CodexAccountUsageState>(
-            CodexAccountUsageState.Unavailable("Codex account usage has not been loaded."),
+            CodexAccountUsageState.Unavailable,
         )
 
     init {
@@ -48,21 +48,21 @@ internal class CodexAccountUsageStoreImpl(
             var observedAccountKey: AccountKey? = null
             var observedAuth = false
             authStore.state.collectLatest { authState ->
-                val accountKey = (authState as? KodexAuthState.Authenticated)
-                    ?.value
+                val accountKey = (authState as? OpenAiAuthState.Authenticated)
+                    ?.credentials
                     ?.accountKey()
                 if (!observedAuth || accountKey != observedAccountKey) {
                     observedAuth = true
                     observedAccountKey = accountKey
                     state.value = when (authState) {
-                        is KodexAuthState.Authenticated -> CodexAccountUsageState.Loading()
-                        is KodexAuthState.Unavailable ->
-                            CodexAccountUsageState.Unavailable(authState.message)
+                        is OpenAiAuthState.Authenticated -> CodexAccountUsageState.Loading()
+                        is OpenAiAuthState.Unavailable ->
+                            CodexAccountUsageState.Unavailable
                     }
                 }
                 when (authState) {
-                    is KodexAuthState.Authenticated -> refresh(authState.value, accountKey!!)
-                    is KodexAuthState.Unavailable -> operationMutex.withLock {
+                    is OpenAiAuthState.Authenticated -> refresh(authState.credentials, accountKey!!)
+                    is OpenAiAuthState.Unavailable -> operationMutex.withLock {
                         snapshotAccountKey = null
                         attemptAccountKeys.clear()
                     }
@@ -73,11 +73,11 @@ internal class CodexAccountUsageStoreImpl(
 
     override suspend fun refresh() {
         when (val authState = authStore.state.value) {
-            is KodexAuthState.Authenticated ->
-                refresh(authState.value, authState.value.accountKey())
+            is OpenAiAuthState.Authenticated ->
+                refresh(authState.credentials, authState.credentials.accountKey())
 
-            is KodexAuthState.Unavailable -> {
-                state.value = CodexAccountUsageState.Unavailable(authState.message)
+            is OpenAiAuthState.Unavailable -> {
+                state.value = CodexAccountUsageState.Unavailable
                 operationMutex.withLock {
                     snapshotAccountKey = null
                     attemptAccountKeys.clear()
@@ -248,28 +248,28 @@ internal class CodexAccountUsageStoreImpl(
 
     private fun requireAuthenticated(): OpenAiSubscriptionAuthState =
         when (val authState = authStore.state.value) {
-            is KodexAuthState.Authenticated -> authState.value
-            is KodexAuthState.Unavailable ->
-                throw IllegalStateException("OpenAI authentication is unavailable: ${authState.message}")
+            is OpenAiAuthState.Authenticated -> authState.credentials
+            is OpenAiAuthState.Unavailable ->
+                throw IllegalStateException(authState.usageFailureMessage())
         }
 
     private fun currentAccountKey(): AccountKey? =
-        (authStore.state.value as? KodexAuthState.Authenticated)?.value?.accountKey()
+        (authStore.state.value as? OpenAiAuthState.Authenticated)?.credentials?.accountKey()
 
     private fun transitionToCurrentAuth() {
         when (val authState = authStore.state.value) {
-            is KodexAuthState.Authenticated -> {
-                if (authState.value.accountKey() != snapshotAccountKey) {
+            is OpenAiAuthState.Authenticated -> {
+                if (authState.credentials.accountKey() != snapshotAccountKey) {
                     snapshotAccountKey = null
                     attemptAccountKeys.clear()
                     state.value = CodexAccountUsageState.Loading()
                 }
             }
 
-            is KodexAuthState.Unavailable -> {
+            is OpenAiAuthState.Unavailable -> {
                 snapshotAccountKey = null
                 attemptAccountKeys.clear()
-                state.value = CodexAccountUsageState.Unavailable(authState.message)
+                state.value = CodexAccountUsageState.Unavailable
             }
         }
     }
@@ -278,7 +278,7 @@ internal class CodexAccountUsageStoreImpl(
 /** Creates a live, account-isolated Codex usage store. */
 public fun CodexAccountUsageStore(
     client: OpenAiClient,
-    authStore: KodexAuthStore,
+    authStore: OpenAiAuthStore,
 ): CodexAccountUsageStore =
     CodexAccountUsageStoreImpl(
         client = client,
@@ -399,6 +399,21 @@ private fun Throwable.usageFailureMessage(fallback: String): String =
         ?.let { detail -> "$fallback $detail" }
         ?: fallback
 
+private fun OpenAiAuthState.Unavailable.usageFailureMessage(): String =
+    "OpenAI authentication is unavailable: " +
+        when (this) {
+            OpenAiAuthState.Unavailable.NotLoaded -> "credentials have not been loaded."
+            OpenAiAuthState.Unavailable.CredentialsNotFound -> "credentials were not found."
+            OpenAiAuthState.Unavailable.UnsupportedAuthMode ->
+                "the selected credentials use an unsupported authentication mode."
+            OpenAiAuthState.Unavailable.InvalidCredentials ->
+                "the selected credentials are malformed or incomplete."
+            OpenAiAuthState.Unavailable.CredentialSourceUnavailable ->
+                "the credential source could not be read."
+            OpenAiAuthState.Unavailable.UnexpectedFailure ->
+                "credential loading failed unexpectedly."
+        }
+
 private fun String.toInstantOrNull(): Instant? =
     runCatching { Instant.parse(this) }.getOrNull()
 
@@ -410,13 +425,13 @@ private fun OpenAiSubscriptionAuthState.accountKey(): AccountKey =
         },
     )
 
-private fun KodexAuthState.matches(
+private fun OpenAiAuthState.matches(
     expectedAccount: OpenAiSubscriptionAuthState,
     expectedKey: AccountKey,
 ): Boolean =
-    this is KodexAuthState.Authenticated &&
-        value.accountKey() == expectedKey &&
-        value.accessToken == expectedAccount.accessToken
+    this is OpenAiAuthState.Authenticated &&
+        credentials.accountKey() == expectedKey &&
+        credentials.accessToken == expectedAccount.accessToken
 
 private data class AccountKey(
     val accountId: String?,

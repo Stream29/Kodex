@@ -1,0 +1,79 @@
+package io.github.stream29.kodex.app.application.contract
+
+import io.github.stream29.kodex.app.session.contract.SessionViewModel
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
+import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
+import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
+import kotlinx.coroutines.flow.StateFlow
+
+/**
+ * The one application-level popup surface.
+ *
+ * Each open variant is a distinct popup instance with reference identity and a
+ * directly renderable child ViewModel. A new instance must be created for every
+ * opening, including reopening the same kind of popup. Exact-handle checks use
+ * referential identity rather than structural equality.
+ */
+public sealed interface ApplicationPopupState {
+    public data object Closed : ApplicationPopupState
+
+    /** Exact open handle accepted by [ApplicationViewModel.dismissPopup]. */
+    public sealed interface Open : ApplicationPopupState
+
+    public class SessionCatalog(
+        public val viewModel: SessionCatalogViewModel,
+    ) : Open
+
+    public class Settings(
+        public val target: SessionViewModel,
+        public val viewModel: SettingsViewModel,
+    ) : Open
+
+    public class RenameSession(
+        public val viewModel: RenameSessionPopupViewModel,
+    ) : Open
+
+    public class DeleteSession(
+        public val viewModel: DeleteSessionPopupViewModel,
+    ) : Open
+
+    public class Login(
+        public val viewModel: OpenAiLoginViewModel,
+    ) : Open
+}
+
+/** Editable state and command boundary for one Rename Session popup. */
+public interface RenameSessionPopupViewModel : AutoCloseable {
+    public val target: SessionViewModel
+    public val draftName: StateFlow<String>
+
+    public fun updateDraftName(name: String): Unit
+
+    /**
+     * Trims and applies the latest [draftName] to [target].
+     *
+     * A successful rename does not dismiss the parent popup. The frontend
+     * dismisses the exact open handle after this command returns.
+     */
+    public suspend fun rename(): Unit
+
+    override fun close(): Unit
+}
+
+/** Captured target and command boundary for one Delete Session popup. */
+public interface DeleteSessionPopupViewModel : AutoCloseable {
+    public val sessionIndex: Int
+
+    /** Root Session title captured when the popup opened, when one is available. */
+    public val threadName: String?
+
+    /**
+     * Deletes the captured persisted Session.
+     *
+     * Returns false when the captured target no longer exists. A successful
+     * deletion does not dismiss the parent popup.
+     */
+    public suspend fun delete(): Boolean
+
+    override fun close(): Unit
+}
