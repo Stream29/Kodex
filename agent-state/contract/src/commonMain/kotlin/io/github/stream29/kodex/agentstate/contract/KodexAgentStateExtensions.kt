@@ -6,7 +6,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
-import io.github.stream29.kodex.openai.ModeKind
 
 /**
  * Replaces only the thread name in the latest settings snapshot.
@@ -19,9 +18,8 @@ public suspend fun KodexAgentState.updateThreadName(threadName: String): Int {
 /**
  * Updates the active plan and completes its pending `update_plan` call.
  *
- * [completed] must match a pending `update_plan` call. Plan mode rejects this
- * operation because Codex does not expose `update_plan` in that mode. The
- * settings update and tool completion are separate AgentState operations.
+ * [completed] must match a pending `update_plan` call. The settings update and
+ * tool completion are separate AgentState operations.
  */
 public suspend fun KodexAgentState.appendPlanUpdate(completed: StablePlanUpdate): Int {
     val pending = (state.value as? KodexAgentStateValue.ToolPending)
@@ -35,9 +33,6 @@ public suspend fun KodexAgentState.appendPlanUpdate(completed: StablePlanUpdate)
     }
 
     val currentSettings = storage.settings[latestIndex.value]
-    require(currentSettings.collaborationMode != ModeKind.Plan) {
-        "update_plan is a TODO/checklist tool and is not allowed in Plan mode."
-    }
     updateSettings(currentSettings.copy(plan = completed.arguments))
     return completeToolCall(completed)
 }

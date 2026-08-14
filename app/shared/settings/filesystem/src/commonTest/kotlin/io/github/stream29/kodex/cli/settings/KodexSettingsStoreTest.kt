@@ -4,7 +4,7 @@ import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.hook.contract.HookConfiguration
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
-import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ServiceTier
@@ -282,7 +282,7 @@ val kodexSettingsStoreTest by testSuite(
                     newLineKey = NewLineKey.Enter,
                     newSession = current.newSession.copy(
                         model = OpenAiModelId("override-model"),
-                        mode = ModeKind.Plan,
+                        agentMode = AgentMode.Multi,
                     ),
                     sessionTitle = SessionTitleSettings(
                         enabled = false,
@@ -294,11 +294,11 @@ val kodexSettingsStoreTest by testSuite(
             }
 
             val yaml = SystemCoroutineFileSystem.readString(globalSettingsPath(root))
-            assertTrue(yaml.contains("schema_version: 2"), yaml)
+            assertTrue(yaml.contains("schema_version: 3"), yaml)
             assertTrue(yaml.contains("auth_source: kodex"), yaml)
             assertTrue(yaml.contains("shell: /custom/bin/bash"), yaml)
             assertTrue(yaml.contains("model: override-model"), yaml)
-            assertTrue(yaml.contains("mode: plan"), yaml)
+            assertTrue(yaml.contains("agent_mode: multi"), yaml)
             assertTrue(yaml.contains("session_title:"), yaml)
             assertTrue(yaml.contains("enabled: false"), yaml)
             assertTrue(yaml.contains("model: title-model"), yaml)

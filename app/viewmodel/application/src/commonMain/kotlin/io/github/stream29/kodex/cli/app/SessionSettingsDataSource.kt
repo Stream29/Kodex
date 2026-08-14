@@ -66,8 +66,8 @@ internal class ContractSessionSettingsDataSource(
         if (configuration.serviceTier != current.serviceTier) {
             target.updateServiceTier(configuration.serviceTier)
         }
-        if (configuration.mode != current.collaborationMode) {
-            target.updateMode(configuration.mode)
+        if (configuration.agentMode != current.agentMode) {
+            target.updateAgentMode(configuration.agentMode)
         }
         publish(configurationOverride = configuration)
         true
@@ -142,5 +142,5 @@ private fun KodexAgentSettings.toConfiguration(): SessionSettingsConfiguration =
         workingDirectory = cwd,
         reasoningEffort = reasoning.effort,
         serviceTier = serviceTier,
-        mode = collaborationMode,
+        agentMode = agentMode,
     )

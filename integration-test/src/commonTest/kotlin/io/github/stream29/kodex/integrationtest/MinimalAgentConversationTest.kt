@@ -10,7 +10,8 @@ import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
 import io.github.stream29.kodex.agentsession.contract.AgentPathResolver
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
-import io.github.stream29.kodex.agentcontext.prefix.render.render as renderCollaborationMode
+import io.github.stream29.kodex.agentcontext.prefix.render.renderMultiAgentMode
+import io.github.stream29.kodex.agentcontext.prefix.render.renderPlanningInstructions
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.RequestFinish
@@ -28,13 +29,13 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequest
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.hook.contract.NoOpKodexHooks
 import io.github.stream29.kodex.mcp.contract.McpService
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.FunctionCallOutputContentItem
 import io.github.stream29.kodex.openai.ImageDetail
 import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.kodex.openai.MessageRole
-import io.github.stream29.kodex.openai.ModeKind
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.ModelsResponse
@@ -160,14 +161,23 @@ private data object IntegrationShellSettings : ShellSettings {
     override val shell: Shell = Shell.default
 }
 
-private val defaultCollaborationInput: ResponseItem.Message =
-    ResponseItem.Message(
-        role = MessageRole.Developer,
-        content = listOf(ContentItem.InputText(ModeKind.Default.renderCollaborationMode())),
+private val defaultTransientInputs: List<ResponseItem.Message> =
+    listOf(
+        ResponseItem.Message(
+            role = MessageRole.Developer,
+            content = listOf(ContentItem.InputText(renderPlanningInstructions())),
+        ),
+        ResponseItem.Message(
+            role = MessageRole.Developer,
+            content = listOf(ContentItem.InputText(AgentMode.Single.renderMultiAgentMode())),
+        ),
     )
 
 private fun requestInput(vararg durableItems: ResponseItem): List<ResponseItem> =
-    listOf(defaultCollaborationInput, *durableItems)
+    buildList {
+        addAll(defaultTransientInputs)
+        addAll(durableItems)
+    }
 
 private suspend fun OpenAiClient.collectResponseProbe(input: List<ResponseItem>): List<ResponsesStreamEvent> =
     createResponse(

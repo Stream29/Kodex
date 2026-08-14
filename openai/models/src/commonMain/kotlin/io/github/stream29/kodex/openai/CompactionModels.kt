@@ -29,8 +29,8 @@ import kotlin.uuid.Uuid
  * @property turnId UUIDv7 identity of the active logical user turn. Accepting
  * a new user message is the only operation that rotates it; compaction and
  * other state transitions retain the current value.
- * @property collaborationMode Active collaboration behavior. It is independent
- * of the task checklist and current goal.
+ * @property agentMode Whether this Agent may delegate work to subagents. It is
+ * independent of the task checklist and current goal.
  * @property plan Full replacement `update_plan` snapshot. An empty plan means
  * the thread has no active checklist steps.
  * @property goal Nullable because a thread may not have a current goal; `null`
@@ -56,7 +56,7 @@ public data class KodexAgentSettings(
     public val autoCompactionTokenLimit: Long? = null,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val turnId: String = Uuid.generateV7().toString(),
-    public val collaborationMode: ModeKind = ModeKind.Default,
+    public val agentMode: AgentMode = AgentMode.Single,
     public val plan: UpdatePlanArgs = UpdatePlanArgs(plan = emptyList()),
     public val goal: ThreadGoal? = null,
     public val installationId: String? = null,

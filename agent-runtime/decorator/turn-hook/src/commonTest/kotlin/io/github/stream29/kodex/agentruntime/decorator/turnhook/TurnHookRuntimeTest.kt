@@ -242,7 +242,8 @@ val turnHookRuntimeTest by testSuite {
                 createResponse {
                     flowOf(
                         ResponsesStreamEvent.OutputItemDone(0, assistantMessage("Choose a scope.")),
-                        ResponsesStreamEvent.OutputItemDone(1, requestUserInputCall()),
+                        ResponsesStreamEvent.OutputItemDone(1, assistantMessage("  ")),
+                        ResponsesStreamEvent.OutputItemDone(2, requestUserInputCall()),
                         ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
                     )
                 }
@@ -280,16 +281,28 @@ val turnHookRuntimeTest by testSuite {
         )
     }
 
-    test("empty stop continuation leaves request user input pending") {
+    test("request questions supply stop text and empty continuation remains pending") {
         var requestCount = 0
-        var stopCalls = 0
+        val stopRequests = mutableListOf<StopRequest>()
         val storage = InMemoryKodexAgentStorage(testSettings())
         val state = KodexAgentState(
             client = mockOpenAiClient {
                 createResponse {
                     requestCount += 1
                     flowOf(
-                        ResponsesStreamEvent.OutputItemDone(0, requestUserInputCall()),
+                        ResponsesStreamEvent.OutputItemDone(
+                            0,
+                            requestUserInputCall(
+                                arguments = """
+                                    {
+                                      "questions": [
+                                        {"id": "scope", "header": "Scope", "question": "Which scope?"},
+                                        {"id": "target", "header": "Target", "question": "Which target?"}
+                                      ]
+                                    }
+                                """.trimIndent(),
+                            ),
+                        ),
                         ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
                     )
                 }
@@ -306,8 +319,8 @@ val turnHookRuntimeTest by testSuite {
             .turnHookRuntime(
                 logger = TestLogger,
                 hooks = RecordingTurnHooks(
-                    stop = {
-                        stopCalls += 1
+                    stop = { request ->
+                        stopRequests += request
                         StopResult.Continue(emptyList())
                     },
                 ),
@@ -317,7 +330,8 @@ val turnHookRuntimeTest by testSuite {
         runtime.resume()
 
         assertEquals(1, requestCount)
-        assertEquals(1, stopCalls)
+        assertEquals(1, stopRequests.size)
+        assertEquals("Which scope?\nWhich target?", stopRequests.single().lastAssistantMessage)
         assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
         assertEquals(
             emptyList(),
@@ -376,7 +390,10 @@ val turnHookRuntimeTest by testSuite {
 
         assertEquals(2, requests.size)
         assertEquals(listOf(false, true), stopRequests.map(StopRequest::stopHookActive))
-        assertEquals(listOf(null, "continued"), stopRequests.map(StopRequest::lastAssistantMessage))
+        assertEquals(
+            listOf("Which scope?", "continued"),
+            stopRequests.map(StopRequest::lastAssistantMessage),
+        )
         assertEquals(stopRequests[0].context.turnId, stopRequests[1].context.turnId)
         val completed = storage.stableEvents()
             .filterIsInstance<StableRequestUserInputToolEvent>()
@@ -613,10 +630,13 @@ private fun assistantMessage(text: String): ResponseItem.Message =
         content = listOf(ContentItem.OutputText(text)),
     )
 
-private fun requestUserInputCall(): ResponseItem.FunctionCall =
+private fun requestUserInputCall(
+    arguments: String =
+        """{"questions":[{"id":"scope","header":"Scope","question":"Which scope?"}]}""",
+): ResponseItem.FunctionCall =
     ResponseItem.FunctionCall(
         name = "request_user_input",
-        arguments = """{"questions":[{"id":"scope","header":"Scope","question":"Which scope?"}]}""",
+        arguments = arguments,
         callId = "call_request_user_input",
     )
 

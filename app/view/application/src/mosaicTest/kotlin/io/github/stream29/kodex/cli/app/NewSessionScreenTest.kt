@@ -15,6 +15,35 @@ import kotlin.test.assertEquals
 
 class NewSessionScreenTest {
     @Test
+    fun longComposerUsesItsBoundedRowsAndKeepsTheCursorTailVisible() = runTest {
+        val fixture = SessionViewModelTestFixture.create(this)
+        try {
+            val composer = fixture.newSession("New Session").composer
+            val text = "one\ntwo\nthree\nfour"
+            composer.update(text = text, cursorOffset = text.length)
+
+            runMosaicTest {
+                val snapshot = setContentAndSnapshot {
+                    NewSessionContent(
+                        composerViewModel = composer,
+                        columns = 10,
+                        rows = 4,
+                        newLineKey = NewLineKey.ShiftEnter,
+                        onSubmit = {},
+                    )
+                }
+
+                assertEquals(
+                    "----------\n  two\n  three\n  four",
+                    snapshot,
+                )
+            }
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
     fun submitCallbackRetainsTheExactComposerRevision() = runTest {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
@@ -48,6 +77,71 @@ class NewSessionScreenTest {
                 sendKeyEvent(KeyboardEvent(13))
                 awaitSnapshot()
                 assertEquals(1, submittedRevision)
+            }
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun composerStateEchoPreservesTheFrontendSelection() = runTest {
+        val fixture = SessionViewModelTestFixture.create(this)
+        try {
+            val composer = fixture.newSession("New Session").composer
+
+            runMosaicTest {
+                setContentAndSnapshot {
+                    NewSessionContent(
+                        composerViewModel = composer,
+                        columns = 20,
+                        rows = 8,
+                        newLineKey = NewLineKey.ShiftEnter,
+                        onSubmit = {},
+                    )
+                }
+
+                sendPasteEvent(PasteEvent("abc"))
+                awaitSnapshot()
+                repeat(2) {
+                    sendKeyEvent(
+                        KeyboardEvent(
+                            codepoint = KeyboardEvent.Left,
+                            modifiers = KeyboardEvent.ModifierShift,
+                        ),
+                    )
+                    awaitSnapshot()
+                }
+                sendKeyEvent(KeyboardEvent(codepoint = 'X'.code))
+                awaitSnapshot()
+
+                assertEquals("aX", composer.state.value.text)
+                assertEquals(2, composer.state.value.cursorOffset)
+
+                sendKeyEvent(
+                    KeyboardEvent(
+                        codepoint = 'z'.code,
+                        modifiers = KeyboardEvent.ModifierCtrl,
+                    ),
+                )
+                awaitSnapshot()
+                assertEquals("abc", composer.state.value.text)
+                assertEquals(1, composer.state.value.cursorOffset)
+
+                sendKeyEvent(KeyboardEvent(codepoint = 'Y'.code))
+                awaitSnapshot()
+                assertEquals("aY", composer.state.value.text)
+
+                composer.update(text = "external", cursorOffset = 8)
+                awaitSnapshot()
+                sendKeyEvent(
+                    KeyboardEvent(
+                        codepoint = 'z'.code,
+                        modifiers = KeyboardEvent.ModifierCtrl,
+                    ),
+                )
+                awaitSnapshot()
+                assertEquals("external", composer.state.value.text)
+                assertEquals(8, composer.state.value.cursorOffset)
             }
         } finally {
             fixture.close()

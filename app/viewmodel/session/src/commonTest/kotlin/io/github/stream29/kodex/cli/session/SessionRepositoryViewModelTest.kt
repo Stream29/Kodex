@@ -4,15 +4,21 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.contract.initialize
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.time.Instant
 
 val sessionRepositoryViewModelTest by testSuite {
-    test("catalog stays lazy and orders lightweight entries by activity") {
+    test("catalog publishes loading and orders lightweight entries by activity") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val oldest = repository.create()
@@ -26,17 +32,31 @@ val sessionRepositoryViewModelTest by testSuite {
             val store = testSessionViewModelRegistry(repository, this)
             val catalog = createSessionCatalogViewModelFactory(repository, this).create()
             try {
-                assertEquals(emptyList(), catalog.sessions.value)
+                assertEquals(SessionCatalogState.Unloaded, catalog.state.value)
+                val observedStates = mutableListOf<SessionCatalogState>()
+                val stateCollector = launch(Dispatchers.Unconfined) {
+                    catalog.state.take(3).toList(observedStates)
+                }
 
                 catalog.refresh()
+                stateCollector.join()
 
+                val loaded = assertIs<SessionCatalogState.Loaded>(catalog.state.value)
                 assertEquals(
                     listOf(newest, oldest),
-                    catalog.sessions.value.map { entry -> entry.sessionIndex },
+                    loaded.sessions.map { entry -> entry.sessionIndex },
                 )
                 assertEquals(
                     listOf("Newest", "Oldest"),
-                    catalog.sessions.value.map { entry -> entry.threadName },
+                    loaded.sessions.map { entry -> entry.threadName },
+                )
+                assertEquals(
+                    listOf(
+                        SessionCatalogState.Unloaded,
+                        SessionCatalogState.Loading,
+                        loaded,
+                    ),
+                    observedStates,
                 )
             } finally {
                 catalog.close()

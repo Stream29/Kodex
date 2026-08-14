@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.agentstate.impl
 
-import io.github.stream29.kodex.agentcontext.prefix.render.render as renderCollaborationMode
+import io.github.stream29.kodex.agentcontext.prefix.render.renderPlanningInstructions
 import io.github.stream29.kodex.agentcontext.prefix.render.renderMultiAgentMode
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentcontext.prefix.impl.AgentContextPrefixResolver
@@ -164,13 +164,13 @@ private class KodexAgentStateImpl(
 
             val settings = storage.settings[snapshotIndex]
             val durableInput = storage.modelInputAt(snapshotIndex)
-            val collaborationContext = ResponseItem.Message(
+            val planningContext = ResponseItem.Message(
                 role = MessageRole.Developer,
-                content = listOf(ContentItem.InputText(settings.collaborationMode.renderCollaborationMode())),
+                content = listOf(ContentItem.InputText(renderPlanningInstructions())),
             )
             val multiAgentContext = ResponseItem.Message(
                 role = MessageRole.Developer,
-                content = listOf(ContentItem.InputText(settings.reasoning.effort.renderMultiAgentMode())),
+                content = listOf(ContentItem.InputText(settings.agentMode.renderMultiAgentMode())),
             )
             val contextPrefix = contextPrefixResolver.resolve(settings).render()
             val checkpoint = storage.compaction[snapshotIndex]
@@ -188,7 +188,7 @@ private class KodexAgentStateImpl(
 
             client.createResponse(
                 request = settings.toResponsesApiRequest(
-                    input = listOf(collaborationContext, multiAgentContext) + contextPrefix + durableInput,
+                    input = listOf(planningContext, multiAgentContext) + contextPrefix + durableInput,
                     clientMetadata = clientMetadata,
                     tools = mcpService.visibleToolSpecs(settings),
                 ),

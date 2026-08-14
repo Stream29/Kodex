@@ -5,7 +5,7 @@ import io.github.stream29.kodex.hook.contract.HookConfiguration
 import io.github.stream29.kodex.hook.contract.HookSettings
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpSettings
-import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ServiceTier
@@ -59,7 +59,7 @@ public data class KodexNewSessionSettings(
     public val model: OpenAiModelId = OpenAiModelId("gpt-5.6-sol"),
     public val reasoningEffort: ReasoningEffort = ReasoningEffort.Medium,
     public val serviceTier: ServiceTier = ServiceTier.Default,
-    public val mode: ModeKind = ModeKind.Default,
+    public val agentMode: AgentMode = AgentMode.Single,
 )
 
 /**

@@ -40,7 +40,7 @@ import kotlin.time.Instant
  * @property compaction Sparse checkpoint timeline. `compaction[index]` returns
  * the checkpoint active for the snapshot at `index`.
  * @property settings Sparse agent-thread settings timeline. `settings[index]`
- * returns the model request configuration, collaboration mode, plan, and goal
+ * returns the model request configuration, agent mode, plan, and goal
  * active for the snapshot at `index`.
  * @property timestamp Sparse timestamp timeline. Entries record the time
  * associated with the state index where they are stored.

@@ -3,19 +3,14 @@ package io.github.stream29.kodex.openai
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/**
- * Visible collaboration-mode discriminator for one agent thread.
- *
- * This mirrors Rust `ModeKind`. Kodex intentionally models only the two
- * user-visible modes.
- */
+/** Selects whether one Agent may delegate work to subagents. */
 @Serializable
-public enum class ModeKind {
-    @SerialName("default")
-    Default,
+public enum class AgentMode {
+    @SerialName("single")
+    Single,
 
-    @SerialName("plan")
-    Plan,
+    @SerialName("multi")
+    Multi,
 }
 
 /**

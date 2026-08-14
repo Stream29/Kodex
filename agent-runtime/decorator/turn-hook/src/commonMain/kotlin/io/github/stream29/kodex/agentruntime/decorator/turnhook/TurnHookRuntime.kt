@@ -86,7 +86,8 @@ public class TurnHookRuntime internal constructor(
                         StopRequest(
                             context = context,
                             stopHookActive = stopHookActive,
-                            lastAssistantMessage = lastAssistantMessage,
+                            lastAssistantMessage =
+                                lastAssistantMessage ?: pendingRequestUserInput?.questionTextOrNull(),
                         ),
                     )
                 }
@@ -152,13 +153,12 @@ public class TurnHookRuntime internal constructor(
     private suspend fun latestAssistantMessageSince(historyStartIndex: Int): String? =
         storage.stable
             .indexesDescending(latestIndex.value)
-            .firstOrNull { index ->
-                index > historyStartIndex &&
-                    storage.stable[index] is StableCleanEvent.AssistantMessage
+            .takeWhile { index -> index > historyStartIndex }
+            .map { index ->
+                (storage.stable[index] as? StableCleanEvent.AssistantMessage)
+                    ?.assistantOutputText()
             }
-            ?.let { index ->
-                (storage.stable[index] as StableCleanEvent.AssistantMessage).assistantOutputText()
-            }
+            .firstOrNull { text -> text != null }
 }
 
 /**
@@ -195,14 +195,22 @@ private fun List<ContentItem>.userPromptText(): String =
 
 private fun StableCleanEvent.AssistantMessage.assistantOutputText(): String? {
     val output = content.filterIsInstance<ContentItem.OutputText>()
-    return output.takeIf(List<ContentItem.OutputText>::isNotEmpty)
-        ?.joinToString(separator = "", transform = ContentItem.OutputText::text)
+    return output
+        .joinToString(separator = "", transform = ContentItem.OutputText::text)
+        .takeIf(String::isNotBlank)
 }
 
 private fun KodexAgentStateValue.singleRequestUserInputOrNull(): PendingRequestUserInputToolEvent? =
     (this as? KodexAgentStateValue.ToolPending)
         ?.events
         ?.singleOrNull() as? PendingRequestUserInputToolEvent
+
+private fun PendingRequestUserInputToolEvent.questionTextOrNull(): String? =
+    arguments.questions
+        .map { question -> question.question }
+        .filter(String::isNotBlank)
+        .joinToString(separator = "\n")
+        .takeIf(String::isNotEmpty)
 
 private const val RequestUserInputCancelledByStopHook: String =
     "request_user_input cancelled by Stop hook"

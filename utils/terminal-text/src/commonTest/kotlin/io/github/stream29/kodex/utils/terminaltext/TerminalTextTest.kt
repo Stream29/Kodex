@@ -11,6 +11,16 @@ val terminalTextTest by testSuite {
         assertEquals(0, "\u0301".terminalCellWidth())
     }
 
+    test("exposes grapheme-preserving source and cell boundaries") {
+        assertEquals(
+            listOf(
+                TerminalCellSegment(sourceStart = 0, sourceEnd = 2, cellWidth = 1),
+                TerminalCellSegment(sourceStart = 2, sourceEnd = 7, cellWidth = 2),
+            ),
+            "e\u0301👩‍🔬".terminalCellSegments(),
+        )
+    }
+
     test("takes prefixes without splitting grapheme clusters") {
         assertEquals("A你", "A你B".takeFirstFittingTerminalWidth(3))
         assertEquals("e\u0301", "e\u0301x".takeFirstFittingTerminalWidth(1))

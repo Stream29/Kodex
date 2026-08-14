@@ -4,7 +4,7 @@ import io.github.stream29.kodex.app.settings.contract.NewSessionSettingsState
 import io.github.stream29.kodex.app.settings.contract.NewSessionSettingsViewModel
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettingsStore
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
-import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -67,8 +67,8 @@ internal class NewSessionSettingsViewModelImpl(
         update(expectedRevision) { copy(serviceTier = serviceTier) }
     }
 
-    override fun updateMode(expectedRevision: Long, mode: ModeKind) {
-        update(expectedRevision) { copy(mode = mode) }
+    override fun updateAgentMode(expectedRevision: Long, agentMode: AgentMode) {
+        update(expectedRevision) { copy(agentMode = agentMode) }
     }
 
     override fun close() {

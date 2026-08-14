@@ -35,7 +35,7 @@ import io.github.stream29.kodex.cli.sessiontitle.AgentTitleGeneration
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -252,8 +252,8 @@ internal class AgentRuntimeViewModel(
         updateSettings { current -> current.copy(serviceTier = serviceTier) }
     }
 
-    override suspend fun updateMode(mode: ModeKind) {
-        updateSettings { current -> current.copy(collaborationMode = mode) }
+    override suspend fun updateAgentMode(agentMode: AgentMode) {
+        updateSettings { current -> current.copy(agentMode = agentMode) }
     }
 
     override suspend fun updateModelConfiguration(

@@ -3,8 +3,8 @@ package io.github.stream29.kodex.agentstate.tool
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.ModeKind
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
 import io.github.stream29.kodex.tool.currenttime.CurrentTimeTools
@@ -28,7 +28,6 @@ private val DirectToolSpecs: List<ToolSpec> = buildList {
     add(UnifiedExecTools.execCommandSpec)
     add(UnifiedExecTools.writeStdinSpec)
     add(WebRunTools.spec)
-    addAll(MultiAgentTools.specs)
 }
 
 private val LocalDeferredToolSearchDocuments: List<ToolSearchDocument> =
@@ -49,9 +48,10 @@ public fun McpService.visibleToolSpecs(
         .toDeferredToolSearchDocuments()
     return buildList {
         addAll(DirectToolSpecs)
-        if (settings.collaborationMode == ModeKind.Default) {
-            add(PlanTools.spec)
+        if (settings.agentMode == AgentMode.Multi) {
+            addAll(MultiAgentTools.specs)
         }
+        add(PlanTools.spec)
         add(RequestUserInputTools.spec)
         if (deferredDocuments.isNotEmpty()) {
             add(

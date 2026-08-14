@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.app.settings.contract
 
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
-import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ServiceTier
@@ -31,7 +31,7 @@ public interface NewSessionSettingsViewModel : AutoCloseable {
     public fun updateModel(expectedRevision: Long, model: OpenAiModelId): Unit
     public fun updateReasoningEffort(expectedRevision: Long, reasoningEffort: ReasoningEffort): Unit
     public fun updateServiceTier(expectedRevision: Long, serviceTier: ServiceTier): Unit
-    public fun updateMode(expectedRevision: Long, mode: ModeKind): Unit
+    public fun updateAgentMode(expectedRevision: Long, agentMode: AgentMode): Unit
 
     override fun close(): Unit
 }

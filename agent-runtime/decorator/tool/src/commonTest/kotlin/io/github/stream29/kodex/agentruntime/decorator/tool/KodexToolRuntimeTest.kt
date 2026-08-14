@@ -17,7 +17,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEve
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
@@ -36,7 +35,6 @@ import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
-import io.github.stream29.kodex.openai.ModeKind
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.Response
@@ -693,42 +691,6 @@ val kodexToolRuntimeTest by testSuite {
         assertEquals(plan, completed.arguments)
     }
 
-    test("update plan remains unavailable in plan mode") {
-        val originalPlan = UpdatePlanArgs(plan = emptyList())
-        val call = ResponseItem.FunctionCall(
-            name = PlanTools.Name,
-            arguments = OpenAiJsonCodec.encodeToString(
-                UpdatePlanArgs(
-                    plan = listOf(PlanItemArg("Do not store", StepStatus.Pending)),
-                ),
-            ),
-            callId = "call_plan",
-        )
-        val mcpService = TestMcpService()
-        val fixture = testStateWithCalls(
-            mcpService = mcpService,
-            settings = KodexAgentSettings(
-                model = OpenAiModelId("test-model"),
-                turnId = "turn_started",
-                collaborationMode = ModeKind.Plan,
-                plan = originalPlan,
-            ),
-            calls = arrayOf(call),
-        )
-
-        RequestOnlyRuntime(fixture.state)
-            .testToolRuntime(mcpService, NoOpToolHooks)
-            .resume()
-
-        assertEquals(originalPlan, fixture.state.storage.settings.latestValue().plan)
-        val completed = fixture.state.storage.stable.indexes().toList()
-            .map { index -> fixture.state.storage.stable[index] }
-            .filterIsInstance<StableTextToolEvent>()
-            .single()
-        assertTrue(
-            completed.result.contains("not allowed in Plan mode"),
-        )
-    }
     }
 }
 
