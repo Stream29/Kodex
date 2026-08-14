@@ -12,9 +12,6 @@ kotlin {
             implementation(project(":utils-terminal-text"))
             implementation(libs.mosaic.runtime)
         }
-        desktopMain.dependencies {
-            implementation(project(":app-view-components"))
-        }
         mosaicTest.dependencies {
             implementation(libs.mosaic.testing)
         }
