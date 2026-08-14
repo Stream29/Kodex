@@ -18,7 +18,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.assertTextEquals
@@ -29,8 +31,13 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
@@ -43,6 +50,8 @@ import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.UpdatePlanArgs
+import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
+import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecOutput
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -122,6 +131,55 @@ public class AgentHistoryDesktopViewTest {
             onNodeWithText("Arguments: {}").assertExists()
             onNodeWithText("> Result").performClick()
             onNodeWithText("Result: done").assertExists()
+        }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    public fun toolSummaryEllipsizesToAvailableHistoryWidth(): Unit =
+        runDesktopComposeUiTest {
+            val command = "A你B".repeat(12)
+            val header = "> Run command: $command"
+            val width = mutableStateOf(640.dp)
+            setContent {
+                MaterialTheme {
+                    Box(Modifier.width(width.value)) {
+                        StableEventDesktopView(
+                            event = StableCommandExecutionToolEvent(
+                                callId = "command",
+                                action = StableCommandExecutionAction.ExecCommand(
+                                    ExecCommandArguments(command = command),
+                                ),
+                                result = StableCommandExecutionResult.Output(
+                                    UnifiedExecOutput(
+                                        chunkId = "chunk",
+                                        wallTimeSeconds = 0.1,
+                                        exitCode = 0,
+                                        originalTokenCount = 1,
+                                        output = "",
+                                    ),
+                                ),
+                            ),
+                            shellSessions = EmptyAgentShellSessionRegistry,
+                            uiState = AgentHistoryDesktopUiState(),
+                            expansionPrefix = "entry",
+                        )
+                    }
+                }
+            }
+
+            val wideLayout = onNodeWithText(header).requireTextLayoutResult()
+            assertEquals(1, wideLayout.lineCount)
+            assertFalse(wideLayout.layoutInput.softWrap)
+            assertEquals(1, wideLayout.layoutInput.maxLines)
+            assertEquals(TextOverflow.Ellipsis, wideLayout.layoutInput.overflow)
+            assertTrue(wideLayout.multiParagraph.maxIntrinsicWidth <= wideLayout.size.width)
+
+            runOnIdle { width.value = 180.dp }
+            waitForIdle()
+
+            val narrowLayout = onNodeWithText(header).requireTextLayoutResult()
+            assertEquals(1, narrowLayout.lineCount)
+            assertTrue(narrowLayout.multiParagraph.maxIntrinsicWidth > narrowLayout.size.width)
         }
 
     @OptIn(ExperimentalTestApi::class)
@@ -397,4 +455,14 @@ public class AgentHistoryDesktopViewTest {
 private object EmptyAgentShellSessionRegistry : AgentShellSessionRegistry {
     override val activeSessions =
         MutableStateFlow<Map<Int, AgentShellSession>>(emptyMap())
+}
+
+private fun SemanticsNodeInteraction.requireTextLayoutResult(): TextLayoutResult {
+    val results = mutableListOf<TextLayoutResult>()
+    val succeeded = fetchSemanticsNode()
+        .config[SemanticsActions.GetTextLayoutResult]
+        .action
+        ?.invoke(results)
+    assertEquals(true, succeeded)
+    return assertNotNull(results.singleOrNull())
 }

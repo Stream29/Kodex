@@ -1028,6 +1028,7 @@ private fun DesktopToolEvent(
         DesktopExpandableHeader(
             text = "${if (expanded) "v" else ">"} $summary",
             color = desktopToolHeaderColor(status),
+            ellipsize = true,
             onClick = { uiState.setExpanded(expansionKey, !expanded) },
         )
         if (expanded) {
@@ -1098,6 +1099,7 @@ private fun DesktopExpandableHeader(
     text: String,
     color: Color,
     italic: Boolean = false,
+    ellipsize: Boolean = false,
     onClick: () -> Unit,
 ): Unit {
     var focused by remember { mutableStateOf(false) }
@@ -1117,8 +1119,9 @@ private fun DesktopExpandableHeader(
         fontFamily = FontFamily.Monospace,
         fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
         fontWeight = if (focused) FontWeight.Bold else FontWeight.Normal,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
+        softWrap = !ellipsize,
+        maxLines = if (ellipsize) 1 else Int.MAX_VALUE,
+        overflow = if (ellipsize) TextOverflow.Ellipsis else TextOverflow.Clip,
     )
 }
 
