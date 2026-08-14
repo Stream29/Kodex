@@ -89,11 +89,13 @@ private suspend fun <T : Any> FileSystemIndexVersioned<T>.cached(
     ownerScope: CoroutineScope,
     valueCacheSize: Int,
 ): CachedIndexVersioned<T> {
+    val indexes = storedIndexes()
+    reconcileLatestIndexUnsafe(indexes.lastOrNull() ?: -1)
     return CachedIndexVersioned(
         ownerScope = ownerScope,
         delegate = this,
         valueCacheSize = valueCacheSize,
-        indexes = storedIndexes(),
+        indexes = indexes,
     )
 }
 

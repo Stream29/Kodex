@@ -20,6 +20,7 @@ import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.filesystemlease.FileSystemLeaseInUseException
 import kotlinx.coroutines.flow.toList
@@ -232,6 +233,40 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             repository.closeAndJoin()
         }
 
+        test("lists warm session entries without enumerating timelines") { root ->
+            val fileSystem = CountingListFileSystem()
+            val repository = FileSystemKodexSessionRepository(
+                root = root,
+                dependencies = testKodexAgentDependencies(),
+                fileSystem = fileSystem,
+            )
+            val index = repository.createInitialized(settings("indexed"))
+            val lastActivityAt = Instant.parse("2026-08-14T12:00:00Z")
+            repository.open(index).storage.timestamp[1] = lastActivityAt
+            fileSystem.reset()
+
+            assertEquals(
+                listOf(KodexSessionEntry(index, "indexed", lastActivityAt)),
+                repository.listEntries(),
+            )
+            assertEquals(0, fileSystem.listCalls)
+            repository.closeAndJoin()
+        }
+
+        test("reconciles a dangling latest file when opening a session") { root ->
+            val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            val index = repository.createInitialized(settings("indexed"))
+            repository.closeAndJoin()
+            val latest = Path(root, "sessions/$index/settings/latest.json")
+            SystemCoroutineFileSystem.writeString(latest, "100")
+
+            val reopened = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            reopened.open(index)
+
+            assertEquals("0", SystemCoroutineFileSystem.readString(latest))
+            reopened.closeAndJoin()
+        }
+
         test("retries when another repository claims its next root slot") { root ->
             val staleRepository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
             val competingRepository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
@@ -318,6 +353,22 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             repository.closeAndJoin()
         }
 
+    }
+}
+
+private class CountingListFileSystem(
+    private val delegate: CoroutineFileSystem = SystemCoroutineFileSystem,
+) : CoroutineFileSystem by delegate {
+    var listCalls: Int = 0
+        private set
+
+    override suspend fun list(directory: Path): Collection<Path> {
+        listCalls += 1
+        return delegate.list(directory)
+    }
+
+    fun reset() {
+        listCalls = 0
     }
 }
 
