@@ -28,7 +28,6 @@ internal const val UnifiedExecWindowsMinimumYieldTimeMillis: Long = 10_000L
 public const val UnifiedExecMinimumEmptyPollYieldTimeMillis: Long = 5_000L
 public const val UnifiedExecMaximumEmptyPollYieldTimeMillis: Long = 300_000L
 public const val UnifiedExecMaximumOutputByteCount: Int = 1_024 * 1_024
-public const val UnifiedExecMaximumSessionCount: Int = 64
 
 /**
  * Stateful local process manager shared by `exec_command` and `write_stdin`.
@@ -73,11 +72,6 @@ public class UnifiedExecToolClient internal constructor(
                 val sessions = mutableSessions.value
                 if (!session.scope.isActive && !session.exitCode.isCompleted) {
                     throw UnifiedExecToolException("Unified exec tool client is closed.")
-                }
-                if (sessions.size >= UnifiedExecMaximumSessionCount) {
-                    throw UnifiedExecToolException(
-                        "At most $UnifiedExecMaximumSessionCount process sessions may be active at once.",
-                    )
                 }
                 ManagedProcessSession(
                     sessionId = allocateSessionId(sessions),

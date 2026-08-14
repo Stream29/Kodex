@@ -11,5 +11,8 @@ kotlin {
             implementation(project(":app-view-components"))
             implementation(libs.mosaic.runtime)
         }
+        desktopMain.dependencies {
+            implementation(project(":app-view-components"))
+        }
     }
 }
