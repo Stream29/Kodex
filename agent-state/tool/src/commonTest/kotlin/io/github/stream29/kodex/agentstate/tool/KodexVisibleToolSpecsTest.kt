@@ -7,9 +7,11 @@ import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.ModeKind
 import io.github.stream29.kodex.openai.OpenAiModelId
+import io.github.stream29.kodex.openai.Reasoning
+import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
 import io.github.stream29.kodex.tool.currenttime.CurrentTimeTools
@@ -25,7 +27,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 val kodexVisibleToolSpecsTest by testSuite {
-    test("combines fixed mode-dependent and dynamic specs") {
+    test("combines fixed agent-mode-dependent and dynamic specs") {
         val service = TestMcpService()
         val fixedSpecs = listOf(
             ApplyPatchTools.spec,
@@ -34,32 +36,34 @@ val kodexVisibleToolSpecsTest by testSuite {
             UnifiedExecTools.execCommandSpec,
             UnifiedExecTools.writeStdinSpec,
             WebRunTools.spec,
-        ) + MultiAgentTools.specs
-        val defaultSpecs = service.visibleToolSpecs(
+        )
+        val singleAgentSpecs = service.visibleToolSpecs(
             KodexAgentSettings(
                 model = OpenAiModelId("test-model"),
-                collaborationMode = ModeKind.Default,
+                agentMode = AgentMode.Single,
+                reasoning = Reasoning(effort = ReasoningEffort.Ultra),
             ),
         )
-        val planSpecs = service.visibleToolSpecs(
+        val multiAgentSpecs = service.visibleToolSpecs(
             KodexAgentSettings(
                 model = OpenAiModelId("test-model"),
-                collaborationMode = ModeKind.Plan,
+                agentMode = AgentMode.Multi,
+                reasoning = Reasoning(effort = ReasoningEffort.Low),
             ),
         )
 
         assertEquals(
             fixedSpecs + PlanTools.spec + RequestUserInputTools.spec,
-            defaultSpecs.dropLast(1),
+            singleAgentSpecs.dropLast(1),
         )
         assertEquals(
-            fixedSpecs + RequestUserInputTools.spec,
-            planSpecs.dropLast(1),
+            fixedSpecs + MultiAgentTools.specs + PlanTools.spec + RequestUserInputTools.spec,
+            multiAgentSpecs.dropLast(1),
         )
-        val defaultToolSearch = assertIs<ToolSpec.ToolSearch>(defaultSpecs.last())
-        assertEquals(defaultToolSearch, planSpecs.last())
-        assertTrue(defaultToolSearch.description.contains("None currently enabled."))
-        assertTrue(defaultToolSearch.description.contains("Kodex local tools").not())
+        val singleAgentToolSearch = assertIs<ToolSpec.ToolSearch>(singleAgentSpecs.last())
+        assertEquals(singleAgentToolSearch, multiAgentSpecs.last())
+        assertTrue(singleAgentToolSearch.description.contains("None currently enabled."))
+        assertTrue(singleAgentToolSearch.description.contains("Kodex local tools").not())
         assertTrue(
             emptyList<McpTool>()
                 .toDeferredToolSearchDocuments()

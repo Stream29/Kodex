@@ -85,6 +85,53 @@ class ComposerInputTest {
         }
     }
 
+    @Test fun composerNewlineIsAnAtomicUndoAndRedoTransaction() = runTest {
+        val state = TextInputState()
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                ComposerInput(
+                    state = state,
+                    layout = TextInputLayout.create(
+                        value = state.value,
+                        width = 10,
+                        softWrap = true,
+                    ),
+                    newLineKey = NewLineKey.ShiftEnter,
+                    onSubmit = {},
+                )
+            }
+
+            sendKeyEvent(KeyboardEvent(13, modifiers = KeyboardEvent.ModifierShift))
+            awaitSnapshot()
+            assertEquals(TextInputValue("\n"), state.value)
+
+            sendKeyEvent(
+                KeyboardEvent(
+                    codepoint = 'z'.code,
+                    modifiers = KeyboardEvent.ModifierCtrl,
+                ),
+            )
+            awaitSnapshot()
+            assertEquals(TextInputValue(), state.value)
+
+            sendKeyEvent(
+                KeyboardEvent(
+                    codepoint = 'y'.code,
+                    modifiers = KeyboardEvent.ModifierCtrl,
+                ),
+            )
+            awaitSnapshot()
+            assertEquals(TextInputValue("\n"), state.value)
+        }
+    }
+
+    @Test fun composerViewportUsesOnlyItsAvailableRows() {
+        assertEquals(2, boundedComposerRows(availableRows = 10, desiredRows = 2))
+        assertEquals(3, boundedComposerRows(availableRows = 3, desiredRows = 20))
+        assertEquals(1, boundedComposerRows(availableRows = 0, desiredRows = 20))
+    }
+
     @Test fun pendingSteerPreviewShowsUserAndAgentMessages() {
         val pending = listOf(
             StableCleanEvent.UserMessage(

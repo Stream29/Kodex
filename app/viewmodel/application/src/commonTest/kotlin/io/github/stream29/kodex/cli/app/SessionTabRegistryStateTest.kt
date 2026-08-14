@@ -9,7 +9,7 @@ import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModelFactory
@@ -118,7 +118,8 @@ internal suspend fun kotlinx.coroutines.CoroutineScope.applicationFixture(
 }
 
 private class EmptySessionCatalogViewModel : SessionCatalogViewModel {
-    override val sessions: StateFlow<List<SessionCatalogEntry>> = MutableStateFlow(emptyList())
+    override val state: StateFlow<SessionCatalogState> =
+        MutableStateFlow(SessionCatalogState.Loaded(emptyList()))
 
     override suspend fun refresh(): Unit = Unit
 

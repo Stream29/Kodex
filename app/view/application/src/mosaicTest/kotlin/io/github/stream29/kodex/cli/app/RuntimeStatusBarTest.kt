@@ -15,7 +15,7 @@ import com.jakewharton.mosaic.ui.Row
 import io.github.stream29.kodex.app.agent.contract.AgentExecutionState
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ModelServiceTier
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -34,9 +34,9 @@ import kotlin.test.assertTrue
 
 class RuntimeStatusBarTest {
     @Test
-    fun modesUseConciseBuildAndPlanLabels() {
-        assertEquals("build", ModeKind.Default.displayName())
-        assertEquals("plan", ModeKind.Plan.displayName())
+    fun agentModesUseExplicitLabels() {
+        assertEquals("single agent", AgentMode.Single.displayName())
+        assertEquals("multi agent", AgentMode.Multi.displayName())
     }
 
     @Test
@@ -98,7 +98,7 @@ class RuntimeStatusBarTest {
                 model = model,
                 reasoning = ReasoningEffort.Max,
                 tier = ServiceTier.Default,
-                mode = ModeKind.Default,
+                agentMode = AgentMode.Single,
             ),
         )
         lateinit var dropdowns: RuntimeConfigurationDropdowns
@@ -122,15 +122,14 @@ class RuntimeStatusBarTest {
                                 tier = tier,
                             )
                         },
-                        onModeSelected = { mode ->
-                            configuration = configuration.copy(mode = mode)
+                        onAgentModeSelected = { agentMode ->
+                            configuration = configuration.copy(agentMode = agentMode)
                         },
                     )
                 }
             }
             assertTrue("[gpt-5.6-sol max]" in initial, initial)
-            assertTrue("[build]" in initial, initial)
-            assertFalse("build mode" in initial, initial)
+            assertTrue("[single agent]" in initial, initial)
 
             val modelButtonStart = initial.indexOf("[gpt-5.6-sol max]")
             assertTrue(modelButtonStart >= 0, initial)
@@ -151,14 +150,14 @@ class RuntimeStatusBarTest {
     }
 
     @Test
-    fun modeTriggerOpensAndSelectsPlan() = runTest {
+    fun agentModeTriggerOpensAndSelectsMultiAgent() = runTest {
         val model = OpenAiModelId("test-model")
         var configuration by mutableStateOf(
             RuntimeConfiguration(
                 model = model,
                 reasoning = ReasoningEffort.High,
                 tier = ServiceTier.Default,
-                mode = ModeKind.Default,
+                agentMode = AgentMode.Single,
             ),
         )
 
@@ -181,24 +180,24 @@ class RuntimeStatusBarTest {
                                 tier = tier,
                             )
                         },
-                        onModeSelected = { mode ->
-                            configuration = configuration.copy(mode = mode)
+                        onAgentModeSelected = { agentMode ->
+                            configuration = configuration.copy(agentMode = agentMode)
                         },
                     )
                 }
             }
-            val modeButtonStart = initial.indexOf("[build]")
+            val modeButtonStart = initial.indexOf("[single agent]")
             assertTrue(modeButtonStart >= 0, initial)
 
             click(modeButtonStart + 1)
-            val menu = awaitSnapshotContaining("plan")
-            assertTrue("[build]" in menu, menu)
+            val menu = awaitSnapshotContaining("multi agent")
+            assertTrue("[single agent]" in menu, menu)
             sendKeyEvent(KeyboardEvent(KeyboardEvent.Down))
             sendKeyEvent(KeyboardEvent(codepoint = 13))
-            awaitSnapshotContaining("[plan]")
+            awaitSnapshotContaining("[multi agent]")
         }
 
-        assertEquals(ModeKind.Plan, configuration.mode)
+        assertEquals(AgentMode.Multi, configuration.agentMode)
     }
 
     @Test

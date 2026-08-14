@@ -21,10 +21,11 @@ import io.github.stream29.kodex.app.session.contract.PersistedSessionTopologyNod
 import io.github.stream29.kodex.app.session.contract.PersistedSessionTopologyState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -294,7 +295,8 @@ private class PersistedSessionViewModelImpl(
     override suspend fun updateServiceTier(serviceTier: ServiceTier) =
         rootAgent.updateServiceTier(serviceTier)
 
-    override suspend fun updateMode(mode: ModeKind) = rootAgent.updateMode(mode)
+    override suspend fun updateAgentMode(agentMode: AgentMode) =
+        rootAgent.updateAgentMode(agentMode)
 
     override suspend fun updateModelConfiguration(
         model: OpenAiModelId,
@@ -515,22 +517,31 @@ private class SessionCatalogViewModelImpl(
     private val repository: KodexSessionRepository,
     private val scope: CoroutineScope,
 ) : SessionCatalogViewModel {
-    private val mutableSessions = MutableStateFlow<List<SessionCatalogEntry>>(emptyList())
-    override val sessions: StateFlow<List<SessionCatalogEntry>> = mutableSessions.asStateFlow()
+    private val refreshMutex = Mutex()
+    private val mutableState = MutableStateFlow<SessionCatalogState>(SessionCatalogState.Unloaded)
+    override val state: StateFlow<SessionCatalogState> = mutableState.asStateFlow()
 
-    override suspend fun refresh() {
-        mutableSessions.value = repository.listEntries()
-            .sortedWith(
-                compareByDescending<KodexSessionEntry> { entry -> entry.lastActivityAt }
-                    .thenByDescending(KodexSessionEntry::entryIndex),
-            )
-            .map { entry ->
-                SessionCatalogEntry(
-                    sessionIndex = entry.entryIndex,
-                    threadName = entry.threadName,
-                    lastActivityAt = entry.lastActivityAt,
+    override suspend fun refresh(): Unit = refreshMutex.withLock {
+        val previous = mutableState.value
+        mutableState.value = SessionCatalogState.Loading
+        try {
+            val sessions = repository.listEntries()
+                .sortedWith(
+                    compareByDescending<KodexSessionEntry> { entry -> entry.lastActivityAt }
+                        .thenByDescending(KodexSessionEntry::entryIndex),
                 )
-            }
+                .map { entry ->
+                    SessionCatalogEntry(
+                        sessionIndex = entry.entryIndex,
+                        threadName = entry.threadName,
+                        lastActivityAt = entry.lastActivityAt,
+                    )
+                }
+            mutableState.value = SessionCatalogState.Loaded(sessions)
+        } catch (failure: Throwable) {
+            mutableState.value = previous
+            throw failure
+        }
     }
 
     override fun close() {

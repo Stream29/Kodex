@@ -34,6 +34,7 @@ import io.github.stream29.kodex.app.history.contract.AgentHistoryWindowSnapshot
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.cli.components.LazyColumn
 import io.github.stream29.kodex.cli.components.TextInput
@@ -374,7 +375,7 @@ private fun BoxScope.SessionCatalogPopup(
     open: ApplicationPopupState.SessionCatalog,
 ) {
     val scope = rememberCoroutineScope()
-    val sessions by open.viewModel.sessions.collectAsState()
+    val state by open.viewModel.state.collectAsState()
     LaunchedEffect(open) { open.viewModel.refresh() }
     TuiDialog(
         onDismissRequest = { application.dismissPopup(open) },
@@ -390,28 +391,34 @@ private fun BoxScope.SessionCatalogPopup(
                 textStyle = TextStyle.Bold,
             )
             LazyColumn(modifier = Modifier.fillMaxWidth().height(SessionCatalogRows)) {
-                if (sessions.isEmpty()) {
-                    item { Text("No persisted sessions", color = SettingsDialogForeground) }
-                } else {
-                    items(sessions, key = { entry -> entry.sessionIndex }) { entry ->
-                        TuiButton(
-                            label = entry.sessionBrowserLabel(SessionCatalogWidth - 2),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(SettingsDialogNavigationBackground),
-                            color = SettingsDialogForeground,
-                            onClick = {
-                                scope.launch {
-                                    application.openSession(entry.sessionIndex)
-                                    application.dismissPopup(open)
-                                }
-                            },
-                            onSecondaryClick = {
-                                scope.launch {
-                                    application.openDeleteSessionPopup(entry.sessionIndex)
-                                }
-                            },
-                        )
+                when (val current = state) {
+                    SessionCatalogState.Unloaded,
+                    SessionCatalogState.Loading,
+                    -> item { SessionCatalogLoadingIndicator() }
+
+                    is SessionCatalogState.Loaded -> if (current.sessions.isEmpty()) {
+                        item { Text("No persisted sessions", color = SettingsDialogForeground) }
+                    } else {
+                        items(current.sessions, key = { entry -> entry.sessionIndex }) { entry ->
+                            TuiButton(
+                                label = entry.sessionBrowserLabel(SessionCatalogWidth - 2),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(SettingsDialogNavigationBackground),
+                                color = SettingsDialogForeground,
+                                onClick = {
+                                    scope.launch {
+                                        application.openSession(entry.sessionIndex)
+                                        application.dismissPopup(open)
+                                    }
+                                },
+                                onSecondaryClick = {
+                                    scope.launch {
+                                        application.openDeleteSessionPopup(entry.sessionIndex)
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -422,6 +429,12 @@ private fun BoxScope.SessionCatalogPopup(
             )
         }
     }
+}
+
+@Composable
+internal fun SessionCatalogLoadingIndicator() {
+    val frame by rememberRunningIndicatorFrame(active = true)
+    Text("$frame Loading sessions…", color = SettingsDialogForeground)
 }
 
 @Composable

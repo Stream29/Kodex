@@ -43,9 +43,10 @@ public sealed interface UserPromptSubmitResult {
  * A candidate can be a natural assistant completion or a host-visible user
  * input wait that pauses the outer runtime.
  *
- * @property lastAssistantMessage Nullable because a stop candidate can occur
- * without an assistant text message; `null` means no assistant text is
- * available to the hook.
+ * @property lastAssistantMessage Latest nonblank assistant text when available.
+ * For a `request_user_input` candidate without assistant text, this contains
+ * the pending nonblank question texts in order. `null` means neither source
+ * supplied text.
  */
 public data class StopRequest(
     public val context: HookTurnContext,

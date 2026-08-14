@@ -2,8 +2,8 @@ package io.github.stream29.kodex.agentstate.impl
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
-import io.github.stream29.kodex.agentcontext.prefix.render.render as renderCollaborationMode
 import io.github.stream29.kodex.agentcontext.prefix.render.renderMultiAgentMode
+import io.github.stream29.kodex.agentcontext.prefix.render.renderPlanningInstructions
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
@@ -13,12 +13,12 @@ import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
-import io.github.stream29.kodex.openai.ModeKind
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
@@ -72,8 +72,8 @@ val agentContextProjectionTest by testSuite {
                 agent.requestResponseApi()
 
                 val input = requests.single().input
-                assertEquals(collaborationMessage(ModeKind.Default), input[0])
-                assertEquals(multiAgentMessage(), input[1])
+                assertEquals(planningMessage(), input[0])
+                assertEquals(agentModeMessage(AgentMode.Single), input[1])
                 assertTrue(
                     input.contextText().contains(
                         "user instructions\n\n--- project-doc ---\n\nproject instructions",
@@ -88,7 +88,7 @@ val agentContextProjectionTest by testSuite {
             }
         }
 
-        test("projects mode and discovered skills without plan or goal state") {
+        test("projects agent mode and discovered skills without plan or goal state") {
             val fixture = contextFixture("mode-and-skills")
             try {
                 fixture.writeUserAgentsMd("agent instructions")
@@ -96,7 +96,7 @@ val agentContextProjectionTest by testSuite {
                 val storage = InMemoryKodexAgentStorage(
                     settings(
                         cwd = fixture.project,
-                        collaborationMode = ModeKind.Plan,
+                        agentMode = AgentMode.Multi,
                         plan = UpdatePlanArgs(
                             explanation = "Keep this plan out of the model prompt.",
                             plan = listOf(
@@ -123,8 +123,8 @@ val agentContextProjectionTest by testSuite {
 
                 val input = requests.single().input
                 val rendered = input.text()
-                assertEquals(collaborationMessage(ModeKind.Plan), input[0])
-                assertEquals(multiAgentMessage(), input[1])
+                assertEquals(planningMessage(), input[0])
+                assertEquals(agentModeMessage(AgentMode.Multi), input[1])
                 assertTrue(rendered.contains("test-skill"))
                 assertTrue(rendered.contains("test description"))
                 assertTrue(rendered.contains("agent instructions"))
@@ -250,14 +250,14 @@ private fun recordingClient(
 
 private fun settings(
     cwd: Path,
-    collaborationMode: ModeKind = ModeKind.Default,
+    agentMode: AgentMode = AgentMode.Single,
     plan: UpdatePlanArgs = UpdatePlanArgs(plan = emptyList()),
     goal: ThreadGoal? = null,
 ): KodexAgentSettings =
     KodexAgentSettings(
         model = OpenAiModelId("test-model"),
         cwd = cwd,
-        collaborationMode = collaborationMode,
+        agentMode = agentMode,
         plan = plan,
         goal = goal,
     )
@@ -265,15 +265,11 @@ private fun settings(
 private fun userMessage(text: String): ResponseItem.Message =
     message(MessageRole.User, text)
 
-private fun collaborationMessage(mode: ModeKind): ResponseItem.Message =
-    message(MessageRole.Developer, mode.renderCollaborationMode())
+private fun planningMessage(): ResponseItem.Message =
+    message(MessageRole.Developer, renderPlanningInstructions())
 
-private fun multiAgentMessage(): ResponseItem.Message =
-    message(
-        MessageRole.Developer,
-        KodexAgentSettings(OpenAiModelId("test-model"))
-            .reasoning.effort.renderMultiAgentMode(),
-    )
+private fun agentModeMessage(agentMode: AgentMode): ResponseItem.Message =
+    message(MessageRole.Developer, agentMode.renderMultiAgentMode())
 
 private fun message(role: MessageRole, vararg sections: String): ResponseItem.Message =
     ResponseItem.Message(

@@ -10,7 +10,7 @@ import io.github.stream29.kodex.openai.codexclistorage.CodexCliConfig
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliHookSourceKind
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliMcpServer
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
-import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ServiceTier
@@ -281,7 +281,7 @@ private fun KodexGlobalSettings.withOverride(
                 reasoningEffort = values.reasoningEffort ?: effective.newSession.reasoningEffort,
                 serviceTier = values.serviceTier?.toServiceTier()
                     ?: effective.newSession.serviceTier,
-                mode = values.mode ?: effective.newSession.mode,
+                agentMode = values.agentMode ?: effective.newSession.agentMode,
             ),
         )
     }
@@ -376,7 +376,8 @@ private fun NewSessionOverride?.withChanges(
             .takeIf { updated.reasoningEffort != current.reasoningEffort } ?: existing.reasoningEffort,
         serviceTier = updated.serviceTier.requestValue
             .takeIf { updated.serviceTier != current.serviceTier } ?: existing.serviceTier,
-        mode = updated.mode.takeIf { updated.mode != current.mode } ?: existing.mode,
+        agentMode = updated.agentMode
+            .takeIf { updated.agentMode != current.agentMode } ?: existing.agentMode,
     ).takeUnless(NewSessionOverride::isEmpty)
 }
 
@@ -406,10 +407,11 @@ private data class NewSessionOverride(
     val reasoningEffort: ReasoningEffort? = null,
     @SerialName("service_tier")
     val serviceTier: String? = null,
-    val mode: ModeKind? = null,
+    @SerialName("agent_mode")
+    val agentMode: AgentMode? = null,
 ) {
     fun isEmpty(): Boolean =
-        model == null && reasoningEffort == null && serviceTier == null && mode == null
+        model == null && reasoningEffort == null && serviceTier == null && agentMode == null
 }
 
 /**
@@ -468,5 +470,5 @@ private val SettingsYaml = Yaml(
     ),
 )
 
-private const val CurrentGlobalSettingsSchemaVersion: Int = 2
+private const val CurrentGlobalSettingsSchemaVersion: Int = 3
 private const val KodexSettingsFileName: String = "settings.yml"

@@ -19,7 +19,7 @@ import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
-import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -127,15 +127,20 @@ class SettingsViewModelTest {
         val defaults = newSession.state.value
         newSession.updateModel(defaults.revision, OpenAiModelId("new-default"))
         runCurrent()
+        val withUpdatedModel = newSession.state.value
+        newSession.updateAgentMode(withUpdatedModel.revision, AgentMode.Multi)
+        runCurrent()
 
         assertEquals(
             OpenAiModelId("new-default"),
             settings.settings.value.newSession.model,
         )
+        assertEquals(AgentMode.Multi, settings.settings.value.newSession.agentMode)
         assertEquals(
             OpenAiModelId("new-default"),
             newSession.state.value.settings.model,
         )
+        assertEquals(AgentMode.Multi, newSession.state.value.settings.agentMode)
         assertEquals(
             settings.settings.value.codexHome,
             global.state.value.codexHome,
@@ -266,10 +271,10 @@ class SettingsViewModelTest {
         assertEquals(OpenAiModelId("session-model"), source.current.configuration.model)
         assertEquals(1, source.updateCount)
 
-        viewModel.session.updateMode(first.snapshot.revision, ModeKind.Plan)
+        viewModel.session.updateAgentMode(first.snapshot.revision, AgentMode.Multi)
         runCurrent()
         assertEquals(1, source.updateCount)
-        assertEquals(ModeKind.Default, source.current.configuration.mode)
+        assertEquals(AgentMode.Single, source.current.configuration.agentMode)
 
         viewModel.session.requestWorkingDirectory(first.snapshot.revision)
 
@@ -495,7 +500,7 @@ private fun initialSnapshot(): SessionSettingsSnapshot =
             workingDirectory = Path("workspace"),
             reasoningEffort = ReasoningEffort.Medium,
             serviceTier = ServiceTier.Default,
-            mode = ModeKind.Default,
+            agentMode = AgentMode.Single,
         ),
         editable = true,
     )

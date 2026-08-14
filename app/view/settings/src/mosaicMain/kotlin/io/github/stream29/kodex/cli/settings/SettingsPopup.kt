@@ -45,7 +45,7 @@ import io.github.stream29.kodex.cli.components.TuiDropdownMenu
 import io.github.stream29.kodex.cli.components.TuiDropdownState
 import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
-import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -71,7 +71,7 @@ public fun BoxScope.SettingsPopup(
         model = rememberTuiDropdownState(),
         reasoning = rememberTuiDropdownState(),
         serviceTier = rememberTuiDropdownState(),
-        mode = rememberTuiDropdownState(),
+        agentMode = rememberTuiDropdownState(),
     )
     var renameRequest by remember(viewModel) {
         mutableStateOf<SessionSettingsEffect.RenameSession?>(null)
@@ -448,10 +448,10 @@ private fun ConfigurationSettingsContent(
         enabled = snapshot.editable,
     )
     SettingsDropdownField(
-        label = "Mode",
-        selectedLabel = configuration.mode.displayName(),
-        dropdownState = dropdowns.mode,
-        background = SettingsModeBackground,
+        label = "Agent mode",
+        selectedLabel = configuration.agentMode.displayName(),
+        dropdownState = dropdowns.agentMode,
+        background = SettingsAgentModeBackground,
         enabled = snapshot.editable,
     )
 }
@@ -489,10 +489,10 @@ private fun NewSessionConfigurationContent(
         background = SettingsSubmitKeyBackground,
     )
     SettingsDropdownField(
-        label = "Mode",
-        selectedLabel = state.settings.mode.displayName(),
-        dropdownState = dropdowns.mode,
-        background = SettingsModeBackground,
+        label = "Agent mode",
+        selectedLabel = state.settings.agentMode.displayName(),
+        dropdownState = dropdowns.agentMode,
+        background = SettingsAgentModeBackground,
     )
 }
 
@@ -590,13 +590,13 @@ private fun BoxScope.SessionSettingsDropdownMenus(
         onSelect = { tier -> viewModel.updateServiceTier(snapshot.revision, tier) },
     )
     TuiDropdownMenu(
-        dropdownState = dropdowns.mode,
-        options = ModeKind.entries.toList(),
-        selected = configuration.mode,
-        optionLabel = ModeKind::displayName,
+        dropdownState = dropdowns.agentMode,
+        options = AgentMode.entries.toList(),
+        selected = configuration.agentMode,
+        optionLabel = AgentMode::displayName,
         enabled = snapshot.editable,
         backgroundColor = PopupMenuBackground,
-        onSelect = { mode -> viewModel.updateMode(snapshot.revision, mode) },
+        onSelect = { agentMode -> viewModel.updateAgentMode(snapshot.revision, agentMode) },
     )
 }
 
@@ -631,12 +631,12 @@ private fun BoxScope.NewSessionSettingsDropdownMenus(
         onSelect = { tier -> viewModel.updateServiceTier(state.revision, tier) },
     )
     TuiDropdownMenu(
-        dropdownState = dropdowns.mode,
-        options = ModeKind.entries.toList(),
-        selected = state.settings.mode,
-        optionLabel = ModeKind::displayName,
+        dropdownState = dropdowns.agentMode,
+        options = AgentMode.entries.toList(),
+        selected = state.settings.agentMode,
+        optionLabel = AgentMode::displayName,
         backgroundColor = PopupMenuBackground,
-        onSelect = { mode -> viewModel.updateMode(state.revision, mode) },
+        onSelect = { agentMode -> viewModel.updateAgentMode(state.revision, agentMode) },
     )
 }
 
@@ -723,13 +723,13 @@ private class SettingsDropdownStates(
     val model: TuiDropdownState,
     val reasoning: TuiDropdownState,
     val serviceTier: TuiDropdownState,
-    val mode: TuiDropdownState,
+    val agentMode: TuiDropdownState,
 ) {
     fun dismissAll() {
         model.dismiss()
         reasoning.dismiss()
         serviceTier.dismiss()
-        mode.dismiss()
+        agentMode.dismiss()
     }
 }
 
@@ -793,9 +793,9 @@ private fun ServiceTier.displayName(): String = when (this) {
     ServiceTier.Flex -> "flex"
 }
 
-private fun ModeKind.displayName(): String = when (this) {
-    ModeKind.Default -> "build"
-    ModeKind.Plan -> "plan"
+private fun AgentMode.displayName(): String = when (this) {
+    AgentMode.Single -> "single agent"
+    AgentMode.Multi -> "multi agent"
 }
 
 private val knownReasoningEfforts: List<ReasoningEffort> = listOf(
@@ -816,7 +816,7 @@ internal val SettingsSelectionBackground: Color = Color(36, 78, 84)
 internal val SettingsHomeBackground: Color = Color(52, 52, 56)
 internal val SettingsNewLineBackground: Color = Color(62, 62, 66)
 internal val SettingsSubmitKeyBackground: Color = Color(58, 58, 64)
-internal val SettingsModeBackground: Color = Color(46, 58, 62)
+internal val SettingsAgentModeBackground: Color = Color(46, 58, 62)
 internal val SettingsActionBackground: Color = Color(28, 68, 74)
 internal val PopupMenuBackground: Color = Color(42, 42, 46)
 

@@ -3,7 +3,7 @@ package io.github.stream29.kodex.app.agent.contract
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -38,7 +38,7 @@ public interface AgentSettingsViewModel {
 
     public suspend fun updateServiceTier(serviceTier: ServiceTier): Unit
 
-    public suspend fun updateMode(mode: ModeKind): Unit
+    public suspend fun updateAgentMode(agentMode: AgentMode): Unit
 
     /** Atomically updates the three fields selected by the runtime model menu. */
     public suspend fun updateModelConfiguration(

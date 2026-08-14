@@ -56,31 +56,43 @@ internal fun AgentRuntimeScreen(
     val tokenCount by viewModel.tokenCount.collectAsState()
     val composerState by viewModel.composer.state.collectAsState()
     val composer = rememberComposerInputState(viewModel.composer)
-    val composerLayout = TextInputLayout.create(
+    val fullComposerLayout = TextInputLayout.create(
         value = composer.value,
         width = columns,
         firstLinePrefix = "> ",
         continuationLinePrefix = "  ",
+        softWrap = true,
     )
     val submitHint = submitToSteerHint(execution.running, composer.value.text)
-    val composerRows = composerLayout.rowCount + if (submitHint == null) 0 else 1
-    val availableContentRows =
-        (rows - HistoryComposerSeparatorRows - composerRows - RuntimeStatusRows).coerceAtLeast(0)
     val pendingRequest = requestUserInput as? RequestUserInputState.Pending
+    val submitHintRows = if (submitHint == null) 0 else 1
+    val flexibleRows =
+        (rows - HistoryComposerSeparatorRows - RuntimeStatusRows - submitHintRows).coerceAtLeast(0)
+    val minimumComposerRows = minOf(1, flexibleRows)
     val requestUserInputRows = if (pendingRequest == null) {
         0
     } else {
-        minOf(availableContentRows, RequestUserInputMaximumRows)
+        minOf(
+            (flexibleRows - minimumComposerRows).coerceAtLeast(0),
+            RequestUserInputMaximumRows,
+        )
     }
     val pendingSteerLines = pendingSteerPreviewLines(
         pending = stream.pendingSteer,
         columns = columns,
         maximumRows = minOf(
-            (availableContentRows - requestUserInputRows).coerceAtLeast(0),
+            (flexibleRows - minimumComposerRows - requestUserInputRows).coerceAtLeast(0),
             PendingSteerMaximumRows,
         ),
     )
-    val historyRows = availableContentRows - requestUserInputRows - pendingSteerLines.size
+    val composerAndHistoryRows =
+        (flexibleRows - requestUserInputRows - pendingSteerLines.size).coerceAtLeast(0)
+    val composerRows = boundedComposerRows(
+        availableRows = composerAndHistoryRows,
+        desiredRows = fullComposerLayout.rowCount,
+    )
+    val composerLayout = fullComposerLayout.withViewportRows(composerRows)
+    val historyRows = (composerAndHistoryRows - composerRows).coerceAtLeast(0)
     val scope = rememberCoroutineScope()
 
     Column(modifier = Modifier.width(columns).height(rows)) {
@@ -187,14 +199,20 @@ internal fun NewSessionContent(
     onSubmit: () -> Unit,
 ) {
     val composer = rememberComposerInputState(composerViewModel)
-    val composerLayout = TextInputLayout.create(
+    val fullComposerLayout = TextInputLayout.create(
         value = composer.value,
         width = columns,
         firstLinePrefix = "> ",
         continuationLinePrefix = "  ",
+        softWrap = true,
     )
-    val historyRows =
-        (rows - HistoryComposerSeparatorRows - composerLayout.rowCount).coerceAtLeast(0)
+    val availableRows = (rows - HistoryComposerSeparatorRows).coerceAtLeast(0)
+    val composerRows = boundedComposerRows(
+        availableRows = availableRows,
+        desiredRows = fullComposerLayout.rowCount,
+    )
+    val composerLayout = fullComposerLayout.withViewportRows(composerRows)
+    val historyRows = (availableRows - composerRows).coerceAtLeast(0)
     Column(modifier = Modifier.width(columns).height(rows)) {
         Box(modifier = Modifier.width(columns).height(historyRows)) {
             Text("Enter a prompt to create a session", textStyle = TextStyle.Dim)
@@ -220,7 +238,12 @@ private fun rememberComposerInputState(composer: ComposerViewModel): TextInputSt
     }
     LaunchedEffect(composer, state) {
         val value = TextInputValue(state.text, state.cursorOffset)
-        if (input.value != value) input.reset(value)
+        if (
+            input.value.text != value.text ||
+            input.value.cursorOffset != value.cursorOffset
+        ) {
+            input.reset(value)
+        }
     }
     return input
 }
@@ -236,6 +259,11 @@ private fun PendingSteerPreview(lines: List<String>, columns: Int) {
 
 internal fun submitToSteerHint(running: Boolean, draft: String): String? =
     SubmitToSteerHint.takeIf { running && draft.isNotBlank() }
+
+internal fun boundedComposerRows(availableRows: Int, desiredRows: Int): Int {
+    require(desiredRows > 0) { "Composer content must contain at least one row." }
+    return minOf(desiredRows, availableRows.coerceAtLeast(1))
+}
 
 internal fun pendingSteerPreviewLines(
     pending: List<StableCleanEvent.Steerable>,

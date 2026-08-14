@@ -8,10 +8,10 @@ import kotlin.test.assertEquals
 
 private val json = OpenAiJsonCodec
 
-val collaborationModelsSerializationTest by testSuite {
-    test("visible collaboration modes use Rust wire names") {
-        assertEquals("\"default\"", json.encodeToString(ModeKind.Default))
-        assertEquals("\"plan\"", json.encodeToString(ModeKind.Plan))
+val agentModelsSerializationTest by testSuite {
+    test("agent modes use stable wire names") {
+        assertEquals("\"single\"", json.encodeToString(AgentMode.Single))
+        assertEquals("\"multi\"", json.encodeToString(AgentMode.Multi))
     }
 
     test("thread goal uses Rust camel case status and fields") {

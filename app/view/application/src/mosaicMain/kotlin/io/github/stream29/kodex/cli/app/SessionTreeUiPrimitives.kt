@@ -15,7 +15,7 @@ import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SubmitKey
-import io.github.stream29.kodex.openai.ModeKind
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ServiceTier
 
@@ -78,8 +78,8 @@ internal fun ServiceTier.displayName(): String = when (this) {
     ServiceTier.Default -> "default"; ServiceTier.Fast -> "fast"; ServiceTier.Flex -> "flex"
 }
 
-internal fun ModeKind.displayName(): String = when (this) {
-    ModeKind.Default -> "build"; ModeKind.Plan -> "plan"
+internal fun AgentMode.displayName(): String = when (this) {
+    AgentMode.Single -> "single agent"; AgentMode.Multi -> "multi agent"
 }
 
 internal val SessionForeground: Color = Color.White

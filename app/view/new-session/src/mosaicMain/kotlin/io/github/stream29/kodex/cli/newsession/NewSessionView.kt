@@ -13,6 +13,6 @@ public fun NewSessionDefaults(settings: KodexAgentSettings) {
         Text("Model: ${settings.model}")
         Text("Reasoning: ${settings.reasoning.effort}")
         Text("Service tier: ${settings.serviceTier}")
-        Text("Mode: ${settings.collaborationMode}")
+        Text("Agent mode: ${settings.agentMode}")
     }
 }

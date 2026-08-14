@@ -20,8 +20,9 @@ import io.github.stream29.kodex.agentstorage.contract.indexes
 import io.github.stream29.kodex.agentstorage.contract.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.AgentMessageInputContent
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.Response
@@ -451,7 +452,11 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
         val repository = InMemoryKodexSessionRepository(
             testKodexAgentDependencies(client),
         )
-        val root = repository.open(repository.createInitialized(settings("root")))
+        val root = repository.open(
+            repository.createInitialized(
+                settings("root").copy(agentMode = AgentMode.Multi),
+            ),
+        )
 
         root.runtime.appendUserMessage(listOf(ContentItem.InputText("Delegate this task.")))
         root.runtime.resume()
@@ -473,6 +478,11 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             }
         }
         assertEquals("/root/worker", child.storage.settings[child.storage.latestIndex()].threadName)
+        assertEquals(AgentMode.Multi, child.storage.settings[child.storage.latestIndex()].agentMode)
+        val inheritedSettings = child.storage.settings[child.storage.latestIndex()]
+        child.runtime.updateSettings(inheritedSettings.copy(agentMode = AgentMode.Single))
+        assertEquals(AgentMode.Single, child.storage.settings[child.storage.latestIndex()].agentMode)
+        assertEquals(AgentMode.Multi, root.storage.settings[root.storage.latestIndex()].agentMode)
         assertTrue(MultiAgentTools.specs.all { spec -> spec.name in rootToolNames })
         assertTrue(
             root.storage.stable.indexes().toList().any { index ->

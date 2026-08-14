@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.hook.contract
 
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.ModeKind
 import kotlinx.io.files.Path
 
 /** Permission mode exposed to command hooks. */
@@ -49,10 +48,7 @@ public fun KodexAgentSettings.toHookSessionContext(sessionId: String): HookSessi
         sessionId = sessionId,
         cwd = cwd,
         model = model.value,
-        permissionMode = when (collaborationMode) {
-            ModeKind.Default -> HookPermissionMode.BypassPermissions
-            ModeKind.Plan -> HookPermissionMode.Plan
-        },
+        permissionMode = HookPermissionMode.BypassPermissions,
     )
 
 /**

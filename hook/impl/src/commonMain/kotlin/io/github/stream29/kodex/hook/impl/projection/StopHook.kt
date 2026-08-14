@@ -19,7 +19,7 @@ internal data class StopCommandInputWire(
     val model: String,
     @SerialName("permission_mode") val permissionMode: String,
     @SerialName("stop_hook_active") val stopHookActive: Boolean,
-    /** `null` means this turn has no assistant text message. */
+    /** Assistant text, pending input question fallback, or `null` when neither exists. */
     @SerialName("last_assistant_message") val lastAssistantMessage: String?,
 )
 

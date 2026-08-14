@@ -353,7 +353,7 @@ private fun io.github.stream29.kodex.cli.settings.KodexNewSessionSettings.toAgen
 ): KodexAgentSettings = KodexAgentSettings(
     model = model,
     cwd = workingDirectory,
-    collaborationMode = mode,
+    agentMode = agentMode,
     reasoning = Reasoning(effort = reasoningEffort),
     serviceTier = serviceTier,
 )
