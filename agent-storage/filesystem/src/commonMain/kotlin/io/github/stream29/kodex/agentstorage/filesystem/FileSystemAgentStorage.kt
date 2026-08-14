@@ -114,7 +114,14 @@ public suspend fun FileSystemAgentStorage.Companion.ofEmpty(
     TimelineDirectories.forEach { name ->
         fileSystem.createDirectories(Path(directory, name), mustCreate = true)
     }
-    return FileSystemAgentStorage(directory, fileSystem)
+    return FileSystemAgentStorage(directory, fileSystem).also { storage ->
+        storage.compaction.reconcileLatestIndexUnsafe(-1)
+        storage.settings.reconcileLatestIndexUnsafe(-1)
+        storage.timestamp.reconcileLatestIndexUnsafe(-1)
+        storage.tokenCount.reconcileLatestIndexUnsafe(-1)
+        storage.stable.reconcileLatestIndexUnsafe(-1)
+        storage.unstable.reconcileLatestIndexUnsafe(-1)
+    }
 }
 
 internal suspend fun deleteRecursively(fileSystem: CoroutineFileSystem, path: Path) {
