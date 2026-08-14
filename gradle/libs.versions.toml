@@ -26,8 +26,6 @@ tomlkt = "0.6.1"
 kotlin-logging = "8.0.4"
 kermit = "2.1.0"
 cache4k = "0.14.0"
-compose-multiplatform = "1.11.1"
-compose-material3 = "1.11.0-alpha07"
 
 [libraries]
 kotlin-compose-compiler-gradle-plugin = { module = "org.jetbrains.kotlin:compose-compiler-gradle-plugin", version.ref = "kotlin" }
@@ -74,8 +72,6 @@ kotlin-logging = { module = "io.github.oshai:kotlin-logging", version.ref = "kot
 kermit-io = { module = "co.touchlab:kermit-io", version.ref = "kermit" }
 kermit-core = { module = "co.touchlab:kermit", version.ref = "kermit" }
 cache4k = { module = "io.github.reactivecircus.cache4k:cache4k", version.ref = "cache4k" }
-compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-material3" }
-compose-ui-test-junit4 = { module = "org.jetbrains.compose.ui:ui-test-junit4", version.ref = "compose-multiplatform" }
 
 [bundles]
 ktor-client-jvm-engines = ["ktor-client-cio"]
@@ -90,4 +86,3 @@ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", versi
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 koin-compiler = { id = "io.insert-koin.compiler.plugin", version.ref = "koin-plugin" }
 poko = { id = "dev.drewhamilton.poko", version.ref = "poko" }
-compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }

@@ -7,7 +7,7 @@ import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
 
 internal fun Project.configureCoordinates() {
     group = "io.github.stream29"
-    version = "0.3.0"
+    version = "0.2.2"
 }
 
 internal fun KotlinMultiplatformExtension.configureCompiler() {
@@ -37,13 +37,11 @@ internal fun KotlinMultiplatformExtension.configureMosaicHierarchy() {
     applyHierarchyTemplate(KotlinHierarchyTemplate.default) {
         common {
             group("mosaic") {
+                withJvm()
                 withLinuxX64()
                 withLinuxArm64()
                 withMacosArm64()
                 withMingwX64()
-            }
-            group("desktop") {
-                withJvm()
             }
         }
     }

@@ -38,26 +38,6 @@ kotlin {
             implementation(libs.mosaic.animation)
             implementation(libs.mosaic.runtime)
         }
-        desktopMain.dependencies {
-            api(project(":app-contract-application"))
-            implementation(project(":app-contract-agent"))
-            implementation(project(":app-contract-history"))
-            implementation(project(":app-contract-path-picker"))
-            implementation(project(":app-contract-session"))
-            implementation(project(":app-contract-session-catalog"))
-            implementation(project(":app-contract-settings"))
-            implementation(project(":app-shared-settings-contract"))
-            implementation(project(":app-view-agent"))
-            implementation(project(":app-view-components"))
-            implementation(project(":app-view-history"))
-            implementation(project(":app-view-new-session"))
-            implementation(project(":app-view-path-picker"))
-            implementation(project(":app-view-session"))
-            implementation(project(":app-view-settings"))
-            implementation(project(":openai-models"))
-            implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlinx.io.core)
-        }
         mosaicTest.dependencies {
             implementation(libs.mosaic.testing)
         }
