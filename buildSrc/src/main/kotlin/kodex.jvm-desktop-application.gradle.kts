@@ -1,6 +1,8 @@
 @file:Suppress("UnstableApiUsage")
 
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
 import org.gradle.api.artifacts.VersionCatalogsExtension
+import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.tasks.JavaExec
 import org.gradle.api.tasks.testing.Test
 import org.gradle.jvm.toolchain.JavaLanguageVersion
@@ -16,6 +18,7 @@ plugins {
     kotlin("jvm")
     kotlin("plugin.compose")
     id("org.jetbrains.compose")
+    id("com.gradleup.shadow")
 }
 
 configureCoordinates()
@@ -51,9 +54,16 @@ val desktopJbrHome = desktopJbrLauncher.map {
 val desktopJbrExecutable = desktopJbrLauncher.map {
     it.executablePath.asFile.absolutePath
 }
+val desktopAllRuntime = configurations.create("desktopAllRuntime") {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
 
 dependencies {
     implementation(compose.desktop.currentOs)
+    add(desktopAllRuntime.name, compose.desktop.linux_x64)
+    add(desktopAllRuntime.name, compose.desktop.macos_arm64)
+    add(desktopAllRuntime.name, compose.desktop.windows_x64)
     implementation(libs.findLibrary("compose-material3").get())
     testImplementation(kotlin("test"))
 }
@@ -94,4 +104,18 @@ afterEvaluate {
 
 tasks.withType<Test>().configureEach {
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+
+tasks.named<ShadowJar>("shadowJar") {
+    configurations = project.configurations.named("runtimeClasspath").map {
+        listOf(it, desktopAllRuntime)
+    }
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    mergeServiceFiles()
+    filesNotMatching(listOf("META-INF/services/**", "META-INF/*.kotlin_module")) {
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    }
+    manifest {
+        attributes["Main-Class"] = "io.github.stream29.kodex.desktop.MainKt"
+    }
 }

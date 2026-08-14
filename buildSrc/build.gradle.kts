@@ -18,4 +18,5 @@ dependencies {
     implementation("io.insert-koin:koin-compiler-gradle-plugin:1.0.1")
     implementation(libs.test.balloon.gradle.plugin)
     implementation("org.jetbrains.compose:compose-gradle-plugin:1.11.1")
+    implementation("com.gradleup.shadow:com.gradleup.shadow.gradle.plugin:9.6.1")
 }
