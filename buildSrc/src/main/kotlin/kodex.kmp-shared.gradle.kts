@@ -13,7 +13,7 @@ version = "0.2.2"
 
 kotlin {
     explicitApi()
-    jvmToolchain(26)
+    jvmToolchain(25)
 
     compilerOptions {
         allWarningsAsErrors.set(true)

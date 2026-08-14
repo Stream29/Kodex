@@ -12,7 +12,7 @@ internal fun Project.configureCoordinates() {
 
 internal fun KotlinMultiplatformExtension.configureCompiler() {
     explicitApi()
-    jvmToolchain(26)
+    jvmToolchain(25)
 
     compilerOptions {
         allWarningsAsErrors.set(true)
@@ -37,11 +37,13 @@ internal fun KotlinMultiplatformExtension.configureMosaicHierarchy() {
     applyHierarchyTemplate(KotlinHierarchyTemplate.default) {
         common {
             group("mosaic") {
-                withJvm()
                 withLinuxX64()
                 withLinuxArm64()
                 withMacosArm64()
                 withMingwX64()
+            }
+            group("desktop") {
+                withJvm()
             }
         }
     }

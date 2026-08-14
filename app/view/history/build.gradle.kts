@@ -1,5 +1,6 @@
 plugins {
     id("kodex.kmp-view")
+    id("org.jetbrains.compose")
 }
 
 kotlin {
@@ -15,6 +16,14 @@ kotlin {
             implementation(project(":app-view-components"))
             implementation(project(":app-view-patch"))
             implementation(libs.mosaic.runtime)
+        }
+        desktopMain.dependencies {
+            implementation(project(":app-view-components"))
+            implementation(project(":app-view-patch"))
+        }
+        desktopTest.dependencies {
+            implementation(libs.compose.ui.test.junit4)
+            implementation(compose.desktop.currentOs)
         }
         mosaicTest.dependencies {
             implementation(libs.mosaic.testing)
