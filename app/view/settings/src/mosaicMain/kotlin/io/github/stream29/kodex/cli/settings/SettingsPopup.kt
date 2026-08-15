@@ -98,6 +98,7 @@ public fun BoxScope.SettingsPopup(
     var hookDeleteRequest by remember(viewModel) {
         mutableStateOf<HookManagedSourceState?>(null)
     }
+    var hookDetailsSourceId by remember(viewModel) { mutableStateOf<String?>(null) }
     var hookImportOpen by remember(viewModel) { mutableStateOf(false) }
     val currentOpenLogin by rememberUpdatedState(onOpenLogin)
 
@@ -127,6 +128,7 @@ public fun BoxScope.SettingsPopup(
         mcpDetailsServerName = null
         hookEditorRequest = null
         hookDeleteRequest = null
+        hookDetailsSourceId = null
         if (selectedPage != SettingsPage.Global) {
             mcpImportOpen = false
             viewModel.global.dismissCodexMcpImport()
@@ -192,16 +194,12 @@ public fun BoxScope.SettingsPopup(
                             viewModel.global.previewCodexMcpImport()
                         },
                         onAddHook = { hookEditorRequest = HookEditorRequest() },
-                        onEditHook = { source ->
-                            viewModel.global.hookSourceEditorDraft(source.sourceId)?.let { draft ->
-                                hookEditorRequest = HookEditorRequest(
-                                    sourceId = source.sourceId,
-                                    draft = draft,
-                                )
-                            }
+                        onOpenHook = { source -> hookDetailsSourceId = source.sourceId },
+                        onImportHook = {
+                            viewModel.global.dismissCodexHookImport()
+                            hookImportOpen = true
+                            viewModel.global.previewCodexHookImport()
                         },
-                        onDeleteHook = { source -> hookDeleteRequest = source },
-                        onImportHook = { hookImportOpen = true },
                     )
                 }
             }
@@ -293,6 +291,31 @@ public fun BoxScope.SettingsPopup(
             },
         )
     }
+    hookDetailsSourceId?.let { sourceId ->
+        val sources by viewModel.global.hookSources.collectAsState()
+        sources.firstOrNull { source -> source.sourceId == sourceId }?.let { source ->
+            HookSourceDetailsDialog(
+                source = source,
+                onDismiss = { hookDetailsSourceId = null },
+                onEdit = {
+                    viewModel.global.hookSourceEditorDraft(source.sourceId)?.let { draft ->
+                        hookDetailsSourceId = null
+                        hookEditorRequest = HookEditorRequest(
+                            sourceId = source.sourceId,
+                            draft = draft,
+                        )
+                    }
+                },
+                onDelete = {
+                    hookDetailsSourceId = null
+                    hookDeleteRequest = source
+                },
+                onSetEnabled = {
+                    viewModel.global.setHookSourceEnabled(source.sourceId, !source.enabled)
+                },
+            )
+        }
+    }
     hookEditorRequest?.let { request ->
         HookSourceEditorDialog(
             request = request,
@@ -319,7 +342,6 @@ public fun BoxScope.SettingsPopup(
         val preview by viewModel.global.hookImportPreview.collectAsState()
         HookImportDialog(
             preview = preview,
-            onPreview = viewModel.global::previewCodexHookImport,
             onApply = { previewId: Long, decisions: Map<String, HookImportDecision> ->
                 viewModel.global.applyCodexHookImport(previewId, decisions)
                 hookImportOpen = false
@@ -370,8 +392,7 @@ private fun SettingsPageContent(
     onOpenMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
     onImportMcp: () -> Unit,
     onAddHook: () -> Unit,
-    onEditHook: (HookManagedSourceState) -> Unit,
-    onDeleteHook: (HookManagedSourceState) -> Unit,
+    onOpenHook: (HookManagedSourceState) -> Unit,
     onImportHook: () -> Unit,
 ) {
     when (page) {
@@ -382,8 +403,7 @@ private fun SettingsPageContent(
             onOpenMcp = onOpenMcp,
             onImportMcp = onImportMcp,
             onAddHook = onAddHook,
-            onEditHook = onEditHook,
-            onDeleteHook = onDeleteHook,
+            onOpenHook = onOpenHook,
             onImportHook = onImportHook,
         )
 
@@ -400,8 +420,7 @@ private fun GlobalSettingsContent(
     onOpenMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
     onImportMcp: () -> Unit,
     onAddHook: () -> Unit,
-    onEditHook: (HookManagedSourceState) -> Unit,
-    onDeleteHook: (HookManagedSourceState) -> Unit,
+    onOpenHook: (HookManagedSourceState) -> Unit,
     onImportHook: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
@@ -430,9 +449,7 @@ private fun GlobalSettingsContent(
         sources = hookSources,
         onSetFeatureEnabled = viewModel::setHooksEnabled,
         onAdd = onAddHook,
-        onEdit = onEditHook,
-        onDelete = onDeleteHook,
-        onSetEnabled = viewModel::setHookSourceEnabled,
+        onOpenDetails = onOpenHook,
         onImport = onImportHook,
     )
     SettingsChoiceGroup(
