@@ -56,6 +56,14 @@ public interface CoroutineFileSystem {
         mustCreate: Boolean = false,
     ): CoroutineRawSink
 
+    /**
+     * Restricts an existing file to the current user where the platform
+     * exposes owner-only file modes.
+     *
+     * Windows implementations may rely on the containing user-profile ACL.
+     */
+    public suspend fun protectPrivateFile(path: Path): Unit = Unit
+
     public suspend fun readBytes(path: Path, maxByteCount: Long = Long.MAX_VALUE): ByteArray =
         source(path).use { it.readBytes(maxByteCount) }
 
@@ -71,6 +79,22 @@ public interface CoroutineFileSystem {
         }
     }
 
+    /**
+     * Creates or truncates [path], protects it before writing [content], and
+     * flushes the completed private file.
+     */
+    public suspend fun writePrivateBytes(
+        path: Path,
+        content: ByteArray,
+        mustCreate: Boolean = false,
+    ) {
+        sink(path, append = false, mustCreate = mustCreate).use {
+            protectPrivateFile(path)
+            it.writeBytes(content)
+            it.flush()
+        }
+    }
+
     public suspend fun readString(path: Path): String =
         readBytes(path).decodeToString()
 
@@ -81,6 +105,14 @@ public interface CoroutineFileSystem {
         mustCreate: Boolean = false,
     ) {
         writeBytes(path, content.encodeToByteArray(), append, mustCreate)
+    }
+
+    public suspend fun writePrivateString(
+        path: Path,
+        content: String,
+        mustCreate: Boolean = false,
+    ) {
+        writePrivateBytes(path, content.encodeToByteArray(), mustCreate)
     }
 }
 

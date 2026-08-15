@@ -13,6 +13,7 @@ import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -92,6 +93,10 @@ internal class NewSessionViewModelImpl(
 
     override suspend fun updateAgentMode(agentMode: AgentMode) {
         updateSettings { current -> current.copy(agentMode = agentMode) }
+    }
+
+    override suspend fun updateRequestUserInputMode(mode: RequestUserInputMode) {
+        updateSettings { current -> current.copy(requestUserInputMode = mode) }
     }
 
     override suspend fun updateModelConfiguration(

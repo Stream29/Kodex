@@ -8,6 +8,7 @@ import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
@@ -69,6 +70,13 @@ internal class NewSessionSettingsViewModelImpl(
 
     override fun updateAgentMode(expectedRevision: Long, agentMode: AgentMode) {
         update(expectedRevision) { copy(agentMode = agentMode) }
+    }
+
+    override fun updateRequestUserInputMode(
+        expectedRevision: Long,
+        mode: RequestUserInputMode,
+    ) {
+        update(expectedRevision) { copy(requestUserInputMode = mode) }
     }
 
     override fun close() {

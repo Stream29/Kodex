@@ -14,6 +14,7 @@ import kotlinx.io.files.Path
 import kotlin.test.fail
 
 internal val ImageGenerationTestModel: OpenAiModelId = OpenAiModelId("gpt-image-2")
+internal val ResponsesTestModel: OpenAiModelId = OpenAiModelId("gpt-5.6-sol")
 
 internal fun <T> OpenAiResult<T, OpenAiErrorResponse>.successOrFail(): T =
     when (this) {
@@ -23,7 +24,7 @@ internal fun <T> OpenAiResult<T, OpenAiErrorResponse>.successOrFail(): T =
 
 internal suspend fun kodexAuthStore(): OpenAiAuthStore =
     InMemoryOpenAiAuthStore(
-        testCodexStorage().readAuthOrNull().toSubscriptionAuthStateOrThrow(),
+        testAuthStorage().readAuthOrNull().toSubscriptionAuthStateOrThrow(),
     )
 
 private fun CodexAuthJson?.toSubscriptionAuthStateOrThrow(): OpenAiSubscriptionAuthState {
@@ -43,31 +44,8 @@ internal fun testCodexDirectory(): Path {
         ?: throw IllegalStateException("CODEX_HOME or a readable user home directory must be set for real OpenAI client tests.")
 }
 
-internal suspend fun testCodexClientVersion(): String =
-    testCodexStorage().readModelsCacheOrNull()?.clientVersion
-        ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
-        ?: "0.1.0"
-
-internal suspend fun testCodexModel(): OpenAiModelId =
-    OpenAiModelId(cachedModels().let { models ->
-        configModel()
-            ?: models.firstOrNull { it.contains("codex", ignoreCase = true) }
-            ?: models.firstOrNull()
-    } ?: fail("Codex CLI models_cache.json must contain at least one model."))
-
-private fun testCodexStorage(): CodexCliStorage =
+private fun testAuthStorage(): CodexCliStorage =
     CodexCliStorage(testCodexDirectory())
-
-private suspend fun configModel(): String? {
-    return testCodexStorage().readConfigTomlOrNull()?.model
-}
-
-private suspend fun cachedModels(): List<String> =
-    testCodexStorage()
-        .readModelsCacheOrNull()
-        ?.models
-        .orEmpty()
-        .map { it.slug.value }
 
 internal val png64x32DataUrl: String
     get() = "data:image/png;base64,$png64x32Base64"

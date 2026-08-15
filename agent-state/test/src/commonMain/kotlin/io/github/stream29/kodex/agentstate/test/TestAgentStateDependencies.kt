@@ -3,6 +3,7 @@ package io.github.stream29.kodex.agentstate.test
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpClientState
+import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.utils.shellclient.Shell
@@ -15,7 +16,7 @@ import kotlinx.io.files.Path
 public val TestAgentContextSettings: StateFlow<AgentContextSettings> =
     MutableStateFlow(
         object : AgentContextSettings {
-            override val codexHome: Path = Path(".")
+            override val agentsHome: Path = Path(".")
             override val shell: Shell = Shell(ShellType.Sh, Path("sh"))
         },
     )
@@ -26,12 +27,16 @@ public class TestMcpService(
 ) : McpService {
     override val clients: MutableStateFlow<Map<String, McpClient>> =
         MutableStateFlow(initialTools.toTestMcpClients())
+    override val authentication: StateFlow<Map<String, McpAuthenticationState>> =
+        MutableStateFlow(emptyMap())
 
     public fun replaceTools(tools: List<McpTool>) {
         clients.value = tools.toTestMcpClients()
     }
 
     override suspend fun refresh(): Unit = Unit
+
+    override suspend fun invalidate(serverName: String): Unit = Unit
 
     override fun close(): Unit = Unit
 }

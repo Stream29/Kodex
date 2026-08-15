@@ -10,7 +10,6 @@ kotlin {
             api(libs.kotlinx.io.core)
             api(libs.kotlinx.serialization.json)
             api(project(":openai-models"))
-            api(project(":openai-codex-cli-storage"))
         }
     }
 }

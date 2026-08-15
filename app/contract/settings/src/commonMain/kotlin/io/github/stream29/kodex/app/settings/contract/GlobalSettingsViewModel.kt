@@ -3,7 +3,17 @@ package io.github.stream29.kodex.app.settings.contract
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
+import io.github.stream29.kodex.hook.contract.HookImportDecision
+import io.github.stream29.kodex.hook.contract.HookImportPreview
+import io.github.stream29.kodex.hook.contract.HookManagedSourceState
+import io.github.stream29.kodex.hook.contract.HookSourceDraft
 import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
+import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
+import io.github.stream29.kodex.mcp.contract.McpImportDecision
+import io.github.stream29.kodex.mcp.contract.McpImportPreview
+import io.github.stream29.kodex.mcp.contract.McpOAuthSummary
+import io.github.stream29.kodex.mcp.contract.McpServerDraft
+import io.github.stream29.kodex.mcp.contract.McpTransportKind
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiSubscriptionPlan
@@ -99,7 +109,17 @@ public fun SettingsAccountUsageState.snapshotOrNull(): CodexAccountUsageSnapshot
 /** Sanitized application-wide MCP server row. */
 public data class McpServerSettingsState(
     public val serverName: String,
+    public val transport: McpTransportKind,
+    public val enabled: Boolean,
+    public val authentication: McpAuthenticationState,
     public val status: McpServerSettingsStatus,
+    public val headerNames: List<String> = emptyList(),
+    public val environmentNames: List<String> = emptyList(),
+    public val oauth: McpOAuthSummary? = null,
+    public val streamableHttpUrl: String? = null,
+    public val stdioCommand: String? = null,
+    public val stdioArguments: List<String> = emptyList(),
+    public val stdioWorkingDirectory: Path? = null,
 ) {
     init {
         require(serverName.isNotBlank()) { "An MCP Settings server name must not be blank." }
@@ -109,6 +129,10 @@ public data class McpServerSettingsState(
 /** MCP lifecycle data safe for frontend presentation. */
 public sealed interface McpServerSettingsStatus {
     public data object Disabled : McpServerSettingsStatus
+    public data class AuthenticationBlocked(
+        public val state: McpAuthenticationState,
+    ) : McpServerSettingsStatus
+
     public data object Connecting : McpServerSettingsStatus
 
     public data class Healthy(
@@ -191,6 +215,16 @@ public sealed interface UsageResetState {
 /** One-shot application overlay requested by the Global Settings child. */
 public sealed interface GlobalSettingsEffect {
     public data object OpenLogin : GlobalSettingsEffect
+
+    public data class OpenMcpAuthorizationUrl(
+        public val serverName: String,
+        public val url: String,
+    ) : GlobalSettingsEffect {
+        init {
+            require(serverName.isNotBlank()) { "An MCP server name must not be blank." }
+            require(url.isNotBlank()) { "An MCP authorization URL must not be blank." }
+        }
+    }
 }
 
 /** Settings > Global state owner and command boundary. */
@@ -202,6 +236,10 @@ public interface GlobalSettingsViewModel : AutoCloseable {
     public val accountUsage: StateFlow<SettingsAccountUsageState>
 
     public val mcpServers: StateFlow<List<McpServerSettingsState>>
+    public val mcpImportPreview: StateFlow<McpImportPreview?>
+    public val hooksEnabled: StateFlow<Boolean>
+    public val hookSources: StateFlow<List<HookManagedSourceState>>
+    public val hookImportPreview: StateFlow<HookImportPreview?>
     public val usageReset: StateFlow<UsageResetState>
     public val effects: Flow<GlobalSettingsEffect>
 
@@ -221,6 +259,32 @@ public interface GlobalSettingsViewModel : AutoCloseable {
     public fun dismissUsageReset(): Unit
 
     public fun reconnectMcpServer(serverName: String): Unit
+    public fun addMcpServer(draft: McpServerDraft): Unit
+    public fun editMcpServer(existingServerName: String, draft: McpServerDraft): Unit
+    public fun deleteMcpServer(serverName: String): Unit
+    public fun setMcpServerEnabled(serverName: String, enabled: Boolean): Unit
+    public fun loginMcpServer(serverName: String): Unit
+    public fun cancelMcpServerLogin(serverName: String): Unit
+    public fun logoutMcpServer(serverName: String): Unit
+    public fun previewCodexMcpImport(filter: String = ""): Unit
+    public fun applyCodexMcpImport(
+        previewId: Long,
+        decisions: Map<String, McpImportDecision>,
+    ): Unit
+    public fun dismissCodexMcpImport(): Unit
+
+    public fun setHooksEnabled(enabled: Boolean): Unit
+    public fun addHookSource(draft: HookSourceDraft): Unit
+    public fun editHookSource(sourceId: String, draft: HookSourceDraft): Unit
+    public fun deleteHookSource(sourceId: String): Unit
+    public fun setHookSourceEnabled(sourceId: String, enabled: Boolean): Unit
+    public fun hookSourceEditorDraft(sourceId: String): HookSourceDraft?
+    public fun previewCodexHookImport(filter: String = ""): Unit
+    public fun applyCodexHookImport(
+        previewId: Long,
+        decisions: Map<String, HookImportDecision>,
+    ): Unit
+    public fun dismissCodexHookImport(): Unit
 
     override fun close(): Unit
 }

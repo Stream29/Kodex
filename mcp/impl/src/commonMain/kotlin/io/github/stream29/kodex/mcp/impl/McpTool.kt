@@ -165,6 +165,9 @@ private fun Throwable.toMcpFailureMessage(serverName: String): String =
 
 private fun McpClientState.toUnavailableMessage(serverName: String): String =
     when (this) {
+        McpClientState.AuthenticationBlocked ->
+            "MCP server $serverName requires authorization and is not available."
+
         McpClientState.Connecting -> "MCP server $serverName is connecting and is not available."
         McpClientState.Closed -> "MCP server $serverName is closed and is not available."
         is McpClientState.Failed ->

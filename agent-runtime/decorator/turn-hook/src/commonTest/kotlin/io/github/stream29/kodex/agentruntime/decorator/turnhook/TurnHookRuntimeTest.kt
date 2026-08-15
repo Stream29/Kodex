@@ -31,14 +31,13 @@ import io.github.stream29.kodex.openai.Response
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
-import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
-import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
@@ -279,6 +278,15 @@ val turnHookRuntimeTest by testSuite {
             emptyList(),
             storage.stableEvents().filterIsInstance<StableRequestUserInputToolEvent>(),
         )
+
+        state.updateSettings(
+            storage.settings.latestValue().copy(
+                requestUserInputMode = RequestUserInputMode.NoQuestion,
+            ),
+        )
+
+        val afterModeSwitch = assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
+        assertEquals(pending.events, afterModeSwitch.events)
     }
 
     test("request questions supply stop text and empty continuation remains pending") {
@@ -660,7 +668,6 @@ private fun testModelCatalog(): OpenAiModelCatalog =
         client = mockOpenAiClient {
             listModels { OpenAiResult.Success(ModelsResponse()) }
         },
-        codexCliStorage = CodexCliStorage(Path(".kodex-test-model-catalog")),
     )
 
 private val TestLogger = KotlinLogging.logger {}

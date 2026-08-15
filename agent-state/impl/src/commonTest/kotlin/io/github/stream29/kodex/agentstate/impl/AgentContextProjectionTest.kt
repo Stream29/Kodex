@@ -10,6 +10,7 @@ import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpClientState
+import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -25,7 +26,9 @@ import io.github.stream29.kodex.openai.RemoteCompactionV2Response
 import io.github.stream29.kodex.openai.Response
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesApiRequest
+import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.ThreadGoal
 import io.github.stream29.kodex.openai.ThreadGoalStatus
@@ -44,6 +47,7 @@ import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -162,10 +166,15 @@ val agentContextProjectionTest by testSuite {
                 agent.requestResponseApi()
                 fixture.writeUserAgentsMd("second instructions")
                 fixture.settings.value = ProjectionContextSettings(
-                    codexHome = fixture.codexHome,
+                    agentsHome = fixture.agentsHome,
                     shell = Shell(ShellType.Zsh, Path("/bin/zsh")),
                 )
-                agent.updateSettings(initialSettings.copy(cwd = updatedProject))
+                agent.updateSettings(
+                    initialSettings.copy(
+                        cwd = updatedProject,
+                        requestUserInputMode = RequestUserInputMode.NoQuestion,
+                    ),
+                )
                 mcpService.clients.value = mapOf("projection" to ProjectionMcpClient)
                 agent.requestResponseApi()
 
@@ -178,6 +187,8 @@ val agentContextProjectionTest by testSuite {
                 val secondToolSearchSpec = assertIs<ToolSpec.ToolSearch>(requests[1].tools.last())
                 assertTrue(firstToolSearchSpec.description.contains("None currently enabled."))
                 assertTrue(secondToolSearchSpec.description.contains("- projection: Projection tools."))
+                assertTrue(requests[0].hasRequestUserInputTool())
+                assertFalse(requests[1].hasRequestUserInputTool())
             } finally {
                 deleteRecursively(fixture.root)
             }
@@ -187,7 +198,11 @@ val agentContextProjectionTest by testSuite {
             val fixture = contextFixture("compaction")
             try {
                 fixture.writeUserAgentsMd("must not be compacted")
-                val storage = InMemoryKodexAgentStorage(settings(cwd = fixture.project))
+                val storage = InMemoryKodexAgentStorage(
+                    settings(cwd = fixture.project).copy(
+                        requestUserInputMode = RequestUserInputMode.NoQuestion,
+                    ),
+                )
                 val compactionRequests = mutableListOf<ResponsesApiRequest>()
                 val agent = KodexAgentState(
                     client = mockOpenAiClient {
@@ -221,6 +236,7 @@ val agentContextProjectionTest by testSuite {
                 val toolSearchSpec =
                     assertIs<ToolSpec.ToolSearch>(compactionRequests.single().tools.last())
                 assertTrue(toolSearchSpec.description.contains("- projection: Projection tools."))
+                assertFalse(compactionRequests.single().hasRequestUserInputTool())
                 assertEquals(2, compactIndex)
                 assertEquals(StableCleanEvent.UserMessage(user.content), storage.stable[1])
                 assertEquals(StableCleanEvent.ContextCompaction, storage.stable[compactIndex])
@@ -247,6 +263,10 @@ private fun recordingClient(
         flowOf(ResponsesStreamEvent.Completed(Response(id = "response_${requests.size}")))
     }
 }
+
+private fun ResponsesApiRequest.hasRequestUserInputTool(): Boolean =
+    tools.filterIsInstance<ResponsesApiTool>()
+        .any { tool -> tool.name == "request_user_input" }
 
 private fun settings(
     cwd: Path,
@@ -296,12 +316,12 @@ private fun List<ResponseItem>.text(): String =
 
 private class ContextFixture(
     val root: Path,
-    val codexHome: Path,
+    val agentsHome: Path,
     val project: Path,
     val settings: MutableStateFlow<AgentContextSettings>,
 ) {
     suspend fun writeUserAgentsMd(text: String) {
-        SystemCoroutineFileSystem.writeString(Path(codexHome, "AGENTS.md"), text)
+        SystemCoroutineFileSystem.writeString(Path(agentsHome, "AGENTS.md"), text)
     }
 
     suspend fun writeProjectAgentsMd(text: String) {
@@ -309,7 +329,7 @@ private class ContextFixture(
     }
 
     suspend fun writeSkill(name: String, description: String) {
-        val directory = Path(codexHome, "skills/$name")
+        val directory = Path(agentsHome, "skills/$name")
         SystemCoroutineFileSystem.createDirectories(directory)
         SystemCoroutineFileSystem.writeString(
             Path(directory, "SKILL.md"),
@@ -326,17 +346,17 @@ private class ContextFixture(
 
 private suspend fun contextFixture(name: String): ContextFixture {
     val root = Path(SystemTemporaryDirectory, "kodex-state-context-$name-${Random.nextLong()}")
-    val codexHome = Path(root, "codex-home")
+    val agentsHome = Path(root, "agents-home")
     val project = Path(root, "project")
-    SystemCoroutineFileSystem.createDirectories(codexHome)
+    SystemCoroutineFileSystem.createDirectories(agentsHome)
     SystemCoroutineFileSystem.createDirectories(Path(project, ".git"))
     return ContextFixture(
         root = root,
-        codexHome = codexHome,
+        agentsHome = agentsHome,
         project = project,
         settings = MutableStateFlow(
             ProjectionContextSettings(
-                codexHome = codexHome,
+                agentsHome = agentsHome,
                 shell = Shell(ShellType.Bash, Path("/bin/bash")),
             ),
         ),
@@ -344,7 +364,7 @@ private suspend fun contextFixture(name: String): ContextFixture {
 }
 
 private data class ProjectionContextSettings(
-    override val codexHome: Path,
+    override val agentsHome: Path,
     override val shell: Shell,
 ) : AgentContextSettings
 
@@ -358,6 +378,9 @@ private class ProjectionMcpService(
                 FixedProjectionMcpClient(serverName, tools)
             },
     )
+    override val authentication = MutableStateFlow<Map<String, McpAuthenticationState>>(emptyMap())
+
+    override suspend fun invalidate(serverName: String) = Unit
 
     override suspend fun refresh() = Unit
 

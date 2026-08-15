@@ -23,7 +23,7 @@ val openAiResponseStreamingTest by testSuite {
     testFixture {
         OpenAiClient(
             authStore = kodexAuthStore(),
-            config = OpenAiClientConfig(clientVersion = testCodexClientVersion()),
+            config = OpenAiClientConfig(),
         )
     } asParameterForEach {
         test(
@@ -36,7 +36,7 @@ val openAiResponseStreamingTest by testSuite {
             withContext(Dispatchers.Default) {
                 val stream = client.createResponse(
                     ResponsesApiRequest(
-                        model = testCodexModel(),
+                        model = ResponsesTestModel,
                         input = listOf(
                             ResponseItem.Message(
                                 role = MessageRole.User,

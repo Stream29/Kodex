@@ -15,10 +15,19 @@ import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettingsStore
 import io.github.stream29.kodex.cli.settings.NewLineKey
-import io.github.stream29.kodex.mcp.contract.McpClient
+import io.github.stream29.kodex.hook.contract.HookImportDecision
+import io.github.stream29.kodex.hook.contract.HookImportPreview
+import io.github.stream29.kodex.hook.contract.HookManagedSourceState
+import io.github.stream29.kodex.hook.contract.HookManager
+import io.github.stream29.kodex.hook.contract.HookSourceDraft
+import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpClientState
-import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
-import io.github.stream29.kodex.mcp.contract.McpService
+import io.github.stream29.kodex.mcp.contract.McpImportDecision
+import io.github.stream29.kodex.mcp.contract.McpImportPreview
+import io.github.stream29.kodex.mcp.contract.McpManagedServerState
+import io.github.stream29.kodex.mcp.contract.McpManager
+import io.github.stream29.kodex.mcp.contract.McpManagerEffect
+import io.github.stream29.kodex.mcp.contract.McpServerDraft
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -31,16 +40,12 @@ import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
@@ -49,7 +54,8 @@ internal class GlobalSettingsViewModelImpl(
     private val globalSettings: KodexGlobalSettingsStore,
     authentication: OpenAiAuthStore,
     private val accountUsageStore: CodexAccountUsageStore,
-    private val mcpService: McpService,
+    private val mcpManager: McpManager,
+    private val hookManager: HookManager,
     models: StateFlow<List<ModelInfo>>,
     private val commandScope: CoroutineScope,
 ) : GlobalSettingsViewModel {
@@ -79,6 +85,8 @@ internal class GlobalSettingsViewModelImpl(
         accountUsageStore.state.value.toSettingsState(),
     )
     private val mutableMcpServers = MutableStateFlow<List<McpServerSettingsState>>(emptyList())
+    private val mutableMcpImportPreview = MutableStateFlow<McpImportPreview?>(null)
+    private val mutableHookImportPreview = MutableStateFlow<HookImportPreview?>(null)
     private val mutableUsageReset = MutableStateFlow<UsageResetState>(UsageResetState.Hidden)
 
     override val state: StateFlow<GlobalSettingsState> = mutableState.asStateFlow()
@@ -88,6 +96,12 @@ internal class GlobalSettingsViewModelImpl(
         mutableAccountUsage.asStateFlow()
     override val mcpServers: StateFlow<List<McpServerSettingsState>> =
         mutableMcpServers.asStateFlow()
+    override val mcpImportPreview: StateFlow<McpImportPreview?> =
+        mutableMcpImportPreview.asStateFlow()
+    override val hooksEnabled: StateFlow<Boolean> = hookManager.featureEnabled
+    override val hookSources: StateFlow<List<HookManagedSourceState>> = hookManager.sources
+    override val hookImportPreview: StateFlow<HookImportPreview?> =
+        mutableHookImportPreview.asStateFlow()
     override val usageReset: StateFlow<UsageResetState> = mutableUsageReset.asStateFlow()
     override val effects: Flow<GlobalSettingsEffect> = effectChannel.receiveAsFlow()
 
@@ -115,19 +129,20 @@ internal class GlobalSettingsViewModelImpl(
             }
         }
         scope.launch {
-            combine(globalSettings.settings, mcpService.clients) { settings, clients ->
-                settings.mcpServers to clients
-            }.collectLatest { (configurations, clients) ->
-                publishMcpServers(configurations, clients)
-                coroutineScope {
-                    clients.values.forEach { client ->
-                        launch {
-                            client.state.collect {
-                                publishMcpServers(configurations, clients)
-                            }
-                        }
-                    }
-                    awaitCancellation()
+            mcpManager.servers.collect { servers ->
+                mutableMcpServers.value = servers.map(McpManagedServerState::toSettingsState)
+            }
+        }
+        scope.launch {
+            mcpManager.effects.collect { effect ->
+                when (effect) {
+                    is McpManagerEffect.OpenAuthorizationUrl ->
+                        effectChannel.send(
+                            GlobalSettingsEffect.OpenMcpAuthorizationUrl(
+                                serverName = effect.serverName,
+                                url = effect.url,
+                            ),
+                        )
                 }
             }
         }
@@ -273,28 +288,106 @@ internal class GlobalSettingsViewModelImpl(
     }
 
     override fun reconnectMcpServer(serverName: String) {
-        if (closed) return
-        val server = mutableMcpServers.value
-            .firstOrNull { candidate -> candidate.serverName == serverName }
-            ?: return
-        if (server.status !is McpServerSettingsStatus.Failed) return
-        val client = mcpService.clients.value[serverName] ?: return
-        if (client.state.value !is McpClientState.Failed) return
-        commandScope.launch {
-            try {
-                client.reconnect()
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (_: Throwable) {
-                // The managed client publishes its typed failure state.
-            }
+        launchManagementCommand { mcpManager.reconnect(serverName) }
+    }
+
+    override fun addMcpServer(draft: McpServerDraft) {
+        launchManagementCommand { mcpManager.add(draft) }
+    }
+
+    override fun editMcpServer(existingServerName: String, draft: McpServerDraft) {
+        launchManagementCommand { mcpManager.edit(existingServerName, draft) }
+    }
+
+    override fun deleteMcpServer(serverName: String) {
+        launchManagementCommand { mcpManager.delete(serverName) }
+    }
+
+    override fun setMcpServerEnabled(serverName: String, enabled: Boolean) {
+        launchManagementCommand { mcpManager.setEnabled(serverName, enabled) }
+    }
+
+    override fun loginMcpServer(serverName: String) {
+        launchManagementCommand { mcpManager.login(serverName) }
+    }
+
+    override fun cancelMcpServerLogin(serverName: String) {
+        launchManagementCommand { mcpManager.cancelLogin(serverName) }
+    }
+
+    override fun logoutMcpServer(serverName: String) {
+        launchManagementCommand { mcpManager.logout(serverName) }
+    }
+
+    override fun previewCodexMcpImport(filter: String) {
+        launchManagementCommand {
+            mutableMcpImportPreview.value = mcpManager.previewCodexImport(filter)
         }
+    }
+
+    override fun applyCodexMcpImport(
+        previewId: Long,
+        decisions: Map<String, McpImportDecision>,
+    ) {
+        launchManagementCommand {
+            mcpManager.applyCodexImport(previewId, decisions)
+            mutableMcpImportPreview.value = null
+        }
+    }
+
+    override fun dismissCodexMcpImport() {
+        mutableMcpImportPreview.value = null
+    }
+
+    override fun setHooksEnabled(enabled: Boolean) {
+        launchManagementCommand { hookManager.setFeatureEnabled(enabled) }
+    }
+
+    override fun addHookSource(draft: HookSourceDraft) {
+        launchManagementCommand { hookManager.add(draft) }
+    }
+
+    override fun editHookSource(sourceId: String, draft: HookSourceDraft) {
+        launchManagementCommand { hookManager.edit(sourceId, draft) }
+    }
+
+    override fun deleteHookSource(sourceId: String) {
+        launchManagementCommand { hookManager.delete(sourceId) }
+    }
+
+    override fun setHookSourceEnabled(sourceId: String, enabled: Boolean) {
+        launchManagementCommand { hookManager.setEnabled(sourceId, enabled) }
+    }
+
+    override fun hookSourceEditorDraft(sourceId: String): HookSourceDraft? =
+        hookManager.editorDraft(sourceId)
+
+    override fun previewCodexHookImport(filter: String) {
+        launchManagementCommand {
+            mutableHookImportPreview.value = hookManager.previewCodexImport(filter)
+        }
+    }
+
+    override fun applyCodexHookImport(
+        previewId: Long,
+        decisions: Map<String, HookImportDecision>,
+    ) {
+        launchManagementCommand {
+            hookManager.applyCodexImport(previewId, decisions)
+            mutableHookImportPreview.value = null
+        }
+    }
+
+    override fun dismissCodexHookImport() {
+        mutableHookImportPreview.value = null
     }
 
     override fun close() {
         if (closed) return
         closed = true
         dismissUsageReset()
+        dismissCodexMcpImport()
+        dismissCodexHookImport()
         updates.close()
         effectChannel.close()
         scope.cancel()
@@ -310,6 +403,19 @@ internal class GlobalSettingsViewModelImpl(
         if (closed) return
         updates.submit {
             globalSettings.update { current -> current.transform() }
+        }
+    }
+
+    private fun launchManagementCommand(command: suspend () -> Unit) {
+        if (closed) return
+        commandScope.launch {
+            try {
+                command()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Throwable) {
+                // Manager commands validate before any atomic settings update.
+            }
         }
     }
 
@@ -351,23 +457,6 @@ internal class GlobalSettingsViewModelImpl(
         nextResetGeneration()
     }
 
-    private fun publishMcpServers(
-        configurations: Map<String, McpServerConfiguration>,
-        clients: Map<String, McpClient>,
-    ) {
-        mutableMcpServers.value = configurations.entries
-            .sortedBy(Map.Entry<String, McpServerConfiguration>::key)
-            .map { (serverName, configuration) ->
-                McpServerSettingsState(
-                    serverName = serverName,
-                    status = when {
-                        !configuration.enabled -> McpServerSettingsStatus.Disabled
-                        clients[serverName] == null -> McpServerSettingsStatus.Connecting
-                        else -> clients.getValue(serverName).toSettingsStatus()
-                    },
-                )
-            }
-    }
 }
 
 private fun KodexGlobalSettings.toGlobalSettingsState(
@@ -414,15 +503,56 @@ private fun CodexAccountUsageState.toSettingsState(): SettingsAccountUsageState 
         is CodexAccountUsageState.Redeeming -> SettingsAccountUsageState.Redeeming(snapshot)
     }
 
-private fun McpClient.toSettingsStatus(): McpServerSettingsStatus =
-    when (val current = state.value) {
-        McpClientState.Connecting -> McpServerSettingsStatus.Connecting
-        McpClientState.Healthy -> McpServerSettingsStatus.Healthy(
-            toolCount = runCatching { listTools().size }.getOrDefault(0),
-        )
+private fun McpManagedServerState.toSettingsState(): McpServerSettingsState =
+    McpServerSettingsState(
+        serverName = serverName,
+        transport = transport,
+        enabled = enabled,
+        authentication = authentication,
+        status = connection.let { currentConnection ->
+            when {
+                !enabled -> McpServerSettingsStatus.Disabled
+                authentication.isBlocked() ->
+                    McpServerSettingsStatus.AuthenticationBlocked(authentication)
 
-        is McpClientState.Failed -> McpServerSettingsStatus.Failed(current.reason)
-        McpClientState.Closed -> McpServerSettingsStatus.Closed
+                currentConnection == McpClientState.AuthenticationBlocked ->
+                    McpServerSettingsStatus.AuthenticationBlocked(authentication)
+
+                currentConnection == null -> McpServerSettingsStatus.Connecting
+                currentConnection == McpClientState.Connecting ->
+                    McpServerSettingsStatus.Connecting
+
+                currentConnection == McpClientState.Healthy ->
+                    McpServerSettingsStatus.Healthy(toolCount)
+
+                currentConnection is McpClientState.Failed ->
+                    McpServerSettingsStatus.Failed(currentConnection.reason)
+
+                currentConnection == McpClientState.Closed -> McpServerSettingsStatus.Closed
+                else -> McpServerSettingsStatus.Connecting
+            }
+        },
+        headerNames = headerNames,
+        environmentNames = environmentNames,
+        oauth = oauth,
+        streamableHttpUrl = streamableHttpUrl,
+        stdioCommand = stdioCommand,
+        stdioArguments = stdioArguments,
+        stdioWorkingDirectory = stdioWorkingDirectory,
+    )
+
+private fun McpAuthenticationState.isBlocked(): Boolean =
+    when (this) {
+        McpAuthenticationState.NotConfigured,
+        McpAuthenticationState.Authorized,
+            -> false
+
+        McpAuthenticationState.LoginRequired,
+        McpAuthenticationState.ReauthorizationRequired,
+        McpAuthenticationState.Authorizing,
+        McpAuthenticationState.Refreshing,
+        is McpAuthenticationState.Failed,
+            -> true
     }
 
 internal fun io.github.stream29.kodex.openai.accountusage.CodexAccountUsageSnapshot

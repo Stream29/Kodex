@@ -30,6 +30,7 @@ import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.openai.availableServiceTiers
 import io.github.stream29.kodex.utils.terminaltext.takeLastFittingTerminalWidth
@@ -42,13 +43,17 @@ import kotlinx.io.files.Path
 internal class RuntimeConfigurationDropdowns private constructor(
     val model: TuiDropdownState,
     val agentMode: TuiDropdownState,
+    val requestUserInputMode: TuiDropdownState,
 ) {
     companion object {
         @Composable
         fun remember(owner: Any?): RuntimeConfigurationDropdowns = key(owner) {
             val model = rememberTuiDropdownState()
             val agentMode = rememberTuiDropdownState()
-            remember(model, agentMode) { RuntimeConfigurationDropdowns(model, agentMode) }
+            val requestUserInputMode = rememberTuiDropdownState()
+            remember(model, agentMode, requestUserInputMode) {
+                RuntimeConfigurationDropdowns(model, agentMode, requestUserInputMode)
+            }
         }
     }
 }
@@ -143,6 +148,14 @@ internal fun RuntimeConfigurationTriggers(
     )
     Text(" ")
     TuiDropdownTrigger(
+        dropdownState = dropdowns.requestUserInputMode,
+        label = configuration.requestUserInputMode.displayName(),
+        modifier = Modifier.background(SessionButtonBackground),
+        color = SessionForeground,
+        enabled = enabled,
+    )
+    Text(" ")
+    TuiDropdownTrigger(
         dropdownState = dropdowns.agentMode,
         label = configuration.agentMode.displayName(),
         modifier = Modifier.background(SessionButtonBackground),
@@ -214,6 +227,9 @@ internal fun BoxScope.RuntimeConfigurationMenus(
         onAgentModeSelected = { agentMode ->
             scope.launch { viewModel.updateAgentMode(agentMode) }
         },
+        onRequestUserInputModeSelected = { mode ->
+            scope.launch { viewModel.updateRequestUserInputMode(mode) }
+        },
     )
 }
 
@@ -225,6 +241,7 @@ internal fun BoxScope.RuntimeConfigurationMenus(
     dropdowns: RuntimeConfigurationDropdowns,
     onConfigurationSelected: (OpenAiModelId, ReasoningEffort, ServiceTier) -> Unit,
     onAgentModeSelected: (AgentMode) -> Unit,
+    onRequestUserInputModeSelected: (RequestUserInputMode) -> Unit,
 ) {
     TuiDropdownMenu(
         dropdownState = dropdowns.model,
@@ -295,6 +312,14 @@ internal fun BoxScope.RuntimeConfigurationMenus(
         backgroundColor = PopupMenuBackground,
         onSelect = onAgentModeSelected,
     )
+    TuiDropdownMenu(
+        dropdownState = dropdowns.requestUserInputMode,
+        options = RequestUserInputMode.entries.toList(),
+        selected = configuration.requestUserInputMode,
+        optionLabel = RequestUserInputMode::displayName,
+        backgroundColor = PopupMenuBackground,
+        onSelect = onRequestUserInputModeSelected,
+    )
 }
 
 internal data class RuntimeConfiguration(
@@ -302,6 +327,7 @@ internal data class RuntimeConfiguration(
     val reasoning: ReasoningEffort,
     val tier: ServiceTier,
     val agentMode: AgentMode,
+    val requestUserInputMode: RequestUserInputMode,
 )
 
 private fun KodexAgentSettings.configuration(): RuntimeConfiguration = RuntimeConfiguration(
@@ -309,6 +335,7 @@ private fun KodexAgentSettings.configuration(): RuntimeConfiguration = RuntimeCo
     reasoning = reasoning.effort,
     tier = serviceTier,
     agentMode = agentMode,
+    requestUserInputMode = requestUserInputMode,
 )
 
 internal fun runtimeConfigurationLabel(

@@ -17,6 +17,7 @@ import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SubmitKey
 import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 
 @Composable
@@ -80,6 +81,11 @@ internal fun ServiceTier.displayName(): String = when (this) {
 
 internal fun AgentMode.displayName(): String = when (this) {
     AgentMode.Single -> "single agent"; AgentMode.Multi -> "multi agent"
+}
+
+internal fun RequestUserInputMode.displayName(): String = when (this) {
+    RequestUserInputMode.AskUser -> "ask user"
+    RequestUserInputMode.NoQuestion -> "no question"
 }
 
 internal val SessionForeground: Color = Color.White

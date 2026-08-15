@@ -4,6 +4,7 @@ import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import kotlinx.coroutines.flow.StateFlow
 
@@ -32,6 +33,10 @@ public interface NewSessionSettingsViewModel : AutoCloseable {
     public fun updateReasoningEffort(expectedRevision: Long, reasoningEffort: ReasoningEffort): Unit
     public fun updateServiceTier(expectedRevision: Long, serviceTier: ServiceTier): Unit
     public fun updateAgentMode(expectedRevision: Long, agentMode: AgentMode): Unit
+    public fun updateRequestUserInputMode(
+        expectedRevision: Long,
+        mode: RequestUserInputMode,
+    ): Unit
 
     override fun close(): Unit
 }

@@ -43,7 +43,7 @@ val openAiFunctionCallImageOutputTest by testSuite {
     testFixture {
         OpenAiClient(
             authStore = kodexAuthStore(),
-            config = OpenAiClientConfig(clientVersion = testCodexClientVersion()),
+            config = OpenAiClientConfig(),
         )
     } asParameterForEach {
         test(
@@ -61,7 +61,7 @@ val openAiFunctionCallImageOutputTest by testSuite {
             )
             val request =
                 ResponsesApiRequest(
-                    model = testCodexModel(),
+                    model = ResponsesTestModel,
                     input = listOf(
                         userMessage,
                         ResponseItem.FunctionCall(

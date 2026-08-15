@@ -6,6 +6,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEve
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
+import io.github.stream29.kodex.mcp.contract.McpSecret
 import io.github.stream29.kodex.mcp.contract.McpSettings
 import io.github.stream29.kodex.mcp.impl.McpServiceImpl
 import kotlinx.coroutines.CoroutineScope
@@ -42,7 +43,9 @@ val mcpStdioTransportIoTest by testSuite(
                                 fixtureClasspath(),
                                 McpStdioServerFixture::class.java.name,
                             ),
-                            environment = mapOf(TestEnvironmentName to TestEnvironmentValue),
+                            environment = mapOf(
+                                TestEnvironmentName to McpSecret(TestEnvironmentValue),
+                            ),
                             workingDirectory = Path(workingDirectory.absolutePathString()),
                         ),
                     ),

@@ -19,25 +19,30 @@ val agentContextPrefixResolverTest by testSuite {
     test("resolves hierarchical AGENTS.md from real files") {
         val root = Path(SystemTemporaryDirectory, "kodex-context-${Random.nextLong()}")
         val home = Path(root, "home")
+        val agentsHome = Path(home, ".agents")
         val codexHome = Path(home, ".codex")
         val project = Path(root, "project")
         val cwd = Path(project, "module")
-        val skill = Path(codexHome, "skills/gradle")
+        val skill = Path(agentsHome, "skills/gradle")
+        val ignoredCodexSkill = Path(codexHome, "skills/ignored")
         SystemCoroutineFileSystem.createDirectories(Path(project, ".git"))
         SystemCoroutineFileSystem.createDirectories(cwd)
+        SystemCoroutineFileSystem.createDirectories(agentsHome)
         SystemCoroutineFileSystem.createDirectories(codexHome)
         SystemCoroutineFileSystem.createDirectories(skill)
+        SystemCoroutineFileSystem.createDirectories(ignoredCodexSkill)
         try {
             SystemCoroutineFileSystem.writeString(Path(root, "AGENTS.md"), "outside project")
-            SystemCoroutineFileSystem.writeString(Path(codexHome, "AGENTS.md"), "user rules")
+            SystemCoroutineFileSystem.writeString(Path(agentsHome, "AGENTS.md"), "user rules")
+            SystemCoroutineFileSystem.writeString(Path(codexHome, "AGENTS.md"), "ignored Codex rules")
             SystemCoroutineFileSystem.writeString(Path(project, "AGENTS.md"), "project rules")
             SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.md"), "shadowed module rules")
             SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.override.md"), "module override")
             writeSkill(skill, "gradle", "Build Gradle projects.")
+            writeSkill(ignoredCodexSkill, "ignored", "Ignored Codex skill.")
 
             val resolver = AgentContextPrefixResolver(
-                contextSettings = MutableStateFlow(testContextSettings(codexHome, testShell)),
-                userHome = home,
+                contextSettings = MutableStateFlow(testContextSettings(agentsHome, testShell)),
             )
             val settings = settings(cwd)
             val prefix = resolver.resolve(settings)
@@ -48,7 +53,7 @@ val agentContextPrefixResolverTest by testSuite {
                 prefix.agentMd.projectInstructions.map(AgentsMdInstruction::text),
             )
             assertEquals(
-                SystemCoroutineFileSystem.resolve(Path(codexHome, "AGENTS.md")),
+                SystemCoroutineFileSystem.resolve(Path(agentsHome, "AGENTS.md")),
                 prefix.agentMd.userInstruction?.source,
             )
             assertEquals(
@@ -64,6 +69,7 @@ val agentContextPrefixResolverTest by testSuite {
                         available.path == SystemCoroutineFileSystem.resolve(Path(skill, "SKILL.md"))
                 },
             )
+            assertTrue(prefix.availableSkills.none { available -> available.name == "ignored" })
 
             SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.override.md"), "updated module override")
             assertEquals(
@@ -84,9 +90,8 @@ val agentContextPrefixResolverTest by testSuite {
         try {
             val resolver = AgentContextPrefixResolver(
                 contextSettings = MutableStateFlow(
-                    testContextSettings(Path(home, ".codex"), testShell),
+                    testContextSettings(Path(home, ".agents"), testShell),
                 ),
-                userHome = home,
             )
             val prefix = resolver.resolve(settings(cwd))
 
@@ -118,12 +123,11 @@ val agentContextPrefixResolverTest by testSuite {
             SystemCoroutineFileSystem.writeString(Path(secondHome, "AGENTS.md"), "second user rules")
             SystemCoroutineFileSystem.writeString(Path(first, "AGENTS.md"), "first rules")
             SystemCoroutineFileSystem.writeString(Path(second, "AGENTS.md"), "second rules")
-            writeSkill(firstSkill, "first", "First Codex home.")
-            writeSkill(secondSkill, "second", "Second Codex home.")
+            writeSkill(firstSkill, "first", "First Agents home.")
+            writeSkill(secondSkill, "second", "Second Agents home.")
             val contextSettings = MutableStateFlow(testContextSettings(firstHome, testShell))
             val resolver = AgentContextPrefixResolver(
                 contextSettings = contextSettings,
-                userHome = root,
             )
 
             val initial = resolver.resolve(settings(first))
@@ -159,11 +163,11 @@ val agentContextPrefixResolverTest by testSuite {
 private fun settings(cwd: Path): KodexAgentSettings =
     KodexAgentSettings(model = OpenAiModelId("test-model"), cwd = cwd)
 
-private fun testContextSettings(codexHome: Path, shell: Shell): AgentContextSettings =
-    TestAgentContextSettings(codexHome, shell)
+private fun testContextSettings(agentsHome: Path, shell: Shell): AgentContextSettings =
+    TestAgentContextSettings(agentsHome, shell)
 
 private data class TestAgentContextSettings(
-    override val codexHome: Path,
+    override val agentsHome: Path,
     override val shell: Shell,
 ) : AgentContextSettings
 

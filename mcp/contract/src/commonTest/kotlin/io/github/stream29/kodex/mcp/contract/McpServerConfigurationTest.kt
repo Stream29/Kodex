@@ -11,13 +11,13 @@ val mcpServerConfigurationTest by testSuite {
         val configurations = listOf(
             McpServerConfiguration.StreamableHttp(
                 url = "https://example.test/mcp",
-                headers = mapOf("Authorization" to "Bearer test"),
+                headers = mapOf("Authorization" to McpSecret("Bearer test")),
                 enabled = false,
             ),
             McpServerConfiguration.Stdio(
                 command = "example-mcp",
                 args = listOf("--stdio"),
-                environment = mapOf("MCP_TOKEN" to "test"),
+                environment = mapOf("MCP_TOKEN" to McpSecret("test")),
                 workingDirectory = Path("/workspace"),
             ),
         )
@@ -31,5 +31,30 @@ val mcpServerConfigurationTest by testSuite {
                 Json.decodeFromString<McpServerConfiguration>(encoded),
             )
         }
+    }
+
+    test("redacts every sensitive value from diagnostics") {
+        val configuration = McpServerConfiguration.StreamableHttp(
+            url = "https://example.test/mcp",
+            headers = mapOf("Authorization" to McpSecret("Bearer private")),
+            oauth = McpOAuthConfiguration.Initialized(
+                client = McpOAuthClient(
+                    clientId = "client",
+                    clientSecret = McpSecret("client-private"),
+                ),
+                resolvedAuthorizationEndpoint = "https://example.test/authorize",
+                resolvedTokenEndpoint = "https://example.test/token",
+                accessToken = McpSecret("access-private"),
+                refreshToken = McpSecret("refresh-private"),
+            ),
+        )
+
+        val diagnostic = configuration.toString()
+
+        assertTrue("Bearer private" !in diagnostic, diagnostic)
+        assertTrue("client-private" !in diagnostic, diagnostic)
+        assertTrue("access-private" !in diagnostic, diagnostic)
+        assertTrue("refresh-private" !in diagnostic, diagnostic)
+        assertTrue("<redacted>" in diagnostic, diagnostic)
     }
 }

@@ -26,12 +26,11 @@ import kotlinx.io.readByteArray
  * Filesystem resolver for global skills and the project containing the requested cwd.
  *
  * The metadata cache lives for the lifetime of this resolver. Each [resolve]
- * reads the current [contextSettings], so changing Codex home changes the
+ * reads the current [contextSettings], so changing the Agents home changes the
  * global skill roots without replacing the cache-owning resolver.
  */
 public class FileSystemSkillsResolver(
     private val contextSettings: StateFlow<AgentContextSettings>,
-    private val userHome: Path,
     projectRootMarkers: List<String> = listOf(".git"),
     private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     private val metadataCacheCapacity: Int = DefaultMetadataCacheCapacity,
@@ -59,7 +58,9 @@ public class FileSystemSkillsResolver(
     ): ResolvedSkills {
         val warnings = mutableListOf<SkillWarning>()
         val discovered = mutableListOf<DiscoveredSkill>()
-        discoverRoots(cwd, context.codexHome).forEach { root -> scanRoot(root, discovered, warnings) }
+        discoverRoots(cwd, context.agentsHome).forEach { root ->
+            scanRoot(root, discovered, warnings)
+        }
 
         val unique = linkedMapOf<Path, DiscoveredSkill>()
         discovered.forEach { skill ->
@@ -77,13 +78,11 @@ public class FileSystemSkillsResolver(
         )
     }
 
-    private suspend fun discoverRoots(cwd: Path, configuredCodexHome: Path): List<SkillRoot> {
-        val codexHome = fileSystem.resolveAllowingMissing(configuredCodexHome)
-        val resolvedUserHome = fileSystem.resolveAllowingMissing(userHome)
+    private suspend fun discoverRoots(cwd: Path, configuredAgentsHome: Path): List<SkillRoot> {
+        val agentsHome = fileSystem.resolveAllowingMissing(configuredAgentsHome)
         val globalRoots = listOf(
-            SkillSource(HostAuthorityId, SkillScope.User, Path(codexHome, "skills")),
-            SkillSource(HostAuthorityId, SkillScope.User, Path(resolvedUserHome, ".agents/skills")),
-            SkillSource(HostAuthorityId, SkillScope.System, Path(codexHome, "skills/.system")),
+            SkillSource(HostAuthorityId, SkillScope.User, Path(agentsHome, "skills")),
+            SkillSource(HostAuthorityId, SkillScope.System, Path(agentsHome, "skills/.system")),
         )
         return buildList {
             projectDirectories(cwd).forEach { directory ->
@@ -373,6 +372,7 @@ private fun parseFrontmatter(
         description.isEmpty() -> "Missing frontmatter field `description`."
         description.length > MaxDescriptionLength ->
             "Skill description exceeds $MaxDescriptionLength characters."
+
         else -> null
     }
     if (invalid != null) {

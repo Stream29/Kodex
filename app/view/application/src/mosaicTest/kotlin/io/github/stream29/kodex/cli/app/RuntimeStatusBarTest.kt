@@ -22,6 +22,7 @@ import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.Reasoning
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ReasoningEffortPreset
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 import kotlinx.coroutines.TimeoutCancellationException
@@ -37,6 +38,12 @@ class RuntimeStatusBarTest {
     fun agentModesUseExplicitLabels() {
         assertEquals("single agent", AgentMode.Single.displayName())
         assertEquals("multi agent", AgentMode.Multi.displayName())
+    }
+
+    @Test
+    fun requestUserInputModesUseExplicitLabels() {
+        assertEquals("ask user", RequestUserInputMode.AskUser.displayName())
+        assertEquals("no question", RequestUserInputMode.NoQuestion.displayName())
     }
 
     @Test
@@ -99,6 +106,7 @@ class RuntimeStatusBarTest {
                 reasoning = ReasoningEffort.Max,
                 tier = ServiceTier.Default,
                 agentMode = AgentMode.Single,
+                requestUserInputMode = RequestUserInputMode.AskUser,
             ),
         )
         lateinit var dropdowns: RuntimeConfigurationDropdowns
@@ -124,6 +132,9 @@ class RuntimeStatusBarTest {
                         },
                         onAgentModeSelected = { agentMode ->
                             configuration = configuration.copy(agentMode = agentMode)
+                        },
+                        onRequestUserInputModeSelected = { mode ->
+                            configuration = configuration.copy(requestUserInputMode = mode)
                         },
                     )
                 }
@@ -158,6 +169,7 @@ class RuntimeStatusBarTest {
                 reasoning = ReasoningEffort.High,
                 tier = ServiceTier.Default,
                 agentMode = AgentMode.Single,
+                requestUserInputMode = RequestUserInputMode.AskUser,
             ),
         )
 
@@ -183,6 +195,9 @@ class RuntimeStatusBarTest {
                         onAgentModeSelected = { agentMode ->
                             configuration = configuration.copy(agentMode = agentMode)
                         },
+                        onRequestUserInputModeSelected = { mode ->
+                            configuration = configuration.copy(requestUserInputMode = mode)
+                        },
                     )
                 }
             }
@@ -198,6 +213,61 @@ class RuntimeStatusBarTest {
         }
 
         assertEquals(AgentMode.Multi, configuration.agentMode)
+    }
+
+    @Test
+    fun questionModeTriggerOpensAndSelectsNoQuestion() = runTest {
+        val model = OpenAiModelId("test-model")
+        var configuration by mutableStateOf(
+            RuntimeConfiguration(
+                model = model,
+                reasoning = ReasoningEffort.High,
+                tier = ServiceTier.Default,
+                agentMode = AgentMode.Single,
+                requestUserInputMode = RequestUserInputMode.AskUser,
+            ),
+        )
+
+        runMosaicTest {
+            val initial = setContentAndSnapshot {
+                val dropdowns = RuntimeConfigurationDropdowns.remember(owner = Unit)
+                TuiPopupHost(modifier = Modifier.width(60).height(8)) {
+                    Row {
+                        RuntimeConfigurationTriggers(configuration, dropdowns)
+                    }
+                    RuntimeConfigurationMenus(
+                        configuration = configuration,
+                        models = emptyList(),
+                        modelOptions = listOf(model),
+                        dropdowns = dropdowns,
+                        onConfigurationSelected = { selectedModel, effort, tier ->
+                            configuration = configuration.copy(
+                                model = selectedModel,
+                                reasoning = effort,
+                                tier = tier,
+                            )
+                        },
+                        onAgentModeSelected = { agentMode ->
+                            configuration = configuration.copy(agentMode = agentMode)
+                        },
+                        onRequestUserInputModeSelected = { mode ->
+                            configuration = configuration.copy(requestUserInputMode = mode)
+                        },
+                    )
+                }
+            }
+            val modeButtonStart = initial.indexOf("[ask user]")
+            assertTrue(modeButtonStart >= 0, initial)
+
+            click(modeButtonStart + 1)
+            val menu = awaitSnapshotContaining("no question")
+            assertTrue("[ask user]" in menu, menu)
+            sendKeyEvent(KeyboardEvent(KeyboardEvent.Down))
+            sendKeyEvent(KeyboardEvent(codepoint = 13))
+            awaitSnapshotContaining("[no question]")
+        }
+
+        assertEquals(RequestUserInputMode.NoQuestion, configuration.requestUserInputMode)
     }
 
     @Test

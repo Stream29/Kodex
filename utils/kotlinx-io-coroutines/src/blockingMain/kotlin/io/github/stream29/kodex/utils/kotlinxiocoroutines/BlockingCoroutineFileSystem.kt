@@ -12,6 +12,7 @@ internal class BlockingCoroutineFileSystem(
     private val delegate: FileSystem,
     private val exclusiveSink: (Path, Boolean) -> CoroutineRawSink,
     private val fingerprint: (Path) -> FileFingerprint?,
+    private val protectPrivateFile: (Path) -> Unit,
 ) : CoroutineFileSystem {
     override suspend fun exists(path: Path): Boolean =
         withContext(IoDispatcher) { delegate.exists(path) }
@@ -45,6 +46,9 @@ internal class BlockingCoroutineFileSystem(
             if (mustCreate) exclusiveSink(path, append)
             else BlockingCoroutineRawSink(delegate.sink(path, append))
         }
+
+    override suspend fun protectPrivateFile(path: Path): Unit =
+        withContext(IoDispatcher) { protectPrivateFile.invoke(path) }
 }
 
 private class BlockingCoroutineRawSource(

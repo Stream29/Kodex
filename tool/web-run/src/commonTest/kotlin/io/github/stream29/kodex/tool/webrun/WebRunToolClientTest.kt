@@ -47,12 +47,9 @@ private const val OpenAiCodexSystemCard: String =
 
 private suspend fun realWebRunClient(): OpenAiClient {
     val storage = CodexCliStorage(testCodexDirectory())
-    val clientVersion = storage.readModelsCacheOrNull()?.clientVersion
-        ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
-        ?: "0.1.0"
     return OpenAiClient(
         authStore = InMemoryOpenAiAuthStore(storage.readAuthOrNull().toSubscriptionAuthStateOrThrow()),
-        config = OpenAiClientConfig(clientVersion = clientVersion),
+        config = OpenAiClientConfig(),
     )
 }
 
@@ -64,17 +61,7 @@ private fun CodexAuthJson?.toSubscriptionAuthStateOrThrow(): OpenAiSubscriptionA
     )
 }
 
-private suspend fun testModel(): OpenAiModelId {
-    val storage = CodexCliStorage(testCodexDirectory())
-    val cache = storage.readModelsCacheOrNull()
-        ?: error("Codex CLI models cache is required.")
-    val model = cache.models
-        .map { it.slug.value }
-        .firstOrNull { it.contains("codex", ignoreCase = true) }
-        ?: cache.models.firstOrNull()?.slug?.value
-        ?: error("Codex CLI models_cache.json must contain at least one model.")
-    return OpenAiModelId(model)
-}
+private val TestModel: OpenAiModelId = OpenAiModelId("gpt-5.6-sol")
 
 private fun testCodexDirectory(): Path {
     val explicitCodexHome = environmentVariable("CODEX_HOME")?.takeIf(String::isNotBlank)
@@ -90,7 +77,7 @@ private suspend fun OpenAiClient.webRunClient(): WebRunToolClient =
     WebRunToolClient(
         client = this,
         sessionId = testSessionId(),
-        modelProvider = { testModel() },
+        modelProvider = { TestModel },
     )
 
 private suspend fun WebRunToolClient.runOutputOrFail(commands: SearchCommands): String {

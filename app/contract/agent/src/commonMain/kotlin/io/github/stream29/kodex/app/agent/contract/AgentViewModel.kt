@@ -7,6 +7,7 @@ import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
@@ -39,6 +40,8 @@ public interface AgentSettingsViewModel {
     public suspend fun updateServiceTier(serviceTier: ServiceTier): Unit
 
     public suspend fun updateAgentMode(agentMode: AgentMode): Unit
+
+    public suspend fun updateRequestUserInputMode(mode: RequestUserInputMode): Unit
 
     /** Atomically updates the three fields selected by the runtime model menu. */
     public suspend fun updateModelConfiguration(

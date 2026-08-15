@@ -10,9 +10,9 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            api(project(":hook-contract"))
             api(project(":openai-models"))
             api(project(":utils-kotlinx-io-coroutines"))
-            api(project(":utils-kotlinx-io-serialization"))
             api(libs.kotlinx.io.core)
             api(libs.tomlkt)
             implementation(project(":openai-json-codec"))

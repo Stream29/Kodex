@@ -9,9 +9,9 @@ import kotlinx.io.files.Path
  * A frontend or backend settings model may implement this interface without
  * exposing its concrete type or unrelated settings to AgentState.
  *
- * @property codexHome Root directory used for user-level AGENTS.md discovery.
+ * @property agentsHome Root directory used for user-level AGENTS and skills.
  * @property shell Shell advertised in the Agent environment context.
  */
 public interface AgentContextSettings : ShellSettings {
-    public val codexHome: Path
+    public val agentsHome: Path
 }

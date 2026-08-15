@@ -4,6 +4,7 @@ import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +17,7 @@ public data class SessionSettingsConfiguration(
     public val reasoningEffort: ReasoningEffort,
     public val serviceTier: ServiceTier,
     public val agentMode: AgentMode,
+    public val requestUserInputMode: RequestUserInputMode,
 )
 
 /** Kind of fixed target captured when the Settings popup opened. */
@@ -138,6 +140,10 @@ public interface SessionSettingsViewModel : AutoCloseable {
     public fun updateReasoningEffort(expectedRevision: Long, reasoningEffort: ReasoningEffort): Unit
     public fun updateServiceTier(expectedRevision: Long, serviceTier: ServiceTier): Unit
     public fun updateAgentMode(expectedRevision: Long, agentMode: AgentMode): Unit
+    public fun updateRequestUserInputMode(
+        expectedRevision: Long,
+        mode: RequestUserInputMode,
+    ): Unit
 
     public fun requestWorkingDirectory(expectedRevision: Long): Unit
 

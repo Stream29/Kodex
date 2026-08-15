@@ -31,6 +31,8 @@ import kotlin.uuid.Uuid
  * other state transitions retain the current value.
  * @property agentMode Whether this Agent may delegate work to subagents. It is
  * independent of the task checklist and current goal.
+ * @property requestUserInputMode Whether future requests expose the structured
+ * user-question tool. Changing it does not alter already-issued tool calls.
  * @property plan Full replacement `update_plan` snapshot. An empty plan means
  * the thread has no active checklist steps.
  * @property goal Nullable because a thread may not have a current goal; `null`
@@ -57,6 +59,7 @@ public data class KodexAgentSettings(
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val turnId: String = Uuid.generateV7().toString(),
     public val agentMode: AgentMode = AgentMode.Single,
+    public val requestUserInputMode: RequestUserInputMode = RequestUserInputMode.AskUser,
     public val plan: UpdatePlanArgs = UpdatePlanArgs(plan = emptyList()),
     public val goal: ThreadGoal? = null,
     public val installationId: String? = null,

@@ -9,6 +9,7 @@ kotlin {
             implementation(project(":app-contract-path-picker"))
             api(project(":app-shared-auth-contract"))
             implementation(project(":app-shared-session-title"))
+            implementation(project(":hook-contract"))
             implementation(project(":mcp-contract"))
             implementation(project(":openai-client-contract"))
             implementation(project(":utils-coroutines"))

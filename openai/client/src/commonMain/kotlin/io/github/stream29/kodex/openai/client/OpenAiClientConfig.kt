@@ -3,13 +3,16 @@ package io.github.stream29.kodex.openai.client
 public data class OpenAiClientConfig(
     public val baseUrl: String = "https://chatgpt.com/backend-api/codex",
     public val accountBaseUrl: String = "https://chatgpt.com/backend-api",
-    public val clientVersion: String = "0.1.0",
+    public val clientVersion: String = KodexCompatibleApiClientVersion,
     public val originator: String = DefaultCodexOriginator,
     public val userAgent: String = codexUserAgent(originator, clientVersion),
     public val defaultHeaders: Map<String, String> = emptyMap(),
     public val requestTimeoutMillis: Long = 300_000,
     public val retry: OpenAiClientRetryConfig = OpenAiClientRetryConfig(),
 )
+
+/** Codex API compatibility version maintained by Kodex rather than external cache files. */
+public const val KodexCompatibleApiClientVersion: String = "0.147.0"
 
 /**
  * Retry policy for transient OpenAI HTTP failures.

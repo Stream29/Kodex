@@ -2,10 +2,12 @@ package io.github.stream29.kodex.openai.codexclistorage
 
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.hook.contract.HookCodexImportCandidate
+import io.github.stream29.kodex.hook.contract.HookCodexSourceKind
+import io.github.stream29.kodex.hook.contract.HookMatcher
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
 import io.github.stream29.kodex.utils.osenvironment.userHomeDirectory
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
@@ -34,66 +36,85 @@ val codexCliStorageTest by testSuite {
         assertNotNull(tokens.accountId, "Expected Codex CLI ChatGPT account id.")
     }
 
-    test("reads codex metadata files") {
-        val storage = CodexCliStorage(testCodexDirectory())
-
-        assertTrue(storage.readModelsCacheOrNull()?.models?.isNotEmpty() == true, "Expected Codex CLI models cache.")
-        storage.readConfigTomlOrNull()
-    }
-
-    test("decodes typed config while ignoring unsupported native settings") {
-        val root = Path(SystemTemporaryDirectory, "codex-config-${Random.nextLong()}")
+    test("classifies explicit MCP imports without exposing unsupported values") {
+        val root = Path(SystemTemporaryDirectory, "codex-mcp-import-${Random.nextLong()}")
         try {
             SystemCoroutineFileSystem.createDirectories(root)
             SystemCoroutineFileSystem.writeString(
                 Path(root, "config.toml"),
                 """
-                model = "gpt-5.6"
-                model_reasoning_effort = "high"
-                service_tier = "fast"
-
-                [tui.keymap.composer]
-                submit = "enter"
-
-                [tui.keymap.editor]
-                insert_newline = "shift-enter"
-
                 [mcp_servers.docs]
                 url = "https://docs.example.test/mcp"
-                enabled = false
 
                 [mcp_servers.docs.http_headers]
-                Authorization = "Bearer test"
+                X-Static = "private-header"
 
                 [mcp_servers.browser]
                 command = "browser-mcp"
                 args = ["--headless"]
-                cwd = "/workspace/browser"
 
-                [mcp_servers.browser.env]
-                MCP_TOKEN = "test-token"
+                [mcp_servers.dynamic-auth]
+                url = "https://dynamic.example.test/mcp"
+                bearer_token_env_var = "PRIVATE_TOKEN_NAME"
 
-                [projects."/workspace"]
-                trust_level = "trusted"
+                [mcp_servers.oauth]
+                url = "https://oauth.example.test/mcp"
+                scopes = ["tools.read"]
+                oauth_resource = "https://oauth.example.test"
+
+                [mcp_servers.oauth.oauth]
+                client_id = "oauth-client"
+
+                [mcp_servers.unsupported-oauth]
+                url = "https://unsupported-oauth.example.test/mcp"
+
+                [mcp_servers.unsupported-oauth.oauth]
+                client_id = "oauth-client"
+                client_secret = "nested-private-secret"
+
+                [mcp_servers.ambiguous]
+                url = "https://ambiguous.example.test/mcp"
+                command = "ambiguous-mcp"
                 """.trimIndent(),
             )
 
-            val config = CodexCliStorage(root).readConfigTomlOrNull()
-                ?: error("Expected config.")
-            assertEquals("gpt-5.6", config.model)
-            assertEquals(ReasoningEffort.High, config.reasoningEffort)
-            assertEquals("fast", config.serviceTier)
-            assertEquals("enter", config.tui?.keymap?.composer?.submit)
-            assertEquals("shift-enter", config.tui?.keymap?.editor?.insertNewline)
-            val docs = assertIs<CodexCliMcpServer.StreamableHttp>(config.mcpServers.getValue("docs"))
-            assertEquals("https://docs.example.test/mcp", docs.url)
-            assertEquals("Bearer test", docs.headers["Authorization"])
-            assertEquals(false, docs.enabled)
-            val browser = assertIs<CodexCliMcpServer.Stdio>(config.mcpServers.getValue("browser"))
-            assertEquals("browser-mcp", browser.command)
-            assertEquals(listOf("--headless"), browser.args)
-            assertEquals("/workspace/browser", browser.cwd)
-            assertEquals("test-token", browser.env["MCP_TOKEN"])
+            val candidates = CodexCliStorage(root).readMcpImportCandidates()
+
+            assertEquals(
+                listOf(
+                    "ambiguous",
+                    "browser",
+                    "docs",
+                    "dynamic-auth",
+                    "oauth",
+                    "unsupported-oauth",
+                ),
+                candidates.map(CodexCliMcpImportCandidate::serverName),
+            )
+            val byName = candidates.associateBy(CodexCliMcpImportCandidate::serverName)
+            assertIs<CodexCliMcpImportCandidate.Unsupported>(byName.getValue("ambiguous"))
+            assertIs<CodexCliMcpImportCandidate.Supported>(byName.getValue("browser"))
+            assertIs<CodexCliMcpImportCandidate.Supported>(byName.getValue("docs"))
+            val unsupported =
+                assertIs<CodexCliMcpImportCandidate.Unsupported>(
+                    byName.getValue("dynamic-auth"),
+                )
+            assertEquals(CodexCliMcpTransportKind.StreamableHttp, unsupported.transport)
+            assertTrue("bearer_token_env_var" in unsupported.detail)
+            assertFalse("PRIVATE_TOKEN_NAME" in unsupported.detail)
+            val oauth = assertIs<CodexCliMcpServer.StreamableHttp>(
+                assertIs<CodexCliMcpImportCandidate.Supported>(
+                    byName.getValue("oauth"),
+                ).configuration,
+            )
+            assertEquals("oauth-client", oauth.oauth?.clientId)
+            assertEquals(listOf("tools.read"), oauth.scopes)
+            val unsupportedOAuth =
+                assertIs<CodexCliMcpImportCandidate.Unsupported>(
+                    byName.getValue("unsupported-oauth"),
+                )
+            assertTrue("client_secret" in unsupportedOAuth.detail)
+            assertFalse("nested-private-secret" in unsupportedOAuth.detail)
         } finally {
             deleteRecursively(root)
         }
@@ -106,62 +127,169 @@ val codexCliStorageTest by testSuite {
             val storage = CodexCliStorage(root)
 
             assertEquals(null, storage.readAuthOrNull())
-            assertEquals(null, storage.readModelsCacheOrNull())
-            assertEquals(null, storage.readConfigTomlOrNull())
-        } finally {
-            deleteRecursively(root)
-        }
-    }
-
-    test("defaults nested keymaps") {
-        val root = Path(SystemTemporaryDirectory, "codex-keymap-${Random.nextLong()}")
-        try {
-            SystemCoroutineFileSystem.createDirectories(root)
-            SystemCoroutineFileSystem.writeString(
-                Path(root, "config.toml"),
-                """
-                [tui]
-                animations = false
-                """.trimIndent(),
+            assertEquals(emptyList(), storage.readMcpImportCandidates())
+            assertEquals(
+                emptyList(),
+                storage.readHookImportCandidates(HookCodexSourceKind.User),
             )
-
-            val config = CodexCliStorage(root).readConfigTomlOrNull()
-                ?: error("Expected config.")
-            val tui = assertNotNull(config.tui)
-            assertEquals(null, tui.keymap.global.submit)
-            assertEquals(null, tui.keymap.editor.insertNewline)
         } finally {
             deleteRecursively(root)
         }
     }
 
-    test("fully decodes hook files into typed declaration layers") {
-        val root = Path(SystemTemporaryDirectory, "codex-hooks-${Random.nextLong()}")
+    test("explicit Hook import expands supported commands and reports excluded features") {
+        val root = Path(SystemTemporaryDirectory, "codex-hook-import-${Random.nextLong()}")
         try {
             SystemCoroutineFileSystem.createDirectories(root)
             SystemCoroutineFileSystem.writeString(
                 Path(root, "hooks.json"),
                 """
                 {
-                  "description":"project hooks",
+                  "description":"Imported checks",
+                  "private_source_field":"must-not-appear",
                   "hooks":{
-                    "SessionStart":[{
-                      "hooks":[]
-                    }],
                     "PreToolUse":[{
                       "matcher":"shell|Bash",
+                      "private_group_field":"must-not-appear",
                       "hooks":[{
                         "type":"command",
-                        "command":"echo ${'$'}{HOOK_VALUE}",
+                        "command":"echo ${'$'}{HOOK_TOKEN}",
                         "commandWindows":"echo windows",
-                        "timeout":7,
-                        "statusMessage":"checking",
-                        "additionalContextLimit":1200
+                        "timeout":0,
+                        "enabled":true,
+                        "key":"check-one",
+                        "trusted_hash":"private-trust-hash",
+                        "statusMessage":"Checking",
+                        "additionalContextLimit":1200,
+                        "private_handler_field":"must-not-appear"
                       },{
-                        "type":"prompt"
+                        "type":"prompt",
+                        "prompt":"private prompt"
                       },{
-                        "type":"agent"
+                        "type":"command",
+                        "command":"private async command",
+                        "async":true
                       }]
+                    }],
+                    "SessionStart":[{
+                      "hooks":[{"type":"command","command":"private session command"}]
+                    }],
+                    "state":{
+                      "check-one":{
+                        "enabled":false,
+                        "trusted_hash":"private-state-hash"
+                      },
+                      "unmatched":{
+                        "enabled":true
+                      }
+                    }
+                  }
+                }
+                """.trimIndent(),
+            )
+
+            val candidate = assertIs<HookCodexImportCandidate.Supported>(
+                CodexCliStorage(root).readHookImportCandidates(
+                    sourceKind = HookCodexSourceKind.User,
+                    environment = mapOf("HOOK_TOKEN" to "private-environment-value"),
+                ).single(),
+            )
+
+            assertEquals("Imported checks", candidate.displayName)
+            assertEquals(
+                SystemCoroutineFileSystem.resolve(Path(root, "hooks.json")).toString(),
+                candidate.identity.normalizedPath,
+            )
+            val group = candidate.template.hooks.preToolUse.single()
+            assertIs<HookMatcher.Exact>(group.matcher)
+            val command = group.hooks.single()
+            assertEquals(
+                if (CodexCliStoragePlatform.isWindows) {
+                    "echo windows"
+                } else {
+                    "echo private-environment-value"
+                },
+                command.command,
+            )
+            assertEquals(1L, command.timeoutSeconds)
+            assertFalse(command.enabled)
+            assertEquals("Checking", command.statusMessage)
+            assertEquals(1200, command.additionalContextLimit)
+            assertEquals(
+                "private-environment-value",
+                candidate.template.environment.getValue("HOOK_TOKEN").value,
+            )
+            assertTrue(candidate.excludedDetails.any { "private_source_field" in it })
+            assertTrue(candidate.excludedDetails.any { "private_group_field" in it })
+            assertTrue(candidate.excludedDetails.any { "private_handler_field" in it })
+            assertTrue(candidate.excludedDetails.any { "prompt handlers" in it })
+            assertTrue(candidate.excludedDetails.any { "asynchronous" in it })
+            assertTrue(candidate.excludedDetails.any { "SessionStart" in it })
+            assertTrue(candidate.excludedDetails.any { "state entries" in it })
+            assertTrue(candidate.excludedDetails.any { "trust hashes" in it })
+            val details = candidate.excludedDetails.toString()
+            assertFalse("must-not-appear" in details)
+            assertFalse("private prompt" in details)
+            assertFalse("private async command" in details)
+            assertFalse("private-environment-value" in details)
+            assertFalse("private-trust-hash" in details)
+            assertFalse("private-state-hash" in details)
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    test("explicit Hook import treats JSON and Hook-bearing TOML as separate source units") {
+        val root = Path(SystemTemporaryDirectory, "codex-hook-import-units-${Random.nextLong()}")
+        try {
+            SystemCoroutineFileSystem.createDirectories(root)
+            SystemCoroutineFileSystem.writeString(
+                Path(root, "hooks.json"),
+                "{not valid JSON",
+            )
+            SystemCoroutineFileSystem.writeString(
+                Path(root, "config.toml"),
+                """
+                model = "ignored-model"
+
+                [[hooks.Stop]]
+                private_group_field = "must-not-appear"
+
+                [[hooks.Stop.hooks]]
+                type = "command"
+                command = "finish"
+                private_handler_field = "must-not-appear"
+                """.trimIndent(),
+            )
+
+            val candidates = CodexCliStorage(root).readHookImportCandidates(
+                sourceKind = HookCodexSourceKind.Project,
+            )
+
+            assertEquals(2, candidates.size)
+            assertIs<HookCodexImportCandidate.Unsupported>(candidates.first())
+            val toml = assertIs<HookCodexImportCandidate.Supported>(candidates.last())
+            assertEquals("finish", toml.template.hooks.stop.single().hooks.single().command)
+            assertTrue(toml.excludedDetails.any { "private_group_field" in it })
+            assertTrue(toml.excludedDetails.any { "private_handler_field" in it })
+            assertFalse("must-not-appear" in toml.excludedDetails.toString())
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    test("explicit Hook import ignores config TOML without Hooks and disables unsupported sources") {
+        val root = Path(SystemTemporaryDirectory, "codex-hook-import-unsupported-${Random.nextLong()}")
+        try {
+            SystemCoroutineFileSystem.createDirectories(root)
+            SystemCoroutineFileSystem.writeString(
+                Path(root, "hooks.json"),
+                """
+                {
+                  "description":"Prompt only",
+                  "hooks":{
+                    "Stop":[{
+                      "hooks":[{"type":"prompt","prompt":"private prompt"}]
                     }]
                   }
                 }
@@ -169,110 +297,17 @@ val codexCliStorageTest by testSuite {
             )
             SystemCoroutineFileSystem.writeString(
                 Path(root, "config.toml"),
-                """
-                [[hooks.PreToolUse]]
-                matcher = "^mcp__.+${'$'}"
-
-                [[hooks.PreToolUse.hooks]]
-                type = "command"
-                command = "run-mcp"
-                command_windows = "run-mcp-windows"
-                """.trimIndent(),
+                "model = \"ignored-model\"",
             )
 
-            val layers = CodexCliStorage(root).readHookLayers(
-                sourceKind = CodexCliHookSourceKind.Project,
-                environment = mapOf("HOOK_VALUE" to "decoded"),
+            val candidates = CodexCliStorage(root).readHookImportCandidates(
+                sourceKind = HookCodexSourceKind.User,
             )
 
-            assertEquals(2, layers.size)
-            val jsonLayer = layers.first()
-            assertEquals("project hooks", jsonLayer.description)
-            val exactGroup = jsonLayer.hooks.preToolUse.single()
-            assertIs<CodexCliHookMatcher.Exact>(exactGroup.matcher)
-            assertTrue(exactGroup.matcher.matches(listOf("shell")))
-            assertFalse(exactGroup.matcher.matches(listOf("shell_output")))
-            val command = assertIs<CodexCliHookHandler.Command>(exactGroup.hooks[0])
-            assertEquals("echo ${'$'}{HOOK_VALUE}", command.command)
-            assertEquals("echo windows", command.windowsCommand)
-            assertEquals(7L, command.timeoutSeconds)
-            assertEquals("checking", command.statusMessage)
-            assertEquals(1200, command.additionalContextLimit)
-            assertIs<CodexCliHookHandler.Prompt>(exactGroup.hooks[1])
-            assertIs<CodexCliHookHandler.Agent>(exactGroup.hooks[2])
-
-            val tomlLayer = layers.last()
-            val tomlGroup = tomlLayer.hooks.preToolUse.single()
-            val regularExpression = tomlGroup.matcher
-            assertIs<CodexCliHookMatcher.RegularExpression>(regularExpression)
-            assertTrue(regularExpression.matches(listOf("mcp__docs")))
-            assertFalse(regularExpression.matches(listOf("shell")))
-            val tomlCommand = assertIs<CodexCliHookHandler.Command>(tomlGroup.hooks.single())
-            assertEquals("run-mcp-windows", tomlCommand.windowsCommand)
-        } finally {
-            deleteRecursively(root)
-        }
-    }
-
-    test("rejects unknown hooks.json fields") {
-        val root = Path(SystemTemporaryDirectory, "codex-hook-unknown-${Random.nextLong()}")
-        try {
-            SystemCoroutineFileSystem.createDirectories(root)
-            SystemCoroutineFileSystem.writeString(
-                Path(root, "hooks.json"),
-                """{"hooks":{},"unknown":true}""",
-            )
-
-            assertFails {
-                CodexCliStorage(root).readHookLayers(CodexCliHookSourceKind.User)
-            }
-        } finally {
-            deleteRecursively(root)
-        }
-    }
-
-    test("invalid hook regular expressions remain nonmatching") {
-        val root = Path(SystemTemporaryDirectory, "codex-hook-regex-${Random.nextLong()}")
-        try {
-            SystemCoroutineFileSystem.createDirectories(root)
-            SystemCoroutineFileSystem.writeString(
-                Path(root, "hooks.json"),
-                """
-                {
-                  "hooks":{
-                    "PreToolUse":[{
-                      "matcher":"[",
-                      "hooks":[{"type":"command","command":"must-not-run"}]
-                    }]
-                  }
-                }
-                """.trimIndent(),
-            )
-
-            val layer = CodexCliStorage(root)
-                .readHookLayers(CodexCliHookSourceKind.User)
-                .single()
-
-            val matcher = layer.hooks.preToolUse.single().matcher
-            assertIs<CodexCliHookMatcher.Invalid>(matcher)
-            assertFalse(matcher.matches(listOf("anything")))
-        } finally {
-            deleteRecursively(root)
-        }
-    }
-
-    test("rejects a cache without Codex required metadata") {
-        val root = Path(SystemTemporaryDirectory, "codex-cache-${Random.nextLong()}")
-        try {
-            SystemCoroutineFileSystem.createDirectories(root)
-            SystemCoroutineFileSystem.writeString(
-                Path(root, "models_cache.json"),
-                "{\"fetched_at\":\"2026-07-23T00:00:00Z\"}",
-            )
-
-            assertFails {
-                CodexCliStorage(root).readModelsCacheOrNull()
-            }
+            val unsupported = assertIs<HookCodexImportCandidate.Unsupported>(candidates.single())
+            assertEquals("Prompt only", unsupported.displayName)
+            assertTrue("prompt" in unsupported.detail.lowercase())
+            assertFalse("private prompt" in unsupported.detail)
         } finally {
             deleteRecursively(root)
         }

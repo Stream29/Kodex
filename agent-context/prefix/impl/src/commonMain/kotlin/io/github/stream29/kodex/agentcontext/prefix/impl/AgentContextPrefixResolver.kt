@@ -5,9 +5,7 @@ import io.github.stream29.kodex.agentcontext.prefix.contract.AgentContextPrefix
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentcontext.skill.filesystem.FileSystemSkillsResolver
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.io.files.Path
 
 /**
  * Resolves application-wide and Agent-specific data into one request prefix.
@@ -18,18 +16,16 @@ import kotlinx.io.files.Path
  */
 public class AgentContextPrefixResolver(
     private val contextSettings: StateFlow<AgentContextSettings>,
-    userHome: Path = requireUserHomeDirectory(),
 ) {
     private val skillsResolver = FileSystemSkillsResolver(
         contextSettings = contextSettings,
-        userHome = userHome,
     )
 
     /** Captures global state and resolves Agent-specific context for [settings]. */
     public suspend fun resolve(settings: KodexAgentSettings): AgentContextPrefix {
         val context = contextSettings.value
         val cwd = settings.cwd
-        val agentsMd = loadAgentsMd(context.codexHome, cwd)
+        val agentsMd = loadAgentsMd(context.agentsHome, cwd)
         val skills = skillsResolver.resolve(cwd, context)
         return AgentContextPrefix(
             cwd = cwd,

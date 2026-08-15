@@ -45,11 +45,17 @@ import io.github.stream29.kodex.cli.components.TuiDropdownMenu
 import io.github.stream29.kodex.cli.components.TuiDropdownState
 import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
+import io.github.stream29.kodex.hook.contract.HookImportDecision
+import io.github.stream29.kodex.hook.contract.HookManagedSourceState
+import io.github.stream29.kodex.mcp.contract.McpImportDecision
 import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
+import io.github.stream29.kodex.utils.externalurl.OpenExternalUrlResult
+import io.github.stream29.kodex.utils.externalurl.openExternalUrl
 
 /**
  * Direct renderer for one Settings ViewModel and its three stable page children.
@@ -72,16 +78,36 @@ public fun BoxScope.SettingsPopup(
         reasoning = rememberTuiDropdownState(),
         serviceTier = rememberTuiDropdownState(),
         agentMode = rememberTuiDropdownState(),
+        requestUserInputMode = rememberTuiDropdownState(),
     )
     var renameRequest by remember(viewModel) {
         mutableStateOf<SessionSettingsEffect.RenameSession?>(null)
     }
+    var mcpEditorRequest by remember(viewModel) {
+        mutableStateOf<McpEditorRequest?>(null)
+    }
+    var mcpDeleteRequest by remember(viewModel) {
+        mutableStateOf<io.github.stream29.kodex.app.settings.contract.McpServerSettingsState?>(null)
+    }
+    var mcpImportOpen by remember(viewModel) { mutableStateOf(false) }
+    var hookEditorRequest by remember(viewModel) {
+        mutableStateOf<HookEditorRequest?>(null)
+    }
+    var hookDeleteRequest by remember(viewModel) {
+        mutableStateOf<HookManagedSourceState?>(null)
+    }
+    var hookImportOpen by remember(viewModel) { mutableStateOf(false) }
     val currentOpenLogin by rememberUpdatedState(onOpenLogin)
 
     LaunchedEffect(viewModel.global) {
         viewModel.global.effects.collect { effect ->
             when (effect) {
                 GlobalSettingsEffect.OpenLogin -> currentOpenLogin()
+                is GlobalSettingsEffect.OpenMcpAuthorizationUrl -> {
+                    if (openExternalUrl(effect.url) is OpenExternalUrlResult.Failed) {
+                        viewModel.global.cancelMcpServerLogin(effect.serverName)
+                    }
+                }
             }
         }
     }
@@ -94,6 +120,16 @@ public fun BoxScope.SettingsPopup(
     }
     LaunchedEffect(selectedPage) {
         renameRequest = null
+        mcpEditorRequest = null
+        mcpDeleteRequest = null
+        hookEditorRequest = null
+        hookDeleteRequest = null
+        if (selectedPage != SettingsPage.Global) {
+            mcpImportOpen = false
+            viewModel.global.dismissCodexMcpImport()
+            hookImportOpen = false
+            viewModel.global.dismissCodexHookImport()
+        }
     }
 
     val width = (LocalTerminalState.current.size.columns - 4).coerceIn(1, SettingsMaximumWidth)
@@ -144,6 +180,23 @@ public fun BoxScope.SettingsPopup(
                         viewModel = viewModel,
                         page = selectedPage,
                         dropdowns = dropdowns,
+                        onAddMcp = { mcpEditorRequest = McpEditorRequest() },
+                        onEditMcp = { server ->
+                            mcpEditorRequest = McpEditorRequest(existing = server)
+                        },
+                        onDeleteMcp = { server -> mcpDeleteRequest = server },
+                        onImportMcp = { mcpImportOpen = true },
+                        onAddHook = { hookEditorRequest = HookEditorRequest() },
+                        onEditHook = { source ->
+                            viewModel.global.hookSourceEditorDraft(source.sourceId)?.let { draft ->
+                                hookEditorRequest = HookEditorRequest(
+                                    sourceId = source.sourceId,
+                                    draft = draft,
+                                )
+                            }
+                        },
+                        onDeleteHook = { source -> hookDeleteRequest = source },
+                        onImportHook = { hookImportOpen = true },
                     )
                 }
             }
@@ -175,6 +228,80 @@ public fun BoxScope.SettingsPopup(
             },
         )
     }
+    mcpEditorRequest?.let { request ->
+        McpServerEditorDialog(
+            request = request,
+            onDismiss = { mcpEditorRequest = null },
+            onSave = { draft ->
+                request.existing?.let { existing ->
+                    viewModel.global.editMcpServer(existing.serverName, draft)
+                } ?: viewModel.global.addMcpServer(draft)
+                mcpEditorRequest = null
+            },
+        )
+    }
+    mcpDeleteRequest?.let { server ->
+        McpDeleteConfirmationDialog(
+            server = server,
+            onDismiss = { mcpDeleteRequest = null },
+            onConfirm = {
+                viewModel.global.deleteMcpServer(server.serverName)
+                mcpDeleteRequest = null
+            },
+        )
+    }
+    if (mcpImportOpen) {
+        val preview by viewModel.global.mcpImportPreview.collectAsState()
+        McpImportDialog(
+            preview = preview,
+            onPreview = viewModel.global::previewCodexMcpImport,
+            onApply = { previewId: Long, decisions: Map<String, McpImportDecision> ->
+                viewModel.global.applyCodexMcpImport(previewId, decisions)
+                mcpImportOpen = false
+            },
+            onDismiss = {
+                viewModel.global.dismissCodexMcpImport()
+                mcpImportOpen = false
+            },
+        )
+    }
+    hookEditorRequest?.let { request ->
+        HookSourceEditorDialog(
+            request = request,
+            onDismiss = { hookEditorRequest = null },
+            onSave = { draft ->
+                request.sourceId?.let { sourceId ->
+                    viewModel.global.editHookSource(sourceId, draft)
+                } ?: viewModel.global.addHookSource(draft)
+                hookEditorRequest = null
+            },
+        )
+    }
+    hookDeleteRequest?.let { source ->
+        HookDeleteConfirmationDialog(
+            source = source,
+            onDismiss = { hookDeleteRequest = null },
+            onConfirm = {
+                viewModel.global.deleteHookSource(source.sourceId)
+                hookDeleteRequest = null
+            },
+        )
+    }
+    if (hookImportOpen) {
+        val preview by viewModel.global.hookImportPreview.collectAsState()
+        HookImportDialog(
+            preview = preview,
+            onPreview = viewModel.global::previewCodexHookImport,
+            onApply = { previewId: Long, decisions: Map<String, HookImportDecision> ->
+                viewModel.global.applyCodexHookImport(previewId, decisions)
+                hookImportOpen = false
+            },
+            onDismiss = {
+                viewModel.global.dismissCodexHookImport()
+                hookImportOpen = false
+            },
+        )
+    }
     val directoryPicker by viewModel.session.directoryPicker.collectAsState()
     directoryPicker?.let { picker ->
         DirectoryPickerPopup(
@@ -194,9 +321,28 @@ private fun SettingsPageContent(
     viewModel: SettingsViewModel,
     page: SettingsPage,
     dropdowns: SettingsDropdownStates,
+    onAddMcp: () -> Unit,
+    onEditMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
+    onDeleteMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
+    onImportMcp: () -> Unit,
+    onAddHook: () -> Unit,
+    onEditHook: (HookManagedSourceState) -> Unit,
+    onDeleteHook: (HookManagedSourceState) -> Unit,
+    onImportHook: () -> Unit,
 ) {
     when (page) {
-        SettingsPage.Global -> GlobalSettingsContent(viewModel.global, dropdowns)
+        SettingsPage.Global -> GlobalSettingsContent(
+            viewModel = viewModel.global,
+            dropdowns = dropdowns,
+            onAddMcp = onAddMcp,
+            onEditMcp = onEditMcp,
+            onDeleteMcp = onDeleteMcp,
+            onImportMcp = onImportMcp,
+            onAddHook = onAddHook,
+            onEditHook = onEditHook,
+            onDeleteHook = onDeleteHook,
+            onImportHook = onImportHook,
+        )
         SettingsPage.Session -> SessionSettingsContent(viewModel.session, dropdowns)
         SettingsPage.NewSession -> NewSessionSettingsContent(viewModel.newSession, dropdowns)
     }
@@ -206,14 +352,24 @@ private fun SettingsPageContent(
 private fun GlobalSettingsContent(
     viewModel: GlobalSettingsViewModel,
     dropdowns: SettingsDropdownStates,
+    onAddMcp: () -> Unit,
+    onEditMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
+    onDeleteMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
+    onImportMcp: () -> Unit,
+    onAddHook: () -> Unit,
+    onEditHook: (HookManagedSourceState) -> Unit,
+    onDeleteHook: (HookManagedSourceState) -> Unit,
+    onImportHook: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
     val authentication by viewModel.authentication.collectAsState()
     val accountUsage by viewModel.accountUsage.collectAsState()
     val mcpServers by viewModel.mcpServers.collectAsState()
+    val hooksEnabled by viewModel.hooksEnabled.collectAsState()
+    val hookSources by viewModel.hookSources.collectAsState()
 
     Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
-        Text("Codex home", color = SettingsForeground)
+        Text("Codex source (auth and imports)", color = SettingsForeground)
         Text(
             state.codexHome.toString(),
             modifier = Modifier.fillMaxWidth(),
@@ -222,7 +378,25 @@ private fun GlobalSettingsContent(
     }
     McpSettingsContent(
         servers = mcpServers,
+        onAdd = onAddMcp,
+        onEdit = onEditMcp,
+        onDelete = onDeleteMcp,
+        onSetEnabled = viewModel::setMcpServerEnabled,
+        onLogin = viewModel::loginMcpServer,
+        onCancelLogin = viewModel::cancelMcpServerLogin,
+        onLogout = viewModel::logoutMcpServer,
+        onImport = onImportMcp,
         onReconnect = viewModel::reconnectMcpServer,
+    )
+    HookSettingsContent(
+        featureEnabled = hooksEnabled,
+        sources = hookSources,
+        onSetFeatureEnabled = viewModel::setHooksEnabled,
+        onAdd = onAddHook,
+        onEdit = onEditHook,
+        onDelete = onDeleteHook,
+        onSetEnabled = viewModel::setHookSourceEnabled,
+        onImport = onImportHook,
     )
     SettingsChoiceGroup(
         label = "Authentication",
@@ -454,6 +628,13 @@ private fun ConfigurationSettingsContent(
         background = SettingsAgentModeBackground,
         enabled = snapshot.editable,
     )
+    SettingsDropdownField(
+        label = "Questions",
+        selectedLabel = configuration.requestUserInputMode.displayName(),
+        dropdownState = dropdowns.requestUserInputMode,
+        background = SettingsQuestionModeBackground,
+        enabled = snapshot.editable,
+    )
 }
 
 @Composable
@@ -493,6 +674,12 @@ private fun NewSessionConfigurationContent(
         selectedLabel = state.settings.agentMode.displayName(),
         dropdownState = dropdowns.agentMode,
         background = SettingsAgentModeBackground,
+    )
+    SettingsDropdownField(
+        label = "Questions",
+        selectedLabel = state.settings.requestUserInputMode.displayName(),
+        dropdownState = dropdowns.requestUserInputMode,
+        background = SettingsQuestionModeBackground,
     )
 }
 
@@ -598,6 +785,17 @@ private fun BoxScope.SessionSettingsDropdownMenus(
         backgroundColor = PopupMenuBackground,
         onSelect = { agentMode -> viewModel.updateAgentMode(snapshot.revision, agentMode) },
     )
+    TuiDropdownMenu(
+        dropdownState = dropdowns.requestUserInputMode,
+        options = RequestUserInputMode.entries.toList(),
+        selected = configuration.requestUserInputMode,
+        optionLabel = RequestUserInputMode::displayName,
+        enabled = snapshot.editable,
+        backgroundColor = PopupMenuBackground,
+        onSelect = { mode ->
+            viewModel.updateRequestUserInputMode(snapshot.revision, mode)
+        },
+    )
 }
 
 @Composable
@@ -637,6 +835,14 @@ private fun BoxScope.NewSessionSettingsDropdownMenus(
         optionLabel = AgentMode::displayName,
         backgroundColor = PopupMenuBackground,
         onSelect = { agentMode -> viewModel.updateAgentMode(state.revision, agentMode) },
+    )
+    TuiDropdownMenu(
+        dropdownState = dropdowns.requestUserInputMode,
+        options = RequestUserInputMode.entries.toList(),
+        selected = state.settings.requestUserInputMode,
+        optionLabel = RequestUserInputMode::displayName,
+        backgroundColor = PopupMenuBackground,
+        onSelect = { mode -> viewModel.updateRequestUserInputMode(state.revision, mode) },
     )
 }
 
@@ -724,12 +930,14 @@ private class SettingsDropdownStates(
     val reasoning: TuiDropdownState,
     val serviceTier: TuiDropdownState,
     val agentMode: TuiDropdownState,
+    val requestUserInputMode: TuiDropdownState,
 ) {
     fun dismissAll() {
         model.dismiss()
         reasoning.dismiss()
         serviceTier.dismiss()
         agentMode.dismiss()
+        requestUserInputMode.dismiss()
     }
 }
 
@@ -798,6 +1006,11 @@ private fun AgentMode.displayName(): String = when (this) {
     AgentMode.Multi -> "multi agent"
 }
 
+private fun RequestUserInputMode.displayName(): String = when (this) {
+    RequestUserInputMode.AskUser -> "ask user"
+    RequestUserInputMode.NoQuestion -> "no question"
+}
+
 private val knownReasoningEfforts: List<ReasoningEffort> = listOf(
     ReasoningEffort.None,
     ReasoningEffort.Minimal,
@@ -817,6 +1030,7 @@ internal val SettingsHomeBackground: Color = Color(52, 52, 56)
 internal val SettingsNewLineBackground: Color = Color(62, 62, 66)
 internal val SettingsSubmitKeyBackground: Color = Color(58, 58, 64)
 internal val SettingsAgentModeBackground: Color = Color(46, 58, 62)
+internal val SettingsQuestionModeBackground: Color = Color(42, 54, 58)
 internal val SettingsActionBackground: Color = Color(28, 68, 74)
 internal val PopupMenuBackground: Color = Color(42, 42, 46)
 

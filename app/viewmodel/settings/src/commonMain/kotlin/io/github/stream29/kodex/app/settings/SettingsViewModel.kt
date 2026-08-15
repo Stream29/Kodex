@@ -8,7 +8,8 @@ import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettingsStore
-import io.github.stream29.kodex.mcp.contract.McpService
+import io.github.stream29.kodex.hook.contract.HookManager
+import io.github.stream29.kodex.mcp.contract.McpManager
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageStore
 import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
@@ -63,7 +64,8 @@ public fun createSettingsViewModel(
     globalSettings: KodexGlobalSettingsStore,
     authentication: OpenAiAuthStore,
     accountUsage: CodexAccountUsageStore,
-    mcpService: McpService,
+    mcpManager: McpManager,
+    hookManager: HookManager,
     models: StateFlow<List<ModelInfo>>,
     sessionSettings: SessionSettingsDataSource? = null,
     createDirectoryPicker: (Path) -> DirectoryPickerViewModel? = { null },
@@ -73,7 +75,8 @@ public fun createSettingsViewModel(
         globalSettings = globalSettings,
         authentication = authentication,
         accountUsageStore = accountUsage,
-        mcpService = mcpService,
+        mcpManager = mcpManager,
+        hookManager = hookManager,
         models = models,
         commandScope = ownerScope,
     )
@@ -102,7 +105,8 @@ public data class SettingsViewModelDependencies(
     public val globalSettings: KodexGlobalSettingsStore,
     public val authentication: OpenAiAuthStore,
     public val accountUsage: CodexAccountUsageStore,
-    public val mcpService: McpService,
+    public val mcpManager: McpManager,
+    public val hookManager: HookManager,
     public val models: StateFlow<List<ModelInfo>>,
     public val sessionSettings: SessionSettingsDataSource?,
     public val createDirectoryPicker: (Path) -> DirectoryPickerViewModel?,
@@ -120,7 +124,8 @@ public class DefaultSettingsViewModelFactory(
             globalSettings = dependencies.globalSettings,
             authentication = dependencies.authentication,
             accountUsage = dependencies.accountUsage,
-            mcpService = dependencies.mcpService,
+            mcpManager = dependencies.mcpManager,
+            hookManager = dependencies.hookManager,
             models = dependencies.models,
             sessionSettings = dependencies.sessionSettings,
             createDirectoryPicker = dependencies.createDirectoryPicker,

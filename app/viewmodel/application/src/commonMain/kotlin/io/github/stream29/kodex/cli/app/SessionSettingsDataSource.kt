@@ -69,6 +69,9 @@ internal class ContractSessionSettingsDataSource(
         if (configuration.agentMode != current.agentMode) {
             target.updateAgentMode(configuration.agentMode)
         }
+        if (configuration.requestUserInputMode != current.requestUserInputMode) {
+            target.updateRequestUserInputMode(configuration.requestUserInputMode)
+        }
         publish(configurationOverride = configuration)
         true
     }
@@ -143,4 +146,5 @@ private fun KodexAgentSettings.toConfiguration(): SessionSettingsConfiguration =
         reasoningEffort = reasoning.effort,
         serviceTier = serviceTier,
         agentMode = agentMode,
+        requestUserInputMode = requestUserInputMode,
     )

@@ -13,19 +13,19 @@ import kotlin.test.assertTrue
 val fileSystemAgentsMdTest by testSuite {
     test("loads precedence and returns filesystem changes on the next invocation") {
         val root = temporaryDirectory("agents-md-refresh")
-        val codexHome = Path(root, "codex-home")
+        val agentsHome = Path(root, "agents-home")
         val project = Path(root, "project")
         val cwd = Path(project, "module")
-        SystemCoroutineFileSystem.createDirectories(codexHome)
+        SystemCoroutineFileSystem.createDirectories(agentsHome)
         SystemCoroutineFileSystem.createDirectories(Path(project, ".git"))
         SystemCoroutineFileSystem.createDirectories(cwd)
         try {
-            SystemCoroutineFileSystem.writeString(Path(codexHome, "AGENTS.md"), "ignored user rules")
-            SystemCoroutineFileSystem.writeString(Path(codexHome, "AGENTS.override.md"), "user rules")
+            SystemCoroutineFileSystem.writeString(Path(agentsHome, "AGENTS.md"), "ignored user rules")
+            SystemCoroutineFileSystem.writeString(Path(agentsHome, "AGENTS.override.md"), "user rules")
             SystemCoroutineFileSystem.writeString(Path(project, "AGENTS.md"), "project rules")
             SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.md"), "ignored module rules")
             SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.override.md"), "module rules")
-            val initial = loadAgentsMd(codexHome, cwd)
+            val initial = loadAgentsMd(agentsHome, cwd)
 
             assertEquals("user rules", initial.instructions.userInstruction?.text)
             assertEquals(
@@ -34,7 +34,7 @@ val fileSystemAgentsMdTest by testSuite {
             )
 
             SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.override.md"), "updated module rules")
-            val refreshed = loadAgentsMd(codexHome, cwd)
+            val refreshed = loadAgentsMd(agentsHome, cwd)
             assertEquals("updated module rules", refreshed.instructions.projectInstructions.last().text)
             assertTrue(refreshed.warnings.isEmpty())
         } finally {
@@ -52,7 +52,7 @@ val fileSystemAgentsMdTest by testSuite {
                 byteArrayOf(0xC3.toByte(), 0x28, 'a'.code.toByte(), 'b'.code.toByte()),
             )
             val snapshot = loadAgentsMd(
-                codexHome = Path(root, "codex-home"),
+                agentsHome = Path(root, "agents-home"),
                 cwd = project,
                 projectDocMaxBytes = 3,
             )

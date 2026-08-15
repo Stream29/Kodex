@@ -5,6 +5,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.filesystem.FileSystemKodexSessionRepository
+import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModelFactory
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
@@ -35,7 +36,15 @@ import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettingsStore
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.openGlobalSettings
+import io.github.stream29.kodex.hook.contract.HookCodexImportSource
+import io.github.stream29.kodex.hook.contract.HookCodexSourceKind
+import io.github.stream29.kodex.hook.contract.HookManager
+import io.github.stream29.kodex.hook.impl.HookManagerImpl
 import io.github.stream29.kodex.hook.impl.KodexHooksImpl
+import io.github.stream29.kodex.mcp.contract.McpCodexImportSource
+import io.github.stream29.kodex.mcp.contract.McpManager
+import io.github.stream29.kodex.mcp.impl.DefaultMcpOAuthClient
+import io.github.stream29.kodex.mcp.impl.McpManagerImpl
 import io.github.stream29.kodex.mcp.impl.McpServiceImpl
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.Reasoning
@@ -45,6 +54,7 @@ import io.github.stream29.kodex.openai.client.OpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiClientConfig
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient as OpenAiClientContract
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
+import io.github.stream29.kodex.openai.codexclistorage.CodexCliMcpImportCandidate
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.kodexhome.KodexHome
@@ -52,6 +62,7 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSys
 import io.github.stream29.kodex.utils.logging.global
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
 import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
+import io.github.stream29.kodex.utils.shellclient.Shell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
@@ -78,6 +89,8 @@ public class KodexApplication private constructor(
     private val sessionRepository: FileSystemKodexSessionRepository,
     private val authStore: KodexAuthStore,
     private val accountUsageStore: CodexAccountUsageStore,
+    private val mcpManager: McpManager,
+    private val hookManager: HookManager,
     private val applicationScope: CoroutineScope,
     public val viewModel: ApplicationViewModel,
     public val newLineKey: StateFlow<NewLineKey>,
@@ -101,6 +114,8 @@ public class KodexApplication private constructor(
     private fun closeInfrastructure() {
         sessionRepository.cancel()
         accountUsageStore.close()
+        mcpManager.close()
+        hookManager.close()
         dependencies.close()
         authStore.close()
         applicationScope.cancel()
@@ -112,13 +127,15 @@ public class KodexApplication private constructor(
         public suspend fun openDefault(
             workingDirectory: Path = Path("."),
         ): KodexApplication = open(
-            codexDirectory = configuredCodexHome(),
+            codexDirectory = configuredCodexSourceHome(),
+            agentsDirectory = defaultAgentsHome(),
             workingDirectory = workingDirectory,
             dataDirectory = KodexHome,
         )
 
         public suspend fun open(
             codexDirectory: Path,
+            agentsDirectory: Path = defaultAgentsHome(),
             workingDirectory: Path = Path("."),
             dataDirectory: Path = KodexHome,
             sessionTitleGeneratorFactory: (OpenAiClientContract) -> SessionTitleGenerator =
@@ -131,27 +148,61 @@ public class KodexApplication private constructor(
         ): KodexApplication {
             val scope = CoroutineScope(currentCoroutineContext()).supervisorChildScope()
             val resolvedWorkingDirectory = SystemCoroutineFileSystem.resolve(workingDirectory)
-            val initialStorage = CodexCliStorage(codexDirectory)
-            val globalSettings = initialStorage.openGlobalSettings(
+            val resolvedAgentsDirectory = SystemCoroutineFileSystem.resolve(agentsDirectory)
+            val globalSettings = openGlobalSettings(
                 settingsDirectory = dataDirectory,
-                workingDirectory = resolvedWorkingDirectory,
                 defaults = KodexGlobalSettings(codexHome = codexDirectory),
             )
-            val codexStorage = CodexCliStorage(globalSettings.settings.value.codexHome)
             val authStore = scope.FileSystemKodexAuthStore(
                 dataDirectory = dataDirectory,
                 globalSettings = globalSettings,
             )
-            val clientConfig = codexStorage.readModelsCacheOrNull()
-                ?.clientVersion
-                ?.let { version -> OpenAiClientConfig(clientVersion = version) }
-                ?: OpenAiClientConfig()
-            val mcpService = scope.McpServiceImpl(settings = globalSettings.settings)
+            val clientConfig = OpenAiClientConfig()
+            val contextSettings = globalSettings.settings
+                .map { settings ->
+                    ApplicationAgentContextSettings(
+                        agentsHome = resolvedAgentsDirectory,
+                        shell = settings.shell,
+                    )
+                }
+                .stateIn(
+                    scope = scope,
+                    started = SharingStarted.Eagerly,
+                    initialValue = ApplicationAgentContextSettings(
+                        agentsHome = resolvedAgentsDirectory,
+                        shell = globalSettings.settings.value.shell,
+                    ),
+                )
+            val mcpConfigurationStore = KodexMcpConfigurationStore(globalSettings, scope)
+            val mcpOAuth = scope.DefaultMcpOAuthClient()
+            val mcpService = scope.McpServiceImpl(
+                settings = globalSettings.settings,
+                configurationStore = mcpConfigurationStore,
+                tokenRefresher = mcpOAuth,
+            )
+            val mcpManager = scope.McpManagerImpl(
+                store = mcpConfigurationStore,
+                service = mcpService,
+                codexImportSource = McpCodexImportSource {
+                    CodexCliStorage(globalSettings.settings.value.codexHome)
+                        .readMcpImportCandidates()
+                        .map(CodexCliMcpImportCandidate::toKodexMcpImportCandidate)
+                },
+                loginAttemptFactory = mcpOAuth,
+            )
+            val hookManager = scope.HookManagerImpl(
+                store = KodexHookConfigurationStore(globalSettings, scope),
+                codexImportSource = HookCodexImportSource {
+                    CodexCliStorage(globalSettings.settings.value.codexHome)
+                        .readHookImportCandidates(HookCodexSourceKind.User) +
+                        CodexCliStorage(Path(resolvedWorkingDirectory, ".codex"))
+                            .readHookImportCandidates(HookCodexSourceKind.Project)
+                },
+            )
             val graph = koinApplication<KodexKoinApplication>()
             try {
                 val openAiServices = graph.koin.get<OpenAiApplicationServices> {
                     parametersOf(
-                        codexStorage,
                         authStore,
                         clientConfig,
                     )
@@ -163,7 +214,7 @@ public class KodexApplication private constructor(
                 val dependencies = KodexAgentDependencies(
                     client = client,
                     modelCatalog = modelCatalog,
-                    contextSettings = globalSettings.settings,
+                    contextSettings = contextSettings,
                     shellSettings = globalSettings.settings,
                     mcpService = mcpService,
                     hooks = hooks,
@@ -232,7 +283,8 @@ public class KodexApplication private constructor(
                                 globalSettings = globalSettings,
                                 authentication = authStore,
                                 accountUsage = accountUsage,
-                                mcpService = mcpService,
+                                mcpManager = mcpManager,
+                                hookManager = hookManager,
                                 models = modelCatalog.models,
                                 sessionSettings = ContractSessionSettingsDataSource(
                                     target = arguments.target,
@@ -278,6 +330,8 @@ public class KodexApplication private constructor(
                     sessionRepository = repository,
                     authStore = authStore,
                     accountUsageStore = accountUsage,
+                    mcpManager = mcpManager,
+                    hookManager = hookManager,
                     applicationScope = scope,
                     viewModel = applicationViewModel,
                     newLineKey = newLineKey,
@@ -285,6 +339,8 @@ public class KodexApplication private constructor(
                     ApplicationLogger.info { "Application opened." }
                 }
             } catch (failure: Throwable) {
+                hookManager.close()
+                mcpManager.close()
                 mcpService.close()
                 scope.cancel()
                 graph.close()
@@ -302,14 +358,13 @@ public class KodexApplication private constructor(
  */
 @Factory
 internal class OpenAiApplicationServices(
-    @InjectedParam codexStorage: CodexCliStorage,
     @InjectedParam authStore: KodexAuthStore,
     @InjectedParam clientConfig: OpenAiClientConfig,
 ) {
     val client: OpenAiClient = OpenAiClient(authStore, clientConfig)
     val accountUsage: CodexAccountUsageStore =
         createCodexAccountUsageStore(client, authStore)
-    val modelCatalog: OpenAiModelCatalog = OpenAiModelCatalog(client, codexStorage)
+    val modelCatalog: OpenAiModelCatalog = OpenAiModelCatalog(client)
 }
 
 /** Exact runtime arguments for one compiler-generated application definition. */
@@ -354,15 +409,23 @@ private fun io.github.stream29.kodex.cli.settings.KodexNewSessionSettings.toAgen
     model = model,
     cwd = workingDirectory,
     agentMode = agentMode,
+    requestUserInputMode = requestUserInputMode,
     reasoning = Reasoning(effort = reasoningEffort),
     serviceTier = serviceTier,
 )
 
-private fun configuredCodexHome(): Path =
+private data class ApplicationAgentContextSettings(
+    override val agentsHome: Path,
+    override val shell: Shell,
+) : AgentContextSettings
+
+private fun configuredCodexSourceHome(): Path =
     environmentVariable("CODEX_HOME")
         ?.takeIf(String::isNotBlank)
         ?.let(::Path)
         ?: Path(requireUserHomeDirectory(), ".codex")
+
+private fun defaultAgentsHome(): Path = Path(requireUserHomeDirectory(), ".agents")
 
 private val ApplicationLogger: KLogger by lazy {
     KotlinLogging.logger {}.global()

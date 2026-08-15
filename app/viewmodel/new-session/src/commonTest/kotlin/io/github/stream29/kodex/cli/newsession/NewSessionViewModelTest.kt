@@ -15,6 +15,7 @@ import io.github.stream29.kodex.openai.Response
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
@@ -83,12 +84,17 @@ val newSessionViewModelTest by testSuite {
             try {
                 model.updateModel(OpenAiModelId("local-model"))
                 model.updateWorkingDirectory(workingDirectory)
+                model.updateRequestUserInputMode(RequestUserInputMode.NoQuestion)
                 model.composer.update("Start this session", "Start this session".length)
 
                 val persisted = model.materialize()
 
                 assertEquals(OpenAiModelId("local-model"), persisted.settings.value.model)
                 assertEquals(workingDirectory, persisted.settings.value.cwd)
+                assertEquals(
+                    RequestUserInputMode.NoQuestion,
+                    persisted.settings.value.requestUserInputMode,
+                )
                 assertEquals(
                     ContentItem.InputText("Start this session"),
                     repository.open(persisted.sessionIndex).storage.stable[1]

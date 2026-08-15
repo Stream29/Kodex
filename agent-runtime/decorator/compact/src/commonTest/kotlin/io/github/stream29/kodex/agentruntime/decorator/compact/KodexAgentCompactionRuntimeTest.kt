@@ -33,7 +33,6 @@ import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.TokenUsage
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
-import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
@@ -42,7 +41,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
@@ -523,7 +521,6 @@ private fun testModelCatalog(): OpenAiModelCatalog =
         client = mockOpenAiClient {
             listModels { OpenAiResult.Success(ModelsResponse()) }
         },
-        codexCliStorage = CodexCliStorage(Path(".kodex-test-model-catalog")),
     )
 
 private val TestLogger = KotlinLogging.logger {}

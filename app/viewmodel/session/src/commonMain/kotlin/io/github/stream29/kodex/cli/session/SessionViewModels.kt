@@ -29,6 +29,7 @@ import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
@@ -297,6 +298,9 @@ private class PersistedSessionViewModelImpl(
 
     override suspend fun updateAgentMode(agentMode: AgentMode) =
         rootAgent.updateAgentMode(agentMode)
+
+    override suspend fun updateRequestUserInputMode(mode: RequestUserInputMode) =
+        rootAgent.updateRequestUserInputMode(mode)
 
     override suspend fun updateModelConfiguration(
         model: OpenAiModelId,
