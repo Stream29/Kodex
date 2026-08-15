@@ -1,20 +1,20 @@
 package io.github.stream29.kodex.openai.codexclistorage
 
 import dev.eav.tomlkt.Toml
+import dev.eav.tomlkt.TomlTable
+import io.github.stream29.kodex.hook.contract.HookCodexImportCandidate
+import io.github.stream29.kodex.hook.contract.HookCodexSourceKind
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
-import kotlinx.serialization.json.Json
 
 public class CodexCliStorage(
     internal val directory: Path,
     internal val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ) {
     private val authPath: Path = Path(directory, CodexAuthFileName)
-    private val modelsCachePath: Path = Path(directory, CodexModelsCacheFileName)
     private val configPath: Path = Path(directory, CodexConfigFileName)
-    private val hooksPath: Path = Path(directory, KodexHooksFileName)
 
     /**
      * @return Nullable because Codex CLI may not be signed in; `null` means
@@ -26,64 +26,138 @@ public class CodexCliStorage(
     }
 
     /**
-     * @return Nullable because Codex may not have fetched a model catalog yet;
-     * `null` means `models_cache.json` is absent.
+     * Reads and classifies every Codex MCP declaration for an explicit import.
+     *
+     * A declaration is supported only when all of its fields can be preserved
+     * by Kodex. Unsupported previews expose field names, never their values.
      */
-    public suspend fun readModelsCacheOrNull(): CodexModelsCache? {
-        val text = modelsCachePath.readTextOrNull(fileSystem) ?: return null
-        return OpenAiJsonCodec.decodeFromString(CodexModelsCache.serializer(), text)
+    public suspend fun readMcpImportCandidates(): List<CodexCliMcpImportCandidate> {
+        val text = configPath.readTextOrNull(fileSystem) ?: return emptyList()
+        val root = CodexConfigToml.parseToTomlTable(text)
+        val servers = root["mcp_servers"] as? TomlTable ?: return emptyList()
+        return servers.entries
+            .sortedBy(Map.Entry<String, dev.eav.tomlkt.TomlElement>::key)
+            .map { (serverName, element) ->
+                classifyMcpImportCandidate(serverName, element as? TomlTable)
+            }
     }
 
     /**
-     * Reads supported settings from this Codex Home's `config.toml`.
+     * Reads this directory's Hook files only for an explicit import operation.
      *
-     * @return Nullable because Codex may use its defaults without a config
-     * file; `null` means `config.toml` is absent.
+     * Each existing `hooks.json`, and each `config.toml` containing a `hooks`
+     * table, becomes one independently classified source. Supported commands
+     * are platform-selected, environment-expanded, timeout-normalized, and
+     * matcher-compiled before being returned.
      */
-    public suspend fun readConfigTomlOrNull(): CodexCliConfig? {
-        val text = configPath.readTextOrNull(fileSystem) ?: return null
-        return CodexConfigToml.decodeFromString(CodexCliConfig.serializer(), text)
-    }
-
-    /**
-     * Reads and fully decodes this directory's `hooks.json` and inline
-     * `config.toml` Hook layers.
-     *
-     * Returned declarations retain their source structure while sealed handler
-     * types and matchers are decoded into their final Kotlin models.
-     */
-    public suspend fun readHookLayers(
-        sourceKind: CodexCliHookSourceKind,
+    public suspend fun readHookImportCandidates(
+        sourceKind: HookCodexSourceKind,
         environment: Map<String, String> = emptyMap(),
-    ): List<CodexCliHookLayer> {
-        val hooksJson = hooksPath.readTextOrNull(fileSystem)?.let { contents ->
-            val document = KodexHooksJson.decodeFromString(
-                CodexCliHooksDocument.serializer(),
-                contents,
-            )
-            CodexCliHookLayer(
-                sourcePath = hooksPath,
-                sourceKind = sourceKind,
-                environment = environment,
-                description = document.description,
-                hooks = document.hooks,
-            )
-        }
-        val inlineToml = configPath.readTextOrNull(fileSystem)?.let { contents ->
-            val document = CodexConfigToml.decodeFromString(
-                CodexCliHooksDocument.serializer(),
-                contents,
-            )
-            CodexCliHookLayer(
-                sourcePath = configPath,
-                sourceKind = sourceKind,
-                environment = environment,
-                hooks = document.hooks,
-            )
-        }
-        return listOfNotNull(hooksJson, inlineToml)
-    }
+    ): List<HookCodexImportCandidate> =
+        readHookImportCandidatesInternal(sourceKind, environment)
 }
+
+private fun classifyMcpImportCandidate(
+    serverName: String,
+    table: TomlTable?,
+): CodexCliMcpImportCandidate {
+    if (table == null) {
+        return CodexCliMcpImportCandidate.Unsupported(
+            serverName = serverName,
+            transport = null,
+            detail = "The declaration is not a server table.",
+        )
+    }
+    val hasCommand = "command" in table
+    val hasUrl = "url" in table
+    val transport = when {
+        hasCommand && !hasUrl -> CodexCliMcpTransportKind.Stdio
+        hasUrl && !hasCommand -> CodexCliMcpTransportKind.StreamableHttp
+        else -> null
+    }
+    if (transport == null) {
+        return CodexCliMcpImportCandidate.Unsupported(
+            serverName = serverName,
+            transport = null,
+            detail = "The declaration must contain exactly one supported transport.",
+        )
+    }
+    val supportedFields = when (transport) {
+        CodexCliMcpTransportKind.StreamableHttp -> SupportedHttpMcpImportFields
+        CodexCliMcpTransportKind.Stdio -> SupportedStdioMcpImportFields
+    }
+    val unsupportedFields = (table.keys - supportedFields).sorted()
+    if (unsupportedFields.isNotEmpty()) {
+        return CodexCliMcpImportCandidate.Unsupported(
+            serverName = serverName,
+            transport = transport,
+            detail = "Unsupported fields: ${unsupportedFields.joinToString()}.",
+        )
+    }
+    val configuration = runCatching {
+        CodexConfigToml.decodeFromTomlElement(CodexCliMcpServer.serializer(), table)
+    }.getOrElse {
+        return CodexCliMcpImportCandidate.Unsupported(
+            serverName = serverName,
+            transport = transport,
+            detail = "The supported transport fields are invalid.",
+        )
+    }
+    val invalidSupportedFields = when (configuration) {
+        is CodexCliMcpServer.StreamableHttp ->
+            configuration.url.isBlank() || !configuration.headers.keys.haveValidImportNames()
+
+        is CodexCliMcpServer.Stdio ->
+            configuration.command.isBlank() || !configuration.env.keys.haveValidImportNames()
+    }
+    if (invalidSupportedFields) {
+        return CodexCliMcpImportCandidate.Unsupported(
+            serverName = serverName,
+            transport = transport,
+            detail = "The supported transport fields are invalid.",
+        )
+    }
+    if (configuration is CodexCliMcpServer.StreamableHttp) {
+        val oauthTable = table["oauth"] as? TomlTable
+        val unsupportedOAuthFields = oauthTable
+            ?.keys
+            .orEmpty()
+            .minus(SupportedOAuthMcpImportFields)
+            .sorted()
+        if (unsupportedOAuthFields.isNotEmpty()) {
+            return CodexCliMcpImportCandidate.Unsupported(
+                serverName = serverName,
+                transport = transport,
+                detail = "Unsupported OAuth fields: ${unsupportedOAuthFields.joinToString()}.",
+            )
+        }
+        if (configuration.auth == CodexCliMcpAuth.ChatGpt) {
+            return CodexCliMcpImportCandidate.Unsupported(
+                serverName = serverName,
+                transport = transport,
+                detail = "Unsupported fields: auth.",
+            )
+        }
+        val needsOAuthClient = configuration.oauth != null ||
+            configuration.scopes != null ||
+            configuration.oauthResource != null ||
+            configuration.auth == CodexCliMcpAuth.OAuth
+        if (needsOAuthClient && configuration.oauth?.clientId.isNullOrBlank()) {
+            return CodexCliMcpImportCandidate.Unsupported(
+                serverName = serverName,
+                transport = transport,
+                detail = "Dynamic OAuth client registration is not supported.",
+            )
+        }
+    }
+    return CodexCliMcpImportCandidate.Supported(
+        serverName = serverName,
+        configuration = configuration,
+    )
+}
+
+private fun Set<String>.haveValidImportNames(): Boolean =
+    all(String::isNotBlank) && map(String::trim).distinct().size == size
 
 private suspend fun Path.readTextOrNull(fileSystem: CoroutineFileSystem): String? {
     if (!fileSystem.exists(this)) return null
@@ -91,14 +165,22 @@ private suspend fun Path.readTextOrNull(fileSystem: CoroutineFileSystem): String
 }
 
 private const val CodexAuthFileName: String = "auth.json"
-private const val CodexModelsCacheFileName: String = "models_cache.json"
 private const val CodexConfigFileName: String = "config.toml"
-private const val KodexHooksFileName: String = "hooks.json"
+
+private val SupportedHttpMcpImportFields: Set<String> =
+    setOf(
+        "url",
+        "http_headers",
+        "auth",
+        "scopes",
+        "oauth",
+        "oauth_resource",
+        "enabled",
+    )
+private val SupportedStdioMcpImportFields: Set<String> =
+    setOf("command", "args", "env", "cwd", "enabled")
+private val SupportedOAuthMcpImportFields: Set<String> = setOf("client_id")
 
 private val CodexConfigToml: Toml = Toml {
     ignoreUnknownKeys = true
-}
-
-private val KodexHooksJson: Json = Json(OpenAiJsonCodec) {
-    ignoreUnknownKeys = false
 }

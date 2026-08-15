@@ -132,7 +132,7 @@ private class RequestOnlyRuntime(
             when (requestResponseApi()) {
                 RequestFinish.Continue,
                 RequestFinish.Retryable,
-                -> Unit
+                    -> Unit
 
                 RequestFinish.Finish -> return
             }
@@ -182,7 +182,7 @@ private fun requestInput(vararg durableItems: ResponseItem): List<ResponseItem> 
 private suspend fun OpenAiClient.collectResponseProbe(input: List<ResponseItem>): List<ResponsesStreamEvent> =
     createResponse(
         ResponsesApiRequest(
-            model = testCodexModel(),
+            model = testOpenAiModel(),
             input = input,
             store = false,
         ),
@@ -191,11 +191,9 @@ private suspend fun OpenAiClient.collectResponseProbe(input: List<ResponseItem>)
 internal suspend fun realOpenAiClient(): RealOpenAiClient =
     RealOpenAiClient(
         authStore = InMemoryOpenAiAuthStore(
-            testCodexStorage().readAuthOrNull().toSubscriptionAuthStateOrThrow(),
+            testAuthStorage().readAuthOrNull().toSubscriptionAuthStateOrThrow(),
         ),
-        config = OpenAiClientConfig(
-            clientVersion = testCodexClientVersion(),
-        ),
+        config = OpenAiClientConfig(),
     )
 
 private fun CodexAuthJson?.toSubscriptionAuthStateOrThrow(): OpenAiSubscriptionAuthState {
@@ -240,14 +238,14 @@ private fun ResponseItem.typeName(): String =
         is ResponseItem.FunctionCall -> "function_call"
         is ResponseItem.ClientToolSearchCall,
         is ResponseItem.ServerToolSearchCall,
-        -> "tool_search_call"
+            -> "tool_search_call"
         is ResponseItem.FunctionCallOutput -> "function_call_output"
         is ResponseItem.McpToolCallOutput -> "mcp_tool_call_output"
         is ResponseItem.CustomToolCall -> "custom_tool_call"
         is ResponseItem.CustomToolCallOutput -> "custom_tool_call_output"
         is ResponseItem.ClientToolSearchOutput,
         is ResponseItem.ServerToolSearchOutput,
-        -> "tool_search_output"
+            -> "tool_search_output"
         is ResponseItem.WebSearchCall -> "web_search_call"
         is ResponseItem.ImageGenerationCall -> "image_generation_call"
         is ResponseItem.Compaction -> "compaction"
@@ -266,28 +264,10 @@ private fun testCodexDirectory(): Path {
         ?: throw IllegalStateException("CODEX_HOME or a readable user home directory must be set for real OpenAI integration tests.")
 }
 
-private fun testCodexStorage(): CodexCliStorage =
+private fun testAuthStorage(): CodexCliStorage =
     CodexCliStorage(testCodexDirectory())
 
-private suspend fun testCodexClientVersion(): String =
-    testCodexStorage().readModelsCacheOrNull()?.clientVersion
-        ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
-        ?: "0.1.0"
-
-internal suspend fun testCodexModel(): OpenAiModelId {
-    val storage = testCodexStorage()
-    val configuredModel = storage.readConfigTomlOrNull()?.model
-    val cachedModels = storage.readModelsCacheOrNull()
-        ?.models
-        .orEmpty()
-        .map { model -> model.slug.value }
-    return OpenAiModelId(
-        configuredModel
-            ?: cachedModels.firstOrNull { it.contains("codex", ignoreCase = true) }
-            ?: cachedModels.firstOrNull()
-            ?: fail("Codex CLI models_cache.json must contain at least one model.")
-    )
-}
+internal fun testOpenAiModel(): OpenAiModelId = OpenAiModelId("gpt-5.6-sol")
 
 private suspend fun KodexAgentStateContract.appendUserMessage(text: String): Int {
     markNewTurn()
@@ -319,7 +299,6 @@ internal fun testModelCatalog(): OpenAiModelCatalog =
         client = mockOpenAiClient {
             listModels { OpenAiResult.Success(ModelsResponse()) }
         },
-        codexCliStorage = CodexCliStorage(Path(".kodex-test-model-catalog")),
     )
 
 private fun assistantMessage(text: String): ResponseItem.Message =
@@ -473,7 +452,7 @@ val openAiStoryContinuationProbeTest by testSuite {
             "real client continues story from storage",
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
         ) { client ->
-            val storage = InMemoryKodexAgentStorage(KodexAgentSettings(model = testCodexModel()))
+            val storage = InMemoryKodexAgentStorage(KodexAgentSettings(model = testOpenAiModel()))
             val agent = KodexAgentState(
                 client = client,
                 storage = storage,
@@ -523,7 +502,7 @@ val openAiCurrentTimeToolRoundTripProbeTest by testSuite {
             val mcpService = TestMcpService()
             val storage = InMemoryKodexAgentStorage(
                 KodexAgentSettings(
-                    model = testCodexModel(),
+                    model = testOpenAiModel(),
                     instructions =
                         "When the user asks you to inspect the system time, call " +
                             "clock.curr_time exactly once before answering.",
@@ -601,7 +580,7 @@ val openAiViewImageToolRuntimeProbeTest by testSuite {
             try {
                 val storage = InMemoryKodexAgentStorage(
                     KodexAgentSettings(
-                        model = testCodexModel(),
+                        model = testOpenAiModel(),
                         cwd = imageRoot,
                     ),
                 )
@@ -678,7 +657,7 @@ val openAiImageGenerationToolRuntimeProbeTest by testSuite {
             val mcpService = TestMcpService()
             val modelCatalog = testModelCatalog()
             val storage = InMemoryKodexAgentStorage(
-                KodexAgentSettings(model = testCodexModel()),
+                KodexAgentSettings(model = testOpenAiModel()),
             )
             val state = KodexAgentState(
                 client = client,
@@ -759,7 +738,7 @@ val openAiWebRunToolRuntimeProbeTest by testSuite {
             val mcpService = TestMcpService()
             val modelCatalog = testModelCatalog()
             val storage = InMemoryKodexAgentStorage(
-                KodexAgentSettings(model = testCodexModel()),
+                KodexAgentSettings(model = testOpenAiModel()),
             )
             val state = KodexAgentState(
                 client = client,
@@ -826,7 +805,7 @@ val openAiRequestUserInputProbeTest by testSuite {
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
         ) { client ->
             val storage = InMemoryKodexAgentStorage(
-                KodexAgentSettings(model = testCodexModel()),
+                KodexAgentSettings(model = testOpenAiModel()),
             )
             val state = KodexAgentState(
                 client = client,
@@ -905,7 +884,7 @@ val openAiForcedCompactProbeTest by testSuite {
             "real client forced compact installs server compaction output",
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
         ) { client ->
-            val model = testCodexModel()
+            val model = testOpenAiModel()
             val storage = InMemoryKodexAgentStorage(
                 KodexAgentSettings(
                     model = model,
@@ -1011,7 +990,7 @@ val openAiHostedWebSearchProbeTest by testSuite {
         ) { client ->
             val events = client.createResponse(
                 ResponsesApiRequest(
-                    model = testCodexModel(),
+                    model = testOpenAiModel(),
                     input = listOf(
                         userMessage(
                             "Search the web for the current official Kotlin release, then reply with its version.",

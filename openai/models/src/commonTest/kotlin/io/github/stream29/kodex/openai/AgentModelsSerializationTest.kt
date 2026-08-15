@@ -3,6 +3,7 @@ package io.github.stream29.kodex.openai
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlin.test.assertEquals
 
@@ -12,6 +13,19 @@ val agentModelsSerializationTest by testSuite {
     test("agent modes use stable wire names") {
         assertEquals("\"single\"", json.encodeToString(AgentMode.Single))
         assertEquals("\"multi\"", json.encodeToString(AgentMode.Multi))
+    }
+
+    test("request user input modes use stable wire names") {
+        assertEquals("\"ask_user\"", json.encodeToString(RequestUserInputMode.AskUser))
+        assertEquals("\"no_question\"", json.encodeToString(RequestUserInputMode.NoQuestion))
+    }
+
+    test("agent settings without request user input mode default to ask user") {
+        val settings = json.decodeFromString<KodexAgentSettings>(
+            """{"model":"test-model"}""",
+        )
+
+        assertEquals(RequestUserInputMode.AskUser, settings.requestUserInputMode)
     }
 
     test("thread goal uses Rust camel case status and fields") {

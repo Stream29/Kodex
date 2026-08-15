@@ -10,9 +10,15 @@ import java.nio.file.StandardOpenOption.CREATE_NEW
 import java.nio.file.StandardOpenOption.WRITE
 
 import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.attribute.PosixFilePermission
 
 public actual val SystemCoroutineFileSystem: CoroutineFileSystem =
-    BlockingCoroutineFileSystem(SystemFileSystem, ::exclusiveSink, ::fingerprintOrNull)
+    BlockingCoroutineFileSystem(
+        delegate = SystemFileSystem,
+        exclusiveSink = ::exclusiveSink,
+        fingerprint = ::fingerprintOrNull,
+        protectPrivateFile = ::protectPrivateFile,
+    )
 
 private fun fingerprintOrNull(path: Path): FileFingerprint? = try {
     val attributes = Files.readAttributes(
@@ -37,5 +43,19 @@ private fun exclusiveSink(path: Path, append: Boolean): CoroutineRawSink =
             if (append) APPEND else WRITE,
         ).asSink(),
     )
+
+private fun protectPrivateFile(path: Path) {
+    try {
+        Files.setPosixFilePermissions(
+            java.nio.file.Path.of(path.toString()),
+            setOf(
+                PosixFilePermission.OWNER_READ,
+                PosixFilePermission.OWNER_WRITE,
+            ),
+        )
+    } catch (_: UnsupportedOperationException) {
+        // Windows and other non-POSIX filesystems rely on their inherited ACL.
+    }
+}
 
 private const val NanosecondsPerSecond: Long = 1_000_000_000L

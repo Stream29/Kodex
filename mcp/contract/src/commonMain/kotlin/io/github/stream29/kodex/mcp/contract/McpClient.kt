@@ -40,6 +40,9 @@ public interface McpClient {
 
 /** Observable connection lifecycle for one [McpClient]. */
 public sealed interface McpClientState {
+    /** The server is configured, but a required browser authorization is absent. */
+    public data object AuthenticationBlocked : McpClientState
+
     /** The first connection or a replacement connection is being established. */
     public data object Connecting : McpClientState
 

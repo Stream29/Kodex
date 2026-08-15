@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.cli.settings
 
-import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.hook.contract.HookConfiguration
 import io.github.stream29.kodex.hook.contract.HookSettings
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
@@ -8,8 +7,10 @@ import io.github.stream29.kodex.mcp.contract.McpSettings
 import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.utils.shellclient.Shell
+import io.github.stream29.kodex.utils.shellclient.ShellSettings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.updateAndGet
@@ -20,19 +21,18 @@ import kotlinx.serialization.Serializable
 /**
  * Application-wide settings that apply independently of any one agent session.
  *
- * @property codexHome Root directory of the local Codex CLI data.
+ * @property codexHome External Codex data source used only for selected
+ * authentication and explicit imports.
  * @property authSource Persistent source of subscription credentials.
  * @property shell Default shell advertised to Agents and used by shell tools.
  * @property newLineKey Key chord that a multiline text input treats as a newline.
  * @property newSession Defaults copied into each newly created thread.
  * @property sessionTitle Automatic session-title generation controls.
  * @property mcpServers Application-wide MCP server configurations.
- * @property hooks Effective Hook configuration. It inherits the
- * selected Codex Home and project configuration until Kodex persists a
- * complete override.
+ * @property hooks Complete Kodex-owned Hook configuration.
  */
 public data class KodexGlobalSettings(
-    public override val codexHome: Path,
+    public val codexHome: Path,
     public val authSource: KodexAuthSource = KodexAuthSource.Codex,
     public override val shell: Shell = Shell.default,
     public val newLineKey: NewLineKey = NewLineKey.ShiftEnter,
@@ -40,7 +40,7 @@ public data class KodexGlobalSettings(
     public val sessionTitle: SessionTitleSettings = SessionTitleSettings(),
     public override val mcpServers: Map<String, McpServerConfiguration> = emptyMap(),
     public override val hooks: HookConfiguration = HookConfiguration(),
-) : AgentContextSettings, HookSettings, McpSettings
+) : HookSettings, McpSettings, ShellSettings
 
 /** Selects whether subscription credentials come from Codex or Kodex storage. */
 @Serializable
@@ -60,6 +60,7 @@ public data class KodexNewSessionSettings(
     public val reasoningEffort: ReasoningEffort = ReasoningEffort.Medium,
     public val serviceTier: ServiceTier = ServiceTier.Default,
     public val agentMode: AgentMode = AgentMode.Single,
+    public val requestUserInputMode: RequestUserInputMode = RequestUserInputMode.AskUser,
 )
 
 /**
@@ -107,7 +108,7 @@ public interface KodexGlobalSettingsStore {
     /** Latest complete settings snapshot. */
     public val settings: StateFlow<KodexGlobalSettings>
 
-    /** Reloads external settings sources and publishes the resulting complete snapshot. */
+    /** Reloads Kodex's private settings and publishes the resulting complete snapshot. */
     public suspend fun reload(): KodexGlobalSettings
 
     /** Atomically transforms and publishes the current settings snapshot. */

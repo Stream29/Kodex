@@ -5,8 +5,6 @@ import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
-import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
-import io.github.stream29.kodex.openai.codexclistorage.CodexModelsCache
 import io.github.stream29.kodex.openai.getOrThrow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -21,15 +19,11 @@ import kotlinx.coroutines.launch
  * In-memory model metadata catalog backed by Codex `/models` responses.
  *
  * The initial [models] value is [BuiltInModelCatalog]. A catalog-owned
- * background scope then attempts [refreshFromCodexCliCache] followed by
- * [refresh]. Failed sources leave the most recently published snapshot intact.
- *
- * @param codexCliStorage Installed Codex CLI storage used as a read-only
- * startup cache source.
+ * background scope then attempts a remote refresh. A failed refresh leaves the
+ * built-in snapshot intact.
  */
 internal class OpenAiModelCatalogImpl(
     private val client: OpenAiClient,
-    private val codexCliStorage: CodexCliStorage,
 ) : OpenAiModelCatalog {
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -39,7 +33,6 @@ internal class OpenAiModelCatalogImpl(
 
     init {
         scope.launch {
-            tryBootstrap { refreshFromCodexCliCache() }
             tryBootstrap { refreshAtStartup() }
         }
     }
@@ -49,19 +42,6 @@ internal class OpenAiModelCatalogImpl(
         val refreshed = client.listModels().getOrThrow().models
         models.value = refreshed
         return refreshed
-    }
-
-    /**
-     * Reads and publishes the installed Codex CLI cache without mutating it.
-     *
-     * @return Nullable because Codex CLI may not have created
-     * `models_cache.json`; `null` means no cache file exists. An existing
-     * cache is returned and published even when its model list is empty.
-     */
-    internal suspend fun refreshFromCodexCliCache(): CodexModelsCache? {
-        val cache = codexCliStorage.readModelsCacheOrNull() ?: return null
-        models.value = cache.models
-        return cache
     }
 
     /** Cancels catalog-owned background work without closing the injected client. */
@@ -99,15 +79,9 @@ internal class OpenAiModelCatalogImpl(
     }
 }
 
-/** Creates a live model catalog backed by Codex CLI cache and OpenAI `/models`. */
-public fun OpenAiModelCatalog(
-    client: OpenAiClient,
-    codexCliStorage: CodexCliStorage,
-): OpenAiModelCatalog =
-    OpenAiModelCatalogImpl(
-        client = client,
-        codexCliStorage = codexCliStorage,
-    )
+/** Creates a live model catalog backed by built-in metadata and OpenAI `/models`. */
+public fun OpenAiModelCatalog(client: OpenAiClient): OpenAiModelCatalog =
+    OpenAiModelCatalogImpl(client = client)
 
 private fun List<ModelInfo>.longestPrefixMatch(requestedSlug: String): ModelInfo? =
     asSequence()

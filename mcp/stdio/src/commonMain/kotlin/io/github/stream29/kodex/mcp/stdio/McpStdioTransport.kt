@@ -21,7 +21,7 @@ public suspend fun ProcessClient.openMcpStdioTransport(
             executable = configuration.command,
             arguments = configuration.args,
             workingDirectory = configuration.workingDirectory,
-            environment = configuration.environment,
+            environment = configuration.environment.mapValues { (_, secret) -> secret.value },
         ),
     )
     return try {

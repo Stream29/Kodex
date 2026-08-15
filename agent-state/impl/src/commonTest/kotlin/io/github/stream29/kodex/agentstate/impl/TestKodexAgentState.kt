@@ -4,6 +4,7 @@ import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.mcp.contract.McpClient
+import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.utils.shellclient.Shell
@@ -27,13 +28,17 @@ internal suspend fun CoroutineScope.KodexAgentState(
 internal val TestAgentContextSettings: StateFlow<AgentContextSettings> =
     MutableStateFlow(
         object : AgentContextSettings {
-            override val codexHome: Path = Path(".")
+            override val agentsHome: Path = Path(".")
             override val shell: Shell = Shell(ShellType.Sh, Path("sh"))
         },
     )
 
 internal object TestMcpService : McpService {
     override val clients: StateFlow<Map<String, McpClient>> = MutableStateFlow(emptyMap())
+    override val authentication: StateFlow<Map<String, McpAuthenticationState>> =
+        MutableStateFlow(emptyMap())
+
+    override suspend fun invalidate(serverName: String) = Unit
 
     override suspend fun refresh() = Unit
 

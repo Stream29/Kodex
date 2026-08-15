@@ -21,7 +21,7 @@ val openAiClientWebSearchTest by testSuite {
     testFixture {
         OpenAiClient(
             authStore = kodexAuthStore(),
-            config = OpenAiClientConfig(clientVersion = testCodexClientVersion()),
+            config = OpenAiClientConfig(),
         )
     } asParameterForEach {
         test(
@@ -33,7 +33,7 @@ val openAiClientWebSearchTest by testSuite {
                     client.search(
                         SearchRequest(
                             id = testSearchSessionId(),
-                            model = testCodexModel(),
+                            model = ResponsesTestModel,
                             commands = SearchCommands(searchQuery = listOf(SearchQuery("OpenAI Codex"))),
                         ),
                     )

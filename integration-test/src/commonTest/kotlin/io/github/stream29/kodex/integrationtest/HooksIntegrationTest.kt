@@ -8,17 +8,19 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.contract.initialize
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
+import io.github.stream29.kodex.hook.contract.HookCommandDefinition
 import io.github.stream29.kodex.hook.contract.HookConfiguration
+import io.github.stream29.kodex.hook.contract.HookDeclarations
+import io.github.stream29.kodex.hook.contract.HookMatcherGroup
 import io.github.stream29.kodex.hook.contract.HookSettings
+import io.github.stream29.kodex.hook.contract.HookSourceConfiguration
 import io.github.stream29.kodex.hook.impl.KodexHooksImpl
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.kodex.openai.client.OpenAiClient as RealOpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiClientConfig
 import io.github.stream29.kodex.openai.client.test.InMemoryOpenAiAuthStore
-import io.github.stream29.kodex.openai.codexclistorage.CodexCliHookSourceKind
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -38,11 +40,8 @@ import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
 import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -61,7 +60,7 @@ private suspend fun kodexHooks(configuration: HookConfiguration): KodexHooksImpl
 val openAiFreshSessionHookIntegrationTest by testSuite(
     compartment = { TestCompartment.RealTime },
 ) {
-    test("fresh filesystem session runs Codex Home hooks through natural stop") {
+    test("fresh filesystem session runs Kodex-owned hooks through natural stop") {
         withTimeout(180_000L) {
             runFreshSessionHookIntegration()
         }
@@ -73,32 +72,23 @@ private suspend fun runFreshSessionHookIntegration() {
         SystemTemporaryDirectory,
         "kodex-hook-integration-${Random.nextLong().toString().replace('-', '0')}",
     )
-    val codexHome = Path(root, "codex-home")
     val kodexHome = Path(root, "kodex-home")
     val workingDirectory = Path(root, "workspace")
-    val hookLog = Path(codexHome, "hook-events.jsonl")
+    val hookLog = Path(root, "hook-events.jsonl")
     var client: RealOpenAiClient? = null
     var modelCatalog: OpenAiModelCatalog? = null
     var hooks: KodexHooksImpl? = null
     var sessionRepository: FileSystemKodexSessionRepository? = null
     try {
-        SystemCoroutineFileSystem.createDirectories(codexHome)
         SystemCoroutineFileSystem.createDirectories(kodexHome)
         SystemCoroutineFileSystem.createDirectories(workingDirectory)
 
         val sourceCodexHome = configuredIntegrationCodexHome()
-        copyCodexRuntimeFiles(sourceCodexHome, codexHome)
-        val model = integrationModel(CodexCliStorage(sourceCodexHome))
-        installHooks(
-            codexHome = codexHome,
-            model = model,
-            command = recordingHookCommand(hookLog, "{}"),
-        )
-
-        val codexStorage = CodexCliStorage(codexHome)
-        client = realOpenAiClient(codexStorage)
-        modelCatalog = OpenAiModelCatalog(client, codexStorage)
-        hooks = kodexHooks(loadHookConfiguration(codexHome))
+        val model = testOpenAiModel()
+        val command = recordingHookCommand(hookLog, "{}")
+        client = realOpenAiClient(CodexCliStorage(sourceCodexHome))
+        modelCatalog = OpenAiModelCatalog(client)
+        hooks = kodexHooks(integrationHookConfiguration(command))
         val dependencies = KodexAgentDependencies(
             client = client,
             modelCatalog = modelCatalog,
@@ -159,39 +149,10 @@ private fun configuredIntegrationCodexHome(): Path =
         ?: userHomeDirectory()?.let { home -> Path(home, ".codex") }
         ?: error("CODEX_HOME or a readable user home directory is required.")
 
-private suspend fun copyCodexRuntimeFiles(source: Path, destination: Path) {
-    val auth = Path(source, "auth.json")
-    SystemCoroutineFileSystem.writeBytes(
-        Path(destination, "auth.json"),
-        SystemCoroutineFileSystem.readBytes(auth),
-    )
-    val modelsCache = Path(source, "models_cache.json")
-    if (SystemCoroutineFileSystem.exists(modelsCache)) {
-        SystemCoroutineFileSystem.writeBytes(
-            Path(destination, "models_cache.json"),
-            SystemCoroutineFileSystem.readBytes(modelsCache),
-        )
-    }
-}
-
-private suspend fun integrationModel(storage: CodexCliStorage): OpenAiModelId {
-    val configured = storage.readConfigTomlOrNull()?.model
-    val cached = storage.readModelsCacheOrNull()?.models.orEmpty()
-    return OpenAiModelId(
-        configured
-            ?: cached.firstOrNull { model -> model.slug.value.contains("codex", ignoreCase = true) }?.slug?.value
-            ?: cached.firstOrNull()?.slug?.value
-            ?: error("Codex CLI models_cache.json must contain at least one model."),
-    )
-}
-
 private suspend fun realOpenAiClient(storage: CodexCliStorage): RealOpenAiClient {
     val tokens = requireNotNull(storage.readAuthOrNull()?.tokens) {
         "Codex CLI auth.json must contain tokens."
     }
-    val clientVersion = storage.readModelsCacheOrNull()?.clientVersion
-        ?.takeIf { version -> version.matches(Regex("""\d+\.\d+\.\d+""")) }
-        ?: "0.1.0"
     return RealOpenAiClient(
         authStore = InMemoryOpenAiAuthStore(
             OpenAiSubscriptionAuthState(
@@ -199,46 +160,31 @@ private suspend fun realOpenAiClient(storage: CodexCliStorage): RealOpenAiClient
                 accountId = tokens.accountId?.takeIf(String::isNotBlank),
             ),
         ),
-        config = OpenAiClientConfig(clientVersion = clientVersion),
+        config = OpenAiClientConfig(),
     )
 }
 
-private suspend fun installHooks(
-    codexHome: Path,
-    model: OpenAiModelId,
+private fun integrationHookConfiguration(
     command: String,
-) {
-    val hooksPath = Path(codexHome, "hooks.json")
-    val contents = buildJsonObject {
-        put("hooks", buildJsonObject {
-            listOf("UserPromptSubmit", "Stop").forEach { eventName ->
-                put(eventName, buildJsonArray {
-                    add(buildJsonObject {
-                        put("hooks", buildJsonArray {
-                            add(buildJsonObject {
-                                put("type", "command")
-                                put("command", command)
-                                put("timeout", 5)
-                            })
-                        })
-                    })
-                })
-            }
-        })
-    }.toString()
-    val config = buildString {
-        append("model = \"")
-        append(model.value.tomlStringContent())
-        appendLine("\"")
-    }
-    SystemCoroutineFileSystem.writeString(hooksPath, contents)
-    SystemCoroutineFileSystem.writeString(Path(codexHome, "config.toml"), config)
-}
-
-private suspend fun loadHookConfiguration(codexHome: Path): HookConfiguration {
+): HookConfiguration {
+    val group = HookMatcherGroup(
+        hooks = listOf(
+            HookCommandDefinition(
+                command = command,
+                timeoutSeconds = 5,
+            ),
+        ),
+    )
     return HookConfiguration(
-        sources = CodexCliStorage(codexHome).readHookLayers(
-            sourceKind = CodexCliHookSourceKind.User,
+        sources = listOf(
+            HookSourceConfiguration(
+                id = "integration-hooks",
+                name = "Integration hooks",
+                hooks = HookDeclarations(
+                    userPromptSubmit = listOf(group),
+                    stop = listOf(group),
+                ),
+            ),
         ),
     )
 }
@@ -269,8 +215,6 @@ private suspend fun readHookRequests(path: Path): List<JsonObject> =
 private fun String.posixShellArgument(): String = "'${replace("'", "'\"'\"'")}'"
 
 private fun String.powerShellStringContent(): String = replace("'", "''")
-
-private fun String.tomlStringContent(): String = replace("\\", "\\\\").replace("\"", "\\\"")
 
 private suspend fun FileSystemKodexSessionRepository.closeAndJoin() {
     cancel()

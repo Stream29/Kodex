@@ -24,7 +24,12 @@ import platform.posix.strerror
 import platform.posix.stat
 
 public actual val SystemCoroutineFileSystem: CoroutineFileSystem =
-    BlockingCoroutineFileSystem(SystemFileSystem, ::exclusiveSink, ::fingerprintOrNull)
+    BlockingCoroutineFileSystem(
+        delegate = SystemFileSystem,
+        exclusiveSink = ::exclusiveSink,
+        fingerprint = ::fingerprintOrNull,
+        protectPrivateFile = ::protectPrivateFile,
+    )
 
 @OptIn(ExperimentalForeignApi::class)
 private fun fingerprintOrNull(path: Path): FileFingerprint? = memScoped {
@@ -41,6 +46,8 @@ private fun fingerprintOrNull(path: Path): FileFingerprint? = memScoped {
 }
 
 internal expect fun stat.modifiedAtNanoseconds(): Long
+
+internal expect fun protectPrivateFile(path: Path)
 
 @OptIn(ExperimentalForeignApi::class)
 private fun exclusiveSink(path: Path, append: Boolean): CoroutineRawSink {

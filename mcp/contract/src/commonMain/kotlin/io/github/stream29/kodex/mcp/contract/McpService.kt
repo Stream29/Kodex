@@ -13,6 +13,18 @@ public interface McpService : AutoCloseable {
     /** Current enabled clients keyed by their exact global-settings server name. */
     public val clients: StateFlow<Map<String, McpClient>>
 
+    /** Latest sanitized persistent/runtime authentication state by server name. */
+    public val authentication: StateFlow<Map<String, McpAuthenticationState>>
+
+    /**
+     * Discards one server's current owner and catalog, then reconciles it from
+     * the latest settings snapshot.
+     *
+     * This is used when a management operation semantically replaces a server
+     * even if its resulting connection identity is structurally unchanged.
+     */
+    public suspend fun invalidate(serverName: String): Unit
+
     /**
      * Refreshes catalogs through healthy connections.
      *

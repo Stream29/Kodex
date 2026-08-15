@@ -30,6 +30,7 @@ import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.tool.multiagent.MultiAgentTools
@@ -454,7 +455,10 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
         )
         val root = repository.open(
             repository.createInitialized(
-                settings("root").copy(agentMode = AgentMode.Multi),
+                settings("root").copy(
+                    agentMode = AgentMode.Multi,
+                    requestUserInputMode = RequestUserInputMode.NoQuestion,
+                ),
             ),
         )
 
@@ -479,10 +483,27 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
         }
         assertEquals("/root/worker", child.storage.settings[child.storage.latestIndex()].threadName)
         assertEquals(AgentMode.Multi, child.storage.settings[child.storage.latestIndex()].agentMode)
+        assertEquals(
+            RequestUserInputMode.NoQuestion,
+            child.storage.settings[child.storage.latestIndex()].requestUserInputMode,
+        )
         val inheritedSettings = child.storage.settings[child.storage.latestIndex()]
-        child.runtime.updateSettings(inheritedSettings.copy(agentMode = AgentMode.Single))
+        child.runtime.updateSettings(
+            inheritedSettings.copy(
+                agentMode = AgentMode.Single,
+                requestUserInputMode = RequestUserInputMode.AskUser,
+            ),
+        )
         assertEquals(AgentMode.Single, child.storage.settings[child.storage.latestIndex()].agentMode)
+        assertEquals(
+            RequestUserInputMode.AskUser,
+            child.storage.settings[child.storage.latestIndex()].requestUserInputMode,
+        )
         assertEquals(AgentMode.Multi, root.storage.settings[root.storage.latestIndex()].agentMode)
+        assertEquals(
+            RequestUserInputMode.NoQuestion,
+            root.storage.settings[root.storage.latestIndex()].requestUserInputMode,
+        )
         assertTrue(MultiAgentTools.specs.all { spec -> spec.name in rootToolNames })
         assertTrue(
             root.storage.stable.indexes().toList().any { index ->

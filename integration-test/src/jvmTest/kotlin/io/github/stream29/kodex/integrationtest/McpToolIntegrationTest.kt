@@ -83,7 +83,7 @@ val openAiMcpToolRoundTripProbeTest by testSuite {
                 }
                 val storage = InMemoryKodexAgentStorage(
                     KodexAgentSettings(
-                        model = testCodexModel(),
+                        model = testOpenAiModel(),
                         instructions = McpProbeInstructions,
                     ),
                 )

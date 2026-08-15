@@ -16,7 +16,7 @@ public data class AgentsMdInstruction(
 /**
  * Ordered AGENTS.md instructions grouped by their application scope.
  *
- * @property userInstruction Nullable because the Codex home may contain no
+ * @property userInstruction Nullable because the Agents home may contain no
  * readable, nonblank `AGENTS.override.md` or `AGENTS.md`; `null` means no
  * user-level instructions apply.
  * @property projectInstructions Project documents ordered from project root to

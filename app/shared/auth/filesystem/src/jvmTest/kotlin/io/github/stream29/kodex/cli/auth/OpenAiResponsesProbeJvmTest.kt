@@ -17,7 +17,6 @@ import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.openai.client.OpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiClientConfig
-import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.toList
@@ -54,12 +53,9 @@ val openAiResponsesProbeJvmTest by testSuite(
         } finally {
             loader.close()
         }
-        val clientVersion = CodexCliStorage(codexHome).readModelsCacheOrNull()
-            ?.clientVersion
-            ?: "0.1.0"
         val client = OpenAiClient(
             authStore = InMemoryKodexAuthStore(auth),
-            config = OpenAiClientConfig(clientVersion = clientVersion),
+            config = OpenAiClientConfig(),
         )
         try {
             val events = withTimeout(180.seconds) {

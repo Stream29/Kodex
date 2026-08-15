@@ -15,7 +15,7 @@ import kotlinx.io.readByteArray
 
 /** Loads a fresh AGENTS.md discovery snapshot from the current filesystem state. */
 public suspend fun loadAgentsMd(
-    codexHome: Path,
+    agentsHome: Path,
     cwd: Path,
     projectRootMarkers: List<String> = listOf(".git"),
     projectDocFallbackFilenames: List<String> = emptyList(),
@@ -23,7 +23,7 @@ public suspend fun loadAgentsMd(
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ): AgentsMdSnapshot {
     require(projectDocMaxBytes >= 0) { "Project document byte budget must be non-negative." }
-    val user = loadUserInstructions(codexHome, fileSystem)
+    val user = loadUserInstructions(agentsHome, fileSystem)
     val project = loadProjectInstructions(
         cwd = cwd,
         projectRootMarkers = projectRootMarkers,
@@ -42,15 +42,15 @@ public suspend fun loadAgentsMd(
 
 /**
  * @return Loaded user-level instructions. The wrapped value is `null` when
- * no readable, nonblank Codex home instruction file exists.
+ * no readable, nonblank user Agent instruction file exists.
  */
 private suspend fun loadUserInstructions(
-    codexHome: Path,
+    agentsHome: Path,
     fileSystem: CoroutineFileSystem,
 ): Loaded<AgentsMdInstruction?> {
     var warnings: List<AgentsMdWarning> = emptyList()
     for (name in listOf(AgentsOverrideFileName, AgentsMdFileName)) {
-        val source = Path(codexHome, name)
+        val source = Path(agentsHome, name)
         if (fileSystem.metadataOrNull(source)?.isRegularFile != true) continue
         val resolved = fileSystem.resolve(source)
         val bytes = when (val result = readBytes(fileSystem, resolved)) {

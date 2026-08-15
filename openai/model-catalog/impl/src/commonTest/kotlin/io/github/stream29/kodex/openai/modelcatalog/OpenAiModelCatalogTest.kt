@@ -16,9 +16,6 @@ import io.github.stream29.kodex.openai.client.OpenAiClientConfig
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.openai.codexclistorage.CodexAuthJson
-import io.github.stream29.kodex.openai.codexclistorage.CodexModelsCache
-import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
 import io.github.stream29.kodex.utils.osenvironment.userHomeDirectory
 import kotlinx.coroutines.CompletableDeferred
@@ -28,10 +25,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
-import kotlinx.io.files.SystemTemporaryDirectory
-import kotlinx.serialization.encodeToString
-import kotlin.random.Random
-import kotlin.time.Instant
 import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.seconds
 
@@ -51,32 +44,6 @@ private fun model(
         effectiveContextWindowPercent = effectiveContextWindowPercent,
     )
 
-private suspend fun temporaryRoot(): Path =
-    Path(SystemTemporaryDirectory, "kodex-model-catalog-${Random.nextLong()}").also {
-        SystemCoroutineFileSystem.createDirectories(it)
-    }
-
-private suspend fun deleteRecursively(path: Path) {
-    val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
-    if (metadata.isDirectory) {
-        for (child in SystemCoroutineFileSystem.list(path)) {
-            deleteRecursively(child)
-        }
-    }
-    SystemCoroutineFileSystem.delete(path, mustExist = false)
-}
-
-private suspend fun writeCodexModelsCache(
-    directory: Path,
-    cache: CodexModelsCache,
-) {
-    SystemCoroutineFileSystem.createDirectories(directory)
-    SystemCoroutineFileSystem.writeString(
-        Path(directory, "models_cache.json"),
-        OpenAiJsonCodec.encodeToString(CodexModelsCache.serializer(), cache),
-    )
-}
-
 private fun testCodexDirectory(): Path =
     environmentVariable("CODEX_HOME")
         ?.takeIf(String::isNotBlank)
@@ -88,13 +55,9 @@ private suspend fun liveCatalog(): LiveCatalogFixture {
     val storage = CodexCliStorage(testCodexDirectory())
     val client = OpenAiClient(
         authStore = InMemoryOpenAiAuthStore(storage.readAuthOrNull().toSubscriptionAuthStateOrThrow()),
-        config = OpenAiClientConfig(
-            clientVersion = storage.readModelsCacheOrNull()?.clientVersion
-                ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
-                ?: "0.1.0",
-        ),
+        config = OpenAiClientConfig(),
     )
-    return LiveCatalogFixture(client, OpenAiModelCatalog(client, storage))
+    return LiveCatalogFixture(client, OpenAiModelCatalog(client))
 }
 
 private fun CodexAuthJson?.toSubscriptionAuthStateOrThrow(): OpenAiSubscriptionAuthState {
@@ -117,12 +80,10 @@ private class LiveCatalogFixture(
 
 val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
     test("starts with the bundled Codex model catalog") {
-        val root = temporaryRoot()
         val catalog = OpenAiModelCatalog(
             client = mockOpenAiClient {
                 listModels { OpenAiResult.Success(ModelsResponse(BuiltInModelCatalog)) }
             },
-            codexCliStorage = CodexCliStorage(root),
         )
         try {
             assertEquals(
@@ -146,17 +107,14 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
             )
         } finally {
             catalog.close()
-            deleteRecursively(root)
         }
     }
 
     test("resolves the longest matching model prefix and keeps the requested slug") {
-        val root = temporaryRoot()
         val catalog = OpenAiModelCatalog(
             client = mockOpenAiClient {
                 listModels { OpenAiResult.Success(ModelsResponse(BuiltInModelCatalog)) }
             },
-            codexCliStorage = CodexCliStorage(root),
         )
         try {
             val resolved = catalog.resolve(OpenAiModelId("gpt-5.4-mini-preview"))
@@ -165,17 +123,14 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
             assertEquals("GPT-5.4-Mini", resolved.displayName)
         } finally {
             catalog.close()
-            deleteRecursively(root)
         }
     }
 
     test("resolves one provider namespace segment but not multiple segments") {
-        val root = temporaryRoot()
         val catalog = OpenAiModelCatalog(
             client = mockOpenAiClient {
                 listModels { OpenAiResult.Success(ModelsResponse(BuiltInModelCatalog)) }
             },
-            codexCliStorage = CodexCliStorage(root),
         )
         try {
             assertEquals(
@@ -188,122 +143,41 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
             )
         } finally {
             catalog.close()
-            deleteRecursively(root)
         }
     }
 
-    test("loads the CLI cache before refreshing the remote catalog") {
-        val root = temporaryRoot()
+    test("keeps the built-in catalog until the remote refresh completes") {
+        val remoteStarted = CompletableDeferred<Unit>()
+        val continueRemote = CompletableDeferred<Unit>()
+        val catalog = OpenAiModelCatalog(
+            client = mockOpenAiClient {
+                listModels {
+                    remoteStarted.complete(Unit)
+                    continueRemote.await()
+                    OpenAiResult.Success(ModelsResponse())
+                }
+            },
+        )
         try {
-            val storage = CodexCliStorage(root)
-            val cachedModel = model("cached-model", contextWindow = 128_000L)
-            val remoteModel = model("remote-model", contextWindow = 256_000L)
-            val cache = CodexModelsCache(
-                fetchedAt = Instant.fromEpochSeconds(0),
-                clientVersion = "0.1.0",
-                models = listOf(cachedModel),
+            withTimeout(10.seconds) { remoteStarted.await() }
+            assertEquals(BuiltInModelCatalog, catalog.models.value)
+            continueRemote.complete(Unit)
+            assertEquals(
+                emptyList(),
+                withTimeout(10.seconds) { catalog.models.first { it.isEmpty() } },
             )
-            writeCodexModelsCache(root, cache)
-            val remoteStarted = CompletableDeferred<Unit>()
-            val continueRemote = CompletableDeferred<Unit>()
-            val catalog = OpenAiModelCatalogImpl(
-                client = mockOpenAiClient {
-                    listModels {
-                        remoteStarted.complete(Unit)
-                        continueRemote.await()
-                        OpenAiResult.Success(ModelsResponse(listOf(remoteModel)))
-                    }
-                },
-                codexCliStorage = storage,
-            )
-            try {
-                assertEquals(
-                    listOf(cachedModel),
-                    withTimeout(10.seconds) { catalog.models.first { it == listOf(cachedModel) } },
-                )
-                withTimeout(10.seconds) { remoteStarted.await() }
-                assertEquals(cache, catalog.refreshFromCodexCliCache())
-                continueRemote.complete(Unit)
-                assertEquals(
-                    listOf(remoteModel),
-                    withTimeout(10.seconds) { catalog.models.first { it == listOf(remoteModel) } },
-                )
-            } finally {
-                continueRemote.complete(Unit)
-                catalog.close()
-            }
         } finally {
-            deleteRecursively(root)
-        }
-    }
-
-    test("returns an empty CLI cache and publishes its empty catalog") {
-        val root = temporaryRoot()
-        try {
-            val storage = CodexCliStorage(root)
-            val cache = CodexModelsCache(
-                fetchedAt = Instant.fromEpochSeconds(0),
-                clientVersion = "0.1.0",
-                models = emptyList(),
-            )
-            writeCodexModelsCache(root, cache)
-            val catalog = OpenAiModelCatalogImpl(
-                client = mockOpenAiClient {
-                    listModels { OpenAiResult.Success(ModelsResponse()) }
-                },
-                codexCliStorage = storage,
-            )
-            try {
-                assertEquals(cache, catalog.refreshFromCodexCliCache())
-                assertEquals(emptyList(), catalog.models.value)
-            } finally {
-                catalog.close()
-            }
-        } finally {
-            deleteRecursively(root)
-        }
-    }
-
-    test("publishes an empty remote catalog after an absent cache") {
-        val root = temporaryRoot()
-        try {
-            val remoteStarted = CompletableDeferred<Unit>()
-            val continueRemote = CompletableDeferred<Unit>()
-            val catalog = OpenAiModelCatalog(
-                client = mockOpenAiClient {
-                    listModels {
-                        remoteStarted.complete(Unit)
-                        continueRemote.await()
-                        OpenAiResult.Success(ModelsResponse())
-                    }
-                },
-                codexCliStorage = CodexCliStorage(root),
-            )
-            try {
-                withTimeout(10.seconds) { remoteStarted.await() }
-                assertEquals(BuiltInModelCatalog, catalog.models.value)
-                continueRemote.complete(Unit)
-                assertEquals(
-                    emptyList(),
-                    withTimeout(10.seconds) { catalog.models.first { it.isEmpty() } },
-                )
-            } finally {
-                continueRemote.complete(Unit)
-                catalog.close()
-            }
-        } finally {
-            deleteRecursively(root)
+            continueRemote.complete(Unit)
+            catalog.close()
         }
     }
 
     test("publishes the remote catalog") {
-        val root = temporaryRoot()
         val freshModel = model("fresh-model")
         val catalog = OpenAiModelCatalog(
             client = mockOpenAiClient {
                 listModels { OpenAiResult.Success(ModelsResponse(listOf(freshModel))) }
             },
-            codexCliStorage = CodexCliStorage(root),
         )
         try {
             assertEquals(
@@ -312,12 +186,10 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
             )
         } finally {
             catalog.close()
-            deleteRecursively(root)
         }
     }
 
     test("close cancels a pending startup refresh") {
-        val root = temporaryRoot()
         val remoteStarted = CompletableDeferred<Unit>()
         val remoteCancelled = CompletableDeferred<Unit>()
         val catalog = OpenAiModelCatalog(
@@ -331,7 +203,6 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
                     }
                 }
             },
-            codexCliStorage = CodexCliStorage(root),
         )
         try {
             withTimeout(10.seconds) { remoteStarted.await() }
@@ -339,7 +210,6 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
             withTimeout(10.seconds) { remoteCancelled.await() }
         } finally {
             catalog.close()
-            deleteRecursively(root)
         }
     }
 

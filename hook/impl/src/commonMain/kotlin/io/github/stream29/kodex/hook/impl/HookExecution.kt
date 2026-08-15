@@ -13,11 +13,11 @@ internal suspend fun ShellClient.runHook(
     cwd: Path,
 ): HookRawResult {
     return runHook(
-        command = hook.command,
+        command = hook.definition.command,
         inputJson = inputJson,
         cwd = cwd,
         environment = hook.environment,
-        timeout = hook.timeoutSeconds.seconds,
+        timeout = hook.definition.timeoutSeconds.seconds,
     )
 }
 

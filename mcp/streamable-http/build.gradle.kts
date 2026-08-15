@@ -12,5 +12,8 @@ kotlin {
             implementation(project(":utils-ktor-client-ext"))
             implementation(libs.ktor.sse)
         }
+        commonTest.dependencies {
+            implementation(libs.ktor.client.mock)
+        }
     }
 }

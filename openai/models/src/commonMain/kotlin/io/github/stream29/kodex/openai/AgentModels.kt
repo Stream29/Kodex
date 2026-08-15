@@ -13,6 +13,16 @@ public enum class AgentMode {
     Multi,
 }
 
+/** Selects whether an Agent may ask the user a structured question. */
+@Serializable
+public enum class RequestUserInputMode {
+    @SerialName("ask_user")
+    AskUser,
+
+    @SerialName("no_question")
+    NoQuestion,
+}
+
 /**
  * Persisted goal state for the storage-backed thread.
  *

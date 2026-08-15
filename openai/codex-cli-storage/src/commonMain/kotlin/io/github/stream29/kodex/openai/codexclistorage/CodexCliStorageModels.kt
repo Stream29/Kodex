@@ -3,70 +3,11 @@ package io.github.stream29.kodex.openai.codexclistorage
 import dev.eav.tomlkt.TomlContentPolymorphicSerializer
 import dev.eav.tomlkt.TomlElement
 import dev.eav.tomlkt.asTomlTable
-import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiSubscriptionTokens
-import io.github.stream29.kodex.openai.ReasoningEffort
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.time.Instant
-
-/** One decoded Codex CLI TOML configuration layer. */
-@Serializable
-public data class CodexCliConfig(
-    /** Nullable because a configuration layer may inherit the model. */
-    public val model: String? = null,
-    /** Nullable because a configuration layer may inherit reasoning effort. */
-    @SerialName("model_reasoning_effort")
-    public val reasoningEffort: ReasoningEffort? = null,
-    /** Nullable because a configuration layer may inherit its service tier. */
-    @SerialName("service_tier")
-    public val serviceTier: String? = null,
-    /** Nullable because a configuration layer may omit all TUI settings. */
-    public val tui: CodexCliTuiConfig? = null,
-    @SerialName("mcp_servers")
-    public val mcpServers: Map<String, CodexCliMcpServer> = emptyMap(),
-)
-
-/** Native Codex TUI configuration. */
-@Serializable
-public data class CodexCliTuiConfig(
-    /** Defaults to an empty keymap when `[tui.keymap]` is absent. */
-    public val keymap: CodexCliKeymap = CodexCliKeymap(),
-)
-
-/** Native Codex TUI key bindings. */
-@Serializable
-public data class CodexCliKeymap(
-    /** Defaults to an empty composer map when `[tui.keymap.composer]` is absent. */
-    public val composer: CodexCliComposerKeymap = CodexCliComposerKeymap(),
-    /** Defaults to an empty global map when `[tui.keymap.global]` is absent. */
-    public val global: CodexCliGlobalKeymap = CodexCliGlobalKeymap(),
-    /** Defaults to an empty editor map when `[tui.keymap.editor]` is absent. */
-    public val editor: CodexCliEditorKeymap = CodexCliEditorKeymap(),
-)
-
-/** Native Codex composer key bindings. */
-@Serializable
-public data class CodexCliComposerKeymap(
-    /** Nullable because the composer submit binding can use its default. */
-    public val submit: String? = null,
-)
-
-/** Native Codex global key bindings. */
-@Serializable
-public data class CodexCliGlobalKeymap(
-    /** Nullable because the global submit binding can use its default. */
-    public val submit: String? = null,
-)
-
-/** Native Codex editor key bindings. */
-@Serializable
-public data class CodexCliEditorKeymap(
-    /** Nullable because the editor newline binding can use its default. */
-    @SerialName("insert_newline")
-    public val insertNewline: String? = null,
-)
 
 /** One native Codex MCP server declaration, decoded from its untagged TOML transport shape. */
 @Serializable(with = CodexCliMcpServerSerializer::class)
@@ -79,6 +20,11 @@ public sealed interface CodexCliMcpServer {
         public val url: String,
         @SerialName("http_headers")
         public val headers: Map<String, String> = emptyMap(),
+        public val auth: CodexCliMcpAuth? = null,
+        public val scopes: List<String>? = null,
+        public val oauth: CodexCliMcpOAuth? = null,
+        @SerialName("oauth_resource")
+        public val oauthResource: String? = null,
         override val enabled: Boolean = true,
     ) : CodexCliMcpServer
 
@@ -93,6 +39,55 @@ public sealed interface CodexCliMcpServer {
     ) : CodexCliMcpServer
 }
 
+/** Codex HTTP MCP fallback authentication modes relevant to import support. */
+@Serializable
+public enum class CodexCliMcpAuth {
+    @SerialName("oauth")
+    OAuth,
+
+    @SerialName("chatgpt")
+    ChatGpt,
+}
+
+/** Codex OAuth client declaration; missing ids require dynamic registration. */
+@Serializable
+public data class CodexCliMcpOAuth(
+    @SerialName("client_id")
+    public val clientId: String? = null,
+)
+
+/** Transport hint safe to show for an unsupported Codex MCP declaration. */
+public enum class CodexCliMcpTransportKind {
+    StreamableHttp,
+    Stdio,
+}
+
+/** One declaration classified specifically for an explicit import preview. */
+public sealed interface CodexCliMcpImportCandidate {
+    public val serverName: String
+    public val transport: CodexCliMcpTransportKind?
+
+    public data class Supported(
+        override val serverName: String,
+        public val configuration: CodexCliMcpServer,
+    ) : CodexCliMcpImportCandidate {
+        override val transport: CodexCliMcpTransportKind =
+            when (configuration) {
+                is CodexCliMcpServer.StreamableHttp ->
+                    CodexCliMcpTransportKind.StreamableHttp
+
+                is CodexCliMcpServer.Stdio -> CodexCliMcpTransportKind.Stdio
+            }
+    }
+
+    public data class Unsupported(
+        override val serverName: String,
+        override val transport: CodexCliMcpTransportKind?,
+        /** Contains field names or a generic decode failure, never field values. */
+        public val detail: String,
+    ) : CodexCliMcpImportCandidate
+}
+
 /** Selects Codex's untagged MCP transport from its required transport field. */
 public object CodexCliMcpServerSerializer :
     TomlContentPolymorphicSerializer<CodexCliMcpServer>(CodexCliMcpServer::class) {
@@ -103,27 +98,6 @@ public object CodexCliMcpServerSerializer :
             CodexCliMcpServer.StreamableHttp.serializer()
         }
 }
-
-/**
- * Read-only snapshot written by Codex CLI to `models_cache.json`.
- *
- * Kotlin code must not write this file: it is a shared cache whose complete
- * model entries are owned by the installed Codex CLI.
- *
- * @property etag Nullable because a cache entry may have been written without
- * an HTTP entity tag; `null` means no entity tag is available for comparison.
- * @property clientVersion Nullable because older or partial Codex CLI cache
- * files may omit it; `null` means no cached client version is available.
- */
-@Serializable
-public data class CodexModelsCache(
-    @SerialName("fetched_at")
-    public val fetchedAt: Instant,
-    public val etag: String? = null,
-    @SerialName("client_version")
-    public val clientVersion: String? = null,
-    public val models: List<ModelInfo>,
-)
 
 /**
  * @property openAiApiKey Nullable because subscription authentication does not

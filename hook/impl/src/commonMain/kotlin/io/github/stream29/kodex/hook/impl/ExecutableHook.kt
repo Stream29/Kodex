@@ -1,26 +1,16 @@
 package io.github.stream29.kodex.hook.impl
 
+import io.github.stream29.kodex.hook.contract.HookCommandDefinition
 import io.github.stream29.kodex.hook.contract.HookConfiguration
-import io.github.stream29.kodex.openai.codexclistorage.CodexCliHookHandler
-import io.github.stream29.kodex.openai.codexclistorage.CodexCliHookLayer
-import io.github.stream29.kodex.openai.codexclistorage.CodexCliHookMatcher
-import io.github.stream29.kodex.openai.codexclistorage.CodexCliHookMatcherGroup
+import io.github.stream29.kodex.hook.contract.HookEvent
+import io.github.stream29.kodex.hook.contract.HookMatcher
+import io.github.stream29.kodex.hook.contract.HookSourceConfiguration
 
-/**
- * One enabled command Hook with all source-dependent values resolved.
- *
- * @property statusMessage Nullable because a command may not provide a UI
- * label; `null` means no custom label was configured.
- * @property additionalContextLimit Nullable because omission uses the default
- * output limit; `null` means no per-handler override was configured.
- */
+/** One enabled command Hook paired with source-dependent execution values. */
 internal data class ExecutableHook(
     val id: String,
-    val matcher: CodexCliHookMatcher,
-    val command: String,
-    val timeoutSeconds: Long,
-    val statusMessage: String?,
-    val additionalContextLimit: Int?,
+    val matcher: HookMatcher,
+    val definition: HookCommandDefinition,
     val environment: Map<String, String>,
 )
 
@@ -37,46 +27,29 @@ internal data class ResolvedHooks(
 internal fun HookConfiguration.resolveHooks(): ResolvedHooks {
     if (!featureEnabled) return ResolvedHooks()
     return ResolvedHooks(
-        preToolUse = sources.resolveHandlers { it.hooks.preToolUse },
-        permissionRequest = sources.resolveHandlers {
-            it.hooks.permissionRequest
-        },
-        postToolUse = sources.resolveHandlers { it.hooks.postToolUse },
-        preCompact = sources.resolveHandlers { it.hooks.preCompact },
-        postCompact = sources.resolveHandlers { it.hooks.postCompact },
-        userPromptSubmit = sources.resolveHandlers { it.hooks.userPromptSubmit },
-        stop = sources.resolveHandlers { it.hooks.stop },
+        preToolUse = sources.resolveHandlers(HookEvent.PreToolUse),
+        permissionRequest = sources.resolveHandlers(HookEvent.PermissionRequest),
+        postToolUse = sources.resolveHandlers(HookEvent.PostToolUse),
+        preCompact = sources.resolveHandlers(HookEvent.PreCompact),
+        postCompact = sources.resolveHandlers(HookEvent.PostCompact),
+        userPromptSubmit = sources.resolveHandlers(HookEvent.UserPromptSubmit),
+        stop = sources.resolveHandlers(HookEvent.Stop),
     )
 }
 
-private inline fun List<CodexCliHookLayer>.resolveHandlers(
-    groups: (CodexCliHookLayer) -> List<CodexCliHookMatcherGroup>,
+private fun List<HookSourceConfiguration>.resolveHandlers(
+    event: HookEvent,
 ): List<ExecutableHook> = flatMap { source ->
-    groups(source).flatMapIndexed { groupIndex, group ->
-        group.hooks.mapIndexedNotNull { handlerIndex, handler ->
-            val command = handler as? CodexCliHookHandler.Command
-                ?: return@mapIndexedNotNull null
-            val platformCommand = command.platformCommand
-            if (command.async || platformCommand.isBlank()) {
-                return@mapIndexedNotNull null
-            }
+    if (!source.enabled) return@flatMap emptyList()
+    source.hooks.groups(event).flatMapIndexed { groupIndex, group ->
+        group.hooks.mapIndexedNotNull { handlerIndex, command ->
+            if (!command.enabled) return@mapIndexedNotNull null
             ExecutableHook(
-                id = "${source.sourcePath}:$groupIndex:$handlerIndex",
+                id = "${source.id}:${event.wireName}:$groupIndex:$handlerIndex",
                 matcher = group.matcher,
-                command = platformCommand.substituteEnvironment(source.environment),
-                timeoutSeconds = (command.timeoutSeconds ?: DefaultHookTimeoutSeconds)
-                    .coerceAtLeast(1L),
-                statusMessage = command.statusMessage,
-                additionalContextLimit = command.additionalContextLimit,
-                environment = source.environment,
+                definition = command,
+                environment = source.environment.mapValues { (_, value) -> value.value },
             )
         }
     }
 }
-
-private fun String.substituteEnvironment(environment: Map<String, String>): String =
-    environment.entries.fold(this) { command, (key, value) ->
-        command.replace("\${$key}", value)
-    }
-
-private const val DefaultHookTimeoutSeconds: Long = 600L

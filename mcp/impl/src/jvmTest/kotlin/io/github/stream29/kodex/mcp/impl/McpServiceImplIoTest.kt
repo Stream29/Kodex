@@ -7,12 +7,18 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpTool
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
 import io.github.stream29.kodex.mcp.contract.McpClientState
+import io.github.stream29.kodex.mcp.contract.McpConfigurationStore
+import io.github.stream29.kodex.mcp.contract.McpOAuthClient
+import io.github.stream29.kodex.mcp.contract.McpOAuthConfiguration
+import io.github.stream29.kodex.mcp.contract.McpOAuthTokenRefresher
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
+import io.github.stream29.kodex.mcp.contract.McpSecret
 import io.github.stream29.kodex.mcp.contract.McpSettings
 import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.openai.ResponsesApiNamespace
 import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
@@ -28,7 +34,9 @@ import io.ktor.server.routing.routing
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonElement
@@ -42,12 +50,14 @@ import kotlinx.serialization.json.put
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Duration.Companion.milliseconds
 
 val mcpServiceImplIoTest by testSuite(
     compartment = { TestCompartment.RealTime },
@@ -238,15 +248,212 @@ val mcpServiceImplIoTest by testSuite(
             fixture.stop()
         }
     }
+
+    test("invalidation drops an identical connection and catalog before rebuilding") {
+        val fixture = McpServiceHttpFixture().start()
+        val service = CoroutineScope(currentCoroutineContext()).McpServiceImpl(
+            MutableStateFlow(
+                TestMcpSettings(
+                    mapOf("alpha" to fixture.configuration("alpha", "stable")),
+                ),
+            ),
+        )
+        try {
+            val original = withTimeout(10.seconds) {
+                service.clients.first { clients ->
+                    clients["alpha"]?.let { client ->
+                        client.state.value == McpClientState.Healthy &&
+                            client.listTools().size == 1
+                    } == true
+                }.getValue("alpha")
+            }
+
+            service.invalidate("alpha")
+
+            assertEquals(McpClientState.Closed, original.state.value)
+            assertTrue(service.clients.value["alpha"]?.listTools().orEmpty().isEmpty())
+            val rebuilt = withTimeout(10.seconds) {
+                service.clients.first { clients ->
+                    clients["alpha"]?.let { client ->
+                        client !== original &&
+                            client.state.value == McpClientState.Healthy &&
+                            client.listTools().size == 1
+                    } == true
+                }.getValue("alpha")
+            }
+            assertNotSame(original, rebuilt)
+            assertEquals(2, fixture.initializeCount("alpha"))
+        } finally {
+            service.close()
+            service.coroutineContext[Job]?.join()
+            fixture.stop()
+        }
+    }
+
+    test("OAuth blocking retains a logical client and the last catalog") {
+        val fixture = McpServiceHttpFixture().start()
+        val initialOAuth = testInitializedOAuth("first-access-token")
+        val initialConfiguration = fixture.configuration("oauth", "stable").copy(
+            oauth = initialOAuth,
+        )
+        val settings = MutableStateFlow(
+            TestMcpSettings(mapOf("oauth" to initialConfiguration)),
+        )
+        val service = CoroutineScope(currentCoroutineContext()).McpServiceImpl(settings)
+        try {
+            val authorizedClient = withTimeout(10.seconds) {
+                service.clients.first { clients ->
+                    clients["oauth"]?.let { client ->
+                        client.state.value == McpClientState.Healthy &&
+                            client.listTools().size == 1
+                    } == true
+                }.getValue("oauth")
+            }
+            val originalTool = authorizedClient.listTools().single()
+
+            settings.value = TestMcpSettings(
+                mapOf(
+                    "oauth" to initialConfiguration.copy(
+                        oauth = initialOAuth.copy(
+                            accessToken = McpSecret("second-access-token"),
+                        ),
+                    ),
+                ),
+            )
+            delay(100.milliseconds)
+            assertSame(authorizedClient, service.clients.value.getValue("oauth"))
+            assertSame(originalTool, authorizedClient.listTools().single())
+
+            settings.value = TestMcpSettings(
+                mapOf(
+                    "oauth" to initialConfiguration.copy(
+                        oauth = McpOAuthConfiguration.Uninitialized(
+                            client = initialOAuth.client,
+                            resource = initialOAuth.resource,
+                            scopes = initialOAuth.scopes,
+                        ),
+                    ),
+                ),
+            )
+            val blocked = withTimeout(10.seconds) {
+                service.clients.first { clients ->
+                    clients["oauth"]?.state?.value == McpClientState.AuthenticationBlocked
+                }.getValue("oauth")
+            }
+
+            assertNotSame(authorizedClient, blocked)
+            assertEquals(McpClientState.Closed, authorizedClient.state.value)
+            assertSame(originalTool, blocked.listTools().single())
+        } finally {
+            service.close()
+            service.coroutineContext[Job]?.join()
+            fixture.stop()
+        }
+    }
+
+    test("a 401 refresh persists its token without replacing the client catalog") {
+        val fixture = McpServiceHttpFixture().start()
+        fixture.expectedAuthorization.set("Bearer old-access-token")
+        val store = TestMcpConfigurationState(
+            mapOf(
+                "oauth" to fixture.configuration("oauth", "stable").copy(
+                    oauth = testInitializedOAuth("old-access-token"),
+                ),
+            ),
+        )
+        val refreshCount = AtomicInteger()
+        val refresher = McpOAuthTokenRefresher { initialized ->
+            refreshCount.incrementAndGet()
+            initialized.copy(accessToken = McpSecret("new-access-token"))
+        }
+        val service = CoroutineScope(currentCoroutineContext()).McpServiceImpl(
+            settings = store.settings,
+            configurationStore = store,
+            tokenRefresher = refresher,
+        )
+        try {
+            val originalClient = withTimeout(10.seconds) {
+                service.clients.first { clients ->
+                    clients["oauth"]?.let { client ->
+                        client.state.value == McpClientState.Healthy &&
+                            client.listTools().size == 1
+                    } == true
+                }.getValue("oauth")
+            }
+            val originalTool = originalClient.listTools().single()
+            fixture.expectedAuthorization.set("Bearer new-access-token")
+
+            val completed = assertIs<StableMcpToolEvent>(
+                originalTool.handle(
+                    PendingMcpToolEvent(
+                        callId = "refresh-call",
+                        name = "echo",
+                        namespace = "mcp__oauth",
+                        arguments = buildJsonObject { put("name", "Ada") },
+                    ),
+                ),
+            )
+
+            assertTrue(completed.result.isError != true)
+            assertEquals(1, refreshCount.get())
+            val persisted = assertIs<McpOAuthConfiguration.Initialized>(
+                assertIs<McpServerConfiguration.StreamableHttp>(
+                    store.configurations.value.getValue("oauth"),
+                ).oauth,
+            )
+            assertEquals(McpSecret("new-access-token"), persisted.accessToken)
+            assertSame(originalClient, service.clients.value.getValue("oauth"))
+            assertSame(originalTool, originalClient.listTools().single())
+            assertEquals(1, fixture.initializeCount("oauth"))
+            assertEquals(1, fixture.toolsListCount("oauth"))
+        } finally {
+            service.close()
+            service.coroutineContext[Job]?.join()
+            fixture.stop()
+        }
+    }
 }
+
+private fun testInitializedOAuth(accessToken: String): McpOAuthConfiguration.Initialized =
+    McpOAuthConfiguration.Initialized(
+        client = McpOAuthClient(
+            clientId = "client-id",
+            clientSecret = McpSecret("client-secret"),
+            authorizationEndpoint = "https://issuer.example.test/authorize",
+            tokenEndpoint = "https://issuer.example.test/token",
+        ),
+        resource = "https://resource.example.test",
+        scopes = listOf("tools.read"),
+        resolvedAuthorizationEndpoint = "https://issuer.example.test/authorize",
+        resolvedTokenEndpoint = "https://issuer.example.test/token",
+        accessToken = McpSecret(accessToken),
+        refreshToken = McpSecret("refresh-token"),
+    )
 
 private data class TestMcpSettings(
     override val mcpServers: Map<String, McpServerConfiguration>,
 ) : McpSettings
 
+private class TestMcpConfigurationState(
+    initial: Map<String, McpServerConfiguration>,
+) : McpConfigurationStore {
+    override val configurations = MutableStateFlow(initial)
+    val settings = MutableStateFlow<McpSettings>(TestMcpSettings(initial))
+
+    override suspend fun update(
+        transform: (Map<String, McpServerConfiguration>) -> Map<String, McpServerConfiguration>,
+    ): Map<String, McpServerConfiguration> {
+        val updated = transform(configurations.value)
+        configurations.value = updated
+        settings.value = TestMcpSettings(updated)
+        return updated
+    }
+}
+
 private class McpServiceHttpFixture {
     val catalogVersion: AtomicInteger = AtomicInteger(1)
     val available: AtomicBoolean = AtomicBoolean(true)
+    val expectedAuthorization: AtomicReference<String?> = AtomicReference(null)
 
     private val initializeCounts = ConcurrentHashMap<String, AtomicInteger>()
     private val toolsListCounts = ConcurrentHashMap<String, AtomicInteger>()
@@ -256,6 +463,12 @@ private class McpServiceHttpFixture {
                 if (!available.get()) {
                     call.respond(HttpStatusCode.ServiceUnavailable)
                     return@post
+                }
+                expectedAuthorization.get()?.let { expected ->
+                    if (call.request.headers[HttpHeaders.Authorization] != expected) {
+                        call.respond(HttpStatusCode.Unauthorized)
+                        return@post
+                    }
                 }
                 val serverName = checkNotNull(call.parameters["server"])
                 val request = TestJson.parseToJsonElement(call.receiveText()).jsonObject
@@ -302,7 +515,7 @@ private class McpServiceHttpFixture {
     ): McpServerConfiguration.StreamableHttp =
         McpServerConfiguration.StreamableHttp(
             url = "http://$Host:$port/mcp/$serverName",
-            headers = mapOf(MarkerHeader to marker),
+            headers = mapOf(MarkerHeader to McpSecret(marker)),
             enabled = enabled,
         )
 

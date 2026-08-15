@@ -70,19 +70,41 @@ internal class McpClientImpl(
     ): McpClientCallResult<Value> = owner.call(block)
 }
 
+/** Logical enabled client retained while browser authentication is required. */
+internal class McpAuthenticationBlockedClient(
+    override val serverName: String,
+    private val tools: List<McpTool>,
+) : McpClient {
+    override val state: StateFlow<McpClientState> =
+        MutableStateFlow<McpClientState>(McpClientState.AuthenticationBlocked).asStateFlow()
+
+    override fun listTools(): List<McpTool> = tools
+
+    /** Authentication, rather than transport reconnection, is the required next action. */
+    override suspend fun reconnect(): Unit = Unit
+}
+
 internal class McpClientOwner(
     private val scope: CoroutineScope,
     val serverName: String,
-    val configuration: McpServerConfiguration,
-    private val openTransport: suspend () -> Transport,
+    initialConfiguration: McpServerConfiguration,
+    private val openTransport: suspend (() -> McpServerConfiguration) -> Transport,
     private val publishCatalog: suspend (McpClientOwner, McpClientCatalog) -> Boolean,
+    private val release: () -> Unit = {},
 ) {
     private val connectionLock = ReadWriteMutex()
     private val reconnectMutex = Mutex()
     private val mutableState = MutableStateFlow<McpClientState>(McpClientState.Connecting)
+    private val mutableConfiguration = MutableStateFlow(initialConfiguration)
     private var activeClient: Client? = null
 
     val state: StateFlow<McpClientState> = mutableState.asStateFlow()
+    val configuration: McpServerConfiguration
+        get() = mutableConfiguration.value
+
+    fun updateConfiguration(configuration: McpServerConfiguration) {
+        mutableConfiguration.value = configuration
+    }
 
     fun client(catalog: McpClientCatalog = McpClientCatalog()): McpClientImpl =
         McpClientImpl(owner = this, catalog = catalog)
@@ -188,12 +210,18 @@ internal class McpClientOwner(
             mutableState.value = McpClientState.Closed
             val client = activeClient
             activeClient = null
-            client?.closeSafely()
+            try {
+                client?.closeSafely()
+            } finally {
+                release()
+            }
         }
     }
 
     private suspend fun openConnection(): ConnectionAttempt {
-        val transport = runCatchingCancellable { openTransport() }
+        val transport = runCatchingCancellable {
+            openTransport { mutableConfiguration.value }
+        }
             .getOrElse { failure ->
                 return ConnectionAttempt.Failed(McpClientFailureReason.Transport, failure)
             }

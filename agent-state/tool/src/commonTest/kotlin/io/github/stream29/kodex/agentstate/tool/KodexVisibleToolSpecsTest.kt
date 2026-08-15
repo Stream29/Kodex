@@ -5,6 +5,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpClientState
+import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.openai.AgentMode
@@ -12,6 +13,7 @@ import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.Reasoning
 import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
 import io.github.stream29.kodex.tool.currenttime.CurrentTimeTools
@@ -51,6 +53,20 @@ val kodexVisibleToolSpecsTest by testSuite {
                 reasoning = Reasoning(effort = ReasoningEffort.Low),
             ),
         )
+        val singleAgentWithoutQuestions = service.visibleToolSpecs(
+            KodexAgentSettings(
+                model = OpenAiModelId("test-model"),
+                agentMode = AgentMode.Single,
+                requestUserInputMode = RequestUserInputMode.NoQuestion,
+            ),
+        )
+        val multiAgentWithoutQuestions = service.visibleToolSpecs(
+            KodexAgentSettings(
+                model = OpenAiModelId("test-model"),
+                agentMode = AgentMode.Multi,
+                requestUserInputMode = RequestUserInputMode.NoQuestion,
+            ),
+        )
 
         assertEquals(
             fixedSpecs + PlanTools.spec + RequestUserInputTools.spec,
@@ -60,8 +76,18 @@ val kodexVisibleToolSpecsTest by testSuite {
             fixedSpecs + MultiAgentTools.specs + PlanTools.spec + RequestUserInputTools.spec,
             multiAgentSpecs.dropLast(1),
         )
+        assertEquals(
+            fixedSpecs + PlanTools.spec,
+            singleAgentWithoutQuestions.dropLast(1),
+        )
+        assertEquals(
+            fixedSpecs + MultiAgentTools.specs + PlanTools.spec,
+            multiAgentWithoutQuestions.dropLast(1),
+        )
         val singleAgentToolSearch = assertIs<ToolSpec.ToolSearch>(singleAgentSpecs.last())
         assertEquals(singleAgentToolSearch, multiAgentSpecs.last())
+        assertEquals(singleAgentToolSearch, singleAgentWithoutQuestions.last())
+        assertEquals(singleAgentToolSearch, multiAgentWithoutQuestions.last())
         assertTrue(singleAgentToolSearch.description.contains("None currently enabled."))
         assertTrue(singleAgentToolSearch.description.contains("Kodex local tools").not())
         assertTrue(
@@ -88,6 +114,9 @@ private fun testSettings(): KodexAgentSettings =
 
 private class TestMcpService : McpService {
     override val clients = MutableStateFlow<Map<String, McpClient>>(emptyMap())
+    override val authentication = MutableStateFlow<Map<String, McpAuthenticationState>>(emptyMap())
+
+    override suspend fun invalidate(serverName: String) = Unit
 
     override suspend fun refresh() = Unit
 

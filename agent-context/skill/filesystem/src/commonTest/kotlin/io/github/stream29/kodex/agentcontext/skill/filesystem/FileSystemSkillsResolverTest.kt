@@ -22,22 +22,31 @@ import kotlin.test.assertTrue
 val fileSystemSkillsResolverTest by testSuite {
     test("keeps same-named skills and preserves source precedence") {
         val root = temporaryDirectory("skills-catalog")
-        val codexHome = Path(root, "codex-home")
-        val userHome = Path(root, "home")
+        val agentsHome = Path(root, "home/.agents")
+        val codexHome = Path(root, "home/.codex")
         val project = Path(root, "project")
         val cwd = Path(project, "module")
         val repoSkill = Path(project, ".agents/skills/repo-skill")
-        val userSkill = Path(userHome, ".agents/skills/user-skill")
-        val systemSkill = Path(codexHome, "skills/.system/system-skill")
-        listOf(Path(project, ".git"), cwd, repoSkill, userSkill, systemSkill).forEach {
+        val userSkill = Path(agentsHome, "skills/user-skill")
+        val systemSkill = Path(agentsHome, "skills/.system/system-skill")
+        val ignoredCodexSkill = Path(codexHome, "skills/ignored-codex-skill")
+        listOf(
+            Path(project, ".git"),
+            cwd,
+            repoSkill,
+            userSkill,
+            systemSkill,
+            ignoredCodexSkill,
+        ).forEach {
             SystemCoroutineFileSystem.createDirectories(it)
         }
         try {
             writeSkill(repoSkill, "duplicate", "Repo description", "repo body")
             writeSkill(userSkill, "duplicate", "User description", "user body")
             writeSkill(systemSkill, "system", "System description", "system body")
+            writeSkill(ignoredCodexSkill, "ignored", "Ignored Codex skill", "ignored body")
             SystemCoroutineFileSystem.writeString(Path(repoSkill, "reference.txt"), "resource")
-            val resolver = fileSystemSkillsResolver(codexHome, userHome)
+            val resolver = fileSystemSkillsResolver(agentsHome)
             val resolved = resolver.resolve(cwd)
 
             assertEquals(
@@ -45,6 +54,7 @@ val fileSystemSkillsResolverTest by testSuite {
                 resolved.skills.map { skill -> skill.source.scope },
             )
             assertEquals(listOf("duplicate", "duplicate", "system"), resolved.skills.map { it.name })
+            assertTrue(resolved.skills.none { skill -> skill.name == "ignored" })
 
             val repo = resolved.skills.first()
             val document = assertIs<SkillResourceResult.Success<*>>(resolved.loadSkill(repo)).value
@@ -78,7 +88,7 @@ val fileSystemSkillsResolverTest by testSuite {
         }
         try {
             writeSkill(first, "first", "First description", "first body")
-            val resolver = fileSystemSkillsResolver(Path(home, ".codex"), home)
+            val resolver = fileSystemSkillsResolver(Path(home, ".agents"))
             assertEquals(listOf("first"), resolver.resolve(project).skills.map { it.name })
 
             SystemCoroutineFileSystem.atomicMove(first, renamed)
@@ -109,8 +119,7 @@ val fileSystemSkillsResolverTest by testSuite {
             writeSkill(skill, "cached", "Cached description", "body")
             val fileSystem = CountingFileSystem(SystemCoroutineFileSystem)
             val resolver = fileSystemSkillsResolver(
-                codexHome = Path(home, ".codex"),
-                userHome = home,
+                agentsHome = Path(home, ".agents"),
                 fileSystem = fileSystem,
             )
 
@@ -140,8 +149,7 @@ val fileSystemSkillsResolverTest by testSuite {
             SystemCoroutineFileSystem.writeString(skillFile, initial)
             val fileSystem = FixedTimestampFileSystem(SystemCoroutineFileSystem)
             val resolver = fileSystemSkillsResolver(
-                codexHome = Path(home, ".codex"),
-                userHome = home,
+                agentsHome = Path(home, ".agents"),
                 fileSystem = fileSystem,
             )
             val before = fileSystem.fingerprintOrNull(skillFile)
@@ -172,7 +180,7 @@ val fileSystemSkillsResolverTest by testSuite {
         try {
             writeSkill(valid, "valid", "Valid description", "body")
             SystemCoroutineFileSystem.writeString(Path(invalid, "SKILL.md"), "no frontmatter")
-            val resolver = fileSystemSkillsResolver(Path(home, ".codex"), home)
+            val resolver = fileSystemSkillsResolver(Path(home, ".agents"))
             val resolved = resolver.resolve(project)
 
             assertEquals(listOf("valid"), resolved.skills.map { it.name })
@@ -183,29 +191,27 @@ val fileSystemSkillsResolverTest by testSuite {
         }
     }
 
-    test("observes codex home changes from context settings") {
+    test("observes Agents home changes from context settings") {
         val root = temporaryDirectory("skills-context-settings")
-        val userHome = Path(root, "home")
-        val firstCodexHome = Path(root, "first-codex-home")
-        val secondCodexHome = Path(root, "second-codex-home")
+        val firstAgentsHome = Path(root, "first-agents-home")
+        val secondAgentsHome = Path(root, "second-agents-home")
         val cwd = Path(root, "project")
-        val firstSkill = Path(firstCodexHome, "skills/first")
-        val secondSkill = Path(secondCodexHome, "skills/second")
-        listOf(userHome, cwd, firstSkill, secondSkill).forEach { path ->
+        val firstSkill = Path(firstAgentsHome, "skills/first")
+        val secondSkill = Path(secondAgentsHome, "skills/second")
+        listOf(cwd, firstSkill, secondSkill).forEach { path ->
             SystemCoroutineFileSystem.createDirectories(path)
         }
         try {
-            writeSkill(firstSkill, "first", "First Codex home", "first body")
-            writeSkill(secondSkill, "second", "Second Codex home", "second body")
-            val contextSettings = MutableStateFlow(testContextSettings(firstCodexHome))
+            writeSkill(firstSkill, "first", "First Agents home", "first body")
+            writeSkill(secondSkill, "second", "Second Agents home", "second body")
+            val contextSettings = MutableStateFlow(testContextSettings(firstAgentsHome))
             val resolver = FileSystemSkillsResolver(
                 contextSettings = contextSettings,
-                userHome = userHome,
             )
 
             assertEquals(listOf("first"), resolver.resolve(cwd).skills.map { skill -> skill.name })
 
-            contextSettings.value = testContextSettings(secondCodexHome)
+            contextSettings.value = testContextSettings(secondAgentsHome)
 
             assertEquals(listOf("second"), resolver.resolve(cwd).skills.map { skill -> skill.name })
         } finally {
@@ -255,20 +261,18 @@ private fun temporaryDirectory(name: String): Path =
     Path(SystemTemporaryDirectory, "kodex-$name-${Random.nextLong()}")
 
 private fun fileSystemSkillsResolver(
-    codexHome: Path,
-    userHome: Path,
+    agentsHome: Path,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ): FileSystemSkillsResolver = FileSystemSkillsResolver(
-    contextSettings = MutableStateFlow(testContextSettings(codexHome)),
-    userHome = userHome,
+    contextSettings = MutableStateFlow(testContextSettings(agentsHome)),
     fileSystem = fileSystem,
 )
 
-private fun testContextSettings(codexHome: Path): AgentContextSettings =
-    TestAgentContextSettings(codexHome)
+private fun testContextSettings(agentsHome: Path): AgentContextSettings =
+    TestAgentContextSettings(agentsHome)
 
 private data class TestAgentContextSettings(
-    override val codexHome: Path,
+    override val agentsHome: Path,
 ) : AgentContextSettings {
     override val shell: Shell = TestShell
 }

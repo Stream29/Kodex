@@ -11,12 +11,10 @@ import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.ModelsResponse
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
-import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
@@ -25,7 +23,6 @@ private fun testCatalog(): OpenAiModelCatalog =
         client = mockOpenAiClient {
             listModels { OpenAiResult.Success(ModelsResponse()) }
         },
-        codexCliStorage = CodexCliStorage(Path(".kodex-test-model-catalog")),
     )
 
 private suspend fun CoroutineScope.testState(storage: MutableKodexAgentStorage) =

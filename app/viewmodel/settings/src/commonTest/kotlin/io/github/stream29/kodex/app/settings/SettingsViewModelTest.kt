@@ -13,12 +13,21 @@ import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.UsageResetState
 import io.github.stream29.kodex.cli.settings.InMemoryKodexGlobalSettings
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
-import io.github.stream29.kodex.mcp.contract.McpClient
+import io.github.stream29.kodex.hook.contract.HookImportDecision
+import io.github.stream29.kodex.hook.contract.HookImportPreview
+import io.github.stream29.kodex.hook.contract.HookManagedSourceState
+import io.github.stream29.kodex.hook.contract.HookManager
+import io.github.stream29.kodex.hook.contract.HookSourceDraft
 import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
 import io.github.stream29.kodex.mcp.contract.McpClientState
-import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
-import io.github.stream29.kodex.mcp.contract.McpService
-import io.github.stream29.kodex.mcp.contract.McpTool
+import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
+import io.github.stream29.kodex.mcp.contract.McpImportDecision
+import io.github.stream29.kodex.mcp.contract.McpImportPreview
+import io.github.stream29.kodex.mcp.contract.McpManagedServerState
+import io.github.stream29.kodex.mcp.contract.McpManager
+import io.github.stream29.kodex.mcp.contract.McpManagerEffect
+import io.github.stream29.kodex.mcp.contract.McpServerDraft
+import io.github.stream29.kodex.mcp.contract.McpTransportKind
 import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiAuthState
@@ -26,6 +35,7 @@ import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.kodex.openai.OpenAiSubscriptionPlan
 import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageSnapshot
 import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageState
@@ -37,8 +47,10 @@ import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
 import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.io.files.Path
@@ -109,7 +121,8 @@ class SettingsViewModelTest {
             globalSettings = settings,
             authentication = TestAuthStore(),
             accountUsage = TestAccountUsageStore(),
-            mcpService = TestMcpService(),
+            mcpManager = TestMcpManager(),
+            hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList<ModelInfo>()),
             sessionSettings = source,
             ownerScope = backgroundScope,
@@ -130,6 +143,12 @@ class SettingsViewModelTest {
         val withUpdatedModel = newSession.state.value
         newSession.updateAgentMode(withUpdatedModel.revision, AgentMode.Multi)
         runCurrent()
+        val withUpdatedAgentMode = newSession.state.value
+        newSession.updateRequestUserInputMode(
+            withUpdatedAgentMode.revision,
+            RequestUserInputMode.NoQuestion,
+        )
+        runCurrent()
 
         assertEquals(
             OpenAiModelId("new-default"),
@@ -137,10 +156,18 @@ class SettingsViewModelTest {
         )
         assertEquals(AgentMode.Multi, settings.settings.value.newSession.agentMode)
         assertEquals(
+            RequestUserInputMode.NoQuestion,
+            settings.settings.value.newSession.requestUserInputMode,
+        )
+        assertEquals(
             OpenAiModelId("new-default"),
             newSession.state.value.settings.model,
         )
         assertEquals(AgentMode.Multi, newSession.state.value.settings.agentMode)
+        assertEquals(
+            RequestUserInputMode.NoQuestion,
+            newSession.state.value.settings.requestUserInputMode,
+        )
         assertEquals(
             settings.settings.value.codexHome,
             global.state.value.codexHome,
@@ -170,7 +197,8 @@ class SettingsViewModelTest {
             ),
             authentication = auth,
             accountUsage = TestAccountUsageStore(),
-            mcpService = TestMcpService(),
+            mcpManager = TestMcpManager(),
+            hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
             ownerScope = backgroundScope,
         )
@@ -206,7 +234,8 @@ class SettingsViewModelTest {
             ),
             authentication = TestAuthStore(),
             accountUsage = accountUsage,
-            mcpService = TestMcpService(),
+            mcpManager = TestMcpManager(),
+            hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
             ownerScope = backgroundScope,
         )
@@ -232,7 +261,8 @@ class SettingsViewModelTest {
             ),
             authentication = TestAuthStore(),
             accountUsage = accountUsage,
-            mcpService = TestMcpService(),
+            mcpManager = TestMcpManager(),
+            hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
             ownerScope = backgroundScope,
         )
@@ -258,7 +288,8 @@ class SettingsViewModelTest {
             ),
             authentication = TestAuthStore(),
             accountUsage = TestAccountUsageStore(),
-            mcpService = TestMcpService(),
+            mcpManager = TestMcpManager(),
+            hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
             sessionSettings = source,
             ownerScope = backgroundScope,
@@ -271,9 +302,23 @@ class SettingsViewModelTest {
         assertEquals(OpenAiModelId("session-model"), source.current.configuration.model)
         assertEquals(1, source.updateCount)
 
+        val afterModelUpdate = assertIs<SessionSettingsState.Available>(
+            viewModel.session.state.value,
+        )
+        viewModel.session.updateRequestUserInputMode(
+            afterModelUpdate.snapshot.revision,
+            RequestUserInputMode.NoQuestion,
+        )
+        runCurrent()
+        assertEquals(
+            RequestUserInputMode.NoQuestion,
+            source.current.configuration.requestUserInputMode,
+        )
+        assertEquals(2, source.updateCount)
+
         viewModel.session.updateAgentMode(first.snapshot.revision, AgentMode.Multi)
         runCurrent()
-        assertEquals(1, source.updateCount)
+        assertEquals(2, source.updateCount)
         assertEquals(AgentMode.Single, source.current.configuration.agentMode)
 
         viewModel.session.requestWorkingDirectory(first.snapshot.revision)
@@ -300,7 +345,8 @@ class SettingsViewModelTest {
             ),
             authentication = TestAuthStore(),
             accountUsage = accountUsage,
-            mcpService = TestMcpService(),
+            mcpManager = TestMcpManager(),
+            hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
             ownerScope = backgroundScope,
         )
@@ -328,27 +374,25 @@ class SettingsViewModelTest {
 
     @Test
     fun mcpProjectionContainsOnlySanitizedLifecycleData() = runTest {
-        val client = TestMcpClient(
+        val initialServer = McpManagedServerState(
             serverName = "private-server",
-            initialState = McpClientState.Failed(McpClientFailureReason.ConnectionLost),
+            transport = McpTransportKind.StreamableHttp,
+            enabled = true,
+            authentication = McpAuthenticationState.NotConfigured,
+            connection = McpClientState.Failed(McpClientFailureReason.ConnectionLost),
+            toolCount = 0,
+            headerNames = listOf("Authorization"),
         )
-        val settings = InMemoryKodexGlobalSettings(
-            KodexGlobalSettings(
-                codexHome = Path("codex-home"),
-                mcpServers = mapOf(
-                    "private-server" to McpServerConfiguration.StreamableHttp(
-                        url = "https://secret.example.test?token=secret-token",
-                        headers = mapOf("Authorization" to "secret-header"),
-                    ),
-                ),
-            ),
-        )
+        val manager = TestMcpManager(listOf(initialServer))
         val viewModel = createSettingsViewModel(
             initialPage = SettingsPage.Global,
-            globalSettings = settings,
+            globalSettings = InMemoryKodexGlobalSettings(
+                KodexGlobalSettings(codexHome = Path("codex-home")),
+            ),
             authentication = TestAuthStore(),
             accountUsage = TestAccountUsageStore(),
-            mcpService = TestMcpService(mapOf(client.serverName to client)),
+            mcpManager = manager,
+            hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
             ownerScope = backgroundScope,
         )
@@ -361,16 +405,22 @@ class SettingsViewModelTest {
 
         viewModel.global.reconnectMcpServer("private-server")
         runCurrent()
-        assertEquals(1, client.reconnectCount)
+        assertEquals(listOf("private-server"), manager.reconnects)
 
-        client.state.value = McpClientState.Healthy
+        manager.servers.value = listOf(
+            initialServer.copy(
+                connection = McpClientState.Healthy,
+                toolCount = 3,
+            ),
+        )
         runCurrent()
-        assertIs<McpServerSettingsStatus.Healthy>(
+        val healthy = assertIs<McpServerSettingsStatus.Healthy>(
             viewModel.global.mcpServers.value.single().status,
         )
+        assertEquals(3, healthy.toolCount)
         viewModel.global.reconnectMcpServer("private-server")
         runCurrent()
-        assertEquals(1, client.reconnectCount)
+        assertEquals(listOf("private-server"), manager.reconnects)
 
         viewModel.close()
     }
@@ -417,26 +467,74 @@ private class TestAccountUsageStore(
     override fun close(): Unit = Unit
 }
 
-private class TestMcpService(
-    clients: Map<String, McpClient> = emptyMap(),
-) : McpService {
-    override val clients: StateFlow<Map<String, McpClient>> = MutableStateFlow(clients)
+private class TestMcpManager(
+    initialServers: List<McpManagedServerState> = emptyList(),
+) : McpManager {
+    override val servers = MutableStateFlow(initialServers)
+    override val effects: Flow<McpManagerEffect> = emptyFlow()
+    val reconnects = mutableListOf<String>()
 
-    override suspend fun refresh(): Unit = Unit
+    override suspend fun add(draft: McpServerDraft): Unit = Unit
+
+    override suspend fun edit(
+        existingServerName: String,
+        draft: McpServerDraft,
+    ): Unit = Unit
+
+    override suspend fun delete(serverName: String): Unit = Unit
+
+    override suspend fun setEnabled(
+        serverName: String,
+        enabled: Boolean,
+    ): Unit = Unit
+
+    override suspend fun login(serverName: String): Unit = Unit
+    override suspend fun cancelLogin(serverName: String): Unit = Unit
+    override suspend fun logout(serverName: String): Unit = Unit
+
+    override suspend fun reconnect(serverName: String) {
+        val server = servers.value.singleOrNull { it.serverName == serverName } ?: return
+        if (server.connection !is McpClientState.Healthy) reconnects += serverName
+    }
+
+    override suspend fun previewCodexImport(filter: String): McpImportPreview =
+        McpImportPreview(
+            id = 1,
+            filter = filter,
+            items = emptyList(),
+        )
+
+    override suspend fun applyCodexImport(
+        previewId: Long,
+        decisions: Map<String, McpImportDecision>,
+    ): Unit = Unit
+
     override fun close(): Unit = Unit
 }
 
-private class TestMcpClient(
-    override val serverName: String,
-    initialState: McpClientState,
-) : McpClient {
-    override val state = MutableStateFlow(initialState)
-    var reconnectCount: Int = 0
+private class TestHookManager : HookManager {
+    override val featureEnabled = MutableStateFlow(true)
+    override val sources = MutableStateFlow<List<HookManagedSourceState>>(emptyList())
 
-    override fun listTools(): List<McpTool> = emptyList()
-    override suspend fun reconnect() {
-        reconnectCount += 1
+    override suspend fun setFeatureEnabled(enabled: Boolean) {
+        featureEnabled.value = enabled
     }
+
+    override suspend fun add(draft: HookSourceDraft): String = "hook-source"
+    override suspend fun edit(sourceId: String, draft: HookSourceDraft): Unit = Unit
+    override suspend fun delete(sourceId: String): Unit = Unit
+    override suspend fun setEnabled(sourceId: String, enabled: Boolean): Unit = Unit
+    override fun editorDraft(sourceId: String): HookSourceDraft? = null
+
+    override suspend fun previewCodexImport(filter: String): HookImportPreview =
+        HookImportPreview(id = 1, filter = filter, items = emptyList())
+
+    override suspend fun applyCodexImport(
+        previewId: Long,
+        decisions: Map<String, HookImportDecision>,
+    ): Unit = Unit
+
+    override fun close(): Unit = Unit
 }
 
 private class TestSessionSettingsDataSource : SessionSettingsDataSource {
@@ -501,6 +599,7 @@ private fun initialSnapshot(): SessionSettingsSnapshot =
             reasoningEffort = ReasoningEffort.Medium,
             serviceTier = ServiceTier.Default,
             agentMode = AgentMode.Single,
+            requestUserInputMode = RequestUserInputMode.AskUser,
         ),
         editable = true,
     )
