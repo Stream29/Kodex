@@ -30,7 +30,6 @@ import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
-import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 val kodexSettingsStoreTest by testSuite(
@@ -89,7 +88,7 @@ val kodexSettingsStoreTest by testSuite(
         }
     }
 
-    test("writes and restores a complete schema five snapshot") {
+    test("writes and restores a complete settings snapshot") {
         withSettingsDirectory("restart") { root ->
             val selectedShell = Shell(ShellType.Bash, Path("/custom/bin/bash"))
             val expected = KodexGlobalSettings(
@@ -119,7 +118,7 @@ val kodexSettingsStoreTest by testSuite(
             store.update { expected }
 
             val yaml = SystemCoroutineFileSystem.readString(settingsPath(root))
-            assertTrue(yaml.contains("schema_version: 5"), yaml)
+            assertFalse("schema_version:" in yaml, yaml)
             assertTrue(yaml.contains("codex_home: ${expected.codexHome}"), yaml)
             assertTrue(yaml.contains("auth_source: kodex"), yaml)
             assertTrue(yaml.contains("service_tier: flex"), yaml)
@@ -131,8 +130,8 @@ val kodexSettingsStoreTest by testSuite(
         }
     }
 
-    test("schema five without request user input mode defaults to ask user") {
-        withSettingsDirectory("schema-five-question-default") { root ->
+    test("missing request user input mode uses the current default") {
+        withSettingsDirectory("question-default") { root ->
             val store = openStore(root)
             store.update { settings ->
                 settings.copy(
@@ -283,124 +282,96 @@ val kodexSettingsStoreTest by testSuite(
         }
     }
 
-    test("migrates sparse schema three without inherited MCP or Hooks") {
-        withSettingsDirectory("schema-three") { root ->
+    test("sparse settings use current defaults and ignore unknown keys without rewriting") {
+        withSettingsDirectory("tolerant-read") { root ->
+            val defaultShell = Shell(ShellType.Bash, Path("/default/bin/bash"))
             val defaults = KodexGlobalSettings(
                 codexHome = Path(root, "default-codex"),
+                authSource = KodexAuthSource.Kodex,
+                shell = defaultShell,
                 newSession = KodexNewSessionSettings(
                     model = OpenAiModelId("default-model"),
+                    reasoningEffort = ReasoningEffort.High,
+                    serviceTier = ServiceTier.Flex,
+                    agentMode = AgentMode.Multi,
+                    requestUserInputMode = RequestUserInputMode.NoQuestion,
+                ),
+                sessionTitle = SessionTitleSettings(
+                    enabled = false,
+                    model = OpenAiModelId("default-title-model"),
+                    reasoningEffort = ReasoningEffort.Medium,
                 ),
                 mcpServers = mapOf(
-                    "legacy-inherited" to McpServerConfiguration.Stdio(command = "legacy"),
+                    "default" to McpServerConfiguration.Stdio(command = "default-server"),
                 ),
                 hooks = HookConfiguration(featureEnabled = false),
             )
-            SystemCoroutineFileSystem.writeString(
-                settingsPath(root),
-                """
-                schema_version: 3
+            val original = """
+                schema_version: 2
                 codex_home: ${Path(root, "selected-codex")}
                 new_line_key: enter
                 new_session:
-                  model: migrated-model
-                  agent_mode: multi
-                """.trimIndent() + "\n",
+                  model: configured-model
+                  mode: build
+                  future_nested_key: ignored
+                session_title:
+                  enabled: true
+                future_section:
+                  enabled: true
+                """.trimIndent() + "\n"
+            SystemCoroutineFileSystem.writeString(
+                settingsPath(root),
+                original,
             )
 
-            val migrated = openStore(root, defaults).settings.value
+            val loaded = openStore(root, defaults).settings.value
 
-            assertEquals(Path(root, "selected-codex"), migrated.codexHome)
-            assertEquals(NewLineKey.Enter, migrated.newLineKey)
-            assertEquals(OpenAiModelId("migrated-model"), migrated.newSession.model)
-            assertEquals(AgentMode.Multi, migrated.newSession.agentMode)
-            assertEquals(RequestUserInputMode.AskUser, migrated.newSession.requestUserInputMode)
-            assertEquals(emptyMap(), migrated.mcpServers)
-            assertEquals(HookConfiguration(), migrated.hooks)
-            val yaml = SystemCoroutineFileSystem.readString(settingsPath(root))
-            assertTrue(yaml.contains("schema_version: 5"), yaml)
-            assertTrue(yaml.contains("mcp_servers: {}"), yaml)
+            assertEquals(Path(root, "selected-codex"), loaded.codexHome)
+            assertEquals(KodexAuthSource.Kodex, loaded.authSource)
+            assertEquals(defaultShell, loaded.shell)
+            assertEquals(NewLineKey.Enter, loaded.newLineKey)
+            assertEquals(OpenAiModelId("configured-model"), loaded.newSession.model)
+            assertEquals(ReasoningEffort.High, loaded.newSession.reasoningEffort)
+            assertEquals(ServiceTier.Flex, loaded.newSession.serviceTier)
+            assertEquals(AgentMode.Multi, loaded.newSession.agentMode)
+            assertEquals(RequestUserInputMode.NoQuestion, loaded.newSession.requestUserInputMode)
+            assertEquals(defaults.sessionTitle.copy(enabled = true), loaded.sessionTitle)
+            assertEquals(defaults.mcpServers, loaded.mcpServers)
+            assertEquals(defaults.hooks, loaded.hooks)
+            assertEquals(original, SystemCoroutineFileSystem.readString(settingsPath(root)))
         }
     }
 
-    test("migrates schema three Hook layers into stable Kodex sources") {
-        withSettingsDirectory("schema-three-hooks") { root ->
-            val sourcePath = Path(root, "codex", "hooks.json")
-            SystemCoroutineFileSystem.createDirectories(Path(root, "codex"))
-            SystemCoroutineFileSystem.writeString(sourcePath, "{}")
+    test("normal updates replace unknown keys with the canonical settings shape") {
+        withSettingsDirectory("canonical-update") { root ->
             SystemCoroutineFileSystem.writeString(
                 settingsPath(root),
                 """
-                schema_version: 3
-                hooks:
-                  featureEnabled: false
-                  sources:
-                    - sourcePath: $sourcePath
-                      sourceKind: user
-                      environment:
-                        TOKEN: legacy-secret
-                      description: Legacy checks
-                      hooks:
-                        Stop:
-                          - matcher: shell|Bash
-                            hooks:
-                              - type: command
-                                command: echo ${'$'}{TOKEN}
-                                timeout: 7
+                schema_version: 2
+                obsolete_option: retained-until-update
+                new_session:
+                  model: configured-model
+                  mode: plan
                 """.trimIndent() + "\n",
             )
+            val store = openStore(root)
 
-            val migrated = openStore(root).settings.value.hooks
+            val updated = store.update { current ->
+                current.copy(newLineKey = NewLineKey.Enter)
+            }
 
-            assertFalse(migrated.featureEnabled)
-            val source = migrated.sources.single()
-            assertEquals("migrated-hook-source-1", source.id)
-            assertEquals("Legacy checks", source.name)
-            assertEquals(
-                HookCodexImportIdentity(
-                    sourceKind = HookCodexSourceKind.User,
-                    normalizedPath = SystemCoroutineFileSystem.resolve(sourcePath).toString(),
-                ),
-                source.importIdentity,
-            )
-            assertEquals(HookEnvironmentValue("legacy-secret"), source.environment.getValue("TOKEN"))
-            val group = source.hooks.stop.single()
-            assertIs<HookMatcher.Exact>(group.matcher)
-            assertEquals("echo legacy-secret", group.hooks.single().command)
-            assertEquals(7L, group.hooks.single().timeoutSeconds)
             val yaml = SystemCoroutineFileSystem.readString(settingsPath(root))
-            assertTrue("schema_version: 5" in yaml)
-            assertTrue("migrated-hook-source-1" in yaml)
-        }
-    }
-
-    test("migrates an early schema four snapshot with the current Hook shape") {
-        withSettingsDirectory("schema-four-current-hooks") { root ->
-            val expected = HookConfiguration(
-                sources = listOf(
-                    HookSourceConfiguration(
-                        id = "schema-four-source",
-                        name = "Schema four",
-                        hooks = HookDeclarations(
-                            stop = listOf(
-                                HookMatcherGroup(
-                                    hooks = listOf(HookCommandDefinition("finish")),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            )
-            openStore(root).update { settings -> settings.copy(hooks = expected) }
-            val schemaFour = SystemCoroutineFileSystem.readString(settingsPath(root))
-                .replaceFirst("schema_version: 5", "schema_version: 4")
-            SystemCoroutineFileSystem.writeString(settingsPath(root), schemaFour)
-
-            val migrated = openStore(root).settings.value
-
-            assertEquals(expected, migrated.hooks)
+            assertFalse("schema_version:" in yaml, yaml)
+            assertFalse("obsolete_option:" in yaml, yaml)
             assertTrue(
-                "schema_version: 5" in SystemCoroutineFileSystem.readString(settingsPath(root)),
+                yaml.lineSequence().none { line -> line.trimStart().startsWith("mode:") },
+                yaml,
             )
+            assertTrue("new_line_key: enter" in yaml, yaml)
+            assertTrue("model: configured-model" in yaml, yaml)
+            assertTrue("agent_mode: single" in yaml, yaml)
+            assertTrue("mcp_servers: {}" in yaml, yaml)
+            assertEquals(updated, openStore(root).settings.value)
         }
     }
 
@@ -424,14 +395,20 @@ val kodexSettingsStoreTest by testSuite(
         }
     }
 
-    test("rejects invalid YAML and unsupported schema versions") {
+    test("rejects malformed YAML and invalid known settings") {
         withSettingsDirectory("invalid") { root ->
-            SystemCoroutineFileSystem.writeString(settingsPath(root), "schema_version: nope\n")
+            SystemCoroutineFileSystem.writeString(settingsPath(root), "new_session: [\n")
             assertFailsWith<IllegalArgumentException> { openStore(root) }
 
-            SystemCoroutineFileSystem.writeString(settingsPath(root), "schema_version: 99\n")
+            SystemCoroutineFileSystem.writeString(
+                settingsPath(root),
+                """
+                new_session:
+                  service_tier: unsupported
+                """.trimIndent() + "\n",
+            )
             val failure = assertFailsWith<IllegalArgumentException> { openStore(root) }
-            assertTrue(failure.message.orEmpty().contains("schema 99"))
+            assertTrue(failure.message.orEmpty().contains("Unsupported service tier"))
         }
     }
 

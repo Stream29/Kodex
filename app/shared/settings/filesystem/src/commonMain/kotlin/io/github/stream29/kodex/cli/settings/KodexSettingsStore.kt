@@ -4,16 +4,7 @@ import com.charleskorn.kaml.PolymorphismStyle
 import com.charleskorn.kaml.SingleLineStringStyle
 import com.charleskorn.kaml.Yaml
 import com.charleskorn.kaml.YamlConfiguration
-import io.github.stream29.kodex.hook.contract.DefaultHookTimeoutSeconds
-import io.github.stream29.kodex.hook.contract.HookCodexImportIdentity
-import io.github.stream29.kodex.hook.contract.HookCodexSourceKind
-import io.github.stream29.kodex.hook.contract.HookCommandDefinition
 import io.github.stream29.kodex.hook.contract.HookConfiguration
-import io.github.stream29.kodex.hook.contract.HookDeclarations
-import io.github.stream29.kodex.hook.contract.HookEnvironmentValue
-import io.github.stream29.kodex.hook.contract.HookMatcher
-import io.github.stream29.kodex.hook.contract.HookMatcherGroup
-import io.github.stream29.kodex.hook.contract.HookSourceConfiguration
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -23,23 +14,13 @@ import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.shellclient.Shell
-import io.github.stream29.kodex.utils.shellclient.ShellType
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.io.files.Path
-import kotlinx.serialization.EncodeDefault
-import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.Transient
-import kotlinx.serialization.descriptors.PrimitiveKind
-import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
-import kotlinx.serialization.descriptors.SerialDescriptor
-import kotlinx.serialization.encoding.Decoder
-import kotlinx.serialization.encoding.Encoder
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -68,7 +49,7 @@ public class KodexSettingsStore private constructor(
     override suspend fun update(
         transform: (KodexGlobalSettings) -> KodexGlobalSettings,
     ): KodexGlobalSettings = updateMutex.withLock {
-        val current = readFileOrNull()?.toSettings() ?: defaults
+        val current = readFileOrNull()?.toSettings(defaults) ?: defaults
         val updated = transform(current)
         writeFile(GlobalSettingsFile.from(updated))
         updated.also { settings.value = it }
@@ -77,7 +58,7 @@ public class KodexSettingsStore private constructor(
     /** Reloads only Kodex's private settings snapshot. */
     override suspend fun reload(): KodexGlobalSettings = updateMutex.withLock {
         val stored = readFileOrNull()
-        val resolved = stored?.toSettings() ?: defaults
+        val resolved = stored?.toSettings(defaults) ?: defaults
         settings.value = resolved
         resolved
     }
@@ -85,36 +66,8 @@ public class KodexSettingsStore private constructor(
     private suspend fun readFileOrNull(): GlobalSettingsFile? {
         if (!fileSystem.exists(settingsPath)) return null
         val text = fileSystem.readString(settingsPath)
-        val schemaVersion = try {
-            SettingsYaml.decodeFromString(SettingsVersionFile.serializer(), text).schemaVersion
-        } catch (error: Exception) {
-            throw invalidSettings(error)
-        }
         return try {
-            when (schemaVersion) {
-                CurrentGlobalSettingsSchemaVersion ->
-                    SettingsYaml.decodeFromString(GlobalSettingsFile.serializer(), text)
-
-                PreviousGlobalSettingsSchemaVersion ->
-                    migrateSchemaFour(text)
-
-                LegacyGlobalSettingsSchemaVersion -> {
-                    val legacy = SettingsYaml.decodeFromString(
-                        LegacyGlobalSettingsFile.serializer(),
-                        text,
-                    )
-                    GlobalSettingsFile.from(legacy.applyTo(defaults, fileSystem))
-                        .also { migrated ->
-                            writeFile(migrated)
-                        }
-                }
-
-                else -> throw IllegalArgumentException(
-                    "Unsupported Kodex global settings schema $schemaVersion at $settingsPath.",
-                )
-            }
-        } catch (error: IllegalArgumentException) {
-            throw error
+            SettingsYaml.decodeFromString(GlobalSettingsFile.serializer(), text)
         } catch (error: Exception) {
             throw invalidSettings(error)
         }
@@ -125,25 +78,6 @@ public class KodexSettingsStore private constructor(
             "Kodex global settings must be valid YAML at $settingsPath.",
             cause,
         )
-
-    private suspend fun migrateSchemaFour(text: String): GlobalSettingsFile {
-        val settings = try {
-            SettingsYaml.decodeFromString(GlobalSettingsFile.serializer(), text).toSettings()
-        } catch (currentShapeError: Exception) {
-            try {
-                SettingsYaml.decodeFromString(
-                    LegacySchemaFourGlobalSettingsFile.serializer(),
-                    text,
-                ).toSettings(fileSystem)
-            } catch (legacyShapeError: Exception) {
-                legacyShapeError.addSuppressed(currentShapeError)
-                throw legacyShapeError
-            }
-        }
-        return GlobalSettingsFile.from(settings).also { migrated ->
-            writeFile(migrated)
-        }
-    }
 
     @OptIn(ExperimentalUuidApi::class)
     private suspend fun writeFile(value: GlobalSettingsFile) {
@@ -188,46 +122,34 @@ public suspend fun openGlobalSettings(
         fileSystem = fileSystem,
     )
 
-/** Version header decoded before selecting the compatible file model. */
-@Serializable
-private data class SettingsVersionFile(
-    @SerialName("schema_version")
-    val schemaVersion: Int,
-)
-
-/** Version 5 stores a complete Kodex-owned settings snapshot. */
+/** Tolerant settings file decoded over the current application defaults. */
 @Serializable
 private data class GlobalSettingsFile(
-    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
-    @SerialName("schema_version")
-    val schemaVersion: Int = CurrentGlobalSettingsSchemaVersion,
     @SerialName("codex_home")
-    val codexHome: String,
+    val codexHome: String? = null,
     @SerialName("auth_source")
-    val authSource: KodexAuthSource,
-    val shell: Shell,
+    val authSource: KodexAuthSource? = null,
+    val shell: Shell? = null,
     @SerialName("new_line_key")
-    val newLineKey: NewLineKey,
+    val newLineKey: NewLineKey? = null,
     @SerialName("new_session")
-    val newSession: NewSessionFile,
+    val newSession: NewSessionFile? = null,
     @SerialName("session_title")
-    val sessionTitle: SessionTitleFile,
-    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    val sessionTitle: SessionTitleFile? = null,
     @SerialName("mcp_servers")
-    val mcpServers: Map<String, McpServerConfiguration> = emptyMap(),
-    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
-    val hooks: HookConfiguration = HookConfiguration(),
+    val mcpServers: Map<String, McpServerConfiguration>? = null,
+    val hooks: HookConfiguration? = null,
 ) {
-    fun toSettings(): KodexGlobalSettings =
-        KodexGlobalSettings(
-            codexHome = Path(codexHome),
-            authSource = authSource,
-            shell = shell,
-            newLineKey = newLineKey,
-            newSession = newSession.toSettings(),
-            sessionTitle = sessionTitle.toSettings(),
-            mcpServers = mcpServers,
-            hooks = hooks,
+    fun toSettings(defaults: KodexGlobalSettings): KodexGlobalSettings =
+        defaults.copy(
+            codexHome = codexHome?.let(::Path) ?: defaults.codexHome,
+            authSource = authSource ?: defaults.authSource,
+            shell = shell ?: defaults.shell,
+            newLineKey = newLineKey ?: defaults.newLineKey,
+            newSession = newSession?.applyTo(defaults.newSession) ?: defaults.newSession,
+            sessionTitle = sessionTitle?.applyTo(defaults.sessionTitle) ?: defaults.sessionTitle,
+            mcpServers = mcpServers ?: defaults.mcpServers,
+            hooks = hooks ?: defaults.hooks,
         )
 
     companion object {
@@ -245,324 +167,8 @@ private data class GlobalSettingsFile(
     }
 }
 
-/** Schema 4 complete snapshot accepted once and atomically migrated to schema 5. */
-@Serializable
-private data class LegacySchemaFourGlobalSettingsFile(
-    @SerialName("schema_version")
-    val schemaVersion: Int = PreviousGlobalSettingsSchemaVersion,
-    @SerialName("codex_home")
-    val codexHome: String,
-    @SerialName("auth_source")
-    val authSource: KodexAuthSource,
-    val shell: Shell,
-    @SerialName("new_line_key")
-    val newLineKey: NewLineKey,
-    @SerialName("new_session")
-    val newSession: NewSessionFile,
-    @SerialName("session_title")
-    val sessionTitle: SessionTitleFile,
-    @SerialName("mcp_servers")
-    val mcpServers: Map<String, McpServerConfiguration> = emptyMap(),
-    val hooks: LegacyHookConfiguration = LegacyHookConfiguration(),
-) {
-    suspend fun toSettings(fileSystem: CoroutineFileSystem): KodexGlobalSettings =
-        KodexGlobalSettings(
-            codexHome = Path(codexHome),
-            authSource = authSource,
-            shell = shell,
-            newLineKey = newLineKey,
-            newSession = newSession.toSettings(),
-            sessionTitle = sessionTitle.toSettings(),
-            mcpServers = mcpServers,
-            hooks = hooks.toSettings(fileSystem),
-        )
-}
-
-/** Schema 3 sparse file accepted once and atomically migrated to schema 5. */
-@Serializable
-private data class LegacyGlobalSettingsFile(
-    @SerialName("schema_version")
-    val schemaVersion: Int = LegacyGlobalSettingsSchemaVersion,
-    @SerialName("codex_home")
-    val codexHome: String? = null,
-    @SerialName("auth_source")
-    val authSource: KodexAuthSource? = null,
-    val shell: Shell? = null,
-    @SerialName("new_line_key")
-    val newLineKey: NewLineKey? = null,
-    @SerialName("new_session")
-    val newSession: LegacyNewSessionFile? = null,
-    @SerialName("session_title")
-    val sessionTitle: LegacySessionTitleFile? = null,
-    @SerialName("mcp_servers")
-    val mcpServers: Map<String, McpServerConfiguration>? = null,
-    val hooks: LegacyHookConfiguration? = null,
-) {
-    suspend fun applyTo(
-        defaults: KodexGlobalSettings,
-        fileSystem: CoroutineFileSystem,
-    ): KodexGlobalSettings =
-        defaults.copy(
-            codexHome = codexHome?.let(::Path) ?: defaults.codexHome,
-            authSource = authSource ?: defaults.authSource,
-            shell = shell ?: defaults.shell,
-            newLineKey = newLineKey ?: defaults.newLineKey,
-            newSession = newSession?.applyTo(defaults.newSession) ?: defaults.newSession,
-            sessionTitle = sessionTitle?.applyTo(defaults.sessionTitle) ?: defaults.sessionTitle,
-            mcpServers = mcpServers ?: emptyMap(),
-            hooks = hooks?.toSettings(fileSystem) ?: HookConfiguration(),
-        )
-}
-
-/** Hook shape persisted before Kodex-owned source ids and import provenance. */
-@Serializable
-private data class LegacyHookConfiguration(
-    val featureEnabled: Boolean = true,
-    val sources: List<LegacyHookLayer> = emptyList(),
-) {
-    suspend fun toSettings(fileSystem: CoroutineFileSystem): HookConfiguration =
-        HookConfiguration(
-            featureEnabled = featureEnabled,
-            sources = sources.mapIndexed { index, source ->
-                source.toSettings(
-                    id = "migrated-hook-source-${index + 1}",
-                    fileSystem = fileSystem,
-                )
-            },
-        )
-}
-
-/** Private wire shape retained only to migrate pre-independent Hook settings. */
-@Serializable
-private data class LegacyHookLayer(
-    val sourcePath: String,
-    val sourceKind: LegacyHookSourceKind,
-    val environment: Map<String, String> = emptyMap(),
-    val description: String? = null,
-    val hooks: LegacyHookDeclarations = LegacyHookDeclarations(),
-)
-
-@Serializable
-private enum class LegacyHookSourceKind {
-    @SerialName("system")
-    System,
-
-    @SerialName("user")
-    User,
-
-    @SerialName("project")
-    Project,
-
-    @SerialName("session")
-    Session,
-}
-
-@Serializable
-private data class LegacyHookDeclarations(
-    @SerialName("PreToolUse")
-    val preToolUse: List<LegacyHookMatcherGroup> = emptyList(),
-    @SerialName("PermissionRequest")
-    val permissionRequest: List<LegacyHookMatcherGroup> = emptyList(),
-    @SerialName("PostToolUse")
-    val postToolUse: List<LegacyHookMatcherGroup> = emptyList(),
-    @SerialName("PreCompact")
-    val preCompact: List<LegacyHookMatcherGroup> = emptyList(),
-    @SerialName("PostCompact")
-    val postCompact: List<LegacyHookMatcherGroup> = emptyList(),
-    @SerialName("UserPromptSubmit")
-    val userPromptSubmit: List<LegacyHookMatcherGroup> = emptyList(),
-    @SerialName("SubagentStart")
-    val subagentStart: List<LegacyHookMatcherGroup> = emptyList(),
-    @SerialName("SubagentStop")
-    val subagentStop: List<LegacyHookMatcherGroup> = emptyList(),
-    @SerialName("Stop")
-    val stop: List<LegacyHookMatcherGroup> = emptyList(),
-)
-
-@Serializable
-private data class LegacyHookMatcherGroup(
-    val matcher: LegacyHookMatcher = LegacyHookMatcher("*"),
-    val hooks: List<LegacyHookHandler> = emptyList(),
-)
-
-@Serializable(with = LegacyHookMatcherSerializer::class)
-private data class LegacyHookMatcher(
-    val pattern: String,
-)
-
-private object LegacyHookMatcherSerializer : KSerializer<LegacyHookMatcher> {
-    override val descriptor: SerialDescriptor =
-        PrimitiveSerialDescriptor("LegacyHookMatcher", PrimitiveKind.STRING)
-
-    override fun serialize(encoder: Encoder, value: LegacyHookMatcher) {
-        encoder.encodeString(value.pattern)
-    }
-
-    override fun deserialize(decoder: Decoder): LegacyHookMatcher =
-        LegacyHookMatcher(decoder.decodeString())
-}
-
-@Serializable
-private sealed interface LegacyHookHandler {
-    @Serializable
-    @SerialName("command")
-    data class Command(
-        val command: String,
-        @SerialName("commandWindows")
-        private val commandWindows: String? = null,
-        @SerialName("command_windows")
-        private val commandWindowsAlias: String? = null,
-        @SerialName("timeout")
-        val timeoutSeconds: Long? = null,
-        val async: Boolean = false,
-        @SerialName("statusMessage")
-        val statusMessage: String? = null,
-        @SerialName("additionalContextLimit")
-        val additionalContextLimit: Int? = null,
-    ) : LegacyHookHandler {
-        @Transient
-        val platformCommand: String =
-            if (Shell.default.type == ShellType.PowerShell || Shell.default.type == ShellType.Cmd) {
-                commandWindows ?: commandWindowsAlias ?: command
-            } else {
-                command
-            }
-    }
-
-    @Serializable
-    @SerialName("prompt")
-    data object Prompt : LegacyHookHandler
-
-    @Serializable
-    @SerialName("agent")
-    data object Agent : LegacyHookHandler
-}
-
-private suspend fun LegacyHookLayer.toSettings(
-    id: String,
-    fileSystem: CoroutineFileSystem,
-): HookSourceConfiguration {
-    val path = Path(sourcePath)
-    val normalizedPath = try {
-        fileSystem.resolve(path).toString()
-    } catch (error: CancellationException) {
-        throw error
-    } catch (_: Exception) {
-        sourcePath
-    }
-    return HookSourceConfiguration(
-        id = id,
-        name = description
-            ?.trim()
-            ?.takeIf(String::isNotEmpty)
-            ?: "${sourceKind.name.lowercase()} ${path.name}",
-        importIdentity = sourceKind.toImportSourceKind()?.let { kind ->
-            HookCodexImportIdentity(
-                sourceKind = kind,
-                normalizedPath = normalizedPath,
-            )
-        },
-        environment = environment.mapValues { (_, value) ->
-            HookEnvironmentValue(value)
-        },
-        hooks = hooks.toSettings(environment),
-    )
-}
-
-private fun LegacyHookSourceKind.toImportSourceKind(): HookCodexSourceKind? =
-    when (this) {
-        LegacyHookSourceKind.User -> HookCodexSourceKind.User
-        LegacyHookSourceKind.Project -> HookCodexSourceKind.Project
-        LegacyHookSourceKind.System,
-        LegacyHookSourceKind.Session,
-            -> null
-    }
-
-private fun LegacyHookDeclarations.toSettings(
-    environment: Map<String, String>,
-): HookDeclarations =
-    HookDeclarations(
-        preToolUse = preToolUse.toSettings(environment),
-        permissionRequest = permissionRequest.toSettings(environment),
-        postToolUse = postToolUse.toSettings(environment),
-        preCompact = preCompact.toSettings(environment),
-        postCompact = postCompact.toSettings(environment),
-        userPromptSubmit = userPromptSubmit.toSettings(environment),
-        stop = stop.toSettings(environment),
-    )
-
-private fun List<LegacyHookMatcherGroup>.toSettings(
-    environment: Map<String, String>,
-): List<HookMatcherGroup> =
-    mapNotNull { group ->
-        val commands = group.hooks.mapNotNull { handler ->
-            val command = handler as? LegacyHookHandler.Command
-                ?: return@mapNotNull null
-            val expanded = command.platformCommand.substituteEnvironment(environment)
-            if (
-                command.async ||
-                expanded.isBlank() ||
-                command.additionalContextLimit?.let { limit -> limit < 0 } == true
-            ) {
-                return@mapNotNull null
-            }
-            HookCommandDefinition(
-                command = expanded,
-                timeoutSeconds = (command.timeoutSeconds ?: DefaultHookTimeoutSeconds)
-                    .coerceAtLeast(1L),
-                statusMessage = command.statusMessage,
-                additionalContextLimit = command.additionalContextLimit,
-            )
-        }
-        commands.takeIf(List<*>::isNotEmpty)?.let {
-            HookMatcherGroup(
-                matcher = HookMatcher.parse(group.matcher.pattern),
-                hooks = commands,
-            )
-        }
-    }
-
-private fun String.substituteEnvironment(environment: Map<String, String>): String =
-    environment.entries.fold(this) { command, (name, value) ->
-        command.replace("\${$name}", value)
-    }
-
 @Serializable
 private data class NewSessionFile(
-    val model: String,
-    @SerialName("reasoning_effort")
-    val reasoningEffort: ReasoningEffort,
-    @SerialName("service_tier")
-    val serviceTier: String,
-    @SerialName("agent_mode")
-    val agentMode: AgentMode,
-    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
-    @SerialName("request_user_input_mode")
-    val requestUserInputMode: RequestUserInputMode = RequestUserInputMode.AskUser,
-) {
-    fun toSettings(): KodexNewSessionSettings =
-        KodexNewSessionSettings(
-            model = OpenAiModelId(model),
-            reasoningEffort = reasoningEffort,
-            serviceTier = serviceTier.toServiceTier(),
-            agentMode = agentMode,
-            requestUserInputMode = requestUserInputMode,
-        )
-
-    companion object {
-        fun from(settings: KodexNewSessionSettings): NewSessionFile =
-            NewSessionFile(
-                model = settings.model.value,
-                reasoningEffort = settings.reasoningEffort,
-                serviceTier = settings.serviceTier.requestValue,
-                agentMode = settings.agentMode,
-                requestUserInputMode = settings.requestUserInputMode,
-            )
-    }
-}
-
-@Serializable
-private data class LegacyNewSessionFile(
     val model: String? = null,
     @SerialName("reasoning_effort")
     val reasoningEffort: ReasoningEffort? = null,
@@ -581,34 +187,21 @@ private data class LegacyNewSessionFile(
             agentMode = agentMode ?: defaults.agentMode,
             requestUserInputMode = requestUserInputMode ?: defaults.requestUserInputMode,
         )
-}
-
-@Serializable
-private data class SessionTitleFile(
-    val enabled: Boolean,
-    val model: String? = null,
-    @SerialName("reasoning_effort")
-    val reasoningEffort: ReasoningEffort,
-) {
-    fun toSettings(): SessionTitleSettings =
-        SessionTitleSettings(
-            enabled = enabled,
-            model = model?.let(::OpenAiModelId),
-            reasoningEffort = reasoningEffort,
-        )
 
     companion object {
-        fun from(settings: SessionTitleSettings): SessionTitleFile =
-            SessionTitleFile(
-                enabled = settings.enabled,
-                model = settings.model?.value,
+        fun from(settings: KodexNewSessionSettings): NewSessionFile =
+            NewSessionFile(
+                model = settings.model.value,
                 reasoningEffort = settings.reasoningEffort,
+                serviceTier = settings.serviceTier.requestValue,
+                agentMode = settings.agentMode,
+                requestUserInputMode = settings.requestUserInputMode,
             )
     }
 }
 
 @Serializable
-private data class LegacySessionTitleFile(
+private data class SessionTitleFile(
     val enabled: Boolean? = null,
     val model: String? = null,
     @SerialName("reasoning_effort")
@@ -620,6 +213,15 @@ private data class LegacySessionTitleFile(
             model = model?.let(::OpenAiModelId) ?: defaults.model,
             reasoningEffort = reasoningEffort ?: defaults.reasoningEffort,
         )
+
+    companion object {
+        fun from(settings: SessionTitleSettings): SessionTitleFile =
+            SessionTitleFile(
+                enabled = settings.enabled,
+                model = settings.model?.value,
+                reasoningEffort = settings.reasoningEffort,
+            )
+    }
 }
 
 private fun String.toServiceTier(): ServiceTier =
@@ -642,7 +244,4 @@ private val SettingsYaml = Yaml(
     ),
 )
 
-private const val CurrentGlobalSettingsSchemaVersion: Int = 5
-private const val PreviousGlobalSettingsSchemaVersion: Int = 4
-private const val LegacyGlobalSettingsSchemaVersion: Int = 3
 private const val KodexSettingsFileName: String = "settings.yml"
