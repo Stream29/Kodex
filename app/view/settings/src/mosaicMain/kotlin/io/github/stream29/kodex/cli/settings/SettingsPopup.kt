@@ -10,7 +10,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.LocalTerminalState
-import com.jakewharton.mosaic.layout.IntrinsicSize
 import com.jakewharton.mosaic.layout.background
 import com.jakewharton.mosaic.layout.fillMaxHeight
 import com.jakewharton.mosaic.layout.fillMaxWidth
@@ -39,12 +38,14 @@ import io.github.stream29.kodex.cli.components.TextInput
 import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
+import io.github.stream29.kodex.cli.components.ScrollState
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiDropdownMenu
 import io.github.stream29.kodex.cli.components.TuiDropdownState
 import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
+import io.github.stream29.kodex.cli.components.verticalScroll
 import io.github.stream29.kodex.hook.contract.HookImportDecision
 import io.github.stream29.kodex.hook.contract.HookManagedSourceState
 import io.github.stream29.kodex.mcp.contract.McpImportDecision
@@ -89,6 +90,7 @@ public fun BoxScope.SettingsPopup(
     var mcpDeleteRequest by remember(viewModel) {
         mutableStateOf<io.github.stream29.kodex.app.settings.contract.McpServerSettingsState?>(null)
     }
+    var mcpDetailsServerName by remember(viewModel) { mutableStateOf<String?>(null) }
     var mcpImportOpen by remember(viewModel) { mutableStateOf(false) }
     var hookEditorRequest by remember(viewModel) {
         mutableStateOf<HookEditorRequest?>(null)
@@ -122,6 +124,7 @@ public fun BoxScope.SettingsPopup(
         renameRequest = null
         mcpEditorRequest = null
         mcpDeleteRequest = null
+        mcpDetailsServerName = null
         hookEditorRequest = null
         hookDeleteRequest = null
         if (selectedPage != SettingsPage.Global) {
@@ -132,12 +135,15 @@ public fun BoxScope.SettingsPopup(
         }
     }
 
-    val width = (LocalTerminalState.current.size.columns - 4).coerceIn(1, SettingsMaximumWidth)
+    val terminalSize = LocalTerminalState.current.size
+    val width = (terminalSize.columns - 4).coerceIn(1, SettingsMaximumWidth)
+    val height = (terminalSize.rows - 4).coerceAtLeast(1)
+    val pageScrollState = remember(selectedPage) { ScrollState() }
     val navigationWidth = SettingsNavigationWidth.coerceAtMost((width - 1).coerceAtLeast(1))
     val contentWidth = (width - navigationWidth).coerceAtLeast(1)
     TuiDialog(
         onDismissRequest = onDismissRequest,
-        modifier = Modifier.width(width).background(SettingsHomeBackground),
+        modifier = Modifier.width(width).height(height).background(SettingsHomeBackground),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Text(
@@ -146,7 +152,7 @@ public fun BoxScope.SettingsPopup(
                 color = SettingsForeground,
                 textStyle = TextStyle.Bold,
             )
-            Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Max)) {
+            Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 Column(
                     modifier = Modifier
                         .width(navigationWidth)
@@ -170,22 +176,21 @@ public fun BoxScope.SettingsPopup(
                         )
                     }
                 }
-                Column(
-                    modifier = Modifier
-                        .width(contentWidth)
-                        .fillMaxHeight()
-                        .background(SettingsHomeBackground),
+                SettingsPageViewport(
+                    width = contentWidth,
+                    scrollState = pageScrollState,
                 ) {
                     SettingsPageContent(
                         viewModel = viewModel,
                         page = selectedPage,
                         dropdowns = dropdowns,
                         onAddMcp = { mcpEditorRequest = McpEditorRequest() },
-                        onEditMcp = { server ->
-                            mcpEditorRequest = McpEditorRequest(existing = server)
+                        onOpenMcp = { server -> mcpDetailsServerName = server.serverName },
+                        onImportMcp = {
+                            viewModel.global.dismissCodexMcpImport()
+                            mcpImportOpen = true
+                            viewModel.global.previewCodexMcpImport()
                         },
-                        onDeleteMcp = { server -> mcpDeleteRequest = server },
-                        onImportMcp = { mcpImportOpen = true },
                         onAddHook = { hookEditorRequest = HookEditorRequest() },
                         onEditHook = { source ->
                             viewModel.global.hookSourceEditorDraft(source.sourceId)?.let { draft ->
@@ -228,6 +233,30 @@ public fun BoxScope.SettingsPopup(
             },
         )
     }
+    mcpDetailsServerName?.let { serverName ->
+        val servers by viewModel.global.mcpServers.collectAsState()
+        servers.firstOrNull { server -> server.serverName == serverName }?.let { server ->
+            McpServerDetailsDialog(
+                server = server,
+                onDismiss = { mcpDetailsServerName = null },
+                onEdit = {
+                    mcpDetailsServerName = null
+                    mcpEditorRequest = McpEditorRequest(existing = server)
+                },
+                onDelete = {
+                    mcpDetailsServerName = null
+                    mcpDeleteRequest = server
+                },
+                onSetEnabled = {
+                    viewModel.global.setMcpServerEnabled(server.serverName, !server.enabled)
+                },
+                onLogin = { viewModel.global.loginMcpServer(server.serverName) },
+                onCancelLogin = { viewModel.global.cancelMcpServerLogin(server.serverName) },
+                onLogout = { viewModel.global.logoutMcpServer(server.serverName) },
+                onReconnect = { viewModel.global.reconnectMcpServer(server.serverName) },
+            )
+        }
+    }
     mcpEditorRequest?.let { request ->
         McpServerEditorDialog(
             request = request,
@@ -254,7 +283,6 @@ public fun BoxScope.SettingsPopup(
         val preview by viewModel.global.mcpImportPreview.collectAsState()
         McpImportDialog(
             preview = preview,
-            onPreview = viewModel.global::previewCodexMcpImport,
             onApply = { previewId: Long, decisions: Map<String, McpImportDecision> ->
                 viewModel.global.applyCodexMcpImport(previewId, decisions)
                 mcpImportOpen = false
@@ -317,13 +345,29 @@ public fun BoxScope.SettingsPopup(
 }
 
 @Composable
+internal fun SettingsPageViewport(
+    width: Int,
+    scrollState: ScrollState,
+    content: @Composable () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .width(width)
+            .fillMaxHeight()
+            .background(SettingsHomeBackground)
+            .verticalScroll(scrollState),
+    ) {
+        content()
+    }
+}
+
+@Composable
 private fun SettingsPageContent(
     viewModel: SettingsViewModel,
     page: SettingsPage,
     dropdowns: SettingsDropdownStates,
     onAddMcp: () -> Unit,
-    onEditMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
-    onDeleteMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
+    onOpenMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
     onImportMcp: () -> Unit,
     onAddHook: () -> Unit,
     onEditHook: (HookManagedSourceState) -> Unit,
@@ -335,14 +379,14 @@ private fun SettingsPageContent(
             viewModel = viewModel.global,
             dropdowns = dropdowns,
             onAddMcp = onAddMcp,
-            onEditMcp = onEditMcp,
-            onDeleteMcp = onDeleteMcp,
+            onOpenMcp = onOpenMcp,
             onImportMcp = onImportMcp,
             onAddHook = onAddHook,
             onEditHook = onEditHook,
             onDeleteHook = onDeleteHook,
             onImportHook = onImportHook,
         )
+
         SettingsPage.Session -> SessionSettingsContent(viewModel.session, dropdowns)
         SettingsPage.NewSession -> NewSessionSettingsContent(viewModel.newSession, dropdowns)
     }
@@ -353,8 +397,7 @@ private fun GlobalSettingsContent(
     viewModel: GlobalSettingsViewModel,
     dropdowns: SettingsDropdownStates,
     onAddMcp: () -> Unit,
-    onEditMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
-    onDeleteMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
+    onOpenMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
     onImportMcp: () -> Unit,
     onAddHook: () -> Unit,
     onEditHook: (HookManagedSourceState) -> Unit,
@@ -379,14 +422,8 @@ private fun GlobalSettingsContent(
     McpSettingsContent(
         servers = mcpServers,
         onAdd = onAddMcp,
-        onEdit = onEditMcp,
-        onDelete = onDeleteMcp,
-        onSetEnabled = viewModel::setMcpServerEnabled,
-        onLogin = viewModel::loginMcpServer,
-        onCancelLogin = viewModel::cancelMcpServerLogin,
-        onLogout = viewModel::logoutMcpServer,
+        onOpenDetails = onOpenMcp,
         onImport = onImportMcp,
-        onReconnect = viewModel::reconnectMcpServer,
     )
     HookSettingsContent(
         featureEnabled = hooksEnabled,
