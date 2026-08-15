@@ -20,9 +20,7 @@ internal fun HookSettingsContent(
     sources: List<HookManagedSourceState>,
     onSetFeatureEnabled: (Boolean) -> Unit,
     onAdd: () -> Unit,
-    onEdit: (HookManagedSourceState) -> Unit,
-    onDelete: (HookManagedSourceState) -> Unit,
-    onSetEnabled: (String, Boolean) -> Unit,
+    onOpenDetails: (HookManagedSourceState) -> Unit,
     onImport: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
@@ -50,71 +48,20 @@ internal fun HookSettingsContent(
             )
         } else {
             sources.forEach { source ->
-                HookSettingsRow(
-                    source = source,
-                    onEdit = { onEdit(source) },
-                    onDelete = { onDelete(source) },
-                    onSetEnabled = {
-                        onSetEnabled(source.sourceId, !source.enabled)
+                TuiButton(
+                    label = buildString {
+                        append(source.name)
+                        append(" · ")
+                        append(if (source.enabled) "Enabled" else "Disabled")
+                        append(" · ")
+                        append(source.commandCount)
+                        append(if (source.commandCount == 1) " command" else " commands")
                     },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = SettingsForeground,
+                    onClick = { onOpenDetails(source) },
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun HookSettingsRow(
-    source: HookManagedSourceState,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-    onSetEnabled: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
-        Text(
-            value = buildString {
-                append(source.name)
-                append(" · ")
-                append(if (source.enabled) "Enabled" else "Disabled")
-                append(" · ")
-                append(source.commandCount)
-                append(if (source.commandCount == 1) " command" else " commands")
-            },
-            color = SettingsForeground,
-            textStyle = TextStyle.Dim,
-        )
-        if (source.configuredEvents.isNotEmpty()) {
-            Text(
-                value = "Events: ${source.configuredEvents.joinToString { it.settingsLabel() }}",
-                color = SettingsForeground,
-                textStyle = TextStyle.Dim,
-            )
-        }
-        if (source.environmentNames.isNotEmpty()) {
-            Text(
-                value = "Environment: ${source.environmentNames.joinToString()} (values hidden)",
-                color = SettingsForeground,
-                textStyle = TextStyle.Dim,
-            )
-        }
-        source.importedFrom?.let { imported ->
-            Text(
-                value = "Imported from ${imported.sourceKind.settingsLabel()}: " +
-                    imported.normalizedPath,
-                color = SettingsForeground,
-                textStyle = TextStyle.Dim,
-            )
-        }
-        Row {
-            TuiButton(
-                label = if (source.enabled) "Disable" else "Enable",
-                color = SettingsForeground,
-                onClick = onSetEnabled,
-            )
-            Text(" ")
-            TuiButton(label = "Edit", color = SettingsForeground, onClick = onEdit)
-            Text(" ")
-            TuiButton(label = "Delete", color = SettingsForeground, onClick = onDelete)
         }
     }
 }
