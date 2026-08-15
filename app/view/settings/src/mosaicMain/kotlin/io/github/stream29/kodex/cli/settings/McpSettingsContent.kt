@@ -20,14 +20,8 @@ import io.github.stream29.kodex.mcp.contract.McpTransportKind
 internal fun McpSettingsContent(
     servers: List<McpServerSettingsState>,
     onAdd: () -> Unit,
-    onEdit: (McpServerSettingsState) -> Unit,
-    onDelete: (McpServerSettingsState) -> Unit,
-    onSetEnabled: (String, Boolean) -> Unit,
-    onLogin: (String) -> Unit,
-    onCancelLogin: (String) -> Unit,
-    onLogout: (String) -> Unit,
+    onOpenDetails: (McpServerSettingsState) -> Unit,
     onImport: () -> Unit,
-    onReconnect: (String) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
         Text("MCP servers", color = SettingsForeground)
@@ -52,121 +46,18 @@ internal fun McpSettingsContent(
             )
         } else {
             servers.forEach { server ->
-                McpSettingsRow(
-                    server = server,
-                    onEdit = { onEdit(server) },
-                    onDelete = { onDelete(server) },
-                    onSetEnabled = {
-                        onSetEnabled(server.serverName, !server.enabled)
-                    },
-                    onLogin = { onLogin(server.serverName) },
-                    onCancelLogin = { onCancelLogin(server.serverName) },
-                    onLogout = { onLogout(server.serverName) },
-                    onReconnect = { onReconnect(server.serverName) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun McpSettingsRow(
-    server: McpServerSettingsState,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-    onSetEnabled: () -> Unit,
-    onLogin: () -> Unit,
-    onCancelLogin: () -> Unit,
-    onLogout: () -> Unit,
-    onReconnect: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
-        Text(
-            value = "${server.serverName} · ${server.transport.settingsLabel()} · " +
-                server.status.settingsLabel(),
-            color = SettingsForeground,
-            textStyle = TextStyle.Dim,
-        )
-        server.streamableHttpUrl?.let { url ->
-            Text(value = url, color = SettingsForeground, textStyle = TextStyle.Dim)
-        }
-        server.stdioCommand?.let { command ->
-            Text(
-                value = buildString {
-                    append(command)
-                    if (server.stdioArguments.isNotEmpty()) {
-                        append(' ')
-                        append(server.stdioArguments.joinToString(" "))
-                    }
-                },
-                color = SettingsForeground,
-                textStyle = TextStyle.Dim,
-            )
-        }
-        if (server.headerNames.isNotEmpty()) {
-            Text(
-                value = "Headers: ${server.headerNames.joinToString()} (values hidden)",
-                color = SettingsForeground,
-                textStyle = TextStyle.Dim,
-            )
-        }
-        if (server.environmentNames.isNotEmpty()) {
-            Text(
-                value = "Environment: ${server.environmentNames.joinToString()} (values hidden)",
-                color = SettingsForeground,
-                textStyle = TextStyle.Dim,
-            )
-        }
-        Row {
-            TuiButton(
-                label = if (server.enabled) "Disable" else "Enable",
-                color = SettingsForeground,
-                onClick = onSetEnabled,
-            )
-            Text(" ")
-            TuiButton(label = "Edit", color = SettingsForeground, onClick = onEdit)
-            Text(" ")
-            TuiButton(label = "Delete", color = SettingsForeground, onClick = onDelete)
-            when (server.authentication) {
-                McpAuthenticationState.LoginRequired,
-                McpAuthenticationState.ReauthorizationRequired,
-                is McpAuthenticationState.Failed,
-                    -> {
-                    Text(" ")
-                    TuiButton(label = "Log in", color = SettingsForeground, onClick = onLogin)
-                }
-
-                McpAuthenticationState.Authorized,
-                McpAuthenticationState.Refreshing,
-                    -> {
-                    Text(" ")
-                    TuiButton(label = "Log out", color = SettingsForeground, onClick = onLogout)
-                }
-
-                McpAuthenticationState.Authorizing -> {
-                    Text(" ")
-                    TuiButton(
-                        label = "Cancel login",
-                        color = SettingsForeground,
-                        onClick = onCancelLogin,
-                    )
-                }
-
-                McpAuthenticationState.NotConfigured -> Unit
-            }
-            if (server.status is McpServerSettingsStatus.Failed) {
-                Text(" ")
                 TuiButton(
-                    label = "Reconnect",
+                    label = "${server.serverName} · ${server.status.settingsLabel()}",
+                    modifier = Modifier.fillMaxWidth(),
                     color = SettingsForeground,
-                    onClick = onReconnect,
+                    onClick = { onOpenDetails(server) },
                 )
             }
         }
     }
 }
 
-private fun McpServerSettingsStatus.settingsLabel(): String =
+internal fun McpServerSettingsStatus.settingsLabel(): String =
     when (this) {
         McpServerSettingsStatus.Disabled -> "Disabled"
         is McpServerSettingsStatus.AuthenticationBlocked ->
@@ -180,7 +71,7 @@ private fun McpServerSettingsStatus.settingsLabel(): String =
         McpServerSettingsStatus.Closed -> "Closed"
     }
 
-private fun McpAuthenticationState.settingsLabel(): String =
+internal fun McpAuthenticationState.settingsLabel(): String =
     when (this) {
         McpAuthenticationState.NotConfigured -> "Not configured"
         McpAuthenticationState.LoginRequired -> "Login required"
@@ -191,13 +82,13 @@ private fun McpAuthenticationState.settingsLabel(): String =
         is McpAuthenticationState.Failed -> message
     }
 
-private fun McpTransportKind.settingsLabel(): String =
+internal fun McpTransportKind.settingsLabel(): String =
     when (this) {
         McpTransportKind.StreamableHttp -> "Streamable HTTP"
         McpTransportKind.Stdio -> "stdio"
     }
 
-private fun McpClientFailureReason.settingsLabel(): String =
+internal fun McpClientFailureReason.settingsLabel(): String =
     when (this) {
         McpClientFailureReason.Transport -> "Transport"
         McpClientFailureReason.Initialization -> "Initialization"

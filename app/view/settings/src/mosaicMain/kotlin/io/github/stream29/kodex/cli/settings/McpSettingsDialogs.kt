@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.LocalTerminalState
 import com.jakewharton.mosaic.layout.background
 import com.jakewharton.mosaic.layout.fillMaxWidth
+import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.BoxScope
@@ -16,13 +17,17 @@ import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.app.settings.contract.McpServerSettingsState
+import io.github.stream29.kodex.app.settings.contract.McpServerSettingsStatus
 import io.github.stream29.kodex.cli.components.TextInput
 import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
+import io.github.stream29.kodex.cli.components.ScrollState
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
+import io.github.stream29.kodex.cli.components.verticalScroll
 import io.github.stream29.kodex.mcp.contract.DefaultMcpOAuthRedirectUri
+import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpImportDecision
 import io.github.stream29.kodex.mcp.contract.McpImportItemKind
 import io.github.stream29.kodex.mcp.contract.McpImportPreview
@@ -241,6 +246,128 @@ internal fun BoxScope.McpServerEditorDialog(
     }
 }
 
+/** Sanitized server details and commands kept out of the Global Settings main surface. */
+@Composable
+internal fun BoxScope.McpServerDetailsDialog(
+    server: McpServerSettingsState,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onSetEnabled: () -> Unit,
+    onLogin: () -> Unit,
+    onCancelLogin: () -> Unit,
+    onLogout: () -> Unit,
+    onReconnect: () -> Unit,
+) {
+    val width = (LocalTerminalState.current.size.columns - 4)
+        .coerceIn(1, McpDetailsMaximumWidth)
+    TuiDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.width(width).background(SettingsHomeBackground),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
+            Text(
+                value = server.serverName,
+                modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
+                color = SettingsForeground,
+                textStyle = TextStyle.Bold,
+            )
+            McpDetailLine("Transport", server.transport.settingsLabel())
+            McpDetailLine("Status", server.status.settingsLabel())
+            McpDetailLine("Authentication", server.authentication.settingsLabel())
+            server.streamableHttpUrl?.let { url -> McpDetailLine("URL", url) }
+            server.stdioCommand?.let { command -> McpDetailLine("Command", command) }
+            if (server.stdioArguments.isNotEmpty()) {
+                McpDetailLine("Arguments", server.stdioArguments.joinToString(" "))
+            }
+            server.stdioWorkingDirectory?.let { directory ->
+                McpDetailLine("Working directory", directory.toString())
+            }
+            if (server.headerNames.isNotEmpty()) {
+                McpDetailLine(
+                    "Headers",
+                    "${server.headerNames.joinToString()} (values hidden)",
+                )
+            }
+            if (server.environmentNames.isNotEmpty()) {
+                McpDetailLine(
+                    "Environment",
+                    "${server.environmentNames.joinToString()} (values hidden)",
+                )
+            }
+            server.oauth?.let { oauth ->
+                McpDetailLine("OAuth client", oauth.clientId)
+                McpDetailLine(
+                    "OAuth client secret",
+                    if (oauth.hasClientSecret) "Configured" else "None",
+                )
+                oauth.resource?.let { resource -> McpDetailLine("OAuth resource", resource) }
+                if (oauth.scopes.isNotEmpty()) {
+                    McpDetailLine("OAuth scopes", oauth.scopes.joinToString())
+                }
+            }
+            Row(modifier = Modifier.fillMaxWidth().background(SettingsActionBackground)) {
+                TuiButton(
+                    label = if (server.enabled) "Disable" else "Enable",
+                    color = SettingsForeground,
+                    onClick = onSetEnabled,
+                )
+                Text(" ")
+                TuiButton(label = "Edit", color = SettingsForeground, onClick = onEdit)
+                Text(" ")
+                TuiButton(label = "Delete", color = SettingsForeground, onClick = onDelete)
+            }
+            Row(modifier = Modifier.fillMaxWidth().background(SettingsActionBackground)) {
+                when (server.authentication) {
+                    McpAuthenticationState.LoginRequired,
+                    McpAuthenticationState.ReauthorizationRequired,
+                    is McpAuthenticationState.Failed,
+                        -> {
+                        TuiButton(label = "Log in", color = SettingsForeground, onClick = onLogin)
+                        Text(" ")
+                    }
+
+                    McpAuthenticationState.Authorized,
+                    McpAuthenticationState.Refreshing,
+                        -> {
+                        TuiButton(label = "Log out", color = SettingsForeground, onClick = onLogout)
+                        Text(" ")
+                    }
+
+                    McpAuthenticationState.Authorizing -> {
+                        TuiButton(
+                            label = "Cancel login",
+                            color = SettingsForeground,
+                            onClick = onCancelLogin,
+                        )
+                        Text(" ")
+                    }
+
+                    McpAuthenticationState.NotConfigured -> Unit
+                }
+                if (server.status is McpServerSettingsStatus.Failed) {
+                    TuiButton(
+                        label = "Reconnect",
+                        color = SettingsForeground,
+                        onClick = onReconnect,
+                    )
+                    Text(" ")
+                }
+                TuiButton(label = "Close", color = SettingsForeground, onClick = onDismiss)
+            }
+        }
+    }
+}
+
+@Composable
+private fun McpDetailLine(label: String, value: String) {
+    Text(
+        value = "$label: $value",
+        color = SettingsForeground,
+        textStyle = TextStyle.Dim,
+    )
+}
+
 @Composable
 internal fun BoxScope.McpDeleteConfirmationDialog(
     server: McpServerSettingsState,
@@ -270,56 +397,83 @@ internal fun BoxScope.McpDeleteConfirmationDialog(
     }
 }
 
-/** Explicit preview/filter/selection flow; preview itself never writes settings. */
+/** Direct selection flow; opening the dialog starts preview loading before it is rendered. */
 @Composable
 internal fun BoxScope.McpImportDialog(
     preview: McpImportPreview?,
-    onPreview: (String) -> Unit,
     onApply: (Long, Map<String, McpImportDecision>) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val width = (LocalTerminalState.current.size.columns - 4)
+    val terminalSize = LocalTerminalState.current.size
+    val width = (terminalSize.columns - 4)
         .coerceIn(1, McpImportMaximumWidth)
-    val filter = rememberInput(preview?.filter.orEmpty())
+    val height = (terminalSize.rows - 4)
+        .coerceIn(1, McpImportMaximumHeight)
+    val scrollState = remember(preview?.id) { ScrollState() }
     var decisions by remember(preview?.id) {
-        mutableStateOf<Map<String, McpImportDecision>>(emptyMap())
+        mutableStateOf(preview?.defaultImportDecisions().orEmpty())
+    }
+    val selectedCount = decisions.values.count { decision ->
+        decision != McpImportDecision.Skip
     }
 
     TuiDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.width(width).background(SettingsHomeBackground),
+        modifier = Modifier.width(width).height(height).background(SettingsHomeBackground),
     ) {
         Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
             Text(
-                "Import MCP from Codex",
+                "Import MCP servers from Codex",
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
                 color = SettingsForeground,
                 textStyle = TextStyle.Bold,
             )
-            McpInputField("Filter by server name", filter, width, autoFocus = true)
-            Row {
-                TuiButton(
-                    label = "Preview",
-                    color = SettingsForeground,
-                    onClick = { onPreview(filter.value.text) },
-                )
-                Text(" ")
-                TuiButton(label = "Cancel", color = SettingsForeground, onClick = onDismiss)
-            }
-            preview?.let { current ->
-                if (current.items.isEmpty()) {
-                    Text("No matching Codex MCP servers.", color = SettingsForeground)
-                }
-                current.items.forEach { item ->
-                    val decision = decisions[item.serverName] ?: McpImportDecision.Skip
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            value = "${item.serverName}: ${item.kind.previewLabel()}",
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(scrollState),
+            ) {
+                if (preview == null) {
+                    Text("Loading Codex MCP servers…", color = SettingsForeground)
+                } else {
+                    Text(
+                        "All supported servers are selected. Select a server to toggle it.",
+                        color = SettingsForeground,
+                        textStyle = TextStyle.Dim,
+                    )
+                    Row {
+                        TuiButton(
+                            label = "Select all",
                             color = SettingsForeground,
+                            enabled = preview.items.any { item -> item.selectable },
+                            onClick = { decisions = preview.defaultImportDecisions() },
                         )
                         Text(" ")
                         TuiButton(
-                            label = decision.previewLabel(),
+                            label = "Clear",
+                            color = SettingsForeground,
+                            enabled = selectedCount > 0,
+                            onClick = {
+                                decisions = preview.items.associate { item ->
+                                    item.serverName to McpImportDecision.Skip
+                                }
+                            },
+                        )
+                    }
+                    if (preview.items.isEmpty()) {
+                        Text("No Codex MCP servers found.", color = SettingsForeground)
+                    }
+                    preview.items.forEach { item ->
+                        val decision = decisions[item.serverName] ?: McpImportDecision.Skip
+                        val marker = when {
+                            !item.selectable -> "–"
+                            decision == McpImportDecision.Skip -> " "
+                            else -> "✓"
+                        }
+                        TuiButton(
+                            label = "$marker ${item.serverName} · ${item.kind.importLabel()}",
+                            modifier = Modifier.fillMaxWidth(),
                             color = SettingsForeground,
                             enabled = item.selectable,
                             onClick = {
@@ -328,25 +482,41 @@ internal fun BoxScope.McpImportDialog(
                                     )
                             },
                         )
-                    }
-                    item.detail?.let { detail ->
-                        Text(
-                            value = "  $detail",
-                            color = SettingsForeground,
-                            textStyle = TextStyle.Dim,
-                        )
+                        item.detail?.let { detail ->
+                            Text(
+                                value = "  $detail",
+                                color = SettingsForeground,
+                                textStyle = TextStyle.Dim,
+                            )
+                        }
                     }
                 }
+            }
+            Row(modifier = Modifier.fillMaxWidth().background(SettingsActionBackground)) {
                 TuiButton(
-                    label = "Apply selected",
+                    label = "Import selected ($selectedCount)",
                     color = SettingsForeground,
-                    enabled = decisions.values.any { it != McpImportDecision.Skip },
-                    onClick = { onApply(current.id, decisions) },
+                    enabled = preview != null && selectedCount > 0,
+                    onClick = {
+                        preview?.let { current -> onApply(current.id, decisions) }
+                    },
                 )
+                Text(" ")
+                TuiButton(label = "Cancel", color = SettingsForeground, onClick = onDismiss)
             }
         }
     }
 }
+
+internal fun McpImportPreview.defaultImportDecisions(): Map<String, McpImportDecision> =
+    items.associate { item ->
+        item.serverName to when {
+            !item.selectable -> McpImportDecision.Skip
+            item.kind == McpImportItemKind.New -> McpImportDecision.Import
+            item.kind == McpImportItemKind.Conflict -> McpImportDecision.Replace
+            else -> McpImportDecision.Skip
+        }
+    }
 
 @Composable
 private fun McpInputField(
@@ -381,22 +551,24 @@ private fun List<String>.keepValuesText(): String =
 private fun parseSecretEntries(text: String): Map<String, McpSecretDraft> =
     buildMap {
         text
-        .split(';')
-        .map(String::trim)
-        .filter(String::isNotEmpty)
-        .forEach { entry ->
-            val separator = entry.indexOf('=')
-            require(separator > 0) { "Each secret entry must use KEY=value." }
-            val name = entry.substring(0, separator).trim()
-            val value = entry.substring(separator + 1)
-            require(name.isNotEmpty()) { "A secret entry name must not be blank." }
-            require(name !in this) { "Secret entry names must be unique." }
-            put(name, if (value == KeepValueMarker) {
-                McpSecretDraft.Keep
-            } else {
-                McpSecretDraft.Replace(value)
-            })
-        }
+            .split(';')
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .forEach { entry ->
+                val separator = entry.indexOf('=')
+                require(separator > 0) { "Each secret entry must use KEY=value." }
+                val name = entry.substring(0, separator).trim()
+                val value = entry.substring(separator + 1)
+                require(name.isNotEmpty()) { "A secret entry name must not be blank." }
+                require(name !in this) { "Secret entry names must be unique." }
+                put(
+                    name, if (value == KeepValueMarker) {
+                        McpSecretDraft.Keep
+                    } else {
+                        McpSecretDraft.Replace(value)
+                    }
+                )
+            }
     }
 
 private fun List<String>.formatArguments(): String =
@@ -479,18 +651,11 @@ private fun McpTransportKind.editorLabel(): String =
         McpTransportKind.Stdio -> "stdio"
     }
 
-private fun McpImportItemKind.previewLabel(): String =
+private fun McpImportItemKind.importLabel(): String =
     when (this) {
-        McpImportItemKind.New -> "new"
-        McpImportItemKind.Conflict -> "same-name conflict"
-        McpImportItemKind.Unsupported -> "unsupported"
-    }
-
-private fun McpImportDecision.previewLabel(): String =
-    when (this) {
-        McpImportDecision.Skip -> "Skip"
-        McpImportDecision.Import -> "Import"
-        McpImportDecision.Replace -> "Replace"
+        McpImportItemKind.New -> "New"
+        McpImportItemKind.Conflict -> "Replace existing"
+        McpImportItemKind.Unsupported -> "Unsupported"
     }
 
 private fun McpImportDecision.nextFor(kind: McpImportItemKind): McpImportDecision =
@@ -506,5 +671,7 @@ private fun McpImportDecision.nextFor(kind: McpImportItemKind): McpImportDecisio
 
 private const val KeepValueMarker: String = "<keep>"
 private const val McpEditorMaximumWidth: Int = 84
+private const val McpDetailsMaximumWidth: Int = 84
 private const val McpDeleteMaximumWidth: Int = 56
 private const val McpImportMaximumWidth: Int = 76
+private const val McpImportMaximumHeight: Int = 28
