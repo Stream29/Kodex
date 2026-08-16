@@ -73,12 +73,34 @@ val tuiDropdownMenuTest by testSuite {
 
         assertEquals("medium", selected)
     }
+
+    test("trigger can request initial focus") {
+        var selected by mutableStateOf("low")
+        val dropdownState = TuiDropdownState()
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                DropdownHarness(
+                    dropdownState = dropdownState,
+                    selected = selected,
+                    autoFocus = true,
+                    onSelect = { selected = it },
+                )
+            }
+
+            sendKeyEvent(KeyboardEvent(codepoint = 13))
+            awaitSnapshotContaining("[medium]")
+
+            assertTrue(dropdownState.expanded)
+        }
+    }
 }
 
 @Composable
 private fun DropdownHarness(
     dropdownState: TuiDropdownState,
     selected: String,
+    autoFocus: Boolean = false,
     onSelect: (String) -> Unit,
 ) {
     TuiPopupHost(modifier = Modifier.width(24).height(6)) {
@@ -87,6 +109,7 @@ private fun DropdownHarness(
             TuiDropdownTrigger(
                 dropdownState = dropdownState,
                 label = "current: $selected",
+                autoFocus = autoFocus,
             )
         }
         TuiDropdownMenu(

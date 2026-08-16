@@ -36,8 +36,6 @@ import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettingsStore
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.openGlobalSettings
-import io.github.stream29.kodex.hook.contract.HookCodexImportSource
-import io.github.stream29.kodex.hook.contract.HookCodexSourceKind
 import io.github.stream29.kodex.hook.contract.HookManager
 import io.github.stream29.kodex.hook.impl.HookManagerImpl
 import io.github.stream29.kodex.hook.impl.KodexHooksImpl
@@ -192,12 +190,6 @@ public class KodexApplication private constructor(
             )
             val hookManager = scope.HookManagerImpl(
                 store = KodexHookConfigurationStore(globalSettings, scope),
-                codexImportSource = HookCodexImportSource {
-                    CodexCliStorage(globalSettings.settings.value.codexHome)
-                        .readHookImportCandidates(HookCodexSourceKind.User) +
-                        CodexCliStorage(Path(resolvedWorkingDirectory, ".codex"))
-                            .readHookImportCandidates(HookCodexSourceKind.Project)
-                },
             )
             val graph = koinApplication<KodexKoinApplication>()
             try {

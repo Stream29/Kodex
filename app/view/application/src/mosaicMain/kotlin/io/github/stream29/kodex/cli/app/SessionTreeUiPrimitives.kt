@@ -9,7 +9,6 @@ import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
-import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.cli.components.TextInput
 import io.github.stream29.kodex.cli.components.TextInputEdit
 import io.github.stream29.kodex.cli.components.TextInputLayout
@@ -89,6 +88,7 @@ internal fun HistoryComposerSeparator(
         Text("-".repeat(leadingWidth), textStyle = TuiTheme.typography.supporting)
         TuiButton(
             label = "↓",
+            idleTextStyle = TuiTheme.typography.supporting,
             onClick = onScrollToLatest,
         )
         Text(

@@ -1,12 +1,11 @@
 package io.github.stream29.kodex.app.settings.contract
 
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
-import io.github.stream29.kodex.hook.contract.HookImportDecision
-import io.github.stream29.kodex.hook.contract.HookImportPreview
-import io.github.stream29.kodex.hook.contract.HookManagedSourceState
-import io.github.stream29.kodex.hook.contract.HookSourceDraft
+import io.github.stream29.kodex.hook.contract.HookDraft
+import io.github.stream29.kodex.hook.contract.HookManagedState
 import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
 import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpImportDecision
@@ -45,6 +44,11 @@ public data class GlobalSettingsState(
         }
     }
 }
+
+/** One exact Codex-home directory-picker child owned by Global Settings. */
+public class GlobalCodexHomePicker(
+    public val viewModel: DirectoryPickerViewModel,
+)
 
 /** Authentication projection that never contains request credentials. */
 public sealed interface SettingsAuthenticationState {
@@ -237,11 +241,21 @@ public interface GlobalSettingsViewModel : AutoCloseable {
 
     public val mcpServers: StateFlow<List<McpServerSettingsState>>
     public val mcpImportPreview: StateFlow<McpImportPreview?>
-    public val hooksEnabled: StateFlow<Boolean>
-    public val hookSources: StateFlow<List<HookManagedSourceState>>
-    public val hookImportPreview: StateFlow<HookImportPreview?>
+    public val hooks: StateFlow<List<HookManagedState>>
     public val usageReset: StateFlow<UsageResetState>
+    public val codexHomePicker: StateFlow<GlobalCodexHomePicker?>
     public val effects: Flow<GlobalSettingsEffect>
+
+    public fun requestCodexHome(): Unit
+
+    /** Applies a directory only while [expected] is the current owned child. */
+    public fun selectCodexHome(
+        expected: GlobalCodexHomePicker,
+        codexHome: Path,
+    ): Boolean
+
+    /** Closes [expected] only while it is the current owned child. */
+    public fun dismissCodexHomePicker(expected: GlobalCodexHomePicker): Boolean
 
     public fun updateNewLineKey(newLineKey: NewLineKey): Unit
     public fun updateAuthSource(authSource: KodexAuthSource): Unit
@@ -273,18 +287,10 @@ public interface GlobalSettingsViewModel : AutoCloseable {
     ): Unit
     public fun dismissCodexMcpImport(): Unit
 
-    public fun setHooksEnabled(enabled: Boolean): Unit
-    public fun addHookSource(draft: HookSourceDraft): Unit
-    public fun editHookSource(sourceId: String, draft: HookSourceDraft): Unit
-    public fun deleteHookSource(sourceId: String): Unit
-    public fun setHookSourceEnabled(sourceId: String, enabled: Boolean): Unit
-    public fun hookSourceEditorDraft(sourceId: String): HookSourceDraft?
-    public fun previewCodexHookImport(filter: String = ""): Unit
-    public fun applyCodexHookImport(
-        previewId: Long,
-        decisions: Map<String, HookImportDecision>,
-    ): Unit
-    public fun dismissCodexHookImport(): Unit
+    public fun addHook(draft: HookDraft): Unit
+    public fun editHook(name: String, draft: HookDraft): Unit
+    public fun deleteHook(name: String): Unit
+    public fun hookEditorDraft(name: String): HookDraft?
 
     override fun close(): Unit
 }

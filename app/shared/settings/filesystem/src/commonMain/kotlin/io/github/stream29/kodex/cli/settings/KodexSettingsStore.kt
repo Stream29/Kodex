@@ -27,9 +27,9 @@ import kotlin.uuid.Uuid
 /**
  * Kodex-owned global settings persisted as one complete private snapshot.
  *
- * Regular loading never reads Codex `config.toml`, Hook files, or MCP
- * declarations. The selected Codex Home remains data used by authentication and
- * explicit import commands only.
+ * Regular loading never reads Codex `config.toml` or MCP declarations. The
+ * selected Codex Home remains data used by authentication and explicit MCP
+ * import commands only.
  */
 public class KodexSettingsStore private constructor(
     private val fileSystem: CoroutineFileSystem,

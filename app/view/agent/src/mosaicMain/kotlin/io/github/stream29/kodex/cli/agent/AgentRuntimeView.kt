@@ -2,11 +2,13 @@ package io.github.stream29.kodex.cli.agent
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
+import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
@@ -22,9 +24,17 @@ import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.TuiButton
+import io.github.stream29.kodex.cli.components.TuiDropdownMenu
+import io.github.stream29.kodex.cli.components.TuiDropdownState
+import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
+import io.github.stream29.kodex.cli.components.TuiPopupHost
+import io.github.stream29.kodex.cli.components.TuiPopupMenuItem
+import io.github.stream29.kodex.cli.components.TuiTheme
+import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.verticalScroll
 import io.github.stream29.kodex.cli.components.wrapToTerminalWidth
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestionOption
 import kotlinx.coroutines.launch
 
 @Composable
@@ -40,9 +50,31 @@ public fun RequestUserInputPanel(
     rows: Int,
 ) {
     if (rows <= 0) return
+    TuiPopupHost(modifier = Modifier.width(columns.coerceAtLeast(1)).height(rows)) {
+        RequestUserInputPanelContent(
+            viewModel = viewModel,
+            state = state,
+            columns = columns,
+            rows = rows,
+        )
+    }
+}
+
+@Composable
+private fun BoxScope.RequestUserInputPanelContent(
+    viewModel: RequestUserInputViewModel,
+    state: RequestUserInputState.Pending,
+    columns: Int,
+    rows: Int,
+) {
     val scope = rememberCoroutineScope()
     val scrollState = remember(state.callId) { ScrollState() }
     val submitting = state.submission is RequestUserInputSubmissionState.Submitting
+    val questionDropdowns = state.arguments.questions.map { question ->
+        key(state.callId, question.id) {
+            rememberTuiDropdownState()
+        }
+    }
     Column(
         modifier = Modifier
             .width(columns.coerceAtLeast(1))
@@ -58,8 +90,7 @@ public fun RequestUserInputPanel(
                 columns = columns,
                 autoFocus = index == 0,
                 enabled = !submitting,
-                onSelectOption = viewModel::selectOption,
-                onSelectOther = viewModel::selectOther,
+                dropdownState = questionDropdowns[index],
                 onFreeFormChanged = viewModel::updateFreeForm,
             )
         }
@@ -78,18 +109,28 @@ public fun RequestUserInputPanel(
             },
         )
     }
+    state.arguments.questions.forEachIndexed { index, question ->
+        RequestUserInputQuestionDropdownMenu(
+            callId = state.callId,
+            question = question,
+            draft = state.answers[question.id],
+            dropdownState = questionDropdowns[index],
+            enabled = !submitting,
+            onSelectOption = viewModel::selectOption,
+            onSelectOther = viewModel::selectOther,
+        )
+    }
 }
 
 @Composable
-private fun RequestUserInputQuestionView(
+internal fun RequestUserInputQuestionView(
     callId: String,
     question: RequestUserInputQuestion,
     state: RequestUserInputState.Pending,
     columns: Int,
     autoFocus: Boolean,
     enabled: Boolean,
-    onSelectOption: (String, String, String) -> Boolean,
-    onSelectOther: (String, String) -> Boolean,
+    dropdownState: TuiDropdownState,
     onFreeFormChanged: (String, String, String) -> Boolean,
 ) {
     val options = question.options.orEmpty()
@@ -99,26 +140,17 @@ private fun RequestUserInputQuestionView(
         columns = columns,
         textStyle = TextStyle.Bold,
     )
-    options.forEachIndexed { index, option ->
-        val selected = (draft as? RequestUserInputDraftAnswer.Option)?.label == option.label
-        TuiButton(
-            label = "${if (selected) "●" else "○"} ${option.label}",
+    if (options.isNotEmpty()) {
+        val selectedChoice = question.choices().firstOrNull { choice -> choice.matches(draft) }
+        TuiDropdownTrigger(
+            dropdownState = dropdownState,
+            label = selectedChoice?.triggerLabel() ?: ChooseOptionLabel,
             enabled = enabled,
-            autoFocus = autoFocus && index == 0 &&
-                draft !is RequestUserInputDraftAnswer.FreeForm,
-            onClick = { onSelectOption(callId, question.id, option.label) },
+            autoFocus = autoFocus && draft !is RequestUserInputDraftAnswer.FreeForm,
         )
-        option.description.takeIf(String::isNotBlank)?.let { description ->
+        selectedChoice?.description()?.takeIf(String::isNotBlank)?.let { description ->
             RequestUserInputText("  $description", columns, TextStyle.Dim)
         }
-    }
-    if (options.isNotEmpty() && question.allowsOtherAnswer) {
-        val selected = draft is RequestUserInputDraftAnswer.FreeForm
-        TuiButton(
-            label = "${if (selected) "●" else "○"} Other",
-            enabled = enabled,
-            onClick = { onSelectOther(callId, question.id) },
-        )
     }
     if (options.isEmpty() || draft is RequestUserInputDraftAnswer.FreeForm) {
         RequestUserInputFreeForm(
@@ -131,6 +163,89 @@ private fun RequestUserInputQuestionView(
             onValueChanged = { text -> onFreeFormChanged(callId, question.id, text) },
         )
     }
+}
+
+@Composable
+internal fun BoxScope.RequestUserInputQuestionDropdownMenu(
+    callId: String,
+    question: RequestUserInputQuestion,
+    draft: RequestUserInputDraftAnswer?,
+    dropdownState: TuiDropdownState,
+    enabled: Boolean,
+    onSelectOption: (String, String, String) -> Boolean,
+    onSelectOther: (String, String) -> Boolean,
+) {
+    val choices = question.choices()
+    if (choices.isEmpty()) return
+    TuiDropdownMenu(
+        dropdownState = dropdownState,
+        backgroundColor = TuiTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        choices.forEach { choice ->
+            TuiPopupMenuItem(
+                key = choice,
+                enabled = enabled,
+                selected = choice.matches(draft),
+                onClick = {
+                    when (choice) {
+                        is RequestUserInputChoice.ProvidedOption ->
+                            onSelectOption(callId, question.id, choice.option.label)
+
+                        RequestUserInputChoice.Other ->
+                            onSelectOther(callId, question.id)
+                    }
+                },
+            ) {
+                Text(choice.menuLabel())
+            }
+        }
+    }
+}
+
+private fun RequestUserInputQuestion.choices(): List<RequestUserInputChoice> = buildList {
+    options.orEmpty().forEachIndexed { index, option ->
+        add(RequestUserInputChoice.ProvidedOption(index, option))
+    }
+    if (options.orEmpty().isNotEmpty() && allowsOtherAnswer) {
+        add(RequestUserInputChoice.Other)
+    }
+}
+
+private fun RequestUserInputChoice.matches(draft: RequestUserInputDraftAnswer?): Boolean =
+    when (this) {
+        is RequestUserInputChoice.ProvidedOption ->
+            (draft as? RequestUserInputDraftAnswer.Option)?.label == option.label
+
+        RequestUserInputChoice.Other -> draft is RequestUserInputDraftAnswer.FreeForm
+    }
+
+private fun RequestUserInputChoice.triggerLabel(): String = when (this) {
+    is RequestUserInputChoice.ProvidedOption -> option.label
+    RequestUserInputChoice.Other -> OtherLabel
+}
+
+private fun RequestUserInputChoice.menuLabel(): String = when (this) {
+    is RequestUserInputChoice.ProvidedOption -> if (option.description.isBlank()) {
+        option.label
+    } else {
+        "${option.label} · ${option.description}"
+    }
+
+    RequestUserInputChoice.Other -> OtherLabel
+}
+
+private fun RequestUserInputChoice.description(): String = when (this) {
+    is RequestUserInputChoice.ProvidedOption -> option.description
+    RequestUserInputChoice.Other -> ""
+}
+
+private sealed interface RequestUserInputChoice {
+    data class ProvidedOption(
+        val index: Int,
+        val option: RequestUserInputQuestionOption,
+    ) : RequestUserInputChoice
+
+    data object Other : RequestUserInputChoice
 }
 
 @Composable
@@ -175,3 +290,6 @@ private fun RequestUserInputText(
         Text(value = line, textStyle = textStyle)
     }
 }
+
+private const val ChooseOptionLabel: String = "Choose an option"
+private const val OtherLabel: String = "Other"

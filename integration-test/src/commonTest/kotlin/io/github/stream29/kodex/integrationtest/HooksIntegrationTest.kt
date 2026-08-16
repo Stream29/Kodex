@@ -8,12 +8,10 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.contract.initialize
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
-import io.github.stream29.kodex.hook.contract.HookCommandDefinition
+import io.github.stream29.kodex.hook.contract.HookBody
 import io.github.stream29.kodex.hook.contract.HookConfiguration
-import io.github.stream29.kodex.hook.contract.HookDeclarations
-import io.github.stream29.kodex.hook.contract.HookMatcherGroup
 import io.github.stream29.kodex.hook.contract.HookSettings
-import io.github.stream29.kodex.hook.contract.HookSourceConfiguration
+import io.github.stream29.kodex.hook.contract.HookType
 import io.github.stream29.kodex.hook.impl.KodexHooksImpl
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
@@ -121,17 +119,34 @@ private suspend fun runFreshSessionHookIntegration() {
 
         val requests = readHookRequests(hookLog)
         assertEquals(
-            listOf("UserPromptSubmit", "Stop"),
-            requests.map { request -> request.getValue("hook_event_name").jsonPrimitive.content },
+            listOf("user_prompt_submit", "stop"),
+            requests.map { request -> request.getValue("type").jsonPrimitive.content },
         )
         assertEquals(
             setOf(hookSessionId),
             requests.map { request -> request.getValue("session_id").jsonPrimitive.content }.toSet(),
         )
-        assertEquals(prompt, requests[0].getValue("prompt").jsonPrimitive.content)
-        assertEquals(false, requests[1].getValue("stop_hook_active").jsonPrimitive.boolean)
+        assertEquals(
+            prompt,
+            requests[0].getValue("payload").jsonObject.getValue("prompt").jsonPrimitive.content,
+        )
+        assertEquals(
+            false,
+            requests[1]
+                .getValue("payload")
+                .jsonObject
+                .getValue("stop_hook_active")
+                .jsonPrimitive
+                .boolean,
+        )
         assertTrue(
-            requests[1].getValue("last_assistant_message").jsonPrimitive.content.contains(HookIntegrationMarker),
+            requests[1]
+                .getValue("payload")
+                .jsonObject
+                .getValue("last_assistant_message")
+                .jsonPrimitive
+                .content
+                .contains(HookIntegrationMarker),
         )
     } finally {
         hooks?.cancel()
@@ -166,28 +181,17 @@ private suspend fun realOpenAiClient(storage: CodexCliStorage): RealOpenAiClient
 
 private fun integrationHookConfiguration(
     command: String,
-): HookConfiguration {
-    val group = HookMatcherGroup(
-        hooks = listOf(
-            HookCommandDefinition(
-                command = command,
-                timeoutSeconds = 5,
-            ),
+): HookConfiguration =
+    linkedMapOf(
+        "inspect_prompt" to HookBody(
+            type = HookType.UserPromptSubmit,
+            command = command,
+        ),
+        "inspect_stop" to HookBody(
+            type = HookType.Stop,
+            command = command,
         ),
     )
-    return HookConfiguration(
-        sources = listOf(
-            HookSourceConfiguration(
-                id = "integration-hooks",
-                name = "Integration hooks",
-                hooks = HookDeclarations(
-                    userPromptSubmit = listOf(group),
-                    stop = listOf(group),
-                ),
-            ),
-        ),
-    )
-}
 
 private fun recordingHookCommand(logPath: Path, output: String): String = when (Shell.default.type) {
     ShellType.Sh,

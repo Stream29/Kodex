@@ -22,6 +22,7 @@ import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
+import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
 import io.github.stream29.kodex.app.history.contract.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.cli.components.LazyListState
@@ -221,8 +222,8 @@ private class SingleItemHistoryModel(
     private val item: HistoryItemViewModel,
     private val readEvent: suspend () -> StableCleanEvent,
 ) : AgentHistoryViewModel {
-    override val generation: StateFlow<Long> = MutableStateFlow(0)
-    override val committedItemCount: StateFlow<Int> = MutableStateFlow(1)
+    override val committedItems: StateFlow<HistoryItemWindow> =
+        MutableStateFlow(SingleItemWindow(item))
     override val loadState: StateFlow<AgentHistoryLoadState> =
         MutableStateFlow(AgentHistoryLoadState.Ready(hasOlder = false))
     override val pendingTools: StateFlow<List<UnstableCleanEvent>> = MutableStateFlow(emptyList())
@@ -231,13 +232,6 @@ private class SingleItemHistoryModel(
     override val scrollInteractionSource: MutableScrollInteractionSource =
         MutableScrollInteractionSource()
     override val followsLatest: Boolean = true
-
-    override fun peek(index: Int): HistoryItemViewModel {
-        require(index == 0)
-        return item
-    }
-
-    override fun get(index: Int): HistoryItemViewModel = peek(index)
 
     override suspend fun read(item: HistoryItemViewModel): StableCleanEvent {
         require(item === this.item)
@@ -252,6 +246,20 @@ private class SingleItemHistoryModel(
     override fun requestScrollToLatest() = Unit
 
     override fun close() = Unit
+}
+
+private class SingleItemWindow(
+    private val item: HistoryItemViewModel,
+) : HistoryItemWindow {
+    override val generation: Long = 0
+    override val size: Int = 1
+
+    override fun peek(index: Int): HistoryItemViewModel {
+        require(index == 0)
+        return item
+    }
+
+    override fun get(index: Int): HistoryItemViewModel = peek(index)
 }
 
 private val HistoryItemViewModel.storageIndex: Int

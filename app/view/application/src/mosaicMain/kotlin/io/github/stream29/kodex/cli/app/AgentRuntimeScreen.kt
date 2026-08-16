@@ -220,9 +220,7 @@ internal fun NewSessionContent(
     val composerLayout = fullComposerLayout.withViewportRows(composerRows)
     val historyRows = (availableRows - composerRows).coerceAtLeast(0)
     Column(modifier = Modifier.width(columns).height(rows)) {
-        Box(modifier = Modifier.width(columns).height(historyRows)) {
-            Text("Enter a prompt to create a session", textStyle = TextStyle.Dim)
-        }
+        Box(modifier = Modifier.width(columns).height(historyRows)) {}
         HistoryComposerSeparator(columns)
         ComposerInput(
             state = composer,

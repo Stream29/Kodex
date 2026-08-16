@@ -5,8 +5,7 @@ import io.github.stream29.kodex.hook.contract.HookTurnContext
 /**
  * One model-visible continuation emitted by a Stop hook run.
  *
- * @property hookRunId Composite identity of all handlers participating in the
- * Stop hook run, in configured order.
+ * @property hookRunId Stable name of the Hook that requested continuation.
  */
 public data class HookPromptFragment(
     public val text: String,

@@ -22,7 +22,6 @@ import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
-import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsEffect
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.NewSessionSettingsState
@@ -49,8 +48,7 @@ import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.verticalScroll
-import io.github.stream29.kodex.hook.contract.HookImportDecision
-import io.github.stream29.kodex.hook.contract.HookManagedSourceState
+import io.github.stream29.kodex.hook.contract.HookManagedState
 import io.github.stream29.kodex.mcp.contract.McpImportDecision
 import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiAuthState
@@ -78,11 +76,15 @@ public fun BoxScope.SettingsPopup(
     }
     val selectedPage by viewModel.selectedPage.collectAsState()
     val dropdowns = SettingsDropdownStates(
+        authentication = rememberTuiDropdownState(),
+        automaticSessionTitle = rememberTuiDropdownState(),
         model = rememberTuiDropdownState(),
         reasoning = rememberTuiDropdownState(),
         serviceTier = rememberTuiDropdownState(),
         agentMode = rememberTuiDropdownState(),
         requestUserInputMode = rememberTuiDropdownState(),
+        newLineKey = rememberTuiDropdownState(),
+        submitKey = rememberTuiDropdownState(),
     )
     var renameRequest by remember(viewModel) {
         mutableStateOf<SessionSettingsEffect.RenameSession?>(null)
@@ -99,10 +101,9 @@ public fun BoxScope.SettingsPopup(
         mutableStateOf<HookEditorRequest?>(null)
     }
     var hookDeleteRequest by remember(viewModel) {
-        mutableStateOf<HookManagedSourceState?>(null)
+        mutableStateOf<HookManagedState?>(null)
     }
-    var hookDetailsSourceId by remember(viewModel) { mutableStateOf<String?>(null) }
-    var hookImportOpen by remember(viewModel) { mutableStateOf(false) }
+    var hookDetailsName by remember(viewModel) { mutableStateOf<String?>(null) }
     val currentOpenLogin by rememberUpdatedState(onOpenLogin)
 
     LaunchedEffect(viewModel.global) {
@@ -131,12 +132,10 @@ public fun BoxScope.SettingsPopup(
         mcpDetailsServerName = null
         hookEditorRequest = null
         hookDeleteRequest = null
-        hookDetailsSourceId = null
+        hookDetailsName = null
         if (selectedPage != SettingsPage.Global) {
             mcpImportOpen = false
             viewModel.global.dismissCodexMcpImport()
-            hookImportOpen = false
-            viewModel.global.dismissCodexHookImport()
         }
     }
 
@@ -195,12 +194,7 @@ public fun BoxScope.SettingsPopup(
                             viewModel.global.previewCodexMcpImport()
                         },
                         onAddHook = { hookEditorRequest = HookEditorRequest() },
-                        onOpenHook = { source -> hookDetailsSourceId = source.sourceId },
-                        onImportHook = {
-                            viewModel.global.dismissCodexHookImport()
-                            hookImportOpen = true
-                            viewModel.global.previewCodexHookImport()
-                        },
+                        onOpenHook = { hook -> hookDetailsName = hook.name },
                     )
                 }
             }
@@ -296,64 +290,59 @@ public fun BoxScope.SettingsPopup(
             },
         )
     }
-    hookDetailsSourceId?.let { sourceId ->
-        val sources by viewModel.global.hookSources.collectAsState()
-        sources.firstOrNull { source -> source.sourceId == sourceId }?.let { source ->
-            HookSourceDetailsDialog(
-                source = source,
-                onDismiss = { hookDetailsSourceId = null },
+    hookDetailsName?.let { name ->
+        val hooks by viewModel.global.hooks.collectAsState()
+        hooks.firstOrNull { hook -> hook.name == name }?.let { hook ->
+            HookDetailsDialog(
+                hook = hook,
+                onDismiss = { hookDetailsName = null },
                 onEdit = {
-                    viewModel.global.hookSourceEditorDraft(source.sourceId)?.let { draft ->
-                        hookDetailsSourceId = null
+                    viewModel.global.hookEditorDraft(hook.name)?.let { draft ->
+                        hookDetailsName = null
                         hookEditorRequest = HookEditorRequest(
-                            sourceId = source.sourceId,
+                            name = hook.name,
                             draft = draft,
                         )
                     }
                 },
                 onDelete = {
-                    hookDetailsSourceId = null
-                    hookDeleteRequest = source
-                },
-                onSetEnabled = {
-                    viewModel.global.setHookSourceEnabled(source.sourceId, !source.enabled)
+                    hookDetailsName = null
+                    hookDeleteRequest = hook
                 },
             )
         }
     }
     hookEditorRequest?.let { request ->
-        HookSourceEditorDialog(
+        HookEditorDialog(
             request = request,
             onDismiss = { hookEditorRequest = null },
             onSave = { draft ->
-                request.sourceId?.let { sourceId ->
-                    viewModel.global.editHookSource(sourceId, draft)
-                } ?: viewModel.global.addHookSource(draft)
+                request.name?.let { name ->
+                    viewModel.global.editHook(name, draft)
+                } ?: viewModel.global.addHook(draft)
                 hookEditorRequest = null
             },
         )
     }
-    hookDeleteRequest?.let { source ->
+    hookDeleteRequest?.let { hook ->
         HookDeleteConfirmationDialog(
-            source = source,
+            hook = hook,
             onDismiss = { hookDeleteRequest = null },
             onConfirm = {
-                viewModel.global.deleteHookSource(source.sourceId)
+                viewModel.global.deleteHook(hook.name)
                 hookDeleteRequest = null
             },
         )
     }
-    if (hookImportOpen) {
-        val preview by viewModel.global.hookImportPreview.collectAsState()
-        HookImportDialog(
-            preview = preview,
-            onApply = { previewId: Long, decisions: Map<String, HookImportDecision> ->
-                viewModel.global.applyCodexHookImport(previewId, decisions)
-                hookImportOpen = false
+    val codexHomePicker by viewModel.global.codexHomePicker.collectAsState()
+    codexHomePicker?.let { picker ->
+        DirectoryPickerPopup(
+            viewModel = picker.viewModel,
+            onDismissRequest = {
+                viewModel.global.dismissCodexHomePicker(picker)
             },
-            onDismiss = {
-                viewModel.global.dismissCodexHookImport()
-                hookImportOpen = false
+            onDirectorySelected = { directory ->
+                viewModel.global.selectCodexHome(picker, directory)
             },
         )
     }
@@ -397,8 +386,7 @@ private fun SettingsPageContent(
     onOpenMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
     onImportMcp: () -> Unit,
     onAddHook: () -> Unit,
-    onOpenHook: (HookManagedSourceState) -> Unit,
-    onImportHook: () -> Unit,
+    onOpenHook: (HookManagedState) -> Unit,
 ) {
     when (page) {
         SettingsPage.Global -> GlobalSettingsContent(
@@ -409,7 +397,6 @@ private fun SettingsPageContent(
             onImportMcp = onImportMcp,
             onAddHook = onAddHook,
             onOpenHook = onOpenHook,
-            onImportHook = onImportHook,
         )
 
         SettingsPage.Session -> SessionSettingsContent(viewModel.session, dropdowns)
@@ -425,24 +412,19 @@ private fun GlobalSettingsContent(
     onOpenMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
     onImportMcp: () -> Unit,
     onAddHook: () -> Unit,
-    onOpenHook: (HookManagedSourceState) -> Unit,
-    onImportHook: () -> Unit,
+    onOpenHook: (HookManagedState) -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
     val authentication by viewModel.authentication.collectAsState()
     val accountUsage by viewModel.accountUsage.collectAsState()
     val mcpServers by viewModel.mcpServers.collectAsState()
-    val hooksEnabled by viewModel.hooksEnabled.collectAsState()
-    val hookSources by viewModel.hookSources.collectAsState()
+    val hooks by viewModel.hooks.collectAsState()
 
-    Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
-        Text("Codex source (auth and imports)", color = SettingsForeground)
-        Text(
-            state.codexHome.toString(),
-            modifier = Modifier.fillMaxWidth(),
-            color = SettingsForeground,
-        )
-    }
+    SettingsPathField(
+        label = "Codex home",
+        value = state.codexHome.toString(),
+        onBrowse = viewModel::requestCodexHome,
+    )
     McpSettingsContent(
         servers = mcpServers,
         onAdd = onAddMcp,
@@ -450,30 +432,21 @@ private fun GlobalSettingsContent(
         onImport = onImportMcp,
     )
     HookSettingsContent(
-        featureEnabled = hooksEnabled,
-        sources = hookSources,
-        onSetFeatureEnabled = viewModel::setHooksEnabled,
+        hooks = hooks,
         onAdd = onAddHook,
         onOpenDetails = onOpenHook,
-        onImport = onImportHook,
     )
-    SettingsChoiceGroup(
+    SettingsDropdownField(
         label = "Authentication",
-        options = KodexAuthSource.entries.toList(),
-        selected = state.authSource,
-        optionLabel = KodexAuthSource::dialogLabel,
+        selectedLabel = state.authSource.dialogLabel(),
+        dropdownState = dropdowns.authentication,
         background = SettingsHomeBackground,
-        enabled = true,
-        onSelect = viewModel::updateAuthSource,
     )
-    SettingsChoiceGroup(
+    SettingsDropdownField(
         label = "Automatic session title",
-        options = listOf(true, false),
-        selected = state.sessionTitle.enabled,
-        optionLabel = { enabled -> if (enabled) "Enabled" else "Disabled" },
+        selectedLabel = state.sessionTitle.enabled.enabledLabel(),
+        dropdownState = dropdowns.automaticSessionTitle,
         background = SettingsHomeBackground,
-        enabled = true,
-        onSelect = viewModel::updateSessionTitleEnabled,
     )
     SettingsDropdownField(
         label = "Title model",
@@ -497,36 +470,20 @@ private fun GlobalSettingsContent(
         onUseReset = viewModel::requestUsageReset,
     )
     Row(modifier = Modifier.fillMaxWidth().background(SettingsNewLineBackground)) {
-        Column(modifier = Modifier.weight(1f).background(SettingsNewLineBackground)) {
-            Text("New line key", color = SettingsForeground)
-            Row {
-                NewLineKey.entries.forEachIndexed { index, key ->
-                    if (index != 0) Text(" ")
-                    TuiButton(
-                        label = key.dialogLabel(),
-                        modifier = Modifier.background(SettingsNewLineBackground),
-                        color = SettingsForeground,
-                        selected = key == state.newLineKey,
-                        onClick = { viewModel.updateNewLineKey(key) },
-                    )
-                }
-            }
-        }
-        Column(modifier = Modifier.weight(1f).background(SettingsSubmitKeyBackground)) {
-            Text("Submit key", color = SettingsForeground)
-            Row {
-                SubmitKey.entries.forEachIndexed { index, key ->
-                    if (index != 0) Text(" ")
-                    TuiButton(
-                        label = key.dialogLabel(),
-                        modifier = Modifier.background(SettingsSubmitKeyBackground),
-                        color = SettingsForeground,
-                        selected = key == state.newLineKey.submitKey,
-                        onClick = { viewModel.updateNewLineKey(key.newLineKey) },
-                    )
-                }
-            }
-        }
+        SettingsDropdownField(
+            label = "New line key",
+            selectedLabel = state.newLineKey.dialogLabel(),
+            dropdownState = dropdowns.newLineKey,
+            background = SettingsNewLineBackground,
+            modifier = Modifier.weight(1f),
+        )
+        SettingsDropdownField(
+            label = "Submit key",
+            selectedLabel = state.newLineKey.submitKey.dialogLabel(),
+            dropdownState = dropdowns.submitKey,
+            background = SettingsSubmitKeyBackground,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
@@ -626,19 +583,40 @@ private fun WorkingDirectorySettingsContent(
     snapshot: SessionSettingsSnapshot,
     onBrowse: () -> Unit,
 ) {
+    SettingsPathField(
+        label = "Working directory",
+        value = snapshot.configuration.workingDirectory.toString(),
+        enabled = snapshot.editable,
+        onBrowse = onBrowse,
+    )
+}
+
+@Composable
+internal fun SettingsPathField(
+    label: String,
+    value: String,
+    enabled: Boolean = true,
+    onBrowse: () -> Unit,
+) {
     Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
-        Text("Working directory", color = SettingsForeground)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(SettingsSectionHeaderBackground),
+        ) {
+            Text("$label ", color = SettingsForeground)
+            TuiButton(
+                label = "Browse",
+                modifier = Modifier.background(SettingsSectionHeaderBackground),
+                color = SettingsForeground,
+                enabled = enabled,
+                onClick = onBrowse,
+            )
+        }
         Text(
-            value = snapshot.configuration.workingDirectory.toString(),
-            modifier = Modifier.fillMaxWidth(),
+            value = value,
+            modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground),
             color = SettingsForeground,
-        )
-        TuiButton(
-            label = "Browse",
-            modifier = Modifier.background(SettingsHomeBackground),
-            color = SettingsForeground,
-            enabled = snapshot.editable,
-            onClick = onBrowse,
         )
     }
 }
@@ -733,19 +711,21 @@ private fun NewSessionConfigurationContent(
 }
 
 @Composable
-private fun SettingsDropdownField(
+internal fun SettingsDropdownField(
     label: String,
     selectedLabel: String,
     dropdownState: TuiDropdownState,
     background: Color,
+    modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    Column(modifier = Modifier.fillMaxWidth().background(background)) {
+    Row(modifier = modifier.fillMaxWidth().background(background)) {
         Text(label, color = SettingsForeground)
+        Text(" ")
         TuiDropdownTrigger(
             dropdownState = dropdownState,
             label = selectedLabel,
-            modifier = Modifier.fillMaxWidth().background(background),
+            modifier = Modifier.background(background),
             color = SettingsForeground,
             enabled = enabled,
         )
@@ -772,6 +752,22 @@ private fun BoxScope.GlobalSettingsDropdownMenus(
 ) {
     val state by viewModel.state.collectAsState()
     TuiDropdownMenu(
+        dropdownState = dropdowns.authentication,
+        options = KodexAuthSource.entries.toList(),
+        selected = state.authSource,
+        optionLabel = KodexAuthSource::dialogLabel,
+        backgroundColor = PopupMenuBackground,
+        onSelect = viewModel::updateAuthSource,
+    )
+    TuiDropdownMenu(
+        dropdownState = dropdowns.automaticSessionTitle,
+        options = listOf(true, false),
+        selected = state.sessionTitle.enabled,
+        optionLabel = Boolean::enabledLabel,
+        backgroundColor = PopupMenuBackground,
+        onSelect = viewModel::updateSessionTitleEnabled,
+    )
+    TuiDropdownMenu(
         dropdownState = dropdowns.model,
         options = state.modelOptions,
         selected = state.effectiveSessionTitleModel,
@@ -786,6 +782,22 @@ private fun BoxScope.GlobalSettingsDropdownMenus(
         optionLabel = ReasoningEffort::displayName,
         backgroundColor = PopupMenuBackground,
         onSelect = viewModel::updateSessionTitleReasoningEffort,
+    )
+    TuiDropdownMenu(
+        dropdownState = dropdowns.newLineKey,
+        options = NewLineKey.entries.toList(),
+        selected = state.newLineKey,
+        optionLabel = NewLineKey::dialogLabel,
+        backgroundColor = PopupMenuBackground,
+        onSelect = viewModel::updateNewLineKey,
+    )
+    TuiDropdownMenu(
+        dropdownState = dropdowns.submitKey,
+        options = SubmitKey.entries.toList(),
+        selected = state.newLineKey.submitKey,
+        optionLabel = SubmitKey::dialogLabel,
+        backgroundColor = PopupMenuBackground,
+        onSelect = { submitKey -> viewModel.updateNewLineKey(submitKey.newLineKey) },
     )
 }
 
@@ -945,47 +957,27 @@ private fun BoxScope.RenameSessionDialog(
     }
 }
 
-@Composable
-private fun <T> SettingsChoiceGroup(
-    label: String,
-    options: List<T>,
-    selected: T,
-    optionLabel: (T) -> String,
-    background: Color,
-    enabled: Boolean,
-    onSelect: (T) -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth().background(background)) {
-        Text(label, color = SettingsForeground)
-        Row {
-            options.forEachIndexed { index, option ->
-                if (index != 0) Text(" ")
-                TuiButton(
-                    label = optionLabel(option),
-                    modifier = Modifier.background(background),
-                    color = SettingsForeground,
-                    enabled = enabled,
-                    selected = option == selected,
-                    onClick = { onSelect(option) },
-                )
-            }
-        }
-    }
-}
-
 private class SettingsDropdownStates(
+    val authentication: TuiDropdownState,
+    val automaticSessionTitle: TuiDropdownState,
     val model: TuiDropdownState,
     val reasoning: TuiDropdownState,
     val serviceTier: TuiDropdownState,
     val agentMode: TuiDropdownState,
     val requestUserInputMode: TuiDropdownState,
+    val newLineKey: TuiDropdownState,
+    val submitKey: TuiDropdownState,
 ) {
     fun dismissAll() {
+        authentication.dismiss()
+        automaticSessionTitle.dismiss()
         model.dismiss()
         reasoning.dismiss()
         serviceTier.dismiss()
         agentMode.dismiss()
         requestUserInputMode.dismiss()
+        newLineKey.dismiss()
+        submitKey.dismiss()
     }
 }
 
@@ -1025,6 +1017,8 @@ private fun SubmitKey.dialogLabel(): String = when (this) {
     SubmitKey.Enter -> "Enter"
     SubmitKey.CtrlEnter -> "Ctrl+Enter"
 }
+
+private fun Boolean.enabledLabel(): String = if (this) "Enabled" else "Disabled"
 
 private fun KodexAuthSource.dialogLabel(): String = when (this) {
     KodexAuthSource.Codex -> "Codex"
@@ -1089,6 +1083,11 @@ internal val SettingsHomeBackground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.surface
+
+internal val SettingsSectionHeaderBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surfaceContainerHigh
 
 internal val SettingsNewLineBackground: Color
     @Composable

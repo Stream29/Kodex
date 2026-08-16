@@ -1,11 +1,17 @@
 package io.github.stream29.kodex.cli.components
 
+import com.jakewharton.mosaic.focus.FocusState
+import com.jakewharton.mosaic.focus.focusable
+import com.jakewharton.mosaic.focus.onFocusChanged
+import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.terminal.PasteEvent
 import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.Column
+import com.jakewharton.mosaic.ui.Text
 import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -156,6 +162,76 @@ val textInputTest by testSuite {
             awaitSnapshot()
 
             assertEquals(state.value, observed)
+        }
+    }
+
+    test("unmodified vertical arrows leave the input only at visual boundaries") {
+        val state = TextInputState(TextInputValue("abcdefgh", cursorOffset = 4))
+        var focused = ""
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Column {
+                    Text(
+                        value = "before",
+                        modifier = Modifier
+                            .onFocusChanged {
+                                if (it == FocusState.Active) focused = "before"
+                            }
+                            .focusable(),
+                    )
+                    TextInput(
+                        state = state,
+                        layout = TextInputLayout.create(
+                            value = state.value,
+                            width = 3,
+                            softWrap = true,
+                        ),
+                        modifier = Modifier.onFocusChanged {
+                            if (it == FocusState.Active) focused = "input"
+                        },
+                        autoFocus = true,
+                    )
+                    Text(
+                        value = "after",
+                        modifier = Modifier
+                            .onFocusChanged {
+                                if (it == FocusState.Active) focused = "after"
+                            }
+                            .focusable(),
+                    )
+                }
+            }
+            assertEquals("input", focused)
+
+            sendKeyEvent(KeyboardEvent(codepoint = KeyboardEvent.Up))
+            awaitSnapshot()
+            assertEquals("input", focused)
+            assertEquals(1, state.value.cursorOffset)
+
+            sendKeyEvent(KeyboardEvent(codepoint = KeyboardEvent.Up))
+            awaitSnapshot()
+            assertEquals("before", focused)
+            assertEquals(1, state.value.cursorOffset)
+
+            sendKeyEvent(KeyboardEvent(codepoint = 9))
+            awaitSnapshot()
+            assertEquals("input", focused)
+
+            sendKeyEvent(KeyboardEvent(codepoint = KeyboardEvent.Down))
+            awaitSnapshot()
+            assertEquals("input", focused)
+            assertEquals(4, state.value.cursorOffset)
+
+            sendKeyEvent(KeyboardEvent(codepoint = KeyboardEvent.Down))
+            awaitSnapshot()
+            assertEquals("input", focused)
+            assertEquals(7, state.value.cursorOffset)
+
+            sendKeyEvent(KeyboardEvent(codepoint = KeyboardEvent.Down))
+            awaitSnapshot()
+            assertEquals("after", focused)
+            assertEquals(7, state.value.cursorOffset)
         }
     }
 

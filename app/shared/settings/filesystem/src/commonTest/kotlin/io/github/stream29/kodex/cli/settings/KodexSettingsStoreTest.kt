@@ -2,15 +2,8 @@ package io.github.stream29.kodex.cli.settings
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.hook.contract.HookCodexImportIdentity
-import io.github.stream29.kodex.hook.contract.HookCodexSourceKind
-import io.github.stream29.kodex.hook.contract.HookCommandDefinition
-import io.github.stream29.kodex.hook.contract.HookConfiguration
-import io.github.stream29.kodex.hook.contract.HookDeclarations
-import io.github.stream29.kodex.hook.contract.HookEnvironmentValue
-import io.github.stream29.kodex.hook.contract.HookMatcher
-import io.github.stream29.kodex.hook.contract.HookMatcherGroup
-import io.github.stream29.kodex.hook.contract.HookSourceConfiguration
+import io.github.stream29.kodex.hook.contract.HookBody
+import io.github.stream29.kodex.hook.contract.HookType
 import io.github.stream29.kodex.mcp.contract.McpOAuthClient
 import io.github.stream29.kodex.mcp.contract.McpOAuthConfiguration
 import io.github.stream29.kodex.mcp.contract.McpOAuthTokenEndpointAuthMethod
@@ -78,7 +71,7 @@ val kodexSettingsStoreTest by testSuite(
 
             assertEquals(defaults, store.settings.value)
             assertEquals(emptyMap(), store.settings.value.mcpServers)
-            assertEquals(HookConfiguration(), store.settings.value.hooks)
+            assertEquals(emptyMap(), store.settings.value.hooks)
 
             SystemCoroutineFileSystem.writeString(
                 Path(codexHome, "config.toml"),
@@ -108,7 +101,12 @@ val kodexSettingsStoreTest by testSuite(
                     model = OpenAiModelId("title-model"),
                     reasoningEffort = ReasoningEffort.Medium,
                 ),
-                hooks = HookConfiguration(featureEnabled = false),
+                hooks = mapOf(
+                    "finish_check" to HookBody(
+                        type = HookType.Stop,
+                        command = "finish-command",
+                    ),
+                ),
             )
             val store = openStore(
                 root = root,
@@ -234,39 +232,16 @@ val kodexSettingsStoreTest by testSuite(
         }
     }
 
-    test("round trips Kodex Hook sources with stable identity and environment values") {
-        withSettingsDirectory("hook-sources") { root ->
-            val expected = HookConfiguration(
-                featureEnabled = false,
-                sources = listOf(
-                    HookSourceConfiguration(
-                        id = "stable-source-id",
-                        name = "Project checks",
-                        enabled = false,
-                        importIdentity = HookCodexImportIdentity(
-                            sourceKind = HookCodexSourceKind.Project,
-                            normalizedPath = Path(root, ".codex", "hooks.json").toString(),
-                        ),
-                        environment = mapOf(
-                            "HOOK_TOKEN" to HookEnvironmentValue("private-hook-token"),
-                        ),
-                        hooks = HookDeclarations(
-                            preToolUse = listOf(
-                                HookMatcherGroup(
-                                    matcher = HookMatcher.Exact("shell|Bash"),
-                                    hooks = listOf(
-                                        HookCommandDefinition(
-                                            command = "check-command",
-                                            timeoutSeconds = 9,
-                                            enabled = false,
-                                            statusMessage = "Checking",
-                                            additionalContextLimit = 1200,
-                                        ),
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
+    test("round trips the ordered native Hook name map") {
+        withSettingsDirectory("hooks") { root ->
+            val expected = linkedMapOf(
+                "guard_tools" to HookBody(
+                    type = HookType.PreToolUse,
+                    command = "check-command",
+                ),
+                "verify_stop" to HookBody(
+                    type = HookType.Stop,
+                    command = "verify-command",
                 ),
             )
             val store = openStore(root)
@@ -276,9 +251,11 @@ val kodexSettingsStoreTest by testSuite(
             val reopened = openStore(root)
             assertEquals(expected, reopened.settings.value.hooks)
             val yaml = SystemCoroutineFileSystem.readString(settingsPath(root))
-            assertTrue("stable-source-id" in yaml)
-            assertTrue("private-hook-token" in yaml)
-            assertFalse("private-hook-token" in reopened.settings.value.hooks.toString())
+            assertTrue("guard_tools:" in yaml, yaml)
+            assertTrue("type: pre_tool_use" in yaml, yaml)
+            assertTrue("command: check-command" in yaml, yaml)
+            assertFalse("sources:" in yaml, yaml)
+            assertFalse("matcher:" in yaml, yaml)
         }
     }
 
@@ -304,7 +281,12 @@ val kodexSettingsStoreTest by testSuite(
                 mcpServers = mapOf(
                     "default" to McpServerConfiguration.Stdio(command = "default-server"),
                 ),
-                hooks = HookConfiguration(featureEnabled = false),
+                hooks = mapOf(
+                    "default_hook" to HookBody(
+                        type = HookType.Stop,
+                        command = "default-command",
+                    ),
+                ),
             )
             val original = """
                 schema_version: 2

@@ -13,6 +13,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanE
 import io.github.stream29.kodex.agentstorage.contract.prevIndex
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
+import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
 import io.github.stream29.kodex.app.history.contract.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingKind
@@ -42,16 +43,20 @@ internal class AgentHistoryViewModelImpl(
 ) : AgentHistoryViewModel {
     private val commands = Channel<HistoryCommand>(capacity = Channel.BUFFERED)
     private val olderDemandPending = MutableStateFlow(false)
-    private val committedSequence = MutableStateFlow<HistorySequence>(HistorySequence.Empty)
-    private val mutableGeneration = MutableStateFlow(0L)
-    private val mutableCommittedItemCount = MutableStateFlow(0)
+    private val mutableCommittedItems = MutableStateFlow(
+        CommittedHistoryItemWindow(
+            generation = 0,
+            sequence = HistorySequence.Empty,
+            onOlderDemand = ::registerOlderDemand,
+        ),
+    )
     private val mutableLoadState =
         MutableStateFlow<AgentHistoryLoadState>(AgentHistoryLoadState.Initializing)
     private val mutablePendingTools = MutableStateFlow<List<UnstableCleanEvent>>(emptyList())
     private val mutableStreamingItem = MutableStateFlow<HistoryStreamingItem?>(null)
 
-    override val generation: StateFlow<Long> = mutableGeneration.asStateFlow()
-    override val committedItemCount: StateFlow<Int> = mutableCommittedItemCount.asStateFlow()
+    override val committedItems: StateFlow<HistoryItemWindow> =
+        mutableCommittedItems.asStateFlow()
     override val loadState: StateFlow<AgentHistoryLoadState> = mutableLoadState.asStateFlow()
     override val pendingTools: StateFlow<List<UnstableCleanEvent>> =
         mutablePendingTools.asStateFlow()
@@ -110,13 +115,13 @@ internal class AgentHistoryViewModelImpl(
         }
     }
 
-    override fun peek(index: Int): HistoryItemViewModel = committedSequence.value[index]
-
-    override fun get(index: Int): HistoryItemViewModel {
-        val sequence = committedSequence.value
-        val item = sequence[index]
+    private fun registerOlderDemand(
+        window: CommittedHistoryItemWindow,
+        index: Int,
+    ) {
         if (
-            index >= (sequence.size - OlderDemandDistance).coerceAtLeast(0) &&
+            mutableCommittedItems.value === window &&
+            index >= (window.size - OlderDemandDistance).coerceAtLeast(0) &&
             (mutableLoadState.value as? AgentHistoryLoadState.Ready)?.hasOlder == true &&
             olderDemandPending.compareAndSet(expect = false, update = true)
         ) {
@@ -124,12 +129,11 @@ internal class AgentHistoryViewModelImpl(
                 olderDemandPending.value = false
             }
         }
-        return item
     }
 
     override suspend fun read(item: HistoryItemViewModel): StableCleanEvent {
         val index = item.storageIndex
-        check(committedSequence.value.find(index) === item) {
+        check(mutableCommittedItems.value.find(index) === item) {
             "Committed history item $index is no longer current."
         }
         return withContext(Dispatchers.Default) {
@@ -138,8 +142,9 @@ internal class AgentHistoryViewModelImpl(
     }
 
     override fun contains(generation: Long, storageIndex: Int): Boolean =
-        generation == mutableGeneration.value &&
-            committedSequence.value.find(storageIndex) != null
+        mutableCommittedItems.value.let { window ->
+            generation == window.generation && window.find(storageIndex) != null
+        }
 
     override fun notifyContentChanged() {
         if (mutableFollowsLatest) listState.requestScrollToStart()
@@ -162,18 +167,26 @@ internal class AgentHistoryViewModelImpl(
         var lastInvalidation: Pair<Int, Int>? = null
 
         suspend fun reload(latestIndex: Int, invalidate: Boolean) {
-            if (invalidate) {
-                val currentGeneration = mutableGeneration.value
+            val currentGeneration = mutableCommittedItems.value.generation
+            val reloadGeneration = if (invalidate) {
                 check(currentGeneration < Long.MAX_VALUE) { "History generations are exhausted." }
-                mutableGeneration.value = currentGeneration + 1
+                currentGeneration + 1
+            } else {
+                currentGeneration
             }
-            publishCommitted(HistorySequence.Empty)
+            publishCommitted(
+                sequence = HistorySequence.Empty,
+                generation = reloadGeneration,
+            )
             mutableLoadState.value = AgentHistoryLoadState.Initializing
             val batch = loadBatch(latestIndex, HistoryBatchSize)
             observedLatestIndex = latestIndex
             nextOlderIndex = batch.nextOlderIndex
             initialized = true
-            publishCommitted(HistorySequence.of(batch.items))
+            publishCommitted(
+                sequence = HistorySequence.of(batch.items),
+                generation = reloadGeneration,
+            )
             mutableLoadState.value = AgentHistoryLoadState.Ready(
                 hasOlder = nextOlderIndex != null,
             )
@@ -191,7 +204,7 @@ internal class AgentHistoryViewModelImpl(
             }
             if (latestIndex == observedLatestIndex) return
 
-            val current = committedSequence.value
+            val current = mutableCommittedItems.value.sequence
             val newestLoaded = current.firstOrNull()?.storageIndex
             val newestStored = withContext(Dispatchers.Default) {
                 agentState.storage.stable.floorToIndex(latestIndex)
@@ -211,7 +224,7 @@ internal class AgentHistoryViewModelImpl(
                 publishCommitted(
                     HistorySequence.concat(
                         HistorySequence.of(additions),
-                        committedSequence.value,
+                        mutableCommittedItems.value.sequence,
                     ),
                 )
             }
@@ -229,7 +242,7 @@ internal class AgentHistoryViewModelImpl(
                 nextOlderIndex = batch.nextOlderIndex
                 publishCommitted(
                     HistorySequence.concat(
-                        committedSequence.value,
+                        mutableCommittedItems.value.sequence,
                         HistorySequence.of(batch.items),
                     ),
                 )
@@ -311,11 +324,18 @@ internal class AgentHistoryViewModelImpl(
             }
         }
 
-    private fun publishCommitted(sequence: HistorySequence) {
-        val changed = committedSequence.value !== sequence
-        committedSequence.value = sequence
-        mutableCommittedItemCount.value = sequence.size
-        if (changed) notifyContentChanged()
+    private fun publishCommitted(
+        sequence: HistorySequence,
+        generation: Long = mutableCommittedItems.value.generation,
+    ) {
+        val current = mutableCommittedItems.value
+        if (current.generation == generation && current.sequence === sequence) return
+        mutableCommittedItems.value = CommittedHistoryItemWindow(
+            generation = generation,
+            sequence = sequence,
+            onOlderDemand = ::registerOlderDemand,
+        )
+        notifyContentChanged()
     }
 
     private fun publishPendingTools(pending: List<UnstableCleanEvent>) {
@@ -426,6 +446,24 @@ private sealed interface HistoryCommand {
     data class Refresh(val latestIndex: Int) : HistoryCommand
     data object LoadOlder : HistoryCommand
     data class ExternalWriteFinished(val startIndex: Int, val endIndex: Int) : HistoryCommand
+}
+
+private class CommittedHistoryItemWindow(
+    override val generation: Long,
+    val sequence: HistorySequence,
+    private val onOlderDemand: (CommittedHistoryItemWindow, Int) -> Unit,
+) : HistoryItemWindow {
+    override val size: Int = sequence.size
+
+    override fun peek(index: Int): HistoryItemViewModel = sequence[index]
+
+    override fun get(index: Int): HistoryItemViewModel {
+        val item = sequence[index]
+        onOlderDemand(this, index)
+        return item
+    }
+
+    fun find(storageIndex: Int): HistoryItemViewModel? = sequence.find(storageIndex)
 }
 
 /**

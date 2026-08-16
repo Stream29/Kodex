@@ -1,55 +1,31 @@
 package io.github.stream29.kodex.hook.impl
 
-import io.github.stream29.kodex.hook.contract.HookCommandDefinition
 import io.github.stream29.kodex.hook.contract.HookConfiguration
-import io.github.stream29.kodex.hook.contract.HookEvent
-import io.github.stream29.kodex.hook.contract.HookMatcher
-import io.github.stream29.kodex.hook.contract.HookSourceConfiguration
+import io.github.stream29.kodex.hook.contract.HookType
 
-/** One enabled command Hook paired with source-dependent execution values. */
+/** One named command ready for execution. */
 internal data class ExecutableHook(
-    val id: String,
-    val matcher: HookMatcher,
-    val definition: HookCommandDefinition,
-    val environment: Map<String, String>,
+    val name: String,
+    val command: String,
 )
 
-internal data class ResolvedHooks(
-    val preToolUse: List<ExecutableHook> = emptyList(),
-    val permissionRequest: List<ExecutableHook> = emptyList(),
-    val postToolUse: List<ExecutableHook> = emptyList(),
-    val preCompact: List<ExecutableHook> = emptyList(),
-    val postCompact: List<ExecutableHook> = emptyList(),
-    val userPromptSubmit: List<ExecutableHook> = emptyList(),
-    val stop: List<ExecutableHook> = emptyList(),
-)
+/** Hook commands grouped by type while preserving their configured order. */
+internal class ResolvedHooks(
+    private val hooks: Map<HookType, List<ExecutableHook>> = emptyMap(),
+) {
+    operator fun get(type: HookType): List<ExecutableHook> = hooks[type].orEmpty()
+}
 
-internal fun HookConfiguration.resolveHooks(): ResolvedHooks {
-    if (!featureEnabled) return ResolvedHooks()
-    return ResolvedHooks(
-        preToolUse = sources.resolveHandlers(HookEvent.PreToolUse),
-        permissionRequest = sources.resolveHandlers(HookEvent.PermissionRequest),
-        postToolUse = sources.resolveHandlers(HookEvent.PostToolUse),
-        preCompact = sources.resolveHandlers(HookEvent.PreCompact),
-        postCompact = sources.resolveHandlers(HookEvent.PostCompact),
-        userPromptSubmit = sources.resolveHandlers(HookEvent.UserPromptSubmit),
-        stop = sources.resolveHandlers(HookEvent.Stop),
+internal fun HookConfiguration.resolveHooks(): ResolvedHooks =
+    ResolvedHooks(
+        entries.groupBy(
+            keySelector = { (_, body) -> body.type },
+            valueTransform = { (name, body) ->
+                require(name.isNotBlank()) { "A Hook name must not be blank." }
+                ExecutableHook(
+                    name = name,
+                    command = body.command,
+                )
+            },
+        ),
     )
-}
-
-private fun List<HookSourceConfiguration>.resolveHandlers(
-    event: HookEvent,
-): List<ExecutableHook> = flatMap { source ->
-    if (!source.enabled) return@flatMap emptyList()
-    source.hooks.groups(event).flatMapIndexed { groupIndex, group ->
-        group.hooks.mapIndexedNotNull { handlerIndex, command ->
-            if (!command.enabled) return@mapIndexedNotNull null
-            ExecutableHook(
-                id = "${source.id}:${event.wireName}:$groupIndex:$handlerIndex",
-                matcher = group.matcher,
-                definition = command,
-                environment = source.environment.mapValues { (_, value) -> value.value },
-            )
-        }
-    }
-}

@@ -1,27 +1,22 @@
 package io.github.stream29.kodex.hook.impl
 
-import io.github.stream29.kodex.hook.contract.KodexHooks
 import io.github.stream29.kodex.hook.contract.HookSettings
+import io.github.stream29.kodex.hook.contract.HookType
+import io.github.stream29.kodex.hook.contract.KodexHooks
 import io.github.stream29.kodex.hook.contract.compaction.CompactionHookRequest
 import io.github.stream29.kodex.hook.contract.tool.HookToolInvocation
-import io.github.stream29.kodex.hook.contract.approval.PermissionRequest
-import io.github.stream29.kodex.hook.contract.approval.PermissionRequestResult
 import io.github.stream29.kodex.hook.contract.tool.PostToolUseRequest
 import io.github.stream29.kodex.hook.contract.tool.PreToolUseResult
 import io.github.stream29.kodex.hook.contract.turn.StopRequest
 import io.github.stream29.kodex.hook.contract.turn.StopResult
 import io.github.stream29.kodex.hook.contract.turn.UserPromptSubmitRequest
 import io.github.stream29.kodex.hook.contract.turn.UserPromptSubmitResult
-import io.github.stream29.kodex.hook.impl.projection.CompactCommandInputWire
-import io.github.stream29.kodex.hook.impl.projection.HookJson
-import io.github.stream29.kodex.hook.impl.projection.PermissionRequestCommandInputWire
-import io.github.stream29.kodex.hook.impl.projection.PostToolUseCommandInputWire
-import io.github.stream29.kodex.hook.impl.projection.PreToolUseCommandInputWire
-import io.github.stream29.kodex.hook.impl.projection.StopCommandInputWire
-import io.github.stream29.kodex.hook.impl.projection.UserPromptSubmitCommandInputWire
-import io.github.stream29.kodex.hook.impl.projection.toPostCompactCommandInputWire
-import io.github.stream29.kodex.hook.impl.projection.toPermissionRequestResult
-import io.github.stream29.kodex.hook.impl.projection.toPreCompactCommandInputWire
+import io.github.stream29.kodex.hook.impl.projection.PostToolUsePayload
+import io.github.stream29.kodex.hook.impl.projection.PreToolUsePayload
+import io.github.stream29.kodex.hook.impl.projection.StopPayload
+import io.github.stream29.kodex.hook.impl.projection.UserPromptSubmitPayload
+import io.github.stream29.kodex.hook.impl.projection.encodeHookInput
+import io.github.stream29.kodex.hook.impl.projection.toCompactionPayload
 import io.github.stream29.kodex.hook.impl.projection.toPreToolUseResult
 import io.github.stream29.kodex.hook.impl.projection.toStopResult
 import io.github.stream29.kodex.hook.impl.projection.toUserPromptSubmitResult
@@ -39,8 +34,8 @@ import kotlinx.coroutines.flow.stateIn
 /**
  * [KodexHooks] implementation using a resolved view of global settings.
  *
- * Each invocation reads one immutable resolved snapshot before selecting handlers.
- * Settings changes cannot alter that invocation after handler selection starts.
+ * Each invocation reads one immutable resolved snapshot before selecting commands.
+ * Settings changes cannot alter that invocation after command selection starts.
  */
 public class KodexHooksImpl internal constructor(
     scope: CoroutineScope,
@@ -62,89 +57,67 @@ public class KodexHooksImpl internal constructor(
     override suspend fun onUserPromptSubmit(
         request: UserPromptSubmitRequest,
     ): UserPromptSubmitResult {
-        val hooks = currentHooks()
-        val context = request.context
-        val session = context.session
-        val completed = shellClient.runHooks(
-            hooks = hooks.userPromptSubmit,
-            inputJson = HookJson.encodeToString(
-                UserPromptSubmitCommandInputWire(
-                    sessionId = session.sessionId,
-                    turnId = context.turnId,
-                    transcriptPath = null,
-                    cwd = session.cwd.toString(),
-                    model = session.model,
-                    permissionMode = session.permissionMode.wireName,
-                    prompt = request.prompt,
+        val hooks = currentHooks()[HookType.UserPromptSubmit]
+        val contexts = mutableListOf<String>()
+        val payload = UserPromptSubmitPayload(prompt = request.prompt)
+        for (hook in hooks) {
+            val result = shellClient.runHook(
+                hook = hook,
+                inputJson = encodeHookInput(
+                    hook = hook,
+                    type = HookType.UserPromptSubmit,
+                    context = request.context,
+                    payload = payload,
                 ),
-            ),
-            cwd = session.cwd,
-        ).map(HookRawResult::toUserPromptSubmitResult)
-        val contexts = completed.flatMap { result -> result.additionalContexts }
-        val stopped = completed.firstNotNullOfOrNull { result -> result as? UserPromptSubmitResult.Stop }
-        return if (stopped == null) {
-            UserPromptSubmitResult.Continue(contexts)
-        } else {
-            UserPromptSubmitResult.Stop(stopped.reason, contexts)
+                cwd = request.context.session.cwd,
+            ).toUserPromptSubmitResult()
+            contexts += result.additionalContexts
+            if (result is UserPromptSubmitResult.Stop) {
+                return UserPromptSubmitResult.Stop(result.reason, contexts)
+            }
         }
+        return UserPromptSubmitResult.Continue(contexts)
     }
 
     override suspend fun onStop(request: StopRequest): StopResult {
-        val hooks = currentHooks()
-        val context = request.context
-        val session = context.session
-        val matchedHooks = hooks.stop
-        val hookRunId = matchedHooks.joinToString(separator = "|") { hook ->
-            hook.id
-        }
-        val completed = shellClient.runHooks(
-            hooks = matchedHooks,
-            inputJson = HookJson.encodeToString(
-                StopCommandInputWire(
-                    sessionId = session.sessionId,
-                    turnId = context.turnId,
-                    transcriptPath = null,
-                    cwd = session.cwd.toString(),
-                    model = session.model,
-                    permissionMode = session.permissionMode.wireName,
-                    stopHookActive = request.stopHookActive,
-                    lastAssistantMessage = request.lastAssistantMessage,
+        val hooks = currentHooks()[HookType.Stop]
+        val payload = StopPayload(
+            stopHookActive = request.stopHookActive,
+            lastAssistantMessage = request.lastAssistantMessage,
+        )
+        for (hook in hooks) {
+            val result = shellClient.runHook(
+                hook = hook,
+                inputJson = encodeHookInput(
+                    hook = hook,
+                    type = HookType.Stop,
+                    context = request.context,
+                    payload = payload,
                 ),
-            ),
-            cwd = session.cwd,
-        ).map { result -> result.toStopResult(hookRunId) }
-        completed.firstNotNullOfOrNull { result -> result as? StopResult.Stop }?.let { stopped ->
-            return stopped
+                cwd = request.context.session.cwd,
+            ).toStopResult(hook.name)
+            if (result != StopResult.Finish) return result
         }
-        val fragments = completed
-            .filterIsInstance<StopResult.Continue>()
-            .flatMap(StopResult.Continue::fragments)
-        return if (fragments.isEmpty()) StopResult.Finish else StopResult.Continue(fragments)
+        return StopResult.Finish
     }
 
     override suspend fun onPreToolUse(invocation: HookToolInvocation): PreToolUseResult {
-        val hooks = currentHooks()
-        val context = invocation.context
-        val session = context.session
-        val matcherInputs = invocation.matcherInputs()
-        val inputJson = HookJson.encodeToString(
-            PreToolUseCommandInputWire(
-                sessionId = session.sessionId,
-                turnId = context.turnId,
-                transcriptPath = null,
-                cwd = session.cwd.toString(),
-                model = session.model,
-                permissionMode = session.permissionMode.wireName,
-                toolName = invocation.toolName,
-                toolInput = invocation.input,
-                toolUseId = invocation.toolUseId,
-            ),
+        val hooks = currentHooks()[HookType.PreToolUse]
+        val payload = PreToolUsePayload(
+            toolName = invocation.toolName,
+            toolInput = invocation.input,
+            toolUseId = invocation.toolUseId,
         )
-        for (hook in hooks.preToolUse.matching(matcherInputs)) {
+        for (hook in hooks) {
             val result = shellClient.runHook(
                 hook = hook,
-                inputJson = inputJson,
-                cwd = session.cwd,
+                inputJson = encodeHookInput(
+                    hook = hook,
+                    type = HookType.PreToolUse,
+                    context = invocation.context,
+                    payload = payload,
+                ),
+                cwd = invocation.context.session.cwd,
             ).toPreToolUseResult()
             if (result is PreToolUseResult.Block) return result
         }
@@ -152,87 +125,50 @@ public class KodexHooksImpl internal constructor(
     }
 
     override suspend fun onPostToolUse(request: PostToolUseRequest) {
-        val hooks = currentHooks()
         val invocation = request.invocation
-        val context = invocation.context
-        val session = context.session
-        shellClient.runHooks(
-            hooks = hooks.postToolUse.matching(invocation.matcherInputs()),
-            inputJson = HookJson.encodeToString(
-                PostToolUseCommandInputWire(
-                    sessionId = session.sessionId,
-                    turnId = context.turnId,
-                    transcriptPath = null,
-                    cwd = session.cwd.toString(),
-                    model = session.model,
-                    permissionMode = session.permissionMode.wireName,
-                    toolName = invocation.toolName,
-                    toolInput = invocation.input,
-                    toolResponse = request.response,
-                    toolUseId = invocation.toolUseId,
-                ),
-            ),
-            cwd = session.cwd,
+        val payload = PostToolUsePayload(
+            toolName = invocation.toolName,
+            toolInput = invocation.input,
+            toolResponse = request.response,
+            toolUseId = invocation.toolUseId,
         )
-    }
-
-    override suspend fun onPermissionRequest(request: PermissionRequest): PermissionRequestResult {
-        val hooks = currentHooks()
-        val invocation = request.invocation
-        val context = invocation.context
-        val session = context.session
-        val completed = shellClient.runHooks(
-            hooks = hooks.permissionRequest.matching(invocation.matcherInputs()),
-            inputJson = HookJson.encodeToString(
-                PermissionRequestCommandInputWire(
-                    sessionId = session.sessionId,
-                    turnId = context.turnId,
-                    transcriptPath = null,
-                    cwd = session.cwd.toString(),
-                    model = session.model,
-                    permissionMode = session.permissionMode.wireName,
-                    toolName = invocation.toolName,
-                    toolInput = invocation.input,
-                ),
-            ),
-            cwd = session.cwd,
-        ).map(HookRawResult::toPermissionRequestResult)
-        completed.firstNotNullOfOrNull { result -> result as? PermissionRequestResult.Deny }?.let { denied ->
-            return denied
-        }
-        return if (completed.any { result -> result == PermissionRequestResult.Allow }) {
-            PermissionRequestResult.Allow
-        } else {
-            PermissionRequestResult.NoDecision
+        shellClient.runHooks(
+            hooks = currentHooks()[HookType.PostToolUse],
+            cwd = invocation.context.session.cwd,
+        ) { hook ->
+            encodeHookInput(
+                hook = hook,
+                type = HookType.PostToolUse,
+                context = invocation.context,
+                payload = payload,
+            )
         }
     }
 
     override suspend fun onPreCompact(request: CompactionHookRequest) {
-        runCompactionHooks(
-            hooks = currentHooks().preCompact,
-            request = request,
-            input = request.toPreCompactCommandInputWire(),
-        )
+        runCompactionHooks(HookType.PreCompact, request)
     }
 
     override suspend fun onPostCompact(request: CompactionHookRequest) {
-        runCompactionHooks(
-            hooks = currentHooks().postCompact,
-            request = request,
-            input = request.toPostCompactCommandInputWire(),
-        )
+        runCompactionHooks(HookType.PostCompact, request)
     }
 
     private suspend fun runCompactionHooks(
-        hooks: List<ExecutableHook>,
+        type: HookType,
         request: CompactionHookRequest,
-        input: CompactCommandInputWire,
     ) {
+        val payload = request.toCompactionPayload()
         shellClient.runHooks(
-            hooks = hooks.matching(listOf(request.trigger.wireName)),
-            inputJson = HookJson.encodeToString(input),
+            hooks = currentHooks()[type],
             cwd = request.context.session.cwd,
-        )
+        ) { hook ->
+            encodeHookInput(
+                hook = hook,
+                type = type,
+                context = request.context,
+                payload = payload,
+            )
+        }
     }
 
     private fun currentHooks(): ResolvedHooks {
@@ -256,6 +192,3 @@ public fun CoroutineScope.KodexHooksImpl(
         throw failure
     }
 }
-
-private fun HookToolInvocation.matcherInputs(): List<String> =
-    listOf(toolName) + matcherAliases

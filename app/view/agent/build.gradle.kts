@@ -11,5 +11,8 @@ kotlin {
             implementation(project(":app-view-components"))
             implementation(libs.mosaic.runtime)
         }
+        mosaicTest.dependencies {
+            implementation(libs.mosaic.testing)
+        }
     }
 }

@@ -113,7 +113,7 @@ val rootSessionViewModelTest by testSuite {
                 withTimeout(10.seconds) {
                     model.rootAgent.history.loadState.first { state ->
                         state is AgentHistoryLoadState.Ready &&
-                            model.rootAgent.history.committedItemCount.value == 64
+                            model.rootAgent.history.committedItems.value.size == 64
                     }
                 }
 
@@ -121,7 +121,7 @@ val rootSessionViewModelTest by testSuite {
                 assertEquals(1, probe.historyAddresses.size)
                 assertEquals(model.rootAgent.address, probe.agentAddresses.single())
                 assertEquals(model.rootAgent.address, probe.historyAddresses.single())
-                assertEquals(64, model.rootAgent.history.committedItemCount.value)
+                assertEquals(64, model.rootAgent.history.committedItems.value.size)
                 assertTrue(topology.nodes.drop(1).all { node ->
                     node.materialization == PersistedAgentMaterializationState.Unloaded
                 })
