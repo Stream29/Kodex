@@ -6,8 +6,8 @@ import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
-import io.github.stream29.kodex.app.agent.contract.AgentStreamKind
-import io.github.stream29.kodex.app.agent.contract.AgentStreamTail
+import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
+import io.github.stream29.kodex.app.history.contract.HistoryStreamingKind
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.ResponseItem
@@ -45,7 +45,7 @@ class StreamingRequestResponseViewTest {
         runMosaicTest {
             setContentAndSnapshot {
                 Box(Modifier.width(40)) {
-                    AgentStreamTail.Output(AgentStreamKind.Message, events).renderTransientTail()
+                    HistoryStreamingItem.Output(HistoryStreamingKind.Message, events).renderTransientTail()
                 }
             }
             assertEquals("Assistant · streaming\nhello", awaitSnapshot())
@@ -87,7 +87,7 @@ class StreamingRequestResponseViewTest {
         runMosaicTest {
             setContentAndSnapshot {
                 Box(Modifier.width(40)) {
-                    AgentStreamTail.Output(AgentStreamKind.Message, events).renderTransientTail()
+                    HistoryStreamingItem.Output(HistoryStreamingKind.Message, events).renderTransientTail()
                 }
             }
             assertEquals(
@@ -118,7 +118,7 @@ class StreamingRequestResponseViewTest {
         runMosaicTest {
             setContentAndSnapshot {
                 Box(Modifier.width(40)) {
-                    AgentStreamTail.Output(AgentStreamKind.Reasoning, events).renderTransientTail()
+                    HistoryStreamingItem.Output(HistoryStreamingKind.Reasoning, events).renderTransientTail()
                 }
             }
             val snapshot = awaitSnapshot()
@@ -153,7 +153,7 @@ class StreamingRequestResponseViewTest {
         runMosaicTest {
             setContentAndSnapshot {
                 Box(Modifier.width(40)) {
-                    AgentStreamTail.Output(AgentStreamKind.Reasoning, events).renderTransientTail()
+                    HistoryStreamingItem.Output(HistoryStreamingKind.Reasoning, events).renderTransientTail()
                 }
             }
             assertEquals(
@@ -179,7 +179,7 @@ class StreamingRequestResponseViewTest {
         runMosaicTest {
             setContentAndSnapshot {
                 Box(Modifier.width(40)) {
-                    AgentStreamTail.Output(AgentStreamKind.Message, events).renderTransientTail()
+                    HistoryStreamingItem.Output(HistoryStreamingKind.Message, events).renderTransientTail()
                 }
             }
             val snapshot = awaitSnapshot()
@@ -215,7 +215,7 @@ class StreamingRequestResponseViewTest {
         runMosaicTest {
             setContentAndSnapshot {
                 Box(Modifier.width(60)) {
-                    AgentStreamTail.Output(AgentStreamKind.ToolCall, events).renderTransientTail()
+                    HistoryStreamingItem.Output(HistoryStreamingKind.ToolCall, events).renderTransientTail()
                 }
             }
             val collapsed = awaitSnapshot()
@@ -254,7 +254,7 @@ class StreamingRequestResponseViewTest {
         runMosaicTest {
             setContentAndSnapshot {
                 Box(Modifier.width(60)) {
-                    AgentStreamTail.Output(AgentStreamKind.ToolCall, events).renderTransientTail()
+                    HistoryStreamingItem.Output(HistoryStreamingKind.ToolCall, events).renderTransientTail()
                 }
             }
             val collapsed = awaitSnapshot()
@@ -269,7 +269,7 @@ class StreamingRequestResponseViewTest {
                 "Starting response…",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
-                        AgentStreamTail.Started.renderTransientTail()
+                        HistoryStreamingItem.Started.renderTransientTail()
                     }
                 },
             )
@@ -283,7 +283,7 @@ class StreamingRequestResponseViewTest {
                 "Compacting context…",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
-                        AgentStreamTail.Compacting.renderTransientTail()
+                        HistoryStreamingItem.Compacting.renderTransientTail()
                     }
                 },
             )

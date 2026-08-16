@@ -1,37 +1,70 @@
 package io.github.stream29.kodex.cli.history
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.prevIndex
-import io.github.stream29.kodex.app.history.contract.AgentHistoryCursor
-import io.github.stream29.kodex.app.history.contract.AgentHistoryDirection
-import io.github.stream29.kodex.app.history.contract.AgentHistoryEdgeState
-import io.github.stream29.kodex.app.history.contract.AgentHistoryEntry
-import io.github.stream29.kodex.app.history.contract.AgentHistoryEntryKey
-import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadRequest
+import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
-import io.github.stream29.kodex.app.history.contract.AgentHistoryWindowSnapshot
-import io.github.stream29.kodex.app.history.contract.AgentHistoryWindowStatus
+import io.github.stream29.kodex.app.history.contract.HistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
+import io.github.stream29.kodex.app.history.contract.HistoryStreamingKind
+import io.github.stream29.kodex.cli.components.LazyListState
+import io.github.stream29.kodex.cli.components.MutableScrollInteractionSource
+import io.github.stream29.kodex.cli.components.ScrollInputSource
+import io.github.stream29.kodex.cli.components.ScrollInteraction
+import io.github.stream29.kodex.cli.components.ScrollOrientation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koin.core.annotation.Factory
 import org.koin.core.annotation.InjectedParam
 
-/** Finite newest-first committed-history projection for one Agent. */
+/** Newest-first, demand-extended History View state for one Agent. */
 internal class AgentHistoryViewModelImpl(
     private val agentState: KodexAgentState,
     private val scope: CoroutineScope,
 ) : AgentHistoryViewModel {
-    private val commands = Channel<HistoryCommand>(Channel.UNLIMITED)
-    private val mutableWindow = MutableStateFlow(AgentHistoryWindowSnapshot())
+    private val commands = Channel<HistoryCommand>(capacity = Channel.BUFFERED)
+    private val olderDemandPending = MutableStateFlow(false)
+    private val committedSequence = MutableStateFlow<HistorySequence>(HistorySequence.Empty)
+    private val mutableGeneration = MutableStateFlow(0L)
+    private val mutableCommittedItemCount = MutableStateFlow(0)
+    private val mutableLoadState =
+        MutableStateFlow<AgentHistoryLoadState>(AgentHistoryLoadState.Initializing)
+    private val mutablePendingTools = MutableStateFlow<List<UnstableCleanEvent>>(emptyList())
+    private val mutableStreamingItem = MutableStateFlow<HistoryStreamingItem?>(null)
 
-    override val window: StateFlow<AgentHistoryWindowSnapshot> = mutableWindow.asStateFlow()
+    override val generation: StateFlow<Long> = mutableGeneration.asStateFlow()
+    override val committedItemCount: StateFlow<Int> = mutableCommittedItemCount.asStateFlow()
+    override val loadState: StateFlow<AgentHistoryLoadState> = mutableLoadState.asStateFlow()
+    override val pendingTools: StateFlow<List<UnstableCleanEvent>> =
+        mutablePendingTools.asStateFlow()
+    override val streamingItem: StateFlow<HistoryStreamingItem?> =
+        mutableStreamingItem.asStateFlow()
+
+    override val listState: LazyListState = LazyListState()
+    override val scrollInteractionSource: MutableScrollInteractionSource =
+        MutableScrollInteractionSource(::onScrollInteraction)
+
+    private var mutableFollowsLatest: Boolean by mutableStateOf(true)
+    override val followsLatest: Boolean
+        get() = mutableFollowsLatest
 
     init {
         scope.launch { runHistoryLoop() }
@@ -41,8 +74,14 @@ internal class AgentHistoryViewModelImpl(
             }
         }
         scope.launch {
+            agentState.latestIndex.collectLatest { latestIndex ->
+                publishPendingTools(loadPendingTools(latestIndex))
+            }
+        }
+        scope.launch {
             var externalWriteStart: Int? = null
             agentState.state.collect { state ->
+                publishStreamingItem(state.toStreamingItem())
                 if (state == KodexAgentStateValue.ExternalWrite) {
                     if (externalWriteStart == null) {
                         externalWriteStart = agentState.latestIndex.value
@@ -60,10 +99,55 @@ internal class AgentHistoryViewModelImpl(
                 }
             }
         }
+        scope.launch {
+            snapshotFlow { listState.canScrollForward }.collect { canScrollForward ->
+                if (mutableFollowsLatest) {
+                    if (canScrollForward) listState.requestScrollToStart()
+                } else if (!canScrollForward) {
+                    mutableFollowsLatest = true
+                }
+            }
+        }
     }
 
-    override fun request(request: AgentHistoryLoadRequest) {
-        commands.trySend(HistoryCommand.Load(request))
+    override fun peek(index: Int): HistoryItemViewModel = committedSequence.value[index]
+
+    override fun get(index: Int): HistoryItemViewModel {
+        val sequence = committedSequence.value
+        val item = sequence[index]
+        if (
+            index >= (sequence.size - OlderDemandDistance).coerceAtLeast(0) &&
+            (mutableLoadState.value as? AgentHistoryLoadState.Ready)?.hasOlder == true &&
+            olderDemandPending.compareAndSet(expect = false, update = true)
+        ) {
+            if (commands.trySend(HistoryCommand.LoadOlder).isFailure) {
+                olderDemandPending.value = false
+            }
+        }
+        return item
+    }
+
+    override suspend fun read(item: HistoryItemViewModel): StableCleanEvent {
+        val index = item.storageIndex
+        check(committedSequence.value.find(index) === item) {
+            "Committed history item $index is no longer current."
+        }
+        return withContext(Dispatchers.Default) {
+            agentState.storage.stable[index]
+        }
+    }
+
+    override fun contains(generation: Long, storageIndex: Int): Boolean =
+        generation == mutableGeneration.value &&
+            committedSequence.value.find(storageIndex) != null
+
+    override fun notifyContentChanged() {
+        if (mutableFollowsLatest) listState.requestScrollToStart()
+    }
+
+    override fun requestScrollToLatest() {
+        mutableFollowsLatest = true
+        listState.requestScrollToStart()
     }
 
     override fun close() {
@@ -74,27 +158,24 @@ internal class AgentHistoryViewModelImpl(
     private suspend fun runHistoryLoop() {
         var initialized = false
         var observedLatestIndex = -1
-        var generation = 0L
+        var nextOlderIndex: Int? = null
         var lastInvalidation: Pair<Int, Int>? = null
 
         suspend fun reload(latestIndex: Int, invalidate: Boolean) {
             if (invalidate) {
-                check(generation < Long.MAX_VALUE) { "History generations are exhausted." }
-                generation += 1
+                val currentGeneration = mutableGeneration.value
+                check(currentGeneration < Long.MAX_VALUE) { "History generations are exhausted." }
+                mutableGeneration.value = currentGeneration + 1
             }
-            mutableWindow.value = AgentHistoryWindowSnapshot(
-                generation = generation,
-                status = AgentHistoryWindowStatus.Initializing,
-            )
+            publishCommitted(HistorySequence.Empty)
+            mutableLoadState.value = AgentHistoryLoadState.Initializing
             val batch = loadBatch(latestIndex, HistoryBatchSize)
             observedLatestIndex = latestIndex
+            nextOlderIndex = batch.nextOlderIndex
             initialized = true
-            mutableWindow.value = AgentHistoryWindowSnapshot(
-                generation = generation,
-                entries = batch.entries,
-                olderEdge = batch.nextOlderIndex.toOlderEdge(generation),
-                newerEdge = AgentHistoryEdgeState.Exhausted,
-                status = AgentHistoryWindowStatus.Ready,
+            publishCommitted(HistorySequence.of(batch.items))
+            mutableLoadState.value = AgentHistoryLoadState.Ready(
+                hasOlder = nextOlderIndex != null,
             )
         }
 
@@ -110,78 +191,53 @@ internal class AgentHistoryViewModelImpl(
             }
             if (latestIndex == observedLatestIndex) return
 
-            val current = mutableWindow.value
-            val newestLoaded = current.entries.firstOrNull()?.key?.primaryStorageIndex
-            val newestStored = agentState.storage.stable.floorToIndex(latestIndex)
+            val current = committedSequence.value
+            val newestLoaded = current.firstOrNull()?.storageIndex
+            val newestStored = withContext(Dispatchers.Default) {
+                agentState.storage.stable.floorToIndex(latestIndex)
+            }
             observedLatestIndex = latestIndex
             if (newestStored == null || newestStored == newestLoaded) return
             if (newestLoaded == null) {
                 reload(latestIndex, invalidate = false)
                 return
             }
-            val additions = mutableListOf<AgentHistoryEntry>()
-            var index: Int? = newestStored
-            while (index != null && index > newestLoaded) {
-                additions += entryAt(index)
-                index = agentState.storage.stable.prevIndex(index)
-            }
+
+            val additions = loadNewerThan(
+                fromInclusive = newestStored,
+                exclusiveBoundary = newestLoaded,
+            )
             if (additions.isNotEmpty()) {
-                mutableWindow.value = current.copy(
-                    entries = additions + current.entries,
-                    newerEdge = AgentHistoryEdgeState.Exhausted,
-                    status = AgentHistoryWindowStatus.Ready,
+                publishCommitted(
+                    HistorySequence.concat(
+                        HistorySequence.of(additions),
+                        committedSequence.value,
+                    ),
                 )
             }
         }
 
-        suspend fun load(request: AgentHistoryLoadRequest) {
-            if (request.cursor.direction != AgentHistoryDirection.Older) return
-            val current = mutableWindow.value
-            val ready = current.olderEdge as? AgentHistoryEdgeState.Ready ?: return
-            if (
-                ready.cursor != request.cursor ||
-                request.cursor.generation != current.generation
-            ) {
-                return
-            }
-            mutableWindow.value = current.copy(
-                olderEdge = AgentHistoryEdgeState.Loading(request.cursor),
-            )
+        suspend fun loadOlder() {
             try {
-                val firstIndex = agentState.storage.stable.prevIndex(
-                    request.cursor.storageIndexExclusive,
-                )
+                val firstIndex = nextOlderIndex
                 if (firstIndex == null) {
-                    mutableWindow.value = current.copy(olderEdge = AgentHistoryEdgeState.Exhausted)
+                    mutableLoadState.value = AgentHistoryLoadState.Ready(hasOlder = false)
                     return
                 }
-                val batch = loadBatch(firstIndex, request.itemBudget)
-                val latest = mutableWindow.value
-                if (
-                    latest.generation != request.cursor.generation ||
-                    latest.olderEdge != AgentHistoryEdgeState.Loading(request.cursor)
-                ) {
-                    return
-                }
-                mutableWindow.value = latest.copy(
-                    entries = latest.entries + batch.entries,
-                    olderEdge = batch.nextOlderIndex.toOlderEdge(latest.generation),
+                mutableLoadState.value = AgentHistoryLoadState.LoadingOlder
+                val batch = loadBatch(firstIndex, HistoryBatchSize)
+                nextOlderIndex = batch.nextOlderIndex
+                publishCommitted(
+                    HistorySequence.concat(
+                        committedSequence.value,
+                        HistorySequence.of(batch.items),
+                    ),
                 )
-            } catch (failure: CancellationException) {
-                throw failure
-            } catch (failure: Throwable) {
-                val latest = mutableWindow.value
-                if (
-                    latest.generation == request.cursor.generation &&
-                    latest.olderEdge == AgentHistoryEdgeState.Loading(request.cursor)
-                ) {
-                    mutableWindow.value = latest.copy(
-                        olderEdge = AgentHistoryEdgeState.Failed(
-                            cursor = request.cursor,
-                            message = failure.message ?: failure.toString(),
-                        ),
-                    )
-                }
+                mutableLoadState.value = AgentHistoryLoadState.Ready(
+                    hasOlder = nextOlderIndex != null,
+                )
+            } finally {
+                olderDemandPending.value = false
             }
         }
 
@@ -189,7 +245,7 @@ internal class AgentHistoryViewModelImpl(
             try {
                 when (command) {
                     is HistoryCommand.Refresh -> refresh(command.latestIndex)
-                    is HistoryCommand.Load -> load(command.request)
+                    HistoryCommand.LoadOlder -> loadOlder()
                     is HistoryCommand.ExternalWriteFinished -> {
                         val invalidation = command.startIndex to command.endIndex
                         if (
@@ -207,10 +263,9 @@ internal class AgentHistoryViewModelImpl(
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Throwable) {
-                mutableWindow.value = mutableWindow.value.copy(
-                    status = AgentHistoryWindowStatus.Failed(
-                        failure.message ?: failure.toString(),
-                    ),
+                olderDemandPending.value = false
+                mutableLoadState.value = AgentHistoryLoadState.Failed(
+                    failure.message ?: failure.toString(),
                 )
             }
         }
@@ -219,26 +274,86 @@ internal class AgentHistoryViewModelImpl(
     private suspend fun loadBatch(
         fromInclusive: Int,
         limit: Int,
-    ): LoadedHistoryBatch {
+    ): LoadedHistoryBatch = withContext(Dispatchers.Default) {
         require(limit > 0) { "History batch size must be positive." }
-        if (fromInclusive < 0) return LoadedHistoryBatch(emptyList(), null)
-        val entries = ArrayList<AgentHistoryEntry>(limit)
+        if (fromInclusive < 0) return@withContext LoadedHistoryBatch(emptyList(), null)
+        val items = ArrayList<HistoryItemViewModel>(limit)
         var index = agentState.storage.stable.floorToIndex(fromInclusive)
-        while (index != null && entries.size < limit) {
-            entries += entryAt(index)
+        while (index != null && items.size < limit) {
+            items += agentState.storage.stable[index].toHistoryItem(index)
             index = agentState.storage.stable.prevIndex(index)
         }
-        return LoadedHistoryBatch(entries, index)
+        LoadedHistoryBatch(items, index)
     }
 
-    private suspend fun entryAt(index: Int): AgentHistoryEntry =
-        AgentHistoryEntry(
-            key = AgentHistoryEntryKey(primaryStorageIndex = index),
-            event = agentState.storage.stable[index],
-        )
+    private suspend fun loadNewerThan(
+        fromInclusive: Int,
+        exclusiveBoundary: Int,
+    ): List<HistoryItemViewModel> = withContext(Dispatchers.Default) {
+        val items = mutableListOf<HistoryItemViewModel>()
+        var index: Int? = fromInclusive
+        while (index != null && index > exclusiveBoundary) {
+            items += agentState.storage.stable[index].toHistoryItem(index)
+            index = agentState.storage.stable.prevIndex(index)
+        }
+        items
+    }
+
+    private suspend fun loadPendingTools(latestIndex: Int): List<UnstableCleanEvent> =
+        withContext(Dispatchers.Default) {
+            if (
+                latestIndex >= 0 &&
+                agentState.storage.unstable.floorToIndex(latestIndex) != null
+            ) {
+                agentState.storage.unstable[latestIndex]
+            } else {
+                emptyList()
+            }
+        }
+
+    private fun publishCommitted(sequence: HistorySequence) {
+        val changed = committedSequence.value !== sequence
+        committedSequence.value = sequence
+        mutableCommittedItemCount.value = sequence.size
+        if (changed) notifyContentChanged()
+    }
+
+    private fun publishPendingTools(pending: List<UnstableCleanEvent>) {
+        if (mutablePendingTools.value == pending) return
+        mutablePendingTools.value = pending
+        notifyContentChanged()
+    }
+
+    private fun publishStreamingItem(item: HistoryStreamingItem?) {
+        if (mutableStreamingItem.value == item) return
+        mutableStreamingItem.value = item
+        notifyContentChanged()
+    }
+
+    private fun onScrollInteraction(interaction: ScrollInteraction) {
+        if (
+            interaction.orientation != ScrollOrientation.Vertical ||
+            interaction.consumedDelta == 0
+        ) {
+            return
+        }
+        when (interaction.source) {
+            ScrollInputSource.Pointer,
+            ScrollInputSource.Keyboard,
+                -> if (interaction.consumedDelta < 0) {
+                mutableFollowsLatest = false
+            } else if (!listState.canScrollForward) {
+                mutableFollowsLatest = true
+            }
+
+            ScrollInputSource.FocusRelocation,
+            ScrollInputSource.Programmatic,
+                -> Unit
+        }
+    }
 }
 
-/** Creates the history projection owned by one materialized Agent ViewModel. */
+/** Creates the History View state owned by one materialized Agent ViewModel. */
 public fun createAgentHistoryViewModel(
     agentState: KodexAgentState,
     ownerScope: CoroutineScope,
@@ -247,7 +362,7 @@ public fun createAgentHistoryViewModel(
     scope = ownerScope,
 )
 
-/** Koin-resolved history creator with one exact Agent runtime parameter set. */
+/** Koin-resolved History creator with one exact Agent runtime parameter set. */
 @Factory
 public class DefaultAgentHistoryViewModelFactory(
     @InjectedParam private val agentState: KodexAgentState,
@@ -257,26 +372,225 @@ public class DefaultAgentHistoryViewModelFactory(
         createAgentHistoryViewModel(agentState, ownerScope)
 }
 
+private fun StableCleanEvent.toHistoryItem(index: Int): HistoryItemViewModel = when (this) {
+    is StableCleanEvent.UserMessage,
+    is StableCleanEvent.AssistantMessage,
+    is StableCleanEvent.DeveloperMessage,
+    is StableCleanEvent.AgentMessage,
+        -> HistoryItemViewModel.Message(index)
+
+    is StableCleanEvent.Reasoning -> HistoryItemViewModel.Reasoning(index)
+    StableCleanEvent.ContextCompaction -> HistoryItemViewModel.ContextCompaction(index)
+    is StablePatchToolEvent -> HistoryItemViewModel.Patch(index)
+    is StablePlanUpdate -> HistoryItemViewModel.PlanUpdate(index)
+    is StableCleanEvent.CompletedTool -> HistoryItemViewModel.Tool(index)
+}
+
+private fun KodexAgentStateValue.toStreamingItem(): HistoryStreamingItem? = when (this) {
+    KodexAgentStateValue.RequestResponse.Started -> HistoryStreamingItem.Started
+    is KodexAgentStateValue.RequestResponse.Message ->
+        HistoryStreamingItem.Output(HistoryStreamingKind.Message, events)
+
+    is KodexAgentStateValue.RequestResponse.AgentMessage ->
+        HistoryStreamingItem.Output(HistoryStreamingKind.AgentMessage, events)
+
+    is KodexAgentStateValue.RequestResponse.Reasoning ->
+        HistoryStreamingItem.Output(HistoryStreamingKind.Reasoning, events)
+
+    is KodexAgentStateValue.RequestResponse.ToolCall ->
+        HistoryStreamingItem.Output(HistoryStreamingKind.ToolCall, events)
+
+    is KodexAgentStateValue.RequestResponse.Unknown ->
+        HistoryStreamingItem.Output(HistoryStreamingKind.Unknown, events)
+
+    KodexAgentStateValue.Compacting -> HistoryStreamingItem.Compacting
+    else -> null
+}
+
+private val HistoryItemViewModel.storageIndex: Int
+    get() = when (this) {
+        is HistoryItemViewModel.Message -> index
+        is HistoryItemViewModel.Reasoning -> index
+        is HistoryItemViewModel.Tool -> index
+        is HistoryItemViewModel.Patch -> index
+        is HistoryItemViewModel.PlanUpdate -> index
+        is HistoryItemViewModel.ContextCompaction -> index
+    }
+
 private data class LoadedHistoryBatch(
-    val entries: List<AgentHistoryEntry>,
+    val items: List<HistoryItemViewModel>,
     val nextOlderIndex: Int?,
 )
 
-private fun Int?.toOlderEdge(generation: Long): AgentHistoryEdgeState =
-    this?.let { nextOlderIndex ->
-        AgentHistoryEdgeState.Ready(
-            AgentHistoryCursor(
-                generation = generation,
-                storageIndexExclusive = nextOlderIndex + 1,
-                direction = AgentHistoryDirection.Older,
-            ),
-        )
-    } ?: AgentHistoryEdgeState.Exhausted
-
 private sealed interface HistoryCommand {
     data class Refresh(val latestIndex: Int) : HistoryCommand
-    data class Load(val request: AgentHistoryLoadRequest) : HistoryCommand
+    data object LoadOlder : HistoryCommand
     data class ExternalWriteFinished(val startIndex: Int, val endIndex: Int) : HistoryCommand
 }
 
+/**
+ * Immutable balanced rope. Publishing a batch costs `O(log n)` structural nodes and indexed reads
+ * cost `O(log n)` while retaining exact child instances.
+ */
+private sealed interface HistorySequence {
+    val size: Int
+    val height: Int
+    val newestIndex: Int
+    val oldestIndex: Int
+
+    operator fun get(index: Int): HistoryItemViewModel
+
+    fun find(storageIndex: Int): HistoryItemViewModel?
+
+    fun firstOrNull(): HistoryItemViewModel? = if (size == 0) null else this[0]
+
+    data object Empty : HistorySequence {
+        override val size: Int = 0
+        override val height: Int = 0
+        override val newestIndex: Int
+            get() = error("An empty history sequence has no newest index.")
+        override val oldestIndex: Int
+            get() = error("An empty history sequence has no oldest index.")
+
+        override fun get(index: Int): HistoryItemViewModel =
+            throw IndexOutOfBoundsException("History item index $index is out of bounds for 0 items.")
+
+        override fun find(storageIndex: Int): HistoryItemViewModel? = null
+    }
+
+    class Leaf(
+        val items: List<HistoryItemViewModel>,
+    ) : HistorySequence {
+        init {
+            require(items.isNotEmpty()) { "A history sequence leaf must not be empty." }
+            require(items.size <= HistoryLeafSize) {
+                "A history sequence leaf cannot exceed $HistoryLeafSize items."
+            }
+            require(items.zipWithNext().all { (newer, older) ->
+                newer.storageIndex > older.storageIndex
+            }) {
+                "History sequence items must be strictly newest-first."
+            }
+        }
+
+        override val size: Int = items.size
+        override val height: Int = 1
+        override val newestIndex: Int = items.first().storageIndex
+        override val oldestIndex: Int = items.last().storageIndex
+
+        override fun get(index: Int): HistoryItemViewModel = items[index]
+
+        override fun find(storageIndex: Int): HistoryItemViewModel? {
+            if (storageIndex !in oldestIndex..newestIndex) return null
+            return items.firstOrNull { item -> item.storageIndex == storageIndex }
+        }
+    }
+
+    class Branch(
+        val left: HistorySequence,
+        val right: HistorySequence,
+    ) : HistorySequence {
+        init {
+            require(left !== Empty && right !== Empty) {
+                "A history sequence branch must have two non-empty children."
+            }
+            require(left.oldestIndex > right.newestIndex) {
+                "History sequence branches must be strictly newest-first."
+            }
+        }
+
+        override val size: Int = checkedHistorySize(left.size, right.size)
+        override val height: Int = maxOf(left.height, right.height) + 1
+        override val newestIndex: Int = left.newestIndex
+        override val oldestIndex: Int = right.oldestIndex
+
+        override fun get(index: Int): HistoryItemViewModel {
+            if (index !in 0 until size) {
+                throw IndexOutOfBoundsException(
+                    "History item index $index is out of bounds for $size items.",
+                )
+            }
+            return if (index < left.size) left[index] else right[index - left.size]
+        }
+
+        override fun find(storageIndex: Int): HistoryItemViewModel? {
+            if (storageIndex !in oldestIndex..newestIndex) return null
+            return when {
+                storageIndex >= left.oldestIndex -> left.find(storageIndex)
+                storageIndex <= right.newestIndex -> right.find(storageIndex)
+                else -> null
+            }
+        }
+    }
+
+    companion object {
+        fun of(items: List<HistoryItemViewModel>): HistorySequence {
+            var result: HistorySequence = Empty
+            items.chunked(HistoryLeafSize).forEach { chunk ->
+                result = concat(result, Leaf(chunk))
+            }
+            return result
+        }
+
+        fun concat(left: HistorySequence, right: HistorySequence): HistorySequence {
+            if (left === Empty) return right
+            if (right === Empty) return left
+            return when {
+                left.height > right.height + 1 -> {
+                    check(left is Branch)
+                    balance(left.left, concat(left.right, right))
+                }
+
+                right.height > left.height + 1 -> {
+                    check(right is Branch)
+                    balance(concat(left, right.left), right.right)
+                }
+
+                else -> Branch(left, right)
+            }
+        }
+
+        private fun balance(left: HistorySequence, right: HistorySequence): HistorySequence =
+            when {
+                left.height > right.height + 1 -> {
+                    check(left is Branch)
+                    if (left.left.height >= left.right.height) {
+                        Branch(left.left, Branch(left.right, right))
+                    } else {
+                        val middle = left.right
+                        check(middle is Branch)
+                        Branch(
+                            Branch(left.left, middle.left),
+                            Branch(middle.right, right),
+                        )
+                    }
+                }
+
+                right.height > left.height + 1 -> {
+                    check(right is Branch)
+                    if (right.right.height >= right.left.height) {
+                        Branch(Branch(left, right.left), right.right)
+                    } else {
+                        val middle = right.left
+                        check(middle is Branch)
+                        Branch(
+                            Branch(left, middle.left),
+                            Branch(middle.right, right.right),
+                        )
+                    }
+                }
+
+                else -> Branch(left, right)
+            }
+    }
+}
+
 private const val HistoryBatchSize: Int = 64
+private const val HistoryLeafSize: Int = 64
+private const val OlderDemandDistance: Int = 8
+
+private fun checkedHistorySize(left: Int, right: Int): Int {
+    val size = left.toLong() + right
+    require(size <= Int.MAX_VALUE) { "History item count exceeds Int.MAX_VALUE." }
+    return size.toInt()
+}

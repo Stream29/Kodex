@@ -12,15 +12,9 @@ import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
-import io.github.stream29.kodex.app.history.contract.AgentHistoryEntry
-import io.github.stream29.kodex.app.history.contract.AgentHistoryEntryKey
-import io.github.stream29.kodex.app.history.contract.AgentHistoryWindowSnapshot
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
-import io.github.stream29.kodex.openai.ContentItem
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -46,17 +40,6 @@ class HistoryEntryContextMenuTest {
         assertEquals("fork", result.selection)
     }
 
-    @Test
-    fun historyTargetRequiresTheSameGenerationAndAnEntryStillInTheWindow() {
-        val window = AgentHistoryWindowSnapshot(
-            generation = 4,
-            entries = listOf(historyEntry()),
-        )
-
-        assertTrue(AgentHistoryTarget(generation = 4, storageIndex = 17).isCurrentIn(window))
-        assertFalse(AgentHistoryTarget(generation = 3, storageIndex = 17).isCurrentIn(window))
-        assertFalse(AgentHistoryTarget(generation = 4, storageIndex = 16).isCurrentIn(window))
-    }
 }
 
 private suspend fun selectHistoryEntryMenuItem(
@@ -96,13 +79,6 @@ private suspend fun selectHistoryEntryMenuItem(
 
     return HistoryEntryMenuSelection(menuSnapshot, selection)
 }
-
-private fun historyEntry(): AgentHistoryEntry = AgentHistoryEntry(
-    key = AgentHistoryEntryKey(primaryStorageIndex = 17),
-    event = StableCleanEvent.UserMessage(
-        listOf(ContentItem.InputText("entry-17")),
-    ),
-)
 
 private data class HistoryEntryMenuSelection(
     val snapshot: String,

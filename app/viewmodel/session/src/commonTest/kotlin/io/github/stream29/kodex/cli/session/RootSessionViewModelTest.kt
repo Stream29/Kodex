@@ -8,8 +8,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.initialize
 import io.github.stream29.kodex.app.agent.contract.AgentExecutionPhase
 import io.github.stream29.kodex.app.agent.contract.AgentLifecycleState
-import io.github.stream29.kodex.app.agent.contract.AgentStreamTail
-import io.github.stream29.kodex.app.history.contract.AgentHistoryWindowStatus
+import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
+import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.app.session.contract.PersistedAgentMaterializationState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
 import io.github.stream29.kodex.openai.ContentItem
@@ -110,10 +110,10 @@ val rootSessionViewModelTest by testSuite {
                         state.nodes.size == directChildCount + 1
                     }
                 }
-                val history = withTimeout(10.seconds) {
-                    model.rootAgent.history.window.first { window ->
-                        window.status is AgentHistoryWindowStatus.Ready &&
-                            window.entries.size == 64
+                withTimeout(10.seconds) {
+                    model.rootAgent.history.loadState.first { state ->
+                        state is AgentHistoryLoadState.Ready &&
+                            model.rootAgent.history.committedItemCount.value == 64
                     }
                 }
 
@@ -121,7 +121,7 @@ val rootSessionViewModelTest by testSuite {
                 assertEquals(1, probe.historyAddresses.size)
                 assertEquals(model.rootAgent.address, probe.agentAddresses.single())
                 assertEquals(model.rootAgent.address, probe.historyAddresses.single())
-                assertEquals(64, history.entries.size)
+                assertEquals(64, model.rootAgent.history.committedItemCount.value)
                 assertTrue(topology.nodes.drop(1).all { node ->
                     node.materialization == PersistedAgentMaterializationState.Unloaded
                 })
@@ -278,7 +278,7 @@ val rootSessionViewModelTest by testSuite {
                     }
                 },
                 launch(start = CoroutineStart.UNDISPATCHED) {
-                    model.rootAgent.stream.collect {
+                    model.rootAgent.history.streamingItem.collect {
                         streamEmissions.update { count -> count + 1 }
                     }
                 },
@@ -311,14 +311,14 @@ val rootSessionViewModelTest by testSuite {
                 withContext(Dispatchers.Default) {
                     withTimeout(10.seconds) { streamOpened.await() }
                 }
-                val stream = withContext(Dispatchers.Default) {
+                val streamTail = withContext(Dispatchers.Default) {
                     withTimeout(10.seconds) {
-                        model.rootAgent.stream.first { state ->
-                            state.tail is AgentStreamTail.Output
+                        model.rootAgent.history.streamingItem.first { item ->
+                            item is HistoryStreamingItem.Output
                         }
                     }
                 }
-                val streamTail = assertIs<AgentStreamTail.Output>(stream.tail)
+                assertIs<HistoryStreamingItem.Output>(streamTail)
                 withContext(Dispatchers.Default) {
                     withTimeout(10.seconds) {
                         model.summary.first { state -> state.rootRunning }
