@@ -14,6 +14,7 @@ kotlin {
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))
             implementation(project(":app-view-patch"))
+            implementation(libs.kotlin.logging)
             implementation(libs.mosaic.runtime)
         }
         mosaicTest.dependencies {

@@ -43,7 +43,8 @@ public fun PendingPatchToolEventView(diff: Patch) {
     val visibleLineCount = remember(diff) { mutableStateOf(DefaultPatchLinePageSize) }
     PatchToolEventView(
         presentation = presentation,
-        expandedState = expanded,
+        expanded = expanded.value,
+        onToggleExpanded = { expanded.value = !expanded.value },
         changesExpandedState = changesExpanded,
         visibleLineCountState = visibleLineCount,
     )
@@ -51,16 +52,26 @@ public fun PendingPatchToolEventView(diff: Patch) {
 
 /** Renders a completed apply-patch clean event. */
 @Composable
-public fun StablePatchToolEventView(event: StablePatchToolEvent) {
+public fun StablePatchToolEventView(
+    event: StablePatchToolEvent,
+    expanded: Boolean? = null,
+    onToggleExpanded: (() -> Unit)? = null,
+) {
+    require((expanded == null) == (onToggleExpanded == null)) {
+        "External patch expansion value and toggle must be supplied together."
+    }
     val presentation = remember(event) {
         event.toStablePatchPresentation()
     }
-    val expanded = remember(event) { mutableStateOf(false) }
+    val localExpanded = remember(event) { mutableStateOf(false) }
     val changesExpanded = remember(event) { mutableStateOf(false) }
     val visibleLineCount = remember(event) { mutableStateOf(DefaultPatchLinePageSize) }
     PatchToolEventView(
         presentation = presentation,
-        expandedState = expanded,
+        expanded = expanded ?: localExpanded.value,
+        onToggleExpanded = onToggleExpanded ?: {
+            localExpanded.value = !localExpanded.value
+        },
         changesExpandedState = changesExpanded,
         visibleLineCountState = visibleLineCount,
     )
@@ -69,15 +80,15 @@ public fun StablePatchToolEventView(event: StablePatchToolEvent) {
 @Composable
 private fun PatchToolEventView(
     presentation: PatchPresentation,
-    expandedState: MutableState<Boolean>,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
     changesExpandedState: MutableState<Boolean>,
     visibleLineCountState: MutableState<Int>,
 ) {
-    val expanded by expandedState
     val colorScheme = TuiTheme.colorScheme
     Column(modifier = Modifier.fillMaxWidth()) {
         TuiPressable(
-            onClick = { expandedState.value = !expanded },
+            onClick = onToggleExpanded,
             modifier = Modifier.fillMaxWidth(),
         ) { _, isHovered, isPressed ->
             WrappedPatchText(

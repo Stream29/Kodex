@@ -9,17 +9,19 @@ import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
-import io.github.stream29.kodex.app.history.contract.AgentHistoryWindowStatus
+import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -43,48 +45,45 @@ val agentHistoryActionTest by testSuite {
             val session = store.open(index)
             val agent = session.rootAgent
             try {
-                val window = withTimeout(5.seconds) {
-                    agent.history.window.first { state ->
-                        state.status is AgentHistoryWindowStatus.Ready &&
-                            state.entries.any { entry -> entry.key.primaryStorageIndex == 4 }
-                    }
-                }
+                val initialGeneration = agent.history.awaitStorageIndex(4)
                 val requestId = agent.requestHistoryRevert(
-                    AgentHistoryTarget(window.generation, storageIndex = 1),
+                    AgentHistoryTarget(initialGeneration, storageIndex = 1),
                 )
 
                 agent.confirmHistoryRevert(requestId)
 
-                withTimeout(5.seconds) {
-                    root.runtime.latestIndex.first { latestIndex -> latestIndex == 1 }
-                }
-                assertEquals(1, root.storage.latestIndex())
-                val currentWindow = withTimeout(5.seconds) {
-                    agent.history.window.first { state ->
-                        state.generation > window.generation &&
-                            state.entries.any { entry -> entry.key.primaryStorageIndex == 1 }
+                withContext(Dispatchers.Default) {
+                    withTimeout(5.seconds) {
+                        root.runtime.latestIndex.first { latestIndex -> latestIndex == 1 }
                     }
                 }
+                assertEquals(1, root.storage.latestIndex())
+                val currentGeneration = withContext(Dispatchers.Default) {
+                    withTimeout(5.seconds) {
+                        agent.history.generation.first { generation ->
+                            generation > initialGeneration
+                        }
+                    }
+                }
+                agent.history.awaitStorageIndex(1)
                 root.runtime.modify { storage ->
                     storage.stable[2] = StableCleanEvent.AssistantMessage(
                         listOf(ContentItem.OutputText("invalidate")),
                     )
                 }
-                val changedWindow = withTimeout(5.seconds) {
-                    agent.history.window.first { state ->
-                        state.entries.any { entry -> entry.key.primaryStorageIndex == 2 }
-                    }
-                }
-                assertEquals(currentWindow.generation, changedWindow.generation)
+                val changedGeneration = agent.history.awaitStorageIndex(2)
+                assertEquals(currentGeneration, changedGeneration)
                 val staleRequest = agent.requestHistoryRevert(
-                    AgentHistoryTarget(currentWindow.generation, storageIndex = 1),
+                    AgentHistoryTarget(currentGeneration, storageIndex = 1),
                 )
                 root.runtime.modify { storage ->
                     storage.revert(2)
                 }
-                withTimeout(5.seconds) {
-                    agent.history.window.first { state ->
-                        state.generation > currentWindow.generation
+                withContext(Dispatchers.Default) {
+                    withTimeout(5.seconds) {
+                        agent.history.generation.first { generation ->
+                            generation > currentGeneration
+                        }
                     }
                 }
                 assertFailsWith<IllegalArgumentException> {
@@ -114,15 +113,10 @@ val agentHistoryActionTest by testSuite {
             val store = testSessionViewModelRegistry(repository, this)
             val session = store.open(index)
             try {
-                val window = withTimeout(5.seconds) {
-                    session.rootAgent.history.window.first { state ->
-                        state.status is AgentHistoryWindowStatus.Ready &&
-                            state.entries.any { entry -> entry.key.primaryStorageIndex == 1 }
-                    }
-                }
+                val generation = session.rootAgent.history.awaitStorageIndex(1)
                 val forkIndex = session.fork(
                     session.rootAgent,
-                    AgentHistoryTarget(window.generation, storageIndex = 1),
+                    AgentHistoryTarget(generation, storageIndex = 1),
                 )
 
                 assertEquals(listOf(index, forkIndex), repository.list())
@@ -149,14 +143,9 @@ val agentHistoryActionTest by testSuite {
             val store = testSessionViewModelRegistry(repository, this)
             val agent = store.open(index).rootAgent
             try {
-                val window = withTimeout(5.seconds) {
-                    agent.history.window.first { state ->
-                        state.status is AgentHistoryWindowStatus.Ready &&
-                            state.entries.any { entry -> entry.key.primaryStorageIndex == 4 }
-                    }
-                }
+                val generation = agent.history.awaitStorageIndex(4)
                 val requestId = agent.requestHistoryRevert(
-                    AgentHistoryTarget(window.generation, storageIndex = 1),
+                    AgentHistoryTarget(generation, storageIndex = 1),
                 )
                 val frontendCaller = launch(start = CoroutineStart.UNDISPATCHED) {
                     agent.confirmHistoryRevert(requestId)
@@ -165,8 +154,10 @@ val agentHistoryActionTest by testSuite {
 
                 assertIs<AgentHistoryActionState.None>(agent.historyAction.value)
                 frontendCaller.cancelAndJoin()
-                withTimeout(5.seconds) {
-                    root.runtime.latestIndex.first { latestIndex -> latestIndex == 1 }
+                withContext(Dispatchers.Default) {
+                    withTimeout(5.seconds) {
+                        root.runtime.latestIndex.first { latestIndex -> latestIndex == 1 }
+                    }
                 }
                 assertEquals(1, root.storage.latestIndex())
             } finally {
@@ -179,3 +170,13 @@ val agentHistoryActionTest by testSuite {
 
 private fun userMessage(text: String): StableCleanEvent.UserMessage =
     StableCleanEvent.UserMessage(listOf(ContentItem.InputText(text)))
+
+private suspend fun AgentHistoryViewModel.awaitStorageIndex(storageIndex: Int): Long =
+    withContext(Dispatchers.Default) {
+        withTimeout(5.seconds) {
+            committedItemCount.first {
+                contains(generation.value, storageIndex)
+            }
+            generation.value
+        }
+    }

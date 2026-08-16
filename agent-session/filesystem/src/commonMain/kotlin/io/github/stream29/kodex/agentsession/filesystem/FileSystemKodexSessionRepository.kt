@@ -32,7 +32,7 @@ public class FileSystemKodexSessionRepository internal constructor(
     scope: CoroutineScope,
     root: Path,
     private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-    private val valueCacheSize: Int = 256,
+    private val valueCacheSize: Int = 1_024,
     private val dependencies: KodexAgentDependencies,
     initialEntries: List<Int>,
 ) :
@@ -259,7 +259,7 @@ public suspend fun CoroutineScope.FileSystemKodexSessionRepository(
     root: Path,
     dependencies: KodexAgentDependencies,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-    valueCacheSize: Int = 256,
+    valueCacheSize: Int = 1_024,
 ): FileSystemKodexSessionRepository {
     fileSystem.createDirectories(root)
     val sessionsRoot = Path(root, SessionsDirectory)

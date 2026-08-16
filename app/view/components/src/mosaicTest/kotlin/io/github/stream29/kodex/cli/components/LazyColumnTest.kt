@@ -536,6 +536,7 @@ val lazyColumnTest by testSuite {
 
     test("large data sets compose only a bounded viewport window") {
         val composedKeys = mutableSetOf<Int>()
+        var calculatedKeys = 0
 
         runMosaicTest {
             assertEquals(
@@ -544,7 +545,10 @@ val lazyColumnTest by testSuite {
                     LazyColumn(Modifier.height(4)) {
                         items(
                             count = 10_000,
-                            key = { index -> index },
+                            key = { index ->
+                                calculatedKeys++
+                                index
+                            },
                         ) { index ->
                             composedKeys += index
                             Text(index.toString())
@@ -555,10 +559,12 @@ val lazyColumnTest by testSuite {
         }
 
         assertTrue(composedKeys.size < 32, "Composed ${composedKeys.size} of 10,000 items.")
+        assertTrue(calculatedKeys < 300, "Calculated $calculatedKeys of 10,000 item keys.")
     }
 
     test("reverse layout composes only its newest bounded viewport window") {
         val composedKeys = mutableSetOf<Int>()
+        var calculatedKeys = 0
 
         runMosaicTest {
             assertEquals(
@@ -570,7 +576,10 @@ val lazyColumnTest by testSuite {
                     ) {
                         items(
                             count = 10_000,
-                            key = { index -> index },
+                            key = { index ->
+                                calculatedKeys++
+                                index
+                            },
                         ) { index ->
                             composedKeys += index
                             Text(index.toString())
@@ -581,6 +590,7 @@ val lazyColumnTest by testSuite {
         }
 
         assertTrue(composedKeys.size < 32, "Composed ${composedKeys.size} of 10,000 items.")
+        assertTrue(calculatedKeys < 300, "Calculated $calculatedKeys of 10,000 item keys.")
     }
 
     test("remembered item identity follows a stable key") {

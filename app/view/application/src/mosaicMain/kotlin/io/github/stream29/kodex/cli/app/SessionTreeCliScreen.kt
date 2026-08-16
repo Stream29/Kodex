@@ -21,7 +21,6 @@ import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
-import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
@@ -29,7 +28,6 @@ import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
-import io.github.stream29.kodex.app.history.contract.AgentHistoryWindowSnapshot
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
@@ -69,7 +67,6 @@ public fun SessionTreeCliScreen(
     val navigation by viewModel.navigation.collectAsState()
     val popup by viewModel.popup.collectAsState()
     val currentNewLineKey by newLineKey.collectAsState()
-    val historyStates = rememberAgentHistoryUiStateRegistry(navigation.tabs)
     val tabStates = collectSessionTabRenderStates(navigation.tabs, navigation.selectedIndex)
     val sessionSummary = summarizeOpenSessions(tabStates)
     val runningFrame = rememberRunningIndicatorFrame(
@@ -188,10 +185,6 @@ public fun SessionTreeCliScreen(
                                     key(agent) {
                                         AgentRuntimeScreen(
                                             viewModel = agent,
-                                            historyUiState = historyStates.stateFor(
-                                                selected.sessionIndex,
-                                                agent.address.agentId,
-                                            ),
                                             columns = contentColumns,
                                             rows = contentRows,
                                             newLineKey = currentNewLineKey,
@@ -591,14 +584,20 @@ private fun BoxScope.HistoryEntryContextMenu(
 ) {
     val current = request ?: return
     val execution by current.agent.execution.collectAsState()
-    val window by current.agent.history.window.collectAsState()
+    val historyGeneration by current.agent.history.generation.collectAsState()
+    val committedItemCount by current.agent.history.committedItemCount.collectAsState()
     val targetMatches =
         current.session === selectedSession &&
             current.agent === selectedAgent &&
             !execution.running &&
             execution.capabilities.canReplaceHistory &&
             execution.capabilities.canForkHistory &&
-            current.target.isCurrentIn(window)
+            committedItemCount > 0 &&
+            current.target.generation == historyGeneration &&
+            current.agent.history.contains(
+                current.target.generation,
+                current.target.storageIndex,
+            )
     val anchorPlaced = current.anchor.isPlaced
     LaunchedEffect(current, targetMatches, anchorPlaced) {
         if (!targetMatches || !anchorPlaced) onDismiss()
@@ -646,11 +645,17 @@ private fun BoxScope.AgentHistoryRevertDialog(agent: AgentViewModel?) {
         action as? AgentHistoryActionState.ConfirmRevert
             ?: return
     val execution by agent.execution.collectAsState()
-    val window by agent.history.window.collectAsState()
+    val historyGeneration by agent.history.generation.collectAsState()
+    val committedItemCount by agent.history.committedItemCount.collectAsState()
     val targetMatches =
         !execution.running &&
             execution.capabilities.canReplaceHistory &&
-            confirm.target.isCurrentIn(window)
+            committedItemCount > 0 &&
+            confirm.target.generation == historyGeneration &&
+            agent.history.contains(
+                confirm.target.generation,
+                confirm.target.storageIndex,
+            )
     LaunchedEffect(agent, confirm.requestId, targetMatches) {
         if (!targetMatches) agent.dismissHistoryRevert(confirm.requestId)
     }
@@ -693,14 +698,6 @@ private fun BoxScope.AgentHistoryRevertDialog(agent: AgentViewModel?) {
         }
     }
 }
-
-internal fun AgentHistoryTarget.isCurrentIn(
-    window: AgentHistoryWindowSnapshot,
-): Boolean =
-    generation == window.generation &&
-        window.entries.any { entry ->
-            entry.key.primaryStorageIndex == storageIndex
-        }
 
 private data class SessionTabMenuRequest(
     val target: SessionViewModel,

@@ -26,7 +26,6 @@ import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
-import io.github.stream29.kodex.cli.history.AgentHistoryUiState
 import io.github.stream29.kodex.cli.history.AgentHistoryView
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.openai.AgentMessageInputContent
@@ -36,7 +35,6 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun AgentRuntimeScreen(
     viewModel: AgentViewModel,
-    historyUiState: AgentHistoryUiState,
     columns: Int,
     rows: Int,
     newLineKey: NewLineKey,
@@ -50,7 +48,7 @@ internal fun AgentRuntimeScreen(
     onOpenSettings: () -> Unit,
 ) {
     val execution by viewModel.execution.collectAsState()
-    val stream by viewModel.stream.collectAsState()
+    val pendingSteer by viewModel.pendingSteer.collectAsState()
     val requestUserInput by viewModel.requestUserInput.state.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val tokenCount by viewModel.tokenCount.collectAsState()
@@ -84,7 +82,7 @@ internal fun AgentRuntimeScreen(
         )
     }
     val pendingSteerLines = pendingSteerPreviewLines(
-        pending = stream.pendingSteer,
+        pending = pendingSteer,
         columns = columns,
         maximumRows = minOf(
             (flexibleRows - minimumComposerRows - requestUserInputRows).coerceAtLeast(0),
@@ -104,10 +102,7 @@ internal fun AgentRuntimeScreen(
     Column(modifier = Modifier.width(columns).height(rows)) {
         Box(modifier = Modifier.width(columns).height(historyRows)) {
             AgentHistoryView(
-                agentId = viewModel.address.agentId,
                 model = viewModel.history,
-                stream = stream,
-                uiState = historyUiState,
                 shellSessions = viewModel.shellSessions,
                 onOpenEntryContextMenu = if (
                     execution.capabilities.canReplaceHistory &&
@@ -140,8 +135,8 @@ internal fun AgentRuntimeScreen(
         }
         HistoryComposerSeparator(
             columns = columns,
-            showScrollToLatest = !historyUiState.followsLatest,
-            onScrollToLatest = historyUiState::requestScrollToLatest,
+            showScrollToLatest = !viewModel.history.followsLatest,
+            onScrollToLatest = viewModel.history::requestScrollToLatest,
         )
         ComposerInput(
             state = composer,

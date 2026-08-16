@@ -11,8 +11,8 @@ import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.TextStyle
-import io.github.stream29.kodex.app.agent.contract.AgentStreamKind
-import io.github.stream29.kodex.app.agent.contract.AgentStreamTail
+import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
+import io.github.stream29.kodex.app.history.contract.HistoryStreamingKind
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.ReasoningItemReasoningSummary
@@ -22,18 +22,18 @@ import kotlinx.coroutines.flow.SharedFlow
 
 /** Renders the one active operation that belongs after the persisted history tail. */
 @Composable
-internal fun AgentStreamTail.renderTransientTail(
+internal fun HistoryStreamingItem.renderTransientTail(
     onContentChange: () -> Unit = {},
 ) {
     when (this) {
-        AgentStreamTail.Started -> StreamingStatusTail("Starting response…")
-        AgentStreamTail.Compacting -> StreamingStatusTail("Compacting context…")
-        is AgentStreamTail.Output -> when (kind) {
-            AgentStreamKind.Message -> StreamingMessageTail(events, onContentChange)
-            AgentStreamKind.AgentMessage -> StreamingAgentMessageTail(events, onContentChange)
-            AgentStreamKind.Reasoning -> StreamingReasoningTail(events, onContentChange)
-            AgentStreamKind.ToolCall -> StreamingToolCallTail(events, onContentChange)
-            AgentStreamKind.Unknown -> StreamingUnknownTail(events, onContentChange)
+        HistoryStreamingItem.Started -> StreamingStatusTail("Starting response…")
+        HistoryStreamingItem.Compacting -> StreamingStatusTail("Compacting context…")
+        is HistoryStreamingItem.Output -> when (kind) {
+            HistoryStreamingKind.Message -> StreamingMessageTail(events, onContentChange)
+            HistoryStreamingKind.AgentMessage -> StreamingAgentMessageTail(events, onContentChange)
+            HistoryStreamingKind.Reasoning -> StreamingReasoningTail(events, onContentChange)
+            HistoryStreamingKind.ToolCall -> StreamingToolCallTail(events, onContentChange)
+            HistoryStreamingKind.Unknown -> StreamingUnknownTail(events, onContentChange)
         }
     }
 }

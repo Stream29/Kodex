@@ -3,12 +3,10 @@ package io.github.stream29.kodex.cli.history
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import com.jakewharton.mosaic.focus.FocusRequester
 import com.jakewharton.mosaic.layout.fillMaxSize
 import com.jakewharton.mosaic.layout.fillMaxWidth
@@ -22,6 +20,18 @@ import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
+import io.github.oshai.kotlinlogging.KotlinLogging
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
+import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
+import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
+import io.github.stream29.kodex.app.history.contract.HistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
+import io.github.stream29.kodex.app.history.contract.HistoryStreamingKind
 import io.github.stream29.kodex.cli.components.LazyColumn
 import io.github.stream29.kodex.cli.components.LazyListLayoutInfo
 import io.github.stream29.kodex.cli.components.LazyListState
@@ -30,36 +40,19 @@ import io.github.stream29.kodex.cli.components.ScrollInputSource
 import io.github.stream29.kodex.cli.components.ScrollOrientation
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.TuiPressable
-import io.github.stream29.kodex.cli.components.items
+import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import io.github.stream29.kodex.cli.components.wrapToTerminalWidth
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
-import io.github.stream29.kodex.app.agent.contract.AgentStreamState
-import io.github.stream29.kodex.app.agent.contract.AgentStreamTail
-import io.github.stream29.kodex.app.history.contract.AgentHistoryEdgeState
-import io.github.stream29.kodex.app.history.contract.AgentHistoryEntry
-import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadRequest
-import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
-import io.github.stream29.kodex.app.history.contract.AgentHistoryWindowStatus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 
-/** Renders one Agent history model. */
+/** Renders one Agent's complete History ViewModel. */
 @Composable
 public fun AgentHistoryView(
-    agentId: String,
     model: AgentHistoryViewModel,
-    stream: AgentStreamState,
-    uiState: AgentHistoryUiState,
     shellSessions: AgentShellSessionRegistry,
     onOpenEntryContextMenu: ((
         generation: Long,
@@ -68,203 +61,111 @@ public fun AgentHistoryView(
         clickPosition: IntOffset?,
     ) -> Unit)? = null,
 ) {
-    val listState = uiState.listState
-    val scrollInteractionSource = uiState.interactionSource
-    val entryFocusRequesters = remember(agentId) {
-        mutableMapOf<StoredHistoryKey, FocusRequester>()
+    val generation by model.generation.collectAsState()
+    val committedItemCount by model.committedItemCount.collectAsState()
+    val loadState by model.loadState.collectAsState()
+    val pendingTools by model.pendingTools.collectAsState()
+    val streamingItem by model.streamingItem.collectAsState()
+    val entryFocusRequesters = remember(model) {
+        mutableMapOf<HistoryItemViewModel, FocusRequester>()
     }
-    var window by remember(model, agentId) { mutableStateOf(model.window.value) }
-    val transientTailCount = if (stream.tail == null) 0 else 1
+
     HistoryPagingFocusEffect(
-        listState = listState,
-        interactionSource = scrollInteractionSource,
+        listState = model.listState,
+        interactionSource = model.scrollInteractionSource,
         entryFocusRequesters = entryFocusRequesters,
     )
-    HistoryFollowLatestEffect(uiState)
 
-    LaunchedEffect(model, agentId, uiState) {
-        model.window.collect { updatedWindow ->
-            if (updatedWindow != window) {
-                uiState.requestLatestForContentChange()
-                window = updatedWindow
-            }
-        }
-    }
-    LaunchedEffect(stream.revision, uiState) {
-        uiState.requestLatestForContentChange()
-    }
-
-    LaunchedEffect(
-        model,
-        agentId,
-        listState,
-        window.generation,
-        transientTailCount,
-        stream.pendingEvents.size,
-        window.entries.size,
-        window.olderEdge,
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        state = model.listState,
+        reverseLayout = true,
+        interactionSource = model.scrollInteractionSource,
+        keyboardPageSize = { viewportSize -> (viewportSize / 2).coerceAtLeast(1) },
     ) {
-        val initialOlderCursor = window.olderEdge.loadableCursor()
-        if (
-            window.entries.isEmpty() ||
-            initialOlderCursor == null
-        ) {
-            return@LaunchedEffect
-        }
-
-        val loadBoundary = (
-            transientTailCount +
-                stream.pendingEvents.size +
-                window.entries.lastIndex -
-                HistoryPrefetchDistance
-            ).coerceAtLeast(0)
-        snapshotFlow {
-            listState.layoutInfo.visibleItemsInfo.any { item ->
-                item.index >= loadBoundary
+        streamingItem?.let { item ->
+            item(
+                key = item.historyIdentity(),
+                contentType = item.historyContentType(),
+            ) {
+                item.renderTransientTail(onContentChange = model::notifyContentChanged)
             }
         }
-            .distinctUntilChanged()
-            .filter { nearOlderBoundary -> nearOlderBoundary }
-            .collect {
-                val cursor = window.olderEdge.loadableCursor() ?: return@collect
-                model.request(AgentHistoryLoadRequest(cursor, HistoryBatchSize))
-            }
-    }
 
-    key(agentId) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            state = listState,
-            reverseLayout = true,
-            interactionSource = scrollInteractionSource,
-            keyboardPageSize = { viewportSize -> (viewportSize / 2).coerceAtLeast(1) },
-        ) {
-            stream.tail?.let { tail ->
-                item(
-                    key = StreamingHistoryKey(
-                        agentId = agentId,
-                        identity = tail.historyIdentity(),
-                    ),
-                    contentType = tail.historyContentType(),
-                ) {
-                    tail.renderTransientTail(
-                        onContentChange = uiState::requestLatestForContentChange,
-                    )
-                }
-            }
-
-            val pending = stream.pendingEvents.asReversed()
-            items(
-                count = pending.size,
-                key = { position ->
-                    PendingHistoryKey(
-                        agentId = agentId,
-                        generation = window.generation,
-                        identity = pending[position].historyIdentity(position),
-                    )
-                },
-                contentType = { position -> pending[position].historyContentType() },
-            ) { position ->
-                pending[position].render(shellSessions)
-            }
-
-            items(
-                items = window.entries,
-                key = { entry ->
-                    StoredHistoryKey(
-                        agentId = agentId,
-                        generation = window.generation,
-                        storageIndex = entry.key.primaryStorageIndex,
-                    )
-                },
-                contentType = { entry -> entry.event.historyContentType() },
-            ) { entry ->
-                val entryKey = StoredHistoryKey(
-                    agentId = agentId,
-                    generation = window.generation,
-                    storageIndex = entry.key.primaryStorageIndex,
+        val pending = pendingTools.asReversed()
+        items(
+            count = pending.size,
+            key = { position ->
+                PendingHistoryKey(
+                    generation = generation,
+                    identity = pending[position].historyIdentity(position),
                 )
-                val focusRequester = remember(entryKey) { FocusRequester() }
-                DisposableEffect(entryKey, focusRequester) {
-                    entryFocusRequesters[entryKey] = focusRequester
-                    onDispose {
-                        if (entryFocusRequesters[entryKey] === focusRequester) {
-                            entryFocusRequesters.remove(entryKey)
-                        }
+            },
+            contentType = { position -> pending[position].historyContentType() },
+        ) { position ->
+            pending[position].render(shellSessions)
+        }
+
+        items(
+            count = committedItemCount,
+            key = model::peek,
+            contentType = { position -> model.peek(position).historyContentType() },
+        ) { position ->
+            val item = model[position]
+            val focusRequester = remember(item) { FocusRequester() }
+            DisposableEffect(item, focusRequester) {
+                entryFocusRequesters[item] = focusRequester
+                onDispose {
+                    if (entryFocusRequesters[item] === focusRequester) {
+                        entryFocusRequesters.remove(item)
                     }
                 }
-                StoredHistoryEntry(
-                    entry = entry,
-                    generation = window.generation,
-                    focusRequester = focusRequester,
-                    shellSessions = shellSessions,
-                    onOpenContextMenu = onOpenEntryContextMenu,
+            }
+            StoredHistoryEntry(
+                item = item,
+                generation = generation,
+                model = model,
+                focusRequester = focusRequester,
+                shellSessions = shellSessions,
+                onOpenContextMenu = onOpenEntryContextMenu,
+            )
+        }
+
+        when (val state = loadState) {
+            AgentHistoryLoadState.Initializing,
+            AgentHistoryLoadState.LoadingOlder,
+                -> item(
+                key = HistoryMarkerKey(generation, HistoryMarker.Loading),
+                contentType = HistoryContentType.Marker,
+            ) {
+                HistoryMarkerText("Loading history…")
+            }
+
+            is AgentHistoryLoadState.Failed -> item(
+                key = HistoryMarkerKey(generation, HistoryMarker.Failure),
+                contentType = HistoryContentType.Marker,
+            ) {
+                WrappedHistoryText(
+                    value = "History error: ${state.message}",
+                    color = TuiTheme.colorScheme.error,
                 )
             }
 
-            if (
-                window.status is AgentHistoryWindowStatus.Initializing ||
-                window.olderEdge is AgentHistoryEdgeState.Loading
-            ) {
-                item(
-                    key = HistoryMarkerKey(
-                        agentId = agentId,
-                        generation = window.generation,
-                        marker = HistoryMarker.Loading,
-                    ),
-                    contentType = HistoryContentType.Marker,
+            is AgentHistoryLoadState.Ready -> {
+                if (
+                    streamingItem == null &&
+                    pendingTools.isEmpty() &&
+                    committedItemCount == 0 &&
+                    !state.hasOlder
                 ) {
-                    HistoryMarkerText("Loading history…")
+                    item(
+                        key = HistoryMarkerKey(generation, HistoryMarker.Empty),
+                        contentType = HistoryContentType.Marker,
+                    ) {
+                        HistoryMarkerText("No committed conversation items")
+                    }
                 }
             }
-
-            val failureMessage = when (val status = window.status) {
-                is AgentHistoryWindowStatus.Failed -> status.message
-                else -> (window.olderEdge as? AgentHistoryEdgeState.Failed)?.message
-            }
-            failureMessage?.let {
-                item(
-                    key = HistoryMarkerKey(
-                        agentId = agentId,
-                        generation = window.generation,
-                        marker = HistoryMarker.Failure,
-                    ),
-                    contentType = HistoryContentType.Marker,
-                ) {
-                    HistoryMarkerText("History error: $it")
-                }
-            }
-
-            if (
-                stream.tail == null &&
-                window.entries.isEmpty() &&
-                stream.pendingEvents.isEmpty() &&
-                window.status !is AgentHistoryWindowStatus.Initializing &&
-                window.olderEdge !is AgentHistoryEdgeState.Loading &&
-                failureMessage == null
-            ) {
-                item(
-                    key = HistoryMarkerKey(
-                        agentId = agentId,
-                        generation = window.generation,
-                        marker = HistoryMarker.Empty,
-                    ),
-                    contentType = HistoryContentType.Marker,
-                ) {
-                    HistoryMarkerText("No committed conversation items")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun HistoryFollowLatestEffect(uiState: AgentHistoryUiState) {
-    LaunchedEffect(uiState) {
-        snapshotFlow {
-            uiState.followsLatest to uiState.listState.canScrollForward
-        }.collect {
-            uiState.reconcileLayout()
         }
     }
 }
@@ -273,7 +174,7 @@ internal fun HistoryFollowLatestEffect(uiState: AgentHistoryUiState) {
 internal fun HistoryPagingFocusEffect(
     listState: LazyListState,
     interactionSource: MutableScrollInteractionSource,
-    entryFocusRequesters: Map<StoredHistoryKey, FocusRequester>,
+    entryFocusRequesters: Map<HistoryItemViewModel, FocusRequester>,
 ) {
     LaunchedEffect(listState, interactionSource) {
         interactionSource.interactions
@@ -284,18 +185,18 @@ internal fun HistoryPagingFocusEffect(
             .collectLatest { interaction ->
                 val expectedAnchorIndex = listState.firstVisibleItemIndex
                 val expectedAnchorOffset = listState.firstVisibleItemScrollOffset
-                val layoutInfo = snapshotFlow { listState.layoutInfo }
+                val layoutInfo = androidx.compose.runtime.snapshotFlow { listState.layoutInfo }
                     .first { layout ->
                         layout.matchesAnchor(
                             index = expectedAnchorIndex,
                             scrollOffset = expectedAnchorOffset,
                         )
                     }
-                val targetKey = layoutInfo.historyPageFocusKey(
+                val targetItem = layoutInfo.historyPageFocusItem(
                     towardTop = interaction.consumedDelta < 0,
                 ) ?: return@collectLatest
 
-                entryFocusRequesters[targetKey]?.requestFocus()
+                entryFocusRequesters[targetItem]?.requestFocus()
             }
     }
 }
@@ -309,9 +210,11 @@ private fun LazyListLayoutInfo.matchesAnchor(
         firstVisibleItem.offset == viewportStartOffset - scrollOffset
 }
 
-internal fun LazyListLayoutInfo.historyPageFocusKey(towardTop: Boolean): StoredHistoryKey? {
+internal fun LazyListLayoutInfo.historyPageFocusItem(
+    towardTop: Boolean,
+): HistoryItemViewModel? {
     val candidates = visibleItemsInfo.filter { item ->
-        item.key is StoredHistoryKey &&
+        item.key is HistoryItemViewModel &&
             item.offset >= viewportStartOffset &&
             item.offset + item.size <= viewportEndOffset
     }
@@ -320,13 +223,14 @@ internal fun LazyListLayoutInfo.historyPageFocusKey(towardTop: Boolean): StoredH
     } else {
         candidates.maxByOrNull { item -> item.offset + item.size }
     }
-    return target?.key as? StoredHistoryKey
+    return target?.key as? HistoryItemViewModel
 }
 
 @Composable
 internal fun StoredHistoryEntry(
-    entry: AgentHistoryEntry,
+    item: HistoryItemViewModel,
     generation: Long,
+    model: AgentHistoryViewModel,
     focusRequester: FocusRequester? = null,
     shellSessions: AgentShellSessionRegistry,
     onOpenContextMenu: ((
@@ -336,6 +240,7 @@ internal fun StoredHistoryEntry(
         clickPosition: IntOffset?,
     ) -> Unit)?,
 ) {
+    val storageIndex = item.storageIndex
     val menuAnchor = rememberTuiPopupAnchor()
     TuiPressable(
         onClick = {},
@@ -344,7 +249,7 @@ internal fun StoredHistoryEntry(
             { clickPosition ->
                 openMenu(
                     generation,
-                    entry.key.primaryStorageIndex,
+                    storageIndex,
                     menuAnchor,
                     clickPosition,
                 )
@@ -354,7 +259,55 @@ internal fun StoredHistoryEntry(
             .fillMaxWidth()
             .tuiPopupAnchor(menuAnchor),
     ) { _, _, _ ->
-        entry.event.render(shellSessions)
+        StoredHistoryContent(
+            item = item,
+            generation = generation,
+            model = model,
+            shellSessions = shellSessions,
+        )
+    }
+}
+
+@Composable
+private fun StoredHistoryContent(
+    item: HistoryItemViewModel,
+    generation: Long,
+    model: AgentHistoryViewModel,
+    shellSessions: AgentShellSessionRegistry,
+) {
+    val loaded by produceState<StoredEventLoadState>(
+        initialValue = StoredEventLoadState.Loading,
+        model,
+        item,
+        generation,
+    ) {
+        value = try {
+            StoredEventLoadState.Loaded(model.read(item))
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            if (!model.contains(generation, item.storageIndex)) return@produceState
+            HistoryViewLogger.error(failure) {
+                "Unable to read committed history item ${item.storageIndex}."
+            }
+            StoredEventLoadState.Failed
+        }
+    }
+
+    when (val state = loaded) {
+        StoredEventLoadState.Loading -> Text("")
+        StoredEventLoadState.Failed -> Text(
+            value = "Error",
+            color = TuiTheme.colorScheme.error,
+        )
+
+        is StoredEventLoadState.Loaded -> {
+            val expansion = remember(item) { item.expansionBinding() }
+            state.event.render(
+                shellSessions = shellSessions,
+                expansion = expansion,
+            )
+        }
     }
 }
 
@@ -367,8 +320,8 @@ private fun HistoryMarkerText(value: String) {
 }
 
 /**
- * Mosaic's Text clips at its measured width instead of wrapping. Subcomposing
- * from the incoming finite width keeps each lazy item independently measurable.
+ * Mosaic's Text clips at its measured width instead of wrapping. Subcomposing from the incoming
+ * finite width keeps each lazy item independently measurable.
  */
 @Composable
 internal fun WrappedHistoryText(
@@ -408,17 +361,15 @@ internal fun WrappedHistoryText(
     }
 }
 
-private fun StableCleanEvent.historyContentType(): HistoryContentType = when (this) {
-    is StableCleanEvent.UserMessage,
-    is StableCleanEvent.AssistantMessage,
-    is StableCleanEvent.DeveloperMessage,
-    is StableCleanEvent.AgentMessage,
-        -> HistoryContentType.Message
+private fun HistoryItemViewModel.historyContentType(): HistoryContentType = when (this) {
+    is HistoryItemViewModel.Message -> HistoryContentType.Message
+    is HistoryItemViewModel.Reasoning -> HistoryContentType.Reasoning
+    is HistoryItemViewModel.Tool,
+    is HistoryItemViewModel.PlanUpdate,
+        -> HistoryContentType.CompletedTool
 
-    is StableCleanEvent.Reasoning -> HistoryContentType.Reasoning
-    StableCleanEvent.ContextCompaction -> HistoryContentType.Context
-    is StablePatchToolEvent -> HistoryContentType.Patch
-    else -> HistoryContentType.CompletedTool
+    is HistoryItemViewModel.Patch -> HistoryContentType.Patch
+    is HistoryItemViewModel.ContextCompaction -> HistoryContentType.Context
 }
 
 private fun UnstableCleanEvent.historyContentType(): HistoryContentType = when (this) {
@@ -431,58 +382,72 @@ private fun UnstableCleanEvent.historyIdentity(position: Int): String = when (th
     is PendingServerToolSearch -> "server:${call.id?.value ?: position}"
 }
 
-private fun AgentStreamTail.historyIdentity(): Any = when (this) {
-    AgentStreamTail.Started -> StreamingStartedHistoryKey
-    is AgentStreamTail.Output -> events
-    AgentStreamTail.Compacting -> CompactingHistoryKey
+private fun HistoryStreamingItem.historyIdentity(): Any = when (this) {
+    HistoryStreamingItem.Started -> StreamingStartedHistoryKey
+    is HistoryStreamingItem.Output -> events
+    HistoryStreamingItem.Compacting -> CompactingHistoryKey
 }
 
-private fun AgentStreamTail.historyContentType(): HistoryContentType = when (this) {
-    AgentStreamTail.Started,
-    AgentStreamTail.Compacting,
+private fun HistoryStreamingItem.historyContentType(): HistoryContentType = when (this) {
+    HistoryStreamingItem.Started,
+    HistoryStreamingItem.Compacting,
         -> HistoryContentType.StreamingStatus
 
-    is AgentStreamTail.Output -> when (kind) {
-        io.github.stream29.kodex.app.agent.contract.AgentStreamKind.Message,
-        io.github.stream29.kodex.app.agent.contract.AgentStreamKind.AgentMessage,
+    is HistoryStreamingItem.Output -> when (kind) {
+        HistoryStreamingKind.Message,
+        HistoryStreamingKind.AgentMessage,
             -> HistoryContentType.StreamingMessage
-        io.github.stream29.kodex.app.agent.contract.AgentStreamKind.Reasoning ->
-            HistoryContentType.StreamingReasoning
-        io.github.stream29.kodex.app.agent.contract.AgentStreamKind.ToolCall ->
-            HistoryContentType.StreamingTool
-        io.github.stream29.kodex.app.agent.contract.AgentStreamKind.Unknown ->
-            HistoryContentType.StreamingStatus
+
+        HistoryStreamingKind.Reasoning -> HistoryContentType.StreamingReasoning
+        HistoryStreamingKind.ToolCall -> HistoryContentType.StreamingTool
+        HistoryStreamingKind.Unknown -> HistoryContentType.StreamingStatus
     }
 }
 
-private fun AgentHistoryEdgeState.loadableCursor() = when (this) {
-    is AgentHistoryEdgeState.Ready -> cursor
-    is AgentHistoryEdgeState.Failed -> cursor
-    AgentHistoryEdgeState.Exhausted,
-    is AgentHistoryEdgeState.Loading,
-    AgentHistoryEdgeState.Unresolved,
+private val HistoryItemViewModel.storageIndex: Int
+    get() = when (this) {
+        is HistoryItemViewModel.Message -> index
+        is HistoryItemViewModel.Reasoning -> index
+        is HistoryItemViewModel.Tool -> index
+        is HistoryItemViewModel.Patch -> index
+        is HistoryItemViewModel.PlanUpdate -> index
+        is HistoryItemViewModel.ContextCompaction -> index
+    }
+
+private fun HistoryItemViewModel.expansionBinding(): HistoryExpansionBinding? = when (this) {
+    is HistoryItemViewModel.Reasoning -> HistoryExpansionBinding(
+        expanded = { expanded },
+        toggle = ::toggleExpanded,
+    )
+
+    is HistoryItemViewModel.Tool -> HistoryExpansionBinding(
+        expanded = { expanded },
+        toggle = ::toggleExpanded,
+    )
+
+    is HistoryItemViewModel.Patch -> HistoryExpansionBinding(
+        expanded = { expanded },
+        toggle = ::toggleExpanded,
+    )
+
+    is HistoryItemViewModel.Message,
+    is HistoryItemViewModel.PlanUpdate,
+    is HistoryItemViewModel.ContextCompaction,
         -> null
 }
 
-internal data class StoredHistoryKey(
-    val agentId: String,
-    val generation: Long,
-    val storageIndex: Int,
-)
+private sealed interface StoredEventLoadState {
+    data object Loading : StoredEventLoadState
+    data object Failed : StoredEventLoadState
+    data class Loaded(val event: StableCleanEvent) : StoredEventLoadState
+}
 
 private data class PendingHistoryKey(
-    val agentId: String,
     val generation: Long,
     val identity: String,
 )
 
-private data class StreamingHistoryKey(
-    val agentId: String,
-    val identity: Any,
-)
-
 private data class HistoryMarkerKey(
-    val agentId: String,
     val generation: Long,
     val marker: HistoryMarker,
 )
@@ -509,8 +474,6 @@ private enum class HistoryContentType {
 
 private data object StreamingStartedHistoryKey
 private data object CompactingHistoryKey
-
 private data object WrappedHistoryTextSlot
 
-private const val HistoryPrefetchDistance: Int = 4
-private const val HistoryBatchSize: Int = 64
+private val HistoryViewLogger = KotlinLogging.logger {}

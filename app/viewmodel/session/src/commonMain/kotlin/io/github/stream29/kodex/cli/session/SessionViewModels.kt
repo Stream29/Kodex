@@ -233,8 +233,8 @@ private class PersistedSessionViewModelImpl(
         require(owned === source) {
             "Fork source is not owned by this persisted Session."
         }
-        require(target.generation == source.history.window.value.generation) {
-            "Fork target generation is stale."
+        require(source.history.contains(target.generation, target.storageIndex)) {
+            "Fork target is stale."
         }
         require(
             !source.execution.value.running &&

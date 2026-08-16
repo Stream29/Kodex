@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.app.agent.contract
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -70,7 +71,7 @@ public interface AgentViewModel :
 
     public val execution: StateFlow<AgentExecutionState>
     public val tokenCount: StateFlow<Long?>
-    public val stream: StateFlow<AgentStreamState>
+    public val pendingSteer: StateFlow<List<StableCleanEvent.Steerable>>
     public val directChildren: StateFlow<AgentChildrenState>
     public val historyAction: StateFlow<AgentHistoryActionState>
     public val notification: StateFlow<AgentNotification?>

@@ -1,12 +1,15 @@
 package io.github.stream29.kodex.cli.history
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Color
@@ -113,32 +116,54 @@ import kotlinx.serialization.json.contentOrNull
 public fun StableCleanEvent.render(
     shellSessions: AgentShellSessionRegistry? = null,
 ) {
-    when (this) {
-        is StableCleanEvent.UserMessage -> renderUserMessage()
-        is StableCleanEvent.AssistantMessage -> renderAssistantMessage()
-        is StableCleanEvent.DeveloperMessage -> renderDeveloperMessage()
-        is StableCleanEvent.AgentMessage -> renderAgentMessage()
-        is StableCleanEvent.Reasoning -> renderReasoning()
-        is StableCleanEvent.InvalidToolCall -> renderInvalidToolCall()
-        is StableCleanEvent.ServerToolSearch -> renderServerToolSearch()
-        is StableCleanEvent.WebSearchCall -> renderHostedWebSearch()
-        is StableCleanEvent.ImageGenerationCall -> renderHostedImageGeneration()
-        StableCleanEvent.ContextCompaction -> ContextCompactionEvent()
-        is StablePatchToolEvent -> StablePatchToolEventView(this)
-        is StableCommandExecutionToolEvent -> renderCommandExecution(shellSessions)
-        is StableJsonToolEvent -> renderJsonTool()
-        is StableTextToolEvent -> renderTextTool()
-        is StableCustomToolEvent -> renderCustomTool()
-        is StableImageGenerationToolEvent -> renderImageGeneration()
-        is StableImageViewToolEvent -> renderImageView()
-        is StableMcpToolEvent -> renderMcpTool()
-        is StableMultiAgentToolEvent -> renderMultiAgentTool()
-        is StablePlanUpdate -> renderPlanUpdate()
-        is StableRequestUserInputToolEvent -> renderRequestUserInput()
-        is StableToolSearchEvent -> renderToolSearch()
-        is StableWebSearchToolEvent -> renderWebSearch()
+    render(shellSessions, expansion = null)
+}
+
+@Composable
+internal fun StableCleanEvent.render(
+    shellSessions: AgentShellSessionRegistry?,
+    expansion: HistoryExpansionBinding?,
+) {
+    CompositionLocalProvider(LocalHistoryExpansion provides expansion) {
+        when (this) {
+            is StableCleanEvent.UserMessage -> renderUserMessage()
+            is StableCleanEvent.AssistantMessage -> renderAssistantMessage()
+            is StableCleanEvent.DeveloperMessage -> renderDeveloperMessage()
+            is StableCleanEvent.AgentMessage -> renderAgentMessage()
+            is StableCleanEvent.Reasoning -> renderReasoning()
+            is StableCleanEvent.InvalidToolCall -> renderInvalidToolCall()
+            is StableCleanEvent.ServerToolSearch -> renderServerToolSearch()
+            is StableCleanEvent.WebSearchCall -> renderHostedWebSearch()
+            is StableCleanEvent.ImageGenerationCall -> renderHostedImageGeneration()
+            StableCleanEvent.ContextCompaction -> ContextCompactionEvent()
+            is StablePatchToolEvent -> StablePatchToolEventView(
+                event = this,
+                expanded = expansion?.expanded?.invoke(),
+                onToggleExpanded = expansion?.toggle,
+            )
+            is StableCommandExecutionToolEvent -> renderCommandExecution(shellSessions)
+            is StableJsonToolEvent -> renderJsonTool()
+            is StableTextToolEvent -> renderTextTool()
+            is StableCustomToolEvent -> renderCustomTool()
+            is StableImageGenerationToolEvent -> renderImageGeneration()
+            is StableImageViewToolEvent -> renderImageView()
+            is StableMcpToolEvent -> renderMcpTool()
+            is StableMultiAgentToolEvent -> renderMultiAgentTool()
+            is StablePlanUpdate -> renderPlanUpdate()
+            is StableRequestUserInputToolEvent -> renderRequestUserInput()
+            is StableToolSearchEvent -> renderToolSearch()
+            is StableWebSearchToolEvent -> renderWebSearch()
+        }
     }
 }
+
+@Stable
+internal class HistoryExpansionBinding(
+    val expanded: () -> Boolean,
+    val toggle: () -> Unit,
+)
+
+private val LocalHistoryExpansion = staticCompositionLocalOf<HistoryExpansionBinding?> { null }
 
 /** Renders one current unfinished clean event without reducing it to raw history. */
 @Composable
@@ -661,12 +686,20 @@ internal fun ToolEvent(
     detailStyle: TextStyle = TextStyle.Unspecified,
     content: @Composable ToolEventDetailsScope.() -> Unit,
 ) {
-    var expanded by remember(expansionKey) { mutableStateOf(false) }
+    var localExpanded by remember(expansionKey) { mutableStateOf(false) }
+    val externalExpansion = LocalHistoryExpansion.current
+    val expanded = externalExpansion?.expanded?.invoke() ?: localExpanded
     val headerColor = toolHeaderColor(status)
 
     Column(modifier = Modifier.fillMaxWidth()) {
         TuiPressable(
-            onClick = { expanded = !expanded },
+            onClick = {
+                if (externalExpansion == null) {
+                    localExpanded = !localExpanded
+                } else {
+                    externalExpansion.toggle()
+                }
+            },
             modifier = Modifier.fillMaxWidth(),
         ) { _, isHovered, isPressed ->
             EllipsizedText(
@@ -768,11 +801,19 @@ private fun ExpandableHistoryEvent(
     headerStyle: TextStyle,
     content: @Composable () -> Unit,
 ) {
-    var expanded by remember(expansionKey) { mutableStateOf(false) }
+    var localExpanded by remember(expansionKey) { mutableStateOf(false) }
+    val externalExpansion = LocalHistoryExpansion.current
+    val expanded = externalExpansion?.expanded?.invoke() ?: localExpanded
 
     Column(modifier = Modifier.fillMaxWidth()) {
         TuiPressable(
-            onClick = { expanded = !expanded },
+            onClick = {
+                if (externalExpansion == null) {
+                    localExpanded = !localExpanded
+                } else {
+                    externalExpansion.toggle()
+                }
+            },
             modifier = Modifier.fillMaxWidth(),
         ) { _, isHovered, isPressed ->
             WrappedHistoryText(

@@ -23,9 +23,6 @@ import io.github.stream29.kodex.app.agent.contract.AgentNotification
 import io.github.stream29.kodex.app.agent.contract.AgentNotificationLevel
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
-import io.github.stream29.kodex.app.agent.contract.AgentStreamKind
-import io.github.stream29.kodex.app.agent.contract.AgentStreamState
-import io.github.stream29.kodex.app.agent.contract.AgentStreamTail
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModelFactory
@@ -107,7 +104,6 @@ internal class AgentRuntimeViewModel(
     private val mutableRuntimeOperation = MutableStateFlow<Job?>(null)
     private val mutableHistoryOperation = MutableStateFlow<Job?>(null)
     private val mutableExecution = MutableStateFlow(projectExecution(activityVersion = 0))
-    private val mutableStream = MutableStateFlow(AgentStreamState())
     private val mutableChildren = MutableStateFlow<AgentChildrenState>(AgentChildrenState.Unloaded)
     private val mutableHistoryAction =
         MutableStateFlow<AgentHistoryActionState>(AgentHistoryActionState.None)
@@ -115,7 +111,6 @@ internal class AgentRuntimeViewModel(
     private val mutableLifecycle = MutableStateFlow<AgentLifecycleState>(AgentLifecycleState.Open)
     private var nextHistoryRequestId: Long = 1
     private var nextNotificationId: Long = 1
-    private var streamRevision: Long = 0
     private var childrenRevision: Long = 0
     private var closed: Boolean = false
 
@@ -125,7 +120,8 @@ internal class AgentRuntimeViewModel(
     override val settings: StateFlow<KodexAgentSettings> = mutableSettings.asStateFlow()
     override val tokenCount: StateFlow<Long?> = mutableTokenCount.asStateFlow()
     override val execution: StateFlow<AgentExecutionState> = mutableExecution.asStateFlow()
-    override val stream: StateFlow<AgentStreamState> = mutableStream.asStateFlow()
+    override val pendingSteer: StateFlow<List<StableCleanEvent.Steerable>> =
+        session.runtime.pendingSteer.asStateFlow()
     override val directChildren: StateFlow<AgentChildrenState> = mutableChildren.asStateFlow()
     override val historyAction: StateFlow<AgentHistoryActionState> =
         mutableHistoryAction.asStateFlow()
@@ -137,24 +133,17 @@ internal class AgentRuntimeViewModel(
             session.runtime.latestIndex.collect { index ->
                 refreshDurableState(index)
                 publishExecution()
-                publishStream()
             }
         }
         scope.launch {
             session.runtime.state.collect { value ->
                 requestUserInputImpl.synchronize(value.singleRequestUserInputOrNull())
                 publishExecution()
-                publishStream()
             }
         }
         scope.launch {
             session.runtime.runningTurn.collect {
                 publishExecution()
-            }
-        }
-        scope.launch {
-            session.runtime.pendingSteer.collect {
-                publishStream()
             }
         }
         scope.launch {
@@ -322,13 +311,7 @@ internal class AgentRuntimeViewModel(
         require(!state.running && state.capabilities.canReplaceHistory) {
             "Cannot request a history revert in Agent phase ${state.phase}."
         }
-        val window = history.window.value
-        require(
-            window.generation == target.generation &&
-                window.entries.any { entry ->
-                    entry.key.primaryStorageIndex == target.storageIndex
-                },
-        ) {
+        require(history.contains(target.generation, target.storageIndex)) {
             "History revert target is no longer present in the current window."
         }
         val requestId = nextHistoryRequestId
@@ -354,13 +337,7 @@ internal class AgentRuntimeViewModel(
         require(!state.running && state.capabilities.canReplaceHistory) {
             "Cannot revert history in Agent phase ${state.phase}."
         }
-        val window = history.window.value
-        require(
-            window.generation == request.target.generation &&
-                window.entries.any { entry ->
-                    entry.key.primaryStorageIndex == request.target.storageIndex
-                },
-        ) {
+        require(history.contains(request.target.generation, request.target.storageIndex)) {
             "History revert target is no longer present in the current window."
         }
         val operation = scope.launch(start = CoroutineStart.LAZY) {
@@ -393,8 +370,8 @@ internal class AgentRuntimeViewModel(
     private suspend fun executeHistoryRevert(target: AgentHistoryTarget) {
         commandMutex.withLock {
             ensureOpen()
-            require(target.generation == history.window.value.generation) {
-                "History revert target generation is stale."
+            require(history.contains(target.generation, target.storageIndex)) {
+                "History revert target is stale."
             }
             val value = session.runtime.state.value
             val runtimeRunning =
@@ -485,29 +462,6 @@ internal class AgentRuntimeViewModel(
             activityVersion = activityVersion,
             capabilities = value.toCapabilities(running, cancelable),
         )
-    }
-
-    private suspend fun publishStream() {
-        check(streamRevision < Long.MAX_VALUE) { "Agent stream revisions are exhausted." }
-        val latestIndex = session.runtime.latestIndex.value
-        val pending = if (
-            latestIndex >= 0 &&
-            session.storage.unstable.floorToIndex(latestIndex) != null
-        ) {
-            session.storage.unstable[latestIndex]
-        } else {
-            emptyList()
-        }
-        val projected = AgentStreamState(
-            tail = session.runtime.state.value.toStreamTail(),
-            pendingEvents = pending,
-            pendingSteer = session.runtime.pendingSteer.value,
-            revision = streamRevision,
-        )
-        if (projected.copy(revision = 0) != mutableStream.value.copy(revision = 0)) {
-            streamRevision += 1
-            mutableStream.value = projected.copy(revision = streamRevision)
-        }
     }
 
     private suspend fun startAutomaticTitle(content: List<ContentItem>) {
@@ -759,27 +713,6 @@ private val KodexAgentStateValue.canReplaceHistory: Boolean
         KodexAgentStateValue.Compacting,
             -> false
     }
-
-private fun KodexAgentStateValue.toStreamTail(): AgentStreamTail? = when (this) {
-    KodexAgentStateValue.RequestResponse.Started -> AgentStreamTail.Started
-    is KodexAgentStateValue.RequestResponse.Message ->
-        AgentStreamTail.Output(AgentStreamKind.Message, events)
-
-    is KodexAgentStateValue.RequestResponse.AgentMessage ->
-        AgentStreamTail.Output(AgentStreamKind.AgentMessage, events)
-
-    is KodexAgentStateValue.RequestResponse.Reasoning ->
-        AgentStreamTail.Output(AgentStreamKind.Reasoning, events)
-
-    is KodexAgentStateValue.RequestResponse.ToolCall ->
-        AgentStreamTail.Output(AgentStreamKind.ToolCall, events)
-
-    is KodexAgentStateValue.RequestResponse.Unknown ->
-        AgentStreamTail.Output(AgentStreamKind.Unknown, events)
-
-    KodexAgentStateValue.Compacting -> AgentStreamTail.Compacting
-    else -> null
-}
 
 private fun KodexAgentStateValue.singleRequestUserInputOrNull(): PendingRequestUserInputToolEvent? =
     (this as? KodexAgentStateValue.ToolPending)

@@ -19,6 +19,7 @@ import io.github.stream29.kodex.cli.components.LazyListState
 import io.github.stream29.kodex.cli.components.MutableScrollInteractionSource
 import io.github.stream29.kodex.cli.components.TuiPressable
 import io.github.stream29.kodex.cli.components.items
+import io.github.stream29.kodex.app.history.contract.HistoryItemViewModel
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -40,14 +41,15 @@ val agentHistoryPagingTest by testSuite {
             totalItemsCount = 4,
         )
 
-        assertEquals(firstComplete, layoutInfo.historyPageFocusKey(towardTop = true))
-        assertEquals(lastComplete, layoutInfo.historyPageFocusKey(towardTop = false))
+        assertEquals(firstComplete, layoutInfo.historyPageFocusItem(towardTop = true))
+        assertEquals(lastComplete, layoutInfo.historyPageFocusItem(towardTop = false))
     }
 
     test("paging moves half a viewport and refocuses its visual edge") {
         val listState = LazyListState()
         val interactionSource = MutableScrollInteractionSource()
-        val focusRequesters = mutableMapOf<StoredHistoryKey, FocusRequester>()
+        val historyItems = List(12) { index -> storedKey(index) }
+        val focusRequesters = mutableMapOf<HistoryItemViewModel, FocusRequester>()
 
         runMosaicTest {
             setContentAndSnapshot {
@@ -67,10 +69,10 @@ val agentHistoryPagingTest by testSuite {
                         },
                     ) {
                         items(
-                            count = 12,
-                            key = { index -> storedKey(index) },
-                        ) { index ->
-                            val key = storedKey(index)
+                            items = historyItems,
+                            key = { item -> item },
+                        ) { key ->
+                            val index = (key as HistoryItemViewModel.Message).index
                             val focusRequester = remember(key) { FocusRequester() }
                             DisposableEffect(key, focusRequester) {
                                 focusRequesters[key] = focusRequester
@@ -123,8 +125,5 @@ val agentHistoryPagingTest by testSuite {
     }
 }
 
-private fun storedKey(index: Int): StoredHistoryKey = StoredHistoryKey(
-    agentId = "agent",
-    generation = 0,
-    storageIndex = index,
-)
+private fun storedKey(index: Int): HistoryItemViewModel =
+    HistoryItemViewModel.Message(index)

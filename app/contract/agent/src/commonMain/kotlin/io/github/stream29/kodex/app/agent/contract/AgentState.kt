@@ -1,10 +1,6 @@
 package io.github.stream29.kodex.app.agent.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** Lightweight execution phase without a streaming payload or runtime handle. */
@@ -48,46 +44,6 @@ public data class AgentExecutionState(
             "An Agent latest storage index must be -1 or non-negative."
         }
         require(activityVersion >= 0) { "An Agent activity version must not be negative." }
-    }
-}
-
-/** Semantic kind of the currently streaming Responses output item. */
-public enum class AgentStreamKind {
-    Message,
-    AgentMessage,
-    Reasoning,
-    ToolCall,
-    Unknown,
-}
-
-/**
- * One active high-frequency operation rendered after committed history.
- *
- * An [Output] forwards the execution layer's replaying event source rather
- * than copying every delta into an aggregate ViewModel state.
- */
-public sealed interface AgentStreamTail {
-    public data object Started : AgentStreamTail
-
-    public data class Output(
-        public val kind: AgentStreamKind,
-        public val events: SharedFlow<ResponsesStreamEvent>,
-    ) : AgentStreamTail
-
-    public data object Compacting : AgentStreamTail
-}
-
-/**
- * High-frequency transient timeline state, separate from committed history.
- */
-public data class AgentStreamState(
-    public val tail: AgentStreamTail? = null,
-    public val pendingEvents: List<UnstableCleanEvent> = emptyList(),
-    public val pendingSteer: List<StableCleanEvent.Steerable> = emptyList(),
-    public val revision: Long = 0,
-) {
-    init {
-        require(revision >= 0) { "An Agent stream revision must not be negative." }
     }
 }
 
