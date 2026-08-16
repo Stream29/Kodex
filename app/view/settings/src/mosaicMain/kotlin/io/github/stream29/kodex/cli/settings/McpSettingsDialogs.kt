@@ -167,7 +167,6 @@ internal fun BoxScope.McpServerEditorDialog(
                 label = "Transport",
                 selectedLabel = transport.editorLabel(),
                 dropdownState = transportDropdown,
-                background = SettingsHomeBackground,
             )
             McpInputField(
                 if (transport == McpTransportKind.StreamableHttp) "URL" else "Command",
@@ -192,7 +191,6 @@ internal fun BoxScope.McpServerEditorDialog(
                     label = "OAuth",
                     selectedLabel = oauthEnabled.oauthEditorLabel(),
                     dropdownState = oauthDropdown,
-                    background = SettingsHomeBackground,
                 )
                 if (oauthEnabled) {
                     McpInputField("OAuth client id", oauthClientId, width)

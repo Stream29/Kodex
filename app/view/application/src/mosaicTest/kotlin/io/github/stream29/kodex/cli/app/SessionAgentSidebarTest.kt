@@ -33,25 +33,28 @@ class SessionAgentSidebarTest {
                 )
             }
 
-            assertTrue("←" in snapshot)
+            assertTrue("[←]" in snapshot)
             assertFalse("Agent tree" in snapshot)
             assertFalse("No agents" in snapshot)
         }
     }
 
     @Test
-    fun collapsedBookmarkOccupiesOnlyItsTopThreeCells() = runTest {
+    fun collapsedSidebarUsesTheMatchingDirectionButton() = runTest {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
-                SessionAgentSidebarBookmark(
+                SessionAgentSidebarExpandButton(
                     onHoverChanged = {},
                     onExpand = {},
                 )
             }
 
-            assertEquals(listOf("╮", "→", "╯"), snapshot.lines())
-            assertEquals(SessionSidebarBookmarkColumns, snapshot.lines().maxOf(String::length))
-            assertEquals(SessionSidebarBookmarkRows, snapshot.lines().size)
+            assertEquals(listOf("[→]"), snapshot.lines())
+            assertEquals(
+                SessionSidebarCollapsedButtonColumns,
+                snapshot.lines().maxOf(String::length),
+            )
+            assertEquals(SessionSidebarCollapsedButtonRows, snapshot.lines().size)
         }
     }
 

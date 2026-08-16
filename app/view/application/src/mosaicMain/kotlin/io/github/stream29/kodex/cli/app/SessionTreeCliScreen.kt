@@ -79,13 +79,13 @@ public fun SessionTreeCliScreen(
     val rows = (terminal.size.rows - 1).coerceAtLeast(1)
     val scope = rememberCoroutineScope()
     var sidebarPinnedExpanded by remember { mutableStateOf(false) }
-    var sidebarBookmarkHovered by remember { mutableStateOf(false) }
+    var sidebarExpandButtonHovered by remember { mutableStateOf(false) }
     var sidebarSurfaceHovered by remember { mutableStateOf(false) }
     var shellSessionMenu by remember { mutableStateOf<ShellSessionMenuRequest?>(null) }
     var tabMenu by remember { mutableStateOf<SessionTabMenuRequest?>(null) }
     var historyMenu by remember { mutableStateOf<HistoryEntryMenuRequest?>(null) }
     val sidebarExpanded = sidebarPinnedExpanded ||
-        sidebarBookmarkHovered ||
+        sidebarExpandButtonHovered ||
         sidebarSurfaceHovered ||
         shellSessionMenu != null
     val animatedSidebarColumns by animateIntAsState(
@@ -93,11 +93,11 @@ public fun SessionTreeCliScreen(
         label = "session sidebar width",
     )
     val sidebarColumns = animatedSidebarColumns.coerceIn(0, SessionSidebarExpandedColumns)
-    val bookmarkBridgesHoverAnimation = sidebarBookmarkHovered &&
+    val expandButtonBridgesHoverAnimation = sidebarExpandButtonHovered &&
         !sidebarPinnedExpanded &&
         sidebarColumns < SessionSidebarExpandedColumns
-    val showSidebarBookmarks =
-        (!sidebarExpanded && sidebarColumns == 0) || bookmarkBridgesHoverAnimation
+    val showSidebarExpandButton =
+        (!sidebarExpanded && sidebarColumns == 0) || expandButtonBridgesHoverAnimation
     val contentColumns = (columns - sidebarColumns).coerceAtLeast(1)
     val contentRows = (rows - SessionTabBarRows).coerceAtLeast(0)
     val selected = navigation.selected
@@ -232,9 +232,9 @@ public fun SessionTreeCliScreen(
                             }
                         }
                     }
-                    if (showSidebarBookmarks) {
-                        SessionAgentSidebarBookmark(
-                            onHoverChanged = { hovered -> sidebarBookmarkHovered = hovered },
+                    if (showSidebarExpandButton) {
+                        SessionAgentSidebarExpandButton(
+                            onHoverChanged = { hovered -> sidebarExpandButtonHovered = hovered },
                             onExpand = { sidebarPinnedExpanded = true },
                         )
                     }
