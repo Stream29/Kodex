@@ -640,12 +640,13 @@ private fun TuiPopupMenuItemContent(
             }
         },
     ) { _, hovered, pressed ->
-        val textStyle = when {
-            !entry.enabled -> TextStyle.Dim
-            pressed -> TextStyle.Invert
-            hovered || entry.selected -> TextStyle.Bold
-            else -> TextStyle.Unspecified
-        }
+        val textStyle = tuiInteractionTextStyle(
+            enabled = entry.enabled,
+            hovered = hovered,
+            pressed = pressed,
+            selected = entry.selected,
+            idleTextStyle = TuiTheme.typography.label,
+        )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -680,7 +681,7 @@ private fun TuiPopupMenuDividerContent(entry: TuiPopupMenuEntry.Divider) {
         modifier = entry.modifier
             .fillMaxWidth()
             .height(1),
-        textStyle = TextStyle.Dim,
+        textStyle = TuiTheme.typography.supporting,
     )
 }
 
@@ -689,7 +690,7 @@ private fun TuiPopupMenuOverflowIndicator(value: String) {
     Row(modifier = Modifier.fillMaxWidth()) {
         Text("[")
         Spacer(Modifier.weight(1f))
-        Text(value, textStyle = TextStyle.Dim)
+        Text(value, textStyle = TuiTheme.typography.supporting)
         Spacer(Modifier.weight(1f))
         Text("]")
     }

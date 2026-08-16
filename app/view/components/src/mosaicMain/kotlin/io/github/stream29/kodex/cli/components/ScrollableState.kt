@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 
 /**
- * Consumes scrolling measured in terminal rows.
+ * Consumes scrolling measured in terminal cells along one logical axis.
  *
  * Positive deltas move toward the logical end and negative deltas move toward the logical start.
  * [scrollBy] returns the signed portion that was consumed.
@@ -105,7 +105,7 @@ public fun rememberScrollableState(
     }
 }
 
-/** Absolute row position for an eagerly measured scrolling container. */
+/** Absolute terminal-cell position for an eagerly measured scrolling container. */
 @Stable
 public class ScrollState(initial: Int = 0) : ScrollableState {
     private val valueState = mutableIntStateOf(initial)

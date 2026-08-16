@@ -12,6 +12,7 @@ import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Row
+import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.agent.contract.AgentExecutionState
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -288,6 +289,63 @@ class RuntimeStatusBarTest {
             assertEquals(columns - 1, snapshot.length, snapshot)
             assertTrue(snapshot.endsWith("[Settings]"), snapshot)
             assertTrue(snapshot.dropLast("[Settings]".length).endsWith("  "), snapshot)
+        }
+    }
+
+    @Test
+    fun statusBarPlanPinsSettingsAndWrapsWholeControls() {
+        val width = 39
+        val itemWidths = listOf(17, 10, 14, 5)
+
+        val plan = statusBarLayoutPlan(
+            width = width,
+            itemWidths = itemWidths,
+            settingsWidth = 10,
+        )
+
+        assertEquals(IntOffset(x = 29, y = 0), plan.settingsPosition)
+        assertEquals(
+            listOf(
+                IntOffset(x = 0, y = 0),
+                IntOffset(x = 18, y = 0),
+                IntOffset(x = 0, y = 1),
+                IntOffset(x = 15, y = 1),
+            ),
+            plan.itemPositions,
+        )
+        assertEquals(2, plan.rowCount)
+        plan.itemPositions.zip(itemWidths).forEach { (position, itemWidth) ->
+            if (position.y == 0) {
+                assertTrue(position.x + itemWidth < plan.settingsPosition.x)
+            } else {
+                assertTrue(position.x + itemWidth <= width)
+            }
+        }
+    }
+
+    @Test
+    fun newSessionControlsStayCompleteAcrossSupportedWidths() = runTest {
+        listOf(40, 60, 80, 120).forEach { columns ->
+            runMosaicTest {
+                val settings = testSettings(Path("."))
+                val snapshot = setContentAndSnapshot {
+                    NewSessionStatusBar(
+                        columns = columns,
+                        settings = settings,
+                        dropdowns = RuntimeConfigurationDropdowns.remember(owner = columns),
+                        onBrowseWorkingDirectory = {},
+                        onOpenSettings = {},
+                    )
+                }
+                val lines = snapshot.lines()
+
+                assertTrue(lines.first().endsWith("[Settings]"), snapshot)
+                assertTrue("[test-model high]" in snapshot, snapshot)
+                assertTrue("[ask user]" in snapshot, snapshot)
+                assertTrue("[single agent]" in snapshot, snapshot)
+                assertTrue("[cwd]" in snapshot || "[.]" in snapshot, snapshot)
+                assertEquals(newSessionStatusBarRows(columns, settings), lines.size, snapshot)
+            }
         }
     }
 

@@ -39,7 +39,7 @@ val tuiPressableTest by testSuite {
         }
     }
 
-    test("pressed button uses reverse video until release") {
+    test("pressed button uses bold reverse video until release") {
         runMosaicTest(snapshotStrategy = ansiSnapshots) {
             setContentAndSnapshot {
                 Box {
@@ -48,7 +48,7 @@ val tuiPressableTest by testSuite {
             }
 
             sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
-            assertEquals("\u001B[7m[Run]\u001B[0m", awaitSnapshot())
+            assertEquals("\u001B[1;7m[Run]\u001B[0m", awaitSnapshot())
 
             sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Release))
             assertEquals("\u001B[1m[Run]\u001B[0m", awaitSnapshot())
@@ -84,7 +84,7 @@ val tuiPressableTest by testSuite {
     test("dragging out and back in preserves pointer ownership") {
         var clickCount by mutableStateOf(0)
 
-        runMosaicTest {
+        runMosaicTest(snapshotStrategy = ansiSnapshots) {
             setContentAndSnapshot {
                 Box {
                     Row {

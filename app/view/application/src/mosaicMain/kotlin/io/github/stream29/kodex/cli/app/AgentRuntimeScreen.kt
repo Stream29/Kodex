@@ -66,8 +66,14 @@ internal fun AgentRuntimeScreen(
     val submitHint = submitToSteerHint(execution.running, composer.value.text)
     val pendingRequest = requestUserInput as? RequestUserInputState.Pending
     val submitHintRows = if (submitHint == null) 0 else 1
+    val statusBarRows = agentRuntimeStatusBarRows(
+        columns = columns,
+        execution = execution,
+        settings = settings,
+        tokenCount = tokenCount,
+    )
     val flexibleRows =
-        (rows - HistoryComposerSeparatorRows - RuntimeStatusRows - submitHintRows).coerceAtLeast(0)
+        (rows - HistoryComposerSeparatorRows - statusBarRows - submitHintRows).coerceAtLeast(0)
     val minimumComposerRows = minOf(1, flexibleRows)
     val requestUserInputRows = if (pendingRequest == null) {
         0
@@ -132,7 +138,11 @@ internal fun AgentRuntimeScreen(
         if (pendingSteerLines.isNotEmpty()) {
             PendingSteerPreview(pendingSteerLines, columns)
         }
-        HistoryComposerSeparator(columns)
+        HistoryComposerSeparator(
+            columns = columns,
+            showScrollToLatest = !historyUiState.followsLatest,
+            onScrollToLatest = historyUiState::requestScrollToLatest,
+        )
         ComposerInput(
             state = composer,
             layout = composerLayout,
@@ -172,11 +182,12 @@ internal fun NewSessionScreen(
     onOpenSettings: () -> Unit,
 ) {
     val settings by viewModel.settings.collectAsState()
+    val statusBarRows = newSessionStatusBarRows(columns, settings)
     Column(modifier = Modifier.width(columns).height(rows)) {
         NewSessionContent(
             composerViewModel = viewModel.composer,
             columns = columns,
-            rows = (rows - RuntimeStatusRows).coerceAtLeast(0),
+            rows = (rows - statusBarRows).coerceAtLeast(0),
             newLineKey = newLineKey,
             onSubmit = onSubmit,
         )
@@ -315,7 +326,6 @@ private fun List<AgentMessageInputContent>.previewAgentMessageText(): String =
 private fun String.singleLine(): String =
     lineSequence().joinToString(" ") { line -> line.trim() }.trim()
 
-private const val RuntimeStatusRows: Int = 1
 private const val RequestUserInputMaximumRows: Int = 12
 private const val PendingSteerMaximumRows: Int = 6
 private const val SubmitToSteerHint: String = "Submit to steer"

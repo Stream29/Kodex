@@ -3,6 +3,7 @@ package io.github.stream29.kodex.cli.pathpicker
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -23,7 +24,6 @@ import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
-import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerEffect
@@ -37,6 +37,8 @@ import io.github.stream29.kodex.app.pathpicker.contract.visibleChildren
 import io.github.stream29.kodex.cli.components.LazyColumn
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
+import io.github.stream29.kodex.cli.components.TuiDialogActionRow
+import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.cli.components.items
 import io.github.stream29.kodex.cli.components.rememberLazyListState
@@ -138,7 +140,7 @@ public fun BoxScope.DirectoryPickerPopup(
                 value = "Select directory",
                 modifier = Modifier.fillMaxWidth().background(DirectoryPickerHeaderBackground),
                 color = DirectoryPickerForeground,
-                textStyle = TextStyle.Bold,
+                textStyle = TuiTheme.typography.headline,
             )
             Text(
                 value = currentDirectory.toString().ellipsizeToTerminalWidth(dialogWidth),
@@ -151,14 +153,6 @@ public fun BoxScope.DirectoryPickerPopup(
                 modifier = Modifier.fillMaxWidth().background(DirectoryPickerCurrentPathBackground),
                 color = DirectoryPickerForeground,
             )
-            Row(modifier = Modifier.fillMaxWidth().background(DirectoryPickerActionBackground)) {
-                TuiButton(
-                    label = "Select",
-                    color = DirectoryPickerForeground,
-                    enabled = state.canConfirm,
-                    onClick = viewModel::confirm,
-                )
-            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -221,11 +215,21 @@ public fun BoxScope.DirectoryPickerPopup(
                     }
                 }
             }
-            Row(modifier = Modifier.fillMaxWidth().background(DirectoryPickerActionBackground)) {
+            TuiDialogActionRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(DirectoryPickerActionBackground),
+            ) {
                 TuiButton(
                     label = "Cancel",
                     color = DirectoryPickerForeground,
                     onClick = onDismissRequest,
+                )
+                TuiButton(
+                    label = "Select",
+                    color = DirectoryPickerForeground,
+                    enabled = state.canConfirm,
+                    onClick = viewModel::confirm,
                 )
             }
         }
@@ -259,12 +263,35 @@ private fun directoryName(path: Path): String = path.name.ifEmpty { path.toStrin
 
 private fun directoryLabel(path: Path): String = "${directoryName(path)}/"
 
-private val DirectoryPickerForeground: Color = Color.White
-private val DirectoryPickerBackground: Color = Color(52, 52, 56)
-private val DirectoryPickerHeaderBackground: Color = Color(28, 68, 74)
-private val DirectoryPickerCurrentPathBackground: Color = Color(42, 42, 46)
-private val DirectoryPickerListBackground: Color = Color(52, 52, 56)
-private val DirectoryPickerActionBackground: Color = Color(28, 68, 74)
+private val DirectoryPickerForeground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.onSurface
+
+private val DirectoryPickerBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surface
+
+private val DirectoryPickerHeaderBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.primary
+
+private val DirectoryPickerCurrentPathBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surfaceContainer
+
+private val DirectoryPickerListBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surface
+
+private val DirectoryPickerActionBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.primary
 
 private const val DirectoryPickerMaximumWidth: Int = 84
 private const val DirectoryPickerMaximumListRows: Int = 16

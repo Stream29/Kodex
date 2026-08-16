@@ -206,7 +206,7 @@ val tuiPopupMenuTest by testSuite {
                 }
             }
             val snapshot = awaitSnapshotUntil { state.focusedKey == "selected" }
-            assertTrue("\u001B[1m[selected]\u001B[22m" in snapshot, snapshot)
+            assertTrue("\u001B[7m[selected]\u001B[27m" in snapshot, snapshot)
         }
 
         assertEquals("selected", state.focusedKey)

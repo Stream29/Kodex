@@ -1,11 +1,13 @@
 package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import com.jakewharton.mosaic.layout.KeyEvent
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
+import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.cli.components.TextInput
@@ -13,6 +15,8 @@ import io.github.stream29.kodex.cli.components.TextInputEdit
 import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
+import io.github.stream29.kodex.cli.components.TuiButton
+import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SubmitKey
 import io.github.stream29.kodex.openai.AgentMode
@@ -59,15 +63,42 @@ internal fun ComposerInput(
             },
         )
         submitHint?.let { hint ->
-            Text(value = hint, textStyle = TextStyle.Dim)
+            Text(value = hint, textStyle = TuiTheme.typography.supporting)
         }
     }
 }
 
 @Composable
-internal fun HistoryComposerSeparator(columns: Int) = Text(
-    "-".repeat(columns.coerceAtLeast(1)), textStyle = TextStyle.Dim,
-)
+internal fun HistoryComposerSeparator(
+    columns: Int,
+    showScrollToLatest: Boolean = false,
+    onScrollToLatest: () -> Unit = {},
+) {
+    val width = columns.coerceAtLeast(1)
+    if (!showScrollToLatest) {
+        Text(
+            "-".repeat(width),
+            textStyle = TuiTheme.typography.supporting,
+        )
+        return
+    }
+
+    val separatorWidth = (width - ScrollToLatestButtonWidth).coerceAtLeast(0)
+    val leadingWidth = (separatorWidth + 1) / 2
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Text("-".repeat(leadingWidth), textStyle = TuiTheme.typography.supporting)
+        TuiButton(
+            label = "↓",
+            onClick = onScrollToLatest,
+        )
+        Text(
+            "-".repeat(separatorWidth - leadingWidth),
+            textStyle = TuiTheme.typography.supporting,
+        )
+    }
+}
+
+private const val ScrollToLatestButtonWidth: Int = 3
 
 internal fun ReasoningEffort.displayName(): String = when (this) {
     ReasoningEffort.None -> "none"; ReasoningEffort.Minimal -> "minimal"; ReasoningEffort.Low -> "low"
@@ -88,19 +119,65 @@ internal fun RequestUserInputMode.displayName(): String = when (this) {
     RequestUserInputMode.NoQuestion -> "no question"
 }
 
-internal val SessionForeground: Color = Color.White
-internal val SessionTopBarBackground: Color = Color(28, 68, 74)
-internal val SessionButtonBackground: Color = Color(36, 78, 84)
-internal val PopupMenuBackground: Color = Color(42, 42, 46)
-internal val SettingsDialogForeground: Color = Color.White
-internal val SettingsDialogHeaderBackground: Color = Color(28, 68, 74)
-internal val SettingsDialogNavigationBackground: Color = Color(42, 42, 46)
-internal val SettingsDialogSelectionBackground: Color = Color(36, 78, 84)
-internal val SettingsDialogHomeBackground: Color = Color(52, 52, 56)
-internal val SettingsDialogNewLineBackground: Color = Color(62, 62, 66)
-internal val SettingsDialogSubmitKeyBackground: Color = Color(58, 58, 64)
-internal val SettingsDialogModeBackground: Color = Color(46, 58, 62)
-internal val SettingsDialogActionBackground: Color = Color(28, 68, 74)
+internal val SessionForeground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.onPrimary
+
+internal val SessionTopBarBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.primary
+
+internal val SessionButtonBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.primaryContainer
+
+internal val PopupMenuBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surfaceContainer
+
+internal val SettingsDialogForeground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.onSurface
+
+internal val SettingsDialogHeaderBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.primary
+
+internal val SettingsDialogNavigationBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surfaceContainer
+
+internal val SettingsDialogHomeBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surface
+
+internal val SettingsDialogNewLineBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surfaceContainerHighest
+
+internal val SettingsDialogSubmitKeyBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surfaceContainerHigh
+
+internal val SettingsDialogModeBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.secondaryContainer
+
+internal val SettingsDialogActionBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.primary
 internal const val HistoryComposerSeparatorRows: Int = 1
 
 private fun NewLineKey.matches(event: KeyEvent): Boolean = event.key == "Enter" && when (this) {

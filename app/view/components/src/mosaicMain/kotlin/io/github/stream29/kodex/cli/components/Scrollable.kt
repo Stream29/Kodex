@@ -11,7 +11,7 @@ public enum class ScrollOrientation {
 }
 
 /**
- * Interprets wheel input as terminal-row deltas for [state].
+ * Interprets wheel input as terminal-cell deltas along [orientation] for [state].
  *
  * This modifier does not move, measure, or clip content. It consumes a wheel event only when
  * [ScrollableState.scrollBy] consumes a non-zero delta.

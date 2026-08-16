@@ -65,11 +65,12 @@ val directoryPickerPopupTest by testSuite {
                 assertTrue("[Up]" !in snapshot, snapshot)
                 assertTrue("[Select]" in snapshot, snapshot)
                 assertTrue("[..]" in snapshot, snapshot)
-                assertTrue(snapshot.indexOf("[Select]") < snapshot.indexOf("[..]"), snapshot)
                 assertTrue(snapshot.indexOf("[..]") < snapshot.indexOf("[child/]"), snapshot)
-                sendMouseEvent(MouseEvent(8, 5, MouseEvent.Type.Press, MouseEvent.Button.Left))
+                assertTrue(snapshot.indexOf("[child/]") < snapshot.indexOf("[Cancel]"), snapshot)
+                assertTrue(snapshot.indexOf("[Cancel]") < snapshot.indexOf("[Select]"), snapshot)
+                sendMouseEvent(MouseEvent(73, 21, MouseEvent.Type.Press, MouseEvent.Button.Left))
                 awaitSnapshot()
-                sendMouseEvent(MouseEvent(8, 5, MouseEvent.Type.Release))
+                sendMouseEvent(MouseEvent(73, 21, MouseEvent.Type.Release))
                 awaitSnapshotUntil { selected != null }
             }
 

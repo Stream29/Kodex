@@ -25,6 +25,12 @@ public class AgentHistoryUiState(
         if (followsLatest) listState.requestScrollToStart()
     }
 
+    /** Restores follow-latest intent and requests the newest history position. */
+    public fun requestScrollToLatest() {
+        followsLatest = true
+        listState.requestScrollToStart()
+    }
+
     internal fun reconcileLayout() {
         if (followsLatest) {
             if (listState.canScrollForward) listState.requestScrollToStart()
@@ -44,10 +50,10 @@ public class AgentHistoryUiState(
             ScrollInputSource.Pointer,
             ScrollInputSource.Keyboard,
                 -> if (interaction.consumedDelta < 0) {
-                    followsLatest = false
-                } else if (!listState.canScrollForward) {
-                    followsLatest = true
-                }
+                followsLatest = false
+            } else if (!listState.canScrollForward) {
+                followsLatest = true
+            }
 
             ScrollInputSource.FocusRelocation,
             ScrollInputSource.Programmatic,

@@ -3,6 +3,7 @@ package io.github.stream29.kodex.cli.settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,9 +42,11 @@ import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.ScrollState
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
+import io.github.stream29.kodex.cli.components.TuiDialogActionRow
 import io.github.stream29.kodex.cli.components.TuiDropdownMenu
 import io.github.stream29.kodex.cli.components.TuiDropdownState
 import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
+import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.verticalScroll
 import io.github.stream29.kodex.hook.contract.HookImportDecision
@@ -152,7 +155,7 @@ public fun BoxScope.SettingsPopup(
                 value = "Settings",
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
                 color = SettingsForeground,
-                textStyle = TextStyle.Bold,
+                textStyle = TuiTheme.typography.headline,
             )
             Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 Column(
@@ -162,15 +165,13 @@ public fun BoxScope.SettingsPopup(
                         .background(SettingsNavigationBackground),
                 ) {
                     SettingsPage.entries.forEach { candidate ->
-                        val background = if (candidate == selectedPage) {
-                            SettingsSelectionBackground
-                        } else {
-                            SettingsNavigationBackground
-                        }
                         TuiButton(
                             label = candidate.settingsLabel(),
-                            modifier = Modifier.fillMaxWidth().background(background),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(SettingsNavigationBackground),
                             color = SettingsForeground,
+                            selected = candidate == selectedPage,
                             onClick = {
                                 dropdowns.dismissAll()
                                 viewModel.selectPage(candidate)
@@ -203,7 +204,11 @@ public fun BoxScope.SettingsPopup(
                     )
                 }
             }
-            Row(modifier = Modifier.fillMaxWidth().background(SettingsActionBackground)) {
+            TuiDialogActionRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SettingsActionBackground),
+            ) {
                 TuiButton(
                     label = "Close",
                     color = SettingsForeground,
@@ -499,14 +504,9 @@ private fun GlobalSettingsContent(
                     if (index != 0) Text(" ")
                     TuiButton(
                         label = key.dialogLabel(),
-                        modifier = Modifier.background(
-                            if (key == state.newLineKey) {
-                                SettingsSelectionBackground
-                            } else {
-                                SettingsNewLineBackground
-                            },
-                        ),
+                        modifier = Modifier.background(SettingsNewLineBackground),
                         color = SettingsForeground,
+                        selected = key == state.newLineKey,
                         onClick = { viewModel.updateNewLineKey(key) },
                     )
                 }
@@ -519,14 +519,9 @@ private fun GlobalSettingsContent(
                     if (index != 0) Text(" ")
                     TuiButton(
                         label = key.dialogLabel(),
-                        modifier = Modifier.background(
-                            if (key == state.newLineKey.submitKey) {
-                                SettingsSelectionBackground
-                            } else {
-                                SettingsSubmitKeyBackground
-                            },
-                        ),
+                        modifier = Modifier.background(SettingsSubmitKeyBackground),
                         color = SettingsForeground,
+                        selected = key == state.newLineKey.submitKey,
                         onClick = { viewModel.updateNewLineKey(key.newLineKey) },
                     )
                 }
@@ -929,7 +924,7 @@ private fun BoxScope.RenameSessionDialog(
                 value = "Rename session",
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
                 color = SettingsForeground,
-                textStyle = TextStyle.Bold,
+                textStyle = TuiTheme.typography.headline,
             )
             Text("Session name", color = SettingsForeground)
             TextInput(
@@ -967,11 +962,10 @@ private fun <T> SettingsChoiceGroup(
                 if (index != 0) Text(" ")
                 TuiButton(
                     label = optionLabel(option),
-                    modifier = Modifier.background(
-                        if (option == selected) SettingsSelectionBackground else background,
-                    ),
+                    modifier = Modifier.background(background),
                     color = SettingsForeground,
                     enabled = enabled,
+                    selected = option == selected,
                     onClick = { onSelect(option) },
                 )
             }
@@ -1076,17 +1070,55 @@ private val knownReasoningEfforts: List<ReasoningEffort> = listOf(
     ReasoningEffort.Ultra,
 )
 
-internal val SettingsForeground: Color = Color.White
-internal val SettingsHeaderBackground: Color = Color(28, 68, 74)
-internal val SettingsNavigationBackground: Color = Color(42, 42, 46)
-internal val SettingsSelectionBackground: Color = Color(36, 78, 84)
-internal val SettingsHomeBackground: Color = Color(52, 52, 56)
-internal val SettingsNewLineBackground: Color = Color(62, 62, 66)
-internal val SettingsSubmitKeyBackground: Color = Color(58, 58, 64)
-internal val SettingsAgentModeBackground: Color = Color(46, 58, 62)
-internal val SettingsQuestionModeBackground: Color = Color(42, 54, 58)
-internal val SettingsActionBackground: Color = Color(28, 68, 74)
-internal val PopupMenuBackground: Color = Color(42, 42, 46)
+internal val SettingsForeground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.onSurface
+
+internal val SettingsHeaderBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.primary
+
+internal val SettingsNavigationBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surfaceContainer
+
+internal val SettingsHomeBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surface
+
+internal val SettingsNewLineBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surfaceContainerHighest
+
+internal val SettingsSubmitKeyBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surfaceContainerHigh
+
+internal val SettingsAgentModeBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.secondaryContainer
+
+internal val SettingsQuestionModeBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.tertiaryContainer
+
+internal val SettingsActionBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.primary
+
+internal val PopupMenuBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surfaceContainer
 
 private const val SettingsMaximumWidth: Int = 84
 private const val SettingsNavigationWidth: Int = 18

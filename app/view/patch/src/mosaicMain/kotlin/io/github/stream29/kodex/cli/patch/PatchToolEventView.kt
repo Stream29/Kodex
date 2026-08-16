@@ -22,7 +22,10 @@ import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.cli.components.TuiColorScheme
 import io.github.stream29.kodex.cli.components.TuiPressable
+import io.github.stream29.kodex.cli.components.TuiTheme
+import io.github.stream29.kodex.cli.components.tuiInteractionTextStyle
 import io.github.stream29.kodex.utils.applypatch.Patch
 import io.github.stream29.kodex.utils.terminaltext.takeFirstFittingTerminalWidth
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
@@ -71,23 +74,23 @@ private fun PatchToolEventView(
     visibleLineCountState: MutableState<Int>,
 ) {
     val expanded by expandedState
+    val colorScheme = TuiTheme.colorScheme
     Column(modifier = Modifier.fillMaxWidth()) {
         TuiPressable(
             onClick = { expandedState.value = !expanded },
             modifier = Modifier.fillMaxWidth(),
-        ) { isFocused, isHovered, isPressed ->
+        ) { _, isHovered, isPressed ->
             WrappedPatchText(
                 value = "${if (expanded) "v" else ">"} ${presentation.header}",
                 color = when (presentation.status) {
-                    PatchPresentationStatus.Running -> Color.Green
-                    PatchPresentationStatus.Completed -> Color.White
-                    PatchPresentationStatus.Failed -> Color.Red
+                    PatchPresentationStatus.Running -> colorScheme.success
+                    PatchPresentationStatus.Completed -> colorScheme.onBackground
+                    PatchPresentationStatus.Failed -> colorScheme.error
                 },
-                textStyle = when {
-                    isPressed -> TextStyle.Invert
-                    isFocused || isHovered -> TextStyle.Bold
-                    else -> TextStyle.Unspecified
-                },
+                textStyle = tuiInteractionTextStyle(
+                    hovered = isHovered,
+                    pressed = isPressed,
+                ),
             )
         }
 
@@ -116,14 +119,13 @@ private fun PatchChangeDetails(
     TuiPressable(
         onClick = { expandedState.value = !expanded },
         modifier = Modifier.fillMaxWidth(),
-    ) { isFocused, isHovered, isPressed ->
+    ) { _, isHovered, isPressed ->
         WrappedPatchText(
             value = "${if (expanded) "v" else ">"} Changes",
-            textStyle = when {
-                isPressed -> TextStyle.Invert
-                isFocused || isHovered -> TextStyle.Bold
-                else -> TextStyle.Unspecified
-            },
+            textStyle = tuiInteractionTextStyle(
+                hovered = isHovered,
+                pressed = isPressed,
+            ),
         )
     }
     PatchBody(
@@ -161,15 +163,16 @@ private fun PatchShowMore(
                 },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = remainingLineCount > 0,
-            ) { isFocused, isHovered, isPressed ->
+            ) { _, isHovered, isPressed ->
                 WrappedPatchText(
                     value = "> Show next ${minOf(DefaultPatchLinePageSize, remainingLineCount)} lines" +
                         " · $remainingLineCount remaining",
-                    textStyle = when {
-                        isPressed -> TextStyle.Invert
-                        isFocused || isHovered -> TextStyle.Bold
-                        else -> TextStyle.Dim
-                    },
+                    textStyle = tuiInteractionTextStyle(
+                        enabled = remainingLineCount > 0,
+                        hovered = isHovered,
+                        pressed = isPressed,
+                        idleTextStyle = TextStyle.Dim,
+                    ),
                 )
             }
         }.single().measure(
@@ -201,6 +204,7 @@ private fun PatchBody(
     expandedState: State<Boolean>,
     visibleLineCountState: State<Int>,
 ) {
+    val colorScheme = TuiTheme.colorScheme
     SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
         check(constraints.hasBoundedWidth) {
             "Patch text must be measured with a finite maximum width."
@@ -214,7 +218,7 @@ private fun PatchBody(
             StyledPatchLine(
                 text = line.text,
                 style = SpanStyle(
-                    color = line.kind.color(),
+                    color = line.kind.color(colorScheme),
                     textStyle = line.kind.textStyle(),
                 ),
             )
@@ -365,28 +369,28 @@ internal fun String.wrapPatchHardLine(
     }
 }
 
-private fun PatchPresentationLineKind.color(): Color = when (this) {
-    PatchPresentationLineKind.Addition -> Color.Green
+private fun PatchPresentationLineKind.color(colorScheme: TuiColorScheme): Color = when (this) {
+    PatchPresentationLineKind.Addition -> colorScheme.success
     PatchPresentationLineKind.Removal,
     PatchPresentationLineKind.Failure,
-    -> Color.Red
+        -> colorScheme.error
 
     PatchPresentationLineKind.Metadata,
     PatchPresentationLineKind.File,
     PatchPresentationLineKind.Context,
-    -> Color.Unspecified
+        -> Color.Unspecified
 }
 
 private fun PatchPresentationLineKind.textStyle(): TextStyle = when (this) {
     PatchPresentationLineKind.File -> TextStyle.Bold
     PatchPresentationLineKind.Metadata,
     PatchPresentationLineKind.Context,
-    -> TextStyle.Dim
+        -> TextStyle.Dim
 
     PatchPresentationLineKind.Addition,
     PatchPresentationLineKind.Removal,
     PatchPresentationLineKind.Failure,
-    -> TextStyle.Unspecified
+        -> TextStyle.Unspecified
 }
 
 private data class WrappedPatchLinesSlot(val text: AnnotatedString)

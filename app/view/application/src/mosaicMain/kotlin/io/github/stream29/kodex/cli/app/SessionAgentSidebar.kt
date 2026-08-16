@@ -37,6 +37,7 @@ import io.github.stream29.kodex.cli.components.TuiPressable
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.cli.components.items
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
+import io.github.stream29.kodex.cli.components.tuiInteractionTextStyle
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import io.github.stream29.kodex.cli.components.wrapToTerminalWidth
 
@@ -44,7 +45,6 @@ import io.github.stream29.kodex.cli.components.wrapToTerminalWidth
 internal fun SessionAgentSidebar(
     topology: PersistedSessionTopologyState?,
     selectedAgent: AgentViewModel?,
-    expanded: Boolean,
     columns: Int,
     rows: Int,
     runningIndicatorFrame: State<String>,
@@ -87,111 +87,135 @@ internal fun SessionAgentSidebar(
                 onPointerExit = { onHoverChanged(false) },
             ),
     ) {
-        if (expanded) {
-            TuiButton(
-                label = "←",
-                modifier = Modifier.fillMaxWidth().background(SettingsDialogHeaderBackground),
-                color = SettingsDialogForeground,
-                onClick = onToggleExpanded,
-            )
-            if (visibleAgents.isNotEmpty()) {
-                Text("Agent tree", color = SettingsDialogForeground)
-                Box(modifier = Modifier.width(columns).height(agentTreeRows)) {
-                    LazyColumn(modifier = Modifier.width(columns).height(agentTreeRows)) {
-                        items(visibleAgents, key = PersistedSessionTopologyNode::address) { node ->
-                            val selected = node.address == selectedAgent?.address
-                            val background = if (selected) {
-                                SettingsDialogSelectionBackground
-                            } else {
-                                SettingsDialogNavigationBackground
-                            }
-                            val nodeLabel = topology?.nodeLabel(node) ?: node.address.agentId
-                            val label = agentTreeNodeDisplayLabel(
-                                nodeLabel = nodeLabel,
-                                running = node.running,
-                                runningIndicatorFrame =
-                                    runningIndicatorFrame.value.takeIf { node.running }.orEmpty(),
-                                maximumColumns = (
-                                    columns -
-                                        node.depth * SessionTreeIndentColumns -
-                                        SessionTreeDisclosureColumns -
-                                        SessionTreeNodeButtonBorderColumns
-                                    ).coerceAtLeast(1),
-                            )
-                            Column(modifier = Modifier.fillMaxWidth().background(background)) {
-                                Row(modifier = Modifier.fillMaxWidth().background(background)) {
-                                    Text(" ".repeat(node.depth * SessionTreeIndentColumns))
-                                    if (node.hasChildren) {
-                                        TuiButton(
-                                            label = if (node.address in expandedAddresses) "▼" else "▶",
-                                            modifier = Modifier.background(background),
-                                            color = SettingsDialogForeground,
-                                            onClick = {
-                                                if (node.address in expandedAddresses) {
-                                                    expandedAddresses -= node.address
-                                                } else {
-                                                    expandedAddresses += node.address
-                                                    onExpandAgent(node.address)
-                                                }
-                                            },
-                                        )
-                                    } else {
-                                        Text(" ".repeat(SessionTreeDisclosureColumns))
-                                    }
+        TuiButton(
+            label = "←",
+            modifier = Modifier.fillMaxWidth().background(SettingsDialogHeaderBackground),
+            color = SettingsDialogForeground,
+            onClick = onToggleExpanded,
+        )
+        if (visibleAgents.isNotEmpty()) {
+            Text("Agent tree", color = SettingsDialogForeground)
+            Box(modifier = Modifier.width(columns).height(agentTreeRows)) {
+                LazyColumn(modifier = Modifier.width(columns).height(agentTreeRows)) {
+                    items(visibleAgents, key = PersistedSessionTopologyNode::address) { node ->
+                        val selected = node.address == selectedAgent?.address
+                        val nodeLabel = topology?.nodeLabel(node) ?: node.address.agentId
+                        val label = agentTreeNodeDisplayLabel(
+                            nodeLabel = nodeLabel,
+                            running = node.running,
+                            runningIndicatorFrame =
+                                runningIndicatorFrame.value.takeIf { node.running }.orEmpty(),
+                            maximumColumns = (
+                                columns -
+                                    node.depth * SessionTreeIndentColumns -
+                                    SessionTreeDisclosureColumns -
+                                    SessionTreeNodeButtonBorderColumns
+                                ).coerceAtLeast(1),
+                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(SettingsDialogNavigationBackground),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(SettingsDialogNavigationBackground),
+                            ) {
+                                Text(" ".repeat(node.depth * SessionTreeIndentColumns))
+                                if (node.hasChildren) {
                                     TuiButton(
-                                        label = label,
-                                        modifier = Modifier.weight(1f).background(background),
+                                        label = if (node.address in expandedAddresses) "▼" else "▶",
+                                        modifier = Modifier.background(
+                                            SettingsDialogNavigationBackground,
+                                        ),
                                         color = SettingsDialogForeground,
-                                        onClick = { onSelectAgent(node.address) },
+                                        onClick = {
+                                            if (node.address in expandedAddresses) {
+                                                expandedAddresses -= node.address
+                                            } else {
+                                                expandedAddresses += node.address
+                                                onExpandAgent(node.address)
+                                            }
+                                        },
                                     )
+                                } else {
+                                    Text(" ".repeat(SessionTreeDisclosureColumns))
                                 }
-                                Text(
-                                    value = (
-                                        " ".repeat(
-                                            node.depth * SessionTreeIndentColumns +
-                                                SessionTreeDisclosureColumns,
-                                        ) + node.phase.label()
-                                        ).ellipsizeToTerminalWidth(columns),
-                                    modifier = Modifier.fillMaxWidth().background(background),
+                                TuiButton(
+                                    label = label,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .background(SettingsDialogNavigationBackground),
                                     color = SettingsDialogForeground,
-                                    textStyle = TextStyle.Dim,
+                                    selected = selected,
+                                    onClick = { onSelectAgent(node.address) },
                                 )
                             }
+                            Text(
+                                value = (
+                                    " ".repeat(
+                                        node.depth * SessionTreeIndentColumns +
+                                            SessionTreeDisclosureColumns,
+                                    ) + node.phase.label()
+                                    ).ellipsizeToTerminalWidth(columns),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(SettingsDialogNavigationBackground),
+                                color = SettingsDialogForeground,
+                                textStyle = TextStyle.Dim,
+                            )
                         }
                     }
                 }
             }
-            if (shellSessionListRows > 0) {
-                Text("Shell sessions", color = SettingsDialogForeground)
-                LazyColumn(modifier = Modifier.width(columns).height(shellSessionListRows)) {
-                    items(shellSessionItems, key = { item -> item.session.sessionId }) { item ->
-                        ShellSessionSidebarRow(
-                            lines = item.lines,
-                            onOpenMenu = { anchor, clickPosition ->
-                                onOpenShellSessionMenu(
-                                    ShellSessionMenuRequest(
-                                        session = item.session,
-                                        anchor = anchor,
-                                        clickPosition = clickPosition,
-                                    ),
-                                )
-                            },
-                        )
-                    }
+        }
+        if (shellSessionListRows > 0) {
+            Text("Shell sessions", color = SettingsDialogForeground)
+            LazyColumn(modifier = Modifier.width(columns).height(shellSessionListRows)) {
+                items(shellSessionItems, key = { item -> item.session.sessionId }) { item ->
+                    ShellSessionSidebarRow(
+                        lines = item.lines,
+                        onOpenMenu = { anchor, clickPosition ->
+                            onOpenShellSessionMenu(
+                                ShellSessionMenuRequest(
+                                    session = item.session,
+                                    anchor = anchor,
+                                    clickPosition = clickPosition,
+                                ),
+                            )
+                        },
+                    )
                 }
             }
-        } else {
-            TuiPressable(
-                onClick = onToggleExpanded,
-                modifier = Modifier.fillMaxWidth().background(SettingsDialogHeaderBackground),
-            ) { _, hovered, _ ->
-                Text(
-                    value = "→",
-                    color = SettingsDialogForeground,
-                    textStyle = if (hovered) TextStyle.Bold else TextStyle.Unspecified,
-                )
-            }
         }
+    }
+}
+
+@Composable
+internal fun SessionAgentSidebarBookmark(
+    onHoverChanged: (Boolean) -> Unit,
+    onExpand: () -> Unit,
+) {
+    TuiPressable(
+        onClick = onExpand,
+        modifier = Modifier
+            .width(SessionSidebarBookmarkColumns)
+            .height(SessionSidebarBookmarkRows)
+            .background(SettingsDialogHeaderBackground)
+            .onPointerHover(
+                onPointerEnter = { onHoverChanged(true) },
+                onPointerExit = { onHoverChanged(false) },
+            ),
+    ) { _, hovered, pressed ->
+        Text(
+            value = "╮\n→\n╯",
+            color = SettingsDialogForeground,
+            textStyle = tuiInteractionTextStyle(
+                hovered = hovered,
+                pressed = pressed,
+            ),
+        )
     }
 }
 
@@ -213,19 +237,25 @@ internal fun ShellSessionSidebarRow(
         onClick = {},
         onSecondaryClick = { position -> onOpenMenu(anchor, position) },
         modifier = Modifier.fillMaxWidth().tuiPopupAnchor(anchor),
-    ) { focused, hovered, _ ->
-        val background = if (focused || hovered) {
-            SettingsDialogSelectionBackground
-        } else {
-            SettingsDialogNavigationBackground
-        }
-        Column(modifier = Modifier.fillMaxWidth().background(background)) {
+    ) { _, hovered, pressed ->
+        val textStyle = tuiInteractionTextStyle(
+            hovered = hovered,
+            pressed = pressed,
+            idleTextStyle = TextStyle.Dim,
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(SettingsDialogNavigationBackground),
+        ) {
             lines.forEach { line ->
                 Text(
                     value = line,
-                    modifier = Modifier.fillMaxWidth().background(background),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(SettingsDialogNavigationBackground),
                     color = SettingsDialogForeground,
-                    textStyle = TextStyle.Dim,
+                    textStyle = textStyle,
                 )
             }
         }
@@ -318,7 +348,8 @@ internal fun shellSessionSidebarLines(
 ): List<String> = "$sessionId: $command".wrapToTerminalWidth(columns.coerceAtLeast(1))
 
 internal const val SessionSidebarExpandedColumns: Int = 28
-internal const val SessionSidebarCollapsedColumns: Int = 1
+internal const val SessionSidebarBookmarkColumns: Int = 1
+internal const val SessionSidebarBookmarkRows: Int = 3
 
 private const val SessionSidebarSectionRows: Int = 3
 private const val SessionTreeIndentColumns: Int = 2

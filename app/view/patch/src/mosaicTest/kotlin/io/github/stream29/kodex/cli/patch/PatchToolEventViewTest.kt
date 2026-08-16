@@ -206,10 +206,7 @@ class PatchToolEventViewTest {
                 message = "Expected at most five Text nodes, found $textNodeCount",
             )
 
-            sendMouseEvent(MouseEvent(1, 203, MouseEvent.Type.Press, MouseEvent.Button.Left))
-            sendMouseEvent(MouseEvent(1, 203, MouseEvent.Type.Release))
-            awaitSnapshot()
-            val afterSecondClick = awaitSnapshot().draw().render(
+            val afterSecondClick = click(x = 1, y = 203).draw().render(
                 ansiLevel = AnsiLevel.NONE,
                 supportsKittyUnderlines = false,
             )

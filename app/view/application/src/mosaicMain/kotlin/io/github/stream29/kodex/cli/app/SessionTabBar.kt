@@ -1,24 +1,31 @@
 package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import com.jakewharton.mosaic.layout.background
 import com.jakewharton.mosaic.layout.fillMaxWidth
+import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
-import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
+import io.github.stream29.kodex.cli.components.ScrollState
+import io.github.stream29.kodex.cli.components.ScrollOrientation
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
+import io.github.stream29.kodex.cli.components.horizontalScroll
+import io.github.stream29.kodex.cli.components.rememberScrollState
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
+import io.github.stream29.kodex.cli.components.scrollablePaging
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 
@@ -66,9 +73,50 @@ internal fun SessionTabBar(
     onCreateNewSession: () -> Unit,
     onOpenSessions: () -> Unit,
 ) {
-    val tabColumns = (columns - TabControlsColumns).coerceAtLeast(0)
-    val visible = visibleTabs(tabs, tabColumns)
-    Row(modifier = Modifier.fillMaxWidth().background(SessionTopBarBackground)) {
+    val tabColumns = (columns - TabControlsColumns).coerceAtLeast(1)
+    val scrollState = rememberScrollState()
+    val presentations = tabs.map { entry ->
+        SessionTabPresentation(
+            entry = entry,
+            label = runningIndicatorLabel(
+                name = entry.sessionName,
+                running = entry.running,
+                frame = runningIndicatorFrame.value,
+            ).ellipsizeToTerminalWidth(MaximumTabLabelColumns),
+        )
+    }
+    val selectedIndex = presentations.indexOfFirst { presentation ->
+        presentation.entry.selected
+    }
+    val selectedBounds = remember(presentations.map(SessionTabPresentation::label), selectedIndex) {
+        sessionTabBounds(
+            labels = presentations.map(SessionTabPresentation::label),
+            index = selectedIndex,
+        )
+    }
+    LaunchedEffect(
+        selectedBounds,
+        tabColumns,
+        scrollState.maxValue,
+        scrollState.viewportSize,
+    ) {
+        selectedBounds?.let { bounds ->
+            if (scrollState.viewportSize > 0 && scrollState.maxValue != Int.MAX_VALUE) {
+                scrollState.ensureRangeVisible(bounds)
+            }
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SessionTopBarBackground)
+            .scrollablePaging(
+                state = scrollState,
+                viewportSize = { scrollState.viewportSize },
+                orientation = ScrollOrientation.Horizontal,
+            ),
+    ) {
         TuiButton(
             label = "Sessions",
             modifier = Modifier.background(SessionButtonBackground),
@@ -76,19 +124,23 @@ internal fun SessionTabBar(
             onClick = onOpenSessions,
         )
         Text(" ")
-        visible.forEachIndexed { index, entry ->
-            if (index != 0) Text(" ")
-            key(entry.target) {
-                SessionTab(
-                    entry = entry,
-                    runningIndicatorFrame = runningIndicatorFrame,
-                    maximumLabelColumns = tabLabelColumns(entry, tabColumns, visible.size),
-                    onClick = { onSelectTab(entry.target) },
-                    onOpenMenu = onOpenTabMenu,
-                )
+        Row(
+            modifier = Modifier
+                .width(tabColumns)
+                .horizontalScroll(scrollState),
+        ) {
+            presentations.forEachIndexed { index, presentation ->
+                if (index != 0) Text(" ")
+                key(presentation.entry.target) {
+                    SessionTab(
+                        presentation = presentation,
+                        onClick = { onSelectTab(presentation.entry.target) },
+                        onOpenMenu = onOpenTabMenu,
+                    )
+                }
             }
         }
-        if (visible.isNotEmpty()) Text(" ")
+        Text(" ")
         TuiButton(
             label = "+",
             modifier = Modifier.background(SessionButtonBackground),
@@ -100,25 +152,19 @@ internal fun SessionTabBar(
 
 @Composable
 private fun SessionTab(
-    entry: SessionTabRenderState,
-    runningIndicatorFrame: State<String>,
-    maximumLabelColumns: Int,
+    presentation: SessionTabPresentation,
     onClick: () -> Unit,
     onOpenMenu: (SessionViewModel, String, TuiPopupAnchor, IntOffset?) -> Unit,
 ) {
     val anchor = rememberTuiPopupAnchor()
-    val label = runningIndicatorLabel(
-        name = entry.sessionName,
-        running = entry.running,
-        frame = runningIndicatorFrame.value,
-    )
+    val entry = presentation.entry
     TuiButton(
-        label = label.ellipsizeToTerminalWidth(maximumLabelColumns),
+        label = presentation.label,
         modifier = Modifier
-            .background(if (entry.selected) SessionButtonBackground else SessionTopBarBackground)
+            .background(SessionTopBarBackground)
             .tuiPopupAnchor(anchor),
         color = SessionForeground,
-        idleTextStyle = if (entry.selected) TextStyle.Bold else TextStyle.Unspecified,
+        selected = entry.selected,
         onSecondaryClick = { position ->
             onOpenMenu(entry.target, entry.sessionName, anchor, position)
         },
@@ -126,42 +172,37 @@ private fun SessionTab(
     )
 }
 
-private fun visibleTabs(
-    tabs: List<SessionTabRenderState>,
-    availableColumns: Int,
-): List<SessionTabRenderState> {
-    val active = tabs.firstOrNull(SessionTabRenderState::selected)
-    val ordered = listOfNotNull(active) + tabs.filter { entry -> entry !== active }
-    var remaining = availableColumns
-    return buildList {
-        ordered.forEach { entry ->
-            val required = minimumTabColumns(entry) + if (isEmpty()) 0 else TabSpacingColumns
-            if (required <= remaining) {
-                add(entry)
-                remaining -= required
-            }
-        }
-    }.sortedBy(tabs::indexOf)
+private data class SessionTabPresentation(
+    val entry: SessionTabRenderState,
+    val label: String,
+)
+
+internal data class SessionTabBounds(
+    val start: Int,
+    val endExclusive: Int,
+)
+
+internal fun sessionTabBounds(
+    labels: List<String>,
+    index: Int,
+): SessionTabBounds? {
+    if (index !in labels.indices) return null
+    var start = 0
+    labels.take(index).forEach { label ->
+        start += label.terminalCellWidth() + TabBracketsColumns + TabSpacingColumns
+    }
+    return SessionTabBounds(
+        start = start,
+        endExclusive = start + labels[index].terminalCellWidth() + TabBracketsColumns,
+    )
 }
 
-private fun tabLabelColumns(
-    entry: SessionTabRenderState,
-    availableColumns: Int,
-    tabCount: Int,
-): Int {
-    val spacing = (tabCount - 1).coerceAtLeast(0) * TabSpacingColumns
-    val availableForLabels =
-        (availableColumns - spacing - tabCount * TabBracketsColumns).coerceAtLeast(tabCount)
-    val equalShare = (availableForLabels / tabCount.coerceAtLeast(1)).coerceAtLeast(1)
-    return minOf(equalShare, MaximumTabLabelColumns).coerceAtLeast(minimumLabelColumns(entry))
-}
-
-private fun minimumTabColumns(entry: SessionTabRenderState): Int =
-    minimumLabelColumns(entry) + TabBracketsColumns
-
-private fun minimumLabelColumns(entry: SessionTabRenderState): Int = when (val target = entry.target) {
-    is NewSessionViewModel -> "new".terminalCellWidth()
-    is PersistedSessionViewModel -> "s${target.sessionIndex}".terminalCellWidth()
+internal fun ScrollState.ensureRangeVisible(bounds: SessionTabBounds) {
+    val viewportEnd = value + viewportSize
+    when {
+        bounds.start < value -> scrollTo(bounds.start)
+        bounds.endExclusive > viewportEnd -> scrollTo(bounds.endExclusive - viewportSize)
+    }
 }
 
 private const val MaximumTabLabelColumns: Int = 20
