@@ -13,9 +13,6 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputDraftAnswer
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
-import io.github.stream29.kodex.cli.components.TuiDropdownState
-import io.github.stream29.kodex.cli.components.TuiPopupHost
-import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestionOption
@@ -27,9 +24,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-class RequestUserInputDropdownTest {
+class RequestUserInputOptionsTest {
     @Test
-    fun optionsUseOneDropdownAndOtherStillEnablesFreeFormInput() = runTest {
+    fun optionsRemainButtonsAndOtherStillEnablesFreeFormInput() = runTest {
         val question = RequestUserInputQuestion(
             id = "scope",
             header = "Scope",
@@ -46,37 +43,21 @@ class RequestUserInputDropdownTest {
             ),
         )
         var answer by mutableStateOf<RequestUserInputDraftAnswer?>(null)
-        lateinit var dropdownState: TuiDropdownState
 
         runMosaicTest {
             val initial = setContentAndSnapshot {
-                TuiPopupHost(modifier = Modifier.width(64).height(10)) {
-                    dropdownState = rememberTuiDropdownState()
-                    val state = RequestUserInputState.Pending(
-                        callId = "call_scope",
-                        arguments = RequestUserInputArgs(listOf(question)),
-                        answers = answer?.let { mapOf(question.id to it) }.orEmpty(),
-                    )
-                    Column(modifier = Modifier.width(64).height(10)) {
-                        RequestUserInputQuestionView(
-                            callId = state.callId,
-                            question = question,
-                            state = state,
-                            columns = 64,
-                            autoFocus = true,
-                            enabled = true,
-                            dropdownState = dropdownState,
-                            onFreeFormChanged = { _, _, text ->
-                                answer = RequestUserInputDraftAnswer.FreeForm(text)
-                                true
-                            },
-                        )
-                    }
-                    RequestUserInputQuestionDropdownMenu(
+                val state = RequestUserInputState.Pending(
+                    callId = "call_scope",
+                    arguments = RequestUserInputArgs(listOf(question)),
+                    answers = answer?.let { mapOf(question.id to it) }.orEmpty(),
+                )
+                Column(modifier = Modifier.width(64).height(10)) {
+                    RequestUserInputQuestionView(
                         callId = state.callId,
                         question = question,
-                        draft = answer,
-                        dropdownState = dropdownState,
+                        state = state,
+                        columns = 64,
+                        autoFocus = true,
                         enabled = true,
                         onSelectOption = { _, _, label ->
                             answer = RequestUserInputDraftAnswer.Option(label)
@@ -86,30 +67,29 @@ class RequestUserInputDropdownTest {
                             answer = RequestUserInputDraftAnswer.FreeForm("")
                             true
                         },
+                        onFreeFormChanged = { _, _, text ->
+                            answer = RequestUserInputDraftAnswer.FreeForm(text)
+                            true
+                        },
                     )
                 }
             }
 
-            assertTrue("[Choose an option]" in initial, initial)
-            assertFalse("○" in initial, initial)
-            assertFalse("●" in initial, initial)
-
-            dropdownState.expand()
-            val menu = awaitSnapshotContaining("Beta · Second option")
-            assertTrue("Alpha · First option" in menu, menu)
-            assertTrue("Other" in menu, menu)
+            assertTrue("[○ Alpha]" in initial, initial)
+            assertTrue("[○ Beta]" in initial, initial)
+            assertTrue("[○ Other]" in initial, initial)
+            assertTrue("First option" in initial, initial)
+            assertFalse("Choose an option" in initial, initial)
 
             sendKeyEvent(KeyboardEvent(codepoint = 13))
-            val selected = awaitSnapshotContaining("[Alpha]")
-            assertTrue("First option" in selected, selected)
+            val selected = awaitSnapshotContaining("[● Alpha]")
             assertEquals(RequestUserInputDraftAnswer.Option("Alpha"), answer)
+            assertTrue("First option" in selected, selected)
 
-            dropdownState.expand()
-            awaitSnapshotContaining("Other")
             sendKeyEvent(KeyboardEvent(codepoint = KeyboardEvent.Down))
             sendKeyEvent(KeyboardEvent(codepoint = KeyboardEvent.Down))
             sendKeyEvent(KeyboardEvent(codepoint = 13))
-            val other = awaitSnapshotContaining("[Other]")
+            val other = awaitSnapshotContaining("[● Other]")
 
             assertTrue(other.lines().any { line -> line.trimStart() == ">" }, other)
             assertIs<RequestUserInputDraftAnswer.FreeForm>(answer)
