@@ -24,8 +24,8 @@ import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
+import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
-import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerEffect
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerFailure
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerLoadState
@@ -37,12 +37,10 @@ import io.github.stream29.kodex.app.pathpicker.contract.visibleChildren
 import io.github.stream29.kodex.cli.components.LazyColumn
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
-import io.github.stream29.kodex.cli.components.TuiDialogActionRow
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.cli.components.items
 import io.github.stream29.kodex.cli.components.rememberLazyListState
-import kotlinx.coroutines.flow.collect
 import kotlinx.io.files.Path
 
 /**
@@ -153,6 +151,14 @@ public fun BoxScope.DirectoryPickerPopup(
                 modifier = Modifier.fillMaxWidth().background(DirectoryPickerCurrentPathBackground),
                 color = DirectoryPickerForeground,
             )
+            Row(modifier = Modifier.fillMaxWidth().background(DirectoryPickerActionBackground)) {
+                TuiButton(
+                    label = "Select",
+                    color = DirectoryPickerForeground,
+                    enabled = state.canConfirm,
+                    onClick = viewModel::confirm,
+                )
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -215,21 +221,11 @@ public fun BoxScope.DirectoryPickerPopup(
                     }
                 }
             }
-            TuiDialogActionRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(DirectoryPickerActionBackground),
-            ) {
+            Row(modifier = Modifier.fillMaxWidth().background(DirectoryPickerActionBackground)) {
                 TuiButton(
                     label = "Cancel",
                     color = DirectoryPickerForeground,
                     onClick = onDismissRequest,
-                )
-                TuiButton(
-                    label = "Select",
-                    color = DirectoryPickerForeground,
-                    enabled = state.canConfirm,
-                    onClick = viewModel::confirm,
                 )
             }
         }

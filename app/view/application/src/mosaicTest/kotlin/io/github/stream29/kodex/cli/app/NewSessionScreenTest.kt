@@ -12,8 +12,33 @@ import io.github.stream29.kodex.cli.settings.NewLineKey
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 
 class NewSessionScreenTest {
+    @Test
+    fun emptySessionDoesNotRenderCreationInstructions() = runTest {
+        val fixture = SessionViewModelTestFixture.create(this)
+        try {
+            val composer = fixture.newSession("New Session").composer
+
+            runMosaicTest {
+                val snapshot = setContentAndSnapshot {
+                    NewSessionContent(
+                        composerViewModel = composer,
+                        columns = 40,
+                        rows = 8,
+                        newLineKey = NewLineKey.ShiftEnter,
+                        onSubmit = {},
+                    )
+                }
+
+                assertFalse("Enter a prompt to create a session" in snapshot, snapshot)
+            }
+        } finally {
+            fixture.close()
+        }
+    }
+
     @Test
     fun longComposerUsesItsBoundedRowsAndKeepsTheCursorTailVisible() = runTest {
         val fixture = SessionViewModelTestFixture.create(this)

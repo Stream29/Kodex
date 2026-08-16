@@ -65,12 +65,12 @@ val directoryPickerPopupTest by testSuite {
                 assertTrue("[Up]" !in snapshot, snapshot)
                 assertTrue("[Select]" in snapshot, snapshot)
                 assertTrue("[..]" in snapshot, snapshot)
+                assertTrue(snapshot.indexOf("[Select]") < snapshot.indexOf("[..]"), snapshot)
                 assertTrue(snapshot.indexOf("[..]") < snapshot.indexOf("[child/]"), snapshot)
                 assertTrue(snapshot.indexOf("[child/]") < snapshot.indexOf("[Cancel]"), snapshot)
-                assertTrue(snapshot.indexOf("[Cancel]") < snapshot.indexOf("[Select]"), snapshot)
-                sendMouseEvent(MouseEvent(73, 21, MouseEvent.Type.Press, MouseEvent.Button.Left))
+                sendMouseEvent(MouseEvent(8, 5, MouseEvent.Type.Press, MouseEvent.Button.Left))
                 awaitSnapshot()
-                sendMouseEvent(MouseEvent(73, 21, MouseEvent.Type.Release))
+                sendMouseEvent(MouseEvent(8, 5, MouseEvent.Type.Release))
                 awaitSnapshotUntil { selected != null }
             }
 
@@ -127,16 +127,18 @@ val directoryPickerPopupTest by testSuite {
         }
     }
 
-    test("typing filters case-insensitively and enter opens the first match") {
+    test("filtering then pressing enter twice opens the first match and selects it") {
         val unresolvedRoot = temporaryDirectory("directory-picker-filter")
         SystemCoroutineFileSystem.createDirectories(unresolvedRoot)
         val root = SystemCoroutineFileSystem.resolve(unresolvedRoot)
         val viewModels = DirectoryPickerViewModels()
         try {
-            SystemCoroutineFileSystem.createDirectories(Path(root, "alpha", "inside-alpha"))
+            val matchingDirectory = Path(root, "ACodeSpace")
+            SystemCoroutineFileSystem.createDirectories(Path(matchingDirectory, "inside-acode"))
             SystemCoroutineFileSystem.createDirectories(Path(root, "beta", "inside-beta"))
             SystemCoroutineFileSystem.createDirectories(Path(root, "zulu"))
             val viewModel = viewModels.create(root)
+            var selected: Path? = null
 
             runMosaicTest {
                 setContentAndSnapshot {
@@ -145,30 +147,34 @@ val directoryPickerPopupTest by testSuite {
                             DirectoryPickerPopup(
                                 viewModel = viewModel,
                                 onDismissRequest = {},
-                                onDirectorySelected = {},
+                                onDirectorySelected = { directory -> selected = directory },
                             )
                         }
                     }
                 }
 
                 awaitSnapshotContaining("[zulu/]")
-                sendKeyEvent(
-                    KeyboardEvent(
-                        codepoint = 'A'.code,
-                        modifiers = KeyboardEvent.ModifierShift,
-                    )
-                )
-                val filtered = awaitSnapshotContaining("Filter: A")
-                assertTrue("[alpha/]" in filtered, filtered)
-                assertTrue("[beta/]" in filtered, filtered)
+                sendKeyEvent(KeyboardEvent(codepoint = 'a'.code))
+                awaitSnapshotContaining("Filter: a")
+                sendKeyEvent(KeyboardEvent(codepoint = 'c'.code))
+                awaitSnapshotContaining("Filter: ac")
+                sendKeyEvent(KeyboardEvent(codepoint = 'o'.code))
+                val filtered = awaitSnapshotContaining("Filter: aco")
+                assertTrue("[ACodeSpace/]" in filtered, filtered)
+                assertTrue("[beta/]" !in filtered, filtered)
                 assertTrue("[zulu/]" !in filtered, filtered)
                 awaitSnapshot()
 
                 sendKeyEvent(KeyboardEvent(codepoint = 13))
-                val opened = awaitSnapshotContaining("[inside-alpha/]")
+                val opened = awaitSnapshotContaining("[inside-acode/]")
                 assertTrue("[inside-beta/]" !in opened, opened)
                 assertTrue("Filter: type letters" in opened, opened)
+
+                sendKeyEvent(KeyboardEvent(codepoint = 13))
+                awaitSnapshotUntil { selected != null }
             }
+
+            assertEquals(matchingDirectory, selected)
         } finally {
             viewModels.close()
             deleteRecursively(root)

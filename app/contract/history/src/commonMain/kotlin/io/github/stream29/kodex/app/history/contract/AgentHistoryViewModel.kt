@@ -92,6 +92,27 @@ public sealed interface HistoryItemViewModel {
     }
 }
 
+/**
+ * One immutable newest-first snapshot of the materialized committed-item window.
+ *
+ * [size], [peek], and [get] always address the same sequence. A previously published window
+ * remains indexable after a newer window replaces it so a lazy renderer can finish an in-flight
+ * measure safely.
+ */
+@Stable
+public interface HistoryItemWindow {
+    /** Destructive replacement generation for context-action validation. */
+    public val generation: Long
+
+    public val size: Int
+
+    /** Returns an already materialized child without registering viewport demand. */
+    public fun peek(index: Int): HistoryItemViewModel
+
+    /** Returns a child and registers demand when [index] approaches the loaded older edge. */
+    public operator fun get(index: Int): HistoryItemViewModel
+}
+
 /** Current structural loading state of the committed child sequence. */
 public sealed interface AgentHistoryLoadState {
     public data object Initializing : AgentHistoryLoadState
@@ -139,11 +160,8 @@ public sealed interface HistoryStreamingItem {
  * remains private and supplies decoded committed events on demand through [read].
  */
 public interface AgentHistoryViewModel : AutoCloseable {
-    /** Destructive replacement generation for context-action validation. */
-    public val generation: StateFlow<Long>
-
-    /** Number of currently materialized newest-first committed children. */
-    public val committedItemCount: StateFlow<Int>
+    /** Atomically published materialized committed children. */
+    public val committedItems: StateFlow<HistoryItemWindow>
 
     public val loadState: StateFlow<AgentHistoryLoadState>
 
@@ -158,12 +176,6 @@ public interface AgentHistoryViewModel : AutoCloseable {
 
     /** Observable Compose state indicating whether content changes follow the latest row. */
     public val followsLatest: Boolean
-
-    /** Returns an already materialized child without registering viewport demand. */
-    public fun peek(index: Int): HistoryItemViewModel
-
-    /** Returns a child and registers demand when [index] approaches the loaded older edge. */
-    public operator fun get(index: Int): HistoryItemViewModel
 
     /** Reads the exact committed event represented by [item] through the storage value LRU. */
     public suspend fun read(item: HistoryItemViewModel): StableCleanEvent

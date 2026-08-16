@@ -7,183 +7,97 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Column
 import io.github.stream29.kodex.cli.components.TuiPopupHost
-import io.github.stream29.kodex.hook.contract.HookCodexImportSummary
-import io.github.stream29.kodex.hook.contract.HookCodexSourceKind
-import io.github.stream29.kodex.hook.contract.HookEvent
-import io.github.stream29.kodex.hook.contract.HookImportDecision
-import io.github.stream29.kodex.hook.contract.HookImportDisposition
-import io.github.stream29.kodex.hook.contract.HookImportItem
-import io.github.stream29.kodex.hook.contract.HookImportPreview
-import io.github.stream29.kodex.hook.contract.HookImportSupport
-import io.github.stream29.kodex.hook.contract.HookManagedSourceState
+import io.github.stream29.kodex.hook.contract.HookDraft
+import io.github.stream29.kodex.hook.contract.HookManagedState
+import io.github.stream29.kodex.hook.contract.HookType
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class HookSettingsContentTest {
     @Test
-    fun rendersCompactSourceButtonsWithoutFlattenedDetailsOrActions() = runTest {
+    fun rendersNativeHookNamesAndTypesUnderTheManagementHeader() = runTest {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(96)) {
                     HookSettingsContent(
-                        featureEnabled = true,
-                        sources = listOf(managedSource()),
-                        onSetFeatureEnabled = {},
+                        hooks = listOf(managedHook()),
                         onAdd = {},
                         onOpenDetails = {},
-                        onImport = {},
                     )
                 }
             }
 
-            assertTrue("[Project checks · Enabled · 2 commands]" in snapshot, snapshot)
-            assertTrue("[Disable all] [Add] [Import from Codex]" in snapshot, snapshot)
-            assertFalse("Events:" in snapshot, snapshot)
-            assertFalse("Environment:" in snapshot, snapshot)
-            assertFalse("Imported from" in snapshot, snapshot)
+            assertTrue("Hooks [Add]" in snapshot, snapshot)
+            assertTrue("[guard tools · Pre tool use]" in snapshot, snapshot)
+            assertFalse("Import from Codex" in snapshot, snapshot)
+            assertFalse("Enabled" in snapshot, snapshot)
+            assertFalse("matcher" in snapshot.lowercase(), snapshot)
             assertFalse("[Edit]" in snapshot, snapshot)
             assertFalse("[Delete]" in snapshot, snapshot)
-            assertFalse("private-hook-token" in snapshot, snapshot)
         }
     }
 
     @Test
-    fun rendersSanitizedSourceDetailsAndActionsInsideDialog() = runTest {
+    fun rendersHookDetailsAndActionsInsideDialog() = runTest {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Box {
                     TuiPopupHost(modifier = Modifier.width(96).height(24)) {
-                        HookSourceDetailsDialog(
-                            source = managedSource(),
+                        HookDetailsDialog(
+                            hook = managedHook(),
                             onDismiss = {},
                             onEdit = {},
                             onDelete = {},
-                            onSetEnabled = {},
                         )
                     }
                 }
             }
 
-            assertTrue("State: Enabled" in snapshot, snapshot)
-            assertTrue("Commands: 2 commands" in snapshot, snapshot)
-            assertTrue("Events: Pre tool, Stop" in snapshot, snapshot)
-            assertTrue("Environment: HOOK_TOKEN (values hidden)" in snapshot, snapshot)
-            assertTrue(
-                "Imported from: project: /workspace/.codex/hooks.json" in snapshot,
-                snapshot,
-            )
-            assertTrue("[Close] [Disable] [Edit] [Delete]" in snapshot, snapshot)
-            assertFalse("private-hook-token" in snapshot, snapshot)
+            assertTrue("guard tools" in snapshot, snapshot)
+            assertTrue("Type: Pre tool use" in snapshot, snapshot)
+            assertTrue("[Close] [Edit] [Delete]" in snapshot, snapshot)
+            assertFalse("Command:" in snapshot, snapshot)
         }
     }
 
     @Test
-    fun importDefaultsSelectEverySupportedSourceAndReplaceConflicts() {
-        assertEquals(
-            mapOf(
-                "user:/home/user/.codex/hooks.json" to HookImportDecision.Import,
-                "project:/workspace/.codex/hooks.json" to HookImportDecision.Replace,
-                "user:/home/user/.codex/config.toml" to HookImportDecision.Skip,
-            ),
-            importPreview().defaultImportDecisions(),
-        )
-    }
-
-    @Test
-    fun importDialogShowsLoadedSelectionWithoutPreviewStep() = runTest {
+    fun editorContainsOnlyNameTypeAndCommand() = runTest {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Box {
-                    TuiPopupHost(modifier = Modifier.width(100).height(30)) {
-                        HookImportDialog(
-                            preview = importPreview(),
-                            onApply = { _, _ -> },
+                    TuiPopupHost(modifier = Modifier.width(96).height(24)) {
+                        HookEditorDialog(
+                            request = HookEditorRequest(
+                                name = "guard tools",
+                                draft = HookDraft(
+                                    name = "guard tools",
+                                    type = HookType.PreToolUse,
+                                    command = "guard-command",
+                                ),
+                            ),
                             onDismiss = {},
+                            onSave = {},
                         )
                     }
                 }
             }
 
-            assertTrue("All supported sources are selected." in snapshot, snapshot)
-            assertTrue("[✓ User checks · New]" in snapshot, snapshot)
-            assertTrue("[✓ Project checks · Replace existing · partial]" in snapshot, snapshot)
-            assertTrue("[– Unsupported source · Unsupported]" in snapshot, snapshot)
-            assertTrue("[Import selected (2)]" in snapshot, snapshot)
-            assertTrue("Environment: HOOK_TOKEN (values hidden)" in snapshot, snapshot)
-            assertTrue("Prompt handlers were excluded." in snapshot, snapshot)
-            assertFalse("[Preview]" in snapshot, snapshot)
-            assertFalse("private-hook-token" in snapshot, snapshot)
-            assertFalse("private-command" in snapshot, snapshot)
+            assertTrue("Edit Hook" in snapshot, snapshot)
+            assertTrue("Name" in snapshot, snapshot)
+            assertTrue("Type: [Pre tool use]" in snapshot, snapshot)
+            assertTrue("Command" in snapshot, snapshot)
+            assertTrue("guard-command" in snapshot, snapshot)
+            assertFalse("Matcher" in snapshot, snapshot)
+            assertFalse("Timeout" in snapshot, snapshot)
+            assertFalse("Environment" in snapshot, snapshot)
         }
     }
 
-    private fun managedSource(): HookManagedSourceState =
-        HookManagedSourceState(
-            sourceId = "source-id",
-            name = "Project checks",
-            enabled = true,
-            importedFrom = HookCodexImportSummary(
-                sourceKind = HookCodexSourceKind.Project,
-                normalizedPath = "/workspace/.codex/hooks.json",
-            ),
-            configuredEvents = listOf(
-                HookEvent.PreToolUse,
-                HookEvent.Stop,
-            ),
-            commandCount = 2,
-            environmentNames = listOf("HOOK_TOKEN"),
-        )
-
-    private fun importPreview(): HookImportPreview =
-        HookImportPreview(
-            id = 1,
-            filter = "",
-            items = listOf(
-                HookImportItem(
-                    sourceKey = "user:/home/user/.codex/hooks.json",
-                    displayName = "User checks",
-                    sourceKind = HookCodexSourceKind.User,
-                    normalizedPath = "/home/user/.codex/hooks.json",
-                    disposition = HookImportDisposition.New,
-                    support = HookImportSupport.Full,
-                    configuredEvents = listOf(HookEvent.PreToolUse),
-                    commandCount = 1,
-                    environmentNames = emptyList(),
-                    selectable = true,
-                ),
-                HookImportItem(
-                    sourceKey = "project:/workspace/.codex/hooks.json",
-                    displayName = "Project checks",
-                    sourceKind = HookCodexSourceKind.Project,
-                    normalizedPath = "/workspace/.codex/hooks.json",
-                    disposition = HookImportDisposition.Conflict,
-                    support = HookImportSupport.Partial,
-                    configuredEvents = listOf(HookEvent.Stop),
-                    commandCount = 1,
-                    environmentNames = listOf("HOOK_TOKEN"),
-                    excludedDetails = listOf(
-                        "Prompt handlers were excluded.",
-                    ),
-                    selectable = true,
-                ),
-                HookImportItem(
-                    sourceKey = "user:/home/user/.codex/config.toml",
-                    displayName = "Unsupported source",
-                    sourceKind = HookCodexSourceKind.User,
-                    normalizedPath = "/home/user/.codex/config.toml",
-                    disposition = null,
-                    support = HookImportSupport.Unsupported,
-                    configuredEvents = emptyList(),
-                    commandCount = 0,
-                    environmentNames = emptyList(),
-                    excludedDetails = listOf(
-                        "The source contains no supported command Hooks.",
-                    ),
-                    selectable = false,
-                ),
-            ),
+    private fun managedHook(): HookManagedState =
+        HookManagedState(
+            name = "guard tools",
+            type = HookType.PreToolUse,
         )
 }

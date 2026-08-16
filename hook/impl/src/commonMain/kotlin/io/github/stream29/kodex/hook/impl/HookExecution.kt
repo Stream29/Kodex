@@ -5,41 +5,33 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.io.files.Path
-import kotlin.time.Duration.Companion.seconds
 
 internal suspend fun ShellClient.runHook(
     hook: ExecutableHook,
     inputJson: String,
     cwd: Path,
 ): HookRawResult {
-    return runHook(
-        command = hook.definition.command,
+    return runHookCommand(
+        command = hook.command,
         inputJson = inputJson,
         cwd = cwd,
-        environment = hook.environment,
-        timeout = hook.definition.timeoutSeconds.seconds,
     )
 }
 
 internal suspend fun ShellClient.runHooks(
     hooks: List<ExecutableHook>,
-    inputJson: String,
     cwd: Path,
+    inputJson: (ExecutableHook) -> String,
 ): List<HookRawResult> = coroutineScope {
     hooks
         .map { hook ->
             async {
                 runHook(
                     hook = hook,
-                    inputJson = inputJson,
+                    inputJson = inputJson(hook),
                     cwd = cwd,
                 )
             }
         }
         .awaitAll()
 }
-
-internal fun List<ExecutableHook>.matching(
-    matcherInputs: List<String>,
-): List<ExecutableHook> =
-    filter { hook -> hook.matcher.matches(matcherInputs) }

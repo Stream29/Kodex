@@ -45,13 +45,14 @@ val agentHistoryModelsTest by testSuite {
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
                 model.awaitReady(itemCount = 3)
+                val committedItems = model.committedItems.value
                 assertEquals(
                     listOf(9, 4, 1),
-                    (0 until model.committedItemCount.value).map { position ->
-                        model.peek(position).storageIndex
+                    (0 until committedItems.size).map { position ->
+                        committedItems.peek(position).storageIndex
                     },
                 )
-                assertIs<HistoryItemViewModel.Message>(model.peek(0))
+                assertIs<HistoryItemViewModel.Message>(committedItems.peek(0))
             } finally {
                 model.close()
                 repository.cancelAndJoin()
@@ -78,19 +79,21 @@ val agentHistoryModelsTest by testSuite {
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
                 model.awaitReady(itemCount = 64, hasOlder = true)
-                val newest = assertIs<HistoryItemViewModel.Tool>(model.peek(0))
+                val initialWindow = model.committedItems.value
+                val newest = assertIs<HistoryItemViewModel.Tool>(initialWindow.peek(0))
                 newest.toggleExpanded()
 
-                model[63]
+                initialWindow[63]
                 model.awaitReady(itemCount = 128, hasOlder = true)
-                assertSame(newest, model.peek(0))
+                assertSame(newest, model.committedItems.value.peek(0))
 
-                model[127]
+                model.committedItems.value[127]
                 model.awaitReady(itemCount = 130, hasOlder = false)
-                assertSame(newest, model.peek(0))
+                val completeWindow = model.committedItems.value
+                assertSame(newest, completeWindow.peek(0))
                 assertTrue(newest.expanded)
-                assertEquals(130, model.peek(0).storageIndex)
-                assertEquals(1, model.peek(129).storageIndex)
+                assertEquals(130, completeWindow.peek(0).storageIndex)
+                assertEquals(1, completeWindow.peek(129).storageIndex)
             } finally {
                 model.close()
                 repository.cancelAndJoin()
@@ -111,23 +114,28 @@ val agentHistoryModelsTest by testSuite {
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
                 model.awaitReady(itemCount = 64, hasOlder = true)
-                val newest = model.peek(0)
+                val newest = model.committedItems.value.peek(0)
 
-                while (model.committedItemCount.value < itemCount) {
-                    val previousCount = model.committedItemCount.value
-                    val previousOldest = model.peek(previousCount - 1)
-                    model[previousCount - 1]
+                while (model.committedItems.value.size < itemCount) {
+                    val previousWindow = model.committedItems.value
+                    val previousCount = previousWindow.size
+                    val previousOldest = previousWindow.peek(previousCount - 1)
+                    previousWindow[previousCount - 1]
                     val expectedCount = minOf(previousCount + 64, itemCount)
                     model.awaitReady(
                         itemCount = expectedCount,
                         hasOlder = expectedCount < itemCount,
                     )
-                    assertSame(previousOldest, model.peek(previousCount - 1))
+                    assertSame(
+                        previousOldest,
+                        model.committedItems.value.peek(previousCount - 1),
+                    )
                 }
 
-                assertSame(newest, model.peek(0))
-                assertEquals(itemCount, model.peek(0).storageIndex)
-                assertEquals(1, model.peek(itemCount - 1).storageIndex)
+                val completeWindow = model.committedItems.value
+                assertSame(newest, completeWindow.peek(0))
+                assertEquals(itemCount, completeWindow.peek(0).storageIndex)
+                assertEquals(1, completeWindow.peek(itemCount - 1).storageIndex)
             } finally {
                 model.close()
                 repository.cancelAndJoin()
@@ -147,19 +155,28 @@ val agentHistoryModelsTest by testSuite {
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
                 model.awaitReady(itemCount = 64, hasOlder = true)
-                val initialGeneration = model.generation.value
-                val oldChild = model.peek(0)
+                val oldWindow = model.committedItems.value
+                val initialGeneration = oldWindow.generation
+                val oldChild = oldWindow.peek(0)
 
                 runtime.modify { storage -> storage.revert(10) }
                 withContext(Dispatchers.Default) {
                     withTimeout(5.seconds) {
-                        model.generation.first { generation -> generation > initialGeneration }
+                        model.committedItems.first { window ->
+                            window.generation > initialGeneration
+                        }
                     }
                 }
                 model.awaitReady(itemCount = 9, hasOlder = false)
 
+                val replacementWindow = model.committedItems.value
                 assertFalse(model.contains(initialGeneration, oldChild.storageIndex))
-                assertEquals(9, model.peek(0).storageIndex)
+                assertEquals(initialGeneration + 1, replacementWindow.generation)
+                assertEquals(9, replacementWindow.peek(0).storageIndex)
+                assertEquals(64, oldWindow.size)
+                repeat(oldWindow.size) { position ->
+                    oldWindow.peek(position)
+                }
             } finally {
                 model.close()
                 repository.cancelAndJoin()
@@ -246,7 +263,7 @@ private suspend fun AgentHistoryViewModel.awaitReady(
             val state = loadState.first { state ->
                 state is AgentHistoryLoadState.Failed ||
                     (state is AgentHistoryLoadState.Ready &&
-                        committedItemCount.value == itemCount &&
+                        committedItems.value.size == itemCount &&
                         (hasOlder == null || state.hasOlder == hasOlder))
             }
             if (state is AgentHistoryLoadState.Failed) {

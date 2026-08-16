@@ -2,7 +2,7 @@ package io.github.stream29.kodex.hook.contract.compaction
 
 import io.github.stream29.kodex.hook.contract.HookTurnContext
 
-/** Trigger visible to PreCompact and PostCompact matchers. */
+/** Trigger exposed to PreCompact and PostCompact commands. */
 public enum class HookCompactionTrigger(public val wireName: String) {
     Manual("manual"),
     Auto("auto"),

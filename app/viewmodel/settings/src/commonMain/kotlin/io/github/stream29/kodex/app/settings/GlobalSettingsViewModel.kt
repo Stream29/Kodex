@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.app.settings
 
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
+import io.github.stream29.kodex.app.settings.contract.GlobalCodexHomePicker
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsEffect
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsState
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsViewModel
@@ -15,11 +17,9 @@ import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettingsStore
 import io.github.stream29.kodex.cli.settings.NewLineKey
-import io.github.stream29.kodex.hook.contract.HookImportDecision
-import io.github.stream29.kodex.hook.contract.HookImportPreview
-import io.github.stream29.kodex.hook.contract.HookManagedSourceState
+import io.github.stream29.kodex.hook.contract.HookDraft
+import io.github.stream29.kodex.hook.contract.HookManagedState
 import io.github.stream29.kodex.hook.contract.HookManager
-import io.github.stream29.kodex.hook.contract.HookSourceDraft
 import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpImportDecision
@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.io.files.Path
 
 internal class GlobalSettingsViewModelImpl(
     private val globalSettings: KodexGlobalSettingsStore,
@@ -58,6 +59,7 @@ internal class GlobalSettingsViewModelImpl(
     private val hookManager: HookManager,
     models: StateFlow<List<ModelInfo>>,
     private val commandScope: CoroutineScope,
+    private val createDirectoryPicker: (Path) -> DirectoryPickerViewModel?,
 ) : GlobalSettingsViewModel {
     private data class PreparedReset(
         val option: UsageResetOption,
@@ -86,8 +88,8 @@ internal class GlobalSettingsViewModelImpl(
     )
     private val mutableMcpServers = MutableStateFlow<List<McpServerSettingsState>>(emptyList())
     private val mutableMcpImportPreview = MutableStateFlow<McpImportPreview?>(null)
-    private val mutableHookImportPreview = MutableStateFlow<HookImportPreview?>(null)
     private val mutableUsageReset = MutableStateFlow<UsageResetState>(UsageResetState.Hidden)
+    private val mutableCodexHomePicker = MutableStateFlow<GlobalCodexHomePicker?>(null)
 
     override val state: StateFlow<GlobalSettingsState> = mutableState.asStateFlow()
     override val authentication: StateFlow<SettingsAuthenticationState> =
@@ -98,11 +100,10 @@ internal class GlobalSettingsViewModelImpl(
         mutableMcpServers.asStateFlow()
     override val mcpImportPreview: StateFlow<McpImportPreview?> =
         mutableMcpImportPreview.asStateFlow()
-    override val hooksEnabled: StateFlow<Boolean> = hookManager.featureEnabled
-    override val hookSources: StateFlow<List<HookManagedSourceState>> = hookManager.sources
-    override val hookImportPreview: StateFlow<HookImportPreview?> =
-        mutableHookImportPreview.asStateFlow()
+    override val hooks: StateFlow<List<HookManagedState>> = hookManager.hooks
     override val usageReset: StateFlow<UsageResetState> = mutableUsageReset.asStateFlow()
+    override val codexHomePicker: StateFlow<GlobalCodexHomePicker?> =
+        mutableCodexHomePicker.asStateFlow()
     override val effects: Flow<GlobalSettingsEffect> = effectChannel.receiveAsFlow()
 
     init {
@@ -157,6 +158,35 @@ internal class GlobalSettingsViewModelImpl(
                 }
             }
         }
+    }
+
+    override fun requestCodexHome() {
+        if (closed) return
+        val child = createDirectoryPicker(mutableState.value.codexHome) ?: return
+        val created = GlobalCodexHomePicker(child)
+        val replaced = mutableCodexHomePicker.value
+        mutableCodexHomePicker.value = created
+        replaced?.viewModel?.close()
+    }
+
+    override fun selectCodexHome(
+        expected: GlobalCodexHomePicker,
+        codexHome: Path,
+    ): Boolean {
+        if (!removeCodexHomePicker(expected)) return false
+        enqueueSettingsUpdate {
+            copy(codexHome = codexHome)
+        }
+        return true
+    }
+
+    override fun dismissCodexHomePicker(expected: GlobalCodexHomePicker): Boolean =
+        removeCodexHomePicker(expected)
+
+    private fun removeCodexHomePicker(expected: GlobalCodexHomePicker): Boolean {
+        if (!mutableCodexHomePicker.compareAndSet(expected, null)) return false
+        expected.viewModel.close()
+        return true
     }
 
     override fun updateNewLineKey(newLineKey: NewLineKey) {
@@ -339,55 +369,27 @@ internal class GlobalSettingsViewModelImpl(
         mutableMcpImportPreview.value = null
     }
 
-    override fun setHooksEnabled(enabled: Boolean) {
-        launchManagementCommand { hookManager.setFeatureEnabled(enabled) }
-    }
-
-    override fun addHookSource(draft: HookSourceDraft) {
+    override fun addHook(draft: HookDraft) {
         launchManagementCommand { hookManager.add(draft) }
     }
 
-    override fun editHookSource(sourceId: String, draft: HookSourceDraft) {
-        launchManagementCommand { hookManager.edit(sourceId, draft) }
+    override fun editHook(name: String, draft: HookDraft) {
+        launchManagementCommand { hookManager.edit(name, draft) }
     }
 
-    override fun deleteHookSource(sourceId: String) {
-        launchManagementCommand { hookManager.delete(sourceId) }
+    override fun deleteHook(name: String) {
+        launchManagementCommand { hookManager.delete(name) }
     }
 
-    override fun setHookSourceEnabled(sourceId: String, enabled: Boolean) {
-        launchManagementCommand { hookManager.setEnabled(sourceId, enabled) }
-    }
-
-    override fun hookSourceEditorDraft(sourceId: String): HookSourceDraft? =
-        hookManager.editorDraft(sourceId)
-
-    override fun previewCodexHookImport(filter: String) {
-        launchManagementCommand {
-            mutableHookImportPreview.value = hookManager.previewCodexImport(filter)
-        }
-    }
-
-    override fun applyCodexHookImport(
-        previewId: Long,
-        decisions: Map<String, HookImportDecision>,
-    ) {
-        launchManagementCommand {
-            hookManager.applyCodexImport(previewId, decisions)
-            mutableHookImportPreview.value = null
-        }
-    }
-
-    override fun dismissCodexHookImport() {
-        mutableHookImportPreview.value = null
-    }
+    override fun hookEditorDraft(name: String): HookDraft? = hookManager.editorDraft(name)
 
     override fun close() {
         if (closed) return
         closed = true
         dismissUsageReset()
         dismissCodexMcpImport()
-        dismissCodexHookImport()
+        mutableCodexHomePicker.value?.viewModel?.close()
+        mutableCodexHomePicker.value = null
         updates.close()
         effectChannel.close()
         scope.cancel()

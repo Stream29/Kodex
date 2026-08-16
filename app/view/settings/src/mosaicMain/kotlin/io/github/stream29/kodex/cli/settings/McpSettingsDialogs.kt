@@ -26,7 +26,9 @@ import io.github.stream29.kodex.cli.components.ScrollState
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiDialogActionRow
+import io.github.stream29.kodex.cli.components.TuiDropdownMenu
 import io.github.stream29.kodex.cli.components.TuiTheme
+import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.verticalScroll
 import io.github.stream29.kodex.mcp.contract.DefaultMcpOAuthRedirectUri
 import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
@@ -61,6 +63,8 @@ internal fun BoxScope.McpServerEditorDialog(
     var oauthEnabled by remember(request) {
         mutableStateOf(existing?.oauth != null)
     }
+    val transportDropdown = rememberTuiDropdownState()
+    val oauthDropdown = rememberTuiDropdownState()
     var error by remember(request) { mutableStateOf<String?>(null) }
     val name = rememberInput(existing?.serverName.orEmpty())
     val httpUrl = rememberInput(existing?.streamableHttpUrl.orEmpty())
@@ -159,19 +163,12 @@ internal fun BoxScope.McpServerEditorDialog(
                 textStyle = TuiTheme.typography.headline,
             )
             McpInputField("Server name", name, width, autoFocus = true)
-            Text("Transport", color = SettingsForeground)
-            Row {
-                McpTransportKind.entries.forEachIndexed { index, option ->
-                    if (index > 0) Text(" ")
-                    TuiButton(
-                        label = option.editorLabel(),
-                        modifier = Modifier.background(SettingsHomeBackground),
-                        color = SettingsForeground,
-                        selected = option == transport,
-                        onClick = { transport = option },
-                    )
-                }
-            }
+            SettingsDropdownField(
+                label = "Transport",
+                selectedLabel = transport.editorLabel(),
+                dropdownState = transportDropdown,
+                background = SettingsHomeBackground,
+            )
             McpInputField(
                 if (transport == McpTransportKind.StreamableHttp) "URL" else "Command",
                 if (transport == McpTransportKind.StreamableHttp) httpUrl else stdioCommand,
@@ -191,19 +188,12 @@ internal fun BoxScope.McpServerEditorDialog(
                     headers,
                     width,
                 )
-                Text("OAuth", color = SettingsForeground)
-                Row {
-                    listOf(true, false).forEachIndexed { index, enabled ->
-                        if (index > 0) Text(" ")
-                        TuiButton(
-                            label = if (enabled) "Enabled" else "None",
-                            modifier = Modifier.background(SettingsHomeBackground),
-                            color = SettingsForeground,
-                            selected = enabled == oauthEnabled,
-                            onClick = { oauthEnabled = enabled },
-                        )
-                    }
-                }
+                SettingsDropdownField(
+                    label = "OAuth",
+                    selectedLabel = oauthEnabled.oauthEditorLabel(),
+                    dropdownState = oauthDropdown,
+                    background = SettingsHomeBackground,
+                )
                 if (oauthEnabled) {
                     McpInputField("OAuth client id", oauthClientId, width)
                     McpInputField(
@@ -238,6 +228,24 @@ internal fun BoxScope.McpServerEditorDialog(
                 TuiButton(label = "Save", color = SettingsForeground, onClick = ::save)
             }
         }
+    }
+    TuiDropdownMenu(
+        dropdownState = transportDropdown,
+        options = McpTransportKind.entries.toList(),
+        selected = transport,
+        optionLabel = McpTransportKind::editorLabel,
+        backgroundColor = PopupMenuBackground,
+        onSelect = { selected -> transport = selected },
+    )
+    if (transport == McpTransportKind.StreamableHttp) {
+        TuiDropdownMenu(
+            dropdownState = oauthDropdown,
+            options = listOf(true, false),
+            selected = oauthEnabled,
+            optionLabel = Boolean::oauthEditorLabel,
+            backgroundColor = PopupMenuBackground,
+            onSelect = { enabled -> oauthEnabled = enabled },
+        )
     }
 }
 
@@ -666,6 +674,8 @@ private fun McpTransportKind.editorLabel(): String =
         McpTransportKind.StreamableHttp -> "HTTP"
         McpTransportKind.Stdio -> "stdio"
     }
+
+private fun Boolean.oauthEditorLabel(): String = if (this) "Enabled" else "None"
 
 private fun McpImportItemKind.importLabel(): String =
     when (this) {

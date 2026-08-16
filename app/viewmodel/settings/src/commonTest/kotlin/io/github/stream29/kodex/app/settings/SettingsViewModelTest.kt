@@ -1,5 +1,9 @@
 package io.github.stream29.kodex.app.settings
 
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerEffect
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerLoadState
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerState
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.settings.contract.McpServerSettingsStatus
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsConfiguration
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsDataSource
@@ -13,11 +17,9 @@ import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.UsageResetState
 import io.github.stream29.kodex.cli.settings.InMemoryKodexGlobalSettings
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
-import io.github.stream29.kodex.hook.contract.HookImportDecision
-import io.github.stream29.kodex.hook.contract.HookImportPreview
-import io.github.stream29.kodex.hook.contract.HookManagedSourceState
+import io.github.stream29.kodex.hook.contract.HookDraft
+import io.github.stream29.kodex.hook.contract.HookManagedState
 import io.github.stream29.kodex.hook.contract.HookManager
-import io.github.stream29.kodex.hook.contract.HookSourceDraft
 import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
 import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
@@ -58,6 +60,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Instant
@@ -279,6 +283,88 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun globalCodexHomeUsesAnOwnedDirectoryPickerAndPersistsItsSelection() = runTest {
+        val initialCodexHome = Path("codex-home")
+        val selectedCodexHome = Path("selected-codex-home")
+        val settings = InMemoryKodexGlobalSettings(
+            KodexGlobalSettings(codexHome = initialCodexHome),
+        )
+        var pickerInitialDirectory: Path? = null
+        lateinit var picker: TestDirectoryPickerViewModel
+        val viewModel = createSettingsViewModel(
+            initialPage = SettingsPage.Global,
+            globalSettings = settings,
+            authentication = TestAuthStore(),
+            accountUsage = TestAccountUsageStore(),
+            mcpManager = TestMcpManager(),
+            hookManager = TestHookManager(),
+            models = MutableStateFlow(emptyList()),
+            createDirectoryPicker = { initialDirectory ->
+                pickerInitialDirectory = initialDirectory
+                TestDirectoryPickerViewModel(initialDirectory).also { picker = it }
+            },
+            ownerScope = backgroundScope,
+        )
+
+        viewModel.global.requestCodexHome()
+        val request = assertNotNull(viewModel.global.codexHomePicker.value)
+        assertEquals(initialCodexHome, pickerInitialDirectory)
+        assertSame(picker, request.viewModel)
+
+        assertTrue(viewModel.global.selectCodexHome(request, selectedCodexHome))
+        assertNull(viewModel.global.codexHomePicker.value)
+        assertTrue(picker.closed)
+        runCurrent()
+
+        assertEquals(selectedCodexHome, settings.settings.value.codexHome)
+        assertEquals(selectedCodexHome, viewModel.global.state.value.codexHome)
+        assertFalse(viewModel.global.dismissCodexHomePicker(request))
+
+        viewModel.close()
+    }
+
+    @Test
+    fun sessionWorkingDirectoryUsesAnOwnedDirectoryPicker() = runTest {
+        val source = TestSessionSettingsDataSource()
+        val selectedDirectory = Path("selected-workspace")
+        var pickerInitialDirectory: Path? = null
+        lateinit var picker: TestDirectoryPickerViewModel
+        val viewModel = createSettingsViewModel(
+            initialPage = SettingsPage.Session,
+            globalSettings = InMemoryKodexGlobalSettings(
+                KodexGlobalSettings(codexHome = Path("codex-home")),
+            ),
+            authentication = TestAuthStore(),
+            accountUsage = TestAccountUsageStore(),
+            mcpManager = TestMcpManager(),
+            hookManager = TestHookManager(),
+            models = MutableStateFlow(emptyList()),
+            sessionSettings = source,
+            createDirectoryPicker = { initialDirectory ->
+                pickerInitialDirectory = initialDirectory
+                TestDirectoryPickerViewModel(initialDirectory).also { picker = it }
+            },
+            ownerScope = backgroundScope,
+        )
+        runCurrent()
+        val session = assertIs<SessionSettingsState.Available>(viewModel.session.state.value)
+
+        viewModel.session.requestWorkingDirectory(session.snapshot.revision)
+        val request = assertNotNull(viewModel.session.directoryPicker.value)
+        assertEquals(Path("workspace"), pickerInitialDirectory)
+        assertSame(picker, request.viewModel)
+
+        assertTrue(viewModel.session.selectWorkingDirectory(request, selectedDirectory))
+        assertNull(viewModel.session.directoryPicker.value)
+        assertTrue(picker.closed)
+        runCurrent()
+
+        assertEquals(selectedDirectory, source.current.configuration.workingDirectory)
+
+        viewModel.close()
+    }
+
+    @Test
     fun sessionChildRejectsStaleRevisionAndNeverResolvesAnotherTarget() = runTest {
         val source = TestSessionSettingsDataSource()
         val viewModel = createSettingsViewModel(
@@ -432,6 +518,32 @@ private class TestAuthStore(
     override val state: StateFlow<OpenAiAuthState> = MutableStateFlow(initialState)
 }
 
+private class TestDirectoryPickerViewModel(initialDirectory: Path) : DirectoryPickerViewModel {
+    override val state: StateFlow<DirectoryPickerState> = MutableStateFlow(
+        DirectoryPickerState(
+            loadState = DirectoryPickerLoadState.Ready(
+                requestId = 1,
+                requestedDirectory = initialDirectory,
+                directory = initialDirectory,
+                children = emptyList(),
+            ),
+        ),
+    )
+    override val effects: Flow<DirectoryPickerEffect> = emptyFlow()
+    var closed: Boolean = false
+
+    override fun navigateTo(directory: Path): Unit = Unit
+    override fun navigateUp(): Unit = Unit
+    override fun updateFilter(query: String): Unit = Unit
+    override fun clearFilter(): Unit = Unit
+    override fun retry(): Unit = Unit
+    override fun confirm(): Unit = Unit
+
+    override fun close() {
+        closed = true
+    }
+}
+
 private class TestAccountUsageStore(
     initialState: CodexAccountUsageState = CodexAccountUsageState.Unavailable,
     private val consumeResults: ArrayDeque<Result<CodexRateLimitResetOutcome>> = ArrayDeque(),
@@ -513,26 +625,12 @@ private class TestMcpManager(
 }
 
 private class TestHookManager : HookManager {
-    override val featureEnabled = MutableStateFlow(true)
-    override val sources = MutableStateFlow<List<HookManagedSourceState>>(emptyList())
+    override val hooks = MutableStateFlow<List<HookManagedState>>(emptyList())
 
-    override suspend fun setFeatureEnabled(enabled: Boolean) {
-        featureEnabled.value = enabled
-    }
-
-    override suspend fun add(draft: HookSourceDraft): String = "hook-source"
-    override suspend fun edit(sourceId: String, draft: HookSourceDraft): Unit = Unit
-    override suspend fun delete(sourceId: String): Unit = Unit
-    override suspend fun setEnabled(sourceId: String, enabled: Boolean): Unit = Unit
-    override fun editorDraft(sourceId: String): HookSourceDraft? = null
-
-    override suspend fun previewCodexImport(filter: String): HookImportPreview =
-        HookImportPreview(id = 1, filter = filter, items = emptyList())
-
-    override suspend fun applyCodexImport(
-        previewId: Long,
-        decisions: Map<String, HookImportDecision>,
-    ): Unit = Unit
+    override suspend fun add(draft: HookDraft): String = draft.name
+    override suspend fun edit(name: String, draft: HookDraft): Unit = Unit
+    override suspend fun delete(name: String): Unit = Unit
+    override fun editorDraft(name: String): HookDraft? = null
 
     override fun close(): Unit = Unit
 }

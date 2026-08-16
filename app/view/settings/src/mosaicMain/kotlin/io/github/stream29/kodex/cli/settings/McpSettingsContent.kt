@@ -24,8 +24,12 @@ internal fun McpSettingsContent(
     onImport: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
-        Text("MCP servers", color = SettingsForeground)
-        Row {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(SettingsSectionHeaderBackground),
+        ) {
+            Text("MCP servers ", color = SettingsForeground)
             TuiButton(
                 label = "Add",
                 color = SettingsForeground,
@@ -48,7 +52,7 @@ internal fun McpSettingsContent(
             servers.forEach { server ->
                 TuiButton(
                     label = "${server.serverName} · ${server.status.settingsLabel()}",
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground),
                     color = SettingsForeground,
                     onClick = { onOpenDetails(server) },
                 )

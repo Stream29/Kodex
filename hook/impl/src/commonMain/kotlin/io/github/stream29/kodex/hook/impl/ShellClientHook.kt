@@ -8,7 +8,7 @@ import io.github.stream29.kodex.utils.shellclient.StdoutBuffer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.files.Path
-import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Raw result of one command handler.
@@ -22,21 +22,19 @@ internal data class HookRawResult(
     val stderr: String,
 )
 
-internal suspend fun ShellClient.runHook(
+internal suspend fun ShellClient.runHookCommand(
     command: String,
     inputJson: String,
     cwd: Path,
-    environment: Map<String, String>,
-    timeout: Duration,
 ): HookRawResult =
     try {
-        withTimeoutOrNull(timeout) {
+        withTimeoutOrNull(DefaultHookTimeoutSeconds.seconds) {
             start(
                 ShellProcessCommand(
                     command = command,
                     workingDirectory = cwd,
                     shell = Shell.default,
-                    environment = environment,
+                    environment = emptyMap(),
                 ),
             ).use { process ->
                 process.stdin.send(inputJson)
@@ -88,3 +86,5 @@ private data class CapturedHookOutput(
     val text: String,
     val truncated: Boolean,
 )
+
+private const val DefaultHookTimeoutSeconds: Long = 600L

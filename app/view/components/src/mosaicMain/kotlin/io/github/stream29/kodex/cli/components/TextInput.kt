@@ -280,13 +280,21 @@ public fun TextInput(
                     }
 
                     event.key == "ArrowUp" && !event.ctrl && !event.alt -> {
-                        moveCursor(TextInputMovement.Up, event.shift)
-                        true
+                        if (!event.shift && layout.cursorRow == 0) {
+                            false
+                        } else {
+                            moveCursor(TextInputMovement.Up, event.shift)
+                            true
+                        }
                     }
 
                     event.key == "ArrowDown" && !event.ctrl && !event.alt -> {
-                        moveCursor(TextInputMovement.Down, event.shift)
-                        true
+                        if (!event.shift && layout.cursorRow == layout.rowCount - 1) {
+                            false
+                        } else {
+                            moveCursor(TextInputMovement.Down, event.shift)
+                            true
+                        }
                     }
 
                     event.key == "Home" && !event.alt -> {

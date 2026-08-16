@@ -3,28 +3,17 @@ package io.github.stream29.kodex.hook.contract
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import kotlinx.io.files.Path
 
-/** Permission mode exposed to command hooks. */
-public enum class HookPermissionMode(public val wireName: String) {
-    Default("default"),
-    AcceptEdits("acceptEdits"),
-    Plan("plan"),
-    DontAsk("dontAsk"),
-    BypassPermissions("bypassPermissions"),
-}
-
 /**
  * Session data projected from the state snapshot visible at one Hook boundary.
  *
  * @property sessionId Identity of the backing Agent storage.
  * @property cwd Working directory active at the Hook boundary.
  * @property model Model active at the Hook boundary.
- * @property permissionMode Effective permission behavior exposed to Hooks.
  */
 public data class HookSessionContext(
     public val sessionId: String,
     public val cwd: Path,
     public val model: String,
-    public val permissionMode: HookPermissionMode,
 )
 
 /**
@@ -48,7 +37,6 @@ public fun KodexAgentSettings.toHookSessionContext(sessionId: String): HookSessi
         sessionId = sessionId,
         cwd = cwd,
         model = model.value,
-        permissionMode = HookPermissionMode.BypassPermissions,
     )
 
 /**

@@ -60,9 +60,9 @@ val agentHistoryActionTest by testSuite {
                 assertEquals(1, root.storage.latestIndex())
                 val currentGeneration = withContext(Dispatchers.Default) {
                     withTimeout(5.seconds) {
-                        agent.history.generation.first { generation ->
-                            generation > initialGeneration
-                        }
+                        agent.history.committedItems.first { window ->
+                            window.generation > initialGeneration
+                        }.generation
                     }
                 }
                 agent.history.awaitStorageIndex(1)
@@ -81,8 +81,8 @@ val agentHistoryActionTest by testSuite {
                 }
                 withContext(Dispatchers.Default) {
                     withTimeout(5.seconds) {
-                        agent.history.generation.first { generation ->
-                            generation > currentGeneration
+                        agent.history.committedItems.first { window ->
+                            window.generation > currentGeneration
                         }
                     }
                 }
@@ -174,9 +174,8 @@ private fun userMessage(text: String): StableCleanEvent.UserMessage =
 private suspend fun AgentHistoryViewModel.awaitStorageIndex(storageIndex: Int): Long =
     withContext(Dispatchers.Default) {
         withTimeout(5.seconds) {
-            committedItemCount.first {
-                contains(generation.value, storageIndex)
-            }
-            generation.value
+            committedItems.first { window ->
+                contains(window.generation, storageIndex)
+            }.generation
         }
     }

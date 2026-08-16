@@ -11,6 +11,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.LocalTerminalState
+import com.jakewharton.mosaic.animation.animateIntAsState
 import com.jakewharton.mosaic.layout.background
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.layout.height
@@ -78,13 +79,25 @@ public fun SessionTreeCliScreen(
     val rows = (terminal.size.rows - 1).coerceAtLeast(1)
     val scope = rememberCoroutineScope()
     var sidebarPinnedExpanded by remember { mutableStateOf(false) }
-    var sidebarHovered by remember { mutableStateOf(false) }
+    var sidebarBookmarkHovered by remember { mutableStateOf(false) }
+    var sidebarSurfaceHovered by remember { mutableStateOf(false) }
     var shellSessionMenu by remember { mutableStateOf<ShellSessionMenuRequest?>(null) }
     var tabMenu by remember { mutableStateOf<SessionTabMenuRequest?>(null) }
     var historyMenu by remember { mutableStateOf<HistoryEntryMenuRequest?>(null) }
-    val sidebarExpanded =
-        sidebarPinnedExpanded || sidebarHovered || shellSessionMenu != null
-    val sidebarColumns = if (sidebarExpanded) SessionSidebarExpandedColumns else 0
+    val sidebarExpanded = sidebarPinnedExpanded ||
+        sidebarBookmarkHovered ||
+        sidebarSurfaceHovered ||
+        shellSessionMenu != null
+    val animatedSidebarColumns by animateIntAsState(
+        targetValue = if (sidebarExpanded) SessionSidebarExpandedColumns else 0,
+        label = "session sidebar width",
+    )
+    val sidebarColumns = animatedSidebarColumns.coerceIn(0, SessionSidebarExpandedColumns)
+    val bookmarkBridgesHoverAnimation = sidebarBookmarkHovered &&
+        !sidebarPinnedExpanded &&
+        sidebarColumns < SessionSidebarExpandedColumns
+    val showSidebarBookmarks =
+        (!sidebarExpanded && sidebarColumns == 0) || bookmarkBridgesHoverAnimation
     val contentColumns = (columns - sidebarColumns).coerceAtLeast(1)
     val contentRows = (rows - SessionTabBarRows).coerceAtLeast(0)
     val selected = navigation.selected
@@ -125,14 +138,14 @@ public fun SessionTreeCliScreen(
                 )
                 Box(modifier = Modifier.width(columns).height(contentRows)) {
                     Row(modifier = Modifier.width(columns).height(contentRows)) {
-                        if (sidebarExpanded) {
+                        if (sidebarColumns > 0) {
                             SessionAgentSidebar(
                                 topology = topology,
                                 selectedAgent = selectedAgent,
                                 columns = sidebarColumns,
                                 rows = contentRows,
                                 runningIndicatorFrame = runningFrame,
-                                onHoverChanged = { sidebarHovered = it },
+                                onHoverChanged = { sidebarSurfaceHovered = it },
                                 onToggleExpanded = {
                                     sidebarPinnedExpanded = !sidebarPinnedExpanded
                                     if (!sidebarPinnedExpanded) shellSessionMenu = null
@@ -219,9 +232,9 @@ public fun SessionTreeCliScreen(
                             }
                         }
                     }
-                    if (!sidebarExpanded) {
+                    if (showSidebarBookmarks) {
                         SessionAgentSidebarBookmark(
-                            onHoverChanged = { sidebarHovered = it },
+                            onHoverChanged = { hovered -> sidebarBookmarkHovered = hovered },
                             onExpand = { sidebarPinnedExpanded = true },
                         )
                     }
@@ -584,16 +597,15 @@ private fun BoxScope.HistoryEntryContextMenu(
 ) {
     val current = request ?: return
     val execution by current.agent.execution.collectAsState()
-    val historyGeneration by current.agent.history.generation.collectAsState()
-    val committedItemCount by current.agent.history.committedItemCount.collectAsState()
+    val committedItems by current.agent.history.committedItems.collectAsState()
     val targetMatches =
         current.session === selectedSession &&
             current.agent === selectedAgent &&
             !execution.running &&
             execution.capabilities.canReplaceHistory &&
             execution.capabilities.canForkHistory &&
-            committedItemCount > 0 &&
-            current.target.generation == historyGeneration &&
+            committedItems.size > 0 &&
+            current.target.generation == committedItems.generation &&
             current.agent.history.contains(
                 current.target.generation,
                 current.target.storageIndex,
@@ -645,13 +657,12 @@ private fun BoxScope.AgentHistoryRevertDialog(agent: AgentViewModel?) {
         action as? AgentHistoryActionState.ConfirmRevert
             ?: return
     val execution by agent.execution.collectAsState()
-    val historyGeneration by agent.history.generation.collectAsState()
-    val committedItemCount by agent.history.committedItemCount.collectAsState()
+    val committedItems by agent.history.committedItems.collectAsState()
     val targetMatches =
         !execution.running &&
             execution.capabilities.canReplaceHistory &&
-            committedItemCount > 0 &&
-            confirm.target.generation == historyGeneration &&
+            committedItems.size > 0 &&
+            confirm.target.generation == committedItems.generation &&
             agent.history.contains(
                 confirm.target.generation,
                 confirm.target.storageIndex,

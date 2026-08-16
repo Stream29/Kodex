@@ -22,7 +22,7 @@ import kotlinx.serialization.Serializable
  * Application-wide settings that apply independently of any one agent session.
  *
  * @property codexHome External Codex data source used only for selected
- * authentication and explicit imports.
+ * authentication and explicit MCP imports.
  * @property authSource Persistent source of subscription credentials.
  * @property shell Default shell advertised to Agents and used by shell tools.
  * @property newLineKey Key chord that a multiline text input treats as a newline.
@@ -39,8 +39,14 @@ public data class KodexGlobalSettings(
     public val newSession: KodexNewSessionSettings = KodexNewSessionSettings(),
     public val sessionTitle: SessionTitleSettings = SessionTitleSettings(),
     public override val mcpServers: Map<String, McpServerConfiguration> = emptyMap(),
-    public override val hooks: HookConfiguration = HookConfiguration(),
-) : HookSettings, McpSettings, ShellSettings
+    public override val hooks: HookConfiguration = emptyMap(),
+) : HookSettings, McpSettings, ShellSettings {
+    init {
+        require(hooks.keys.all(String::isNotBlank)) {
+            "Hook names must not be blank."
+        }
+    }
+}
 
 /** Selects whether subscription credentials come from Codex or Kodex storage. */
 @Serializable

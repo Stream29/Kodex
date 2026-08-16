@@ -567,7 +567,6 @@ val kodexToolRuntimeTest by testSuite {
             runtime.resume()
 
             assertEquals("apply_patch", invocations.single().toolName)
-            assertEquals(emptyList(), invocations.single().matcherAliases)
             assertEquals(JsonPrimitive(patch), invocations.single().input)
             assertEquals(null, SystemCoroutineFileSystem.metadataOrNull(Path(initialRoot, "hook.txt")))
             assertEquals(

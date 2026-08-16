@@ -55,6 +55,7 @@ public fun TuiDropdownTrigger(
     modifier: Modifier = Modifier,
     color: Color = Color.Unspecified,
     enabled: Boolean = true,
+    autoFocus: Boolean = false,
 ) {
     DisposableEffect(dropdownState) {
         onDispose { dropdownState.dismiss() }
@@ -67,6 +68,7 @@ public fun TuiDropdownTrigger(
         modifier = modifier.tuiPopupAnchor(dropdownState.anchor),
         color = color,
         enabled = enabled,
+        autoFocus = autoFocus,
         onClick = dropdownState::expand,
     )
 }

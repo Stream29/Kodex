@@ -65,6 +65,7 @@ class McpSettingsContentTest {
                 }
             }
 
+            assertTrue("MCP servers [Add] [Import from Codex]" in snapshot, snapshot)
             assertTrue("[healthy · Healthy (2 tools)]" in snapshot, snapshot)
             assertTrue("[lost · Failed: Connection lost]" in snapshot, snapshot)
             assertTrue("[disabled · Disabled]" in snapshot, snapshot)

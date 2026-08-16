@@ -61,8 +61,9 @@ public fun AgentHistoryView(
         clickPosition: IntOffset?,
     ) -> Unit)? = null,
 ) {
-    val generation by model.generation.collectAsState()
-    val committedItemCount by model.committedItemCount.collectAsState()
+    val committedItemsState = model.committedItems.collectAsState()
+    val committedItems = committedItemsState.value
+    val generation = committedItems.generation
     val loadState by model.loadState.collectAsState()
     val pendingTools by model.pendingTools.collectAsState()
     val streamingItem by model.streamingItem.collectAsState()
@@ -107,11 +108,11 @@ public fun AgentHistoryView(
         }
 
         items(
-            count = committedItemCount,
-            key = model::peek,
-            contentType = { position -> model.peek(position).historyContentType() },
+            count = committedItems.size,
+            key = committedItems::peek,
+            contentType = { position -> committedItems.peek(position).historyContentType() },
         ) { position ->
-            val item = model[position]
+            val item = committedItems[position]
             val focusRequester = remember(item) { FocusRequester() }
             DisposableEffect(item, focusRequester) {
                 entryFocusRequesters[item] = focusRequester
@@ -155,7 +156,7 @@ public fun AgentHistoryView(
                 if (
                     streamingItem == null &&
                     pendingTools.isEmpty() &&
-                    committedItemCount == 0 &&
+                    committedItems.size == 0 &&
                     !state.hasOlder
                 ) {
                     item(
@@ -282,7 +283,9 @@ private fun StoredHistoryContent(
         generation,
     ) {
         value = try {
-            StoredEventLoadState.Loaded(model.read(item))
+            val event = model.read(item)
+            if (!model.contains(generation, item.storageIndex)) return@produceState
+            StoredEventLoadState.Loaded(event)
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {

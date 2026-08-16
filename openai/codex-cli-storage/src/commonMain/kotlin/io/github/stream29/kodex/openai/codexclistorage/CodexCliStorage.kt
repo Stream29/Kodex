@@ -2,8 +2,6 @@ package io.github.stream29.kodex.openai.codexclistorage
 
 import dev.eav.tomlkt.Toml
 import dev.eav.tomlkt.TomlTable
-import io.github.stream29.kodex.hook.contract.HookCodexImportCandidate
-import io.github.stream29.kodex.hook.contract.HookCodexSourceKind
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -42,19 +40,6 @@ public class CodexCliStorage(
             }
     }
 
-    /**
-     * Reads this directory's Hook files only for an explicit import operation.
-     *
-     * Each existing `hooks.json`, and each `config.toml` containing a `hooks`
-     * table, becomes one independently classified source. Supported commands
-     * are platform-selected, environment-expanded, timeout-normalized, and
-     * matcher-compiled before being returned.
-     */
-    public suspend fun readHookImportCandidates(
-        sourceKind: HookCodexSourceKind,
-        environment: Map<String, String> = emptyMap(),
-    ): List<HookCodexImportCandidate> =
-        readHookImportCandidatesInternal(sourceKind, environment)
 }
 
 private fun classifyMcpImportCandidate(

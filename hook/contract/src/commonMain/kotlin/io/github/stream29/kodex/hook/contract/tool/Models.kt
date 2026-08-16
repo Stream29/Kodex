@@ -7,12 +7,11 @@ import kotlinx.serialization.json.JsonElement
 public data class HookToolInvocation(
     public val context: HookTurnContext,
     public val toolName: String,
-    public val matcherAliases: List<String> = emptyList(),
     public val toolUseId: String,
     public val input: JsonElement,
 )
 
-/** Result of authorizing a tool call through matching PreToolUse hooks. */
+/** Result of authorizing a tool call through configured PreToolUse hooks. */
 public sealed interface PreToolUseResult {
     /** The original tool call may proceed unchanged. */
     public data object Continue : PreToolUseResult
