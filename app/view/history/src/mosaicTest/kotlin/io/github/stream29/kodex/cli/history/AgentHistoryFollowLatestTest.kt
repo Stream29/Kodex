@@ -207,6 +207,26 @@ val agentHistoryFollowLatestTest by testSuite {
             assertFalse(state.listState.canScrollForward)
         }
     }
+
+    test("explicit scroll-to-latest restores intent and the newest viewport") {
+        val state = AgentHistoryUiState()
+        val entries = historyEntries("newest", "middle", "oldest")
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                HistoryTestList(entries, state, width = 12, height = 2)
+            }
+            commitScroll(state, ScrollInputSource.Pointer, delta = -1)
+            assertEquals("oldest\nmiddle", awaitSnapshot())
+            assertFalse(state.followsLatest)
+
+            state.requestScrollToLatest()
+
+            assertEquals("middle\nnewest", awaitSnapshot())
+            assertTrue(state.followsLatest)
+            assertFalse(state.listState.canScrollForward)
+        }
+    }
 }
 
 private fun commitScroll(

@@ -21,6 +21,7 @@ import io.github.stream29.kodex.app.settings.contract.UsageResetState
 import io.github.stream29.kodex.app.settings.contract.snapshotOrNull
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
+import io.github.stream29.kodex.cli.components.TuiDialogActionRow
 import io.github.stream29.kodex.openai.accountusage.CodexAccountRateLimit
 import io.github.stream29.kodex.openai.accountusage.CodexAccountRateLimitWindow
 import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageSection
@@ -40,8 +41,10 @@ internal fun CodexAccountUsageSettingsContent(
             snapshot != null -> CodexAccountUsageSnapshotContent(snapshot)
             state is SettingsAccountUsageState.Unavailable ->
                 Text("Sign in to view Codex usage.", color = SettingsForeground)
+
             state is SettingsAccountUsageState.Loading ->
                 Text("Loading usage…", color = SettingsForeground, textStyle = TextStyle.Dim)
+
             state is SettingsAccountUsageState.Failed ->
                 Text(state.message, color = SettingsForeground, textStyle = TextStyle.Dim)
         }
@@ -221,7 +224,11 @@ private fun BoxScope.UsageResetPickerDialog(
                 )
             }
         }
-        Row(modifier = Modifier.fillMaxWidth().background(SettingsActionBackground)) {
+        TuiDialogActionRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(SettingsActionBackground),
+        ) {
             TuiButton(label = "Cancel", color = SettingsForeground, onClick = onDismiss)
         }
     }
@@ -247,15 +254,18 @@ private fun BoxScope.UsageResetConfirmationDialog(
             modifier = Modifier.fillMaxWidth(),
             color = SettingsForeground,
         )
-        Row(modifier = Modifier.fillMaxWidth().background(SettingsActionBackground)) {
-            TuiButton(label = "Use reset", color = SettingsForeground, onClick = onConfirm)
-            Text(" ")
+        TuiDialogActionRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(SettingsActionBackground),
+        ) {
             TuiButton(
                 label = "Go back",
                 color = SettingsForeground,
                 autoFocus = true,
                 onClick = onBack,
             )
+            TuiButton(label = "Use reset", color = SettingsForeground, onClick = onConfirm)
         }
     }
 }
@@ -281,15 +291,18 @@ private fun BoxScope.UsageResetFailureDialog(
             modifier = Modifier.fillMaxWidth(),
             color = SettingsForeground,
         )
-        Row(modifier = Modifier.fillMaxWidth().background(SettingsActionBackground)) {
-            TuiButton(label = "Try again", color = SettingsForeground, onClick = onRetry)
-            Text(" ")
+        TuiDialogActionRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(SettingsActionBackground),
+        ) {
             TuiButton(
                 label = "Close",
                 color = SettingsForeground,
                 autoFocus = true,
                 onClick = onDismiss,
             )
+            TuiButton(label = "Try again", color = SettingsForeground, onClick = onRetry)
         }
     }
 }
@@ -302,7 +315,11 @@ private fun BoxScope.UsageResetMessageDialog(
 ) {
     UsageResetDialog(title = title, onDismiss = onDismiss) {
         Text(message, modifier = Modifier.fillMaxWidth(), color = SettingsForeground)
-        Row(modifier = Modifier.fillMaxWidth().background(SettingsActionBackground)) {
+        TuiDialogActionRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(SettingsActionBackground),
+        ) {
             TuiButton(
                 label = "Close",
                 color = SettingsForeground,
@@ -384,8 +401,10 @@ private fun CodexRateLimitResetOutcome.resultMessage(selectedCredit: Boolean): S
         CodexRateLimitResetOutcome.Reset -> "Usage reset."
         CodexRateLimitResetOutcome.AlreadyRedeemed ->
             "This reset was already used successfully."
+
         CodexRateLimitResetOutcome.NothingToReset ->
             "Your usage does not need a reset right now."
+
         CodexRateLimitResetOutcome.NoCredit -> if (selectedCredit) {
             "That reset is no longer available."
         } else {

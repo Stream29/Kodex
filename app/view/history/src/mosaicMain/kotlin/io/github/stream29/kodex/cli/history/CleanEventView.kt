@@ -65,6 +65,8 @@ import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.cli.components.EllipsizedText
 import io.github.stream29.kodex.cli.components.TuiPressable
+import io.github.stream29.kodex.cli.components.TuiTheme
+import io.github.stream29.kodex.cli.components.tuiInteractionTextStyle
 import io.github.stream29.kodex.cli.patch.PendingPatchToolEventView
 import io.github.stream29.kodex.cli.patch.StablePatchToolEventView
 import io.github.stream29.kodex.openai.AgentMessageInputContent
@@ -666,16 +668,15 @@ internal fun ToolEvent(
         TuiPressable(
             onClick = { expanded = !expanded },
             modifier = Modifier.fillMaxWidth(),
-        ) { isFocused, isHovered, isPressed ->
+        ) { _, isHovered, isPressed ->
             EllipsizedText(
                 value = "${if (expanded) "v" else ">"} $summary",
                 modifier = Modifier.fillMaxWidth(),
                 color = headerColor,
-                textStyle = when {
-                    isPressed -> TextStyle.Invert
-                    isFocused || isHovered -> TextStyle.Bold
-                    else -> TextStyle.Unspecified
-                },
+                textStyle = tuiInteractionTextStyle(
+                    hovered = isHovered,
+                    pressed = isPressed,
+                ),
             )
         }
 
@@ -686,10 +687,13 @@ internal fun ToolEvent(
     }
 }
 
+@Composable
 private fun toolHeaderColor(status: String): Color = when (status) {
-    "failed" -> Color.Red
-    "running", "streaming", "starting", "in_progress", "inprogress" -> Color.Green
-    else -> Color.White
+    "failed" -> TuiTheme.colorScheme.error
+    "running", "streaming", "starting", "in_progress", "inprogress" ->
+        TuiTheme.colorScheme.success
+
+    else -> TuiTheme.colorScheme.onBackground
 }
 
 internal class ToolEventDetailsScope(
@@ -705,14 +709,14 @@ internal class ToolEventDetailsScope(
         TuiPressable(
             onClick = { expandedState.value = !expanded },
             modifier = Modifier.fillMaxWidth(),
-        ) { isFocused, isHovered, isPressed ->
+        ) { _, isHovered, isPressed ->
             WrappedHistoryText(
                 value = "${if (expanded) "v" else ">"} $label",
-                textStyle = when {
-                    isPressed -> TextStyle.Invert
-                    isFocused || isHovered -> TextStyle.Bold
-                    else -> detailStyle
-                },
+                textStyle = tuiInteractionTextStyle(
+                    hovered = isHovered,
+                    pressed = isPressed,
+                    idleTextStyle = detailStyle,
+                ),
             )
         }
         ToolDetailBody(expandedState, content)
@@ -770,14 +774,14 @@ private fun ExpandableHistoryEvent(
         TuiPressable(
             onClick = { expanded = !expanded },
             modifier = Modifier.fillMaxWidth(),
-        ) { isFocused, isHovered, isPressed ->
+        ) { _, isHovered, isPressed ->
             WrappedHistoryText(
                 value = "${if (expanded) "v" else ">"} $header",
-                textStyle = when {
-                    isPressed -> TextStyle.Invert
-                    isFocused || isHovered -> TextStyle.Bold
-                    else -> headerStyle
-                },
+                textStyle = tuiInteractionTextStyle(
+                    hovered = isHovered,
+                    pressed = isPressed,
+                    idleTextStyle = headerStyle,
+                ),
             )
         }
 
@@ -1241,6 +1245,7 @@ private fun StableCommandExecutionResult.status(
 ): String = when (this) {
     is StableCommandExecutionResult.Output -> value.exitCode?.completedStatus()
         ?: if (session == null || processCompleted) "finished" else "running"
+
     is StableCommandExecutionResult.Failure -> "failed"
 }
 
@@ -1399,11 +1404,11 @@ internal fun functionToolSummary(
     "request_user_input" -> "Ask the user for input"
     "tool_search",
     "server_tool_search",
-    -> "Search available tools"
+        -> "Search available tools"
 
     "web.run",
     "hosted_web_search",
-    -> "Search the web"
+        -> "Search the web"
 
     "hosted_image_generation" -> "Generate an image"
     "spawn_agent" -> "Start an agent"

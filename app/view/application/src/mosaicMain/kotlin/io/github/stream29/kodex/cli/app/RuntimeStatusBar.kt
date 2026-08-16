@@ -9,10 +9,11 @@ import com.jakewharton.mosaic.layout.background
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.BoxScope
+import com.jakewharton.mosaic.ui.Layout
 import com.jakewharton.mosaic.ui.Row
-import com.jakewharton.mosaic.ui.RowScope
-import com.jakewharton.mosaic.ui.Spacer
 import com.jakewharton.mosaic.ui.Text
+import com.jakewharton.mosaic.ui.unit.Constraints
+import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.agent.contract.AgentExecutionState
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
@@ -69,44 +70,47 @@ internal fun AgentRuntimeStatusBar(
     onBrowseWorkingDirectory: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    Row(modifier = Modifier.width((columns - 1).coerceAtLeast(1))) {
-        tokenCount?.let { Text("${it}t ") }
-        val control = execution.runtimeControl()
-        TuiButton(
-            label = control.label(),
-            modifier = Modifier.background(SessionButtonBackground),
-            color = SessionForeground,
-            onClick = {
-                when (control) {
-                    AgentRuntimeControl.Stop -> viewModel.cancel()
-                    AgentRuntimeControl.ClearPending -> viewModel.clearPending()
-                    AgentRuntimeControl.Resume -> viewModel.resume()
-                }
-            },
-        )
-        Text(" ")
-        if (compactVisible(execution)) {
+    StatusBarLayout(
+        columns = columns,
+        regularContent = {
+            tokenCount?.let { Text("${it}t") }
+            val control = execution.runtimeControl()
             TuiButton(
-                label = "Compact",
+                label = control.label(),
                 modifier = Modifier.background(SessionButtonBackground),
                 color = SessionForeground,
-                enabled = execution.capabilities.canCompact,
-                onClick = viewModel::forceCompact,
+                onClick = {
+                    when (control) {
+                        AgentRuntimeControl.Stop -> viewModel.cancel()
+                        AgentRuntimeControl.ClearPending -> viewModel.clearPending()
+                        AgentRuntimeControl.Resume -> viewModel.resume()
+                    }
+                },
             )
-            Text(" ")
-        }
-        RuntimeConfigurationTriggers(
-            configuration = settings.configuration(),
-            dropdowns = dropdowns,
-        )
-        StatusBarEndActions(
-            columns = columns,
-            workingDirectory = settings.cwd,
-            workingDirectoryEnabled = true,
-            onBrowseWorkingDirectory = onBrowseWorkingDirectory,
-            onOpenSettings = onOpenSettings,
-        )
-    }
+            if (compactVisible(execution)) {
+                TuiButton(
+                    label = "Compact",
+                    modifier = Modifier.background(SessionButtonBackground),
+                    color = SessionForeground,
+                    enabled = execution.capabilities.canCompact,
+                    onClick = viewModel::forceCompact,
+                )
+            }
+            RuntimeConfigurationStatusItemsWithoutSpacing(
+                configuration = settings.configuration(),
+                dropdowns = dropdowns,
+            )
+            WorkingDirectoryStatusButton(
+                columns = columns,
+                workingDirectory = settings.cwd,
+                enabled = true,
+                onBrowse = onBrowseWorkingDirectory,
+            )
+        },
+        settingsContent = {
+            SettingsStatusButton(onOpenSettings)
+        },
+    )
 }
 
 @Composable
@@ -117,20 +121,87 @@ internal fun NewSessionStatusBar(
     onBrowseWorkingDirectory: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    Row(modifier = Modifier.width((columns - 1).coerceAtLeast(1))) {
-        RuntimeConfigurationTriggers(settings.configuration(), dropdowns)
-        StatusBarEndActions(
-            columns = columns,
-            workingDirectory = settings.cwd,
-            workingDirectoryEnabled = true,
-            onBrowseWorkingDirectory = onBrowseWorkingDirectory,
-            onOpenSettings = onOpenSettings,
+    StatusBarLayout(
+        columns = columns,
+        regularContent = {
+            RuntimeConfigurationStatusItemsWithoutSpacing(settings.configuration(), dropdowns)
+            WorkingDirectoryStatusButton(
+                columns = columns,
+                workingDirectory = settings.cwd,
+                enabled = true,
+                onBrowse = onBrowseWorkingDirectory,
+            )
+        },
+        settingsContent = {
+            SettingsStatusButton(onOpenSettings)
+        },
+    )
+}
+
+@Composable
+private fun StatusBarLayout(
+    columns: Int,
+    regularContent: @Composable () -> Unit,
+    settingsContent: @Composable () -> Unit,
+) {
+    val width = statusBarWidth(columns)
+    Layout(
+        content = {
+            regularContent()
+            settingsContent()
+        },
+        modifier = Modifier.width(width),
+        debugInfo = { "StatusBarLayout(columns=$width)" },
+    ) { measurables, constraints ->
+        check(measurables.isNotEmpty()) {
+            "StatusBarLayout requires a trailing Settings item."
+        }
+        val childConstraints = Constraints(
+            minWidth = 0,
+            maxWidth = Constraints.Infinity,
+            minHeight = 0,
+            maxHeight = 1,
         )
+        val placeables = measurables.map { measurable -> measurable.measure(childConstraints) }
+        val settings = placeables.last()
+        val regular = placeables.dropLast(1)
+        val plan = statusBarLayoutPlan(
+            width = width,
+            itemWidths = regular.map { placeable -> placeable.width },
+            settingsWidth = settings.width,
+        )
+        layout(width = width, height = plan.rowCount) {
+            regular.zip(plan.itemPositions).forEach { (placeable, position) ->
+                placeable.place(position.x, position.y)
+            }
+            settings.place(plan.settingsPosition.x, plan.settingsPosition.y)
+        }
     }
 }
 
 @Composable
+private fun SettingsStatusButton(onOpenSettings: () -> Unit) {
+    TuiButton(
+        label = SettingsLabel,
+        modifier = Modifier.background(SessionButtonBackground),
+        color = SessionForeground,
+        onClick = onOpenSettings,
+    )
+}
+
+@Composable
 internal fun RuntimeConfigurationTriggers(
+    configuration: RuntimeConfiguration,
+    dropdowns: RuntimeConfigurationDropdowns,
+    enabled: Boolean = true,
+) {
+    Row {
+        RuntimeConfigurationStatusItems(configuration, dropdowns, enabled)
+    }
+}
+
+@Composable
+private fun RuntimeConfigurationStatusItems(
     configuration: RuntimeConfiguration,
     dropdowns: RuntimeConfigurationDropdowns,
     enabled: Boolean = true,
@@ -165,27 +236,35 @@ internal fun RuntimeConfigurationTriggers(
 }
 
 @Composable
-private fun RowScope.StatusBarEndActions(
-    columns: Int,
-    workingDirectory: Path,
-    workingDirectoryEnabled: Boolean,
-    onBrowseWorkingDirectory: () -> Unit,
-    onOpenSettings: () -> Unit,
+private fun RuntimeConfigurationStatusItemsWithoutSpacing(
+    configuration: RuntimeConfiguration,
+    dropdowns: RuntimeConfigurationDropdowns,
+    enabled: Boolean = true,
 ) {
-    Text(" ")
-    WorkingDirectoryStatusButton(
-        columns = columns,
-        workingDirectory = workingDirectory,
-        enabled = workingDirectoryEnabled,
-        onBrowse = onBrowseWorkingDirectory,
-    )
-    Spacer(Modifier.width(1))
-    Spacer(Modifier.weight(1f))
-    TuiButton(
-        label = "Settings",
+    TuiDropdownTrigger(
+        dropdownState = dropdowns.model,
+        label = runtimeConfigurationLabel(
+            model = configuration.model,
+            reasoning = configuration.reasoning,
+            tier = configuration.tier,
+        ),
         modifier = Modifier.background(SessionButtonBackground),
         color = SessionForeground,
-        onClick = onOpenSettings,
+        enabled = enabled,
+    )
+    TuiDropdownTrigger(
+        dropdownState = dropdowns.requestUserInputMode,
+        label = configuration.requestUserInputMode.displayName(),
+        modifier = Modifier.background(SessionButtonBackground),
+        color = SessionForeground,
+        enabled = enabled,
+    )
+    TuiDropdownTrigger(
+        dropdownState = dropdowns.agentMode,
+        label = configuration.agentMode.displayName(),
+        modifier = Modifier.background(SessionButtonBackground),
+        color = SessionForeground,
+        enabled = enabled,
     )
 }
 
@@ -202,6 +281,101 @@ internal fun WorkingDirectoryStatusButton(
         color = SessionForeground,
         enabled = enabled,
         onClick = onBrowse,
+    )
+}
+
+internal fun agentRuntimeStatusBarRows(
+    columns: Int,
+    execution: AgentExecutionState,
+    settings: KodexAgentSettings,
+    tokenCount: Long?,
+): Int {
+    val configuration = settings.configuration()
+    val widths = buildList {
+        tokenCount?.let { add("${it}t".terminalCellWidth()) }
+        add(buttonWidth(execution.runtimeControl().label()))
+        if (compactVisible(execution)) add(buttonWidth("Compact"))
+        addAll(runtimeConfigurationButtonWidths(configuration))
+        add(buttonWidth(workingDirectoryStatusLabel(settings.cwd, columns)))
+    }
+    return statusBarLayoutPlan(
+        width = statusBarWidth(columns),
+        itemWidths = widths,
+        settingsWidth = buttonWidth(SettingsLabel),
+    ).rowCount
+}
+
+internal fun newSessionStatusBarRows(
+    columns: Int,
+    settings: KodexAgentSettings,
+): Int {
+    val widths = runtimeConfigurationButtonWidths(settings.configuration()) +
+        buttonWidth(workingDirectoryStatusLabel(settings.cwd, columns))
+    return statusBarLayoutPlan(
+        width = statusBarWidth(columns),
+        itemWidths = widths,
+        settingsWidth = buttonWidth(SettingsLabel),
+    ).rowCount
+}
+
+private fun runtimeConfigurationButtonWidths(
+    configuration: RuntimeConfiguration,
+): List<Int> = listOf(
+    buttonWidth(
+        runtimeConfigurationLabel(
+            model = configuration.model,
+            reasoning = configuration.reasoning,
+            tier = configuration.tier,
+        ),
+    ),
+    buttonWidth(configuration.requestUserInputMode.displayName()),
+    buttonWidth(configuration.agentMode.displayName()),
+)
+
+private fun buttonWidth(label: String): Int = label.terminalCellWidth() + ButtonBorderColumns
+
+private fun statusBarWidth(columns: Int): Int = (columns - 1).coerceAtLeast(1)
+
+internal data class StatusBarLayoutPlan(
+    val itemPositions: List<IntOffset>,
+    val settingsPosition: IntOffset,
+    val rowCount: Int,
+)
+
+internal fun statusBarLayoutPlan(
+    width: Int,
+    itemWidths: List<Int>,
+    settingsWidth: Int,
+): StatusBarLayoutPlan {
+    require(width > 0) { "Status bar width must be positive." }
+    require(settingsWidth > 0) { "Settings width must be positive." }
+    require(itemWidths.all { itemWidth -> itemWidth > 0 }) {
+        "Status bar item widths must be positive."
+    }
+    val settingsX = (width - settingsWidth).coerceAtLeast(0)
+    val firstRowLimit = (settingsX - StatusBarItemSpacing).coerceAtLeast(0)
+    var row = 0
+    var rowWidth = 0
+    val positions = buildList(itemWidths.size) {
+        itemWidths.forEach { itemWidth ->
+            while (true) {
+                val rowLimit = if (row == 0) firstRowLimit else width
+                val itemX = if (rowWidth == 0) 0 else rowWidth + StatusBarItemSpacing
+                val fits = itemX + itemWidth <= rowLimit
+                if (fits || (row > 0 && rowWidth == 0)) {
+                    add(IntOffset(itemX, row))
+                    rowWidth = itemX + itemWidth
+                    break
+                }
+                row++
+                rowWidth = 0
+            }
+        }
+    }
+    return StatusBarLayoutPlan(
+        itemPositions = positions,
+        settingsPosition = IntOffset(settingsX, 0),
+        rowCount = maxOf(1, positions.maxOfOrNull(IntOffset::y)?.plus(1) ?: 1),
     )
 }
 
@@ -243,9 +417,10 @@ internal fun BoxScope.RuntimeConfigurationMenus(
     onAgentModeSelected: (AgentMode) -> Unit,
     onRequestUserInputModeSelected: (RequestUserInputMode) -> Unit,
 ) {
+    val popupMenuBackground = PopupMenuBackground
     TuiDropdownMenu(
         dropdownState = dropdowns.model,
-        backgroundColor = PopupMenuBackground,
+        backgroundColor = popupMenuBackground,
     ) {
         modelOptions.forEach { model ->
             val modelInfo = models.firstOrNull { info -> info.slug == model }
@@ -264,7 +439,7 @@ internal fun BoxScope.RuntimeConfigurationMenus(
                 initialSubmenuFocusedKey = configuration.reasoning
                     .takeIf { model == configuration.model && it in efforts }
                     ?: efforts.first(),
-                backgroundColor = PopupMenuBackground,
+                backgroundColor = popupMenuBackground,
                 submenuContent = {
                     efforts.forEach { effort ->
                         TuiPopupSubmenuItem(
@@ -278,7 +453,7 @@ internal fun BoxScope.RuntimeConfigurationMenus(
                                         it in tiers
                                 }
                                 ?: ServiceTier.Default,
-                            backgroundColor = PopupMenuBackground,
+                            backgroundColor = popupMenuBackground,
                             submenuContent = {
                                 tiers.forEach { tier ->
                                     TuiPopupMenuItem(
@@ -309,7 +484,7 @@ internal fun BoxScope.RuntimeConfigurationMenus(
         options = AgentMode.entries.toList(),
         selected = configuration.agentMode,
         optionLabel = AgentMode::displayName,
-        backgroundColor = PopupMenuBackground,
+        backgroundColor = popupMenuBackground,
         onSelect = onAgentModeSelected,
     )
     TuiDropdownMenu(
@@ -317,7 +492,7 @@ internal fun BoxScope.RuntimeConfigurationMenus(
         options = RequestUserInputMode.entries.toList(),
         selected = configuration.requestUserInputMode,
         optionLabel = RequestUserInputMode::displayName,
-        backgroundColor = PopupMenuBackground,
+        backgroundColor = popupMenuBackground,
         onSelect = onRequestUserInputModeSelected,
     )
 }
@@ -383,3 +558,6 @@ private const val WorkingDirectoryExpandedLabelMinimumColumns: Int = 72
 private const val WorkingDirectoryWideLabelMinimumColumns: Int = 112
 private const val WorkingDirectoryPathMaximumWidth: Int = 16
 private const val WorkingDirectoryWidePathMaximumWidth: Int = 28
+private const val SettingsLabel: String = "Settings"
+private const val ButtonBorderColumns: Int = 2
+private const val StatusBarItemSpacing: Int = 1

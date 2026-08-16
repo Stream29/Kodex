@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.AnsiLevel
+import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.runMosaicTest
@@ -15,6 +16,7 @@ import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -86,7 +88,7 @@ class SessionTabBarTest {
     }
 
     @Test
-    fun selectedSessionTabIsBold() = runTest {
+    fun selectedSessionTabUsesReverseVideo() = runTest {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val selected = fixture.newSession("First")
@@ -118,8 +120,8 @@ class SessionTabBarTest {
                     }
                 }
 
-                assertTrue(Regex("\u001B\\[(?:[0-9]+;)*1m\\[First]").containsMatchIn(snapshot), snapshot)
-                assertFalse(Regex("\u001B\\[(?:[0-9]+;)*1m\\[Second]").containsMatchIn(snapshot), snapshot)
+                assertTrue(Regex("\u001B\\[(?:[0-9]+;)*7m\\[First]").containsMatchIn(snapshot), snapshot)
+                assertFalse(Regex("\u001B\\[(?:[0-9]+;)*7m\\[Second]").containsMatchIn(snapshot), snapshot)
             }
         } finally {
             fixture.close()
@@ -161,6 +163,109 @@ class SessionTabBarTest {
         } finally {
             fixture.close()
         }
+    }
+
+    @Test
+    fun overflowingTabsRemainReachableWithHorizontalPageKeys() = runTest {
+        val fixture = SessionViewModelTestFixture.create(this)
+        try {
+            val targets = (0 until 10).map { index ->
+                fixture.newSession("Tab $index")
+            }
+            val tabs = targets.mapIndexed { index, target ->
+                SessionTabRenderState(
+                    target = target,
+                    selected = index == 0,
+                    sessionName = "Tab $index",
+                )
+            }
+
+            runMosaicTest {
+                val initial = setContentAndSnapshot {
+                    Box(Modifier.width(32)) {
+                        SessionTabBar(
+                            tabs = tabs,
+                            runningIndicatorFrame = fixedRunningIndicatorFrame,
+                            columns = 32,
+                            onSelectTab = {},
+                            onOpenTabMenu = { _, _, _, _ -> },
+                            onCreateNewSession = {},
+                            onOpenSessions = {},
+                        )
+                    }
+                }
+                assertTrue("[Tab 0]" in initial, initial)
+                assertFalse("[Tab 9]" in initial, initial)
+                assertTrue("[Sessions]" in initial && "[+]" in initial, initial)
+
+                awaitSnapshot()
+                repeat(4) {
+                    sendKeyEvent(KeyboardEvent(KeyboardEvent.PageDown))
+                }
+                var latest = initial
+                for (attempt in 0 until 12) {
+                    latest = try {
+                        awaitSnapshot()
+                    } catch (_: TimeoutCancellationException) {
+                        break
+                    }
+                    if ("[Tab 9]" in latest) break
+                }
+
+                assertTrue("[Tab 9]" in latest, latest)
+                assertTrue("[Sessions]" in latest && "[+]" in latest, latest)
+            }
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun selectedOverflowingTabAutomaticallyEntersTheViewport() = runTest {
+        val fixture = SessionViewModelTestFixture.create(this)
+        try {
+            val targets = (0 until 10).map { index ->
+                fixture.newSession("Tab $index")
+            }
+
+            runMosaicTest {
+                setContentAndSnapshot {
+                    Box(Modifier.width(32)) {
+                        SessionTabBar(
+                            tabs = targets.mapIndexed { index, target ->
+                                SessionTabRenderState(
+                                    target = target,
+                                    selected = index == targets.lastIndex,
+                                    sessionName = "Tab $index",
+                                )
+                            },
+                            runningIndicatorFrame = fixedRunningIndicatorFrame,
+                            columns = 32,
+                            onSelectTab = {},
+                            onOpenTabMenu = { _, _, _, _ -> },
+                            onCreateNewSession = {},
+                            onOpenSessions = {},
+                        )
+                    }
+                }
+                val visible = awaitSnapshot()
+
+                assertTrue("[Tab 9]" in visible, visible)
+                assertFalse("[Tab 0]" in visible, visible)
+            }
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun tabBoundsIncludeBracketsAndInterTabSpacing() {
+        assertEquals(SessionTabBounds(start = 0, endExclusive = 5), sessionTabBounds(listOf("one"), 0))
+        assertEquals(
+            SessionTabBounds(start = 6, endExclusive = 11),
+            sessionTabBounds(listOf("one", "two"), 1),
+        )
+        assertEquals(null, sessionTabBounds(listOf("one"), 2))
     }
 
     @Test

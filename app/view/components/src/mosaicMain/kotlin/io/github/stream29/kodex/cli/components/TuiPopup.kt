@@ -15,6 +15,7 @@ import com.jakewharton.mosaic.focus.focusTrap
 import com.jakewharton.mosaic.layout.KeyEvent
 import com.jakewharton.mosaic.layout.LayoutCoordinates
 import com.jakewharton.mosaic.layout.MeasurePolicy
+import com.jakewharton.mosaic.layout.drawTextStyleOverlay
 import com.jakewharton.mosaic.layout.onPlaced
 import com.jakewharton.mosaic.layout.onPointerEvent
 import com.jakewharton.mosaic.layout.onPreviewKeyEvent
@@ -26,6 +27,7 @@ import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Filler
 import com.jakewharton.mosaic.ui.Layout
+import com.jakewharton.mosaic.ui.Spacer
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import com.jakewharton.mosaic.ui.unit.IntSize
@@ -224,8 +226,9 @@ public fun BoxScope.TuiPopup(
  * [dismissOnOutsideClick]
  * is `true`.
  *
- * The dialog clears every character cell inside its measured bounds before drawing [content].
- * Surface colors and other business styling remain the caller's responsibility through [modifier].
+ * The dialog applies dim text style to the host cells behind it without replacing their characters,
+ * then clears every character cell inside its measured bounds before drawing [content]. Surface
+ * colors and other business styling remain the caller's responsibility through [modifier].
  */
 @Composable
 public fun BoxScope.TuiDialog(
@@ -255,6 +258,11 @@ public fun BoxScope.TuiDialog(
     }
 
     Box(modifier = Modifier.matchParentSize() then barrierModifier) {
+        Spacer(
+            modifier = Modifier
+                .matchParentSize()
+                .drawTextStyleOverlay(TextStyle.Dim),
+        )
         Box(
             modifier = Modifier.matchParentSize(),
             contentAlignment = Alignment.Center,

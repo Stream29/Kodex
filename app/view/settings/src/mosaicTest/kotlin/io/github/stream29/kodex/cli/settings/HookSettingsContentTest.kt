@@ -75,7 +75,7 @@ class HookSettingsContentTest {
                 "Imported from: project: /workspace/.codex/hooks.json" in snapshot,
                 snapshot,
             )
-            assertTrue("[Disable] [Edit] [Delete] [Close]" in snapshot, snapshot)
+            assertTrue("[Close] [Disable] [Edit] [Delete]" in snapshot, snapshot)
             assertFalse("private-hook-token" in snapshot, snapshot)
         }
     }

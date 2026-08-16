@@ -23,6 +23,8 @@ import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.ScrollState
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
+import io.github.stream29.kodex.cli.components.TuiDialogActionRow
+import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.verticalScroll
 import io.github.stream29.kodex.hook.contract.DefaultHookTimeoutSeconds
 import io.github.stream29.kodex.hook.contract.HookCommandDefinition
@@ -139,7 +141,7 @@ internal fun BoxScope.HookSourceEditorDialog(
                 value = if (request.sourceId == null) "Add Hook source" else "Edit Hook source",
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
                 color = SettingsForeground,
-                textStyle = TextStyle.Bold,
+                textStyle = TuiTheme.typography.headline,
             )
             HookInputField("Source name", name, width, autoFocus = true)
             Text("Source state", color = SettingsForeground)
@@ -148,14 +150,9 @@ internal fun BoxScope.HookSourceEditorDialog(
                     if (index > 0) Text(" ")
                     TuiButton(
                         label = if (enabled) "Enabled" else "Disabled",
-                        modifier = Modifier.background(
-                            if (enabled == sourceEnabled) {
-                                SettingsSelectionBackground
-                            } else {
-                                SettingsHomeBackground
-                            },
-                        ),
+                        modifier = Modifier.background(SettingsHomeBackground),
                         color = SettingsForeground,
+                        selected = enabled == sourceEnabled,
                         onClick = { sourceEnabled = enabled },
                     )
                 }
@@ -222,10 +219,13 @@ internal fun BoxScope.HookSourceEditorDialog(
             error?.let { message ->
                 Text(message, color = SettingsForeground, textStyle = TextStyle.Bold)
             }
-            Row(modifier = Modifier.fillMaxWidth().background(SettingsActionBackground)) {
-                TuiButton(label = "Save", color = SettingsForeground, onClick = ::save)
-                Text(" ")
+            TuiDialogActionRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SettingsActionBackground),
+            ) {
                 TuiButton(label = "Cancel", color = SettingsForeground, onClick = onDismiss)
+                TuiButton(label = "Save", color = SettingsForeground, onClick = ::save)
             }
         }
     }
@@ -251,7 +251,7 @@ internal fun BoxScope.HookSourceDetailsDialog(
                 value = source.name,
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
                 color = SettingsForeground,
-                textStyle = TextStyle.Bold,
+                textStyle = TuiTheme.typography.headline,
             )
             HookDetailLine("State", if (source.enabled) "Enabled" else "Disabled")
             HookDetailLine(
@@ -277,18 +277,23 @@ internal fun BoxScope.HookSourceDetailsDialog(
                     "${imported.sourceKind.settingsLabel()}: ${imported.normalizedPath}",
                 )
             }
-            Row(modifier = Modifier.fillMaxWidth().background(SettingsActionBackground)) {
+            TuiDialogActionRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SettingsActionBackground),
+            ) {
+                TuiButton(label = "Close", color = SettingsForeground, onClick = onDismiss)
                 TuiButton(
                     label = if (source.enabled) "Disable" else "Enable",
                     color = SettingsForeground,
                     onClick = onSetEnabled,
                 )
-                Text(" ")
                 TuiButton(label = "Edit", color = SettingsForeground, onClick = onEdit)
-                Text(" ")
-                TuiButton(label = "Delete", color = SettingsForeground, onClick = onDelete)
-                Text(" ")
-                TuiButton(label = "Close", color = SettingsForeground, onClick = onDismiss)
+                TuiButton(
+                    label = "Delete",
+                    color = TuiTheme.colorScheme.error,
+                    onClick = onDelete,
+                )
             }
         }
     }
@@ -320,13 +325,25 @@ internal fun BoxScope.HookDeleteConfirmationDialog(
                 "Delete Hook source",
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
                 color = SettingsForeground,
-                textStyle = TextStyle.Bold,
+                textStyle = TuiTheme.typography.headline,
             )
             Text("Delete '${source.name}'?", color = SettingsForeground)
-            Row(modifier = Modifier.fillMaxWidth().background(SettingsActionBackground)) {
-                TuiButton(label = "Delete", color = SettingsForeground, onClick = onConfirm)
-                Text(" ")
-                TuiButton(label = "Cancel", color = SettingsForeground, onClick = onDismiss)
+            TuiDialogActionRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SettingsActionBackground),
+            ) {
+                TuiButton(
+                    label = "Cancel",
+                    color = SettingsForeground,
+                    autoFocus = true,
+                    onClick = onDismiss,
+                )
+                TuiButton(
+                    label = "Delete",
+                    color = TuiTheme.colorScheme.error,
+                    onClick = onConfirm,
+                )
             }
         }
     }
@@ -361,7 +378,7 @@ internal fun BoxScope.HookImportDialog(
                 "Import Hooks from Codex",
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
                 color = SettingsForeground,
-                textStyle = TextStyle.Bold,
+                textStyle = TuiTheme.typography.headline,
             )
             Column(
                 modifier = Modifier
@@ -446,7 +463,12 @@ internal fun BoxScope.HookImportDialog(
                     }
                 }
             }
-            Row(modifier = Modifier.fillMaxWidth().background(SettingsActionBackground)) {
+            TuiDialogActionRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SettingsActionBackground),
+            ) {
+                TuiButton(label = "Cancel", color = SettingsForeground, onClick = onDismiss)
                 TuiButton(
                     label = "Import selected ($selectedCount)",
                     color = SettingsForeground,
@@ -455,8 +477,6 @@ internal fun BoxScope.HookImportDialog(
                         preview?.let { current -> onApply(current.id, decisions) }
                     },
                 )
-                Text(" ")
-                TuiButton(label = "Cancel", color = SettingsForeground, onClick = onDismiss)
             }
         }
     }

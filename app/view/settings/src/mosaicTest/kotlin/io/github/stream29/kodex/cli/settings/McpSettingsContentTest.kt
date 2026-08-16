@@ -115,7 +115,7 @@ class McpSettingsContentTest {
             assertTrue("URL: https://lost.example.test/mcp" in snapshot, snapshot)
             assertTrue("Headers: Authorization (values hidden)" in snapshot, snapshot)
             assertTrue("[Disable] [Edit] [Delete]" in snapshot, snapshot)
-            assertTrue("[Log in] [Reconnect] [Close]" in snapshot, snapshot)
+            assertTrue("[Close] [Log in] [Reconnect]" in snapshot, snapshot)
         }
     }
 

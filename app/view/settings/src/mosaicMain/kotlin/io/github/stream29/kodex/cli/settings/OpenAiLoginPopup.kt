@@ -3,6 +3,7 @@ package io.github.stream29.kodex.cli.settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import com.jakewharton.mosaic.LocalTerminalState
@@ -13,7 +14,6 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
-import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginEffect
@@ -21,6 +21,8 @@ import io.github.stream29.kodex.app.settings.contract.OpenAiLoginState
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
+import io.github.stream29.kodex.cli.components.TuiDialogActionRow
+import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.utils.externalurl.OpenExternalUrlResult
 import io.github.stream29.kodex.utils.externalurl.openExternalUrl
 import kotlinx.coroutines.flow.collect
@@ -63,7 +65,7 @@ public fun BoxScope.OpenAiLoginPopup(
                 value = "Sign in to OpenAI",
                 modifier = Modifier.fillMaxWidth().background(LoginDialogHeaderBackground),
                 color = LoginDialogForeground,
-                textStyle = TextStyle.Bold,
+                textStyle = TuiTheme.typography.headline,
             )
             LoginContent(
                 state = state,
@@ -146,17 +148,11 @@ private fun LoginActions(
     require((primaryLabel == null) == (primaryAction == null)) {
         "A primary label and action must be supplied together."
     }
-    Row(modifier = Modifier.fillMaxWidth().background(LoginDialogActionBackground)) {
-        primaryLabel?.let { label ->
-            TuiButton(
-                label = label,
-                color = LoginDialogForeground,
-                onClick = requireNotNull(primaryAction),
-            )
-        }
-        if (primaryLabel != null && onDismissRequest != null) {
-            Text(" ", color = LoginDialogForeground)
-        }
+    TuiDialogActionRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(LoginDialogActionBackground),
+    ) {
         onDismissRequest?.let { dismiss ->
             TuiButton(
                 label = "Cancel",
@@ -164,12 +160,34 @@ private fun LoginActions(
                 onClick = dismiss,
             )
         }
+        primaryLabel?.let { label ->
+            TuiButton(
+                label = label,
+                color = LoginDialogForeground,
+                onClick = requireNotNull(primaryAction),
+            )
+        }
     }
 }
 
-private val LoginDialogForeground: Color = Color.White
-private val LoginDialogBackground: Color = Color(52, 52, 56)
-private val LoginDialogHeaderBackground: Color = Color(28, 68, 74)
-private val LoginDialogActionBackground: Color = Color(28, 68, 74)
+private val LoginDialogForeground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.onSurface
+
+private val LoginDialogBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surface
+
+private val LoginDialogHeaderBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.primary
+
+private val LoginDialogActionBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.primary
 
 private const val LoginDialogMaximumWidth: Int = 72

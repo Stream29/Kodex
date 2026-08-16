@@ -11,8 +11,10 @@ import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.onKeyEvent
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
+import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.MouseEvent
+import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
@@ -70,6 +72,32 @@ val tuiDialogTest by testSuite {
             }
 
             assertEquals("abcX     jkl", snapshot.lines()[2])
+        }
+    }
+
+    test("dialog dims existing background cells without filling empty cells") {
+        val ansiSnapshots = SnapshotStrategy { mosaic ->
+            mosaic.draw().render(AnsiLevel.TRUECOLOR, supportsKittyUnderlines = false)
+        }
+
+        runMosaicTest(snapshotStrategy = ansiSnapshots) {
+            val snapshot = setContentAndSnapshot {
+                Box {
+                    TuiPopupHost(
+                        modifier = Modifier
+                            .width(12)
+                            .height(5),
+                    ) {
+                        Text("background")
+                        TuiDialog(onDismissRequest = {}) {
+                            Text("[dialog]", modifier = Modifier.focusable())
+                        }
+                    }
+                }
+            }
+
+            assertEquals("\u001B[2mbackground\u001B[0m", snapshot.lines()[0])
+            assertEquals("  [dialog]", snapshot.lines()[2])
         }
     }
 

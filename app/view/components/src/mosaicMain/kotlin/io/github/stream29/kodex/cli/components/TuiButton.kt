@@ -13,18 +13,19 @@ import com.jakewharton.mosaic.ui.unit.IntOffset
  * Compact bracketed command surface with terminal-native interaction feedback.
  *
  * Focus is represented by the terminal cursor, hover uses bold text, a held primary-pointer press
- * uses inverse video, and a disabled button is dim. Enter, Space, and primary-pointer activation
- * converge on the same command. [idleTextStyle] applies while the enabled button is neither hovered
- * nor pressed. [onSecondaryClick] optionally handles the secondary pointer button, Shift+F10, and
- * the Menu/Application key. Its position is local to this button for pointer activation and `null`
- * for keyboard activation.
+ * combines inverse video and bold, [selected] uses inverse video, and a disabled button is dim.
+ * Enter, Space, and primary-pointer activation converge on the same command. [idleTextStyle]
+ * applies while the enabled button is neither selected, hovered, nor pressed. [onSecondaryClick]
+ * optionally handles the secondary pointer button, Shift+F10, and the Menu/Application key. Its
+ * position is local to this button for pointer activation and `null` for keyboard activation.
  */
 @Composable
 public fun TuiButton(
     label: String,
     modifier: Modifier = Modifier,
     color: Color = Color.Unspecified,
-    idleTextStyle: TextStyle = TextStyle.Unspecified,
+    idleTextStyle: TextStyle = TuiTheme.typography.label,
+    selected: Boolean = false,
     enabled: Boolean = true,
     focusRequester: FocusRequester? = null,
     onKeyEvent: ((KeyEvent) -> Boolean)? = null,
@@ -41,12 +42,13 @@ public fun TuiButton(
         autoFocus = autoFocus,
         onSecondaryClick = onSecondaryClick,
     ) { _, isHovered, isPressed ->
-        val resolvedTextStyle = when {
-            isPressed -> TextStyle.Invert
-            isHovered -> TextStyle.Bold
-            enabled -> idleTextStyle
-            else -> TextStyle.Dim
-        }
+        val resolvedTextStyle = tuiInteractionTextStyle(
+            enabled = enabled,
+            hovered = isHovered,
+            pressed = isPressed,
+            selected = selected,
+            idleTextStyle = idleTextStyle,
+        )
         Text(
             value = "[$label]",
             color = color,
