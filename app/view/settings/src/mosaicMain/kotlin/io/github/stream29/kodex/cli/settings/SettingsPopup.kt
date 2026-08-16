@@ -23,6 +23,7 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsEffect
+import io.github.stream29.kodex.app.settings.contract.GlobalSettingsState
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.NewSessionSettingsState
 import io.github.stream29.kodex.app.settings.contract.NewSessionSettingsViewModel
@@ -30,6 +31,7 @@ import io.github.stream29.kodex.app.settings.contract.SessionSettingsEffect
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsSnapshot
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsState
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsViewModel
+import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
@@ -436,55 +438,76 @@ private fun GlobalSettingsContent(
         onAdd = onAddHook,
         onOpenDetails = onOpenHook,
     )
-    SettingsDropdownField(
-        label = "Authentication",
-        selectedLabel = state.authSource.dialogLabel(),
-        dropdownState = dropdowns.authentication,
-        background = SettingsHomeBackground,
-    )
-    SettingsDropdownField(
-        label = "Automatic session title",
-        selectedLabel = state.sessionTitle.enabled.enabledLabel(),
-        dropdownState = dropdowns.automaticSessionTitle,
-        background = SettingsHomeBackground,
-    )
-    SettingsDropdownField(
-        label = "Title model",
-        selectedLabel = state.effectiveSessionTitleModel.value,
-        dropdownState = dropdowns.model,
-        background = SettingsNewLineBackground,
-    )
-    SettingsDropdownField(
-        label = "Title reasoning",
-        selectedLabel = state.sessionTitle.reasoningEffort.displayName(),
-        dropdownState = dropdowns.reasoning,
-        background = SettingsSubmitKeyBackground,
-    )
-    AuthenticationSettingsContent(
-        authState = authentication,
+    GlobalAuthenticationAndTitleSettingsContent(
+        state = state,
+        authentication = authentication,
+        accountUsage = accountUsage,
+        authenticationDropdown = dropdowns.authentication,
+        automaticSessionTitleDropdown = dropdowns.automaticSessionTitle,
+        modelDropdown = dropdowns.model,
+        reasoningDropdown = dropdowns.reasoning,
         onOpenLogin = viewModel::requestLogin,
-    )
-    CodexAccountUsageSettingsContent(
-        state = accountUsage,
-        onRefresh = viewModel::refreshUsage,
+        onRefreshUsage = viewModel::refreshUsage,
         onUseReset = viewModel::requestUsageReset,
     )
-    Row(modifier = Modifier.fillMaxWidth().background(SettingsNewLineBackground)) {
+    Row(modifier = Modifier.fillMaxWidth().background(SettingsFieldBackground)) {
         SettingsDropdownField(
             label = "New line key",
             selectedLabel = state.newLineKey.dialogLabel(),
             dropdownState = dropdowns.newLineKey,
-            background = SettingsNewLineBackground,
             modifier = Modifier.weight(1f),
         )
         SettingsDropdownField(
             label = "Submit key",
             selectedLabel = state.newLineKey.submitKey.dialogLabel(),
             dropdownState = dropdowns.submitKey,
-            background = SettingsSubmitKeyBackground,
             modifier = Modifier.weight(1f),
         )
     }
+}
+
+@Composable
+internal fun GlobalAuthenticationAndTitleSettingsContent(
+    state: GlobalSettingsState,
+    authentication: SettingsAuthenticationState,
+    accountUsage: SettingsAccountUsageState,
+    authenticationDropdown: TuiDropdownState,
+    automaticSessionTitleDropdown: TuiDropdownState,
+    modelDropdown: TuiDropdownState,
+    reasoningDropdown: TuiDropdownState,
+    onOpenLogin: () -> Unit,
+    onRefreshUsage: () -> Unit,
+    onUseReset: () -> Unit,
+) {
+    SettingsDropdownField(
+        label = "Authentication",
+        selectedLabel = state.authSource.dialogLabel(),
+        dropdownState = authenticationDropdown,
+    )
+    AuthenticationSettingsContent(
+        authState = authentication,
+        onOpenLogin = onOpenLogin,
+    )
+    CodexAccountUsageSettingsContent(
+        state = accountUsage,
+        onRefresh = onRefreshUsage,
+        onUseReset = onUseReset,
+    )
+    SettingsDropdownField(
+        label = "Automatic session title",
+        selectedLabel = state.sessionTitle.enabled.enabledLabel(),
+        dropdownState = automaticSessionTitleDropdown,
+    )
+    SettingsDropdownField(
+        label = "Title model",
+        selectedLabel = state.effectiveSessionTitleModel.value,
+        dropdownState = modelDropdown,
+    )
+    SettingsDropdownField(
+        label = "Title reasoning",
+        selectedLabel = state.sessionTitle.reasoningEffort.displayName(),
+        dropdownState = reasoningDropdown,
+    )
 }
 
 @Composable
@@ -631,35 +654,30 @@ private fun ConfigurationSettingsContent(
         label = "Model",
         selectedLabel = configuration.model.value,
         dropdownState = dropdowns.model,
-        background = SettingsHomeBackground,
         enabled = snapshot.editable,
     )
     SettingsDropdownField(
         label = "Reasoning",
         selectedLabel = configuration.reasoningEffort.displayName(),
         dropdownState = dropdowns.reasoning,
-        background = SettingsNewLineBackground,
         enabled = snapshot.editable,
     )
     SettingsDropdownField(
         label = "Service tier",
         selectedLabel = configuration.serviceTier.displayName(),
         dropdownState = dropdowns.serviceTier,
-        background = SettingsSubmitKeyBackground,
         enabled = snapshot.editable,
     )
     SettingsDropdownField(
         label = "Agent mode",
         selectedLabel = configuration.agentMode.displayName(),
         dropdownState = dropdowns.agentMode,
-        background = SettingsAgentModeBackground,
         enabled = snapshot.editable,
     )
     SettingsDropdownField(
         label = "Questions",
         selectedLabel = configuration.requestUserInputMode.displayName(),
         dropdownState = dropdowns.requestUserInputMode,
-        background = SettingsQuestionModeBackground,
         enabled = snapshot.editable,
     )
 }
@@ -682,31 +700,26 @@ private fun NewSessionConfigurationContent(
         label = "Model",
         selectedLabel = state.settings.model.value,
         dropdownState = dropdowns.model,
-        background = SettingsHomeBackground,
     )
     SettingsDropdownField(
         label = "Reasoning",
         selectedLabel = state.settings.reasoningEffort.displayName(),
         dropdownState = dropdowns.reasoning,
-        background = SettingsNewLineBackground,
     )
     SettingsDropdownField(
         label = "Service tier",
         selectedLabel = state.settings.serviceTier.displayName(),
         dropdownState = dropdowns.serviceTier,
-        background = SettingsSubmitKeyBackground,
     )
     SettingsDropdownField(
         label = "Agent mode",
         selectedLabel = state.settings.agentMode.displayName(),
         dropdownState = dropdowns.agentMode,
-        background = SettingsAgentModeBackground,
     )
     SettingsDropdownField(
         label = "Questions",
         selectedLabel = state.settings.requestUserInputMode.displayName(),
         dropdownState = dropdowns.requestUserInputMode,
-        background = SettingsQuestionModeBackground,
     )
 }
 
@@ -715,17 +728,16 @@ internal fun SettingsDropdownField(
     label: String,
     selectedLabel: String,
     dropdownState: TuiDropdownState,
-    background: Color,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    Row(modifier = modifier.fillMaxWidth().background(background)) {
+    Row(modifier = modifier.fillMaxWidth().background(SettingsFieldBackground)) {
         Text(label, color = SettingsForeground)
         Text(" ")
         TuiDropdownTrigger(
             dropdownState = dropdownState,
             label = selectedLabel,
-            modifier = Modifier.background(background),
+            modifier = Modifier.background(SettingsFieldBackground),
             color = SettingsForeground,
             enabled = enabled,
         )
@@ -1084,30 +1096,15 @@ internal val SettingsHomeBackground: Color
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.surface
 
+internal val SettingsFieldBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surface
+
 internal val SettingsSectionHeaderBackground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.surfaceContainerHigh
-
-internal val SettingsNewLineBackground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.surfaceContainerHighest
-
-internal val SettingsSubmitKeyBackground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.surfaceContainerHigh
-
-internal val SettingsAgentModeBackground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.secondaryContainer
-
-internal val SettingsQuestionModeBackground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.tertiaryContainer
 
 internal val SettingsActionBackground: Color
     @Composable

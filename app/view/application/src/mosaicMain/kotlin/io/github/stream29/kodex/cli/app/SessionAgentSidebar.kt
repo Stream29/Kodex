@@ -193,30 +193,23 @@ internal fun SessionAgentSidebar(
 }
 
 @Composable
-internal fun SessionAgentSidebarBookmark(
+internal fun SessionAgentSidebarExpandButton(
     onHoverChanged: (Boolean) -> Unit,
     onExpand: () -> Unit,
 ) {
-    TuiPressable(
+    TuiButton(
+        label = "→",
         onClick = onExpand,
         modifier = Modifier
-            .width(SessionSidebarBookmarkColumns)
-            .height(SessionSidebarBookmarkRows)
+            .width(SessionSidebarCollapsedButtonColumns)
+            .height(SessionSidebarCollapsedButtonRows)
             .background(SettingsDialogHeaderBackground)
             .onPointerHover(
                 onPointerEnter = { onHoverChanged(true) },
                 onPointerExit = { onHoverChanged(false) },
             ),
-    ) { _, hovered, pressed ->
-        Text(
-            value = "╮\n→\n╯",
-            color = SettingsDialogForeground,
-            textStyle = tuiInteractionTextStyle(
-                hovered = hovered,
-                pressed = pressed,
-            ),
-        )
-    }
+        color = SettingsDialogForeground,
+    )
 }
 
 internal fun agentTreeNodeDisplayLabel(
@@ -348,8 +341,8 @@ internal fun shellSessionSidebarLines(
 ): List<String> = "$sessionId: $command".wrapToTerminalWidth(columns.coerceAtLeast(1))
 
 internal const val SessionSidebarExpandedColumns: Int = 28
-internal const val SessionSidebarBookmarkColumns: Int = 1
-internal const val SessionSidebarBookmarkRows: Int = 3
+internal const val SessionSidebarCollapsedButtonColumns: Int = 3
+internal const val SessionSidebarCollapsedButtonRows: Int = 1
 
 private const val SessionSidebarSectionRows: Int = 3
 private const val SessionTreeIndentColumns: Int = 2
