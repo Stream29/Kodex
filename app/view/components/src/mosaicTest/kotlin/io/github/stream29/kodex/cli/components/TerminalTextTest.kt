@@ -5,10 +5,14 @@ import kotlin.test.assertEquals
 
 val terminalTextTest by testSuite {
     test("wrap uses terminal-cell width") {
+        assertEquals(listOf("abc", "def"), "abcdef".wrapToTerminalWidth(width = 3))
         assertEquals(listOf("a界", "b"), "a界b".wrapToTerminalWidth(width = 3))
         assertEquals(listOf("first", "", "second"), "first\n\nsecond".wrapToTerminalWidth(width = 20))
+        assertEquals(listOf("ab", "", "cd", ""), "ab\n\ncd\n".wrapToTerminalWidth(width = 20))
         assertEquals(listOf("界", "a"), "界a".wrapToTerminalWidth(width = 1))
         assertEquals(listOf("e\u0301", "x"), "e\u0301x".wrapToTerminalWidth(width = 1))
+        assertEquals(listOf("👩‍💻", "a"), "👩‍💻a".wrapToTerminalWidth(width = 1))
+        assertEquals(listOf("a", "b"), "ab".wrapToTerminalWidth(width = 0))
     }
 
     test("ellipsize reserves its suffix") {

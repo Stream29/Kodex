@@ -332,12 +332,15 @@ internal fun WrappedHistoryText(
     textStyle: TextStyle = TextStyle.Unspecified,
     color: Color = Color.Unspecified,
 ) {
+    val layoutCache = remember(value) {
+        WrappedHistoryTextLayoutCache(value)
+    }
     SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
         check(constraints.hasBoundedWidth) {
             "Agent history text must be measured with a finite maximum width."
         }
         val wrapWidth = constraints.maxWidth.coerceAtLeast(1)
-        val lines = value.wrapToTerminalWidth(wrapWidth)
+        val lines = layoutCache.linesFor(wrapWidth)
         val placeable = subcompose(WrappedHistoryTextSlot) {
             Column {
                 lines.forEach { line ->
@@ -361,6 +364,21 @@ internal fun WrappedHistoryText(
         ) {
             placeable.place(0, 0)
         }
+    }
+}
+
+internal class WrappedHistoryTextLayoutCache(
+    private val value: String,
+) {
+    private var cachedWidth: Int? = null
+    private var cachedLines: List<String> = emptyList()
+
+    internal fun linesFor(width: Int): List<String> {
+        if (cachedWidth != width) {
+            cachedWidth = width
+            cachedLines = value.wrapToTerminalWidth(width)
+        }
+        return cachedLines
     }
 }
 
