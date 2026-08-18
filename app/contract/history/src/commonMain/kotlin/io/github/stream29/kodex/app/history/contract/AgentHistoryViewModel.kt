@@ -13,9 +13,10 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Stable identity and minimal presentation state for one committed top-level history row.
+ * Stable identity and minimal presentation state for one committed history item.
  *
- * A child deliberately retains no decoded event. The child object itself is the lazy-list key.
+ * An item deliberately retains no decoded event. Top-level item objects are lazy-list keys, while
+ * a [WorkGroup] privately retains its exact child items so their expansion state survives folding.
  */
 @Stable
 public sealed interface HistoryItemViewModel {
@@ -44,6 +45,23 @@ public sealed interface HistoryItemViewModel {
     }
 
     public class Tool(
+        public val index: Int,
+        initiallyExpanded: Boolean = false,
+    ) : HistoryItemViewModel {
+        init {
+            requireValidHistoryIndex(index)
+        }
+
+        public var expanded: Boolean by mutableStateOf(initiallyExpanded)
+            private set
+
+        public fun toggleExpanded() {
+            expanded = !expanded
+        }
+    }
+
+    /** Completed user input is rendered as a tool but always breaks an automatic work group. */
+    public class RequestUserInput(
         public val index: Int,
         initiallyExpanded: Boolean = false,
     ) : HistoryItemViewModel {
@@ -88,6 +106,46 @@ public sealed interface HistoryItemViewModel {
     ) : HistoryItemViewModel {
         init {
             requireValidHistoryIndex(index)
+        }
+    }
+
+    /**
+     * One folded, newest-first run of reasoning, ordinary tool, and patch items.
+     *
+     * [indexRange] is the sparse storage span, not a claim that every integer in it is a child.
+     */
+    public class WorkGroup(
+        children: List<HistoryItemViewModel>,
+        initiallyExpanded: Boolean = false,
+    ) : HistoryItemViewModel {
+        private val children: List<HistoryItemViewModel> = children.toList()
+
+        init {
+            require(this.children.size > 1) {
+                "A history work group must contain at least two items."
+            }
+            require(this.children.all { child -> child.isWorkGroupChild() }) {
+                "A history work group may contain only reasoning, ordinary tool, and patch items."
+            }
+            require(this.children.zipWithNext().all { (newer, older) ->
+                newer.individualIndex > older.individualIndex
+            }) {
+                "History work group children must be strictly newest-first."
+            }
+        }
+
+        public val indexRange: IntRange =
+            this.children.last().individualIndex..this.children.first().individualIndex
+
+        public val itemCount: Int = this.children.size
+
+        public var expanded: Boolean by mutableStateOf(initiallyExpanded)
+            private set
+
+        public fun childAt(position: Int): HistoryItemViewModel = children[position]
+
+        public fun toggleExpanded() {
+            expanded = !expanded
         }
     }
 }
@@ -195,3 +253,29 @@ public interface AgentHistoryViewModel : AutoCloseable {
 private fun requireValidHistoryIndex(index: Int) {
     require(index >= 0) { "A committed history index must not be negative." }
 }
+
+private fun HistoryItemViewModel.isWorkGroupChild(): Boolean = when (this) {
+    is HistoryItemViewModel.Reasoning,
+    is HistoryItemViewModel.Tool,
+    is HistoryItemViewModel.Patch,
+        -> true
+
+    is HistoryItemViewModel.Message,
+    is HistoryItemViewModel.RequestUserInput,
+    is HistoryItemViewModel.PlanUpdate,
+    is HistoryItemViewModel.ContextCompaction,
+    is HistoryItemViewModel.WorkGroup,
+        -> false
+}
+
+private val HistoryItemViewModel.individualIndex: Int
+    get() = when (this) {
+        is HistoryItemViewModel.Message -> index
+        is HistoryItemViewModel.Reasoning -> index
+        is HistoryItemViewModel.Tool -> index
+        is HistoryItemViewModel.RequestUserInput -> index
+        is HistoryItemViewModel.Patch -> index
+        is HistoryItemViewModel.PlanUpdate -> index
+        is HistoryItemViewModel.ContextCompaction -> index
+        is HistoryItemViewModel.WorkGroup -> error("A work group cannot be nested.")
+    }

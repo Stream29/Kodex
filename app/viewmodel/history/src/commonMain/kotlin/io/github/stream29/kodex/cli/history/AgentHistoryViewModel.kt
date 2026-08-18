@@ -9,6 +9,7 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.prevIndex
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
@@ -32,6 +33,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.koin.core.annotation.Factory
 import org.koin.core.annotation.InjectedParam
@@ -42,6 +45,7 @@ internal class AgentHistoryViewModelImpl(
     private val scope: CoroutineScope,
 ) : AgentHistoryViewModel {
     private val commands = Channel<HistoryCommand>(capacity = Channel.BUFFERED)
+    private val committedReadSemaphore = Semaphore(HistoryReadParallelism)
     private val olderDemandPending = MutableStateFlow(false)
     private val mutableCommittedItems = MutableStateFlow(
         CommittedHistoryItemWindow(
@@ -133,11 +137,13 @@ internal class AgentHistoryViewModelImpl(
 
     override suspend fun read(item: HistoryItemViewModel): StableCleanEvent {
         val index = item.storageIndex
-        check(mutableCommittedItems.value.find(index) === item) {
-            "Committed history item $index is no longer current."
-        }
-        return withContext(Dispatchers.Default) {
-            agentState.storage.stable[index]
+        return committedReadSemaphore.withPermit {
+            check(mutableCommittedItems.value.find(index) === item) {
+                "Committed history item $index is no longer current."
+            }
+            withContext(Dispatchers.Default) {
+                agentState.storage.stable[index]
+            }
         }
     }
 
@@ -165,6 +171,18 @@ internal class AgentHistoryViewModelImpl(
         var observedLatestIndex = -1
         var nextOlderIndex: Int? = null
         var lastInvalidation: Pair<Int, Int>? = null
+        var newestOpenItems: List<HistoryItemViewModel> = emptyList()
+        var sealedSequence: HistorySequence = HistorySequence.Empty
+
+        fun publishCurrent(generation: Long = mutableCommittedItems.value.generation) {
+            publishCommitted(
+                sequence = HistorySequence.concat(
+                    HistorySequence.of(newestOpenItems),
+                    sealedSequence,
+                ),
+                generation = generation,
+            )
+        }
 
         suspend fun reload(latestIndex: Int, invalidate: Boolean) {
             val currentGeneration = mutableCommittedItems.value.generation
@@ -174,19 +192,21 @@ internal class AgentHistoryViewModelImpl(
             } else {
                 currentGeneration
             }
+            newestOpenItems = emptyList()
+            sealedSequence = HistorySequence.Empty
             publishCommitted(
                 sequence = HistorySequence.Empty,
                 generation = reloadGeneration,
             )
             mutableLoadState.value = AgentHistoryLoadState.Initializing
-            val batch = loadBatch(latestIndex, HistoryBatchSize)
+            val batch = loadBatch(latestIndex)
+            val projection = projectNewestHistory(batch.items)
             observedLatestIndex = latestIndex
             nextOlderIndex = batch.nextOlderIndex
             initialized = true
-            publishCommitted(
-                sequence = HistorySequence.of(batch.items),
-                generation = reloadGeneration,
-            )
+            newestOpenItems = projection.openItems
+            sealedSequence = HistorySequence.of(projection.sealedItems)
+            publishCurrent(reloadGeneration)
             mutableLoadState.value = AgentHistoryLoadState.Ready(
                 hasOlder = nextOlderIndex != null,
             )
@@ -205,7 +225,7 @@ internal class AgentHistoryViewModelImpl(
             if (latestIndex == observedLatestIndex) return
 
             val current = mutableCommittedItems.value.sequence
-            val newestLoaded = current.firstOrNull()?.storageIndex
+            val newestLoaded = current.takeUnless { it === HistorySequence.Empty }?.newestIndex
             val newestStored = withContext(Dispatchers.Default) {
                 agentState.storage.stable.floorToIndex(latestIndex)
             }
@@ -221,12 +241,18 @@ internal class AgentHistoryViewModelImpl(
                 exclusiveBoundary = newestLoaded,
             )
             if (additions.isNotEmpty()) {
-                publishCommitted(
-                    HistorySequence.concat(
-                        HistorySequence.of(additions),
-                        mutableCommittedItems.value.sequence,
-                    ),
+                val projectionInput = ArrayList<HistoryItemViewModel>(
+                    additions.size + newestOpenItems.size,
                 )
+                projectionInput += additions
+                projectionInput += newestOpenItems
+                val projection = projectNewestHistory(projectionInput)
+                newestOpenItems = projection.openItems
+                sealedSequence = HistorySequence.concat(
+                    HistorySequence.of(projection.sealedItems),
+                    sealedSequence,
+                )
+                publishCurrent()
             }
         }
 
@@ -238,14 +264,14 @@ internal class AgentHistoryViewModelImpl(
                     return
                 }
                 mutableLoadState.value = AgentHistoryLoadState.LoadingOlder
-                val batch = loadBatch(firstIndex, HistoryBatchSize)
+                val batch = loadBatch(firstIndex)
+                val projectedItems = projectSealedHistory(batch.items)
                 nextOlderIndex = batch.nextOlderIndex
-                publishCommitted(
-                    HistorySequence.concat(
-                        mutableCommittedItems.value.sequence,
-                        HistorySequence.of(batch.items),
-                    ),
+                sealedSequence = HistorySequence.concat(
+                    sealedSequence,
+                    HistorySequence.of(projectedItems),
                 )
+                publishCurrent()
                 mutableLoadState.value = AgentHistoryLoadState.Ready(
                     hasOlder = nextOlderIndex != null,
                 )
@@ -284,20 +310,25 @@ internal class AgentHistoryViewModelImpl(
         }
     }
 
-    private suspend fun loadBatch(
-        fromInclusive: Int,
-        limit: Int,
-    ): LoadedHistoryBatch = withContext(Dispatchers.Default) {
-        require(limit > 0) { "History batch size must be positive." }
-        if (fromInclusive < 0) return@withContext LoadedHistoryBatch(emptyList(), null)
-        val items = ArrayList<HistoryItemViewModel>(limit)
-        var index = agentState.storage.stable.floorToIndex(fromInclusive)
-        while (index != null && items.size < limit) {
-            items += agentState.storage.stable[index].toHistoryItem(index)
-            index = agentState.storage.stable.prevIndex(index)
+    private suspend fun loadBatch(fromInclusive: Int): LoadedHistoryBatch =
+        withContext(Dispatchers.Default) {
+            if (fromInclusive < 0) return@withContext LoadedHistoryBatch(emptyList(), null)
+            val items = ArrayList<HistoryItemViewModel>(MaximumHistoryBatchSize)
+            var index = agentState.storage.stable.floorToIndex(fromInclusive)
+            while (index != null && items.size < HistoryBatchSize) {
+                items += agentState.storage.stable[index].toHistoryItem(index)
+                index = agentState.storage.stable.prevIndex(index)
+            }
+            while (
+                index != null &&
+                items.size < MaximumHistoryBatchSize &&
+                items.last().isAutomaticallyFoldable
+            ) {
+                items += agentState.storage.stable[index].toHistoryItem(index)
+                index = agentState.storage.stable.prevIndex(index)
+            }
+            LoadedHistoryBatch(items, index)
         }
-        LoadedHistoryBatch(items, index)
-    }
 
     private suspend fun loadNewerThan(
         fromInclusive: Int,
@@ -401,9 +432,70 @@ private fun StableCleanEvent.toHistoryItem(index: Int): HistoryItemViewModel = w
 
     is StableCleanEvent.Reasoning -> HistoryItemViewModel.Reasoning(index)
     StableCleanEvent.ContextCompaction -> HistoryItemViewModel.ContextCompaction(index)
+    is StableRequestUserInputToolEvent -> HistoryItemViewModel.RequestUserInput(index)
     is StablePatchToolEvent -> HistoryItemViewModel.Patch(index)
     is StablePlanUpdate -> HistoryItemViewModel.PlanUpdate(index)
     is StableCleanEvent.CompletedTool -> HistoryItemViewModel.Tool(index)
+}
+
+internal data class NewestHistoryProjection(
+    val openItems: List<HistoryItemViewModel>,
+    val sealedItems: List<HistoryItemViewModel>,
+)
+
+/**
+ * Projects only the newest changed segment. Its leading foldable run remains individually visible
+ * until a later breaker seals it.
+ */
+internal fun projectNewestHistory(
+    items: List<HistoryItemViewModel>,
+): NewestHistoryProjection {
+    var openItemCount = 0
+    while (
+        openItemCount < items.size &&
+        items[openItemCount].isAutomaticallyFoldable
+    ) {
+        openItemCount += 1
+    }
+    return NewestHistoryProjection(
+        openItems = items.subList(0, openItemCount).toList(),
+        sealedItems = projectSealedHistory(items.subList(openItemCount, items.size)),
+    )
+}
+
+/** Projects complete or forcibly bounded work runs without retaining decoded stable events. */
+internal fun projectSealedHistory(
+    items: List<HistoryItemViewModel>,
+): List<HistoryItemViewModel> {
+    if (items.isEmpty()) return emptyList()
+    val projected = ArrayList<HistoryItemViewModel>(items.size)
+    var position = 0
+    while (position < items.size) {
+        val first = items[position]
+        if (!first.isAutomaticallyFoldable) {
+            check(first !is HistoryItemViewModel.WorkGroup) {
+                "A projected work group cannot be projected again."
+            }
+            projected += first
+            position += 1
+            continue
+        }
+
+        val start = position
+        position += 1
+        while (
+            position < items.size &&
+            items[position].isAutomaticallyFoldable
+        ) {
+            position += 1
+        }
+        if (position - start == 1) {
+            projected += first
+        } else {
+            projected += HistoryItemViewModel.WorkGroup(items.subList(start, position))
+        }
+    }
+    return projected
 }
 
 private fun KodexAgentStateValue.toStreamingItem(): HistoryStreamingItem? = when (this) {
@@ -432,10 +524,55 @@ private val HistoryItemViewModel.storageIndex: Int
         is HistoryItemViewModel.Message -> index
         is HistoryItemViewModel.Reasoning -> index
         is HistoryItemViewModel.Tool -> index
+        is HistoryItemViewModel.RequestUserInput -> index
         is HistoryItemViewModel.Patch -> index
         is HistoryItemViewModel.PlanUpdate -> index
         is HistoryItemViewModel.ContextCompaction -> index
+        is HistoryItemViewModel.WorkGroup ->
+            error("A folded history work group cannot be read as one stable event.")
     }
+
+private val HistoryItemViewModel.isAutomaticallyFoldable: Boolean
+    get() = when (this) {
+        is HistoryItemViewModel.Reasoning,
+        is HistoryItemViewModel.Tool,
+        is HistoryItemViewModel.Patch,
+            -> true
+
+        is HistoryItemViewModel.Message,
+        is HistoryItemViewModel.RequestUserInput,
+        is HistoryItemViewModel.PlanUpdate,
+        is HistoryItemViewModel.ContextCompaction,
+        is HistoryItemViewModel.WorkGroup,
+            -> false
+    }
+
+private val HistoryItemViewModel.newestStorageIndex: Int
+    get() = when (this) {
+        is HistoryItemViewModel.WorkGroup -> indexRange.last
+        else -> storageIndex
+    }
+
+private val HistoryItemViewModel.oldestStorageIndex: Int
+    get() = when (this) {
+        is HistoryItemViewModel.WorkGroup -> indexRange.first
+        else -> storageIndex
+    }
+
+private fun HistoryItemViewModel.find(storageIndex: Int): HistoryItemViewModel? {
+    return when (this) {
+        is HistoryItemViewModel.WorkGroup -> {
+            if (storageIndex !in indexRange) return null
+            for (position in 0 until itemCount) {
+                val child = childAt(position)
+                if (child.storageIndex == storageIndex) return child
+            }
+            null
+        }
+
+        else -> takeIf { this.storageIndex == storageIndex }
+    }
+}
 
 private data class LoadedHistoryBatch(
     val items: List<HistoryItemViewModel>,
@@ -505,7 +642,7 @@ private sealed interface HistorySequence {
                 "A history sequence leaf cannot exceed $HistoryLeafSize items."
             }
             require(items.zipWithNext().all { (newer, older) ->
-                newer.storageIndex > older.storageIndex
+                newer.oldestStorageIndex > older.newestStorageIndex
             }) {
                 "History sequence items must be strictly newest-first."
             }
@@ -513,14 +650,19 @@ private sealed interface HistorySequence {
 
         override val size: Int = items.size
         override val height: Int = 1
-        override val newestIndex: Int = items.first().storageIndex
-        override val oldestIndex: Int = items.last().storageIndex
+        override val newestIndex: Int = items.first().newestStorageIndex
+        override val oldestIndex: Int = items.last().oldestStorageIndex
 
         override fun get(index: Int): HistoryItemViewModel = items[index]
 
         override fun find(storageIndex: Int): HistoryItemViewModel? {
             if (storageIndex !in oldestIndex..newestIndex) return null
-            return items.firstOrNull { item -> item.storageIndex == storageIndex }
+            for (item in items) {
+                if (storageIndex in item.oldestStorageIndex..item.newestStorageIndex) {
+                    return item.find(storageIndex)
+                }
+            }
+            return null
         }
     }
 
@@ -624,8 +766,10 @@ private sealed interface HistorySequence {
 }
 
 private const val HistoryBatchSize: Int = 64
+private const val MaximumHistoryBatchSize: Int = HistoryBatchSize * 2
 private const val HistoryLeafSize: Int = 64
 private const val OlderDemandDistance: Int = 8
+private const val HistoryReadParallelism: Int = 8
 
 private fun checkedHistorySize(left: Int, right: Int): Int {
     val size = left.toLong() + right

@@ -32,6 +32,7 @@ import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingKind
+import io.github.stream29.kodex.cli.components.EllipsizedText
 import io.github.stream29.kodex.cli.components.LazyColumn
 import io.github.stream29.kodex.cli.components.LazyListLayoutInfo
 import io.github.stream29.kodex.cli.components.LazyListState
@@ -42,6 +43,7 @@ import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.TuiPressable
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
+import io.github.stream29.kodex.cli.components.tuiInteractionTextStyle
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import io.github.stream29.kodex.cli.components.wrapToTerminalWidth
 import kotlinx.coroutines.CancellationException
@@ -122,14 +124,25 @@ public fun AgentHistoryView(
                     }
                 }
             }
-            StoredHistoryEntry(
-                item = item,
-                generation = generation,
-                model = model,
-                focusRequester = focusRequester,
-                shellSessions = shellSessions,
-                onOpenContextMenu = onOpenEntryContextMenu,
-            )
+            if (item is HistoryItemViewModel.WorkGroup) {
+                StoredHistoryWorkGroup(
+                    group = item,
+                    generation = generation,
+                    model = model,
+                    focusRequester = focusRequester,
+                    shellSessions = shellSessions,
+                    onOpenContextMenu = onOpenEntryContextMenu,
+                )
+            } else {
+                StoredHistoryEntry(
+                    item = item,
+                    generation = generation,
+                    model = model,
+                    focusRequester = focusRequester,
+                    shellSessions = shellSessions,
+                    onOpenContextMenu = onOpenEntryContextMenu,
+                )
+            }
         }
 
         when (val state = loadState) {
@@ -225,6 +238,52 @@ internal fun LazyListLayoutInfo.historyPageFocusItem(
         candidates.maxByOrNull { item -> item.offset + item.size }
     }
     return target?.key as? HistoryItemViewModel
+}
+
+@Composable
+internal fun StoredHistoryWorkGroup(
+    group: HistoryItemViewModel.WorkGroup,
+    generation: Long,
+    model: AgentHistoryViewModel,
+    focusRequester: FocusRequester? = null,
+    shellSessions: AgentShellSessionRegistry,
+    onOpenContextMenu: ((
+        generation: Long,
+        storageIndex: Int,
+        anchor: TuiPopupAnchor,
+        clickPosition: IntOffset?,
+    ) -> Unit)?,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        TuiPressable(
+            onClick = {
+                group.toggleExpanded()
+                model.notifyContentChanged()
+            },
+            focusRequester = focusRequester,
+            modifier = Modifier.fillMaxWidth(),
+        ) { _, isHovered, isPressed ->
+            EllipsizedText(
+                value = "${if (group.expanded) "v" else ">"} Take ${group.itemCount} actions",
+                modifier = Modifier.fillMaxWidth(),
+                textStyle = tuiInteractionTextStyle(
+                    hovered = isHovered,
+                    pressed = isPressed,
+                ),
+            )
+        }
+        if (group.expanded) {
+            repeat(group.itemCount) { position ->
+                StoredHistoryEntry(
+                    item = group.childAt(position),
+                    generation = generation,
+                    model = model,
+                    shellSessions = shellSessions,
+                    onOpenContextMenu = onOpenContextMenu,
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -386,11 +445,13 @@ private fun HistoryItemViewModel.historyContentType(): HistoryContentType = when
     is HistoryItemViewModel.Message -> HistoryContentType.Message
     is HistoryItemViewModel.Reasoning -> HistoryContentType.Reasoning
     is HistoryItemViewModel.Tool,
+    is HistoryItemViewModel.RequestUserInput,
     is HistoryItemViewModel.PlanUpdate,
         -> HistoryContentType.CompletedTool
 
     is HistoryItemViewModel.Patch -> HistoryContentType.Patch
     is HistoryItemViewModel.ContextCompaction -> HistoryContentType.Context
+    is HistoryItemViewModel.WorkGroup -> HistoryContentType.WorkGroup
 }
 
 private fun UnstableCleanEvent.historyContentType(): HistoryContentType = when (this) {
@@ -430,9 +491,12 @@ private val HistoryItemViewModel.storageIndex: Int
         is HistoryItemViewModel.Message -> index
         is HistoryItemViewModel.Reasoning -> index
         is HistoryItemViewModel.Tool -> index
+        is HistoryItemViewModel.RequestUserInput -> index
         is HistoryItemViewModel.Patch -> index
         is HistoryItemViewModel.PlanUpdate -> index
         is HistoryItemViewModel.ContextCompaction -> index
+        is HistoryItemViewModel.WorkGroup ->
+            error("A folded history work group cannot be rendered as one stored event.")
     }
 
 private fun HistoryItemViewModel.expansionBinding(): HistoryExpansionBinding? = when (this) {
@@ -446,6 +510,11 @@ private fun HistoryItemViewModel.expansionBinding(): HistoryExpansionBinding? = 
         toggle = ::toggleExpanded,
     )
 
+    is HistoryItemViewModel.RequestUserInput -> HistoryExpansionBinding(
+        expanded = { expanded },
+        toggle = ::toggleExpanded,
+    )
+
     is HistoryItemViewModel.Patch -> HistoryExpansionBinding(
         expanded = { expanded },
         toggle = ::toggleExpanded,
@@ -454,6 +523,7 @@ private fun HistoryItemViewModel.expansionBinding(): HistoryExpansionBinding? = 
     is HistoryItemViewModel.Message,
     is HistoryItemViewModel.PlanUpdate,
     is HistoryItemViewModel.ContextCompaction,
+    is HistoryItemViewModel.WorkGroup,
         -> null
 }
 
@@ -490,6 +560,7 @@ private enum class HistoryContentType {
     PendingTool,
     Patch,
     Context,
+    WorkGroup,
     Marker,
 }
 
