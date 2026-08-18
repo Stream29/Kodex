@@ -153,6 +153,70 @@ val agentHistoryEntryInteractionTest by testSuite {
         }
     }
 
+    test("a work group expands into exact reusable child entries") {
+        var callbackCount by mutableStateOf(0)
+        var capturedIndex: Int? = null
+        val newer = HistoryItemViewModel.Tool(index = 29)
+        val older = HistoryItemViewModel.Tool(index = 23)
+        val group = HistoryItemViewModel.WorkGroup(listOf(newer, older))
+        val model = WorkGroupHistoryModel(
+            group = group,
+            events = mapOf(
+                newer to textToolEvent(name = "newer"),
+                older to textToolEvent(name = "older"),
+            ),
+        )
+
+        runMosaicTest {
+            val collapsed = setContentAndSnapshot {
+                Column(modifier = Modifier.width(40)) {
+                    StoredHistoryWorkGroup(
+                        group = group,
+                        generation = 12,
+                        model = model,
+                        shellSessions = EmptyAgentShellSessionRegistry,
+                        onOpenContextMenu = { _, storageIndex, _, _ ->
+                            capturedIndex = storageIndex
+                            callbackCount++
+                        },
+                    )
+                    Text("callbacks=$callbackCount")
+                }
+            }
+            assertTrue("> Take 2 actions" in collapsed)
+
+            sendMouseEvent(MouseEvent(0, 0, MouseEvent.Type.Press, MouseEvent.Button.Right))
+            sendMouseEvent(MouseEvent(0, 0, MouseEvent.Type.Release))
+            assertEquals(0, callbackCount)
+
+            sendMouseEvent(MouseEvent(0, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
+            sendMouseEvent(MouseEvent(0, 0, MouseEvent.Type.Release))
+            var expanded = awaitSnapshot()
+            while ("> newer" !in expanded || "> older" !in expanded) {
+                expanded = awaitSnapshot()
+            }
+            assertTrue("v Take 2 actions" in expanded)
+            assertTrue("> newer" in expanded)
+            assertTrue("> older" in expanded)
+            assertTrue(group.expanded)
+
+            sendMouseEvent(MouseEvent(0, 1, MouseEvent.Type.Press, MouseEvent.Button.Right))
+            sendMouseEvent(MouseEvent(0, 1, MouseEvent.Type.Release))
+            awaitSnapshot()
+            assertEquals(1, callbackCount)
+            assertEquals(29, capturedIndex)
+
+            sendMouseEvent(MouseEvent(0, 1, MouseEvent.Type.Press, MouseEvent.Button.Left))
+            sendMouseEvent(MouseEvent(0, 1, MouseEvent.Type.Release))
+            var childExpanded = awaitSnapshot()
+            while ("v newer" !in childExpanded) {
+                childExpanded = awaitSnapshot()
+            }
+            assertTrue("v newer" in childExpanded)
+            assertTrue(newer.expanded)
+        }
+    }
+
     test("a loading committed entry reserves exactly one blank row") {
         val item = HistoryItemViewModel.Message(index = 31)
         val event = CompletableDeferred<StableCleanEvent>()
@@ -248,6 +312,33 @@ private class SingleItemHistoryModel(
     override fun close() = Unit
 }
 
+private class WorkGroupHistoryModel(
+    group: HistoryItemViewModel.WorkGroup,
+    private val events: Map<HistoryItemViewModel, StableCleanEvent>,
+) : AgentHistoryViewModel {
+    override val committedItems: StateFlow<HistoryItemWindow> =
+        MutableStateFlow(SingleItemWindow(group))
+    override val loadState: StateFlow<AgentHistoryLoadState> =
+        MutableStateFlow(AgentHistoryLoadState.Ready(hasOlder = false))
+    override val pendingTools: StateFlow<List<UnstableCleanEvent>> = MutableStateFlow(emptyList())
+    override val streamingItem: StateFlow<HistoryStreamingItem?> = MutableStateFlow(null)
+    override val listState: LazyListState = LazyListState()
+    override val scrollInteractionSource: MutableScrollInteractionSource =
+        MutableScrollInteractionSource()
+    override val followsLatest: Boolean = true
+
+    override suspend fun read(item: HistoryItemViewModel): StableCleanEvent = events.getValue(item)
+
+    override fun contains(generation: Long, storageIndex: Int): Boolean =
+        events.keys.any { item -> item.storageIndex == storageIndex }
+
+    override fun notifyContentChanged() = Unit
+
+    override fun requestScrollToLatest() = Unit
+
+    override fun close() = Unit
+}
+
 private class SingleItemWindow(
     private val item: HistoryItemViewModel,
 ) : HistoryItemWindow {
@@ -267,7 +358,18 @@ private val HistoryItemViewModel.storageIndex: Int
         is HistoryItemViewModel.Message -> index
         is HistoryItemViewModel.Reasoning -> index
         is HistoryItemViewModel.Tool -> index
+        is HistoryItemViewModel.RequestUserInput -> index
         is HistoryItemViewModel.Patch -> index
         is HistoryItemViewModel.PlanUpdate -> index
         is HistoryItemViewModel.ContextCompaction -> index
+        is HistoryItemViewModel.WorkGroup -> indexRange.last
     }
+
+private fun textToolEvent(name: String): StableTextToolEvent =
+    StableTextToolEvent(
+        callId = "call-$name",
+        name = name,
+        arguments = JsonObject(emptyMap()),
+        result = "done",
+        success = true,
+    )

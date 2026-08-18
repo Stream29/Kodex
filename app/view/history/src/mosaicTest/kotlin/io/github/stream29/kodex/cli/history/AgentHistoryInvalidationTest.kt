@@ -141,7 +141,9 @@ private val HistoryItemViewModel.storageIndex: Int
         is HistoryItemViewModel.Message -> index
         is HistoryItemViewModel.Reasoning -> index
         is HistoryItemViewModel.Tool -> index
+        is HistoryItemViewModel.RequestUserInput -> index
         is HistoryItemViewModel.Patch -> index
         is HistoryItemViewModel.PlanUpdate -> index
         is HistoryItemViewModel.ContextCompaction -> index
+        is HistoryItemViewModel.WorkGroup -> indexRange.last
     }
