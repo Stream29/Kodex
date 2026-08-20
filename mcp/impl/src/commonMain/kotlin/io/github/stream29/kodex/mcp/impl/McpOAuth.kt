@@ -351,18 +351,7 @@ public class DefaultMcpOAuthClient internal constructor(
         val body = buildJsonObject {
             put("client_name", "Kodex")
             put("redirect_uris", buildJsonArray { add(JsonPrimitive(client.redirectUri)) })
-            put(
-                "grant_types",
-                buildJsonArray {
-                    add(JsonPrimitive("authorization_code"))
-                    add(JsonPrimitive("refresh_token"))
-                },
-            )
-            put("response_types", buildJsonArray { add(JsonPrimitive("code")) })
             put("token_endpoint_auth_method", requestedMethod.serializedName)
-            if (metadata.scopes.isNotEmpty()) {
-                put("scope", metadata.scopes.joinToString(" "))
-            }
         }
         val response = httpClient.post(registrationEndpoint) {
             contentType(ContentType.Application.Json)
