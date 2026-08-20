@@ -144,10 +144,8 @@ val mcpOAuthIoTest by testSuite(
             )
             assertEquals("none", registration.string("token_endpoint_auth_method"))
             assertEquals(
-                listOf("authorization_code", "refresh_token"),
-                registration.getValue("grant_types").jsonArray.map { value ->
-                    value.jsonPrimitive.content
-                },
+                setOf("client_name", "redirect_uris", "token_endpoint_auth_method"),
+                registration.keys,
             )
 
             val authorizationUrl = Url(attempt.authorizationUrl)
