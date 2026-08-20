@@ -104,9 +104,8 @@ internal fun BoxScope.McpServerEditorDialog(
                         url = endpointValue,
                         headers = parseSecretEntries(headers.value.text),
                         oauth = if (oauthEnabled) {
-                            val clientId = oauthClientId.value.text.trim()
+                            val clientId = oauthClientId.value.text.trim().ifEmpty { null }
                             val redirectUri = oauthRedirect.value.text.trim()
-                            require(clientId.isNotEmpty()) { "OAuth client id is required." }
                             require(redirectUri.isNotEmpty()) {
                                 "OAuth redirect URI is required."
                             }
@@ -193,7 +192,11 @@ internal fun BoxScope.McpServerEditorDialog(
                     dropdownState = oauthDropdown,
                 )
                 if (oauthEnabled) {
-                    McpInputField("OAuth client id", oauthClientId, width)
+                    McpInputField(
+                        "OAuth client id (blank for dynamic registration)",
+                        oauthClientId,
+                        width,
+                    )
                     McpInputField(
                         "OAuth client secret (blank for none; <keep> retains)",
                         oauthClientSecret,
@@ -297,7 +300,10 @@ internal fun BoxScope.McpServerDetailsDialog(
                 )
             }
             server.oauth?.let { oauth ->
-                McpDetailLine("OAuth client", oauth.clientId)
+                McpDetailLine(
+                    "OAuth client",
+                    oauth.clientId ?: "Dynamic registration pending",
+                )
                 McpDetailLine(
                     "OAuth client secret",
                     if (oauth.hasClientSecret) "Configured" else "None",

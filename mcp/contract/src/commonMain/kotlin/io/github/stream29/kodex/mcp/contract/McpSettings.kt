@@ -30,7 +30,7 @@ public value class McpSecret(
 @Serializable
 public data class McpOAuthClient(
     @SerialName("client_id")
-    public val clientId: String,
+    public val clientId: String? = null,
     @SerialName("client_secret")
     public val clientSecret: McpSecret? = null,
     @SerialName("redirect_uri")
@@ -41,7 +41,12 @@ public data class McpOAuthClient(
     public val tokenEndpoint: String? = null,
 ) {
     init {
-        require(clientId.isNotBlank()) { "An MCP OAuth client id must not be blank." }
+        require(clientId == null || clientId.isNotBlank()) {
+            "An MCP OAuth client id must be absent or non-blank."
+        }
+        require(clientId != null || clientSecret == null) {
+            "An MCP OAuth client secret requires a client id."
+        }
         require(redirectUri.isNotBlank()) { "An MCP OAuth redirect URI must not be blank." }
     }
 }
@@ -86,6 +91,9 @@ public sealed interface McpOAuthConfiguration {
         public val expiresAtEpochSeconds: Long? = null,
     ) : McpOAuthConfiguration {
         init {
+            require(client.clientId != null) {
+                "An initialized MCP OAuth configuration must have a client id."
+            }
             require(resolvedAuthorizationEndpoint.isNotBlank()) {
                 "An initialized MCP OAuth authorization endpoint must not be blank."
             }

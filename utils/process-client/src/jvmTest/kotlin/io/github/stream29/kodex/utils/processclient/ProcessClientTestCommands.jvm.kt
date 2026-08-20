@@ -37,3 +37,22 @@ internal actual val delayedProcessCommand: ProcessCommand =
             arguments = listOf("-c", "sleep 30"),
         )
     }
+
+internal actual val environmentProcessCommand: ProcessCommand =
+    if (isWindows) {
+        ProcessCommand(
+            executable = "powershell.exe",
+            arguments = listOf(
+                "-NoProfile",
+                "-Command",
+                "[Console]::Out.Write(\$env:$TestEnvironmentName)",
+            ),
+            environment = mapOf(TestEnvironmentName to TestEnvironmentValue),
+        )
+    } else {
+        ProcessCommand(
+            executable = "/bin/sh",
+            arguments = listOf("-c", "printf %s \"\$$TestEnvironmentName\""),
+            environment = mapOf(TestEnvironmentName to TestEnvironmentValue),
+        )
+    }

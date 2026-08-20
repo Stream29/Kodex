@@ -123,17 +123,6 @@ private fun classifyMcpImportCandidate(
                 detail = "Unsupported fields: auth.",
             )
         }
-        val needsOAuthClient = configuration.oauth != null ||
-            configuration.scopes != null ||
-            configuration.oauthResource != null ||
-            configuration.auth == CodexCliMcpAuth.OAuth
-        if (needsOAuthClient && configuration.oauth?.clientId.isNullOrBlank()) {
-            return CodexCliMcpImportCandidate.Unsupported(
-                serverName = serverName,
-                transport = transport,
-                detail = "Dynamic OAuth client registration is not supported.",
-            )
-        }
     }
     return CodexCliMcpImportCandidate.Supported(
         serverName = serverName,

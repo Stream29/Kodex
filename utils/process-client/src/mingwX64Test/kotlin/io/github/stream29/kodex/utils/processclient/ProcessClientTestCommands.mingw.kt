@@ -15,3 +15,13 @@ internal actual val delayedProcessCommand: ProcessCommand = ProcessCommand(
     executable = "powershell.exe",
     arguments = listOf("-NoProfile", "-Command", "Start-Sleep -Seconds 30"),
 )
+
+internal actual val environmentProcessCommand: ProcessCommand = ProcessCommand(
+    executable = "powershell.exe",
+    arguments = listOf(
+        "-NoProfile",
+        "-Command",
+        "[Console]::Out.Write(\$env:$TestEnvironmentName)",
+    ),
+    environment = mapOf(TestEnvironmentName to TestEnvironmentValue),
+)

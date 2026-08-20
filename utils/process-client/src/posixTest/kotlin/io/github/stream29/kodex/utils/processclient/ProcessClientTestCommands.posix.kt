@@ -12,3 +12,9 @@ internal actual val delayedProcessCommand: ProcessCommand = ProcessCommand(
     executable = "/bin/sh",
     arguments = listOf("-c", "sleep 30"),
 )
+
+internal actual val environmentProcessCommand: ProcessCommand = ProcessCommand(
+    executable = "/bin/sh",
+    arguments = listOf("-c", "printf %s \"\$$TestEnvironmentName\""),
+    environment = mapOf(TestEnvironmentName to TestEnvironmentValue),
+)

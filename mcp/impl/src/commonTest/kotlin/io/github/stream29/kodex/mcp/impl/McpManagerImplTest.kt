@@ -248,7 +248,7 @@ class McpManagerImplTest {
                 ),
             ),
         )
-        val attempt = TestMcpOAuthLoginAttempt()
+        val attempt = TestMcpOAuthLoginAttempt(uninitialized)
         val manager = backgroundScope.McpManagerImpl(
             store = store,
             service = TestMcpService(),
@@ -291,6 +291,53 @@ class McpManagerImplTest {
             McpAuthenticationState.LoginRequired,
             manager.servers.value.single().authentication,
         )
+        manager.close()
+    }
+
+    @Test
+    fun browserLoginPersistsDynamicRegistrationBeforeOpeningTheBrowser() = runTest {
+        val uninitialized = McpOAuthConfiguration.Uninitialized(
+            client = McpOAuthClient(),
+        )
+        val prepared = uninitialized.copy(
+            client = uninitialized.client.copy(clientId = "registered-client"),
+            resource = "https://oauth.example.test/mcp",
+            scopes = listOf("tools.read"),
+        )
+        val store = TestMcpConfigurationStore(
+            mapOf(
+                "oauth" to McpServerConfiguration.StreamableHttp(
+                    url = "https://oauth.example.test/mcp",
+                    oauth = uninitialized,
+                ),
+            ),
+        )
+        val attempt = TestMcpOAuthLoginAttempt(prepared)
+        val manager = backgroundScope.McpManagerImpl(
+            store = store,
+            service = TestMcpService(),
+            codexImportSource = McpCodexImportSource { emptyList() },
+            loginAttemptFactory = { attempt },
+        )
+        runCurrent()
+
+        val loginJob = launch { manager.login("oauth") }
+        runCurrent()
+
+        assertEquals(
+            prepared,
+            assertIs<McpServerConfiguration.StreamableHttp>(
+                store.configurations.value.getValue("oauth"),
+            ).oauth,
+        )
+        attempt.result.complete(
+            initializedOAuth().copy(
+                client = prepared.client,
+                resource = prepared.resource,
+                scopes = prepared.scopes,
+            ),
+        )
+        loginJob.join()
         manager.close()
     }
 
@@ -341,6 +388,7 @@ private class TestMcpService(
     override suspend fun invalidate(serverName: String) {
         invalidatedServerNames += serverName
     }
+
     override suspend fun refresh(): Unit = Unit
     override fun close(): Unit = Unit
 }
@@ -358,7 +406,9 @@ private class TestMcpClient(
     }
 }
 
-private class TestMcpOAuthLoginAttempt : McpOAuthLoginAttempt {
+private class TestMcpOAuthLoginAttempt(
+    override val preparedConfiguration: McpOAuthConfiguration.Uninitialized,
+) : McpOAuthLoginAttempt {
     override val authorizationUrl: String = "https://issuer.example.test/authorize?state=test"
     val result = CompletableDeferred<McpOAuthConfiguration.Initialized>()
     var closed: Boolean = false

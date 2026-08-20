@@ -54,6 +54,10 @@ val codexCliStorageTest by testSuite {
                 url = "https://dynamic.example.test/mcp"
                 bearer_token_env_var = "PRIVATE_TOKEN_NAME"
 
+                [mcp_servers.dynamic-oauth]
+                url = "https://dynamic-oauth.example.test/mcp"
+                auth = "oauth"
+
                 [mcp_servers.oauth]
                 url = "https://oauth.example.test/mcp"
                 scopes = ["tools.read"]
@@ -83,6 +87,7 @@ val codexCliStorageTest by testSuite {
                     "browser",
                     "docs",
                     "dynamic-auth",
+                    "dynamic-oauth",
                     "oauth",
                     "unsupported-oauth",
                 ),
@@ -99,6 +104,13 @@ val codexCliStorageTest by testSuite {
             assertEquals(CodexCliMcpTransportKind.StreamableHttp, unsupported.transport)
             assertTrue("bearer_token_env_var" in unsupported.detail)
             assertFalse("PRIVATE_TOKEN_NAME" in unsupported.detail)
+            val dynamicOAuth = assertIs<CodexCliMcpServer.StreamableHttp>(
+                assertIs<CodexCliMcpImportCandidate.Supported>(
+                    byName.getValue("dynamic-oauth"),
+                ).configuration,
+            )
+            assertEquals(CodexCliMcpAuth.OAuth, dynamicOAuth.auth)
+            assertEquals(null, dynamicOAuth.oauth?.clientId)
             val oauth = assertIs<CodexCliMcpServer.StreamableHttp>(
                 assertIs<CodexCliMcpImportCandidate.Supported>(
                     byName.getValue("oauth"),

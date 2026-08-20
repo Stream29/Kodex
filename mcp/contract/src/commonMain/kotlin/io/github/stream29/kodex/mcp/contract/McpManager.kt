@@ -58,7 +58,7 @@ public data class McpManagedServerState(
 
 /** Credential-free OAuth identity used by Settings editors and status rows. */
 public data class McpOAuthSummary(
-    public val clientId: String,
+    public val clientId: String?,
     public val hasClientSecret: Boolean,
     public val redirectUri: String,
     public val authorizationEndpoint: String?,
@@ -95,7 +95,7 @@ public data class McpStdioDraft(
 
 /** OAuth client input; [clientSecret] follows preserve-or-replace edit semantics. */
 public data class McpOAuthDraft(
-    public val clientId: String,
+    public val clientId: String? = null,
     public val clientSecret: McpSecretDraft? = null,
     public val redirectUri: String = DefaultMcpOAuthRedirectUri,
     public val authorizationEndpoint: String? = null,
@@ -159,6 +159,8 @@ public enum class McpImportDecision {
 
 /** Browser authorization attempt owned by its caller until completion or cancellation. */
 public interface McpOAuthLoginAttempt : AutoCloseable {
+    /** Discovery and registration results that must be persisted before opening the browser. */
+    public val preparedConfiguration: McpOAuthConfiguration.Uninitialized
     public val authorizationUrl: String
     public suspend fun awaitInitialized(): McpOAuthConfiguration.Initialized
     override fun close(): Unit
