@@ -7,6 +7,7 @@ import io.github.stream29.kodex.mcp.contract.McpOAuthClient
 import io.github.stream29.kodex.mcp.contract.McpOAuthConfiguration
 import io.github.stream29.kodex.mcp.contract.McpSecret
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
+import io.github.stream29.kodex.openai.codexclistorage.CodexCliMcpAuth
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliMcpServer
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliMcpImportCandidate
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliMcpTransportKind
@@ -42,25 +43,35 @@ internal class KodexMcpConfigurationStore(
 /** One-time projection from Codex's decoded declaration into Kodex-owned data. */
 internal fun CodexCliMcpServer.toKodexMcpConfiguration(): McpServerConfiguration =
     when (this) {
-        is CodexCliMcpServer.StreamableHttp -> McpServerConfiguration.StreamableHttp(
-            url = url.trim(),
-            headers = headers.mapKeys { (name, _) -> name.trim() }
-                .mapValues { (_, value) -> McpSecret(value) },
-            oauth = oauth?.let { configured ->
-                McpOAuthConfiguration.Uninitialized(
-                    client = McpOAuthClient(
-                        clientId = requireNotNull(configured.clientId)
-                            .trim(),
-                    ),
-                    resource = oauthResource?.trim()?.takeIf(String::isNotEmpty),
-                    scopes = scopes.orEmpty()
-                        .map(String::trim)
-                        .filter(String::isNotEmpty)
-                        .distinct(),
-                )
-            },
-            enabled = enabled,
-        )
+        is CodexCliMcpServer.StreamableHttp -> {
+            val usesOAuth = oauth != null ||
+                scopes != null ||
+                oauthResource != null ||
+                auth == CodexCliMcpAuth.OAuth
+            McpServerConfiguration.StreamableHttp(
+                url = url.trim(),
+                headers = headers.mapKeys { (name, _) -> name.trim() }
+                    .mapValues { (_, value) -> McpSecret(value) },
+                oauth = if (usesOAuth) {
+                    McpOAuthConfiguration.Uninitialized(
+                        client = McpOAuthClient(
+                            clientId = oauth
+                                ?.clientId
+                                ?.trim()
+                                ?.takeIf(String::isNotEmpty),
+                        ),
+                        resource = oauthResource?.trim()?.takeIf(String::isNotEmpty),
+                        scopes = scopes.orEmpty()
+                            .map(String::trim)
+                            .filter(String::isNotEmpty)
+                            .distinct(),
+                    )
+                } else {
+                    null
+                },
+                enabled = enabled,
+            )
+        }
 
         is CodexCliMcpServer.Stdio -> McpServerConfiguration.Stdio(
             command = command.trim(),

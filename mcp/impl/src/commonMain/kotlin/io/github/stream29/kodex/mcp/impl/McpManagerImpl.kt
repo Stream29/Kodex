@@ -194,8 +194,29 @@ public class McpManagerImpl internal constructor(
                     serverName to McpAuthenticationState.Failed("Authorization could not start.")
                 throw failure
             }
+            val prepared = attempt.preparedConfiguration
+            try {
+                if (prepared != uninitialized) {
+                    store.update { current ->
+                        val latest = current[serverName]
+                            as? McpServerConfiguration.StreamableHttp
+                            ?: throw IllegalStateException(
+                                "MCP server '$serverName' changed during authorization.",
+                            )
+                        require(latest.oauth?.loginIdentity() == uninitialized.loginIdentity()) {
+                            "MCP server '$serverName' changed during authorization."
+                        }
+                        current + (serverName to latest.copy(oauth = prepared))
+                    }
+                }
+            } catch (failure: Throwable) {
+                attempt.close()
+                authenticationOverrides.value +=
+                    serverName to McpAuthenticationState.Failed("Authorization could not start.")
+                throw failure
+            }
             activeLoginAttempts[serverName] = attempt
-            LoginOperation(uninitialized, attempt)
+            LoginOperation(prepared, attempt)
         }
         try {
             effectChannel.send(
@@ -547,8 +568,7 @@ private fun McpOAuthDraft.toConfiguration(
     existing: McpOAuthConfiguration?,
     preserveOAuth: Boolean,
 ): McpOAuthConfiguration {
-    val normalizedClientId = clientId.trim()
-    require(normalizedClientId.isNotEmpty()) { "An MCP OAuth client id must not be blank." }
+    val normalizedClientId = clientId.normalizedOptional()
     val existingClientSecret = existing?.client?.clientSecret
     val client = io.github.stream29.kodex.mcp.contract.McpOAuthClient(
         clientId = normalizedClientId,
@@ -624,7 +644,7 @@ private fun McpOAuthConfiguration.toUninitialized(): McpOAuthConfiguration.Unini
     )
 
 private data class OAuthLoginIdentity(
-    val clientId: String,
+    val clientId: String?,
     val clientSecret: McpSecret?,
     val redirectUri: String,
     val authorizationEndpoint: String?,

@@ -14,6 +14,12 @@ val mcpServerConfigurationTest by testSuite {
                 headers = mapOf("Authorization" to McpSecret("Bearer test")),
                 enabled = false,
             ),
+            McpServerConfiguration.StreamableHttp(
+                url = "https://dynamic.example.test/mcp",
+                oauth = McpOAuthConfiguration.Uninitialized(
+                    client = McpOAuthClient(),
+                ),
+            ),
             McpServerConfiguration.Stdio(
                 command = "example-mcp",
                 args = listOf("--stdio"),
