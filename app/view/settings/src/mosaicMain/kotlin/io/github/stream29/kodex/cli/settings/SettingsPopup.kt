@@ -146,7 +146,7 @@ public fun BoxScope.SettingsPopup(
     val contentWidth = (width - navigationWidth).coerceAtLeast(1)
     TuiDialog(
         onDismissRequest = onDismissRequest,
-        modifier = Modifier.width(width).height(height).background(SettingsHomeBackground),
+        modifier = Modifier.width(width).height(height).background(SettingsDialogBackground),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Text(
@@ -940,9 +940,9 @@ private fun BoxScope.RenameSessionDialog(
 
     TuiDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.width(width).background(SettingsHomeBackground),
+        modifier = Modifier.width(width).background(SettingsDialogBackground),
     ) {
-        Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
+        Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogBackground)) {
             Text(
                 value = "Rename session",
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),

@@ -78,7 +78,7 @@ internal fun AgentRuntimeStatusBar(
             TuiButton(
                 label = control.label(),
                 modifier = Modifier.background(SessionButtonBackground),
-                color = SessionForeground,
+                color = SessionButtonForeground,
                 onClick = {
                     when (control) {
                         AgentRuntimeControl.Stop -> viewModel.cancel()
@@ -91,7 +91,7 @@ internal fun AgentRuntimeStatusBar(
                 TuiButton(
                     label = "Compact",
                     modifier = Modifier.background(SessionButtonBackground),
-                    color = SessionForeground,
+                    color = SessionButtonForeground,
                     enabled = execution.capabilities.canCompact,
                     onClick = viewModel::forceCompact,
                 )
@@ -184,7 +184,7 @@ private fun SettingsStatusButton(onOpenSettings: () -> Unit) {
     TuiButton(
         label = SettingsLabel,
         modifier = Modifier.background(SessionButtonBackground),
-        color = SessionForeground,
+        color = SessionButtonForeground,
         onClick = onOpenSettings,
     )
 }
@@ -214,7 +214,7 @@ private fun RuntimeConfigurationStatusItems(
             tier = configuration.tier,
         ),
         modifier = Modifier.background(SessionButtonBackground),
-        color = SessionForeground,
+        color = SessionButtonForeground,
         enabled = enabled,
     )
     Text(" ")
@@ -222,7 +222,7 @@ private fun RuntimeConfigurationStatusItems(
         dropdownState = dropdowns.requestUserInputMode,
         label = configuration.requestUserInputMode.displayName(),
         modifier = Modifier.background(SessionButtonBackground),
-        color = SessionForeground,
+        color = SessionButtonForeground,
         enabled = enabled,
     )
     Text(" ")
@@ -230,7 +230,7 @@ private fun RuntimeConfigurationStatusItems(
         dropdownState = dropdowns.agentMode,
         label = configuration.agentMode.displayName(),
         modifier = Modifier.background(SessionButtonBackground),
-        color = SessionForeground,
+        color = SessionButtonForeground,
         enabled = enabled,
     )
 }
@@ -249,21 +249,21 @@ private fun RuntimeConfigurationStatusItemsWithoutSpacing(
             tier = configuration.tier,
         ),
         modifier = Modifier.background(SessionButtonBackground),
-        color = SessionForeground,
+        color = SessionButtonForeground,
         enabled = enabled,
     )
     TuiDropdownTrigger(
         dropdownState = dropdowns.requestUserInputMode,
         label = configuration.requestUserInputMode.displayName(),
         modifier = Modifier.background(SessionButtonBackground),
-        color = SessionForeground,
+        color = SessionButtonForeground,
         enabled = enabled,
     )
     TuiDropdownTrigger(
         dropdownState = dropdowns.agentMode,
         label = configuration.agentMode.displayName(),
         modifier = Modifier.background(SessionButtonBackground),
-        color = SessionForeground,
+        color = SessionButtonForeground,
         enabled = enabled,
     )
 }
@@ -278,7 +278,7 @@ internal fun WorkingDirectoryStatusButton(
     TuiButton(
         label = workingDirectoryStatusLabel(workingDirectory, columns),
         modifier = Modifier.background(SessionButtonBackground),
-        color = SessionForeground,
+        color = SessionButtonForeground,
         enabled = enabled,
         onClick = onBrowse,
     )

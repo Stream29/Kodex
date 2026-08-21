@@ -276,7 +276,7 @@ val webRunToolClientTest by testSuite {
                 WebRunToolClient(
                     client = client,
                     sessionId = testSessionId(),
-                    modelProvider = { testModel() },
+                    modelProvider = { TestModel },
                 ),
             )
             val completed = withContext(Dispatchers.Default) {

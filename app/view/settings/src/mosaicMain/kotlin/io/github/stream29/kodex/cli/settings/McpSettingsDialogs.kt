@@ -151,9 +151,9 @@ internal fun BoxScope.McpServerEditorDialog(
 
     TuiDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.width(width).background(SettingsHomeBackground),
+        modifier = Modifier.width(width).background(SettingsDialogBackground),
     ) {
-        Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
+        Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogBackground)) {
             Text(
                 value = if (existing == null) "Add MCP server" else "Edit MCP server",
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
@@ -256,9 +256,9 @@ internal fun BoxScope.McpServerDetailsDialog(
         .coerceIn(1, McpDetailsMaximumWidth)
     TuiDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.width(width).background(SettingsHomeBackground),
+        modifier = Modifier.width(width).background(SettingsDialogBackground),
     ) {
-        Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
+        Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogBackground)) {
             Text(
                 value = server.serverName,
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
@@ -380,9 +380,9 @@ internal fun BoxScope.McpDeleteConfirmationDialog(
         .coerceIn(1, McpDeleteMaximumWidth)
     TuiDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.width(width).background(SettingsHomeBackground),
+        modifier = Modifier.width(width).background(SettingsDialogBackground),
     ) {
-        Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
+        Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogBackground)) {
             Text(
                 "Delete MCP server",
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
@@ -433,9 +433,9 @@ internal fun BoxScope.McpImportDialog(
 
     TuiDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.width(width).height(height).background(SettingsHomeBackground),
+        modifier = Modifier.width(width).height(height).background(SettingsDialogBackground),
     ) {
-        Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
+        Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogBackground)) {
             Text(
                 "Import MCP servers from Codex",
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),

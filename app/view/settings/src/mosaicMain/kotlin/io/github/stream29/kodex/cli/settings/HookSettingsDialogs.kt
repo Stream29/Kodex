@@ -67,9 +67,9 @@ internal fun BoxScope.HookEditorDialog(
 
     TuiDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.width(width).background(SettingsHomeBackground),
+        modifier = Modifier.width(width).background(SettingsDialogBackground),
     ) {
-        Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
+        Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogBackground)) {
             Text(
                 value = if (request.name == null) "Add Hook" else "Edit Hook",
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
@@ -113,9 +113,9 @@ internal fun BoxScope.HookDetailsDialog(
         .coerceIn(1, HookDetailsMaximumWidth)
     TuiDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.width(width).background(SettingsHomeBackground),
+        modifier = Modifier.width(width).background(SettingsDialogBackground),
     ) {
-        Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
+        Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogBackground)) {
             Text(
                 value = hook.name,
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
@@ -154,9 +154,9 @@ internal fun BoxScope.HookDeleteConfirmationDialog(
         .coerceIn(1, HookDeleteMaximumWidth)
     TuiDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.width(width).background(SettingsHomeBackground),
+        modifier = Modifier.width(width).background(SettingsDialogBackground),
     ) {
-        Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
+        Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogBackground)) {
             Text(
                 "Delete Hook",
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),

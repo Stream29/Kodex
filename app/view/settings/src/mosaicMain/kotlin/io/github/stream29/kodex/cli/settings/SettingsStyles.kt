@@ -132,12 +132,17 @@ internal val SettingsHeaderBackground: Color
 internal val SettingsNavigationBackground: Color
     @Composable
     @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.surfaceContainer
+    get() = Color.Unspecified
 
 internal val SettingsHomeBackground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.surface
+
+internal val SettingsDialogBackground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.surfaceContainer
 
 internal val SettingsFieldBackground: Color
     @Composable

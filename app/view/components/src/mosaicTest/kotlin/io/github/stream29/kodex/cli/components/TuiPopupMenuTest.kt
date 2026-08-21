@@ -33,6 +33,32 @@ private val popupMenuAnsiSnapshots = SnapshotStrategy { mosaic ->
 }
 
 val tuiPopupMenuTest by testSuite {
+    test("default popup uses a tonal container instead of the native background") {
+        val scheme = DefaultTuiColorScheme.copy(
+            surface = Color(1, 2, 3),
+            surfaceContainer = Color(12, 34, 56),
+        )
+
+        runMosaicTest(snapshotStrategy = popupMenuAnsiSnapshots) {
+            setContentAndSnapshot {
+                TuiTheme(colorScheme = scheme) {
+                    Box {
+                        PopupMenuHarness(state = TuiPopupMenuState()) {
+                            TuiPopupMenuItem(key = "item", onClick = {}) {
+                                Text("item")
+                            }
+                        }
+                    }
+                }
+            }
+            awaitSnapshotContaining("[item]")
+            val snapshot = draw().render(AnsiLevel.TRUECOLOR, supportsKittyUnderlines = false)
+
+            assertTrue("\u001B[48;2;12;34;56m[item]" in snapshot, snapshot)
+            assertFalse("\u001B[48;2;1;2;3m[item]" in snapshot, snapshot)
+        }
+    }
+
     test("keyboard navigation selects by stable key and dismisses the menu") {
         var expanded by mutableStateOf(true)
         var selected by mutableStateOf("")
@@ -206,7 +232,7 @@ val tuiPopupMenuTest by testSuite {
                 }
             }
             val snapshot = awaitSnapshotUntil { state.focusedKey == "selected" }
-            assertTrue("\u001B[7m[selected]\u001B[27m" in snapshot, snapshot)
+            assertTrue(";7m[selected]" in snapshot, snapshot)
         }
 
         assertEquals("selected", state.focusedKey)

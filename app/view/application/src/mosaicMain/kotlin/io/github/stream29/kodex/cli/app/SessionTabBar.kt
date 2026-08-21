@@ -120,7 +120,7 @@ internal fun SessionTabBar(
         TuiButton(
             label = "Sessions",
             modifier = Modifier.background(SessionButtonBackground),
-            color = SessionForeground,
+            color = SessionButtonForeground,
             onClick = onOpenSessions,
         )
         Text(" ")
@@ -144,7 +144,7 @@ internal fun SessionTabBar(
         TuiButton(
             label = "+",
             modifier = Modifier.background(SessionButtonBackground),
-            color = SessionForeground,
+            color = SessionButtonForeground,
             onClick = onCreateNewSession,
         )
     }

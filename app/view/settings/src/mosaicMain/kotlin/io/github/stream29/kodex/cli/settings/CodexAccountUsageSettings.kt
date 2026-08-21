@@ -350,9 +350,9 @@ private fun BoxScope.UsageResetDialog(
     val width = (LocalTerminalState.current.size.columns - 4).coerceIn(1, UsageResetMaximumWidth)
     TuiDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.width(width).background(SettingsHomeBackground),
+        modifier = Modifier.width(width).background(SettingsDialogBackground),
     ) {
-        Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
+        Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogBackground)) {
             Text(
                 value = title,
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),

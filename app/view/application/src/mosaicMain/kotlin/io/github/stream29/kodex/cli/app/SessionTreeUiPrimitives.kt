@@ -122,12 +122,17 @@ internal fun RequestUserInputMode.displayName(): String = when (this) {
 internal val SessionForeground: Color
     @Composable
     @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.onPrimary
+    get() = TuiTheme.colorScheme.onSurface
+
+internal val SessionButtonForeground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.onPrimaryContainer
 
 internal val SessionTopBarBackground: Color
     @Composable
     @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.primary
+    get() = Color.Unspecified
 
 internal val SessionButtonBackground: Color
     @Composable
@@ -147,7 +152,7 @@ internal val SettingsDialogForeground: Color
 internal val SettingsDialogHeaderBackground: Color
     @Composable
     @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.primary
+    get() = TuiTheme.colorScheme.surfaceContainerHigh
 
 internal val SettingsDialogNavigationBackground: Color
     @Composable
@@ -157,7 +162,7 @@ internal val SettingsDialogNavigationBackground: Color
 internal val SettingsDialogHomeBackground: Color
     @Composable
     @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.surface
+    get() = TuiTheme.colorScheme.surfaceContainer
 
 internal val SettingsDialogNewLineBackground: Color
     @Composable
@@ -177,7 +182,7 @@ internal val SettingsDialogModeBackground: Color
 internal val SettingsDialogActionBackground: Color
     @Composable
     @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.primary
+    get() = TuiTheme.colorScheme.surfaceContainerHigh
 internal const val HistoryComposerSeparatorRows: Int = 1
 
 private fun NewLineKey.matches(event: KeyEvent): Boolean = event.key == "Enter" && when (this) {

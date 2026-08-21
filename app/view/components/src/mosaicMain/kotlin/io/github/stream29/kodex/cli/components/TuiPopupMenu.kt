@@ -34,6 +34,7 @@ import com.jakewharton.mosaic.ui.Spacer
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.isSpecifiedColor
+import com.jakewharton.mosaic.ui.takeOrElse
 import com.jakewharton.mosaic.ui.unit.Constraints
 
 /** Receiver used to declare keyed content inside [TuiPopupMenu]. */
@@ -309,6 +310,9 @@ private fun BoxScope.TuiPopupMenuLevel(
     dismissGroup: () -> Unit,
     navigateBack: (() -> Unit)?,
 ) {
+    val resolvedBackgroundColor = backgroundColor.takeOrElse {
+        TuiTheme.colorScheme.surfaceContainer
+    }
     val focusedKey = state.resolveFocusedKey(entries)
     state.reconcile(entries, focusedKey)
     val latestDismissGroup = rememberUpdatedState(dismissGroup)
@@ -327,7 +331,7 @@ private fun BoxScope.TuiPopupMenuLevel(
             entries = entries,
             focusedKey = focusedKey,
             state = state,
-            backgroundColor = backgroundColor,
+            backgroundColor = resolvedBackgroundColor,
             modifier = modifier,
             dismiss = {
                 latestNavigateBack.value?.invoke() ?: latestDismissGroup.value()

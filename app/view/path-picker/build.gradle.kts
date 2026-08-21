@@ -14,6 +14,7 @@ kotlin {
         }
         mosaicTest.dependencies {
             implementation(project(":app-viewmodel-path-picker"))
+            implementation(project(":utils-kotlinx-io-coroutines"))
             implementation(libs.mosaic.testing)
         }
     }
