@@ -51,10 +51,7 @@ class AuthenticationSettingsTest {
             }
 
             assertTrue("Authentication unavailable" in snapshot, snapshot)
-            assertTrue(
-                "No credentials were found in the selected authentication source." in snapshot,
-                snapshot,
-            )
+            assertTrue("No credentials were found" in snapshot, snapshot)
             assertTrue("[Sign in]" in snapshot, snapshot)
         }
     }

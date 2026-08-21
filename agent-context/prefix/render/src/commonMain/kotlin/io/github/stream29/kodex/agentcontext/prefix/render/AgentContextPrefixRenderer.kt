@@ -62,9 +62,9 @@ private fun AgentsMdInstructions.render(cwd: Path): String {
         }
     }
     val instructions = buildString {
-        userInstruction?.let { instruction -> append(instruction.text) }
+        append(globalInstructions.joinToString(separator = "\n\n") { instruction -> instruction.text })
         if (projectInstructions.isNotEmpty()) {
-            if (userInstruction != null) append(ProjectDocSeparator)
+            if (globalInstructions.isNotEmpty()) append(ProjectDocSeparator)
             append(projectInstructions.joinToString(separator = "\n\n") { instruction -> instruction.text })
         }
     }
@@ -81,7 +81,7 @@ private fun AgentsMdInstructions.render(cwd: Path): String {
 }
 
 private fun AgentsMdInstructions.isNotEmpty(): Boolean =
-    userInstruction != null || projectInstructions.isNotEmpty()
+    globalInstructions.isNotEmpty() || projectInstructions.isNotEmpty()
 
 private fun AgentContextPrefix.renderEnvironmentContext(): String = promptXml {
     tag("environment_context") {

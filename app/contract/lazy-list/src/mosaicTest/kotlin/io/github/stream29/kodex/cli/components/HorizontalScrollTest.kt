@@ -29,7 +29,7 @@ val horizontalScrollTest by testSuite {
         assertEquals(4, state.viewportSize)
     }
 
-    test("wheel and page keys share the horizontal scroll state") {
+    test("native and vertical wheel input share the horizontal scroll state") {
         val state = ScrollState()
 
         runMosaicTest {
@@ -39,6 +39,14 @@ val horizontalScrollTest by testSuite {
                     ScrollableText(state = state, viewportWidth = 4)
                 },
             )
+
+            sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Press, MouseEvent.Button.WheelRight))
+            assertEquals("DEFG", awaitSnapshot())
+            assertEquals(3, state.value)
+
+            sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Press, MouseEvent.Button.WheelLeft))
+            assertEquals("ABCD", awaitSnapshot())
+            assertEquals(0, state.value)
 
             sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Press, MouseEvent.Button.WheelDown))
             assertEquals("DEFG", awaitSnapshot())

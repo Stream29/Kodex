@@ -22,6 +22,7 @@ import io.github.stream29.kodex.app.settings.contract.snapshotOrNull
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiDialogActionRow
+import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.openai.accountusage.CodexAccountRateLimit
 import io.github.stream29.kodex.openai.accountusage.CodexAccountRateLimitWindow
 import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageSection
@@ -36,30 +37,34 @@ internal fun CodexAccountUsageSettingsContent(
 ) {
     val snapshot = state.snapshotOrNull()
     Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
-        Text("Codex usage", color = SettingsForeground)
+        Text(
+            "Codex usage",
+            color = SettingsForeground,
+            textStyle = TuiTheme.typography.title,
+        )
         when {
             snapshot != null -> CodexAccountUsageSnapshotContent(snapshot)
             state is SettingsAccountUsageState.Unavailable ->
-                Text("Sign in to view Codex usage.", color = SettingsForeground)
+                Text("Sign in to view Codex usage.", color = SettingsSupportingForeground)
 
             state is SettingsAccountUsageState.Loading ->
-                Text("Loading usage…", color = SettingsForeground, textStyle = TextStyle.Dim)
+                Text("Loading usage…", color = SettingsSupportingForeground, textStyle = TextStyle.Dim)
 
             state is SettingsAccountUsageState.Failed ->
-                Text(state.message, color = SettingsForeground, textStyle = TextStyle.Dim)
+                Text(state.message, color = SettingsErrorForeground, textStyle = TextStyle.Dim)
         }
 
         when (state) {
             is SettingsAccountUsageState.Loading -> if (snapshot != null) {
-                Text("Refreshing usage…", color = SettingsForeground, textStyle = TextStyle.Dim)
+                Text("Refreshing usage…", color = SettingsSupportingForeground, textStyle = TextStyle.Dim)
             }
 
             is SettingsAccountUsageState.Failed -> if (snapshot != null) {
-                Text(state.message, color = SettingsForeground, textStyle = TextStyle.Dim)
+                Text(state.message, color = SettingsErrorForeground, textStyle = TextStyle.Dim)
             }
 
             is SettingsAccountUsageState.Redeeming ->
-                Text("Using a reset…", color = SettingsForeground, textStyle = TextStyle.Dim)
+                Text("Using a reset…", color = SettingsSupportingForeground, textStyle = TextStyle.Dim)
 
             is SettingsAccountUsageState.Available,
             is SettingsAccountUsageState.Unavailable,
@@ -74,7 +79,7 @@ internal fun CodexAccountUsageSettingsContent(
                 TuiButton(
                     label = "Refresh",
                     modifier = Modifier.background(SettingsHomeBackground),
-                    color = SettingsForeground,
+                    color = SettingsActionForeground,
                     enabled = !operationActive,
                     onClick = onRefresh,
                 )
@@ -82,7 +87,7 @@ internal fun CodexAccountUsageSettingsContent(
                 TuiButton(
                     label = "Use reset",
                     modifier = Modifier.background(SettingsHomeBackground),
-                    color = SettingsForeground,
+                    color = SettingsActionForeground,
                     enabled = state is SettingsAccountUsageState.Available &&
                         snapshot?.hasAvailableUsageReset() == true,
                     onClick = onUseReset,
@@ -185,6 +190,7 @@ internal fun BoxScope.UsageResetDialogHost(viewModel: GlobalSettingsViewModel) {
             title = "Usage limit resets",
             message = "Couldn't prepare a usage limit reset. Refresh usage and try again.",
             onDismiss = viewModel::dismissUsageReset,
+            isError = true,
         )
 
         is UsageResetState.Completed -> UsageResetMessageDialog(
@@ -229,7 +235,7 @@ private fun BoxScope.UsageResetPickerDialog(
                 .fillMaxWidth()
                 .background(SettingsActionBackground),
         ) {
-            TuiButton(label = "Cancel", color = SettingsForeground, onClick = onDismiss)
+            TuiButton(label = "Cancel", color = SettingsActionForeground, onClick = onDismiss)
         }
     }
 }
@@ -246,7 +252,7 @@ private fun BoxScope.UsageResetConfirmationDialog(
             Text(
                 value = "Expires $expiration",
                 modifier = Modifier.fillMaxWidth(),
-                color = SettingsForeground,
+                color = SettingsActionForeground,
             )
         }
         Text(
@@ -261,11 +267,11 @@ private fun BoxScope.UsageResetConfirmationDialog(
         ) {
             TuiButton(
                 label = "Go back",
-                color = SettingsForeground,
+                color = SettingsActionForeground,
                 autoFocus = true,
                 onClick = onBack,
             )
-            TuiButton(label = "Use reset", color = SettingsForeground, onClick = onConfirm)
+            TuiButton(label = "Use reset", color = SettingsActionForeground, onClick = onConfirm)
         }
     }
 }
@@ -289,7 +295,7 @@ private fun BoxScope.UsageResetFailureDialog(
         Text(
             value = "Couldn't reset usage. Please try again.",
             modifier = Modifier.fillMaxWidth(),
-            color = SettingsForeground,
+            color = SettingsErrorForeground,
         )
         TuiDialogActionRow(
             modifier = Modifier
@@ -298,11 +304,11 @@ private fun BoxScope.UsageResetFailureDialog(
         ) {
             TuiButton(
                 label = "Close",
-                color = SettingsForeground,
+                color = SettingsActionForeground,
                 autoFocus = true,
                 onClick = onDismiss,
             )
-            TuiButton(label = "Try again", color = SettingsForeground, onClick = onRetry)
+            TuiButton(label = "Try again", color = SettingsActionForeground, onClick = onRetry)
         }
     }
 }
@@ -312,9 +318,14 @@ private fun BoxScope.UsageResetMessageDialog(
     title: String,
     message: String,
     onDismiss: () -> Unit,
+    isError: Boolean = false,
 ) {
     UsageResetDialog(title = title, onDismiss = onDismiss) {
-        Text(message, modifier = Modifier.fillMaxWidth(), color = SettingsForeground)
+        Text(
+            message,
+            modifier = Modifier.fillMaxWidth(),
+            color = if (isError) SettingsErrorForeground else SettingsForeground,
+        )
         TuiDialogActionRow(
             modifier = Modifier
                 .fillMaxWidth()
@@ -322,7 +333,7 @@ private fun BoxScope.UsageResetMessageDialog(
         ) {
             TuiButton(
                 label = "Close",
-                color = SettingsForeground,
+                color = SettingsActionForeground,
                 autoFocus = true,
                 onClick = onDismiss,
             )
@@ -346,7 +357,7 @@ private fun BoxScope.UsageResetDialog(
                 value = title,
                 modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
                 color = SettingsForeground,
-                textStyle = TextStyle.Bold,
+                textStyle = TuiTheme.typography.headline,
             )
             content()
         }

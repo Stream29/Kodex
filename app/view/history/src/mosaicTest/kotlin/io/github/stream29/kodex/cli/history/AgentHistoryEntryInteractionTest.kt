@@ -272,7 +272,7 @@ val agentHistoryEntryInteractionTest by testSuite {
             if ("Error" !in failed) failed = awaitSnapshot()
 
             assertTrue("Error" in failed)
-            assertTrue("\u001B[38;2;255;0;0m" in failed)
+            assertTrue("\u001B[38;2;255;180;171m" in failed)
         }
     }
 }

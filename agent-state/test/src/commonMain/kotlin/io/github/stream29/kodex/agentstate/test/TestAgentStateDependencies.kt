@@ -17,6 +17,7 @@ public val TestAgentContextSettings: StateFlow<AgentContextSettings> =
     MutableStateFlow(
         object : AgentContextSettings {
             override val agentsHome: Path = Path(".")
+            override val kodexHome: Path = Path(".")
             override val shell: Shell = Shell(ShellType.Sh, Path("sh"))
         },
     )

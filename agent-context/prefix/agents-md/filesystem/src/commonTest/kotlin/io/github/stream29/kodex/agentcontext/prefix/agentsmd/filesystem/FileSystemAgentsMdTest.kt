@@ -11,52 +11,121 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 val fileSystemAgentsMdTest by testSuite {
-    test("loads precedence and returns filesystem changes on the next invocation") {
-        val root = temporaryDirectory("agents-md-refresh")
+    test("loads the four endpoint layers, ignores overrides, and refreshes") {
+        val root = temporaryDirectory("agents-md-layers")
         val agentsHome = Path(root, "agents-home")
+        val kodexHome = Path(root, "kodex-home")
         val project = Path(root, "project")
-        val cwd = Path(project, "module")
+        val intermediate = Path(project, "module")
+        val cwd = Path(intermediate, "leaf")
         SystemCoroutineFileSystem.createDirectories(agentsHome)
+        SystemCoroutineFileSystem.createDirectories(kodexHome)
         SystemCoroutineFileSystem.createDirectories(Path(project, ".git"))
+        SystemCoroutineFileSystem.createDirectories(intermediate)
         SystemCoroutineFileSystem.createDirectories(cwd)
         try {
-            SystemCoroutineFileSystem.writeString(Path(agentsHome, "AGENTS.md"), "ignored user rules")
-            SystemCoroutineFileSystem.writeString(Path(agentsHome, "AGENTS.override.md"), "user rules")
-            SystemCoroutineFileSystem.writeString(Path(project, "AGENTS.md"), "project rules")
-            SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.md"), "ignored module rules")
-            SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.override.md"), "module rules")
-            val initial = loadAgentsMd(agentsHome, cwd)
+            SystemCoroutineFileSystem.writeString(Path(agentsHome, "AGENTS.md"), "Agents rules")
+            SystemCoroutineFileSystem.writeString(Path(agentsHome, "AGENTS.override.md"), "Ignored Agents override")
+            SystemCoroutineFileSystem.writeString(Path(kodexHome, "AGENTS.md"), "Kodex rules")
+            SystemCoroutineFileSystem.writeString(Path(kodexHome, "AGENTS.override.md"), "Ignored Kodex override")
+            SystemCoroutineFileSystem.writeString(Path(project, "AGENTS.md"), "Git rules")
+            SystemCoroutineFileSystem.writeString(Path(intermediate, "AGENTS.md"), "Ignored intermediate rules")
+            SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.md"), "Cwd rules")
+            SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.override.md"), "Ignored cwd override")
+            val initial = loadAgentsMd(agentsHome, kodexHome, cwd)
 
-            assertEquals("user rules", initial.instructions.userInstruction?.text)
             assertEquals(
-                listOf("project rules", "module rules"),
+                listOf("Agents rules", "Kodex rules"),
+                initial.instructions.globalInstructions.map(AgentsMdInstruction::text),
+            )
+            assertEquals(
+                listOf("Git rules", "Cwd rules"),
                 initial.instructions.projectInstructions.map(AgentsMdInstruction::text),
             )
+            assertEquals(
+                listOf(
+                    SystemCoroutineFileSystem.resolve(Path(agentsHome, "AGENTS.md")),
+                    SystemCoroutineFileSystem.resolve(Path(kodexHome, "AGENTS.md")),
+                    SystemCoroutineFileSystem.resolve(Path(project, "AGENTS.md")),
+                    SystemCoroutineFileSystem.resolve(Path(cwd, "AGENTS.md")),
+                ),
+                initial.instructions.globalInstructions.map(AgentsMdInstruction::source) +
+                    initial.instructions.projectInstructions.map(AgentsMdInstruction::source),
+            )
 
-            SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.override.md"), "updated module rules")
-            val refreshed = loadAgentsMd(agentsHome, cwd)
-            assertEquals("updated module rules", refreshed.instructions.projectInstructions.last().text)
+            SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.md"), "Updated cwd rules")
+            val refreshed = loadAgentsMd(agentsHome, kodexHome, cwd)
+            assertEquals("Updated cwd rules", refreshed.instructions.projectInstructions.last().text)
             assertTrue(refreshed.warnings.isEmpty())
         } finally {
             deleteRecursively(root)
         }
     }
 
-    test("reports lossy decoding and project byte truncation") {
-        val root = temporaryDirectory("agents-md-warning")
-        val project = Path(root, "project")
-        SystemCoroutineFileSystem.createDirectories(Path(project, ".git"))
+    test("deduplicates physical endpoint roots and omits a missing Git layer") {
+        val root = temporaryDirectory("agents-md-root-deduplication")
+        val agentsHome = Path(root, "agents-home")
+        val kodexHome = Path(root, "kodex-home")
+        val cwd = Path(root, "working")
+        SystemCoroutineFileSystem.createDirectories(agentsHome)
+        SystemCoroutineFileSystem.createDirectories(kodexHome)
+        SystemCoroutineFileSystem.createDirectories(cwd)
         try {
+            SystemCoroutineFileSystem.writeString(Path(agentsHome, "AGENTS.md"), "Agents rules")
+            SystemCoroutineFileSystem.writeString(Path(kodexHome, "AGENTS.md"), "Kodex rules")
+            SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.md"), "Cwd rules")
+            val withoutGit = loadAgentsMd(agentsHome, kodexHome, cwd)
+
+            assertEquals(
+                listOf("Agents rules", "Kodex rules"),
+                withoutGit.instructions.globalInstructions.map(AgentsMdInstruction::text),
+            )
+            assertEquals(
+                listOf("Cwd rules"),
+                withoutGit.instructions.projectInstructions.map(AgentsMdInstruction::text),
+            )
+
+            SystemCoroutineFileSystem.createDirectories(Path(cwd, ".git"))
+            val rootEqualsCwd = loadAgentsMd(agentsHome, kodexHome, cwd)
+
+            assertEquals(
+                listOf("Cwd rules"),
+                rootEqualsCwd.instructions.projectInstructions.map(AgentsMdInstruction::text),
+            )
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    test("reports lossy decoding and keeps global documents outside the project budget") {
+        val root = temporaryDirectory("agents-md-warning")
+        val agentsHome = Path(root, "agents-home")
+        val kodexHome = Path(root, "kodex-home")
+        val project = Path(root, "project")
+        val cwd = Path(project, "module")
+        SystemCoroutineFileSystem.createDirectories(agentsHome)
+        SystemCoroutineFileSystem.createDirectories(kodexHome)
+        SystemCoroutineFileSystem.createDirectories(Path(project, ".git"))
+        SystemCoroutineFileSystem.createDirectories(cwd)
+        try {
+            SystemCoroutineFileSystem.writeString(Path(agentsHome, "AGENTS.md"), "Agents document")
+            SystemCoroutineFileSystem.writeString(Path(kodexHome, "AGENTS.md"), "Kodex document")
             SystemCoroutineFileSystem.writeBytes(
                 Path(project, "AGENTS.md"),
                 byteArrayOf(0xC3.toByte(), 0x28, 'a'.code.toByte(), 'b'.code.toByte()),
             )
+            SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.md"), "Cwd document")
             val snapshot = loadAgentsMd(
-                agentsHome = Path(root, "agents-home"),
-                cwd = project,
+                agentsHome = agentsHome,
+                kodexHome = kodexHome,
+                cwd = cwd,
                 projectDocMaxBytes = 3,
             )
 
+            assertEquals(
+                listOf("Agents document", "Kodex document"),
+                snapshot.instructions.globalInstructions.map(AgentsMdInstruction::text),
+            )
             assertEquals(1, snapshot.instructions.projectInstructions.size)
             val invalidUtf8 = snapshot.warnings.filterIsInstance<AgentsMdWarning.InvalidUtf8>()
             val truncated = snapshot.warnings.filterIsInstance<AgentsMdWarning.Truncated>()

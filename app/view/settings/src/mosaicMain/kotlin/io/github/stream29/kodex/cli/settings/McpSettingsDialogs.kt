@@ -64,7 +64,6 @@ internal fun BoxScope.McpServerEditorDialog(
         mutableStateOf(existing?.oauth != null)
     }
     val transportDropdown = rememberTuiDropdownState()
-    val oauthDropdown = rememberTuiDropdownState()
     var error by remember(request) { mutableStateOf<String?>(null) }
     val name = rememberInput(existing?.serverName.orEmpty())
     val httpUrl = rememberInput(existing?.streamableHttpUrl.orEmpty())
@@ -186,10 +185,10 @@ internal fun BoxScope.McpServerEditorDialog(
                     headers,
                     width,
                 )
-                SettingsDropdownField(
+                SettingsCheckboxItem(
                     label = "OAuth",
-                    selectedLabel = oauthEnabled.oauthEditorLabel(),
-                    dropdownState = oauthDropdown,
+                    checked = oauthEnabled,
+                    onCheckedChange = { enabled -> oauthEnabled = enabled },
                 )
                 if (oauthEnabled) {
                     McpInputField(
@@ -218,15 +217,15 @@ internal fun BoxScope.McpServerEditorDialog(
                 }
             }
             error?.let { message ->
-                Text(message, color = SettingsForeground, textStyle = TextStyle.Bold)
+                SettingsErrorText(message)
             }
             TuiDialogActionRow(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(SettingsActionBackground),
             ) {
-                TuiButton(label = "Cancel", color = SettingsForeground, onClick = onDismiss)
-                TuiButton(label = "Save", color = SettingsForeground, onClick = ::save)
+                TuiButton(label = "Cancel", color = SettingsActionForeground, onClick = onDismiss)
+                TuiButton(label = "Save", color = SettingsActionForeground, onClick = ::save)
             }
         }
     }
@@ -238,16 +237,6 @@ internal fun BoxScope.McpServerEditorDialog(
         backgroundColor = PopupMenuBackground,
         onSelect = { selected -> transport = selected },
     )
-    if (transport == McpTransportKind.StreamableHttp) {
-        TuiDropdownMenu(
-            dropdownState = oauthDropdown,
-            options = listOf(true, false),
-            selected = oauthEnabled,
-            optionLabel = Boolean::oauthEditorLabel,
-            backgroundColor = PopupMenuBackground,
-            onSelect = { enabled -> oauthEnabled = enabled },
-        )
-    }
 }
 
 /** Sanitized server details and commands kept out of the Global Settings main surface. */
@@ -320,10 +309,10 @@ internal fun BoxScope.McpServerDetailsDialog(
             ) {
                 TuiButton(
                     label = if (server.enabled) "Disable" else "Enable",
-                    color = SettingsForeground,
+                    color = SettingsActionForeground,
                     onClick = onSetEnabled,
                 )
-                TuiButton(label = "Edit", color = SettingsForeground, onClick = onEdit)
+                TuiButton(label = "Edit", color = SettingsActionForeground, onClick = onEdit)
                 TuiButton(
                     label = "Delete",
                     color = TuiTheme.colorScheme.error,
@@ -335,25 +324,25 @@ internal fun BoxScope.McpServerDetailsDialog(
                     .fillMaxWidth()
                     .background(SettingsActionBackground),
             ) {
-                TuiButton(label = "Close", color = SettingsForeground, onClick = onDismiss)
+                TuiButton(label = "Close", color = SettingsActionForeground, onClick = onDismiss)
                 when (server.authentication) {
                     McpAuthenticationState.LoginRequired,
                     McpAuthenticationState.ReauthorizationRequired,
                     is McpAuthenticationState.Failed,
                         -> {
-                        TuiButton(label = "Log in", color = SettingsForeground, onClick = onLogin)
+                        TuiButton(label = "Log in", color = SettingsActionForeground, onClick = onLogin)
                     }
 
                     McpAuthenticationState.Authorized,
                     McpAuthenticationState.Refreshing,
                         -> {
-                        TuiButton(label = "Log out", color = SettingsForeground, onClick = onLogout)
+                        TuiButton(label = "Log out", color = SettingsActionForeground, onClick = onLogout)
                     }
 
                     McpAuthenticationState.Authorizing -> {
                         TuiButton(
                             label = "Cancel login",
-                            color = SettingsForeground,
+                            color = SettingsActionForeground,
                             onClick = onCancelLogin,
                         )
                     }
@@ -363,7 +352,7 @@ internal fun BoxScope.McpServerDetailsDialog(
                 if (server.status is McpServerSettingsStatus.Failed) {
                     TuiButton(
                         label = "Reconnect",
-                        color = SettingsForeground,
+                        color = SettingsActionForeground,
                         onClick = onReconnect,
                     )
                 }
@@ -408,7 +397,7 @@ internal fun BoxScope.McpDeleteConfirmationDialog(
             ) {
                 TuiButton(
                     label = "Cancel",
-                    color = SettingsForeground,
+                    color = SettingsActionForeground,
                     autoFocus = true,
                     onClick = onDismiss,
                 )
@@ -470,14 +459,14 @@ internal fun BoxScope.McpImportDialog(
                     Row {
                         TuiButton(
                             label = "Select all",
-                            color = SettingsForeground,
+                            color = SettingsActionForeground,
                             enabled = preview.items.any { item -> item.selectable },
                             onClick = { decisions = preview.defaultImportDecisions() },
                         )
                         Text(" ")
                         TuiButton(
                             label = "Clear",
-                            color = SettingsForeground,
+                            color = SettingsActionForeground,
                             enabled = selectedCount > 0,
                             onClick = {
                                 decisions = preview.items.associate { item ->
@@ -522,10 +511,10 @@ internal fun BoxScope.McpImportDialog(
                     .fillMaxWidth()
                     .background(SettingsActionBackground),
             ) {
-                TuiButton(label = "Cancel", color = SettingsForeground, onClick = onDismiss)
+                TuiButton(label = "Cancel", color = SettingsActionForeground, onClick = onDismiss)
                 TuiButton(
                     label = "Import selected ($selectedCount)",
-                    color = SettingsForeground,
+                    color = SettingsActionForeground,
                     enabled = preview != null && selectedCount > 0,
                     onClick = {
                         preview?.let { current -> onApply(current.id, decisions) }
@@ -678,8 +667,6 @@ private fun McpTransportKind.editorLabel(): String =
         McpTransportKind.StreamableHttp -> "HTTP"
         McpTransportKind.Stdio -> "stdio"
     }
-
-private fun Boolean.oauthEditorLabel(): String = if (this) "Enabled" else "None"
 
 private fun McpImportItemKind.importLabel(): String =
     when (this) {

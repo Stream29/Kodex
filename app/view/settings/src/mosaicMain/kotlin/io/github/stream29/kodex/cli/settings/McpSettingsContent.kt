@@ -8,6 +8,7 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
+import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.app.settings.contract.McpServerSettingsState
 import io.github.stream29.kodex.app.settings.contract.McpServerSettingsStatus
 import io.github.stream29.kodex.cli.components.TuiButton
@@ -29,16 +30,20 @@ internal fun McpSettingsContent(
                 .fillMaxWidth()
                 .background(SettingsSectionHeaderBackground),
         ) {
-            Text("MCP servers ", color = SettingsForeground)
+            Text(
+                "MCP servers ",
+                color = SettingsForeground,
+                textStyle = TuiTheme.typography.title,
+            )
             TuiButton(
                 label = "Add",
-                color = SettingsForeground,
+                color = SettingsActionForeground,
                 onClick = onAdd,
             )
             Text(" ")
             TuiButton(
                 label = "Import from Codex",
-                color = SettingsForeground,
+                color = SettingsActionForeground,
                 onClick = onImport,
             )
         }
@@ -54,6 +59,7 @@ internal fun McpSettingsContent(
                     label = "${server.serverName} · ${server.status.settingsLabel()}",
                     modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground),
                     color = SettingsForeground,
+                    idleTextStyle = TuiTheme.typography.body + TextStyle.Bold,
                     onClick = { onOpenDetails(server) },
                 )
             }

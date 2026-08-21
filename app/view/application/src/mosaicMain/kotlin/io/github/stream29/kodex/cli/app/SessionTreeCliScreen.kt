@@ -48,6 +48,7 @@ import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.TuiPopupMenuItem
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.items
+import io.github.stream29.kodex.cli.components.tuiColorSchemeFor
 import io.github.stream29.kodex.cli.pathpicker.DirectoryPickerPopup
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.OpenAiLoginPopup
@@ -110,7 +111,7 @@ public fun SessionTreeCliScreen(
     val runtimeSettings = collectRuntimeSettings(settingsOwner)
     val runtimeModels = collectRuntimeModels(settingsOwner)
 
-    TuiTheme {
+    TuiTheme(colorScheme = tuiColorSchemeFor(terminal.theme)) {
         TuiPopupHost {
             Column(modifier = Modifier.width(columns).height(rows)) {
                 SessionTabBar(

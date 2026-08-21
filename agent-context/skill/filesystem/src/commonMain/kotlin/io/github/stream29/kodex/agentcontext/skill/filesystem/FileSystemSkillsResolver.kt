@@ -23,11 +23,12 @@ import kotlinx.io.files.Path
 import kotlinx.io.readByteArray
 
 /**
- * Filesystem resolver for global skills and the project containing the requested cwd.
+ * Filesystem resolver for configured global skills and the exact project
+ * endpoints containing the requested cwd.
  *
  * The metadata cache lives for the lifetime of this resolver. Each [resolve]
- * reads the current [contextSettings], so changing the Agents home changes the
- * global skill roots without replacing the cache-owning resolver.
+ * reads the current [contextSettings], so changing either global home changes
+ * the global skill roots without replacing the cache-owning resolver.
  */
 public class FileSystemSkillsResolver(
     private val contextSettings: StateFlow<AgentContextSettings>,
@@ -58,7 +59,7 @@ public class FileSystemSkillsResolver(
     ): ResolvedSkills {
         val warnings = mutableListOf<SkillWarning>()
         val discovered = mutableListOf<DiscoveredSkill>()
-        discoverRoots(cwd, context.agentsHome).forEach { root ->
+        discoverRoots(cwd, context.agentsHome, context.kodexHome).forEach { root ->
             scanRoot(root, discovered, warnings)
         }
 
@@ -78,25 +79,33 @@ public class FileSystemSkillsResolver(
         )
     }
 
-    private suspend fun discoverRoots(cwd: Path, configuredAgentsHome: Path): List<SkillRoot> {
+    private suspend fun discoverRoots(
+        workingDirectory: Path,
+        configuredAgentsHome: Path,
+        configuredKodexHome: Path,
+    ): List<SkillRoot> {
+        val cwd = fileSystem.resolve(workingDirectory)
         val agentsHome = fileSystem.resolveAllowingMissing(configuredAgentsHome)
-        val globalRoots = listOf(
-            SkillSource(HostAuthorityId, SkillScope.User, Path(agentsHome, "skills")),
-            SkillSource(HostAuthorityId, SkillScope.System, Path(agentsHome, "skills/.system")),
-        )
+        val kodexHome = fileSystem.resolveAllowingMissing(configuredKodexHome)
+        val projectRoot = nearestProjectRoot(cwd)
         return buildList {
-            projectDirectories(cwd).forEach { directory ->
-                addRootIfDirectory(
-                    SkillSource(
-                        authorityId = HostAuthorityId,
-                        scope = SkillScope.Repo,
-                        root = Path(directory, ProjectSkillsPath),
-                    ),
-                )
+            globalSkillRoots(agentsHome).forEach { source -> addRootIfDirectory(source) }
+            globalSkillRoots(kodexHome).forEach { source -> addRootIfDirectory(source) }
+            projectRoot?.let { root ->
+                projectSkillRoots(root).forEach { source -> addRootIfDirectory(source) }
             }
-            globalRoots.forEach { source -> addRootIfDirectory(source) }
+            projectSkillRoots(cwd).forEach { source -> addRootIfDirectory(source) }
         }.distinctBy { root -> root.source.root }
     }
+
+    private fun globalSkillRoots(home: Path): List<SkillSource> = listOf(
+        SkillSource(HostAuthorityId, SkillScope.User, Path(home, SkillsPath)),
+    )
+
+    private fun projectSkillRoots(root: Path): List<SkillSource> = listOf(
+        SkillSource(HostAuthorityId, SkillScope.Repo, Path(root, SkillsPath)),
+        SkillSource(HostAuthorityId, SkillScope.Repo, Path(root, ProjectAgentsSkillsPath)),
+    )
 
     private suspend fun MutableList<SkillRoot>.addRootIfDirectory(source: SkillSource) {
         if (fileSystem.metadataOrNull(source.root)?.isDirectory != true) return
@@ -214,28 +223,17 @@ public class FileSystemSkillsResolver(
         null
     }
 
-    private suspend fun projectDirectories(workingDirectory: Path): List<Path> {
-        val cwd = fileSystem.resolve(workingDirectory)
-        if (projectRootMarkers.isEmpty()) return listOf(cwd)
+    private suspend fun nearestProjectRoot(cwd: Path): Path? {
+        if (projectRootMarkers.isEmpty()) return null
         var cursor: Path? = cwd
-        var root: Path? = null
         while (cursor != null) {
             val current = cursor
             if (projectRootMarkers.any { marker -> fileSystem.metadataOrNull(Path(current, marker)) != null }) {
-                root = current
-                break
+                return current
             }
             cursor = current.parent
         }
-        val projectRoot = root ?: cwd
-        return buildList {
-            var current: Path? = cwd
-            while (current != null) {
-                add(current)
-                if (current == projectRoot) break
-                current = current.parent
-            }
-        }.asReversed()
+        return null
     }
 
 }
@@ -426,7 +424,8 @@ private val SkillScope.rank: Int
     }
 
 private const val SkillFileName: String = "SKILL.md"
-private const val ProjectSkillsPath: String = ".agents/skills"
+private const val SkillsPath: String = "skills"
+private const val ProjectAgentsSkillsPath: String = ".agents/skills"
 private const val HostAuthorityId: String = "host"
 private const val MaxScanDepth: Int = 6
 private const val MaxDirectoriesPerRoot: Int = 2_000
