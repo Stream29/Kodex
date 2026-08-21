@@ -1040,7 +1040,6 @@ private fun ReasoningEffort.displayName(): String = when (this) {
     ReasoningEffort.High -> "high"
     ReasoningEffort.XHigh -> "xhigh"
     ReasoningEffort.Max -> "max"
-    ReasoningEffort.Ultra -> "ultra"
     is ReasoningEffort.Custom -> wireName
 }
 
@@ -1068,7 +1067,6 @@ private val knownReasoningEfforts: List<ReasoningEffort> = listOf(
     ReasoningEffort.High,
     ReasoningEffort.XHigh,
     ReasoningEffort.Max,
-    ReasoningEffort.Ultra,
 )
 
 private const val SettingsMaximumWidth: Int = 84

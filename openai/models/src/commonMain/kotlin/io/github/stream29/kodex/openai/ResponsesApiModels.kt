@@ -447,10 +447,6 @@ public sealed interface ReasoningEffort {
         override val wireName: String = "max"
     }
 
-    public data object Ultra : Known {
-        override val wireName: String = "ultra"
-    }
-
     /** A future server-defined reasoning strength. */
     public data class Custom(
         override val wireName: String,

@@ -9,6 +9,7 @@ import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.ReasoningEffortPreset
 import io.github.stream29.kodex.openai.contextWindowTokenStatus
 import io.github.stream29.kodex.openai.client.OpenAiClient
 import io.github.stream29.kodex.openai.client.test.InMemoryOpenAiAuthStore
@@ -102,7 +103,7 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
             assertEquals(1_000_000L, catalog.resolve(OpenAiModelId("gpt-5.4")).maxContextWindow)
             assertEquals(ReasoningEffort.Low, catalog.resolve(OpenAiModelId("gpt-5.6-sol")).defaultReasoningLevel)
             assertEquals(
-                ReasoningEffort.Ultra,
+                ReasoningEffort.Max,
                 catalog.resolve(OpenAiModelId("gpt-5.6-sol")).supportedReasoningLevels.last().effort,
             )
         } finally {
@@ -184,6 +185,37 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
                 listOf(freshModel),
                 withTimeout(10.seconds) { catalog.models.first { it == listOf(freshModel) } },
             )
+        } finally {
+            catalog.close()
+        }
+    }
+
+    test("normalizes duplicate remote reasoning presets at startup and explicit refresh") {
+        val providerMax = ReasoningEffortPreset(ReasoningEffort.Max, "Provider Max")
+        val legacyUltra = ReasoningEffortPreset(ReasoningEffort.Max, "Legacy Ultra")
+        val future = ReasoningEffortPreset(ReasoningEffort.Custom("future"), "Future")
+        val remoteModel = model("normalized-model").copy(
+            defaultReasoningLevel = ReasoningEffort.Max,
+            supportedReasoningLevels = listOf(providerMax, legacyUltra, future),
+        )
+        val expectedModel = remoteModel.copy(
+            supportedReasoningLevels = listOf(providerMax, future),
+        )
+        val catalog = OpenAiModelCatalog(
+            client = mockOpenAiClient {
+                listModels { OpenAiResult.Success(ModelsResponse(listOf(remoteModel))) }
+            },
+        )
+        try {
+            val startupModels = withTimeout(10.seconds) {
+                catalog.models.first { models ->
+                    models.singleOrNull()?.slug == remoteModel.slug
+                }
+            }
+            assertEquals(listOf(expectedModel), startupModels)
+
+            assertEquals(listOf(expectedModel), catalog.refresh())
+            assertEquals(listOf(expectedModel), catalog.models.value)
         } finally {
             catalog.close()
         }
