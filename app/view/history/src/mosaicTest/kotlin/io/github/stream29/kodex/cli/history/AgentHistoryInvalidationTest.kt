@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration
 
 val agentHistoryInvalidationTest by testSuite {
     test("destructive replacement keeps an in-flight lazy provider on one window") {
@@ -104,6 +105,8 @@ private class ReplaceableHistoryModel(
         StableCleanEvent.UserMessage(
             content = listOf(ContentItem.InputText(item.storageIndex.toString())),
         )
+
+    override suspend fun elapsedSincePrevious(item: HistoryItemViewModel): Duration? = null
 
     override fun contains(generation: Long, storageIndex: Int): Boolean {
         val window = mutableCommittedItems.value

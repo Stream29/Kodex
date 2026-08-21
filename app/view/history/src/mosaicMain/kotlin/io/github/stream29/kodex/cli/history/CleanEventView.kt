@@ -15,6 +15,7 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.SubcomposeLayout
+import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.constrainHeight
@@ -67,6 +68,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanE
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.cli.components.EllipsizedText
+import io.github.stream29.kodex.cli.components.EllipsizedTextWithTrailingContent
 import io.github.stream29.kodex.cli.components.TuiPressable
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.tuiInteractionTextStyle
@@ -110,21 +112,28 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.microseconds
+import kotlin.time.Duration.Companion.milliseconds
 
 /** Renders one committed clean event without flattening its domain model first. */
 @Composable
 public fun StableCleanEvent.render(
     shellSessions: AgentShellSessionRegistry? = null,
 ) {
-    render(shellSessions, expansion = null)
+    render(shellSessions, expansion = null, elapsed = null)
 }
 
 @Composable
 internal fun StableCleanEvent.render(
     shellSessions: AgentShellSessionRegistry?,
     expansion: HistoryExpansionBinding?,
+    elapsed: Duration?,
 ) {
-    CompositionLocalProvider(LocalHistoryExpansion provides expansion) {
+    CompositionLocalProvider(
+        LocalHistoryExpansion provides expansion,
+        LocalHistoryElapsed provides elapsed,
+    ) {
         when (this) {
             is StableCleanEvent.UserMessage -> renderUserMessage()
             is StableCleanEvent.AssistantMessage -> renderAssistantMessage()
@@ -140,6 +149,7 @@ internal fun StableCleanEvent.render(
                 event = this,
                 expanded = expansion?.expanded?.invoke(),
                 onToggleExpanded = expansion?.toggle,
+                headerTrailingText = elapsed?.historyElapsedSuffix(),
             )
             is StableCommandExecutionToolEvent -> renderCommandExecution(shellSessions)
             is StableJsonToolEvent -> renderJsonTool()
@@ -164,6 +174,7 @@ internal class HistoryExpansionBinding(
 )
 
 private val LocalHistoryExpansion = staticCompositionLocalOf<HistoryExpansionBinding?> { null }
+private val LocalHistoryElapsed = staticCompositionLocalOf<Duration?> { null }
 
 /** Renders one current unfinished clean event without reducing it to raw history. */
 @Composable
@@ -702,7 +713,7 @@ internal fun ToolEvent(
             },
             modifier = Modifier.fillMaxWidth(),
         ) { _, isHovered, isPressed ->
-            EllipsizedText(
+            HistoryItemHeader(
                 value = "${if (expanded) "v" else ">"} $summary",
                 modifier = Modifier.fillMaxWidth(),
                 color = headerColor,
@@ -816,8 +827,9 @@ private fun ExpandableHistoryEvent(
             },
             modifier = Modifier.fillMaxWidth(),
         ) { _, isHovered, isPressed ->
-            WrappedHistoryText(
+            HistoryItemHeader(
                 value = "${if (expanded) "v" else ">"} $header",
+                modifier = Modifier.fillMaxWidth(),
                 textStyle = tuiInteractionTextStyle(
                     hovered = isHovered,
                     pressed = isPressed,
@@ -837,7 +849,58 @@ private fun Header(
     value: String,
     textStyle: TextStyle,
 ) {
-    WrappedHistoryText(value, textStyle)
+    HistoryItemHeader(
+        value = value,
+        modifier = Modifier.fillMaxWidth(),
+        textStyle = textStyle,
+    )
+}
+
+@Composable
+internal fun HistoryItemHeader(
+    value: String,
+    elapsed: Duration? = LocalHistoryElapsed.current,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    textStyle: TextStyle = TextStyle.Unspecified,
+) {
+    if (elapsed == null) {
+        EllipsizedText(
+            value = value,
+            modifier = modifier,
+            color = color,
+            textStyle = textStyle,
+        )
+    } else {
+        EllipsizedTextWithTrailingContent(
+            value = value,
+            modifier = modifier,
+            color = color,
+            textStyle = textStyle,
+        ) {
+            Text(
+                value = elapsed.historyElapsedSuffix(),
+                color = color,
+                textStyle = textStyle + TextStyle.Dim,
+            )
+        }
+    }
+}
+
+private fun Duration.historyElapsedSuffix(): String =
+    " · +${roundToMilliseconds()}"
+
+private fun Duration.roundToMilliseconds(): Duration {
+    if (!isFinite()) return this
+    val truncatedMilliseconds = inWholeMilliseconds
+    val truncated = truncatedMilliseconds.milliseconds
+    val remainder = this - truncated
+    val roundedMilliseconds = when {
+        remainder >= 500.microseconds -> truncatedMilliseconds + 1
+        remainder <= (-500).microseconds -> truncatedMilliseconds - 1
+        else -> truncatedMilliseconds
+    }
+    return roundedMilliseconds.milliseconds
 }
 
 @Composable

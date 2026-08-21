@@ -43,7 +43,11 @@ private fun PlanUpdateView(
 ) {
     val note = explanation?.trim()?.takeIf(String::isNotEmpty)
     Column(modifier = Modifier.fillMaxWidth()) {
-        WrappedHistoryText("• $title", titleStyle)
+        HistoryItemHeader(
+            value = "• $title",
+            modifier = Modifier.fillMaxWidth(),
+            textStyle = titleStyle,
+        )
         note?.let { WrappedHistoryText("  └ $it", TextStyle.Dim) }
         if (plan.isEmpty()) {
             val indent = if (note == null) "  └ " else "    "

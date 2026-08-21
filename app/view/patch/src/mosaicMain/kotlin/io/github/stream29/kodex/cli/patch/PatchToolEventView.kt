@@ -22,6 +22,7 @@ import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.cli.components.EllipsizedTextWithTrailingContent
 import io.github.stream29.kodex.cli.components.TuiColorScheme
 import io.github.stream29.kodex.cli.components.TuiPressable
 import io.github.stream29.kodex.cli.components.TuiTheme
@@ -56,6 +57,7 @@ public fun StablePatchToolEventView(
     event: StablePatchToolEvent,
     expanded: Boolean? = null,
     onToggleExpanded: (() -> Unit)? = null,
+    headerTrailingText: String? = null,
 ) {
     require((expanded == null) == (onToggleExpanded == null)) {
         "External patch expansion value and toggle must be supplied together."
@@ -74,6 +76,7 @@ public fun StablePatchToolEventView(
         },
         changesExpandedState = changesExpanded,
         visibleLineCountState = visibleLineCount,
+        headerTrailingText = headerTrailingText,
     )
 }
 
@@ -84,6 +87,7 @@ private fun PatchToolEventView(
     onToggleExpanded: () -> Unit,
     changesExpandedState: MutableState<Boolean>,
     visibleLineCountState: MutableState<Int>,
+    headerTrailingText: String? = null,
 ) {
     val colorScheme = TuiTheme.colorScheme
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -91,18 +95,29 @@ private fun PatchToolEventView(
             onClick = onToggleExpanded,
             modifier = Modifier.fillMaxWidth(),
         ) { _, isHovered, isPressed ->
-            WrappedPatchText(
-                value = "${if (expanded) "v" else ">"} ${presentation.header}",
-                color = when (presentation.status) {
-                    PatchPresentationStatus.Running -> colorScheme.success
-                    PatchPresentationStatus.Completed -> colorScheme.onBackground
-                    PatchPresentationStatus.Failed -> colorScheme.error
-                },
-                textStyle = tuiInteractionTextStyle(
-                    hovered = isHovered,
-                    pressed = isPressed,
-                ),
+            val headerColor = when (presentation.status) {
+                PatchPresentationStatus.Running -> colorScheme.success
+                PatchPresentationStatus.Completed -> colorScheme.onBackground
+                PatchPresentationStatus.Failed -> colorScheme.error
+            }
+            val headerStyle = tuiInteractionTextStyle(
+                hovered = isHovered,
+                pressed = isPressed,
             )
+            EllipsizedTextWithTrailingContent(
+                value = "${if (expanded) "v" else ">"} ${presentation.header}",
+                modifier = Modifier.fillMaxWidth(),
+                color = headerColor,
+                textStyle = headerStyle,
+            ) {
+                headerTrailingText?.let { trailingText ->
+                    Text(
+                        value = trailingText,
+                        color = headerColor,
+                        textStyle = headerStyle + TextStyle.Dim,
+                    )
+                }
+            }
         }
 
         if (expanded) {
