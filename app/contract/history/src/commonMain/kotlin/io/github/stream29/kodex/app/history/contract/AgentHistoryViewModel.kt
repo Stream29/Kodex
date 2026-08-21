@@ -11,6 +11,7 @@ import io.github.stream29.kodex.cli.components.MutableScrollInteractionSource
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.time.Duration
 
 /**
  * Stable identity and minimal presentation state for one committed history item.
@@ -237,6 +238,15 @@ public interface AgentHistoryViewModel : AutoCloseable {
 
     /** Reads the exact committed event represented by [item] through the storage value LRU. */
     public suspend fun read(item: HistoryItemViewModel): StableCleanEvent
+
+    /**
+     * Returns the elapsed wall-clock time from the preceding committed event to [item].
+     *
+     * For a [HistoryItemViewModel.WorkGroup], the interval starts at the committed event before
+     * its oldest child and ends at its newest child. `null` means that no preceding event or exact
+     * timestamp pair is available.
+     */
+    public suspend fun elapsedSincePrevious(item: HistoryItemViewModel): Duration?
 
     /** Validates a generation-scoped committed storage target. */
     public fun contains(generation: Long, storageIndex: Int): Boolean

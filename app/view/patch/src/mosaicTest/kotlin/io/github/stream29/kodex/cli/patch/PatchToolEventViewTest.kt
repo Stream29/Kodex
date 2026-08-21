@@ -165,6 +165,49 @@ class PatchToolEventViewTest {
     }
 
     @Test
+    fun stablePatchKeepsElapsedAtTheEndOfItsHeader() = runTest {
+        val event = StablePatchToolEvent(
+            callId = "patch",
+            diff = Patch(
+                patch = "",
+                hunks = listOf(
+                    UpdateFileHunk(
+                        path = "file.txt",
+                        chunks = emptyList(),
+                    ),
+                ),
+            ),
+            result = StablePatchToolExecutionResult.Failure("not applied"),
+        )
+
+        runMosaicTest {
+            assertEquals(
+                "> Editing 1 file · +1.5s",
+                setContentAndSnapshot {
+                    Box(Modifier.width(40)) {
+                        StablePatchToolEventView(
+                            event = event,
+                            headerTrailingText = " · +1.5s",
+                        )
+                    }
+                },
+            )
+
+            assertEquals(
+                "> E... · +1.5s",
+                setContentAndSnapshot {
+                    Box(Modifier.width(14)) {
+                        StablePatchToolEventView(
+                            event = event,
+                            headerTrailingText = " · +1.5s",
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    @Test
     fun largePatchUsesABoundedNumberOfComposedTextNodes() = runTest {
         val patch = Patch(
             patch = "",

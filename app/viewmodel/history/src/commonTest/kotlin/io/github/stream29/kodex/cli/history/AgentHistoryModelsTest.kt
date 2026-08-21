@@ -30,11 +30,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 
 val agentHistoryModelsTest by testSuite {
     test("projects only multi-item sealed work runs") {
@@ -127,6 +129,103 @@ val agentHistoryModelsTest by testSuite {
                     },
                 )
                 assertIs<HistoryItemViewModel.Message>(committedItems.peek(0))
+            } finally {
+                model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("computes elapsed from exact timestamps at adjacent stable indexes") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify { storage ->
+                storage.stable[1] = userMessage("one")
+                storage.timestamp[1] = Instant.fromEpochSeconds(100)
+                storage.timestamp[2] = Instant.fromEpochSeconds(500)
+                storage.stable[4] = userMessage("four")
+                storage.timestamp[4] = Instant.fromEpochSeconds(111)
+                storage.stable[9] = userMessage("nine")
+                storage.timestamp[9] = Instant.fromEpochSeconds(125)
+            }
+            val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+            try {
+                model.awaitReady(itemCount = 3, hasOlder = false)
+                val window = model.committedItems.value
+                val newest = window.peek(0)
+                val middle = window.peek(1)
+                val oldest = window.peek(2)
+
+                assertEquals(14.seconds, model.elapsedSincePrevious(newest))
+                assertEquals(11.seconds, model.elapsedSincePrevious(middle))
+                assertEquals(null, model.elapsedSincePrevious(oldest))
+            } finally {
+                model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("omits elapsed when an exact timestamp is missing or time moves backwards") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify { storage ->
+                storage.stable[1] = userMessage("one")
+                storage.timestamp[1] = Instant.fromEpochSeconds(100)
+                storage.stable[2] = userMessage("two")
+                storage.stable[3] = userMessage("three")
+                storage.timestamp[3] = Instant.fromEpochSeconds(90)
+                storage.stable[4] = userMessage("four")
+                storage.timestamp[4] = Instant.fromEpochSeconds(80)
+            }
+            val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+            try {
+                model.awaitReady(itemCount = 4, hasOlder = false)
+                val window = model.committedItems.value
+
+                assertEquals(null, model.elapsedSincePrevious(window.peek(0)))
+                assertEquals(null, model.elapsedSincePrevious(window.peek(1)))
+                assertEquals(null, model.elapsedSincePrevious(window.peek(2)))
+                assertEquals(null, model.elapsedSincePrevious(window.peek(3)))
+            } finally {
+                model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("work group elapsed equals its expanded child intervals") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify { storage ->
+                storage.stable[1] = userMessage("before")
+                storage.timestamp[1] = Instant.fromEpochSeconds(100)
+                storage.stable[2] = textTool("older")
+                storage.timestamp[2] = Instant.fromEpochSeconds(102)
+                storage.stable[3] = textTool("newer")
+                storage.timestamp[3] = Instant.fromEpochSeconds(105)
+                storage.stable[4] = userMessage("breaker")
+                storage.timestamp[4] = Instant.fromEpochSeconds(110)
+            }
+            val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+            try {
+                model.awaitReady(itemCount = 3, hasOlder = false)
+                val group = assertIs<HistoryItemViewModel.WorkGroup>(
+                    model.committedItems.value.peek(1),
+                )
+                val newer = group.childAt(0)
+                val older = group.childAt(1)
+                val groupElapsed = model.elapsedSincePrevious(group)
+                val newerElapsed = model.elapsedSincePrevious(newer)
+                val olderElapsed = model.elapsedSincePrevious(older)
+
+                assertEquals(5.seconds, groupElapsed)
+                assertEquals(3.seconds, newerElapsed)
+                assertEquals(2.seconds, olderElapsed)
+                assertEquals(groupElapsed, newerElapsed!! + olderElapsed!!)
             } finally {
                 model.close()
                 repository.cancelAndJoin()
@@ -430,6 +529,9 @@ val agentHistoryModelsTest by testSuite {
 
                 val replacementWindow = model.committedItems.value
                 assertFalse(model.contains(initialGeneration, oldChild.storageIndex))
+                assertFailsWith<IllegalStateException> {
+                    model.elapsedSincePrevious(oldChild)
+                }
                 assertEquals(initialGeneration + 1, replacementWindow.generation)
                 assertEquals(9, replacementWindow.peek(0).storageIndex)
                 assertEquals(64, oldWindow.size)

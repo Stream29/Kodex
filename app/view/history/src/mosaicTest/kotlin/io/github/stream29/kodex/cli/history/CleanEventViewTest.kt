@@ -49,6 +49,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.nanoseconds
 
 class CleanEventViewTest {
     @Test
@@ -74,6 +76,111 @@ class CleanEventViewTest {
                             recipient = "child",
                             content = listOf(AgentMessageInputContent.InputText("delivered")),
                         ).render()
+                    }
+                },
+            )
+        }
+    }
+
+    @Test
+    fun stableHeadersRenderElapsedWithoutAllowingLongTitlesToDisplaceIt() = runTest {
+        val elapsed = 1_500.milliseconds
+        val tool = StableTextToolEvent(
+            callId = "call",
+            name = "very-long-tool-name",
+            arguments = JsonObject(emptyMap()),
+            result = "done",
+            success = true,
+        )
+        val plan = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate(
+            callId = "plan",
+            arguments = UpdatePlanArgs(plan = emptyList()),
+        )
+
+        runMosaicTest {
+            assertEquals(
+                "Assistant · +1.5s\nhello",
+                setContentAndSnapshot {
+                    Box(Modifier.width(40)) {
+                        StableCleanEvent.AssistantMessage(
+                            content = listOf(ContentItem.OutputText("hello")),
+                        ).render(
+                            shellSessions = null,
+                            expansion = null,
+                            elapsed = elapsed,
+                        )
+                    }
+                },
+            )
+
+            assertEquals(
+                "> very-long-tool-name · +1.5s",
+                setContentAndSnapshot {
+                    Box(Modifier.width(40)) {
+                        tool.render(
+                            shellSessions = null,
+                            expansion = null,
+                            elapsed = elapsed,
+                        )
+                    }
+                },
+            )
+
+            assertEquals(
+                "> v... · +1.5s",
+                setContentAndSnapshot {
+                    Box(Modifier.width(14)) {
+                        tool.render(
+                            shellSessions = null,
+                            expansion = null,
+                            elapsed = elapsed,
+                        )
+                    }
+                },
+            )
+
+            assertEquals(
+                "• Updated Plan · +1.5s\n  └ (no steps provided)",
+                setContentAndSnapshot {
+                    Box(Modifier.width(40)) {
+                        plan.render(
+                            shellSessions = null,
+                            expansion = null,
+                            elapsed = elapsed,
+                        )
+                    }
+                },
+            )
+
+            assertEquals(
+                "Context compacted · +1.5s",
+                setContentAndSnapshot {
+                    Box(Modifier.width(40)) {
+                        StableCleanEvent.ContextCompaction.render(
+                            shellSessions = null,
+                            expansion = null,
+                            elapsed = elapsed,
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    @Test
+    fun elapsedRoundsToMillisecondsBeforeUsingDefaultDurationFormatting() = runTest {
+        runMosaicTest {
+            assertEquals(
+                "Assistant · +1.501s\nhello",
+                setContentAndSnapshot {
+                    Box(Modifier.width(40)) {
+                        StableCleanEvent.AssistantMessage(
+                            content = listOf(ContentItem.OutputText("hello")),
+                        ).render(
+                            shellSessions = null,
+                            expansion = null,
+                            elapsed = 1_500_600_000.nanoseconds,
+                        )
                     }
                 },
             )

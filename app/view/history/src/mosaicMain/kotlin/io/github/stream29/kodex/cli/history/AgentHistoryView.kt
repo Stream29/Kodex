@@ -32,7 +32,6 @@ import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingKind
-import io.github.stream29.kodex.cli.components.EllipsizedText
 import io.github.stream29.kodex.cli.components.LazyColumn
 import io.github.stream29.kodex.cli.components.LazyListLayoutInfo
 import io.github.stream29.kodex.cli.components.LazyListState
@@ -50,6 +49,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlin.time.Duration
 
 /** Renders one Agent's complete History ViewModel. */
 @Composable
@@ -254,6 +254,27 @@ internal fun StoredHistoryWorkGroup(
         clickPosition: IntOffset?,
     ) -> Unit)?,
 ) {
+    val elapsed by produceState<Duration?>(
+        initialValue = null,
+        model,
+        group,
+        generation,
+    ) {
+        value = try {
+            val result = model.elapsedSincePrevious(group)
+            if (!model.contains(generation, group)) return@produceState
+            result
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            if (model.contains(generation, group)) {
+                HistoryViewLogger.error(failure) {
+                    "Unable to read elapsed time for committed history group ${group.indexRange}."
+                }
+            }
+            null
+        }
+    }
     Column(modifier = Modifier.fillMaxWidth()) {
         TuiPressable(
             onClick = {
@@ -263,8 +284,9 @@ internal fun StoredHistoryWorkGroup(
             focusRequester = focusRequester,
             modifier = Modifier.fillMaxWidth(),
         ) { _, isHovered, isPressed ->
-            EllipsizedText(
+            HistoryItemHeader(
                 value = "${if (group.expanded) "v" else ">"} Take ${group.itemCount} actions",
+                elapsed = elapsed,
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = tuiInteractionTextStyle(
                     hovered = isHovered,
@@ -343,12 +365,25 @@ private fun StoredHistoryContent(
     ) {
         value = try {
             val event = model.read(item)
-            if (!model.contains(generation, item.storageIndex)) return@produceState
-            StoredEventLoadState.Loaded(event)
+            if (!model.contains(generation, item)) return@produceState
+            val elapsed = try {
+                model.elapsedSincePrevious(item)
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Throwable) {
+                if (model.contains(generation, item)) {
+                    HistoryViewLogger.error(failure) {
+                        "Unable to read elapsed time for committed history item ${item.storageIndex}."
+                    }
+                }
+                null
+            }
+            if (!model.contains(generation, item)) return@produceState
+            StoredEventLoadState.Loaded(event, elapsed)
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            if (!model.contains(generation, item.storageIndex)) return@produceState
+            if (!model.contains(generation, item)) return@produceState
             HistoryViewLogger.error(failure) {
                 "Unable to read committed history item ${item.storageIndex}."
             }
@@ -368,6 +403,7 @@ private fun StoredHistoryContent(
             state.event.render(
                 shellSessions = shellSessions,
                 expansion = expansion,
+                elapsed = state.elapsed,
             )
         }
     }
@@ -530,7 +566,10 @@ private fun HistoryItemViewModel.expansionBinding(): HistoryExpansionBinding? = 
 private sealed interface StoredEventLoadState {
     data object Loading : StoredEventLoadState
     data object Failed : StoredEventLoadState
-    data class Loaded(val event: StableCleanEvent) : StoredEventLoadState
+    data class Loaded(
+        val event: StableCleanEvent,
+        val elapsed: Duration?,
+    ) : StoredEventLoadState
 }
 
 private data class PendingHistoryKey(
@@ -562,6 +601,17 @@ private enum class HistoryContentType {
     Context,
     WorkGroup,
     Marker,
+}
+
+private fun AgentHistoryViewModel.contains(
+    generation: Long,
+    item: HistoryItemViewModel,
+): Boolean = when (item) {
+    is HistoryItemViewModel.WorkGroup ->
+        contains(generation, item.indexRange.first) &&
+            contains(generation, item.indexRange.last)
+
+    else -> contains(generation, item.storageIndex)
 }
 
 private data object StreamingStartedHistoryKey

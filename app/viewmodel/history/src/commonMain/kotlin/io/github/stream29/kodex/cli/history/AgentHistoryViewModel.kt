@@ -38,6 +38,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.koin.core.annotation.Factory
 import org.koin.core.annotation.InjectedParam
+import kotlin.time.Duration
 
 /** Newest-first, demand-extended History View state for one Agent. */
 internal class AgentHistoryViewModelImpl(
@@ -146,6 +147,28 @@ internal class AgentHistoryViewModelImpl(
             }
         }
     }
+
+    override suspend fun elapsedSincePrevious(item: HistoryItemViewModel): Duration? =
+        committedReadSemaphore.withPermit {
+            val oldestIndex = item.oldestStorageIndex
+            val newestIndex = item.newestStorageIndex
+            check(mutableCommittedItems.value.contains(item)) {
+                "Committed history item $oldestIndex..$newestIndex is no longer current."
+            }
+            withContext(Dispatchers.Default) {
+                val previousIndex = agentState.storage.stable.prevIndex(oldestIndex)
+                    ?: return@withContext null
+                val timestamp = agentState.storage.timestamp
+                if (
+                    timestamp.floorToIndex(previousIndex) != previousIndex ||
+                    timestamp.floorToIndex(newestIndex) != newestIndex
+                ) {
+                    return@withContext null
+                }
+                (timestamp[newestIndex] - timestamp[previousIndex])
+                    .takeIf { elapsed -> elapsed >= Duration.ZERO && elapsed.isFinite() }
+            }
+        }
 
     override fun contains(generation: Long, storageIndex: Int): Boolean =
         mutableCommittedItems.value.let { window ->
@@ -601,6 +624,14 @@ private class CommittedHistoryItemWindow(
     }
 
     fun find(storageIndex: Int): HistoryItemViewModel? = sequence.find(storageIndex)
+
+    fun contains(item: HistoryItemViewModel): Boolean = when (item) {
+        is HistoryItemViewModel.WorkGroup ->
+            find(item.indexRange.first) === item.childAt(item.itemCount - 1) &&
+                find(item.indexRange.last) === item.childAt(0)
+
+        else -> find(item.storageIndex) === item
+    }
 }
 
 /**

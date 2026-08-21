@@ -34,6 +34,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 private val ansiSnapshots = SnapshotStrategy { mosaic ->
     mosaic.draw().render(AnsiLevel.TRUECOLOR, supportsKittyUnderlines = false)
@@ -165,10 +168,15 @@ val agentHistoryEntryInteractionTest by testSuite {
                 newer to textToolEvent(name = "newer"),
                 older to textToolEvent(name = "older"),
             ),
+            elapsed = mapOf(
+                group to 5.seconds,
+                newer to 3.seconds,
+                older to 2.seconds,
+            ),
         )
 
         runMosaicTest {
-            val collapsed = setContentAndSnapshot {
+            var collapsed = setContentAndSnapshot {
                 Column(modifier = Modifier.width(40)) {
                     StoredHistoryWorkGroup(
                         group = group,
@@ -183,7 +191,9 @@ val agentHistoryEntryInteractionTest by testSuite {
                     Text("callbacks=$callbackCount")
                 }
             }
-            assertTrue("> Take 2 actions" in collapsed)
+            while ("> Take 2 actions · +5s" !in collapsed) {
+                collapsed = awaitSnapshot()
+            }
 
             sendMouseEvent(MouseEvent(0, 0, MouseEvent.Type.Press, MouseEvent.Button.Right))
             sendMouseEvent(MouseEvent(0, 0, MouseEvent.Type.Release))
@@ -192,12 +202,13 @@ val agentHistoryEntryInteractionTest by testSuite {
             sendMouseEvent(MouseEvent(0, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
             sendMouseEvent(MouseEvent(0, 0, MouseEvent.Type.Release))
             var expanded = awaitSnapshot()
-            while ("> newer" !in expanded || "> older" !in expanded) {
+            while (
+                "> newer · +3s" !in expanded ||
+                "> older · +2s" !in expanded
+            ) {
                 expanded = awaitSnapshot()
             }
-            assertTrue("v Take 2 actions" in expanded)
-            assertTrue("> newer" in expanded)
-            assertTrue("> older" in expanded)
+            assertTrue("v Take 2 actions · +5s" in expanded)
             assertTrue(group.expanded)
 
             sendMouseEvent(MouseEvent(0, 1, MouseEvent.Type.Press, MouseEvent.Button.Right))
@@ -214,6 +225,67 @@ val agentHistoryEntryInteractionTest by testSuite {
             }
             assertTrue("v newer" in childExpanded)
             assertTrue(newer.expanded)
+        }
+    }
+
+    test("a committed entry renders elapsed returned by its model") {
+        val item = HistoryItemViewModel.Message(index = 30)
+        val model = SingleItemHistoryModel(
+            item = item,
+            readEvent = {
+                StableCleanEvent.AssistantMessage(
+                    listOf(ContentItem.OutputText("loaded")),
+                )
+            },
+            elapsed = 1_500.milliseconds,
+        )
+
+        runMosaicTest {
+            var rendered = setContentAndSnapshot {
+                Column(modifier = Modifier.width(24)) {
+                    StoredHistoryEntry(
+                        item = item,
+                        generation = 1,
+                        model = model,
+                        shellSessions = EmptyAgentShellSessionRegistry,
+                        onOpenContextMenu = { _, _, _, _ -> },
+                    )
+                }
+            }
+            while ("loaded" !in rendered) rendered = awaitSnapshot()
+
+            assertEquals("Assistant · +1.5s\nloaded", rendered)
+        }
+    }
+
+    test("an elapsed metadata failure does not replace committed content with Error") {
+        val item = HistoryItemViewModel.Message(index = 31)
+        val model = SingleItemHistoryModel(
+            item = item,
+            readEvent = {
+                StableCleanEvent.AssistantMessage(
+                    listOf(ContentItem.OutputText("loaded")),
+                )
+            },
+            elapsedFailure = IllegalStateException("broken timestamp"),
+        )
+
+        runMosaicTest {
+            var rendered = setContentAndSnapshot {
+                Column(modifier = Modifier.width(24)) {
+                    StoredHistoryEntry(
+                        item = item,
+                        generation = 1,
+                        model = model,
+                        shellSessions = EmptyAgentShellSessionRegistry,
+                        onOpenContextMenu = { _, _, _, _ -> },
+                    )
+                }
+            }
+            while ("loaded" !in rendered) rendered = awaitSnapshot()
+
+            assertEquals("Assistant\nloaded", rendered)
+            assertTrue("Error" !in rendered)
         }
     }
 
@@ -285,6 +357,8 @@ private object EmptyAgentShellSessionRegistry : AgentShellSessionRegistry {
 private class SingleItemHistoryModel(
     private val item: HistoryItemViewModel,
     private val readEvent: suspend () -> StableCleanEvent,
+    private val elapsed: Duration? = null,
+    private val elapsedFailure: Throwable? = null,
 ) : AgentHistoryViewModel {
     override val committedItems: StateFlow<HistoryItemWindow> =
         MutableStateFlow(SingleItemWindow(item))
@@ -302,6 +376,12 @@ private class SingleItemHistoryModel(
         return readEvent()
     }
 
+    override suspend fun elapsedSincePrevious(item: HistoryItemViewModel): Duration? {
+        require(item === this.item)
+        elapsedFailure?.let { failure -> throw failure }
+        return elapsed
+    }
+
     override fun contains(generation: Long, storageIndex: Int): Boolean =
         storageIndex == item.storageIndex
 
@@ -315,6 +395,7 @@ private class SingleItemHistoryModel(
 private class WorkGroupHistoryModel(
     group: HistoryItemViewModel.WorkGroup,
     private val events: Map<HistoryItemViewModel, StableCleanEvent>,
+    private val elapsed: Map<HistoryItemViewModel, Duration?> = emptyMap(),
 ) : AgentHistoryViewModel {
     override val committedItems: StateFlow<HistoryItemWindow> =
         MutableStateFlow(SingleItemWindow(group))
@@ -328,6 +409,8 @@ private class WorkGroupHistoryModel(
     override val followsLatest: Boolean = true
 
     override suspend fun read(item: HistoryItemViewModel): StableCleanEvent = events.getValue(item)
+
+    override suspend fun elapsedSincePrevious(item: HistoryItemViewModel): Duration? = elapsed[item]
 
     override fun contains(generation: Long, storageIndex: Int): Boolean =
         events.keys.any { item -> item.storageIndex == storageIndex }
