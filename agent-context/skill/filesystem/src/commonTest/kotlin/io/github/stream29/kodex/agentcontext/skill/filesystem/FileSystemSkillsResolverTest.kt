@@ -20,56 +20,119 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 val fileSystemSkillsResolverTest by testSuite {
-    test("keeps same-named skills and preserves source precedence") {
+    test("discovers four-layer roots while ignoring Home .system skills") {
         val root = temporaryDirectory("skills-catalog")
         val agentsHome = Path(root, "home/.agents")
-        val codexHome = Path(root, "home/.codex")
+        val kodexHome = Path(root, "kodex-home")
         val project = Path(root, "project")
-        val cwd = Path(project, "module")
-        val repoSkill = Path(project, ".agents/skills/repo-skill")
+        val intermediate = Path(project, "module")
+        val cwd = Path(intermediate, "leaf")
+        val gitDirectSkill = Path(project, "skills/git-direct")
+        val gitAgentsSkill = Path(project, ".agents/skills/git-agents")
+        val intermediateSkill = Path(intermediate, ".agents/skills/intermediate")
+        val cwdDirectSkill = Path(cwd, "skills/cwd-direct")
+        val cwdAgentsSkill = Path(cwd, ".agents/skills/cwd-agents")
         val userSkill = Path(agentsHome, "skills/user-skill")
         val systemSkill = Path(agentsHome, "skills/.system/system-skill")
-        val ignoredCodexSkill = Path(codexHome, "skills/ignored-codex-skill")
+        val kodexSkill = Path(kodexHome, "skills/kodex-skill")
+        val kodexSystemSkill = Path(kodexHome, "skills/.system/kodex-system-skill")
         listOf(
             Path(project, ".git"),
+            intermediate,
             cwd,
-            repoSkill,
+            gitDirectSkill,
+            gitAgentsSkill,
+            intermediateSkill,
+            cwdDirectSkill,
+            cwdAgentsSkill,
             userSkill,
             systemSkill,
-            ignoredCodexSkill,
+            kodexSkill,
+            kodexSystemSkill,
         ).forEach {
             SystemCoroutineFileSystem.createDirectories(it)
         }
         try {
-            writeSkill(repoSkill, "duplicate", "Repo description", "repo body")
+            writeSkill(gitDirectSkill, "git-direct", "Git direct description", "git direct body")
+            writeSkill(gitAgentsSkill, "duplicate", "Git Agents description", "git agents body")
+            writeSkill(intermediateSkill, "intermediate", "Ignored intermediate description", "intermediate body")
+            writeSkill(cwdDirectSkill, "cwd-direct", "Cwd direct description", "cwd direct body")
+            writeSkill(cwdAgentsSkill, "cwd-agents", "Cwd Agents description", "cwd agents body")
             writeSkill(userSkill, "duplicate", "User description", "user body")
             writeSkill(systemSkill, "system", "System description", "system body")
-            writeSkill(ignoredCodexSkill, "ignored", "Ignored Codex skill", "ignored body")
-            SystemCoroutineFileSystem.writeString(Path(repoSkill, "reference.txt"), "resource")
-            val resolver = fileSystemSkillsResolver(agentsHome)
+            writeSkill(kodexSkill, "kodex", "Kodex description", "kodex body")
+            writeSkill(kodexSystemSkill, "kodex-system", "Kodex system description", "kodex system body")
+            SystemCoroutineFileSystem.writeString(Path(gitAgentsSkill, "reference.txt"), "resource")
+            val resolver = fileSystemSkillsResolver(agentsHome, kodexHome)
             val resolved = resolver.resolve(cwd)
 
             assertEquals(
-                listOf(SkillScope.Repo, SkillScope.User, SkillScope.System),
+                listOf(
+                    SkillScope.Repo,
+                    SkillScope.Repo,
+                    SkillScope.Repo,
+                    SkillScope.Repo,
+                    SkillScope.User,
+                    SkillScope.User,
+                ),
                 resolved.skills.map { skill -> skill.source.scope },
             )
-            assertEquals(listOf("duplicate", "duplicate", "system"), resolved.skills.map { it.name })
-            assertTrue(resolved.skills.none { skill -> skill.name == "ignored" })
+            assertEquals(2, resolved.skills.count { skill -> skill.name == "duplicate" })
+            assertTrue(
+                setOf(
+                    "git-direct",
+                    "duplicate",
+                    "cwd-direct",
+                    "cwd-agents",
+                    "kodex",
+                ).all { name -> resolved.skills.any { skill -> skill.name == name } },
+            )
+            assertTrue(resolved.skills.none { skill -> skill.name == "intermediate" })
+            assertTrue(resolved.skills.none { skill -> skill.name in setOf("system", "kodex-system") })
 
-            val repo = resolved.skills.first()
+            val repo = resolved.skills.first { skill ->
+                skill.path == SystemCoroutineFileSystem.resolve(Path(gitAgentsSkill, "SKILL.md"))
+            }
             val document = assertIs<SkillResourceResult.Success<*>>(resolved.loadSkill(repo)).value
-            assertTrue(document.toString().contains("repo body"))
+            assertTrue(document.toString().contains("git agents body"))
             val resource = assertIs<SkillResourceResult.Success<*>>(
                 resolved.readResource(repo, Path("reference.txt")),
             ).value
             assertEquals("resource", (resource as ByteArray).decodeToString())
             assertIs<SkillResourceResult.Failure>(resolved.readResource(repo, Path("../outside.txt")))
 
-            writeSkill(repoSkill, "duplicate", "Updated repo description", "updated body")
+            writeSkill(gitAgentsSkill, "duplicate", "Updated Git Agents description", "updated body")
             assertEquals(
-                "Updated repo description",
-                resolver.resolve(cwd).skills.first().description,
+                "Updated Git Agents description",
+                resolver.resolve(cwd).skills.first { skill ->
+                    skill.path == SystemCoroutineFileSystem.resolve(Path(gitAgentsSkill, "SKILL.md"))
+                }.description,
             )
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    test("uses only cwd Skill roots when no Git root exists") {
+        val root = temporaryDirectory("skills-without-git")
+        val agentsHome = Path(root, "agents-home")
+        val cwd = Path(root, "working")
+        val directSkill = Path(cwd, "skills/direct")
+        val agentsSkill = Path(cwd, ".agents/skills/agents")
+        listOf(agentsHome, directSkill, agentsSkill).forEach { path ->
+            SystemCoroutineFileSystem.createDirectories(path)
+        }
+        try {
+            writeSkill(directSkill, "direct", "Direct description", "direct body")
+            writeSkill(agentsSkill, "agents", "Agents description", "agents body")
+
+            val resolved = fileSystemSkillsResolver(agentsHome).resolve(cwd)
+
+            assertEquals(
+                listOf("agents", "direct"),
+                resolved.skills.map { skill -> skill.name },
+            )
+            assertTrue(resolved.skills.all { skill -> skill.source.scope == SkillScope.Repo })
         } finally {
             deleteRecursively(root)
         }
@@ -262,17 +325,21 @@ private fun temporaryDirectory(name: String): Path =
 
 private fun fileSystemSkillsResolver(
     agentsHome: Path,
+    kodexHome: Path = Path(agentsHome, "kodex-home"),
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ): FileSystemSkillsResolver = FileSystemSkillsResolver(
-    contextSettings = MutableStateFlow(testContextSettings(agentsHome)),
+    contextSettings = MutableStateFlow(testContextSettings(agentsHome, kodexHome)),
     fileSystem = fileSystem,
 )
 
-private fun testContextSettings(agentsHome: Path): AgentContextSettings =
-    TestAgentContextSettings(agentsHome)
+private fun testContextSettings(
+    agentsHome: Path,
+    kodexHome: Path = Path(agentsHome, "kodex-home"),
+): AgentContextSettings = TestAgentContextSettings(agentsHome, kodexHome)
 
 private data class TestAgentContextSettings(
     override val agentsHome: Path,
+    override val kodexHome: Path,
 ) : AgentContextSettings {
     override val shell: Shell = TestShell
 }

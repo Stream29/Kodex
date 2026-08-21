@@ -16,7 +16,7 @@ import kotlin.test.assertTrue
 
 class McpSettingsDialogsTest {
     @Test
-    fun editorUsesDropdownsForTransportAndOAuth() = runTest {
+    fun editorUsesDropdownForTransportAndCheckboxForOAuth() = runTest {
         runMosaicTest {
             val initial = setContentAndSnapshot {
                 TuiPopupHost(modifier = Modifier.width(100).height(30)) {
@@ -29,9 +29,9 @@ class McpSettingsDialogsTest {
             }
 
             assertTrue("Transport [HTTP]" in initial, initial)
-            assertTrue("OAuth [None]" in initial, initial)
+            assertTrue("[ ] OAuth" in initial, initial)
             assertFalse("[HTTP] [stdio]" in initial, initial)
-            assertFalse("[Enabled] [None]" in initial, initial)
+            assertFalse("OAuth [" in initial, initial)
 
             sendKeyEvent(KeyboardEvent(codepoint = 9))
             sendKeyEvent(KeyboardEvent(codepoint = 13))

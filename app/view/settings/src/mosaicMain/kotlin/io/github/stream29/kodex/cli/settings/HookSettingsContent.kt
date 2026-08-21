@@ -9,6 +9,7 @@ import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.cli.components.TuiButton
+import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.hook.contract.HookManagedState
 import io.github.stream29.kodex.hook.contract.HookType
 
@@ -25,8 +26,12 @@ internal fun HookSettingsContent(
                 .fillMaxWidth()
                 .background(SettingsSectionHeaderBackground),
         ) {
-            Text("Hooks ", color = SettingsForeground)
-            TuiButton(label = "Add", color = SettingsForeground, onClick = onAdd)
+            Text(
+                "Hooks ",
+                color = SettingsForeground,
+                textStyle = TuiTheme.typography.title,
+            )
+            TuiButton(label = "Add", color = SettingsActionForeground, onClick = onAdd)
         }
         if (hooks.isEmpty()) {
             Text(
@@ -40,6 +45,7 @@ internal fun HookSettingsContent(
                     label = "${hook.name} · ${hook.type.settingsLabel()}",
                     modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground),
                     color = SettingsForeground,
+                    idleTextStyle = TuiTheme.typography.body + TextStyle.Bold,
                     onClick = { onOpenDetails(hook) },
                 )
             }

@@ -106,6 +106,47 @@ val scrollableStateTest by testSuite {
         )
     }
 
+    test("horizontal wheel publishes horizontal pointer interactions") {
+        val state = ScrollState()
+        state.updateBounds(maxValue = 4, viewportSize = 2)
+        val interactionSource = MutableScrollInteractionSource()
+        val interactions = mutableListOf<ScrollInteraction>()
+        val collector = launch(start = CoroutineStart.UNDISPATCHED) {
+            interactionSource.interactions.take(1).toList(interactions)
+        }
+
+        runMosaicTest {
+            assertEquals(
+                "0",
+                setContentAndSnapshot {
+                    Text(
+                        value = state.value.toString(),
+                        modifier = Modifier
+                            .width(4)
+                            .height(1)
+                            .scrollable(
+                                state = state,
+                                orientation = ScrollOrientation.Horizontal,
+                                interactionSource = interactionSource,
+                                wheelScrollLines = 2,
+                            ),
+                    )
+                },
+            )
+
+            sendMouseEvent(MouseEvent(0, 0, MouseEvent.Type.Press, MouseEvent.Button.WheelRight))
+            assertEquals("2", awaitSnapshot())
+        }
+        collector.join()
+
+        assertEquals(
+            listOf(
+                ScrollInteraction(ScrollInputSource.Pointer, ScrollOrientation.Horizontal, 2, 2),
+            ),
+            interactions,
+        )
+    }
+
     test("committed interaction observer runs synchronously and preserves flow publication") {
         val observed = mutableListOf<ScrollInteraction>()
         val interactionSource = MutableScrollInteractionSource { interaction ->
@@ -196,6 +237,47 @@ val scrollableStateTest by testSuite {
             assertEquals("1:1", awaitSnapshot())
             assertEquals(1, parentConsumptions)
         }
+    }
+
+    test("vertical scrolling lets native horizontal wheel input bubble to the parent") {
+        val state = ScrollState()
+        state.updateBounds(maxValue = 2, viewportSize = 1)
+        var parentConsumptions by mutableStateOf(0)
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Box(
+                    modifier = Modifier
+                        .width(4)
+                        .height(1)
+                        .onPointerEvent { event ->
+                            if (event.button == MouseEvent.Button.WheelRight) {
+                                parentConsumptions++
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                ) {
+                    Text(
+                        value = "${state.value}:$parentConsumptions",
+                        modifier = Modifier
+                            .width(4)
+                            .height(1)
+                            .scrollable(
+                                state = state,
+                                orientation = ScrollOrientation.Vertical,
+                            ),
+                    )
+                }
+            }
+
+            sendMouseEvent(MouseEvent(0, 0, MouseEvent.Type.Press, MouseEvent.Button.WheelRight))
+            assertEquals("0:1", awaitSnapshot())
+        }
+
+        assertEquals(0, state.value)
+        assertEquals(1, parentConsumptions)
     }
 
     test("paging uses the measured viewport and publishes keyboard interactions") {

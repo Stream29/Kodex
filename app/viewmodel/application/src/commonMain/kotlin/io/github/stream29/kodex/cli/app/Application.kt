@@ -160,6 +160,7 @@ public class KodexApplication private constructor(
                 .map { settings ->
                     ApplicationAgentContextSettings(
                         agentsHome = resolvedAgentsDirectory,
+                        kodexHome = dataDirectory,
                         shell = settings.shell,
                     )
                 }
@@ -168,6 +169,7 @@ public class KodexApplication private constructor(
                     started = SharingStarted.Eagerly,
                     initialValue = ApplicationAgentContextSettings(
                         agentsHome = resolvedAgentsDirectory,
+                        kodexHome = dataDirectory,
                         shell = globalSettings.settings.value.shell,
                     ),
                 )
@@ -408,6 +410,7 @@ private fun io.github.stream29.kodex.cli.settings.KodexNewSessionSettings.toAgen
 
 private data class ApplicationAgentContextSettings(
     override val agentsHome: Path,
+    override val kodexHome: Path,
     override val shell: Shell,
 ) : AgentContextSettings
 

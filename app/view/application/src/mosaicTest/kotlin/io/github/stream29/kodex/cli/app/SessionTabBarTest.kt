@@ -221,6 +221,54 @@ class SessionTabBarTest {
     }
 
     @Test
+    fun overflowingTabsRespondToNativeHorizontalWheelInput() = runTest {
+        val fixture = SessionViewModelTestFixture.create(this)
+        try {
+            val targets = (0 until 10).map { index ->
+                fixture.newSession("Tab $index")
+            }
+            val tabs = targets.mapIndexed { index, target ->
+                SessionTabRenderState(
+                    target = target,
+                    selected = index == 0,
+                    sessionName = "Tab $index",
+                )
+            }
+
+            runMosaicTest {
+                val initial = setContentAndSnapshot {
+                    Box(Modifier.width(32)) {
+                        SessionTabBar(
+                            tabs = tabs,
+                            runningIndicatorFrame = fixedRunningIndicatorFrame,
+                            columns = 32,
+                            onSelectTab = {},
+                            onOpenTabMenu = { _, _, _, _ -> },
+                            onCreateNewSession = {},
+                            onOpenSessions = {},
+                        )
+                    }
+                }
+                assertTrue("[Tab 0]" in initial, initial)
+                assertFalse("[Tab 2]" in initial, initial)
+
+                var scrolled = initial
+                repeat(3) {
+                    sendMouseEvent(
+                        MouseEvent(12, 0, MouseEvent.Type.Press, MouseEvent.Button.WheelRight),
+                    )
+                    scrolled = awaitSnapshot()
+                }
+
+                assertTrue("[Tab 2]" in scrolled, scrolled)
+                assertTrue("[Sessions]" in scrolled && "[+]" in scrolled, scrolled)
+            }
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
     fun selectedOverflowingTabAutomaticallyEntersTheViewport() = runTest {
         val fixture = SessionViewModelTestFixture.create(this)
         try {

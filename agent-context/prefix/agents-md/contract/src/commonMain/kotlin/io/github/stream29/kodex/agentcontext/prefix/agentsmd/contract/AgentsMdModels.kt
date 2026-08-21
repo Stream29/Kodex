@@ -16,14 +16,13 @@ public data class AgentsMdInstruction(
 /**
  * Ordered AGENTS.md instructions grouped by their application scope.
  *
- * @property userInstruction Nullable because the Agents home may contain no
- * readable, nonblank `AGENTS.override.md` or `AGENTS.md`; `null` means no
- * user-level instructions apply.
- * @property projectInstructions Project documents ordered from project root to
- * the selected working directory.
+ * @property globalInstructions Global documents ordered from Agents Home to
+ * Kodex Home.
+ * @property projectInstructions Project documents ordered from the nearest Git
+ * root to the selected working directory.
  */
 public data class AgentsMdInstructions(
-    public val userInstruction: AgentsMdInstruction? = null,
+    public val globalInstructions: List<AgentsMdInstruction> = emptyList(),
     public val projectInstructions: List<AgentsMdInstruction> = emptyList(),
 )
 

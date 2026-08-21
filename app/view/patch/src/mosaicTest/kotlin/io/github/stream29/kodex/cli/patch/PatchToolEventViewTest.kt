@@ -125,10 +125,10 @@ class PatchToolEventViewTest {
                 .draw()
                 .render(AnsiLevel.TRUECOLOR, supportsKittyUnderlines = false)
 
-            assertTrue("\u001B[38;2;255;0;0m- old" in rendered)
-            assertTrue("\u001B[38;2;0;255;0m+ new" in rendered)
+            assertTrue("\u001B[38;2;255;180;171m- old" in rendered)
+            assertTrue("\u001B[38;2;0;227;133m+ new" in rendered)
             assertTrue(
-                rendered.indexOf("38;2;0;255;0") < rendered.indexOf("v Editing 1 file"),
+                rendered.indexOf("38;2;0;227;133") < rendered.indexOf("v Editing 1 file"),
             )
         }
     }
@@ -159,7 +159,7 @@ class PatchToolEventViewTest {
                 supportsKittyUnderlines = false,
             )
 
-            assertTrue("38;2;255;0;0" in rendered)
+            assertTrue("38;2;255;180;171" in rendered)
             assertTrue("failed" !in rendered)
         }
     }

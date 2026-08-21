@@ -6,6 +6,8 @@ import com.jakewharton.mosaic.terminal.MouseEvent
 
 /**
  * Interprets wheel input as terminal-cell deltas along [orientation] for [state].
+ * Native horizontal wheel input is consumed only by horizontal scrollables; vertical wheel input
+ * remains a compatibility input for either logical axis.
  *
  * This modifier does not move, measure, or clip content. It consumes a wheel event only when
  * [ScrollableState.scrollBy] consumes a non-zero delta.
@@ -27,6 +29,16 @@ public fun Modifier.scrollable(
         val direction = when (event.button) {
             MouseEvent.Button.WheelUp -> -1
             MouseEvent.Button.WheelDown -> 1
+            MouseEvent.Button.WheelLeft -> {
+                if (orientation != ScrollOrientation.Horizontal) return@onPointerEvent false
+                -1
+            }
+
+            MouseEvent.Button.WheelRight -> {
+                if (orientation != ScrollOrientation.Horizontal) return@onPointerEvent false
+                1
+            }
+
             else -> return@onPointerEvent false
         }
         val requestedDelta = direction * wheelScrollLines * if (reverseDirection) -1 else 1

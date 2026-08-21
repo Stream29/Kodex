@@ -74,11 +74,11 @@ class SettingsDropdownFieldTest {
                 }
             }
 
-            assertTrue(";48;2;12;34;56m" in snapshot, snapshot)
-            assertFalse(";48;2;21;22;23m" in snapshot, snapshot)
-            assertFalse(";48;2;31;32;33m" in snapshot, snapshot)
-            assertFalse(";48;2;41;42;43m" in snapshot, snapshot)
-            assertFalse(";48;2;51;52;53m" in snapshot, snapshot)
+            assertTrue(";48;2;12;34;56" in snapshot, snapshot)
+            assertFalse(";48;2;21;22;23" in snapshot, snapshot)
+            assertFalse(";48;2;31;32;33" in snapshot, snapshot)
+            assertFalse(";48;2;41;42;43" in snapshot, snapshot)
+            assertFalse(";48;2;51;52;53" in snapshot, snapshot)
         }
     }
 }

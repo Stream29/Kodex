@@ -23,9 +23,11 @@ val agentContextPrefixRendererTest by testSuite {
         val skills = listOf(testSkill(1))
         val rendered = contextPrefix(
             agentMd = AgentsMdInstructions(
-                userInstruction = AgentsMdInstruction(
-                    source = Path("/home/stream/AGENTS.md"),
-                    text = "agent instructions",
+                globalInstructions = listOf(
+                    AgentsMdInstruction(
+                        source = Path("/home/stream/.agents/AGENTS.md"),
+                        text = "agent instructions",
+                    ),
                 ),
             ),
             availableSkills = skills,
@@ -44,12 +46,18 @@ val agentContextPrefixRendererTest by testSuite {
         )
     }
 
-    test("renders raw project AGENTS.md sources in discovery order") {
+    test("renders global and project AGENTS.md sources in discovery order") {
         val rendered = contextPrefix(
             agentMd = AgentsMdInstructions(
-                userInstruction = AgentsMdInstruction(
-                    Path("/home/stream/AGENTS.md"),
-                    "user instructions",
+                globalInstructions = listOf(
+                    AgentsMdInstruction(
+                        Path("/home/stream/.agents/AGENTS.md"),
+                        "Agents instructions",
+                    ),
+                    AgentsMdInstruction(
+                        Path("/home/stream/.kodex/AGENTS.md"),
+                        "Kodex instructions",
+                    ),
                 ),
                 projectInstructions = listOf(
                     AgentsMdInstruction(
@@ -70,7 +78,9 @@ val agentContextPrefixRendererTest by testSuite {
                     MessageRole.User,
                     agentMdForDirectory(
                         """
-                        user instructions
+                        Agents instructions
+
+                        Kodex instructions
 
                         --- project-doc ---
 

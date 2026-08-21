@@ -16,88 +16,63 @@ import kotlinx.io.readByteArray
 /** Loads a fresh AGENTS.md discovery snapshot from the current filesystem state. */
 public suspend fun loadAgentsMd(
     agentsHome: Path,
+    kodexHome: Path,
     cwd: Path,
     projectRootMarkers: List<String> = listOf(".git"),
-    projectDocFallbackFilenames: List<String> = emptyList(),
     projectDocMaxBytes: Int = DefaultProjectDocMaxBytes,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ): AgentsMdSnapshot {
     require(projectDocMaxBytes >= 0) { "Project document byte budget must be non-negative." }
-    val user = loadUserInstructions(agentsHome, fileSystem)
-    val project = loadProjectInstructions(
+    val roots = discoveryRoots(
+        agentsHome = agentsHome,
+        kodexHome = kodexHome,
         cwd = cwd,
         projectRootMarkers = projectRootMarkers,
-        projectDocFallbackFilenames = projectDocFallbackFilenames,
+        fileSystem = fileSystem,
+    )
+    val discoveredSources = mutableSetOf<Path>()
+    val global = loadInstructions(
+        roots = roots.global,
+        projectDocMaxBytes = null,
+        discoveredSources = discoveredSources,
+        fileSystem = fileSystem,
+    )
+    val project = loadInstructions(
+        roots = roots.project,
         projectDocMaxBytes = projectDocMaxBytes,
+        discoveredSources = discoveredSources,
         fileSystem = fileSystem,
     )
     return AgentsMdSnapshot(
         instructions = AgentsMdInstructions(
-            userInstruction = user.value,
+            globalInstructions = global.value,
             projectInstructions = project.value,
         ),
-        warnings = user.warnings + project.warnings,
+        warnings = global.warnings + project.warnings,
     )
 }
 
-/**
- * @return Loaded user-level instructions. The wrapped value is `null` when
- * no readable, nonblank user Agent instruction file exists.
- */
-private suspend fun loadUserInstructions(
-    agentsHome: Path,
-    fileSystem: CoroutineFileSystem,
-): Loaded<AgentsMdInstruction?> {
-    var warnings: List<AgentsMdWarning> = emptyList()
-    for (name in listOf(AgentsOverrideFileName, AgentsMdFileName)) {
-        val source = Path(agentsHome, name)
-        if (fileSystem.metadataOrNull(source)?.isRegularFile != true) continue
-        val resolved = fileSystem.resolve(source)
-        val bytes = when (val result = readBytes(fileSystem, resolved)) {
-            is ReadBytesResult.Success -> result.bytes
-            is ReadBytesResult.Failure -> {
-                warnings = warnings + result.warning
-                continue
-            }
-        }
-        val decoded = decode(bytes, resolved)
-        warnings = warnings + decoded.warnings
-        val text = decoded.value.trim()
-        if (text.isNotEmpty()) {
-            return Loaded(
-                value = AgentsMdInstruction(resolved, text),
-                warnings = warnings,
-            )
-        }
-    }
-    return Loaded(null, warnings)
-}
-
-private suspend fun loadProjectInstructions(
-    cwd: Path,
-    projectRootMarkers: List<String>,
-    projectDocFallbackFilenames: List<String>,
-    projectDocMaxBytes: Int,
+private suspend fun loadInstructions(
+    roots: List<Path>,
+    projectDocMaxBytes: Int?,
+    discoveredSources: MutableSet<Path>,
     fileSystem: CoroutineFileSystem,
 ): Loaded<List<AgentsMdInstruction>> {
-    if (projectDocMaxBytes == 0) return Loaded(emptyList())
     var remaining = projectDocMaxBytes
     var instructions: List<AgentsMdInstruction> = emptyList()
     var warnings: List<AgentsMdWarning> = emptyList()
-    for (directory in projectDirectories(cwd, projectRootMarkers, fileSystem)) {
+    for (root in roots) {
         if (remaining == 0) break
-        val source = candidateNames(projectDocFallbackFilenames)
-            .asSequence()
-            .map { name -> Path(directory, name) }
-            .firstOrNull { path -> fileSystem.metadataOrNull(path)?.isRegularFile == true }
-            ?: continue
+        val source = Path(root, AgentsMdFileName)
+        if (fileSystem.metadataOrNull(source)?.isRegularFile != true) continue
         val resolved = fileSystem.resolve(source)
+        if (!discoveredSources.add(resolved)) continue
         val metadata = fileSystem.metadataOrNull(resolved) ?: continue
         val bytes = when (
             val result = readBytes(
                 fileSystem = fileSystem,
                 source = resolved,
-                maxByteCount = remaining.toLong(),
+                maxByteCount = remaining?.toLong() ?: Long.MAX_VALUE,
             )
         ) {
             is ReadBytesResult.Success -> result.bytes
@@ -106,7 +81,7 @@ private suspend fun loadProjectInstructions(
                 continue
             }
         }
-        if (metadata.size > bytes.size) {
+        if (remaining != null && metadata.size > bytes.size) {
             warnings = warnings + AgentsMdWarning.Truncated(
                 source = resolved,
                 originalByteCount = metadata.size,
@@ -120,7 +95,7 @@ private suspend fun loadProjectInstructions(
             source = resolved,
             text = decoded.value,
         )
-        remaining -= bytes.size
+        if (remaining != null) remaining -= bytes.size
     }
     return Loaded(instructions, warnings)
 }
@@ -163,40 +138,57 @@ private fun decode(
     return Loaded(text, warnings)
 }
 
-private suspend fun projectDirectories(
-    workingDirectory: Path,
+private suspend fun discoveryRoots(
+    agentsHome: Path,
+    kodexHome: Path,
+    cwd: Path,
     projectRootMarkers: List<String>,
     fileSystem: CoroutineFileSystem,
-): List<Path> {
-    val cwd = fileSystem.resolve(workingDirectory)
-    if (projectRootMarkers.isEmpty()) return listOf(cwd)
+): AgentsMdRoots {
+    val resolvedCwd = fileSystem.resolve(cwd)
+    val projectRoot = nearestProjectRoot(resolvedCwd, projectRootMarkers, fileSystem)
+    val ordered = buildList {
+        add(AgentsMdRoot(fileSystem.resolveAllowingMissing(agentsHome), AgentsMdRootScope.Global))
+        add(AgentsMdRoot(fileSystem.resolveAllowingMissing(kodexHome), AgentsMdRootScope.Global))
+        projectRoot?.let { root -> add(AgentsMdRoot(root, AgentsMdRootScope.Project)) }
+        add(AgentsMdRoot(resolvedCwd, AgentsMdRootScope.Project))
+    }
+    val unique = linkedMapOf<Path, AgentsMdRoot>()
+    ordered.forEach { root ->
+        if (root.path !in unique) unique[root.path] = root
+    }
+    return AgentsMdRoots(
+        global = unique.values
+            .filter { root -> root.scope == AgentsMdRootScope.Global }
+            .map(AgentsMdRoot::path),
+        project = unique.values
+            .filter { root -> root.scope == AgentsMdRootScope.Project }
+            .map(AgentsMdRoot::path),
+    )
+}
+
+private suspend fun nearestProjectRoot(
+    cwd: Path,
+    projectRootMarkers: List<String>,
+    fileSystem: CoroutineFileSystem,
+): Path? {
+    if (projectRootMarkers.isEmpty()) return null
     var cursor: Path? = cwd
-    var root: Path? = null
     while (cursor != null) {
         val current = cursor
         if (projectRootMarkers.any { marker -> fileSystem.metadataOrNull(Path(current, marker)) != null }) {
-            root = current
-            break
+            return current
         }
         cursor = current.parent
     }
-    val projectRoot = root ?: cwd
-    return buildList {
-        var current: Path? = cwd
-        while (current != null) {
-            add(current)
-            if (current == projectRoot) break
-            current = current.parent
-        }
-    }.asReversed()
+    return null
 }
 
-private fun candidateNames(projectDocFallbackFilenames: List<String>): List<String> = buildList {
-    add(AgentsOverrideFileName)
-    add(AgentsMdFileName)
-    projectDocFallbackFilenames.forEach { name ->
-        if (name.isNotEmpty() && name !in this) add(name)
-    }
+private suspend fun CoroutineFileSystem.resolveAllowingMissing(path: Path): Path {
+    if (metadataOrNull(path) != null) return resolve(path)
+    val parent = path.parent
+    val resolvedParent = if (parent == null) resolve(Path(".")) else resolveAllowingMissing(parent)
+    return Path(resolvedParent, path.name)
 }
 
 private data class Loaded<out T>(
@@ -214,7 +206,21 @@ private sealed interface ReadBytesResult {
     ) : ReadBytesResult
 }
 
+private data class AgentsMdRoots(
+    val global: List<Path>,
+    val project: List<Path>,
+)
+
+private data class AgentsMdRoot(
+    val path: Path,
+    val scope: AgentsMdRootScope,
+)
+
+private enum class AgentsMdRootScope {
+    Global,
+    Project,
+}
+
 private const val AgentsMdFileName: String = "AGENTS.md"
-private const val AgentsOverrideFileName: String = "AGENTS.override.md"
 private const val DefaultProjectDocMaxBytes: Int = 32 * 1024
 private const val ReadSegmentByteCount: Long = 64 * 1024L

@@ -25,7 +25,7 @@ public class AgentContextPrefixResolver(
     public suspend fun resolve(settings: KodexAgentSettings): AgentContextPrefix {
         val context = contextSettings.value
         val cwd = settings.cwd
-        val agentsMd = loadAgentsMd(context.agentsHome, cwd)
+        val agentsMd = loadAgentsMd(context.agentsHome, context.kodexHome, cwd)
         val skills = skillsResolver.resolve(cwd, context)
         return AgentContextPrefix(
             cwd = cwd,

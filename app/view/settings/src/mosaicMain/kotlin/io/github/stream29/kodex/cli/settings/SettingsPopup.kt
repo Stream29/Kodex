@@ -3,7 +3,6 @@ package io.github.stream29.kodex.cli.settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,7 +17,6 @@ import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.BoxScope
-import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
@@ -79,7 +77,6 @@ public fun BoxScope.SettingsPopup(
     val selectedPage by viewModel.selectedPage.collectAsState()
     val dropdowns = SettingsDropdownStates(
         authentication = rememberTuiDropdownState(),
-        automaticSessionTitle = rememberTuiDropdownState(),
         model = rememberTuiDropdownState(),
         reasoning = rememberTuiDropdownState(),
         serviceTier = rememberTuiDropdownState(),
@@ -207,7 +204,7 @@ public fun BoxScope.SettingsPopup(
             ) {
                 TuiButton(
                     label = "Close",
-                    color = SettingsForeground,
+                    color = SettingsActionForeground,
                     onClick = onDismissRequest,
                 )
             }
@@ -422,46 +419,48 @@ private fun GlobalSettingsContent(
     val mcpServers by viewModel.mcpServers.collectAsState()
     val hooks by viewModel.hooks.collectAsState()
 
-    SettingsPathField(
-        label = "Codex home",
-        value = state.codexHome.toString(),
-        onBrowse = viewModel::requestCodexHome,
-    )
-    McpSettingsContent(
-        servers = mcpServers,
-        onAdd = onAddMcp,
-        onOpenDetails = onOpenMcp,
-        onImport = onImportMcp,
-    )
-    HookSettingsContent(
-        hooks = hooks,
-        onAdd = onAddHook,
-        onOpenDetails = onOpenHook,
-    )
+    SettingsSection(title = "General") {
+        SettingsPathField(
+            label = "Codex home",
+            value = state.codexHome.toString(),
+            onBrowse = viewModel::requestCodexHome,
+        )
+    }
+    SettingsSection(title = "Integrations") {
+        McpSettingsContent(
+            servers = mcpServers,
+            onAdd = onAddMcp,
+            onOpenDetails = onOpenMcp,
+            onImport = onImportMcp,
+        )
+        HookSettingsContent(
+            hooks = hooks,
+            onAdd = onAddHook,
+            onOpenDetails = onOpenHook,
+        )
+    }
     GlobalAuthenticationAndTitleSettingsContent(
         state = state,
         authentication = authentication,
         accountUsage = accountUsage,
         authenticationDropdown = dropdowns.authentication,
-        automaticSessionTitleDropdown = dropdowns.automaticSessionTitle,
         modelDropdown = dropdowns.model,
         reasoningDropdown = dropdowns.reasoning,
         onOpenLogin = viewModel::requestLogin,
         onRefreshUsage = viewModel::refreshUsage,
         onUseReset = viewModel::requestUsageReset,
+        onUpdateSessionTitleEnabled = viewModel::updateSessionTitleEnabled,
     )
-    Row(modifier = Modifier.fillMaxWidth().background(SettingsFieldBackground)) {
+    SettingsSection(title = "Input") {
         SettingsDropdownField(
             label = "New line key",
             selectedLabel = state.newLineKey.dialogLabel(),
             dropdownState = dropdowns.newLineKey,
-            modifier = Modifier.weight(1f),
         )
         SettingsDropdownField(
             label = "Submit key",
             selectedLabel = state.newLineKey.submitKey.dialogLabel(),
             dropdownState = dropdowns.submitKey,
-            modifier = Modifier.weight(1f),
         )
     }
 }
@@ -472,42 +471,54 @@ internal fun GlobalAuthenticationAndTitleSettingsContent(
     authentication: SettingsAuthenticationState,
     accountUsage: SettingsAccountUsageState,
     authenticationDropdown: TuiDropdownState,
-    automaticSessionTitleDropdown: TuiDropdownState,
     modelDropdown: TuiDropdownState,
     reasoningDropdown: TuiDropdownState,
     onOpenLogin: () -> Unit,
     onRefreshUsage: () -> Unit,
     onUseReset: () -> Unit,
+    onUpdateSessionTitleEnabled: (Boolean) -> Unit,
 ) {
-    SettingsDropdownField(
-        label = "Authentication",
-        selectedLabel = state.authSource.dialogLabel(),
-        dropdownState = authenticationDropdown,
-    )
-    AuthenticationSettingsContent(
-        authState = authentication,
-        onOpenLogin = onOpenLogin,
-    )
-    CodexAccountUsageSettingsContent(
-        state = accountUsage,
-        onRefresh = onRefreshUsage,
-        onUseReset = onUseReset,
-    )
-    SettingsDropdownField(
-        label = "Automatic session title",
-        selectedLabel = state.sessionTitle.enabled.enabledLabel(),
-        dropdownState = automaticSessionTitleDropdown,
-    )
-    SettingsDropdownField(
-        label = "Title model",
-        selectedLabel = state.effectiveSessionTitleModel.value,
-        dropdownState = modelDropdown,
-    )
-    SettingsDropdownField(
-        label = "Title reasoning",
-        selectedLabel = state.sessionTitle.reasoningEffort.displayName(),
-        dropdownState = reasoningDropdown,
-    )
+    SettingsSection(title = "Account") {
+        SettingsDropdownField(
+            label = "Authentication",
+            selectedLabel = state.authSource.dialogLabel(),
+            dropdownState = authenticationDropdown,
+        )
+        AuthenticationSettingsContent(
+            authState = authentication,
+            onOpenLogin = onOpenLogin,
+        )
+        CodexAccountUsageSettingsContent(
+            state = accountUsage,
+            onRefresh = onRefreshUsage,
+            onUseReset = onUseReset,
+        )
+    }
+    SettingsSection(title = "Session titles") {
+        SettingsCheckboxItem(
+            label = "Automatic session title",
+            checked = state.sessionTitle.enabled,
+            onCheckedChange = onUpdateSessionTitleEnabled,
+        )
+        SettingsDropdownField(
+            label = "Title model",
+            selectedLabel = state.effectiveSessionTitleModel.value,
+            dropdownState = modelDropdown,
+            enabled = state.sessionTitle.enabled,
+            supportingText = if (state.sessionTitle.enabled) {
+                null
+            } else {
+                "Available when automatic session titles are enabled."
+            },
+        )
+        SettingsDropdownField(
+            label = "Title reasoning",
+            selectedLabel = state.sessionTitle.reasoningEffort.displayName(),
+            dropdownState = reasoningDropdown,
+            enabled = state.sessionTitle.enabled,
+            supportingText = "Reasoning effort used to generate automatic session titles.",
+        )
+    }
 }
 
 @Composable
@@ -516,7 +527,6 @@ internal fun AuthenticationSettingsContent(
     onOpenLogin: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
-        Text("OpenAI account", color = SettingsForeground)
         when (authState) {
             is SettingsAuthenticationState.Authenticated -> {
                 val identity = authState.email
@@ -524,29 +534,26 @@ internal fun AuthenticationSettingsContent(
                     ?: authState.accountId
                         ?.let { accountId -> "Signed in as account $accountId" }
                     ?: "Signed in"
-                Text(identity, modifier = Modifier.fillMaxWidth(), color = SettingsForeground)
-                authState.planType?.let { plan ->
-                    Text(
-                        value = "Plan: ${plan.rawValue}",
-                        modifier = Modifier.fillMaxWidth(),
-                        color = SettingsForeground,
-                    )
-                }
+                SettingsItem(
+                    label = "OpenAI account",
+                    supportingText = authState.planType?.let { plan ->
+                        "$identity · Plan: ${plan.rawValue}"
+                    } ?: identity,
+                )
             }
 
             is SettingsAuthenticationState.Unavailable -> {
-                Text("Authentication unavailable", color = SettingsForeground)
-                Text(
-                    value = authState.reason.settingsDescription(),
-                    modifier = Modifier.fillMaxWidth(),
-                    color = SettingsForeground,
-                )
-                TuiButton(
-                    label = "Sign in",
-                    modifier = Modifier.background(SettingsHomeBackground),
-                    color = SettingsForeground,
-                    onClick = onOpenLogin,
-                )
+                SettingsItem(
+                    label = "OpenAI account",
+                    supportingText =
+                        "Authentication unavailable: ${authState.reason.settingsDescription()}",
+                ) {
+                    TuiButton(
+                        label = "Sign in",
+                        color = SettingsActionForeground,
+                        onClick = onOpenLogin,
+                    )
+                }
             }
         }
     }
@@ -567,15 +574,19 @@ private fun SessionSettingsContent(
 
         is SessionSettingsState.Available -> {
             val snapshot = current.snapshot
-            SessionNameSettingsContent(
-                snapshot = snapshot,
-                onRename = { viewModel.requestRename(snapshot.revision) },
-            )
-            WorkingDirectorySettingsContent(
-                snapshot = snapshot,
-                onBrowse = { viewModel.requestWorkingDirectory(snapshot.revision) },
-            )
-            ConfigurationSettingsContent(snapshot, dropdowns)
+            SettingsSection(title = "Identity") {
+                SessionNameSettingsContent(
+                    snapshot = snapshot,
+                    onRename = { viewModel.requestRename(snapshot.revision) },
+                )
+                WorkingDirectorySettingsContent(
+                    snapshot = snapshot,
+                    onBrowse = { viewModel.requestWorkingDirectory(snapshot.revision) },
+                )
+            }
+            SettingsSection(title = "Model behavior") {
+                ConfigurationSettingsContent(snapshot, dropdowns)
+            }
         }
     }
 }
@@ -585,17 +596,13 @@ private fun SessionNameSettingsContent(
     snapshot: SessionSettingsSnapshot,
     onRename: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
-        Text("Session name", color = SettingsForeground)
-        Text(
-            value = snapshot.sessionName,
-            modifier = Modifier.fillMaxWidth(),
-            color = SettingsForeground,
-        )
+    SettingsItem(
+        label = "Session name",
+        supportingText = snapshot.sessionName,
+    ) {
         TuiButton(
             label = "Rename",
-            modifier = Modifier.background(SettingsHomeBackground),
-            color = SettingsForeground,
+            color = SettingsActionForeground,
             onClick = onRename,
         )
     }
@@ -621,25 +628,16 @@ internal fun SettingsPathField(
     enabled: Boolean = true,
     onBrowse: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(SettingsSectionHeaderBackground),
-        ) {
-            Text("$label ", color = SettingsForeground)
-            TuiButton(
-                label = "Browse",
-                modifier = Modifier.background(SettingsSectionHeaderBackground),
-                color = SettingsForeground,
-                enabled = enabled,
-                onClick = onBrowse,
-            )
-        }
-        Text(
-            value = value,
-            modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground),
-            color = SettingsForeground,
+    SettingsItem(
+        label = label,
+        supportingText = value,
+        enabled = enabled,
+    ) {
+        TuiButton(
+            label = "Browse",
+            color = SettingsActionForeground,
+            enabled = enabled,
+            onClick = onBrowse,
         )
     }
 }
@@ -673,12 +671,14 @@ private fun ConfigurationSettingsContent(
         selectedLabel = configuration.agentMode.displayName(),
         dropdownState = dropdowns.agentMode,
         enabled = snapshot.editable,
+        supportingText = "Controls whether the agent may delegate work to sub-agents.",
     )
     SettingsDropdownField(
         label = "Questions",
         selectedLabel = configuration.requestUserInputMode.displayName(),
         dropdownState = dropdowns.requestUserInputMode,
         enabled = snapshot.editable,
+        supportingText = "Controls whether the agent may pause to ask for input.",
     )
 }
 
@@ -688,7 +688,9 @@ private fun NewSessionSettingsContent(
     dropdowns: SettingsDropdownStates,
 ) {
     val state by viewModel.state.collectAsState()
-    NewSessionConfigurationContent(state, dropdowns)
+    SettingsSection(title = "Model behavior") {
+        NewSessionConfigurationContent(state, dropdowns)
+    }
 }
 
 @Composable
@@ -715,11 +717,13 @@ private fun NewSessionConfigurationContent(
         label = "Agent mode",
         selectedLabel = state.settings.agentMode.displayName(),
         dropdownState = dropdowns.agentMode,
+        supportingText = "Controls whether the agent may delegate work to sub-agents.",
     )
     SettingsDropdownField(
         label = "Questions",
         selectedLabel = state.settings.requestUserInputMode.displayName(),
         dropdownState = dropdowns.requestUserInputMode,
+        supportingText = "Controls whether the agent may pause to ask for input.",
     )
 }
 
@@ -730,15 +734,18 @@ internal fun SettingsDropdownField(
     dropdownState: TuiDropdownState,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    supportingText: String? = null,
 ) {
-    Row(modifier = modifier.fillMaxWidth().background(SettingsFieldBackground)) {
-        Text(label, color = SettingsForeground)
-        Text(" ")
+    SettingsItem(
+        label = label,
+        supportingText = supportingText,
+        modifier = modifier,
+        enabled = enabled,
+    ) {
         TuiDropdownTrigger(
             dropdownState = dropdownState,
             label = selectedLabel,
-            modifier = Modifier.background(SettingsFieldBackground),
-            color = SettingsForeground,
+            color = if (enabled) SettingsForeground else SettingsSupportingForeground,
             enabled = enabled,
         )
     }
@@ -770,14 +777,6 @@ private fun BoxScope.GlobalSettingsDropdownMenus(
         optionLabel = KodexAuthSource::dialogLabel,
         backgroundColor = PopupMenuBackground,
         onSelect = viewModel::updateAuthSource,
-    )
-    TuiDropdownMenu(
-        dropdownState = dropdowns.automaticSessionTitle,
-        options = listOf(true, false),
-        selected = state.sessionTitle.enabled,
-        optionLabel = Boolean::enabledLabel,
-        backgroundColor = PopupMenuBackground,
-        onSelect = viewModel::updateSessionTitleEnabled,
     )
     TuiDropdownMenu(
         dropdownState = dropdowns.model,
@@ -971,7 +970,6 @@ private fun BoxScope.RenameSessionDialog(
 
 private class SettingsDropdownStates(
     val authentication: TuiDropdownState,
-    val automaticSessionTitle: TuiDropdownState,
     val model: TuiDropdownState,
     val reasoning: TuiDropdownState,
     val serviceTier: TuiDropdownState,
@@ -982,7 +980,6 @@ private class SettingsDropdownStates(
 ) {
     fun dismissAll() {
         authentication.dismiss()
-        automaticSessionTitle.dismiss()
         model.dismiss()
         reasoning.dismiss()
         serviceTier.dismiss()
@@ -1030,8 +1027,6 @@ private fun SubmitKey.dialogLabel(): String = when (this) {
     SubmitKey.CtrlEnter -> "Ctrl+Enter"
 }
 
-private fun Boolean.enabledLabel(): String = if (this) "Enabled" else "Disabled"
-
 private fun KodexAuthSource.dialogLabel(): String = when (this) {
     KodexAuthSource.Codex -> "Codex"
     KodexAuthSource.Kodex -> "Kodex"
@@ -1075,46 +1070,6 @@ private val knownReasoningEfforts: List<ReasoningEffort> = listOf(
     ReasoningEffort.Max,
     ReasoningEffort.Ultra,
 )
-
-internal val SettingsForeground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.onSurface
-
-internal val SettingsHeaderBackground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.primary
-
-internal val SettingsNavigationBackground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.surfaceContainer
-
-internal val SettingsHomeBackground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.surface
-
-internal val SettingsFieldBackground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.surface
-
-internal val SettingsSectionHeaderBackground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.surfaceContainerHigh
-
-internal val SettingsActionBackground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.primary
-
-internal val PopupMenuBackground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.surfaceContainer
 
 private const val SettingsMaximumWidth: Int = 84
 private const val SettingsNavigationWidth: Int = 18

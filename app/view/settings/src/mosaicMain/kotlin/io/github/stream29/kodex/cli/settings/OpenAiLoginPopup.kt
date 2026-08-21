@@ -3,7 +3,6 @@ package io.github.stream29.kodex.cli.settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import com.jakewharton.mosaic.LocalTerminalState
@@ -12,7 +11,6 @@ import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.BoxScope
-import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
@@ -128,7 +126,7 @@ private fun LoginContent(
             }
 
             is OpenAiLoginState.Failed -> {
-                Text(state.message, color = LoginDialogForeground)
+                Text(state.message, color = SettingsErrorForeground)
                 LoginActions(
                     primaryLabel = "Try again",
                     primaryAction = viewModel::start,
@@ -156,38 +154,34 @@ private fun LoginActions(
         onDismissRequest?.let { dismiss ->
             TuiButton(
                 label = "Cancel",
-                color = LoginDialogForeground,
+                color = SettingsActionForeground,
                 onClick = dismiss,
             )
         }
         primaryLabel?.let { label ->
             TuiButton(
                 label = label,
-                color = LoginDialogForeground,
+                color = SettingsActionForeground,
                 onClick = requireNotNull(primaryAction),
             )
         }
     }
 }
 
-private val LoginDialogForeground: Color
+private val LoginDialogForeground
     @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.onSurface
+    get() = SettingsForeground
 
-private val LoginDialogBackground: Color
+private val LoginDialogBackground
     @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.surface
+    get() = SettingsHomeBackground
 
-private val LoginDialogHeaderBackground: Color
+private val LoginDialogHeaderBackground
     @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.primary
+    get() = SettingsHeaderBackground
 
-private val LoginDialogActionBackground: Color
+private val LoginDialogActionBackground
     @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.primary
+    get() = SettingsActionBackground
 
 private const val LoginDialogMaximumWidth: Int = 72

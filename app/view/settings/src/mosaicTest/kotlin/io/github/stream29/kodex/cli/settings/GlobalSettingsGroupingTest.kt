@@ -38,12 +38,12 @@ class GlobalSettingsGroupingTest {
                         ),
                         accountUsage = SettingsAccountUsageState.Unavailable,
                         authenticationDropdown = rememberTuiDropdownState(),
-                        automaticSessionTitleDropdown = rememberTuiDropdownState(),
                         modelDropdown = rememberTuiDropdownState(),
                         reasoningDropdown = rememberTuiDropdownState(),
                         onOpenLogin = {},
                         onRefreshUsage = {},
                         onUseReset = {},
+                        onUpdateSessionTitleEnabled = {},
                     )
                 }
             }
@@ -51,7 +51,7 @@ class GlobalSettingsGroupingTest {
             val authentication = snapshot.indexOf("Authentication [Codex]")
             val account = snapshot.indexOf("OpenAI account")
             val usage = snapshot.indexOf("Codex usage")
-            val titleGeneration = snapshot.indexOf("Automatic session title [Enabled]")
+            val titleGeneration = snapshot.indexOf("[x] Automatic session title")
             assertTrue(authentication >= 0, snapshot)
             assertTrue(authentication < account, snapshot)
             assertTrue(account < usage, snapshot)

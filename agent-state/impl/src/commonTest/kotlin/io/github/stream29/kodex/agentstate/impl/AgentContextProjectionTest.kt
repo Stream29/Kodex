@@ -61,6 +61,7 @@ val agentContextProjectionTest by testSuite {
             val fixture = contextFixture("projection")
             try {
                 fixture.writeUserAgentsMd("user instructions")
+                fixture.writeKodexAgentsMd("kodex instructions")
                 fixture.writeProjectAgentsMd("project instructions")
                 val storage = InMemoryKodexAgentStorage(settings(cwd = fixture.project))
                 val requests = mutableListOf<ResponsesApiRequest>()
@@ -80,7 +81,7 @@ val agentContextProjectionTest by testSuite {
                 assertEquals(agentModeMessage(AgentMode.Single), input[1])
                 assertTrue(
                     input.contextText().contains(
-                        "user instructions\n\n--- project-doc ---\n\nproject instructions",
+                        "user instructions\n\nkodex instructions\n\n--- project-doc ---\n\nproject instructions",
                     ),
                 )
                 assertEquals(user, input.last())
@@ -167,6 +168,7 @@ val agentContextProjectionTest by testSuite {
                 fixture.writeUserAgentsMd("second instructions")
                 fixture.settings.value = ProjectionContextSettings(
                     agentsHome = fixture.agentsHome,
+                    kodexHome = fixture.kodexHome,
                     shell = Shell(ShellType.Zsh, Path("/bin/zsh")),
                 )
                 agent.updateSettings(
@@ -317,6 +319,7 @@ private fun List<ResponseItem>.text(): String =
 private class ContextFixture(
     val root: Path,
     val agentsHome: Path,
+    val kodexHome: Path,
     val project: Path,
     val settings: MutableStateFlow<AgentContextSettings>,
 ) {
@@ -326,6 +329,10 @@ private class ContextFixture(
 
     suspend fun writeProjectAgentsMd(text: String) {
         SystemCoroutineFileSystem.writeString(Path(project, "AGENTS.md"), text)
+    }
+
+    suspend fun writeKodexAgentsMd(text: String) {
+        SystemCoroutineFileSystem.writeString(Path(kodexHome, "AGENTS.md"), text)
     }
 
     suspend fun writeSkill(name: String, description: String) {
@@ -347,16 +354,20 @@ private class ContextFixture(
 private suspend fun contextFixture(name: String): ContextFixture {
     val root = Path(SystemTemporaryDirectory, "kodex-state-context-$name-${Random.nextLong()}")
     val agentsHome = Path(root, "agents-home")
+    val kodexHome = Path(root, "kodex-home")
     val project = Path(root, "project")
     SystemCoroutineFileSystem.createDirectories(agentsHome)
+    SystemCoroutineFileSystem.createDirectories(kodexHome)
     SystemCoroutineFileSystem.createDirectories(Path(project, ".git"))
     return ContextFixture(
         root = root,
         agentsHome = agentsHome,
+        kodexHome = kodexHome,
         project = project,
         settings = MutableStateFlow(
             ProjectionContextSettings(
                 agentsHome = agentsHome,
+                kodexHome = kodexHome,
                 shell = Shell(ShellType.Bash, Path("/bin/bash")),
             ),
         ),
@@ -365,6 +376,7 @@ private suspend fun contextFixture(name: String): ContextFixture {
 
 private data class ProjectionContextSettings(
     override val agentsHome: Path,
+    override val kodexHome: Path,
     override val shell: Shell,
 ) : AgentContextSettings
 

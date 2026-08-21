@@ -87,15 +87,15 @@ internal fun BoxScope.HookEditorDialog(
             }
             HookInputField("Command", command, width)
             error?.let { message ->
-                Text(message, color = SettingsForeground, textStyle = TextStyle.Bold)
+                SettingsErrorText(message)
             }
             TuiDialogActionRow(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(SettingsActionBackground),
             ) {
-                TuiButton(label = "Cancel", color = SettingsForeground, onClick = onDismiss)
-                TuiButton(label = "Save", color = SettingsForeground, onClick = ::save)
+                TuiButton(label = "Cancel", color = SettingsActionForeground, onClick = onDismiss)
+                TuiButton(label = "Save", color = SettingsActionForeground, onClick = ::save)
             }
         }
     }
@@ -132,8 +132,8 @@ internal fun BoxScope.HookDetailsDialog(
                     .fillMaxWidth()
                     .background(SettingsActionBackground),
             ) {
-                TuiButton(label = "Close", color = SettingsForeground, onClick = onDismiss)
-                TuiButton(label = "Edit", color = SettingsForeground, onClick = onEdit)
+                TuiButton(label = "Close", color = SettingsActionForeground, onClick = onDismiss)
+                TuiButton(label = "Edit", color = SettingsActionForeground, onClick = onEdit)
                 TuiButton(
                     label = "Delete",
                     color = TuiTheme.colorScheme.error,
@@ -171,7 +171,7 @@ internal fun BoxScope.HookDeleteConfirmationDialog(
             ) {
                 TuiButton(
                     label = "Cancel",
-                    color = SettingsForeground,
+                    color = SettingsActionForeground,
                     autoFocus = true,
                     onClick = onDismiss,
                 )
