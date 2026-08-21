@@ -137,7 +137,7 @@ public fun BoxScope.DirectoryPickerPopup(
             Text(
                 value = "Select directory",
                 modifier = Modifier.fillMaxWidth().background(DirectoryPickerHeaderBackground),
-                color = DirectoryPickerForeground,
+                color = DirectoryPickerPrimaryForeground,
                 textStyle = TuiTheme.typography.headline,
             )
             Text(
@@ -154,7 +154,7 @@ public fun BoxScope.DirectoryPickerPopup(
             Row(modifier = Modifier.fillMaxWidth().background(DirectoryPickerActionBackground)) {
                 TuiButton(
                     label = "Select",
-                    color = DirectoryPickerForeground,
+                    color = DirectoryPickerPrimaryForeground,
                     enabled = state.canConfirm,
                     onClick = viewModel::confirm,
                 )
@@ -224,7 +224,7 @@ public fun BoxScope.DirectoryPickerPopup(
             Row(modifier = Modifier.fillMaxWidth().background(DirectoryPickerActionBackground)) {
                 TuiButton(
                     label = "Cancel",
-                    color = DirectoryPickerForeground,
+                    color = DirectoryPickerPrimaryForeground,
                     onClick = onDismissRequest,
                 )
             }
@@ -267,12 +267,17 @@ private val DirectoryPickerForeground: Color
 private val DirectoryPickerBackground: Color
     @Composable
     @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.surface
+    get() = TuiTheme.colorScheme.surfaceContainer
 
 private val DirectoryPickerHeaderBackground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.primary
+
+private val DirectoryPickerPrimaryForeground: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = TuiTheme.colorScheme.onPrimary
 
 private val DirectoryPickerCurrentPathBackground: Color
     @Composable
@@ -282,7 +287,7 @@ private val DirectoryPickerCurrentPathBackground: Color
 private val DirectoryPickerListBackground: Color
     @Composable
     @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.surface
+    get() = TuiTheme.colorScheme.surfaceContainer
 
 private val DirectoryPickerActionBackground: Color
     @Composable

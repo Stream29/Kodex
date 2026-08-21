@@ -12,9 +12,9 @@ import com.jakewharton.mosaic.terminal.Terminal
 /**
  * Semantic terminal colors supplied to Kodex TUI components.
  *
- * [background] intentionally defaults to [Color.Unspecified]. The conversation history uses that
- * role so Mosaic does not fill otherwise empty cells and terminal-native text copying remains
- * intact. Surface roles are opaque and intended for bounded controls, sidebars, menus, and dialogs.
+ * [background] and [surface] intentionally use [Color.Unspecified]. Mosaic then leaves large
+ * background regions to the terminal instead of assuming black or any other configured color.
+ * Container roles remain available for bounded controls, headers, menus, and dialogs.
  */
 @Immutable
 public data class TuiColorScheme(
@@ -67,7 +67,7 @@ public val LightTuiColorScheme: TuiColorScheme = TuiColorScheme(
     onSecondaryContainer = Color(51, 75, 79),
     tertiaryContainer = Color(218, 226, 255),
     onTertiaryContainer = Color(59, 70, 100),
-    surface = Color(245, 250, 251),
+    surface = Color.Unspecified,
     onSurface = Color(23, 29, 30),
     onSurfaceVariant = Color(63, 72, 74),
     surfaceContainer = Color(233, 239, 240),
@@ -96,7 +96,7 @@ public val DarkTuiColorScheme: TuiColorScheme = TuiColorScheme(
     onSecondaryContainer = Color(205, 231, 236),
     tertiaryContainer = Color(59, 70, 100),
     onTertiaryContainer = Color(218, 226, 255),
-    surface = Color(14, 20, 21),
+    surface = Color.Unspecified,
     onSurface = Color(222, 227, 229),
     onSurfaceVariant = Color(191, 200, 202),
     surfaceContainer = Color(27, 33, 34),
@@ -109,8 +109,36 @@ public val DarkTuiColorScheme: TuiColorScheme = TuiColorScheme(
     onSuccess = Color(0, 57, 29),
 )
 
-/** Default scheme preserves the existing dark terminal appearance. */
-public val DefaultTuiColorScheme: TuiColorScheme = DarkTuiColorScheme
+/**
+ * Compatibility fallback used when no terminal-specific scheme is provided.
+ *
+ * The application normally supplies [LightTuiColorScheme] or [DarkTuiColorScheme] from the
+ * terminal theme. Keeping this fallback stable avoids breaking components rendered outside that
+ * application root.
+ */
+public val DefaultTuiColorScheme: TuiColorScheme = TuiColorScheme(
+    background = Color.Unspecified,
+    onBackground = Color.White,
+    primary = Color(28, 68, 74),
+    onPrimary = Color.White,
+    primaryContainer = Color(36, 78, 84),
+    onPrimaryContainer = Color.White,
+    secondaryContainer = Color(46, 58, 62),
+    onSecondaryContainer = Color.White,
+    tertiaryContainer = Color(42, 54, 58),
+    onTertiaryContainer = Color.White,
+    surface = Color.Unspecified,
+    onSurface = Color.White,
+    onSurfaceVariant = Color(190, 190, 195),
+    surfaceContainer = Color(42, 42, 46),
+    surfaceContainerHigh = Color(58, 58, 64),
+    surfaceContainerHighest = Color(62, 62, 66),
+    outline = Color(96, 96, 102),
+    error = Color.Red,
+    onError = Color.White,
+    success = Color.Green,
+    onSuccess = Color.White,
+)
 
 /** Selects a static scheme from the terminal-reported appearance. */
 public fun tuiColorSchemeFor(theme: Terminal.Theme): TuiColorScheme = when (theme) {

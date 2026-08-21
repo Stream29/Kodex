@@ -506,7 +506,7 @@ class CleanEventViewTest {
                 ansiLevel = AnsiLevel.TRUECOLOR,
                 supportsKittyUnderlines = false,
             )
-            assertTrue("38;2;0;227;133" in pending)
+            assertTrue("38;2;0;255;0" in pending)
             assertFalse("running" in pending)
 
             val normal = setContentAndSnapshot {
@@ -515,7 +515,7 @@ class CleanEventViewTest {
                 ansiLevel = AnsiLevel.TRUECOLOR,
                 supportsKittyUnderlines = false,
             )
-            assertTrue("38;2;222;227;229" in normal)
+            assertTrue("38;2;255;255;255" in normal)
             assertFalse("succeeded" in normal)
 
             val failure = setContentAndSnapshot {
@@ -524,7 +524,7 @@ class CleanEventViewTest {
                 ansiLevel = AnsiLevel.TRUECOLOR,
                 supportsKittyUnderlines = false,
             )
-            assertTrue("38;2;255;180;171" in failure)
+            assertTrue("38;2;255;0;0" in failure)
             assertFalse("failed" in failure)
         }
     }

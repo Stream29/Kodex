@@ -174,7 +174,7 @@ private val LoginDialogForeground
 
 private val LoginDialogBackground
     @Composable
-    get() = SettingsHomeBackground
+    get() = SettingsDialogBackground
 
 private val LoginDialogHeaderBackground
     @Composable

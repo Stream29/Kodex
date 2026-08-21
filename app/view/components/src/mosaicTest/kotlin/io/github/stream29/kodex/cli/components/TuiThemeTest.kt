@@ -17,8 +17,11 @@ import kotlin.math.pow
 val tuiThemeTest by testSuite {
     test("default background remains unspecified for transparent history rendering") {
         assertEquals(Color.Unspecified, DefaultTuiColorScheme.background)
+        assertEquals(Color.Unspecified, DefaultTuiColorScheme.surface)
         assertEquals(Color.Unspecified, LightTuiColorScheme.background)
+        assertEquals(Color.Unspecified, LightTuiColorScheme.surface)
         assertEquals(Color.Unspecified, DarkTuiColorScheme.background)
+        assertEquals(Color.Unspecified, DarkTuiColorScheme.surface)
     }
 
     test("terminal theme chooses the generated color scheme") {
@@ -33,12 +36,13 @@ val tuiThemeTest by testSuite {
             assertContrast(scheme.onPrimaryContainer, scheme.primaryContainer, 4.5)
             assertContrast(scheme.onSecondaryContainer, scheme.secondaryContainer, 4.5)
             assertContrast(scheme.onTertiaryContainer, scheme.tertiaryContainer, 4.5)
-            assertContrast(scheme.onSurface, scheme.surface, 4.5)
-            assertContrast(scheme.onSurfaceVariant, scheme.surface, 4.5)
-            assertContrast(scheme.primary, scheme.surface, 4.5)
-            assertContrast(scheme.error, scheme.surface, 4.5)
-            assertContrast(scheme.success, scheme.surface, 4.5)
-            assertContrast(scheme.outline, scheme.surface, 3.0)
+            assertContrast(scheme.onSurface, scheme.surfaceContainer, 4.5)
+            assertContrast(scheme.onSurface, scheme.surfaceContainerHigh, 4.5)
+            assertContrast(scheme.onSurfaceVariant, scheme.surfaceContainer, 4.5)
+            assertContrast(scheme.primary, scheme.surfaceContainerHigh, 4.5)
+            assertContrast(scheme.error, scheme.surfaceContainer, 4.5)
+            assertContrast(scheme.success, scheme.surfaceContainer, 4.5)
+            assertContrast(scheme.outline, scheme.surfaceContainer, 3.0)
         }
     }
 

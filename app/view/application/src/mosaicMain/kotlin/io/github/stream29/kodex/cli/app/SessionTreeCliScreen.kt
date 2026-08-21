@@ -301,13 +301,17 @@ public fun SessionTreeCliScreen(
                 is ApplicationPopupState.SessionCatalog ->
                     SessionCatalogPopup(viewModel, open)
 
-                is ApplicationPopupState.Settings -> SettingsPopup(
-                    viewModel = open.viewModel,
-                    onDismissRequest = { viewModel.dismissPopup(open) },
-                    onOpenLogin = {
-                        scope.launch { viewModel.openLoginPopup() }
-                    },
-                )
+                is ApplicationPopupState.Settings -> TuiTheme(
+                    colorScheme = tuiColorSchemeFor(terminal.theme),
+                ) {
+                    SettingsPopup(
+                        viewModel = open.viewModel,
+                        onDismissRequest = { viewModel.dismissPopup(open) },
+                        onOpenLogin = {
+                            scope.launch { viewModel.openLoginPopup() }
+                        },
+                    )
+                }
 
                 is ApplicationPopupState.RenameSession ->
                     RenameSessionPopup(viewModel, open)
