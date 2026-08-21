@@ -184,10 +184,12 @@ public object ReasoningEffortSerializer : KSerializer<ReasoningEffort> {
             ReasoningEffort.High.wireName -> ReasoningEffort.High
             ReasoningEffort.XHigh.wireName -> ReasoningEffort.XHigh
             ReasoningEffort.Max.wireName -> ReasoningEffort.Max
-            ReasoningEffort.Ultra.wireName -> ReasoningEffort.Ultra
+            LegacyUltraReasoningEffortWireName -> ReasoningEffort.Max
             else -> ReasoningEffort.Custom(wireName)
         }
 }
+
+private const val LegacyUltraReasoningEffortWireName: String = "ultra"
 
 public object FunctionCallOutputPayloadSerializer : KSerializer<FunctionCallOutputPayload> {
     private val contentItemsSerializer = ListSerializer(FunctionCallOutputContentItem.serializer())

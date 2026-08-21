@@ -10,7 +10,7 @@ import kotlin.test.assertEquals
 private val json = OpenAiJsonCodec
 
 val modelCatalogModelsSerializationTest by testSuite {
-    test("decodes server-advertised reasoning metadata") {
+    test("normalizes legacy ultra reasoning metadata") {
         val response = json.decodeFromString<ModelsResponse>(
             """
             {
@@ -29,14 +29,23 @@ val modelCatalogModelsSerializationTest by testSuite {
         )
 
         val model = response.models.single()
-        assertEquals(ReasoningEffort.Ultra, model.defaultReasoningLevel)
+        assertEquals(ReasoningEffort.Max, model.defaultReasoningLevel)
         assertEquals(
             listOf(
                 ReasoningEffort.Max,
-                ReasoningEffort.Ultra,
+                ReasoningEffort.Max,
                 ReasoningEffort.Custom("future"),
             ),
             model.supportedReasoningLevels.map(ReasoningEffortPreset::effort),
+        )
+
+        val encoded = json.parseToJsonElement(json.encodeToString(model)).jsonObject
+        assertEquals(JsonPrimitive("max"), encoded["default_reasoning_level"])
+        assertEquals(
+            listOf(JsonPrimitive("max"), JsonPrimitive("max"), JsonPrimitive("future")),
+            encoded.getValue("supported_reasoning_levels")
+                .jsonArray
+                .map { preset -> preset.jsonObject.getValue("effort") },
         )
     }
 

@@ -17,9 +17,6 @@ private val standardReasoningLevels: List<ReasoningEffortPreset> = listOf(
 private val maxReasoningLevels: List<ReasoningEffortPreset> = standardReasoningLevels +
     ReasoningEffortPreset(ReasoningEffort.Max, "Maximum reasoning depth for the hardest problems")
 
-private val ultraReasoningLevels: List<ReasoningEffortPreset> = maxReasoningLevels +
-    ReasoningEffortPreset(ReasoningEffort.Ultra, "Maximum reasoning with automatic task delegation")
-
 private val gpt52ReasoningLevels: List<ReasoningEffortPreset> = listOf(
     ReasoningEffortPreset(
         ReasoningEffort.Low,
@@ -50,7 +47,7 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         slug = OpenAiModelId("gpt-5.6-sol"),
         displayName = "GPT-5.6-Sol",
         defaultReasoningLevel = ReasoningEffort.Low,
-        supportedReasoningLevels = ultraReasoningLevels,
+        supportedReasoningLevels = maxReasoningLevels,
         serviceTiers = fastServiceTier,
         contextWindow = 372_000L,
         maxContextWindow = 372_000L,
@@ -59,7 +56,7 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         slug = OpenAiModelId("gpt-5.6-terra"),
         displayName = "GPT-5.6-Terra",
         defaultReasoningLevel = ReasoningEffort.Medium,
-        supportedReasoningLevels = ultraReasoningLevels,
+        supportedReasoningLevels = maxReasoningLevels,
         serviceTiers = fastServiceTier,
         contextWindow = 372_000L,
         maxContextWindow = 372_000L,

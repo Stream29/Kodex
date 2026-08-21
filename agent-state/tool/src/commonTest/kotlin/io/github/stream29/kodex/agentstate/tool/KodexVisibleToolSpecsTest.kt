@@ -43,7 +43,7 @@ val kodexVisibleToolSpecsTest by testSuite {
             KodexAgentSettings(
                 model = OpenAiModelId("test-model"),
                 agentMode = AgentMode.Single,
-                reasoning = Reasoning(effort = ReasoningEffort.Ultra),
+                reasoning = Reasoning(effort = ReasoningEffort.Max),
             ),
         )
         val multiAgentSpecs = service.visibleToolSpecs(

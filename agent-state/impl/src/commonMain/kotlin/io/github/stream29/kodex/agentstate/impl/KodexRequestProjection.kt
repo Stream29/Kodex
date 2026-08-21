@@ -3,7 +3,6 @@ package io.github.stream29.kodex.agentstate.impl
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.CodexResponsesClientMetadata
 import io.github.stream29.kodex.openai.CodexResponsesMetadata
-import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ToolSpec
@@ -25,10 +24,7 @@ internal fun KodexAgentSettings.toResponsesApiRequest(
         tools = tools,
         toolChoice = toolChoice,
         parallelToolCalls = parallelToolCalls,
-        reasoning = when (reasoning.effort) {
-            ReasoningEffort.Ultra -> reasoning.copy(effort = ReasoningEffort.Max)
-            else -> reasoning
-        },
+        reasoning = reasoning,
         include = include,
         serviceTier = serviceTier,
         promptCacheKey = promptCacheKey,

@@ -27,7 +27,10 @@ internal class OpenAiModelCatalogImpl(
 ) : OpenAiModelCatalog {
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    /** Latest catalog snapshot, ordered exactly as supplied by its source. */
+    /**
+     * Latest catalog snapshot in source model order, retaining the first
+     * preset advertised for each reasoning effort.
+     */
     override val models: StateFlow<List<ModelInfo>>
         field = MutableStateFlow(BuiltInModelCatalog)
 
@@ -39,7 +42,7 @@ internal class OpenAiModelCatalogImpl(
 
     /** Fetches `/models` and returns the atomically published catalog snapshot. */
     override suspend fun refresh(): List<ModelInfo> {
-        val refreshed = client.listModels().getOrThrow().models
+        val refreshed = client.listModels().getOrThrow().models.normalizeReasoningPresets()
         models.value = refreshed
         return refreshed
     }
@@ -64,7 +67,7 @@ internal class OpenAiModelCatalogImpl(
 
     private suspend fun refreshAtStartup(): Unit =
         when (val result = client.listModels()) {
-            is OpenAiResult.Success -> models.value = result.value.models
+            is OpenAiResult.Success -> models.value = result.value.models.normalizeReasoningPresets()
             is OpenAiResult.Failure -> Unit
         }
 
@@ -82,6 +85,16 @@ internal class OpenAiModelCatalogImpl(
 /** Creates a live model catalog backed by built-in metadata and OpenAI `/models`. */
 public fun OpenAiModelCatalog(client: OpenAiClient): OpenAiModelCatalog =
     OpenAiModelCatalogImpl(client = client)
+
+private fun List<ModelInfo>.normalizeReasoningPresets(): List<ModelInfo> =
+    map { model ->
+        val normalizedPresets = model.supportedReasoningLevels.distinctBy { preset -> preset.effort }
+        if (normalizedPresets.size == model.supportedReasoningLevels.size) {
+            model
+        } else {
+            model.copy(supportedReasoningLevels = normalizedPresets)
+        }
+    }
 
 private fun List<ModelInfo>.longestPrefixMatch(requestedSlug: String): ModelInfo? =
     asSequence()

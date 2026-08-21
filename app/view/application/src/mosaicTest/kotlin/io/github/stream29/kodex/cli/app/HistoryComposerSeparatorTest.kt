@@ -68,4 +68,4 @@ val historyComposerSeparatorTest by testSuite {
 }
 
 private val BoldScrollToLatestButton: Regex =
-    Regex("\u001B\\[[0-9;]*1m\\[↓]")
+    Regex("\u001B\\[(?:[0-9]+;)*1(?:;[0-9]+)*m\\[↓]")

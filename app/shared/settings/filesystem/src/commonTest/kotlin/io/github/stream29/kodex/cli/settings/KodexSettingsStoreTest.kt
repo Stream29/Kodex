@@ -153,6 +153,37 @@ val kodexSettingsStoreTest by testSuite(
         }
     }
 
+    test("normalizes legacy ultra reasoning settings to max") {
+        withSettingsDirectory("legacy-ultra") { root ->
+            SystemCoroutineFileSystem.writeString(
+                settingsPath(root),
+                """
+                new_session:
+                  reasoning_effort: ultra
+                session_title:
+                  reasoning_effort: ultra
+                """.trimIndent() + "\n",
+            )
+            val store = openStore(root)
+
+            assertEquals(ReasoningEffort.Max, store.settings.value.newSession.reasoningEffort)
+            assertEquals(ReasoningEffort.Max, store.settings.value.sessionTitle.reasoningEffort)
+
+            store.update { current -> current }
+
+            val yaml = SystemCoroutineFileSystem.readString(settingsPath(root))
+            assertTrue(
+                yaml.lineSequence().none { line -> line.trim() == "reasoning_effort: ultra" },
+                yaml,
+            )
+            assertEquals(
+                2,
+                yaml.lineSequence().count { line -> line.trim() == "reasoning_effort: max" },
+                yaml,
+            )
+        }
+    }
+
     test("clearing MCP settings never falls back to Codex") {
         withSettingsDirectory("clear-mcp") { root ->
             val codexHome = Path(root, "codex")

@@ -103,7 +103,7 @@ private const val ScrollToLatestButtonWidth: Int = 3
 internal fun ReasoningEffort.displayName(): String = when (this) {
     ReasoningEffort.None -> "none"; ReasoningEffort.Minimal -> "minimal"; ReasoningEffort.Low -> "low"
     ReasoningEffort.Medium -> "medium"; ReasoningEffort.High -> "high"; ReasoningEffort.XHigh -> "xhigh"
-    ReasoningEffort.Max -> "max"; ReasoningEffort.Ultra -> "ultra"; is ReasoningEffort.Custom -> wireName
+    ReasoningEffort.Max -> "max"; is ReasoningEffort.Custom -> wireName
 }
 
 internal fun ServiceTier.displayName(): String = when (this) {
