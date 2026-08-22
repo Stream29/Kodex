@@ -63,13 +63,12 @@ public fun AgentHistoryView(
         clickPosition: IntOffset?,
     ) -> Unit)? = null,
 ) {
-    val committedItemsState = model.committedItems.collectAsState()
-    val committedItems = committedItemsState.value
-    val generation = committedItems.generation
+    val historyItemsState = model.historyItems.collectAsState()
+    val historyItems = historyItemsState.value
+    val generation = historyItems.generation
     val loadState by model.loadState.collectAsState()
     val pendingTools by model.pendingTools.collectAsState()
     val streamingItem by model.streamingItem.collectAsState()
-    val historyTurnFooter by model.historyTurnFooter.collectAsState()
     val entryFocusRequesters = remember(model) {
         mutableMapOf<HistoryItemViewModel, FocusRequester>()
     }
@@ -87,18 +86,6 @@ public fun AgentHistoryView(
         interactionSource = model.scrollInteractionSource,
         keyboardPageSize = { viewportSize -> (viewportSize / 2).coerceAtLeast(1) },
     ) {
-        historyTurnFooter?.let { footer ->
-            item(
-                key = HistoryTurnFooterKey(
-                    markerIndex = footer.markerIndex,
-                    endIndex = footer.endIndex,
-                ),
-                contentType = HistoryContentType.TurnFooter,
-            ) {
-                HistoryTurnFooterRow(footer.duration)
-            }
-        }
-
         streamingItem?.let { item ->
             item(
                 key = item.historyIdentity(),
@@ -123,13 +110,13 @@ public fun AgentHistoryView(
         }
 
         items(
-            count = committedItems.size,
-            key = committedItems::peek,
-            contentType = { position -> committedItems.peek(position).historyContentType() },
+            count = historyItems.size,
+            key = historyItems::peek,
+            contentType = { position -> historyItems.peek(position).historyContentType() },
         ) { position ->
-            val item = committedItems[position]
-            if (item is HistoryItemViewModel.TurnFooter) {
-                HistoryTurnFooterRow(item.duration)
+            val item = historyItems[position]
+            if (item is HistoryItemViewModel.TurnTimeMarker) {
+                HistoryTurnTimeMarkerRow(item.duration)
             } else {
                 val focusRequester = remember(item) { FocusRequester() }
                 DisposableEffect(item, focusRequester) {
@@ -186,15 +173,14 @@ public fun AgentHistoryView(
                 if (
                     streamingItem == null &&
                     pendingTools.isEmpty() &&
-                    historyTurnFooter == null &&
-                    committedItems.size == 0 &&
+                    historyItems.size == 0 &&
                     !state.hasOlder
                 ) {
                     item(
                         key = HistoryMarkerKey(generation, HistoryMarker.Empty),
                         contentType = HistoryContentType.Marker,
                     ) {
-                        HistoryMarkerText("No committed conversation items")
+                        HistoryMarkerText("No conversation history items")
                     }
                 }
             }
@@ -203,7 +189,7 @@ public fun AgentHistoryView(
 }
 
 @Composable
-internal fun HistoryTurnFooterRow(duration: Duration) {
+internal fun HistoryTurnTimeMarkerRow(duration: Duration) {
     Text(
         value = "---Worked for ${duration.roundToMilliseconds()}---",
         modifier = Modifier.fillMaxWidth(),
@@ -257,7 +243,7 @@ internal fun LazyListLayoutInfo.historyPageFocusItem(
 ): HistoryItemViewModel? {
     val candidates = visibleItemsInfo.filter { item ->
         item.key is HistoryItemViewModel &&
-            item.key !is HistoryItemViewModel.TurnFooter &&
+            item.key !is HistoryItemViewModel.TurnTimeMarker &&
             item.offset >= viewportStartOffset &&
             item.offset + item.size <= viewportEndOffset
     }
@@ -298,7 +284,7 @@ internal fun StoredHistoryWorkGroup(
         } catch (failure: Throwable) {
             if (model.contains(generation, group)) {
                 HistoryViewLogger.error(failure) {
-                    "Unable to read elapsed time for committed history group ${group.indexRange}."
+                    "Unable to read elapsed time for history group ${group.indexRange}."
                 }
             }
             null
@@ -402,7 +388,7 @@ private fun StoredHistoryContent(
             } catch (failure: Throwable) {
                 if (model.contains(generation, item)) {
                     HistoryViewLogger.error(failure) {
-                        "Unable to read elapsed time for committed history item ${item.storageIndex}."
+                    "Unable to read elapsed time for history item ${item.storageIndex}."
                     }
                 }
                 null
@@ -414,7 +400,7 @@ private fun StoredHistoryContent(
         } catch (failure: Throwable) {
             if (!model.contains(generation, item)) return@produceState
             HistoryViewLogger.error(failure) {
-                "Unable to read committed history item ${item.storageIndex}."
+                "Unable to read history item ${item.storageIndex}."
             }
             StoredEventLoadState.Failed
         }
@@ -516,7 +502,7 @@ private fun HistoryItemViewModel.historyContentType(): HistoryContentType = when
 
     is HistoryItemViewModel.Patch -> HistoryContentType.Patch
     is HistoryItemViewModel.ContextCompaction -> HistoryContentType.Context
-    is HistoryItemViewModel.TurnFooter -> HistoryContentType.TurnFooter
+    is HistoryItemViewModel.TurnTimeMarker -> HistoryContentType.TurnTimeMarker
     is HistoryItemViewModel.WorkGroup -> HistoryContentType.WorkGroup
 }
 
@@ -561,8 +547,8 @@ private val HistoryItemViewModel.storageIndex: Int
         is HistoryItemViewModel.Patch -> index
         is HistoryItemViewModel.PlanUpdate -> index
         is HistoryItemViewModel.ContextCompaction -> index
-        is HistoryItemViewModel.TurnFooter ->
-            error("A turn footer cannot be rendered as a stored history event.")
+        is HistoryItemViewModel.TurnTimeMarker ->
+            error("A turn time marker cannot be rendered as a stored history event.")
         is HistoryItemViewModel.WorkGroup ->
             error("A folded history work group cannot be rendered as one stored event.")
     }
@@ -591,7 +577,7 @@ private fun HistoryItemViewModel.expansionBinding(): HistoryExpansionBinding? = 
     is HistoryItemViewModel.Message,
     is HistoryItemViewModel.PlanUpdate,
     is HistoryItemViewModel.ContextCompaction,
-    is HistoryItemViewModel.TurnFooter,
+    is HistoryItemViewModel.TurnTimeMarker,
     is HistoryItemViewModel.WorkGroup,
         -> null
 }
@@ -633,7 +619,7 @@ private enum class HistoryContentType {
     Patch,
     Context,
     WorkGroup,
-    TurnFooter,
+    TurnTimeMarker,
     Marker,
 }
 
@@ -641,7 +627,7 @@ private fun AgentHistoryViewModel.contains(
     generation: Long,
     item: HistoryItemViewModel,
 ): Boolean = when (item) {
-    is HistoryItemViewModel.TurnFooter -> false
+    is HistoryItemViewModel.TurnTimeMarker -> false
     is HistoryItemViewModel.WorkGroup ->
         contains(generation, item.indexRange.first) &&
             contains(generation, item.indexRange.last)
@@ -651,10 +637,6 @@ private fun AgentHistoryViewModel.contains(
 
 private data object StreamingStartedHistoryKey
 private data object CompactingHistoryKey
-private data class HistoryTurnFooterKey(
-    val markerIndex: Int,
-    val endIndex: Int,
-)
 private data object WrappedHistoryTextSlot
 
 private val HistoryViewLogger = KotlinLogging.logger {}

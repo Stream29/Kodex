@@ -602,15 +602,15 @@ private fun BoxScope.HistoryEntryContextMenu(
 ) {
     val current = request ?: return
     val execution by current.agent.execution.collectAsState()
-    val committedItems by current.agent.history.committedItems.collectAsState()
+    val historyItems by current.agent.history.historyItems.collectAsState()
     val targetMatches =
         current.session === selectedSession &&
             current.agent === selectedAgent &&
             !execution.running &&
             execution.capabilities.canReplaceHistory &&
             execution.capabilities.canForkHistory &&
-            committedItems.size > 0 &&
-            current.target.generation == committedItems.generation &&
+            historyItems.size > 0 &&
+            current.target.generation == historyItems.generation &&
             current.agent.history.contains(
                 current.target.generation,
                 current.target.storageIndex,
@@ -662,12 +662,12 @@ private fun BoxScope.AgentHistoryRevertDialog(agent: AgentViewModel?) {
         action as? AgentHistoryActionState.ConfirmRevert
             ?: return
     val execution by agent.execution.collectAsState()
-    val committedItems by agent.history.committedItems.collectAsState()
+    val historyItems by agent.history.historyItems.collectAsState()
     val targetMatches =
         !execution.running &&
             execution.capabilities.canReplaceHistory &&
-            committedItems.size > 0 &&
-            confirm.target.generation == committedItems.generation &&
+            historyItems.size > 0 &&
+            confirm.target.generation == historyItems.generation &&
             agent.history.contains(
                 confirm.target.generation,
                 confirm.target.storageIndex,
