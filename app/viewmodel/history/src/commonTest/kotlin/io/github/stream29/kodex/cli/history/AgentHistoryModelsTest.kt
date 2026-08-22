@@ -9,6 +9,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUse
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.contract.initialize
+import io.github.stream29.kodex.agentstorage.contract.prevIndex
 import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
@@ -24,8 +25,11 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
@@ -35,6 +39,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
@@ -189,6 +194,76 @@ val agentHistoryModelsTest by testSuite {
                 assertEquals(null, model.elapsedSincePrevious(window.peek(1)))
                 assertEquals(null, model.elapsedSincePrevious(window.peek(2)))
                 assertEquals(null, model.elapsedSincePrevious(window.peek(3)))
+            } finally {
+                model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("projects historical and active turn duration footers from turn markers") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            val runningTurn = MutableStateFlow<Job?>(null)
+            runtime.modify { storage ->
+                val firstTurn = KodexAgentSettings(
+                    model = OpenAiModelId("test-model"),
+                    turnId = "turn-1",
+                )
+                storage.initialize(firstTurn)
+                val initialTimestamp = storage.timestamp[0]
+                storage.timestamp[1] = initialTimestamp + 10.seconds
+                storage.stable[1] = userMessage("first")
+                storage.timestamp[2] = initialTimestamp + 30.seconds
+                storage.stable[2] = textTool("first-tool")
+                val secondTurnTimestamp = Clock.System.now()
+                storage.timestamp[3] = secondTurnTimestamp
+                storage.settings[3] = firstTurn.copy(turnId = "turn-2")
+                storage.timestamp[4] = secondTurnTimestamp + 50.seconds
+                storage.stable[4] = userMessage("second")
+            }
+            assertEquals("turn-2", runtime.storage.settings[3].turnId)
+            assertEquals(3, runtime.storage.settings.floorToIndex(4))
+            assertEquals(2, runtime.storage.stable.prevIndex(3))
+            assertEquals(4, runtime.latestIndex.value)
+            val model = createAgentHistoryViewModel(
+                agentState = runtime,
+                ownerScope = supervisorChildScope(),
+                runningTurn = runningTurn,
+            )
+            try {
+                withContext(Dispatchers.Default) {
+                    withTimeout(5.seconds) {
+                        val state = model.loadState.first { current ->
+                            current is AgentHistoryLoadState.Ready ||
+                                current is AgentHistoryLoadState.Failed
+                        }
+                        assertIs<AgentHistoryLoadState.Ready>(state)
+                        assertEquals(4, model.committedItems.value.size)
+                        assertFalse(state.hasOlder)
+                    }
+                }
+                assertEquals(0, runtime.storage.timestamp.floorToIndex(0))
+                val window = model.committedItems.value
+                val footer = assertIs<HistoryItemViewModel.TurnFooter>(window.peek(1))
+                assertEquals(0, footer.markerIndex)
+                assertEquals(2, footer.endIndex)
+                assertEquals(3, footer.positionIndex)
+                assertEquals(30.seconds, footer.duration)
+
+                val latest = model.historyTurnFooter.first { state -> state != null }!!
+                assertEquals(3, latest.markerIndex)
+                assertEquals(4, latest.endIndex)
+                assertEquals(50.seconds, latest.duration)
+
+                val activeJob = Job()
+                runningTurn.value = activeJob
+                val active = model.activeTurnDuration.first { state -> state != null }!!
+                assertTrue(active < 1.seconds)
+                model.historyTurnFooter.filter { state -> state == null }.first()
+                activeJob.cancel()
+                model.historyTurnFooter.filter { state -> state != null }.first()
             } finally {
                 model.close()
                 repository.cancelAndJoin()
@@ -652,6 +727,7 @@ private val HistoryItemViewModel.storageIndex: Int
         is HistoryItemViewModel.PlanUpdate -> index
         is HistoryItemViewModel.ContextCompaction -> index
         is HistoryItemViewModel.WorkGroup -> indexRange.last
+        is HistoryItemViewModel.TurnFooter -> error("A turn footer has no storage index.")
     }
 
 private fun userMessage(text: String): StableCleanEvent.UserMessage =

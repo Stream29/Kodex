@@ -15,6 +15,7 @@ import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
+import io.github.stream29.kodex.app.history.contract.HistoryTurnFooterState
 import io.github.stream29.kodex.cli.components.LazyListState
 import io.github.stream29.kodex.cli.components.MutableScrollInteractionSource
 import io.github.stream29.kodex.openai.ContentItem
@@ -88,6 +89,8 @@ private class ReplaceableHistoryModel(
     override val loadState: StateFlow<AgentHistoryLoadState> = mutableLoadState
     override val pendingTools: StateFlow<List<UnstableCleanEvent>> = MutableStateFlow(emptyList())
     override val streamingItem: StateFlow<HistoryStreamingItem?> = MutableStateFlow(null)
+    override val historyTurnFooter: StateFlow<HistoryTurnFooterState?> = MutableStateFlow(null)
+    override val activeTurnDuration: StateFlow<Duration?> = MutableStateFlow(null)
     override val listState: LazyListState = LazyListState()
     override val scrollInteractionSource: MutableScrollInteractionSource =
         MutableScrollInteractionSource()
@@ -149,4 +152,5 @@ private val HistoryItemViewModel.storageIndex: Int
         is HistoryItemViewModel.PlanUpdate -> index
         is HistoryItemViewModel.ContextCompaction -> index
         is HistoryItemViewModel.WorkGroup -> indexRange.last
+        is HistoryItemViewModel.TurnFooter -> error("A turn footer has no storage index.")
     }

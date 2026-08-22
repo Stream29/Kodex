@@ -16,12 +16,16 @@ import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiTheme
+import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SubmitKey
 import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 @Composable
 internal fun ComposerInput(
@@ -70,32 +74,53 @@ internal fun ComposerInput(
 @Composable
 internal fun HistoryComposerSeparator(
     columns: Int,
+    liveDuration: Duration? = null,
     showScrollToLatest: Boolean = false,
     onScrollToLatest: () -> Unit = {},
 ) {
     val width = columns.coerceAtLeast(1)
-    if (!showScrollToLatest) {
-        Text(
-            "-".repeat(width),
-            textStyle = TuiTheme.typography.supporting,
-        )
-        return
-    }
-
-    val separatorWidth = (width - ScrollToLatestButtonWidth).coerceAtLeast(0)
+    val label = liveDuration?.let(::liveTurnDurationLabel)
+    val reservedButtonWidth = if (showScrollToLatest) ScrollToLatestButtonWidth else 0
+    val labelWidth = (width - reservedButtonWidth).coerceAtLeast(0)
+    val displayedLabel = label?.ellipsizeToTerminalWidth(labelWidth)
+    val remainingWidth = (width - (displayedLabel?.length ?: 0)).coerceAtLeast(0)
+    val separatorWidth = (remainingWidth - reservedButtonWidth).coerceAtLeast(0)
     val leadingWidth = (separatorWidth + 1) / 2
     Row(modifier = Modifier.fillMaxWidth()) {
-        Text("-".repeat(leadingWidth), textStyle = TuiTheme.typography.supporting)
-        TuiButton(
-            label = "↓",
-            idleTextStyle = TuiTheme.typography.supporting,
-            onClick = onScrollToLatest,
-        )
-        Text(
-            "-".repeat(separatorWidth - leadingWidth),
-            textStyle = TuiTheme.typography.supporting,
-        )
+        displayedLabel?.let { value ->
+            Text(value, textStyle = TuiTheme.typography.supporting)
+        }
+        if (showScrollToLatest) {
+            Text("-".repeat(leadingWidth), textStyle = TuiTheme.typography.supporting)
+            TuiButton(
+                label = "↓",
+                idleTextStyle = TuiTheme.typography.supporting,
+                onClick = onScrollToLatest,
+            )
+            Text(
+                "-".repeat(separatorWidth - leadingWidth),
+                textStyle = TuiTheme.typography.supporting,
+            )
+        } else {
+            Text("-".repeat(remainingWidth), textStyle = TuiTheme.typography.supporting)
+        }
     }
+}
+
+internal fun liveTurnDurationLabel(duration: Duration): String =
+    "Worked for ${duration.roundToSeconds()}"
+
+internal fun Duration.roundToSeconds(): Duration {
+    if (!isFinite()) return this
+    val truncatedSeconds = inWholeSeconds
+    val truncated = truncatedSeconds.seconds
+    val remainder = this - truncated
+    val roundedSeconds = when {
+        remainder >= 500.milliseconds -> truncatedSeconds + 1
+        remainder <= (-500).milliseconds -> truncatedSeconds - 1
+        else -> truncatedSeconds
+    }
+    return roundedSeconds.seconds
 }
 
 private const val ScrollToLatestButtonWidth: Int = 3

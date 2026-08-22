@@ -10,6 +10,7 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 
 private val historySeparatorAnsiSnapshots = SnapshotStrategy { mosaic ->
     mosaic.draw().render(AnsiLevel.TRUECOLOR, supportsKittyUnderlines = false)
@@ -65,7 +66,27 @@ val historyComposerSeparatorTest by testSuite {
             assertEquals("------------", settled)
         }
     }
+
+    test("live duration is rounded to whole seconds") {
+        assertEquals("Worked for 2s", liveTurnDurationLabel(1_500.milliseconds))
+        assertEquals("Worked for 1s", liveTurnDurationLabel(1_499.milliseconds))
+    }
+
+    test("live duration is rendered at the left of the composer separator") {
+        runMosaicTest(snapshotStrategy = historySeparatorAnsiSnapshots) {
+            val snapshot = setContentAndSnapshot {
+                HistoryComposerSeparator(
+                    columns = 30,
+                    liveDuration = 1_500.milliseconds,
+                )
+            }
+            val plain = snapshot.replace(AnsiStyleEscape, "")
+            assertTrue(plain.startsWith("Worked for 2s"), plain)
+        }
+    }
 }
 
 private val BoldScrollToLatestButton: Regex =
     Regex("\u001B\\[(?:[0-9]+;)*1(?:;[0-9]+)*m\\[↓]")
+
+private val AnsiStyleEscape: Regex = Regex("\u001B\\[[0-9;]*m")

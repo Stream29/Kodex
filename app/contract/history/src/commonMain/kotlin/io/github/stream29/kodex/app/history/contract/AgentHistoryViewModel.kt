@@ -111,6 +111,34 @@ public sealed interface HistoryItemViewModel {
     }
 
     /**
+     * A virtual row after one history turn.
+     *
+     * [positionIndex] is the next turn marker, so this row has a stable order in the committed
+     * sequence without pretending to be a stored event. [duration] is display-ready metadata.
+     */
+    public class TurnFooter(
+        public val markerIndex: Int,
+        public val endIndex: Int,
+        public val positionIndex: Int,
+        public val duration: Duration,
+    ) : HistoryItemViewModel {
+        init {
+            requireValidHistoryIndex(markerIndex)
+            requireValidHistoryIndex(endIndex)
+            requireValidHistoryIndex(positionIndex)
+            require(endIndex > markerIndex) {
+                "A turn footer must follow at least one stable item in its turn."
+            }
+            require(positionIndex > endIndex) {
+                "A turn footer must be ordered after its last stable item."
+            }
+            require(duration >= Duration.ZERO && duration.isFinite()) {
+                "A turn footer duration must be finite and non-negative."
+            }
+        }
+    }
+
+    /**
      * One folded, newest-first run of reasoning, ordinary tool, and patch items.
      *
      * [indexRange] is the sparse storage span, not a claim that every integer in it is a child.
@@ -212,6 +240,25 @@ public sealed interface HistoryStreamingItem {
     public data object Compacting : HistoryStreamingItem
 }
 
+/** A completed turn duration rendered after the turn's last stable item. */
+@Stable
+public data class HistoryTurnFooterState(
+    public val markerIndex: Int,
+    public val endIndex: Int,
+    public val duration: Duration,
+) {
+    init {
+        requireValidHistoryIndex(markerIndex)
+        requireValidHistoryIndex(endIndex)
+        require(endIndex > markerIndex) {
+            "A history turn footer must follow at least one stable item in its turn."
+        }
+        require(duration >= Duration.ZERO && duration.isFinite()) {
+            "A history turn footer duration must be finite and non-negative."
+        }
+    }
+}
+
 /**
  * Complete History View state and interaction owner for one materialized Agent.
  *
@@ -228,6 +275,12 @@ public interface AgentHistoryViewModel : AutoCloseable {
 
     public val streamingItem: StateFlow<HistoryStreamingItem?>
 
+    /** Historical turn duration rendered after the latest stable item. */
+    public val historyTurnFooter: StateFlow<HistoryTurnFooterState?>
+
+    /** Elapsed duration of the currently active turn, rendered by the composer. */
+    public val activeTurnDuration: StateFlow<Duration?>
+
     /** Scroll state used by the single Mosaic History View. */
     public val listState: LazyListState
 
@@ -236,7 +289,7 @@ public interface AgentHistoryViewModel : AutoCloseable {
     /** Observable Compose state indicating whether content changes follow the latest row. */
     public val followsLatest: Boolean
 
-    /** Reads the exact committed event represented by [item] through the storage value LRU. */
+    /** Reads a stored history event represented by [item] through the storage value LRU. */
     public suspend fun read(item: HistoryItemViewModel): StableCleanEvent
 
     /**
@@ -274,6 +327,7 @@ private fun HistoryItemViewModel.isWorkGroupChild(): Boolean = when (this) {
     is HistoryItemViewModel.RequestUserInput,
     is HistoryItemViewModel.PlanUpdate,
     is HistoryItemViewModel.ContextCompaction,
+    is HistoryItemViewModel.TurnFooter,
     is HistoryItemViewModel.WorkGroup,
         -> false
 }
@@ -287,5 +341,6 @@ private val HistoryItemViewModel.individualIndex: Int
         is HistoryItemViewModel.Patch -> index
         is HistoryItemViewModel.PlanUpdate -> index
         is HistoryItemViewModel.ContextCompaction -> index
+        is HistoryItemViewModel.TurnFooter -> error("A turn footer has no stable item index.")
         is HistoryItemViewModel.WorkGroup -> error("A work group cannot be nested.")
     }

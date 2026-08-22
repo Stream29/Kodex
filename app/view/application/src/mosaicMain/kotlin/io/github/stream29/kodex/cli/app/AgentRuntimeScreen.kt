@@ -53,6 +53,7 @@ internal fun AgentRuntimeScreen(
     val settings by viewModel.settings.collectAsState()
     val tokenCount by viewModel.tokenCount.collectAsState()
     val composerState by viewModel.composer.state.collectAsState()
+    val activeTurnDuration by viewModel.history.activeTurnDuration.collectAsState()
     val composer = rememberComposerInputState(viewModel.composer)
     val fullComposerLayout = TextInputLayout.create(
         value = composer.value,
@@ -135,6 +136,7 @@ internal fun AgentRuntimeScreen(
         }
         HistoryComposerSeparator(
             columns = columns,
+            liveDuration = activeTurnDuration,
             showScrollToLatest = !viewModel.history.followsLatest,
             onScrollToLatest = viewModel.history::requestScrollToLatest,
         )
