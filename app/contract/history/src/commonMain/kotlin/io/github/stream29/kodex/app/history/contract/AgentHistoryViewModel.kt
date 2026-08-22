@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Duration
 
 /**
- * Stable identity and minimal presentation state for one committed history item.
+ * Stable identity and minimal presentation state for one materialized history item.
  *
  * An item deliberately retains no decoded event. Top-level item objects are lazy-list keys, while
  * a [WorkGroup] privately retains its exact child items so their expansion state survives folding.
@@ -111,29 +111,24 @@ public sealed interface HistoryItemViewModel {
     }
 
     /**
-     * A virtual row after one history turn.
+     * A virtual row describing one history turn's elapsed time.
      *
-     * [positionIndex] is the next turn marker, so this row has a stable order in the committed
-     * sequence without pretending to be a stored event. [duration] is display-ready metadata.
+     * This item is projected from a turn marker or the non-running timeline end. Its placement is
+     * owned by the history projection and it deliberately does not pretend to be a stored event.
      */
-    public class TurnFooter(
+    public class TurnTimeMarker(
         public val markerIndex: Int,
         public val endIndex: Int,
-        public val positionIndex: Int,
         public val duration: Duration,
     ) : HistoryItemViewModel {
         init {
             requireValidHistoryIndex(markerIndex)
             requireValidHistoryIndex(endIndex)
-            requireValidHistoryIndex(positionIndex)
             require(endIndex > markerIndex) {
-                "A turn footer must follow at least one stable item in its turn."
-            }
-            require(positionIndex > endIndex) {
-                "A turn footer must be ordered after its last stable item."
+                "A turn time marker must follow at least one stable item in its turn."
             }
             require(duration >= Duration.ZERO && duration.isFinite()) {
-                "A turn footer duration must be finite and non-negative."
+                "A turn time marker duration must be finite and non-negative."
             }
         }
     }
@@ -180,7 +175,7 @@ public sealed interface HistoryItemViewModel {
 }
 
 /**
- * One immutable newest-first snapshot of the materialized committed-item window.
+ * One immutable newest-first snapshot of the materialized history-item window.
  *
  * [size], [peek], and [get] always address the same sequence. A previously published window
  * remains indexable after a newer window replaces it so a lazy renderer can finish an in-flight
@@ -200,7 +195,7 @@ public interface HistoryItemWindow {
     public operator fun get(index: Int): HistoryItemViewModel
 }
 
-/** Current structural loading state of the committed child sequence. */
+/** Current structural loading state of the materialized history sequence. */
 public sealed interface AgentHistoryLoadState {
     public data object Initializing : AgentHistoryLoadState
 
@@ -240,43 +235,21 @@ public sealed interface HistoryStreamingItem {
     public data object Compacting : HistoryStreamingItem
 }
 
-/** A completed turn duration rendered after the turn's last stable item. */
-@Stable
-public data class HistoryTurnFooterState(
-    public val markerIndex: Int,
-    public val endIndex: Int,
-    public val duration: Duration,
-) {
-    init {
-        requireValidHistoryIndex(markerIndex)
-        requireValidHistoryIndex(endIndex)
-        require(endIndex > markerIndex) {
-            "A history turn footer must follow at least one stable item in its turn."
-        }
-        require(duration >= Duration.ZERO && duration.isFinite()) {
-            "A history turn footer duration must be finite and non-negative."
-        }
-    }
-}
-
 /**
  * Complete History View state and interaction owner for one materialized Agent.
  *
- * Committed children, pending tools, and the streaming item are independent projections. Storage
- * remains private and supplies decoded committed events on demand through [read].
+ * Materialized history items, pending tools, and the streaming item are independent projections.
+ * Storage remains private and supplies decoded stable events on demand through [read].
  */
 public interface AgentHistoryViewModel : AutoCloseable {
-    /** Atomically published materialized committed children. */
-    public val committedItems: StateFlow<HistoryItemWindow>
+    /** Atomically published materialized history items. */
+    public val historyItems: StateFlow<HistoryItemWindow>
 
     public val loadState: StateFlow<AgentHistoryLoadState>
 
     public val pendingTools: StateFlow<List<UnstableCleanEvent>>
 
     public val streamingItem: StateFlow<HistoryStreamingItem?>
-
-    /** Historical turn duration rendered after the latest stable item. */
-    public val historyTurnFooter: StateFlow<HistoryTurnFooterState?>
 
     /** Elapsed duration of the currently active turn, rendered by the composer. */
     public val activeTurnDuration: StateFlow<Duration?>
@@ -289,19 +262,19 @@ public interface AgentHistoryViewModel : AutoCloseable {
     /** Observable Compose state indicating whether content changes follow the latest row. */
     public val followsLatest: Boolean
 
-    /** Reads a stored history event represented by [item] through the storage value LRU. */
+    /** Reads a stable history event represented by [item] through the storage value LRU. */
     public suspend fun read(item: HistoryItemViewModel): StableCleanEvent
 
     /**
-     * Returns the elapsed wall-clock time from the preceding committed event to [item].
+     * Returns the elapsed wall-clock time from the preceding stable event to [item].
      *
-     * For a [HistoryItemViewModel.WorkGroup], the interval starts at the committed event before
+     * For a [HistoryItemViewModel.WorkGroup], the interval starts at the stable event before
      * its oldest child and ends at its newest child. `null` means that no preceding event or exact
      * timestamp pair is available.
      */
     public suspend fun elapsedSincePrevious(item: HistoryItemViewModel): Duration?
 
-    /** Validates a generation-scoped committed storage target. */
+    /** Validates a generation-scoped stable storage target. */
     public fun contains(generation: Long, storageIndex: Int): Boolean
 
     /** Reconciles a renderer-local content-size change with current follow-latest intent. */
@@ -314,7 +287,7 @@ public interface AgentHistoryViewModel : AutoCloseable {
 }
 
 private fun requireValidHistoryIndex(index: Int) {
-    require(index >= 0) { "A committed history index must not be negative." }
+    require(index >= 0) { "A history index must not be negative." }
 }
 
 private fun HistoryItemViewModel.isWorkGroupChild(): Boolean = when (this) {
@@ -327,7 +300,7 @@ private fun HistoryItemViewModel.isWorkGroupChild(): Boolean = when (this) {
     is HistoryItemViewModel.RequestUserInput,
     is HistoryItemViewModel.PlanUpdate,
     is HistoryItemViewModel.ContextCompaction,
-    is HistoryItemViewModel.TurnFooter,
+    is HistoryItemViewModel.TurnTimeMarker,
     is HistoryItemViewModel.WorkGroup,
         -> false
 }
@@ -341,6 +314,6 @@ private val HistoryItemViewModel.individualIndex: Int
         is HistoryItemViewModel.Patch -> index
         is HistoryItemViewModel.PlanUpdate -> index
         is HistoryItemViewModel.ContextCompaction -> index
-        is HistoryItemViewModel.TurnFooter -> error("A turn footer has no stable item index.")
+        is HistoryItemViewModel.TurnTimeMarker -> error("A turn time marker has no stable item index.")
         is HistoryItemViewModel.WorkGroup -> error("A work group cannot be nested.")
     }
