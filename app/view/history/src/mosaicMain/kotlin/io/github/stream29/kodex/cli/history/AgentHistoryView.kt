@@ -69,6 +69,7 @@ public fun AgentHistoryView(
     val loadState by model.loadState.collectAsState()
     val pendingTools by model.pendingTools.collectAsState()
     val streamingItem by model.streamingItem.collectAsState()
+    val historyTurnFooter by model.historyTurnFooter.collectAsState()
     val entryFocusRequesters = remember(model) {
         mutableMapOf<HistoryItemViewModel, FocusRequester>()
     }
@@ -86,6 +87,18 @@ public fun AgentHistoryView(
         interactionSource = model.scrollInteractionSource,
         keyboardPageSize = { viewportSize -> (viewportSize / 2).coerceAtLeast(1) },
     ) {
+        historyTurnFooter?.let { footer ->
+            item(
+                key = HistoryTurnFooterKey(
+                    markerIndex = footer.markerIndex,
+                    endIndex = footer.endIndex,
+                ),
+                contentType = HistoryContentType.TurnFooter,
+            ) {
+                HistoryTurnFooterRow(footer.duration)
+            }
+        }
+
         streamingItem?.let { item ->
             item(
                 key = item.historyIdentity(),
@@ -115,33 +128,37 @@ public fun AgentHistoryView(
             contentType = { position -> committedItems.peek(position).historyContentType() },
         ) { position ->
             val item = committedItems[position]
-            val focusRequester = remember(item) { FocusRequester() }
-            DisposableEffect(item, focusRequester) {
-                entryFocusRequesters[item] = focusRequester
-                onDispose {
-                    if (entryFocusRequesters[item] === focusRequester) {
-                        entryFocusRequesters.remove(item)
+            if (item is HistoryItemViewModel.TurnFooter) {
+                HistoryTurnFooterRow(item.duration)
+            } else {
+                val focusRequester = remember(item) { FocusRequester() }
+                DisposableEffect(item, focusRequester) {
+                    entryFocusRequesters[item] = focusRequester
+                    onDispose {
+                        if (entryFocusRequesters[item] === focusRequester) {
+                            entryFocusRequesters.remove(item)
+                        }
                     }
                 }
-            }
-            if (item is HistoryItemViewModel.WorkGroup) {
-                StoredHistoryWorkGroup(
-                    group = item,
-                    generation = generation,
-                    model = model,
-                    focusRequester = focusRequester,
-                    shellSessions = shellSessions,
-                    onOpenContextMenu = onOpenEntryContextMenu,
-                )
-            } else {
-                StoredHistoryEntry(
-                    item = item,
-                    generation = generation,
-                    model = model,
-                    focusRequester = focusRequester,
-                    shellSessions = shellSessions,
-                    onOpenContextMenu = onOpenEntryContextMenu,
-                )
+                if (item is HistoryItemViewModel.WorkGroup) {
+                    StoredHistoryWorkGroup(
+                        group = item,
+                        generation = generation,
+                        model = model,
+                        focusRequester = focusRequester,
+                        shellSessions = shellSessions,
+                        onOpenContextMenu = onOpenEntryContextMenu,
+                    )
+                } else {
+                    StoredHistoryEntry(
+                        item = item,
+                        generation = generation,
+                        model = model,
+                        focusRequester = focusRequester,
+                        shellSessions = shellSessions,
+                        onOpenContextMenu = onOpenEntryContextMenu,
+                    )
+                }
             }
         }
 
@@ -169,6 +186,7 @@ public fun AgentHistoryView(
                 if (
                     streamingItem == null &&
                     pendingTools.isEmpty() &&
+                    historyTurnFooter == null &&
                     committedItems.size == 0 &&
                     !state.hasOlder
                 ) {
@@ -182,6 +200,16 @@ public fun AgentHistoryView(
             }
         }
     }
+}
+
+@Composable
+internal fun HistoryTurnFooterRow(duration: Duration) {
+    Text(
+        value = "---Worked for ${duration.roundToMilliseconds()}---",
+        modifier = Modifier.fillMaxWidth(),
+        color = Color.Unspecified,
+        textStyle = TextStyle.Dim,
+    )
 }
 
 @Composable
@@ -229,6 +257,7 @@ internal fun LazyListLayoutInfo.historyPageFocusItem(
 ): HistoryItemViewModel? {
     val candidates = visibleItemsInfo.filter { item ->
         item.key is HistoryItemViewModel &&
+            item.key !is HistoryItemViewModel.TurnFooter &&
             item.offset >= viewportStartOffset &&
             item.offset + item.size <= viewportEndOffset
     }
@@ -487,6 +516,7 @@ private fun HistoryItemViewModel.historyContentType(): HistoryContentType = when
 
     is HistoryItemViewModel.Patch -> HistoryContentType.Patch
     is HistoryItemViewModel.ContextCompaction -> HistoryContentType.Context
+    is HistoryItemViewModel.TurnFooter -> HistoryContentType.TurnFooter
     is HistoryItemViewModel.WorkGroup -> HistoryContentType.WorkGroup
 }
 
@@ -531,6 +561,8 @@ private val HistoryItemViewModel.storageIndex: Int
         is HistoryItemViewModel.Patch -> index
         is HistoryItemViewModel.PlanUpdate -> index
         is HistoryItemViewModel.ContextCompaction -> index
+        is HistoryItemViewModel.TurnFooter ->
+            error("A turn footer cannot be rendered as a stored history event.")
         is HistoryItemViewModel.WorkGroup ->
             error("A folded history work group cannot be rendered as one stored event.")
     }
@@ -559,6 +591,7 @@ private fun HistoryItemViewModel.expansionBinding(): HistoryExpansionBinding? = 
     is HistoryItemViewModel.Message,
     is HistoryItemViewModel.PlanUpdate,
     is HistoryItemViewModel.ContextCompaction,
+    is HistoryItemViewModel.TurnFooter,
     is HistoryItemViewModel.WorkGroup,
         -> null
 }
@@ -600,6 +633,7 @@ private enum class HistoryContentType {
     Patch,
     Context,
     WorkGroup,
+    TurnFooter,
     Marker,
 }
 
@@ -607,6 +641,7 @@ private fun AgentHistoryViewModel.contains(
     generation: Long,
     item: HistoryItemViewModel,
 ): Boolean = when (item) {
+    is HistoryItemViewModel.TurnFooter -> false
     is HistoryItemViewModel.WorkGroup ->
         contains(generation, item.indexRange.first) &&
             contains(generation, item.indexRange.last)
@@ -616,6 +651,10 @@ private fun AgentHistoryViewModel.contains(
 
 private data object StreamingStartedHistoryKey
 private data object CompactingHistoryKey
+private data class HistoryTurnFooterKey(
+    val markerIndex: Int,
+    val endIndex: Int,
+)
 private data object WrappedHistoryTextSlot
 
 private val HistoryViewLogger = KotlinLogging.logger {}

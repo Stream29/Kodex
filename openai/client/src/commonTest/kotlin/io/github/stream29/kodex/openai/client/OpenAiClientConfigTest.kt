@@ -12,5 +12,6 @@ val openAiClientConfigTest by testSuite {
             "codex_cli_rs/$KodexCompatibleApiClientVersion (Kodex)",
             config.userAgent,
         )
+        assertEquals(90_000, config.requestTimeoutMillis)
     }
 }

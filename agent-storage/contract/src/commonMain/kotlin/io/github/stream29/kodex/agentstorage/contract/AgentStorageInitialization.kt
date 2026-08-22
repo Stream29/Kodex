@@ -2,6 +2,7 @@ package io.github.stream29.kodex.agentstorage.contract
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.CleanCompactionCheckpoint
 import io.github.stream29.kodex.openai.KodexAgentSettings
+import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -26,6 +27,7 @@ public suspend fun MutableKodexAgentStorage.initialize(initialSettings: KodexAge
             windowId = windowId,
         ),
     ) {
+        timestamp[0] = Clock.System.now()
         settings[0] = initialSettings
         tokenCount[0] = 0L
     }

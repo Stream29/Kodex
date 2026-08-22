@@ -232,7 +232,7 @@ public class KodexApplication private constructor(
                     ->
                     val agentState: KodexAgentState = agentSession.runtime
                     graph.koin.get<DefaultAgentHistoryViewModelFactory> {
-                        parametersOf(agentState, ownerScope)
+                        parametersOf(agentState, ownerScope, agentSession.runtime.runningTurn)
                     }.create()
                 }
                 val sessionAgentFactory = PersistedSessionAgentViewModelFactory {

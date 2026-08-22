@@ -890,7 +890,7 @@ internal fun HistoryItemHeader(
 private fun Duration.historyElapsedSuffix(): String =
     " · +${roundToMilliseconds()}"
 
-private fun Duration.roundToMilliseconds(): Duration {
+internal fun Duration.roundToMilliseconds(): Duration {
     if (!isFinite()) return this
     val truncatedMilliseconds = inWholeMilliseconds
     val truncated = truncatedMilliseconds.milliseconds

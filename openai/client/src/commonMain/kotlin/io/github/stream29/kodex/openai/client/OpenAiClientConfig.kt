@@ -7,7 +7,7 @@ public data class OpenAiClientConfig(
     public val originator: String = DefaultCodexOriginator,
     public val userAgent: String = codexUserAgent(originator, clientVersion),
     public val defaultHeaders: Map<String, String> = emptyMap(),
-    public val requestTimeoutMillis: Long = 300_000,
+    public val requestTimeoutMillis: Long = 90_000,
     public val retry: OpenAiClientRetryConfig = OpenAiClientRetryConfig(),
 )
 
