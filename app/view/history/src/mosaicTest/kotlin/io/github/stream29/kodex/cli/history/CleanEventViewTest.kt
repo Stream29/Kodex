@@ -15,16 +15,20 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExe
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.FunctionCallOutputPayload
+import io.github.stream29.kodex.openai.MessagePhase
 import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.UpdatePlanArgs
@@ -34,6 +38,7 @@ import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestionOption
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecOutput
@@ -99,7 +104,7 @@ class CleanEventViewTest {
 
         runMosaicTest {
             assertEquals(
-                "Assistant · +1.5s\nhello",
+                "Assistant +1.5s\nhello",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
                         StableCleanEvent.AssistantMessage(
@@ -114,7 +119,7 @@ class CleanEventViewTest {
             )
 
             assertEquals(
-                "> very-long-tool-name · +1.5s",
+                "> very-long-tool-name +1.5s",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
                         tool.render(
@@ -127,7 +132,7 @@ class CleanEventViewTest {
             )
 
             assertEquals(
-                "> v... · +1.5s",
+                "> ver... +1.5s",
                 setContentAndSnapshot {
                     Box(Modifier.width(14)) {
                         tool.render(
@@ -140,7 +145,7 @@ class CleanEventViewTest {
             )
 
             assertEquals(
-                "• Updated Plan · +1.5s\n  └ (no steps provided)",
+                "• Updated Plan +1.5s\n  └ (no steps provided)",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
                         plan.render(
@@ -153,7 +158,7 @@ class CleanEventViewTest {
             )
 
             assertEquals(
-                "Context compacted · +1.5s",
+                "Context compacted +1.5s",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
                         StableCleanEvent.ContextCompaction.render(
@@ -171,7 +176,7 @@ class CleanEventViewTest {
     fun elapsedRoundsToMillisecondsBeforeUsingDefaultDurationFormatting() = runTest {
         runMosaicTest {
             assertEquals(
-                "Assistant · +1.501s\nhello",
+                "Assistant +1.501s\nhello",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
                         StableCleanEvent.AssistantMessage(
@@ -181,6 +186,23 @@ class CleanEventViewTest {
                             expansion = null,
                             elapsed = 1_500_600_000.nanoseconds,
                         )
+                    }
+                },
+            )
+        }
+    }
+
+    @Test
+    fun assistantPhaseUsesSpaceInsteadOfTheRemovedMiddleDotSeparator() = runTest {
+        runMosaicTest {
+            assertEquals(
+                "Assistant commentary\nhello",
+                setContentAndSnapshot {
+                    Box(Modifier.width(40)) {
+                        StableCleanEvent.AssistantMessage(
+                            content = listOf(ContentItem.OutputText("hello")),
+                            phase = MessagePhase.Commentary,
+                        ).render()
                     }
                 },
             )
@@ -218,6 +240,40 @@ class CleanEventViewTest {
     }
 
     @Test
+    fun customWebToolKeepsItsQuerySummaryBeforeAndAfterCompletion() = runTest {
+        val input = """{"search_query":[{"q":"Kotlin Duration"}]}"""
+        val stable = StableCustomToolEvent(
+            callId = "stable-web",
+            name = "run",
+            namespace = "web",
+            input = input,
+            result = FunctionCallOutputPayload.fromText("done"),
+            success = true,
+        )
+        val pending = PendingCustomToolEvent(
+            callId = "pending-web",
+            name = "run",
+            namespace = "web",
+            input = input,
+        )
+
+        runMosaicTest {
+            assertEquals(
+                "> Search the web: Kotlin Duration",
+                setContentAndSnapshot {
+                    Box(Modifier.width(60)) { pending.render() }
+                },
+            )
+            assertEquals(
+                "> Search the web: Kotlin Duration",
+                setContentAndSnapshot {
+                    Box(Modifier.width(60)) { stable.render() }
+                },
+            )
+        }
+    }
+
+    @Test
     fun commandToolSummarizesItsCommandAndDefersTheFunctionName() = runTest {
         val event = StableCommandExecutionToolEvent(
             callId = "command",
@@ -239,7 +295,7 @@ class CleanEventViewTest {
             val collapsed = setContentAndSnapshot {
                 Box(Modifier.width(60)) { event.render() }
             }
-            assertEquals("> Run command: pwd", collapsed)
+            assertEquals("> Run: pwd", collapsed)
             assertFalse("exec_command" in collapsed)
 
             val expanded = clickFirstRow()
@@ -275,10 +331,10 @@ class CleanEventViewTest {
             val collapsed = setContentAndSnapshot {
                 Box(Modifier.width(width)) { event.render() }
             }
-            assertEquals("> Run command: ${"A你B".repeat(30)}", collapsed)
+            assertEquals("> Run: ${"A你B".repeat(30)}", collapsed)
 
             width = 42
-            assertEquals("> Run command: ${"A你B".repeat(6)}...", awaitSnapshot())
+            assertEquals("> Run: ${"A你B".repeat(8)}...", awaitSnapshot())
         }
     }
 
@@ -304,14 +360,14 @@ class CleanEventViewTest {
 
         runMosaicTest {
             assertEquals(
-                "> Run command: sleep 5",
+                "> Run: sleep 5",
                 setContentAndSnapshot {
                     Box(Modifier.width(60)) { event.renderCommandExecution(session) }
                 },
             )
 
             session.completed.value = true
-            assertEquals("> Run command: sleep 5", awaitSnapshot())
+            assertEquals("> Run: sleep 5", awaitSnapshot())
 
             val expanded = clickFirstRow()
             assertTrue("> Process" in expanded)
@@ -342,7 +398,7 @@ class CleanEventViewTest {
 
         runMosaicTest {
             assertEquals(
-                "> Run command: sleep 5",
+                "> Run: sleep 5",
                 setContentAndSnapshot {
                     Box(Modifier.width(60)) { event.renderCommandExecution(session = null) }
                 },
@@ -376,7 +432,7 @@ class CleanEventViewTest {
             val collapsed = setContentAndSnapshot {
                 Box(Modifier.width(60)) { event.renderCommandExecution(session) }
             }
-            assertEquals("> Read output: tail -f build.log", collapsed)
+            assertEquals("> Wait for tail -f build.log", collapsed)
             assertFalse("write_stdin" in collapsed)
 
             val expanded = clickFirstRow()
@@ -465,16 +521,76 @@ class CleanEventViewTest {
         )
 
         runMosaicTest {
-            setContentAndSnapshot {
+            val rendered = setContentAndSnapshot {
                 Box(Modifier.width(60)) { event.render() }
             }
-            val expanded = clickFirstRow()
-            assertTrue("> Result" in expanded)
-            assertFalse("Answer Password: [hidden]" in expanded)
+            assertEquals(
+                "Password: Enter password\n  > [hidden]",
+                rendered,
+            )
+            assertFalse("correct horse" in rendered)
+        }
+    }
 
-            val result = clickRow(3)
-            assertTrue("Answer Password: [hidden]" in result)
-            assertFalse("correct horse" in result)
+    @Test
+    fun completedRequestUserInputRendersOtherAsReadOnlyFreeForm() = runTest {
+        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent(
+            callId = "input",
+            arguments = RequestUserInputArgs(
+                questions = listOf(
+                    RequestUserInputQuestion(
+                        id = "layout",
+                        header = "Layout",
+                        question = "Which layout should be used?",
+                        isOther = true,
+                        options = listOf(
+                            RequestUserInputQuestionOption("Compact", "Use less space"),
+                        ),
+                    ),
+                ),
+            ),
+            result = StableRequestUserInputResult.Answered(
+                RequestUserInputResponse(
+                    answers = mapOf(
+                        "layout" to RequestUserInputAnswer(listOf("user_note: Dense")),
+                    ),
+                ),
+            ),
+        )
+
+        runMosaicTest {
+            assertEquals(
+                "Layout: Which layout should be used?\n[● Other]\n  > Dense",
+                setContentAndSnapshot {
+                    Box(Modifier.width(60)) { event.render() }
+                },
+            )
+        }
+    }
+
+    @Test
+    fun failedRequestUserInputRendersItsQuestionAndErrorDirectly() = runTest {
+        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent(
+            callId = "input",
+            arguments = RequestUserInputArgs(
+                questions = listOf(
+                    RequestUserInputQuestion(
+                        id = "layout",
+                        header = "Layout",
+                        question = "Which layout should be used?",
+                    ),
+                ),
+            ),
+            result = StableRequestUserInputResult.Failure("No answer"),
+        )
+
+        runMosaicTest {
+            assertEquals(
+                "Layout: Which layout should be used?\nUnable to submit: No answer",
+                setContentAndSnapshot {
+                    Box(Modifier.width(60)) { event.render() }
+                },
+            )
         }
     }
 
@@ -569,7 +685,7 @@ class CleanEventViewTest {
             val collapsed = setContentAndSnapshot {
                 Box(Modifier.width(40)) { event.render() }
             }
-            assertEquals("> Editing 1 file", collapsed)
+            assertEquals("> Editing file.txt", collapsed)
             assertFalse("apply_patch" in collapsed)
 
             val expanded = clickFirstRow()

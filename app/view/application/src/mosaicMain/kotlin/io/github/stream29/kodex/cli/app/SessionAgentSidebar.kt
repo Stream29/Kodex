@@ -309,6 +309,7 @@ private data class ShellSessionSidebarItem(
     val lines: List<String>,
 )
 
+/** Filters the canonical topology preorder without deriving a second order. */
 internal fun PersistedSessionTopologyState.visibleNodes(
     expandedAddresses: Set<AgentAddress>,
 ): List<PersistedSessionTopologyNode> {

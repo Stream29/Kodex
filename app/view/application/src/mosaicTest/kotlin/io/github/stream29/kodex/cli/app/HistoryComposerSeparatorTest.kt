@@ -84,6 +84,21 @@ val historyComposerSeparatorTest by testSuite {
             assertTrue(plain.startsWith("Worked for 2s"), plain)
         }
     }
+
+    test("live duration does not displace the centered scroll button") {
+        runMosaicTest {
+            val snapshot = setContentAndSnapshot {
+                HistoryComposerSeparator(
+                    columns = 30,
+                    liveDuration = 1_500.milliseconds,
+                    showScrollToLatest = true,
+                )
+            }
+
+            assertEquals("Worked for 2s-[↓]-------------", snapshot)
+            assertEquals(14, snapshot.indexOf("[↓]"))
+        }
+    }
 }
 
 private val BoldScrollToLatestButton: Regex =

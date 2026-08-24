@@ -43,7 +43,7 @@ class PatchToolEventViewTest {
                     PendingPatchToolEventView(patch)
                 }
             }
-            assertEquals("> Editing 1 file", collapsed)
+            assertEquals("> Editing file.txt", collapsed)
 
             val expanded = click()
             assertTrue("Tool: apply_patch" in expanded)
@@ -78,7 +78,7 @@ class PatchToolEventViewTest {
             click()
             assertEquals(
                 listOf(
-                    "v Editing 1 file",
+                    "v Editing ver...",
                     "Tool: apply_patc",
                     "  h",
                     "v Changes",
@@ -128,7 +128,7 @@ class PatchToolEventViewTest {
             assertTrue("\u001B[38;2;255;0;0m- old" in rendered)
             assertTrue("\u001B[38;2;0;255;0m+ new" in rendered)
             assertTrue(
-                rendered.indexOf("38;2;0;255;0") < rendered.indexOf("v Editing 1 file"),
+                rendered.indexOf("38;2;0;255;0") < rendered.indexOf("v Editing file.txt"),
             )
         }
     }
@@ -182,24 +182,24 @@ class PatchToolEventViewTest {
 
         runMosaicTest {
             assertEquals(
-                "> Editing 1 file · +1.5s",
+                "> Editing file.txt +1.5s",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
                         StablePatchToolEventView(
                             event = event,
-                            headerTrailingText = " · +1.5s",
+                            headerTrailingText = " +1.5s",
                         )
                     }
                 },
             )
 
             assertEquals(
-                "> E... · +1.5s",
+                "> Edi... +1.5s",
                 setContentAndSnapshot {
                     Box(Modifier.width(14)) {
                         StablePatchToolEventView(
                             event = event,
-                            headerTrailingText = " · +1.5s",
+                            headerTrailingText = " +1.5s",
                         )
                     }
                 },

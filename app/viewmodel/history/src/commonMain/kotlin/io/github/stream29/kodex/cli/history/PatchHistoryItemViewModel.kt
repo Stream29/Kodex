@@ -14,7 +14,7 @@ internal class PatchHistoryItemViewModelImpl(
     override val index: Int,
     private val descriptor: HistoryItemDescriptor,
     private val context: HistoryItemLoadContext,
-) : PatchHistoryItemViewModel, LoadableHistoryItem {
+) : PatchHistoryItemViewModel, LoadableHistoryItem, ReleasableHistoryItem {
     private val mutableState: MutableStateFlow<PatchHistoryItemState>
     private val initialLoadingJob: Job
 
@@ -80,6 +80,11 @@ internal class PatchHistoryItemViewModelImpl(
 
             else -> Unit
         }
+    }
+
+    override fun release() {
+        initialLoadingJob.cancel()
+        collapse()
     }
 
     private fun PatchHistoryItemState.isExpanding(job: Job): Boolean =

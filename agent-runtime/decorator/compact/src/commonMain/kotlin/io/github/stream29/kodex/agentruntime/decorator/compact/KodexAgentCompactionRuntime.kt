@@ -156,7 +156,7 @@ public class AgentResponseRetryLimitExceededException(
     "Agent response request failed after $maxRetries retries.",
 )
 
-private const val MaxResponseRetries: Int = 4
+private const val MaxResponseRetries: Int = 20
 
 /**
  * Adds automatic compaction, server-requested continuation, and bounded

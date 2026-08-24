@@ -3,22 +3,40 @@ package io.github.stream29.kodex.cli.app
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
+import com.jakewharton.mosaic.text.AnnotatedString
+import com.jakewharton.mosaic.text.SpanStyle
+import com.jakewharton.mosaic.text.buildAnnotatedString
+import com.jakewharton.mosaic.text.withStyle
+import com.jakewharton.mosaic.ui.TextStyle
 import kotlin.time.Clock
 import kotlin.time.Instant
 
 internal fun SessionCatalogEntry.sessionBrowserLabel(
     maximumColumns: Int,
     now: Instant = Clock.System.now(),
-): String {
+): AnnotatedString {
     val title = threadName ?: "Session $sessionIndex"
     val lastActivity = lastActivityAt?.relativeTimeFrom(now)
-        ?: return title.ellipsizeToTerminalWidth(maximumColumns)
-    val suffix = " · $lastActivity"
+        ?: return buildAnnotatedString {
+            append(title.ellipsizeToTerminalWidth(maximumColumns))
+        }
+    val suffix = " $lastActivity"
     val titleColumns = maximumColumns - suffix.terminalCellWidth()
-    return if (titleColumns > 0) {
-        title.ellipsizeToTerminalWidth(titleColumns) + suffix
+    val displayedTitle = if (titleColumns > 0) {
+        title.ellipsizeToTerminalWidth(titleColumns)
     } else {
         (title + suffix).ellipsizeToTerminalWidth(maximumColumns)
+    }
+    if (titleColumns <= 0) {
+        return buildAnnotatedString {
+            append(displayedTitle)
+        }
+    }
+    return buildAnnotatedString {
+        append(displayedTitle)
+        withStyle(SpanStyle(textStyle = TextStyle.Dim)) {
+            append(suffix)
+        }
     }
 }
 

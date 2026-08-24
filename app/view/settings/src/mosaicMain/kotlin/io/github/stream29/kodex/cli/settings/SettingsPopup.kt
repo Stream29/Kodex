@@ -39,12 +39,12 @@ import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.ScrollState
-import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiDialogActionRow
 import io.github.stream29.kodex.cli.components.TuiDropdownMenu
 import io.github.stream29.kodex.cli.components.TuiDropdownState
 import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
+import io.github.stream29.kodex.cli.components.TuiInteractionStyle
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.verticalScroll
@@ -163,12 +163,9 @@ public fun BoxScope.SettingsPopup(
                         .background(SettingsNavigationBackground),
                 ) {
                     SettingsPage.entries.forEach { candidate ->
-                        TuiButton(
+                        SettingsNavigationButton(
                             label = candidate.settingsLabel(),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(SettingsNavigationBackground),
-                            color = SettingsForeground,
+                            modifier = Modifier.fillMaxWidth(),
                             selected = candidate == selectedPage,
                             onClick = {
                                 dropdowns.dismissAll()
@@ -202,9 +199,8 @@ public fun BoxScope.SettingsPopup(
                     .fillMaxWidth()
                     .background(SettingsActionBackground),
             ) {
-                TuiButton(
+                SettingsActionButton(
                     label = "Close",
-                    color = SettingsActionForeground,
                     onClick = onDismissRequest,
                 )
             }
@@ -537,7 +533,7 @@ internal fun AuthenticationSettingsContent(
                 SettingsItem(
                     label = "OpenAI account",
                     supportingText = authState.planType?.let { plan ->
-                        "$identity · Plan: ${plan.rawValue}"
+                        "$identity Plan: ${plan.rawValue}"
                     } ?: identity,
                 )
             }
@@ -548,9 +544,8 @@ internal fun AuthenticationSettingsContent(
                     supportingText =
                         "Authentication unavailable: ${authState.reason.settingsDescription()}",
                 ) {
-                    TuiButton(
+                    SettingsActionButton(
                         label = "Sign in",
-                        color = SettingsActionForeground,
                         onClick = onOpenLogin,
                     )
                 }
@@ -600,9 +595,8 @@ private fun SessionNameSettingsContent(
         label = "Session name",
         supportingText = snapshot.sessionName,
     ) {
-        TuiButton(
+        SettingsActionButton(
             label = "Rename",
-            color = SettingsActionForeground,
             onClick = onRename,
         )
     }
@@ -633,9 +627,8 @@ internal fun SettingsPathField(
         supportingText = value,
         enabled = enabled,
     ) {
-        TuiButton(
+        SettingsActionButton(
             label = "Browse",
-            color = SettingsActionForeground,
             enabled = enabled,
             onClick = onBrowse,
         )
@@ -745,7 +738,8 @@ internal fun SettingsDropdownField(
         TuiDropdownTrigger(
             dropdownState = dropdownState,
             label = selectedLabel,
-            color = if (enabled) SettingsForeground else SettingsSupportingForeground,
+            color = SettingsForeground,
+            interactionStyle = TuiInteractionStyle.PreserveColors,
             enabled = enabled,
         )
     }

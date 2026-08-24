@@ -15,16 +15,12 @@ val openAiClientConfigTest by testSuite {
         )
         assertEquals(90_000, config.requestTimeoutMillis)
         assertEquals(300_000, config.sseSocketTimeoutMillis)
-        assertEquals(480_000, config.remoteCompactionDeadlineMillis)
         assertEquals(2, config.remoteCompactionMaxRetries)
     }
 
     test("rejects invalid streaming timeout configuration") {
         assertFailsWith<IllegalArgumentException> {
             OpenAiClientConfig(sseSocketTimeoutMillis = 0)
-        }
-        assertFailsWith<IllegalArgumentException> {
-            OpenAiClientConfig(remoteCompactionDeadlineMillis = 0)
         }
         assertFailsWith<IllegalArgumentException> {
             OpenAiClientConfig(remoteCompactionMaxRetries = -1)

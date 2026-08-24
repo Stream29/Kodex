@@ -38,21 +38,21 @@ val ellipsizedTextTest by testSuite {
 
         runMosaicTest {
             assertEquals(
-                "A你BCDEF · +1.5s",
+                "A你BCDEF +1.5s",
                 setContentAndSnapshot {
                     Box(Modifier.width(width)) {
                         EllipsizedTextWithTrailingContent("A你BCDEF") {
-                            Text(" · +1.5s")
+                            Text(" +1.5s")
                         }
                     }
                 },
             )
 
             width = 13
-            assertEquals("A... · +1.5s", awaitSnapshot())
+            assertEquals("A你B... +1.5s", awaitSnapshot())
 
             width = 8
-            assertEquals(" · +1.5s", awaitSnapshot())
+            assertEquals("A +1.5s", awaitSnapshot())
         }
     }
 }

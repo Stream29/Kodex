@@ -49,7 +49,6 @@ public fun RequestUserInputPanel(
             .height(rows)
             .verticalScroll(scrollState),
     ) {
-        RequestUserInputText("Input requested", columns, TextStyle.Bold)
         state.arguments.questions.forEachIndexed { index, question ->
             RequestUserInputQuestionView(
                 callId = state.callId,

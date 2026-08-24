@@ -6,6 +6,7 @@ import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionReposi
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.initialize
+import io.github.stream29.kodex.app.agent.contract.AgentAddress
 import io.github.stream29.kodex.app.agent.contract.AgentExecutionPhase
 import io.github.stream29.kodex.app.agent.contract.AgentLifecycleState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
@@ -133,6 +134,120 @@ val rootSessionViewModelTest by testSuite {
         }
     }
 
+    test("topology preserves repository sibling order and depth-first branches") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val sessionIndex = initializedRoot(repository, "Root")
+            val root = repository.open(sessionIndex)
+            val children = List(12) { position ->
+                createInitializedChild(root, "Child $position")
+            }
+            val grandchild = createInitializedChild(children.first(), "Grandchild 0")
+            val probe = SessionViewModelCreationProbe()
+            val store = testSessionViewModelRegistry(repository, this, probe)
+            val model = store.open(sessionIndex)
+            try {
+                val rootAddress = model.rootAgent.address
+                val firstAddress = model.topology.value.nodes.single { node ->
+                    node.threadName == "Child 0"
+                }.address
+
+                assertEquals(
+                    listOf("Root") + List(12) { position -> "Child $position" },
+                    model.topology.value.nodes.map { node -> node.threadName },
+                )
+                assertEquals(listOf(rootAddress), probe.agentAddresses)
+
+                model.materializeDirectChildren(firstAddress)
+
+                assertEquals(
+                    listOf("Root", "Child 0", "Grandchild 0") +
+                        List(11) { position -> "Child ${position + 1}" },
+                    model.topology.value.nodes.map { node -> node.threadName },
+                )
+                assertEquals(
+                    listOf(0, 1, 2) + List(11) { 1 },
+                    model.topology.value.nodes.map { node -> node.depth },
+                )
+                assertEquals(
+                    listOf(
+                        rootAddress,
+                        AgentAddress(sessionIndex, grandchild.storage.id),
+                    ),
+                    probe.agentAddresses,
+                )
+            } finally {
+                store.shutdown()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("direct catalog reconciliation removes stale subtrees and handles entry reuse") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val sessionIndex = initializedRoot(repository, "Root")
+            val root = repository.open(sessionIndex)
+            val first = createInitializedChild(root, "First")
+            val firstEntry = root.subagents.list().single()
+            createInitializedChild(root, "Second")
+            val grandchild = createInitializedChild(first, "Grandchild")
+            val probe = SessionViewModelCreationProbe()
+            val store = testSessionViewModelRegistry(repository, this, probe)
+            val model = store.open(sessionIndex)
+            try {
+                val firstAddress = model.topology.value.nodes.single { node ->
+                    node.threadName == "First"
+                }.address
+                val grandchildAddress = AgentAddress(sessionIndex, grandchild.storage.id)
+                model.materializeDirectChildren(firstAddress)
+                val removedSelection = model.selectAgent(grandchildAddress)
+                yield()
+
+                assertEquals(
+                    listOf("Root", "First", "Grandchild", "Second"),
+                    model.topology.value.nodes.map { node -> node.threadName },
+                )
+
+                root.subagents.delete(firstEntry)
+                model.refresh()
+
+                assertEquals(
+                    listOf("Root", "Second"),
+                    model.topology.value.nodes.map { node -> node.threadName },
+                )
+                assertTrue(model.topology.value.nodes.none { node ->
+                    node.address == firstAddress || node.address == grandchildAddress
+                })
+                assertSame(model.rootAgent, model.selectedAgent.value)
+                assertEquals(AgentLifecycleState.Closed, removedSelection.lifecycle.value)
+                assertEquals(2, model.summary.value.agentCount)
+
+                val replacementEntry = root.subagents.create()
+                assertEquals(firstEntry, replacementEntry)
+                val replacement = root.subagents.open(replacementEntry)
+                initializeAgent(replacement, "Replacement")
+                model.refresh()
+
+                assertEquals(
+                    listOf("Root", "Replacement", "Second"),
+                    model.topology.value.nodes.map { node -> node.threadName },
+                )
+                assertEquals(listOf(0, 1, 1), model.topology.value.nodes.map { node -> node.depth })
+                assertTrue(model.topology.value.nodes.none { node ->
+                    node.address == firstAddress || node.address == grandchildAddress
+                })
+                assertTrue(model.topology.value.nodes.any { node ->
+                    node.address == AgentAddress(sessionIndex, replacement.storage.id)
+                })
+                assertEquals(3, model.summary.value.agentCount)
+            } finally {
+                store.shutdown()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
     test("expansion and deep selection materialize exact reusable children and close them on release") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
@@ -166,7 +281,7 @@ val rootSessionViewModelTest by testSuite {
                     node.materialization == PersistedAgentMaterializationState.Loaded
                 })
 
-                val deepAddress = io.github.stream29.kodex.app.agent.contract.AgentAddress(
+                val deepAddress = AgentAddress(
                     sessionIndex = sessionIndex,
                     agentId = deep.storage.id,
                 )
@@ -649,8 +764,16 @@ private suspend fun initializedRoot(
 private suspend fun createInitializedChild(
     parent: KodexAgentSession,
     name: String,
-): KodexAgentSession = parent.subagents.open(parent.subagents.create()).also { child ->
-    child.runtime.modify { storage ->
+): KodexAgentSession = initializeAgent(
+    parent.subagents.open(parent.subagents.create()),
+    name,
+)
+
+private suspend fun initializeAgent(
+    session: KodexAgentSession,
+    name: String,
+): KodexAgentSession = session.also { agent ->
+    agent.runtime.modify { storage ->
         storage.initialize(
             KodexAgentSettings(
                 model = OpenAiModelId("test-model"),

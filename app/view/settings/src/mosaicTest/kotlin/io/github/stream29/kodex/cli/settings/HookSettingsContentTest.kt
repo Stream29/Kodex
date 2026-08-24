@@ -30,7 +30,7 @@ class HookSettingsContentTest {
             }
 
             assertTrue("Hooks [Add]" in snapshot, snapshot)
-            assertTrue("[guard tools · Pre tool use]" in snapshot, snapshot)
+            assertTrue("[guard tools Pre tool use]" in snapshot, snapshot)
             assertFalse("Import from Codex" in snapshot, snapshot)
             assertFalse("Enabled" in snapshot, snapshot)
             assertFalse("matcher" in snapshot.lowercase(), snapshot)

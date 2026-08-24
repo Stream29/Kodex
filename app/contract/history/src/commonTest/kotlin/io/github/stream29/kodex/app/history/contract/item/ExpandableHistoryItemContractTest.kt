@@ -11,19 +11,19 @@ import kotlin.time.Duration.Companion.milliseconds
 public class ExpandableHistoryItemContractTest {
     @Test
     public fun loadedHeadersRetainOnlyValidatedOneLinePresentation() {
-        val tool = ToolHistoryItemHeader(
+        val tool = ToolHistoryItemHeader.Summary(
             summary = "Run tests",
             status = "completed",
             elapsed = 12.milliseconds,
         )
         val patch = PatchHistoryItemHeader(
-            summary = "Updated two files",
+            target = PatchHistoryItemTarget.FileCount(2),
             status = PatchHistoryItemStatus.Completed,
             elapsed = 4.milliseconds,
         )
 
         assertEquals("Run tests", tool.summary)
-        assertEquals("Updated two files", patch.summary)
+        assertEquals(PatchHistoryItemTarget.FileCount(2), patch.target)
         assertFailsWith<IllegalArgumentException> {
             tool.copy(summary = " ")
         }
@@ -34,7 +34,7 @@ public class ExpandableHistoryItemContractTest {
 
     @Test
     public fun ordinaryToolStateRejectsSpecializedBreakerEvents() {
-        val header = ToolHistoryItemHeader(
+        val header = ToolHistoryItemHeader.Summary(
             summary = "Update the plan",
             status = "completed",
             elapsed = Duration.ZERO,

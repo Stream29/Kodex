@@ -43,27 +43,40 @@ val textInputTest by testSuite {
         }
     }
 
-    test("disabled input keeps its selection dimmed and inverted without accepting pointer edits") {
-        val selected = TextInputValue(text = "locked", cursorOffset = 6, selectionAnchor = 0)
-        val state = TextInputState(selected)
+    test("disabled input rejects pointer cursor placement") {
+        val initial = TextInputValue(text = "locked", cursorOffset = 6)
+        val state = TextInputState(initial)
+
+        runMosaicTest(snapshotStrategy = ansiSnapshots) {
+            assertEquals(
+                "\u001B[2mlocked\u001B[0m",
+                setContentAndSnapshot {
+                    TextInput(
+                        state = state,
+                        layout = TextInputLayout.create(value = state.value, width = 80),
+                        enabled = false,
+                    )
+                },
+            )
+
+            sendMouseEvent(MouseEvent(0, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
+            assertEquals(initial, state.value)
+        }
+    }
+
+    test("enabled input does not render an application-managed selection") {
+        val state = TextInputState(TextInputValue(text = "plain", cursorOffset = 0))
 
         runMosaicTest(snapshotStrategy = ansiSnapshots) {
             val snapshot = setContentAndSnapshot {
                 TextInput(
                     state = state,
                     layout = TextInputLayout.create(value = state.value, width = 80),
-                    enabled = false,
+                    autoFocus = true,
                 )
             }
 
-            assertTrue(
-                "\u001B[7m" in snapshot ||
-                    "\u001B[2;7m" in snapshot ||
-                    "\u001B[7;2m" in snapshot,
-                snapshot,
-            )
-            sendMouseEvent(MouseEvent(0, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
-            assertEquals(selected, state.value)
+            assertFalse("\u001B[7m" in snapshot, snapshot)
         }
     }
 
@@ -262,28 +275,23 @@ val textInputTest by testSuite {
         assertEquals(0, state.scrollOffset)
     }
 
-    test("selection-aware edits replace the complete selected range") {
-        val selection = TextInputValue(
-            text = "abcdef",
-            cursorOffset = 5,
-            selectionAnchor = 1,
-        )
-
+    test("edits apply only at the active cursor") {
+        val value = TextInputValue(text = "abcdef", cursorOffset = 3)
         assertEquals(
-            TextInputValue(text = "aXf", cursorOffset = 2),
-            TextInputEdit.Insert("X").applyTo(selection),
+            TextInputValue(text = "abcXdef", cursorOffset = 4),
+            TextInputEdit.Insert("X").applyTo(value),
         )
         assertEquals(
-            TextInputValue(text = "af", cursorOffset = 1),
-            TextInputEdit.DeleteBeforeCursor.applyTo(selection),
+            TextInputValue(text = "abdef", cursorOffset = 2),
+            TextInputEdit.DeleteBeforeCursor.applyTo(value),
         )
         assertEquals(
-            TextInputValue(text = "af", cursorOffset = 1),
-            TextInputEdit.DeleteAtCursor.applyTo(selection),
+            TextInputValue(text = "abcef", cursorOffset = 3),
+            TextInputEdit.DeleteAtCursor.applyTo(value),
         )
     }
 
-    test("movement extends, reverses, and collapses a selection") {
+    test("movement updates only the active cursor") {
         val state = TextInputState(TextInputValue("abcdef", cursorOffset = 2))
         var layout = TextInputLayout.create(
             value = state.value,
@@ -295,20 +303,11 @@ val textInputTest by testSuite {
         assertEquals(TextInputValue("abcdef", cursorOffset = 5), state.value)
 
         layout = TextInputLayout.create(value = state.value, width = 3, softWrap = true)
-        assertTrue(
-            state.moveCursor(
-                movement = TextInputMovement.Up,
-                extendSelection = true,
-                layout = layout,
-            ),
-        )
-        assertEquals(
-            TextInputValue("abcdef", cursorOffset = 2, selectionAnchor = 5),
-            state.value,
-        )
+        assertTrue(state.moveCursor(movement = TextInputMovement.Up, layout = layout))
+        assertEquals(TextInputValue("abcdef", cursorOffset = 2), state.value)
 
         assertTrue(state.moveCursor(TextInputMovement.Right))
-        assertEquals(TextInputValue("abcdef", cursorOffset = 5), state.value)
+        assertEquals(TextInputValue("abcdef", cursorOffset = 3), state.value)
     }
 
     test("vertical movement preserves its terminal column across short, wide, and empty lines") {
@@ -338,16 +337,8 @@ val textInputTest by testSuite {
 
         assertTrue(state.moveCursor(TextInputMovement.LineStart))
         assertEquals(TextInputValue("one\ntwo", cursorOffset = 4), state.value)
-        assertTrue(
-            state.moveCursor(
-                movement = TextInputMovement.LineEnd,
-                extendSelection = true,
-            ),
-        )
-        assertEquals(
-            TextInputValue("one\ntwo", cursorOffset = 7, selectionAnchor = 4),
-            state.value,
-        )
+        assertTrue(state.moveCursor(movement = TextInputMovement.LineEnd))
+        assertEquals(TextInputValue("one\ntwo", cursorOffset = 7), state.value)
         assertTrue(state.moveCursor(TextInputMovement.DocumentStart))
         assertEquals(TextInputValue("one\ntwo", cursorOffset = 0), state.value)
     }
@@ -595,11 +586,12 @@ val textInputTest by testSuite {
         assertEquals(0, state.scrollOffset)
     }
 
-    test("keyboard selection renders inverted and undo restores it") {
-        val state = TextInputState(TextInputValue("abc", cursorOffset = 0))
+    test("shift-modified movement does not create an application selection") {
+        val initial = TextInputValue("abc", cursorOffset = 0)
+        val state = TextInputState(initial)
 
         runMosaicTest(snapshotStrategy = ansiSnapshots) {
-            setContentAndSnapshot {
+            val snapshot = setContentAndSnapshot {
                 TextInput(
                     state = state,
                     layout = TextInputLayout.create(value = state.value, width = 80),
@@ -615,36 +607,17 @@ val textInputTest by testSuite {
             )
             sendKeyEvent(
                 KeyboardEvent(
-                    codepoint = KeyboardEvent.Right,
+                    codepoint = KeyboardEvent.End,
                     modifiers = KeyboardEvent.ModifierShift,
                 ),
             )
-            val selectedSnapshot = awaitSnapshot()
-            assertEquals(
-                TextInputValue("abc", cursorOffset = 2, selectionAnchor = 0),
-                state.value,
-            )
-            assertTrue("\u001B[7m" in selectedSnapshot, selectedSnapshot)
 
-            sendKeyEvent(KeyboardEvent(codepoint = 'X'.code))
-            awaitSnapshot()
-            assertEquals(TextInputValue("Xc", cursorOffset = 1), state.value)
-
-            sendKeyEvent(
-                KeyboardEvent(
-                    codepoint = 'z'.code,
-                    modifiers = KeyboardEvent.ModifierCtrl,
-                ),
-            )
-            awaitSnapshot()
-            assertEquals(
-                TextInputValue("abc", cursorOffset = 2, selectionAnchor = 0),
-                state.value,
-            )
+            assertEquals(initial, state.value)
+            assertFalse("\u001B[7m" in snapshot, snapshot)
         }
     }
 
-    test("primary-pointer drag selects across visual rows") {
+    test("primary-pointer drag keeps the cursor placed by its initial press") {
         val state = TextInputState(TextInputValue("abcdef", cursorOffset = 0))
 
         runMosaicTest {
@@ -665,19 +638,7 @@ val textInputTest by testSuite {
             sendMouseEvent(MouseEvent(2, 1, MouseEvent.Type.Release))
             awaitSnapshot()
 
-            assertEquals(
-                TextInputValue("abcdef", cursorOffset = 5, selectionAnchor = 1),
-                state.value,
-            )
-
-            sendMouseEvent(MouseEvent(2, 1, MouseEvent.Type.Press, MouseEvent.Button.Left))
-            sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Drag, MouseEvent.Button.Left))
-            sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Release))
-            awaitSnapshot()
-            assertEquals(
-                TextInputValue("abcdef", cursorOffset = 1, selectionAnchor = 5),
-                state.value,
-            )
+            assertEquals(TextInputValue("abcdef", cursorOffset = 1), state.value)
 
             val beforeShiftClick = state.value
             sendMouseEvent(

@@ -68,7 +68,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.takeWhile
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.IOException
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonElement
@@ -225,7 +224,6 @@ public class OpenAiClient(
     ): RemoteCompactionV2Response =
         retryOpenAiStreamingTransportWithBudget(
             retry = config.retry.copy(maxRetries = config.remoteCompactionMaxRetries),
-            deadlineMillis = config.remoteCompactionDeadlineMillis,
         ) { budget ->
             httpClient.streamRemoteCompactionEvents(
                 budget = budget,
@@ -602,7 +600,6 @@ internal suspend fun <T> retryOpenAiStreamingTransport(
 
 internal suspend fun <T> retryOpenAiStreamingTransportWithBudget(
     retry: OpenAiClientRetryConfig,
-    deadlineMillis: Long? = null,
     block: suspend (RemoteCompactionRetryBudget) -> T,
 ): T {
     val budget = RemoteCompactionRetryBudget(retry)
@@ -630,13 +627,7 @@ internal suspend fun <T> retryOpenAiStreamingTransportWithBudget(
         }
     }
 
-    if (deadlineMillis == null) {
-        return runAttempts()
-    }
-    return withTimeoutOrNull(deadlineMillis) { runAttempts() }
-        ?: throw OpenAiRemoteCompactionV2DeadlineExceededException().also {
-            budget.logFinalFailure(termination = "deadline_exceeded", retryable = false)
-        }
+    return runAttempts()
 }
 
 public class OpenAiRemoteCompactionV2ProtocolException(
@@ -649,10 +640,6 @@ public class OpenAiRemoteCompactionV2StreamIncompleteException : IOException(
 
 public class OpenAiRemoteCompactionV2StreamFailureException : IOException(
     "Remote compaction v2 stream reported a retryable failure.",
-)
-
-public class OpenAiRemoteCompactionV2DeadlineExceededException : IllegalStateException(
-    "Remote compaction v2 exceeded its total streaming deadline.",
 )
 
 private fun Throwable.remoteCompactionTermination(): String = when (this) {

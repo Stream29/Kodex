@@ -66,9 +66,9 @@ class McpSettingsContentTest {
             }
 
             assertTrue("MCP servers [Add] [Import from Codex]" in snapshot, snapshot)
-            assertTrue("[healthy · Healthy (2 tools)]" in snapshot, snapshot)
-            assertTrue("[lost · Failed: Connection lost]" in snapshot, snapshot)
-            assertTrue("[disabled · Disabled]" in snapshot, snapshot)
+            assertTrue("[Healthy (2 tools)]" in snapshot, snapshot)
+            assertTrue("[Failed: Connection lost]" in snapshot, snapshot)
+            assertTrue("[Disabled]" in snapshot, snapshot)
             assertFalse("https://healthy.example.test/mcp" in snapshot, snapshot)
             assertFalse("Headers:" in snapshot, snapshot)
             assertFalse("lost-server --headless" in snapshot, snapshot)
@@ -150,9 +150,9 @@ class McpSettingsContentTest {
             }
 
             assertTrue("All supported servers are selected." in snapshot, snapshot)
-            assertTrue("[✓ new · New]" in snapshot, snapshot)
-            assertTrue("[✓ conflict · Replace existing]" in snapshot, snapshot)
-            assertTrue("[– unsupported · Unsupported]" in snapshot, snapshot)
+            assertTrue("[✓ new New]" in snapshot, snapshot)
+            assertTrue("[✓ conflict Replace existing]" in snapshot, snapshot)
+            assertTrue("[– unsupported Unsupported]" in snapshot, snapshot)
             assertTrue("[Import selected (2)]" in snapshot, snapshot)
             assertFalse("[Preview]" in snapshot, snapshot)
         }

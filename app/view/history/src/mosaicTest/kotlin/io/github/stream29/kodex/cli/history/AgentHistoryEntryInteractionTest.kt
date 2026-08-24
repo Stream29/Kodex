@@ -8,12 +8,18 @@ import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.testing.SnapshotStrategy
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
+import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryAction
+import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryResult
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.ReasoningHistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemState
+import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemHeader
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewModel
@@ -21,10 +27,17 @@ import io.github.stream29.kodex.app.history.contract.item.WorkGroupChildHistoryI
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
 import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestionOption
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
+import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Duration
@@ -168,6 +181,101 @@ val agentHistoryEntryInteractionTest by testSuite {
             assertTrue("Thinking" in expanded)
         }
     }
+
+    test("renders completed user input as a read-only answered panel") {
+        val item = FakeRequestUserInput(
+            index = 31,
+            event = StableRequestUserInputToolEvent(
+                callId = "input",
+                arguments = RequestUserInputArgs(
+                    questions = listOf(
+                        RequestUserInputQuestion(
+                            id = "layout",
+                            header = "Layout",
+                            question = "Which layout should be used?",
+                            options = listOf(
+                                RequestUserInputQuestionOption("Compact", "Use less space"),
+                                RequestUserInputQuestionOption("Detailed", "Show every field"),
+                            ),
+                        ),
+                    ),
+                ),
+                result = StableRequestUserInputResult.Answered(
+                    RequestUserInputResponse(
+                        answers = mapOf(
+                            "layout" to RequestUserInputAnswer(listOf("Compact")),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        runMosaicTest {
+            val rendered = setContentAndSnapshot {
+                Column(modifier = Modifier.width(60)) {
+                    StoredHistoryEntry(
+                        item = item,
+                        generation = 9,
+                        shellSessions = EmptyHistoryShellSessions,
+                        onOpenContextMenu = null,
+                    )
+                }
+            }
+
+            assertEquals(
+                listOf(
+                    "Layout: Which layout should be used? +0s",
+                    "[● Compact]",
+                    "  Use less space",
+                ),
+                rendered.lines(),
+            )
+            assertFalse("Detailed" in rendered)
+            assertFalse("Show every field" in rendered)
+            assertFalse("request_user_input" in rendered)
+            assertFalse("Arguments" in rendered)
+            assertFalse("Result" in rendered)
+        }
+    }
+
+    test("collapsed command header follows its live terminal session") {
+        val session = FakeShellSession(
+            sessionId = 7,
+            arguments = ExecCommandArguments(command = "tail -f build.log"),
+        )
+        val sessions = FakeShellSessions(mapOf(session.sessionId to session))
+        val item = FakeTool(
+            index = 33,
+            header = ToolHistoryItemHeader.CommandExecution(
+                action = CommandExecutionHistoryAction.Wait(session.sessionId),
+                result = CommandExecutionHistoryResult.Output(
+                    exitCode = null,
+                    sessionId = session.sessionId,
+                ),
+                elapsed = Duration.ZERO,
+            ),
+        )
+
+        runMosaicTest(snapshotStrategy = ansiSnapshots) {
+            val running = setContentAndSnapshot {
+                Column(modifier = Modifier.width(60)) {
+                    StoredHistoryEntry(
+                        item = item,
+                        generation = 10,
+                        shellSessions = sessions,
+                        onOpenContextMenu = null,
+                    )
+                }
+            }
+            assertTrue("> Wait for tail -f build.log" in running, running)
+            assertTrue("38;2;0;255;0" in running, running)
+
+            session.completed.value = true
+            val completed = awaitSnapshot()
+            assertTrue("> Wait for tail -f build.log" in completed, completed)
+            assertTrue("38;2;0;255;0" !in completed, completed)
+        }
+    }
 }
 
 private class FakeMessage(
@@ -179,12 +287,12 @@ private class FakeMessage(
 
 private class FakeTool(
     override val index: Int,
-) : ToolHistoryItemViewModel {
-    private val header = ToolHistoryItemHeader(
+    private val header: ToolHistoryItemHeader = ToolHistoryItemHeader.Summary(
         summary = "demo",
         status = "completed",
         elapsed = Duration.ZERO,
-    )
+    ),
+) : ToolHistoryItemViewModel {
     private val event = StableTextToolEvent(
         callId = "call-$index",
         name = "demo",
@@ -212,6 +320,15 @@ private class FakeTool(
     }
 }
 
+private class FakeRequestUserInput(
+    override val index: Int,
+    event: StableRequestUserInputToolEvent,
+) : RequestUserInputHistoryItemViewModel {
+    override val state = MutableStateFlow<RequestUserInputHistoryItemState>(
+        RequestUserInputHistoryItemState.Ready(event, Duration.ZERO),
+    )
+}
+
 private class FakeWorkGroup(
     override val indexRange: IntRange = 23..29,
     private val children: List<WorkGroupChildHistoryItemViewModel>,
@@ -233,4 +350,20 @@ private class FakeWorkGroup(
 private object EmptyHistoryShellSessions : AgentShellSessionRegistry {
     override val activeSessions: StateFlow<Map<Int, AgentShellSession>> =
         MutableStateFlow(emptyMap())
+}
+
+private class FakeShellSessions(
+    sessions: Map<Int, AgentShellSession>,
+) : AgentShellSessionRegistry {
+    override val activeSessions: StateFlow<Map<Int, AgentShellSession>> =
+        MutableStateFlow(sessions)
+}
+
+private class FakeShellSession(
+    override val sessionId: Int,
+    override val arguments: ExecCommandArguments,
+) : AgentShellSession {
+    override val completed = MutableStateFlow(false)
+
+    override fun close() = Unit
 }

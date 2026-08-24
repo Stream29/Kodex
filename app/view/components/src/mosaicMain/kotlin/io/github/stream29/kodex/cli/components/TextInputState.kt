@@ -8,32 +8,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 
-/** Immutable text, active UTF-16 cursor offset, and selection anchor. */
+/** Immutable text and active UTF-16 cursor offset. */
 @Immutable
 public data class TextInputValue(
     public val text: String = "",
     public val cursorOffset: Int = text.length,
-    public val selectionAnchor: Int = cursorOffset,
 ) {
     init {
         require(cursorOffset in 0..text.length) { "Cursor offset must be within the text." }
-        require(selectionAnchor in 0..text.length) { "Selection anchor must be within the text." }
     }
-
-    public val hasSelection: Boolean
-        get() = cursorOffset != selectionAnchor
-
-    public val selectionStart: Int
-        get() = minOf(cursorOffset, selectionAnchor)
-
-    public val selectionEnd: Int
-        get() = maxOf(cursorOffset, selectionAnchor)
 }
 
 /** A single text-input mutation or compatibility cursor movement. */
 public sealed interface TextInputEdit {
     /**
-     * Inserts [text], replacing the current selection.
+     * Inserts [text] at the current cursor.
      *
      * [mergeWithPrevious] is reserved for ordinary character input. Paste, newline, and other
      * caller-owned edits remain atomic by using the default value.
@@ -72,61 +61,35 @@ public enum class TextInputMovement {
 
 /** Applies this edit to [value] using Unicode-scalar cursor semantics. */
 public fun TextInputEdit.applyTo(value: TextInputValue): TextInputValue = when (this) {
-    is TextInputEdit.Insert -> value.replaceSelection(text)
+    is TextInputEdit.Insert -> value.replaceRange(value.cursorOffset, value.cursorOffset, text)
     TextInputEdit.DeleteBeforeCursor -> {
-        if (value.hasSelection) {
-            value.replaceSelection("")
-        } else {
-            val start = value.text.previousScalar(value.cursorOffset)
-            if (start == value.cursorOffset) value else value.replaceRange(start, value.cursorOffset, "")
-        }
+        val start = value.text.previousScalar(value.cursorOffset)
+        if (start == value.cursorOffset) value else value.replaceRange(start, value.cursorOffset, "")
     }
 
     TextInputEdit.DeleteAtCursor -> {
-        if (value.hasSelection) {
-            value.replaceSelection("")
-        } else {
-            val end = value.text.nextScalar(value.cursorOffset)
-            if (end == value.cursorOffset) value else value.replaceRange(value.cursorOffset, end, "")
-        }
+        val end = value.text.nextScalar(value.cursorOffset)
+        if (end == value.cursorOffset) value else value.replaceRange(value.cursorOffset, end, "")
     }
 
     TextInputEdit.DeletePreviousWord -> {
-        if (value.hasSelection) {
-            value.replaceSelection("")
-        } else {
-            val start = value.text.previousWordGroupStart(value.cursorOffset)
-            if (start == value.cursorOffset) value else value.replaceRange(start, value.cursorOffset, "")
-        }
+        val start = value.text.previousWordGroupStart(value.cursorOffset)
+        if (start == value.cursorOffset) value else value.replaceRange(start, value.cursorOffset, "")
     }
 
-    TextInputEdit.MoveCursorLeft -> {
-        val target = if (value.hasSelection) {
-            value.selectionStart
-        } else {
-            value.text.previousScalar(value.cursorOffset)
-        }
-        value.withCollapsedCursor(target)
-    }
-
-    TextInputEdit.MoveCursorRight -> {
-        val target = if (value.hasSelection) {
-            value.selectionEnd
-        } else {
-            value.text.nextScalar(value.cursorOffset)
-        }
-        value.withCollapsedCursor(target)
-    }
-
-    TextInputEdit.MoveCursorToStart -> value.withCollapsedCursor(0)
-    TextInputEdit.MoveCursorToEnd -> value.withCollapsedCursor(value.text.length)
+    TextInputEdit.MoveCursorLeft ->
+        value.withCursor(value.text.previousScalar(value.cursorOffset))
+    TextInputEdit.MoveCursorRight ->
+        value.withCursor(value.text.nextScalar(value.cursorOffset))
+    TextInputEdit.MoveCursorToStart -> value.withCursor(0)
+    TextInputEdit.MoveCursorToEnd -> value.withCursor(value.text.length)
 }
 
 /**
  * Mutable, composition-observable state for a terminal text input.
  *
- * Selection, preferred vertical column, bounded undo/redo history, and viewport position are local
- * editor state. Application callers continue to synchronize only text and the active cursor.
+ * Preferred vertical column, bounded undo/redo history, and viewport position are local editor
+ * state. Application callers synchronize text and the active cursor.
  */
 @Stable
 public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
@@ -150,7 +113,7 @@ public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
     public val canRedo: Boolean
         get() = redoHistory.isNotEmpty()
 
-    /** Applies [edit] and returns whether it changed the text, cursor, or selection. */
+    /** Applies [edit] and returns whether it changed the text or cursor. */
     public fun edit(edit: TextInputEdit): Boolean {
         val before = value
         val updated = edit.applyTo(before).withScalarBoundaries()
@@ -164,7 +127,7 @@ public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
         }
 
         if (updated.text != before.text) {
-            recordTextChange(before, updated, edit.historyGroup(before))
+            recordTextChange(before, updated, edit.historyGroup())
             redoHistory.clear()
         } else {
             breakHistoryGroup()
@@ -176,30 +139,20 @@ public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
     }
 
     /**
-     * Moves the active cursor and optionally extends the current selection.
+     * Moves the active cursor.
      *
      * [layout] is required for visual [TextInputMovement.Up] and [TextInputMovement.Down].
      */
     public fun moveCursor(
         movement: TextInputMovement,
-        extendSelection: Boolean = false,
         layout: TextInputLayout? = null,
     ): Boolean {
         breakHistoryGroup()
         val current = value
         val vertical = movement == TextInputMovement.Up || movement == TextInputMovement.Down
         val target = when (movement) {
-            TextInputMovement.Left -> if (!extendSelection && current.hasSelection) {
-                current.selectionStart
-            } else {
-                current.text.previousScalar(current.cursorOffset)
-            }
-
-            TextInputMovement.Right -> if (!extendSelection && current.hasSelection) {
-                current.selectionEnd
-            } else {
-                current.text.nextScalar(current.cursorOffset)
-            }
+            TextInputMovement.Left -> current.text.previousScalar(current.cursorOffset)
+            TextInputMovement.Right -> current.text.nextScalar(current.cursorOffset)
 
             TextInputMovement.Up -> {
                 val currentLayout = layout ?: return false
@@ -236,38 +189,26 @@ public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
         }.let(current.text::coerceToScalarBoundary)
 
         if (!vertical) preferredColumn = null
-        val anchor = if (extendSelection) current.selectionAnchor else target
-        val updated = current.copy(cursorOffset = target, selectionAnchor = anchor)
+        val updated = current.copy(cursorOffset = target)
         followCursor = true
         if (updated == current) return false
         value = updated
         return true
     }
 
-    /** Places the cursor from a primary-pointer press and starts a new selection anchor. */
-    public fun beginPointerSelection(offset: Int): Boolean {
+    /** Places the cursor at the nearest Unicode-scalar boundary. */
+    public fun placeCursor(offset: Int): Boolean {
         breakHistoryGroup()
         preferredColumn = null
         followCursor = true
         val target = value.text.coerceToScalarBoundary(offset)
-        val updated = value.copy(cursorOffset = target, selectionAnchor = target)
+        val updated = value.copy(cursorOffset = target)
         if (updated == value) return false
         value = updated
         return true
     }
 
-    /** Moves the active end of the current pointer selection. */
-    public fun extendPointerSelection(offset: Int): Boolean {
-        breakHistoryGroup()
-        preferredColumn = null
-        followCursor = true
-        val target = value.text.coerceToScalarBoundary(offset)
-        if (target == value.cursorOffset) return false
-        value = value.copy(cursorOffset = target)
-        return true
-    }
-
-    /** Restores the previous text transaction, including its cursor and selection. */
+    /** Restores the previous text transaction, including its cursor. */
     public fun undo(): Boolean {
         val entry = undoHistory.removeLastOrNull() ?: return false
         redoHistory.add(entry)
@@ -278,7 +219,7 @@ public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
         return true
     }
 
-    /** Reapplies the next text transaction, including its cursor and selection. */
+    /** Reapplies the next text transaction, including its cursor. */
     public fun redo(): Boolean {
         val entry = redoHistory.removeLastOrNull() ?: return false
         undoHistory.add(entry)
@@ -291,8 +232,7 @@ public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
 
     /** Replaces the draft and clears all editor-local transient state. */
     public fun reset(value: TextInputValue = TextInputValue()) {
-        val normalized = value.withScalarBoundaries()
-        this.value = normalized.copy(selectionAnchor = normalized.cursorOffset)
+        this.value = value.withScalarBoundaries()
         undoHistory.clear()
         redoHistory.clear()
         activeHistoryGroup = null
@@ -384,16 +324,13 @@ private enum class HistoryGroup {
     DeleteForward,
 }
 
-private fun TextInputEdit.historyGroup(before: TextInputValue): HistoryGroup? = when (this) {
+private fun TextInputEdit.historyGroup(): HistoryGroup? = when (this) {
     is TextInputEdit.Insert -> HistoryGroup.Typing.takeIf {
-        mergeWithPrevious && !before.hasSelection && text.isSingleScalar()
+        mergeWithPrevious && text.isSingleScalar()
     }
 
-    TextInputEdit.DeleteBeforeCursor ->
-        HistoryGroup.DeleteBackward.takeUnless { before.hasSelection }
-
-    TextInputEdit.DeleteAtCursor ->
-        HistoryGroup.DeleteForward.takeUnless { before.hasSelection }
+    TextInputEdit.DeleteBeforeCursor -> HistoryGroup.DeleteBackward
+    TextInputEdit.DeleteAtCursor -> HistoryGroup.DeleteForward
 
     TextInputEdit.DeletePreviousWord,
     TextInputEdit.MoveCursorLeft,
@@ -403,30 +340,20 @@ private fun TextInputEdit.historyGroup(before: TextInputValue): HistoryGroup? = 
         -> null
 }
 
-private fun TextInputValue.replaceSelection(replacement: String): TextInputValue =
-    replaceRange(selectionStart, selectionEnd, replacement)
-
 private fun TextInputValue.replaceRange(start: Int, end: Int, replacement: String): TextInputValue {
     val updatedText = text.substring(0, start) + replacement + text.substring(end)
     val updatedCursor = start + replacement.length
     return TextInputValue(
         text = updatedText,
         cursorOffset = updatedCursor,
-        selectionAnchor = updatedCursor,
     )
 }
 
-private fun TextInputValue.withCollapsedCursor(offset: Int): TextInputValue =
-    copy(cursorOffset = offset, selectionAnchor = offset)
+private fun TextInputValue.withCursor(offset: Int): TextInputValue = copy(cursorOffset = offset)
 
 private fun TextInputValue.withScalarBoundaries(): TextInputValue {
     val cursor = text.coerceToScalarBoundary(cursorOffset)
-    val anchor = text.coerceToScalarBoundary(selectionAnchor)
-    return if (cursor == cursorOffset && anchor == selectionAnchor) {
-        this
-    } else {
-        copy(cursorOffset = cursor, selectionAnchor = anchor)
-    }
+    return if (cursor == cursorOffset) this else copy(cursorOffset = cursor)
 }
 
 private fun String.previousWordGroupStart(offset: Int): Int {

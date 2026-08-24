@@ -88,8 +88,8 @@ class SessionAgentSidebarTest {
         val topology = PersistedSessionTopologyState(
             rootAddress = root,
             nodes = listOf(
-                topologyNode(root, null, 0, "Root / title"),
-                topologyNode(worker, root, 1, "/root/worker"),
+                topologyNode(root, null, 0, "Root / title", hasChildren = true),
+                topologyNode(worker, root, 1, "/root/worker", hasChildren = true),
                 topologyNode(reviewer, worker, 2, "/root/worker/reviewer"),
             ),
         )
@@ -105,6 +105,55 @@ class SessionAgentSidebarTest {
         assertEquals("Root / title", topology.nodeLabel(topology.nodes[0]))
         assertEquals("worker", topology.nodeLabel(topology.nodes[1]))
         assertEquals("reviewer", topology.nodeLabel(topology.nodes[2]))
+    }
+
+    @Test
+    fun branchingTopologyKeepsExpandedDescendantsInsideTheirParentSubtree() {
+        val root = AgentAddress(7, "root")
+        val first = AgentAddress(7, "first")
+        val firstChild = AgentAddress(7, "first-child")
+        val second = AgentAddress(7, "second")
+        val topology = PersistedSessionTopologyState(
+            rootAddress = root,
+            nodes = listOf(
+                topologyNode(root, null, 0, "Root", hasChildren = true),
+                topologyNode(first, root, 1, "First", hasChildren = true),
+                topologyNode(firstChild, first, 2, "First child"),
+                topologyNode(second, root, 1, "Second"),
+            ),
+        )
+
+        assertEquals(
+            listOf(root, first, second),
+            topology.visibleNodes(setOf(root)).map { node -> node.address },
+        )
+        assertEquals(
+            listOf(root, first, firstChild, second),
+            topology.visibleNodes(setOf(root, first)).map { node -> node.address },
+        )
+        assertEquals(
+            listOf(root),
+            topology.visibleNodes(emptySet()).map { node -> node.address },
+        )
+    }
+
+    @Test
+    fun topologyVisibilityPreservesRepositoryOrderForMultiDigitSiblings() {
+        val root = AgentAddress(7, "root")
+        val children = List(12) { position -> AgentAddress(7, "child-$position") }
+        val topology = PersistedSessionTopologyState(
+            rootAddress = root,
+            nodes = listOf(
+                topologyNode(root, null, 0, "Root", hasChildren = true),
+            ) + children.mapIndexed { position, address ->
+                topologyNode(address, root, 1, "Child $position")
+            },
+        )
+
+        assertEquals(
+            listOf(root) + children,
+            topology.visibleNodes(setOf(root)).map { node -> node.address },
+        )
     }
 
     @Test
@@ -125,11 +174,12 @@ private fun topologyNode(
     parent: AgentAddress?,
     depth: Int,
     threadName: String,
+    hasChildren: Boolean = false,
 ): PersistedSessionTopologyNode = PersistedSessionTopologyNode(
     address = address,
     parentAddress = parent,
     depth = depth,
     threadName = threadName,
-    hasChildren = address.agentId != "reviewer",
+    hasChildren = hasChildren,
     materialization = PersistedAgentMaterializationState.Unloaded,
 )

@@ -13,17 +13,14 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
-import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginEffect
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginState
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
-import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiDialogActionRow
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.utils.externalurl.OpenExternalUrlResult
 import io.github.stream29.kodex.utils.externalurl.openExternalUrl
-import kotlinx.coroutines.flow.collect
 
 /** Centered modal popup for one self-managed OpenAI browser sign-in attempt. */
 @Composable
@@ -152,16 +149,14 @@ private fun LoginActions(
             .background(LoginDialogActionBackground),
     ) {
         onDismissRequest?.let { dismiss ->
-            TuiButton(
+            SettingsActionButton(
                 label = "Cancel",
-                color = SettingsActionForeground,
                 onClick = dismiss,
             )
         }
         primaryLabel?.let { label ->
-            TuiButton(
+            SettingsPrimaryButton(
                 label = label,
-                color = SettingsActionForeground,
                 onClick = requireNotNull(primaryAction),
             )
         }

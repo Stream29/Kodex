@@ -38,4 +38,34 @@ val tuiInteractionStyleTest by testSuite {
             tuiInteractionTextStyle(selected = true, idleTextStyle = TextStyle.Dim),
         )
     }
+
+    test("preserve-colors interaction never applies inverse video") {
+        val style = TuiInteractionStyle.PreserveColors
+        assertEquals(
+            TextStyle.Bold,
+            tuiInteractionTextStyle(hovered = true, interactionStyle = style),
+        )
+        assertEquals(
+            TextStyle.Bold,
+            tuiInteractionTextStyle(pressed = true, interactionStyle = style),
+        )
+        assertEquals(
+            TextStyle.Bold,
+            tuiInteractionTextStyle(selected = true, interactionStyle = style),
+        )
+        assertEquals(
+            TextStyle.Italic + TextStyle.Bold,
+            tuiInteractionTextStyle(
+                selected = true,
+                pressed = true,
+                hovered = true,
+                idleTextStyle = TextStyle.Italic,
+                interactionStyle = style,
+            ),
+        )
+        assertEquals(
+            TextStyle.Dim,
+            tuiInteractionTextStyle(enabled = false, interactionStyle = style),
+        )
+    }
 }

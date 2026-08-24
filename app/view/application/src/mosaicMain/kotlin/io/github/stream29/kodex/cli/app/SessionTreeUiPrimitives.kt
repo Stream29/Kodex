@@ -5,9 +5,10 @@ import androidx.compose.runtime.ReadOnlyComposable
 import com.jakewharton.mosaic.layout.KeyEvent
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
+import com.jakewharton.mosaic.ui.Alignment
+import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
-import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.cli.components.TextInput
 import io.github.stream29.kodex.cli.components.TextInputEdit
@@ -81,28 +82,28 @@ internal fun HistoryComposerSeparator(
     val width = columns.coerceAtLeast(1)
     val label = liveDuration?.let(::liveTurnDurationLabel)
     val reservedButtonWidth = if (showScrollToLatest) ScrollToLatestButtonWidth else 0
-    val labelWidth = (width - reservedButtonWidth).coerceAtLeast(0)
+    val labelWidth = if (showScrollToLatest) {
+        ((width - reservedButtonWidth) / 2).coerceAtLeast(0)
+    } else {
+        width
+    }
     val displayedLabel = label?.ellipsizeToTerminalWidth(labelWidth)
-    val remainingWidth = (width - (displayedLabel?.length ?: 0)).coerceAtLeast(0)
-    val separatorWidth = (remainingWidth - reservedButtonWidth).coerceAtLeast(0)
-    val leadingWidth = (separatorWidth + 1) / 2
-    Row(modifier = Modifier.fillMaxWidth()) {
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Text("-".repeat(width), textStyle = TuiTheme.typography.supporting)
         displayedLabel?.let { value ->
             Text(value, textStyle = TuiTheme.typography.supporting)
         }
         if (showScrollToLatest) {
-            Text("-".repeat(leadingWidth), textStyle = TuiTheme.typography.supporting)
-            TuiButton(
-                label = "↓",
-                idleTextStyle = TuiTheme.typography.supporting,
-                onClick = onScrollToLatest,
-            )
-            Text(
-                "-".repeat(separatorWidth - leadingWidth),
-                textStyle = TuiTheme.typography.supporting,
-            )
-        } else {
-            Text("-".repeat(remainingWidth), textStyle = TuiTheme.typography.supporting)
+            Box(
+                modifier = Modifier.matchParentSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                TuiButton(
+                    label = "↓",
+                    idleTextStyle = TuiTheme.typography.supporting,
+                    onClick = onScrollToLatest,
+                )
+            }
         }
     }
 }

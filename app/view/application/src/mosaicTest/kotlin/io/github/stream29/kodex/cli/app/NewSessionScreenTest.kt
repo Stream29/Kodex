@@ -109,7 +109,7 @@ class NewSessionScreenTest {
     }
 
     @Test
-    fun composerStateEchoPreservesTheFrontendSelection() = runTest {
+    fun composerStateEchoPreservesTheFrontendCursorAndHistory() = runTest {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val composer = fixture.newSession("New Session").composer
@@ -131,7 +131,6 @@ class NewSessionScreenTest {
                     sendKeyEvent(
                         KeyboardEvent(
                             codepoint = KeyboardEvent.Left,
-                            modifiers = KeyboardEvent.ModifierShift,
                         ),
                     )
                     awaitSnapshot()
@@ -139,7 +138,7 @@ class NewSessionScreenTest {
                 sendKeyEvent(KeyboardEvent(codepoint = 'X'.code))
                 awaitSnapshot()
 
-                assertEquals("aX", composer.state.value.text)
+                assertEquals("aXbc", composer.state.value.text)
                 assertEquals(2, composer.state.value.cursorOffset)
 
                 sendKeyEvent(
@@ -154,7 +153,7 @@ class NewSessionScreenTest {
 
                 sendKeyEvent(KeyboardEvent(codepoint = 'Y'.code))
                 awaitSnapshot()
-                assertEquals("aY", composer.state.value.text)
+                assertEquals("aYbc", composer.state.value.text)
 
                 composer.update(text = "external", cursorOffset = 8)
                 awaitSnapshot()

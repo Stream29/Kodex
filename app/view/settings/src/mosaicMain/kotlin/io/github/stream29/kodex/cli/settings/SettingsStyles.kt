@@ -11,7 +11,9 @@ import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.RowScope
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
+import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiCheckbox
+import io.github.stream29.kodex.cli.components.TuiInteractionStyle
 import io.github.stream29.kodex.cli.components.TuiTheme
 
 @Composable
@@ -75,8 +77,9 @@ internal fun SettingsCheckboxItem(
             checked = checked,
             onCheckedChange = onCheckedChange,
             modifier = Modifier.fillMaxWidth(),
-            color = if (enabled) SettingsForeground else SettingsSupportingForeground,
+            color = SettingsForeground,
             idleTextStyle = SettingsItemTextStyle,
+            interactionStyle = TuiInteractionStyle.PreserveColors,
             enabled = enabled,
         )
         supportingText?.let { text ->
@@ -96,6 +99,142 @@ internal fun SettingsErrorText(value: String) {
         value = value,
         color = SettingsErrorForeground,
         textStyle = TuiTheme.typography.body + TextStyle.Bold,
+    )
+}
+
+@Composable
+internal fun SettingsActionButton(
+    label: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    autoFocus: Boolean = false,
+    onClick: () -> Unit,
+) {
+    SettingsButton(
+        label = label,
+        modifier = modifier,
+        contentColor = TuiTheme.colorScheme.primary,
+        enabled = enabled,
+        autoFocus = autoFocus,
+        onClick = onClick,
+    )
+}
+
+@Composable
+internal fun SettingsPrimaryButton(
+    label: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    autoFocus: Boolean = false,
+    onClick: () -> Unit,
+) {
+    SettingsButton(
+        label = label,
+        modifier = modifier,
+        containerColor = TuiTheme.colorScheme.primary,
+        contentColor = TuiTheme.colorScheme.onPrimary,
+        enabled = enabled,
+        autoFocus = autoFocus,
+        onClick = onClick,
+    )
+}
+
+@Composable
+internal fun SettingsDangerButton(
+    label: String,
+    modifier: Modifier = Modifier,
+    prominent: Boolean = false,
+    enabled: Boolean = true,
+    autoFocus: Boolean = false,
+    onClick: () -> Unit,
+) {
+    SettingsButton(
+        label = label,
+        modifier = modifier,
+        containerColor = if (prominent) TuiTheme.colorScheme.error else null,
+        contentColor = if (prominent) {
+            TuiTheme.colorScheme.onError
+        } else {
+            TuiTheme.colorScheme.error
+        },
+        enabled = enabled,
+        autoFocus = autoFocus,
+        onClick = onClick,
+    )
+}
+
+@Composable
+internal fun SettingsContentButton(
+    label: String,
+    modifier: Modifier = Modifier,
+    idleTextStyle: TextStyle = TuiTheme.typography.label,
+    enabled: Boolean = true,
+    autoFocus: Boolean = false,
+    onClick: () -> Unit,
+) {
+    SettingsButton(
+        label = label,
+        modifier = modifier,
+        contentColor = TuiTheme.colorScheme.onSurface,
+        idleTextStyle = idleTextStyle,
+        enabled = enabled,
+        autoFocus = autoFocus,
+        onClick = onClick,
+    )
+}
+
+@Composable
+internal fun SettingsNavigationButton(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    SettingsButton(
+        label = label,
+        modifier = modifier,
+        containerColor = if (selected) TuiTheme.colorScheme.secondaryContainer else null,
+        contentColor = if (selected) {
+            TuiTheme.colorScheme.onSecondaryContainer
+        } else {
+            TuiTheme.colorScheme.onSurface
+        },
+        selected = selected,
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun SettingsButton(
+    label: String,
+    contentColor: Color,
+    modifier: Modifier = Modifier,
+    containerColor: Color? = null,
+    idleTextStyle: TextStyle = TuiTheme.typography.label,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    autoFocus: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val resolvedContainer = when {
+        enabled -> containerColor
+        containerColor != null -> TuiTheme.colorScheme.surfaceContainerHighest
+        else -> null
+    }
+    val resolvedContent = if (enabled) contentColor else TuiTheme.colorScheme.onSurface
+    val resolvedModifier = resolvedContainer?.let { color ->
+        modifier.background(color)
+    } ?: modifier
+    TuiButton(
+        label = label,
+        modifier = resolvedModifier,
+        color = resolvedContent,
+        idleTextStyle = idleTextStyle,
+        interactionStyle = TuiInteractionStyle.PreserveColors,
+        selected = selected,
+        enabled = enabled,
+        autoFocus = autoFocus,
+        onClick = onClick,
     )
 }
 
