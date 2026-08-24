@@ -119,8 +119,17 @@ internal interface LoadableHistoryItem {
     fun ensureLoaded()
 }
 
+/** Cancels work and releases detail held by a group-local child that is about to be dropped. */
+internal interface ReleasableHistoryItem {
+    fun release()
+}
+
 internal fun HistoryItemViewModel.ensureLoaded() {
     (this as? LoadableHistoryItem)?.ensureLoaded()
+}
+
+internal fun HistoryItemViewModel.release() {
+    (this as? ReleasableHistoryItem)?.release()
 }
 
 internal fun HistoryItemDescriptor.isFoldable(): Boolean = when (kind) {

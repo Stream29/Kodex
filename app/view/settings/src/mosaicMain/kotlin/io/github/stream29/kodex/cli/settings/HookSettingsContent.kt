@@ -8,7 +8,6 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
-import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.hook.contract.HookManagedState
 import io.github.stream29.kodex.hook.contract.HookType
@@ -31,7 +30,7 @@ internal fun HookSettingsContent(
                 color = SettingsForeground,
                 textStyle = TuiTheme.typography.title,
             )
-            TuiButton(label = "Add", color = SettingsActionForeground, onClick = onAdd)
+            SettingsActionButton(label = "Add", onClick = onAdd)
         }
         if (hooks.isEmpty()) {
             Text(
@@ -41,10 +40,9 @@ internal fun HookSettingsContent(
             )
         } else {
             hooks.forEach { hook ->
-                TuiButton(
-                    label = "${hook.name} · ${hook.type.settingsLabel()}",
-                    modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground),
-                    color = SettingsForeground,
+                SettingsContentButton(
+                    label = "${hook.name} ${hook.type.settingsLabel()}",
+                    modifier = Modifier.fillMaxWidth(),
                     idleTextStyle = TuiTheme.typography.body + TextStyle.Bold,
                     onClick = { onOpenDetails(hook) },
                 )

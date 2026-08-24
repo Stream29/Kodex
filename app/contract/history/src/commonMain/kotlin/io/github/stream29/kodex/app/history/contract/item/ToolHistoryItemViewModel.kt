@@ -62,17 +62,75 @@ public sealed interface ToolHistoryItemState {
     public data object Failed : ToolHistoryItemState
 }
 
-/** Complete one-line header retained in every loaded ordinary-tool state. */
-public data class ToolHistoryItemHeader(
-    public val summary: String,
-    public val status: String,
-    public val elapsed: Duration,
-) {
-    init {
-        require(summary.isNotBlank()) { "A tool history summary must not be blank." }
-        require(status.isNotBlank()) { "A tool history status must not be blank." }
-        requireHistoryItemElapsed(elapsed)
+/** Lightweight one-line presentation retained in every loaded ordinary-tool state. */
+public sealed interface ToolHistoryItemHeader {
+    public val elapsed: Duration
+
+    /** A tool whose collapsed presentation is independent of external live state. */
+    public data class Summary(
+        public val summary: String,
+        public val status: String,
+        override val elapsed: Duration,
+    ) : ToolHistoryItemHeader {
+        init {
+            require(summary.isNotBlank()) { "A tool history summary must not be blank." }
+            require(status.isNotBlank()) { "A tool history status must not be blank." }
+            requireHistoryItemElapsed(elapsed)
+        }
     }
+
+    /**
+     * A command interaction whose title and color may still depend on a live terminal session.
+     *
+     * Only the command/session identity and small outcome discriminators are retained. Process
+     * output remains exclusive to [ToolHistoryItemState.Expanded].
+     */
+    public data class CommandExecution(
+        public val action: CommandExecutionHistoryAction,
+        public val result: CommandExecutionHistoryResult,
+        override val elapsed: Duration,
+    ) : ToolHistoryItemHeader {
+        init {
+            requireHistoryItemElapsed(elapsed)
+        }
+    }
+}
+
+public sealed interface CommandExecutionHistoryAction {
+    public data class Run(
+        public val command: String,
+    ) : CommandExecutionHistoryAction
+
+    public data class Interact(
+        public val sessionId: Int,
+    ) : CommandExecutionHistoryAction {
+        init {
+            require(sessionId >= 0) { "A terminal session id must be non-negative." }
+        }
+    }
+
+    public data class Wait(
+        public val sessionId: Int,
+    ) : CommandExecutionHistoryAction {
+        init {
+            require(sessionId >= 0) { "A terminal session id must be non-negative." }
+        }
+    }
+}
+
+public sealed interface CommandExecutionHistoryResult {
+    public data class Output(
+        public val exitCode: Int?,
+        public val sessionId: Int?,
+    ) : CommandExecutionHistoryResult {
+        init {
+            require(sessionId == null || sessionId >= 0) {
+                "A terminal session id must be null or non-negative."
+            }
+        }
+    }
+
+    public data object Failure : CommandExecutionHistoryResult
 }
 
 private val StableCleanEvent.CompletedTool.isOrdinaryHistoryToolEvent: Boolean

@@ -30,7 +30,10 @@ class CodexAccountUsageSettingsTest {
                 }
             }
 
-            assertTrue("Codex: 5h 42% used (resets in 15m)" in snapshot, snapshot)
+            assertTrue(
+                "Codex: 5h 42% used (resets in 15m) 7d 10% used (resets in 2d)" in snapshot,
+                snapshot,
+            )
             assertTrue("Lifetime tokens: 123,456" in snapshot, snapshot)
             assertTrue("Usage limit resets: 2 available" in snapshot, snapshot)
             assertTrue("[Refresh] [Use reset]" in snapshot, snapshot)
@@ -70,6 +73,12 @@ private fun accountUsageSnapshot(): CodexAccountUsageSnapshot =
                     durationSeconds = 18_000,
                     resetAfterSeconds = 900,
                     resetsAt = Instant.parse("2026-08-08T02:00:00Z"),
+                ),
+                secondaryWindow = CodexAccountRateLimitWindow(
+                    usedPercent = 10,
+                    durationSeconds = 604_800,
+                    resetAfterSeconds = 172_800,
+                    resetsAt = Instant.parse("2026-08-10T01:00:00Z"),
                 ),
             ),
         ),

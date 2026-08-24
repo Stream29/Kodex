@@ -208,6 +208,7 @@ private class PersistedSessionViewModelImpl(
     private val sessions = linkedMapOf<AgentAddress, KodexAgentSession>()
     private val parentAddresses = linkedMapOf<AgentAddress, AgentAddress?>()
     private val depths = linkedMapOf<AgentAddress, Int>()
+    private val directChildEdges = linkedMapOf<AgentAddress, List<TopologyChildEdge>>()
     private val threadNames = linkedMapOf<AgentAddress, String?>()
     private val topologyObservers = linkedMapOf<AgentAddress, Job>()
     private val mutableName = MutableStateFlow("Session $sessionIndex")
@@ -397,6 +398,7 @@ private class PersistedSessionViewModelImpl(
         topologyObservers.clear()
         agents.values.toList().asReversed().forEach(AgentViewModel::close)
         agents.clear()
+        directChildEdges.clear()
         sessions.clear()
         mutableLifecycle.value = PersistedSessionLifecycleState.Closed
         ownerScope.cancel()
@@ -408,16 +410,70 @@ private class PersistedSessionViewModelImpl(
     ) {
         val parent = findKnownSession(parentAddress)
         val parentDepth = requireNotNull(depths[parentAddress])
+        val children = mutableListOf<DiscoveredTopologyChild>()
         parent.subagents.listEntries().forEach { entry ->
             val child = parent.subagents.open(entry.entryIndex)
             if (child.runtime.latestIndex.value < 0) return@forEach
             val address = AgentAddress(sessionIndex, child.storage.id)
-            sessions[address] = child
+            children += DiscoveredTopologyChild(
+                edge = TopologyChildEdge(entry.entryIndex, address),
+                session = child,
+                threadName = entry.threadName,
+            )
+        }
+        require(children.map { child -> child.edge.entryIndex }.distinct().size == children.size) {
+            "Direct Agent entry indices must be unique."
+        }
+        require(children.map { child -> child.edge.address }.distinct().size == children.size) {
+            "Direct Agent addresses must be unique."
+        }
+        children.forEach { child ->
+            if (child.edge.address in parentAddresses) {
+                require(parentAddresses[child.edge.address] == parentAddress) {
+                    "A discovered Agent address cannot move between topology parents."
+                }
+            }
+        }
+
+        val newEdges = children.map(DiscoveredTopologyChild::edge)
+        val newAddresses = newEdges.mapTo(mutableSetOf(), TopologyChildEdge::address)
+        val removedRoots = directChildEdges[parentAddress]
+            .orEmpty()
+            .map(TopologyChildEdge::address)
+            .filterNot(newAddresses::contains)
+        val removedAddresses = linkedSetOf<AgentAddress>()
+        removedRoots.forEach { removedRoot ->
+            discoveredSubtreeAddresses(removedRoot).forEach { removedAddress ->
+                check(removedAddresses.add(removedAddress)) {
+                    "Removed Agent topology subtrees must not overlap."
+                }
+            }
+        }
+
+        directChildEdges[parentAddress] = newEdges
+        children.forEach { child ->
+            val address = child.edge.address
+            sessions[address] = child.session
             parentAddresses[address] = parentAddress
             depths[address] = parentDepth + 1
-            threadNames[address] = entry.threadName
-            observe(address)
-            if (materialize) materialize(address)
+            threadNames[address] = child.threadName
+        }
+
+        if (mutableSelectedAgent.value.address in removedAddresses) {
+            var fallbackAddress = parentAddresses[mutableSelectedAgent.value.address]
+            while (fallbackAddress != null && fallbackAddress in removedAddresses) {
+                fallbackAddress = requireNotNull(parentAddresses[fallbackAddress])
+            }
+            val retainedAddress = requireNotNull(fallbackAddress) {
+                "Removing a topology subtree must retain the root Agent."
+            }
+            mutableSelectedAgent.value = agents[retainedAddress] ?: materialize(retainedAddress)
+        }
+        removedAddresses.toList().asReversed().forEach(::removeDiscoveredAgent)
+
+        children.forEach { child -> observe(child.edge.address) }
+        if (materialize) {
+            children.forEach { child -> materialize(child.edge.address) }
         }
     }
 
@@ -426,11 +482,9 @@ private class PersistedSessionViewModelImpl(
         suspend fun visit(parentAddress: AgentAddress): Boolean {
             discoverDirectChildren(parentAddress, materialize = false)
             if (address in sessions) return true
-            val children = parentAddresses
-                .filterValues { parent -> parent == parentAddress }
-                .keys
-                .toList()
-            return children.any { childAddress -> visit(childAddress) }
+            return directChildEdges[parentAddress].orEmpty().any { child ->
+                visit(child.address)
+            }
         }
         require(visit(rootAgent.address)) {
             "Agent ${address.agentId} does not belong to Session $sessionIndex."
@@ -523,11 +577,7 @@ private class PersistedSessionViewModelImpl(
 
         val projectedTopology = PersistedSessionTopologyState(
             rootAddress = rootAgent.address,
-            nodes = sessions.keys
-                .sortedWith(
-                    compareBy<AgentAddress> { depths.getValue(it) }
-                        .thenBy(AgentAddress::agentId),
-                )
+            nodes = topologyAddressesInPreorder()
                 .map { address ->
                     projectNode(
                         address = address,
@@ -546,6 +596,62 @@ private class PersistedSessionViewModelImpl(
             topologyRevision += 1
             mutableTopology.value = projectedTopology.copy(revision = topologyRevision)
         }
+    }
+
+    private fun topologyAddressesInPreorder(): List<AgentAddress> {
+        val addresses = mutableListOf<AgentAddress>()
+        val visited = mutableSetOf<AgentAddress>()
+
+        fun visit(address: AgentAddress) {
+            check(visited.add(address)) {
+                "A discovered Agent may occur only once in the topology."
+            }
+            check(address in sessions) {
+                "Every topology edge must resolve to a discovered Agent."
+            }
+            addresses += address
+            directChildEdges[address].orEmpty().forEach { child ->
+                check(parentAddresses[child.address] == address) {
+                    "Every topology edge must agree with its child's parent."
+                }
+                visit(child.address)
+            }
+        }
+
+        visit(rootAgent.address)
+        check(visited.size == sessions.size) {
+            "Every discovered Agent must be reachable from the topology root."
+        }
+        return addresses
+    }
+
+    private fun discoveredSubtreeAddresses(rootAddress: AgentAddress): List<AgentAddress> {
+        val addresses = mutableListOf<AgentAddress>()
+        val visited = mutableSetOf<AgentAddress>()
+
+        fun visit(address: AgentAddress) {
+            check(visited.add(address)) {
+                "A discovered Agent may occur only once in a topology subtree."
+            }
+            addresses += address
+            directChildEdges[address].orEmpty().forEach { child -> visit(child.address) }
+        }
+
+        visit(rootAddress)
+        return addresses
+    }
+
+    private fun removeDiscoveredAgent(address: AgentAddress) {
+        check(address != rootAgent.address) {
+            "The persisted Session root Agent cannot be removed from its topology."
+        }
+        directChildEdges.remove(address)
+        topologyObservers.remove(address)?.cancel()
+        agents.remove(address)?.close()
+        sessions.remove(address)
+        parentAddresses.remove(address)
+        depths.remove(address)
+        threadNames.remove(address)
     }
 
     private fun projectNode(
@@ -636,6 +742,17 @@ private data class LightweightAgentRuntimeState(
     val phase: AgentExecutionPhase,
     val running: Boolean,
     val latestIndex: Int,
+)
+
+private data class TopologyChildEdge(
+    val entryIndex: Int,
+    val address: AgentAddress,
+)
+
+private data class DiscoveredTopologyChild(
+    val edge: TopologyChildEdge,
+    val session: KodexAgentSession,
+    val threadName: String?,
 )
 
 private fun KodexAgentStateValue.toExecutionPhase(): AgentExecutionPhase = when (this) {

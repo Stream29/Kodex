@@ -192,7 +192,7 @@ private fun PatchShowMore(
             ) { _, isHovered, isPressed ->
                 WrappedPatchText(
                     value = "> Show next ${minOf(DefaultPatchLinePageSize, remainingLineCount)} lines" +
-                        " · $remainingLineCount remaining",
+                        " $remainingLineCount remaining",
                     textStyle = tuiInteractionTextStyle(
                         enabled = remainingLineCount > 0,
                         hovered = isHovered,

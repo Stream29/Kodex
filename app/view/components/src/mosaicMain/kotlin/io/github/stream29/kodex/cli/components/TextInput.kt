@@ -20,7 +20,6 @@ import com.jakewharton.mosaic.layout.onPointerEvent
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.text.AnnotatedString
-import com.jakewharton.mosaic.text.SpanStyle
 import com.jakewharton.mosaic.text.buildAnnotatedString
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
@@ -33,8 +32,6 @@ import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 @Immutable
 public class TextInputLayout private constructor(
     private val visualLines: List<VisualLine>,
-    private val selectionStart: Int,
-    private val selectionEnd: Int,
     private val maximumVisibleRows: Int,
     public val width: Int,
     public val cursorColumn: Int,
@@ -58,8 +55,6 @@ public class TextInputLayout private constructor(
         require(maximumRows > 0) { "A text-input viewport must contain at least one row." }
         return TextInputLayout(
             visualLines = visualLines,
-            selectionStart = selectionStart,
-            selectionEnd = selectionEnd,
             maximumVisibleRows = maximumRows,
             width = width,
             cursorColumn = cursorColumn,
@@ -68,11 +63,10 @@ public class TextInputLayout private constructor(
         )
     }
 
-    /** Builds styled text for a clamped slice of visual rows. */
+    /** Builds text for a clamped slice of visual rows. */
     public fun visibleText(
         firstRow: Int,
         rowCount: Int = visibleRowCount,
-        selectionTextStyle: TextStyle = TextStyle.Invert,
     ): AnnotatedString {
         val safeFirst = firstRow.coerceIn(0, (this.rowCount - 1).coerceAtLeast(0))
         val safeEnd = (safeFirst + rowCount.coerceAtLeast(1)).coerceAtMost(this.rowCount)
@@ -80,17 +74,7 @@ public class TextInputLayout private constructor(
             visualLines.subList(safeFirst, safeEnd).forEachIndexed { index, line ->
                 if (index > 0) append('\n')
                 append(line.prefix)
-                val contentStart = length
                 append(line.content)
-                val selectedStart = maxOf(selectionStart, line.sourceStart)
-                val selectedEnd = minOf(selectionEnd, line.sourceEnd)
-                if (selectedStart < selectedEnd) {
-                    addStyle(
-                        style = SpanStyle(textStyle = selectionTextStyle),
-                        start = contentStart + selectedStart - line.sourceStart,
-                        end = contentStart + selectedEnd - line.sourceStart,
-                    )
-                }
             }
         }
     }
@@ -164,8 +148,6 @@ public class TextInputLayout private constructor(
             val cursorColumn = cursorLine.prefixWidth + cursorContentColumn
             return TextInputLayout(
                 visualLines = visualLines,
-                selectionStart = value.selectionStart,
-                selectionEnd = value.selectionEnd,
                 maximumVisibleRows = Int.MAX_VALUE,
                 width = safeWidth,
                 cursorColumn = cursorColumn,
@@ -202,7 +184,7 @@ public fun TextInput(
                 (layout.rowCount - layout.visibleRowCount).coerceAtLeast(0)
         },
     )
-    var pointerSelecting by remember(state) { mutableStateOf(false) }
+    var pointerPressed by remember(state) { mutableStateOf(false) }
 
     SideEffect {
         state.commitViewport(layout, firstVisibleRow)
@@ -216,11 +198,10 @@ public fun TextInput(
         notifyIfChanged(state.edit(edit))
     }
 
-    fun moveCursor(movement: TextInputMovement, extendSelection: Boolean) {
+    fun moveCursor(movement: TextInputMovement) {
         notifyIfChanged(
             state.moveCursor(
                 movement = movement,
-                extendSelection = extendSelection,
                 layout = layout,
             ),
         )
@@ -269,54 +250,52 @@ public fun TextInput(
                         true
                     }
 
-                    event.key == "ArrowLeft" && !event.ctrl && !event.alt -> {
-                        moveCursor(TextInputMovement.Left, event.shift)
+                    event.key == "ArrowLeft" && !event.ctrl && !event.alt && !event.shift -> {
+                        moveCursor(TextInputMovement.Left)
                         true
                     }
 
-                    event.key == "ArrowRight" && !event.ctrl && !event.alt -> {
-                        moveCursor(TextInputMovement.Right, event.shift)
+                    event.key == "ArrowRight" && !event.ctrl && !event.alt && !event.shift -> {
+                        moveCursor(TextInputMovement.Right)
                         true
                     }
 
-                    event.key == "ArrowUp" && !event.ctrl && !event.alt -> {
-                        if (!event.shift && layout.cursorRow == 0) {
+                    event.key == "ArrowUp" && !event.ctrl && !event.alt && !event.shift -> {
+                        if (layout.cursorRow == 0) {
                             false
                         } else {
-                            moveCursor(TextInputMovement.Up, event.shift)
+                            moveCursor(TextInputMovement.Up)
                             true
                         }
                     }
 
-                    event.key == "ArrowDown" && !event.ctrl && !event.alt -> {
-                        if (!event.shift && layout.cursorRow == layout.rowCount - 1) {
+                    event.key == "ArrowDown" && !event.ctrl && !event.alt && !event.shift -> {
+                        if (layout.cursorRow == layout.rowCount - 1) {
                             false
                         } else {
-                            moveCursor(TextInputMovement.Down, event.shift)
+                            moveCursor(TextInputMovement.Down)
                             true
                         }
                     }
 
-                    event.key == "Home" && !event.alt -> {
+                    event.key == "Home" && !event.alt && !event.shift -> {
                         moveCursor(
                             movement = if (event.ctrl) {
                                 TextInputMovement.DocumentStart
                             } else {
                                 TextInputMovement.LineStart
                             },
-                            extendSelection = event.shift,
                         )
                         true
                     }
 
-                    event.key == "End" && !event.alt -> {
+                    event.key == "End" && !event.alt && !event.shift -> {
                         moveCursor(
                             movement = if (event.ctrl) {
                                 TextInputMovement.DocumentEnd
                             } else {
                                 TextInputMovement.LineEnd
                             },
-                            extendSelection = event.shift,
                         )
                         true
                     }
@@ -335,21 +314,16 @@ public fun TextInput(
                         if (event.button != MouseEvent.Button.Left || event.shift) {
                             return@onPointerEvent false
                         }
-                        pointerSelecting = true
-                        notifyIfChanged(state.beginPointerSelection(pointerOffset(event)))
+                        pointerPressed = true
+                        notifyIfChanged(state.placeCursor(pointerOffset(event)))
                         true
                     }
 
-                    MouseEvent.Type.Drag -> {
-                        if (!pointerSelecting) return@onPointerEvent false
-                        notifyIfChanged(state.extendPointerSelection(pointerOffset(event)))
-                        true
-                    }
+                    MouseEvent.Type.Drag -> pointerPressed
 
                     MouseEvent.Type.Release -> {
-                        if (!pointerSelecting) return@onPointerEvent false
-                        notifyIfChanged(state.extendPointerSelection(pointerOffset(event)))
-                        pointerSelecting = false
+                        if (!pointerPressed) return@onPointerEvent false
+                        pointerPressed = false
                         true
                     }
 
@@ -360,14 +334,7 @@ public fun TextInput(
         modifier
     }
     Text(
-        value = layout.visibleText(
-            firstRow = firstVisibleRow,
-            selectionTextStyle = if (enabled) {
-                TextStyle.Invert
-            } else {
-                TextStyle.Dim + TextStyle.Invert
-            },
-        ),
+        value = layout.visibleText(firstRow = firstVisibleRow),
         modifier = inputModifier,
         textStyle = if (enabled) TextStyle.Unspecified else TextStyle.Dim,
     )

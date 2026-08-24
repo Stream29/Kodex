@@ -219,8 +219,17 @@ internal class AgentHistoryViewModelImpl(
         generation: Long = activeGeneration,
     ): HistoryItemViewModel {
         itemCache[descriptor.index]?.let { return it }
+        return createItem(descriptor, generation).also { item ->
+            itemCache[descriptor.index] = item
+        }
+    }
+
+    private fun createItem(
+        descriptor: HistoryItemDescriptor,
+        generation: Long,
+    ): HistoryItemViewModel {
         val context = itemContext(generation)
-        val item = when (descriptor.kind) {
+        return when (descriptor.kind) {
             HistoryItemKind.Message ->
                 MessageHistoryItemViewModelImpl(descriptor.index, descriptor, context)
 
@@ -242,8 +251,6 @@ internal class AgentHistoryViewModelImpl(
             HistoryItemKind.ContextCompaction ->
                 ContextCompactionHistoryItemViewModel(descriptor.index, descriptor.elapsed)
         }
-        itemCache[descriptor.index] = item
-        return item
     }
 
     private fun materializeChild(
@@ -253,7 +260,7 @@ internal class AgentHistoryViewModelImpl(
         check(descriptor.isFoldable()) {
             "Only foldable descriptors can be nested in a history work group."
         }
-        return materialize(descriptor, generation) as WorkGroupChildHistoryItemViewModel
+        return createItem(descriptor, generation) as WorkGroupChildHistoryItemViewModel
     }
 
     private fun materializeProjection(
@@ -262,6 +269,9 @@ internal class AgentHistoryViewModelImpl(
     ): HistoryItemViewModel = when (item) {
         is HistoryProjectionItem.Stable -> materialize(item.descriptor, generation)
         is HistoryProjectionItem.WorkGroup -> {
+            item.descriptors.forEach { descriptor ->
+                itemCache.remove(descriptor.index)?.release()
+            }
             val key = GroupKey(
                 oldestIndex = item.descriptors.last().index,
                 newestIndex = item.descriptors.first().index,

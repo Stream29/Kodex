@@ -16,6 +16,7 @@ import io.github.stream29.kodex.openai.ReasoningItemReasoningSummary
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -48,7 +49,7 @@ class StreamingRequestResponseViewTest {
                     HistoryStreamingItem.Output(HistoryStreamingKind.Message, events).renderTransientTail()
                 }
             }
-            assertEquals("Assistant · streaming\nhello", awaitSnapshot())
+            assertEquals("Assistant streaming\nhello", awaitSnapshot())
 
             events.emit(
                 ResponsesStreamEvent.OutputTextDelta(
@@ -58,7 +59,7 @@ class StreamingRequestResponseViewTest {
                     delta = " world",
                 ),
             )
-            assertEquals("Assistant · streaming\nhello world", awaitSnapshot())
+            assertEquals("Assistant streaming\nhello world", awaitSnapshot())
         }
     }
 
@@ -91,7 +92,7 @@ class StreamingRequestResponseViewTest {
                 }
             }
             assertEquals(
-                "Assistant · streaming\nfirst\nsecond part",
+                "Assistant streaming\nfirst\nsecond part",
                 awaitSnapshot(),
             )
         }
@@ -122,7 +123,7 @@ class StreamingRequestResponseViewTest {
                 }
             }
             val snapshot = awaitSnapshot()
-            assertTrue("Thinking · streaming" in snapshot)
+            assertTrue("Thinking streaming" in snapshot)
             assertTrue("brief summary" in snapshot)
             assertFalse("private reasoning" in snapshot)
             assertFalse("opaque provider data" in snapshot)
@@ -157,7 +158,7 @@ class StreamingRequestResponseViewTest {
                 }
             }
             assertEquals(
-                "Thinking · streaming\nfirst\nsecond part",
+                "Thinking streaming\nfirst\nsecond part",
                 awaitSnapshot(),
             )
         }
@@ -289,13 +290,42 @@ class StreamingRequestResponseViewTest {
             )
         }
     }
+
+    @Test
+    fun unknownEventNamesTheFallbackAndRevealsItsRawJsonOnDemand() = runTest {
+        val payload = JsonObject(
+            mapOf(
+                "type" to JsonPrimitive("future.event"),
+                "detail" to JsonPrimitive("opaque"),
+            ),
+        )
+        val events = replayingEvents(ResponsesStreamEvent.Other(payload))
+
+        runMosaicTest {
+            val collapsed = setContentAndSnapshot {
+                Box(Modifier.width(60)) {
+                    HistoryStreamingItem.Output(
+                        kind = HistoryStreamingKind.Unknown,
+                        events = events,
+                    ).renderTransientTail()
+                }
+            }
+            assertEquals("> Unknown", collapsed)
+            assertFalse("future.event" in collapsed)
+
+            val expanded = clickRow()
+            assertTrue("v Unknown" in expanded)
+            assertTrue(payload.toString() in expanded)
+        }
+    }
 }
 
 private fun replayingEvents(
     vararg initial: ResponsesStreamEvent,
-): MutableSharedFlow<ResponsesStreamEvent> = MutableSharedFlow<ResponsesStreamEvent>(replay = Int.MAX_VALUE).also { events ->
-    initial.forEach { event -> check(events.tryEmit(event)) }
-}
+): MutableSharedFlow<ResponsesStreamEvent> =
+    MutableSharedFlow<ResponsesStreamEvent>(replay = Int.MAX_VALUE).also { events ->
+        initial.forEach { event -> check(events.tryEmit(event)) }
+    }
 
 private suspend fun TestMosaic<String>.clickRow(y: Int = 0): String {
     sendMouseEvent(MouseEvent(0, y, MouseEvent.Type.Press, MouseEvent.Button.Left))

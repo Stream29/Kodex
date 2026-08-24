@@ -19,7 +19,6 @@ import io.github.stream29.kodex.app.settings.contract.UsageResetOption
 import io.github.stream29.kodex.app.settings.contract.UsageResetRequest
 import io.github.stream29.kodex.app.settings.contract.UsageResetState
 import io.github.stream29.kodex.app.settings.contract.snapshotOrNull
-import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiDialogActionRow
 import io.github.stream29.kodex.cli.components.TuiTheme
@@ -76,18 +75,14 @@ internal fun CodexAccountUsageSettingsContent(
                 state is SettingsAccountUsageState.Loading ||
                     state is SettingsAccountUsageState.Redeeming
             Row {
-                TuiButton(
+                SettingsActionButton(
                     label = "Refresh",
-                    modifier = Modifier.background(SettingsHomeBackground),
-                    color = SettingsActionForeground,
                     enabled = !operationActive,
                     onClick = onRefresh,
                 )
                 Text(" ")
-                TuiButton(
+                SettingsActionButton(
                     label = "Use reset",
-                    modifier = Modifier.background(SettingsHomeBackground),
-                    color = SettingsActionForeground,
                     enabled = state is SettingsAccountUsageState.Available &&
                         snapshot?.hasAvailableUsageReset() == true,
                     onClick = onUseReset,
@@ -214,10 +209,9 @@ private fun BoxScope.UsageResetPickerDialog(
             color = SettingsForeground,
         )
         request.options.forEachIndexed { index, option ->
-            TuiButton(
+            SettingsContentButton(
                 label = option.title,
-                modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground),
-                color = SettingsForeground,
+                modifier = Modifier.fillMaxWidth(),
                 autoFocus = index == 0,
                 onClick = { onSelect(option) },
             )
@@ -235,7 +229,7 @@ private fun BoxScope.UsageResetPickerDialog(
                 .fillMaxWidth()
                 .background(SettingsActionBackground),
         ) {
-            TuiButton(label = "Cancel", color = SettingsActionForeground, onClick = onDismiss)
+            SettingsActionButton(label = "Cancel", onClick = onDismiss)
         }
     }
 }
@@ -265,13 +259,12 @@ private fun BoxScope.UsageResetConfirmationDialog(
                 .fillMaxWidth()
                 .background(SettingsActionBackground),
         ) {
-            TuiButton(
+            SettingsActionButton(
                 label = "Go back",
-                color = SettingsActionForeground,
                 autoFocus = true,
                 onClick = onBack,
             )
-            TuiButton(label = "Use reset", color = SettingsActionForeground, onClick = onConfirm)
+            SettingsPrimaryButton(label = "Use reset", onClick = onConfirm)
         }
     }
 }
@@ -302,13 +295,12 @@ private fun BoxScope.UsageResetFailureDialog(
                 .fillMaxWidth()
                 .background(SettingsActionBackground),
         ) {
-            TuiButton(
+            SettingsActionButton(
                 label = "Close",
-                color = SettingsActionForeground,
                 autoFocus = true,
                 onClick = onDismiss,
             )
-            TuiButton(label = "Try again", color = SettingsActionForeground, onClick = onRetry)
+            SettingsPrimaryButton(label = "Try again", onClick = onRetry)
         }
     }
 }
@@ -331,9 +323,8 @@ private fun BoxScope.UsageResetMessageDialog(
                 .fillMaxWidth()
                 .background(SettingsActionBackground),
         ) {
-            TuiButton(
+            SettingsActionButton(
                 label = "Close",
-                color = SettingsActionForeground,
                 autoFocus = true,
                 onClick = onDismiss,
             )
@@ -366,9 +357,9 @@ private fun BoxScope.UsageResetDialog(
 
 private fun CodexAccountRateLimit.displayLine(): String {
     val windows = listOfNotNull(primaryWindow, secondaryWindow)
-        .joinToString(separator = " · ") { window -> window.displayLabel() }
+        .joinToString(separator = " ") { window -> window.displayLabel() }
         .ifEmpty { "unavailable" }
-    val reached = if (limitReached || !allowed) " · limit reached" else ""
+    val reached = if (limitReached || !allowed) " limit reached" else ""
     return "$name: $windows$reached"
 }
 

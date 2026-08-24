@@ -19,6 +19,7 @@ import io.github.stream29.kodex.openai.ReasoningItemReasoningSummary
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.serialization.json.JsonElement
 
 /** Renders the one active operation that belongs after the persisted history tail. */
 @Composable
@@ -45,7 +46,7 @@ private fun StreamingMessageTail(
 ) {
     val snapshot = rememberStreamingSnapshot(events, onContentChange)
     StreamingTextTail(
-        header = "Assistant · streaming",
+        header = "Assistant streaming",
         parts = snapshot.messageParts,
         headerStyle = TextStyle.Bold,
     )
@@ -58,8 +59,8 @@ private fun StreamingAgentMessageTail(
 ) {
     val snapshot = rememberStreamingSnapshot(events, onContentChange)
     val header = (snapshot.item as? ResponseItem.AgentMessage)
-        ?.let { item -> "${item.author} → ${item.recipient} · streaming" }
-        ?: "Agent message · streaming"
+        ?.let { item -> "${item.author} → ${item.recipient} streaming" }
+        ?: "Agent message streaming"
     StreamingTextTail(
         header = header,
         parts = snapshot.messageParts,
@@ -74,7 +75,7 @@ private fun StreamingReasoningTail(
 ) {
     val snapshot = rememberStreamingSnapshot(events, onContentChange)
     StreamingTextTail(
-        header = "Thinking · streaming",
+        header = "Thinking streaming",
         parts = snapshot.reasoningSummaryParts,
         headerStyle = TextStyle.Dim,
         detailStyle = TextStyle.Dim,
@@ -109,7 +110,18 @@ private fun StreamingUnknownTail(
     onContentChange: () -> Unit,
 ) {
     val snapshot = rememberStreamingSnapshot(events, onContentChange)
-    StreamingStatusTail(snapshot.item?.unknownHeader() ?: "Receiving response item…")
+    ToolEvent(
+        summary = "Unknown",
+        rawName = null,
+        status = "streaming",
+        expansionKey = events,
+        detailStyle = TextStyle.Dim,
+    ) {
+        WrappedHistoryText(
+            value = snapshot.unknownPayload?.toString() ?: "{}",
+            textStyle = TextStyle.Dim,
+        )
+    }
 }
 
 @Composable
@@ -156,6 +168,7 @@ private data class StreamingResponseSnapshot(
     val reasoningSummaryParts: List<StreamingTextPart> = emptyList(),
     val toolInputParts: List<StreamingTextPart> = emptyList(),
     val webSearchStatus: String? = null,
+    val unknownPayload: JsonElement? = null,
 ) {
     fun reduce(event: ResponsesStreamEvent): StreamingResponseSnapshot = when (event) {
         is ResponsesStreamEvent.OutputItemAdded -> copy(
@@ -215,8 +228,9 @@ private data class StreamingResponseSnapshot(
         is ResponsesStreamEvent.WebSearchCallInProgress -> copy(webSearchStatus = "starting")
         is ResponsesStreamEvent.WebSearchCallSearching -> copy(webSearchStatus = "searching")
         is ResponsesStreamEvent.WebSearchCallCompleted -> copy(webSearchStatus = "completed")
+        is ResponsesStreamEvent.Other -> copy(unknownPayload = event.payload)
 
-        // Full reasoning and opaque protocol payloads must never enter the terminal timeline.
+        // Full private reasoning and lifecycle-only protocol events are not transcript content.
         is ResponsesStreamEvent.ReasoningTextDelta,
         is ResponsesStreamEvent.ReasoningTextDone,
         is ResponsesStreamEvent.Created,
@@ -226,8 +240,7 @@ private data class StreamingResponseSnapshot(
         is ResponsesStreamEvent.Completed,
         is ResponsesStreamEvent.Failed,
         is ResponsesStreamEvent.Incomplete,
-        is ResponsesStreamEvent.Other,
-        -> this
+            -> this
     }
 
     fun toolPresentation(): StreamingToolPresentation = item.streamingToolPresentation(webSearchStatus)
@@ -332,7 +345,7 @@ private fun ResponseItem?.streamingToolPresentation(
     )
 
     is ResponseItem.ServerToolSearchCall -> StreamingToolPresentation(
-        summary = "Load tools from the server",
+        summary = arguments.serverToolSearchSummary(),
         rawName = "server_tool_search",
         status = status ?: "streaming",
     )
@@ -405,15 +418,6 @@ private fun ResponseItem?.streamingToolInputKey(): String? = when (this) {
     is ResponseItem.WebSearchCall -> id?.value
     is ResponseItem.ImageGenerationCall -> id?.value
     else -> null
-}
-
-private fun ResponseItem.unknownHeader(): String = when (this) {
-    is ResponseItem.Message -> "Assistant · streaming"
-    is ResponseItem.AgentMessage -> "$author → $recipient · streaming"
-    is ResponseItem.Reasoning -> "Thinking · streaming"
-    else -> streamingToolPresentation(webSearchStatus = null).let { presentation ->
-        presentation.summary
-    }
 }
 
 private fun qualifiedStreamingName(name: String, namespace: String?): String =

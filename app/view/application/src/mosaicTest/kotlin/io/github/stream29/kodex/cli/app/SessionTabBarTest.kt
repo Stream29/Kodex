@@ -13,6 +13,7 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
+import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
@@ -35,25 +36,30 @@ class SessionTabBarTest {
     @Test
     fun sessionBrowserUsesTheCatalogTitleAndLastActivityWithANumericFallback() {
         val now = Instant.parse("2026-07-31T10:30:00Z")
+        val fullLabel = SessionCatalogEntry(
+            sessionIndex = 7,
+            threadName = "Review session title catalog",
+            lastActivityAt = Instant.parse("2026-07-31T10:25:00Z"),
+        ).sessionBrowserLabel(80, now)
         assertEquals(
-            "Review session title catalog · 5m ago",
-            SessionCatalogEntry(
-                sessionIndex = 7,
-                threadName = "Review session title catalog",
-                lastActivityAt = Instant.parse("2026-07-31T10:25:00Z"),
-            ).sessionBrowserLabel(80, now),
+            "Review session title catalog 5m ago",
+            fullLabel.text,
         )
+        val activityStyle = fullLabel.spanStyles.single()
+        assertEquals(fullLabel.text.indexOf(" 5m ago"), activityStyle.start)
+        assertEquals(fullLabel.text.length, activityStyle.end)
+        assertEquals(TextStyle.Dim, activityStyle.item.textStyle)
         assertEquals(
-            "Review... · 5m ago",
+            "Review s... 5m ago",
             SessionCatalogEntry(
                 sessionIndex = 7,
                 threadName = "Review session title catalog",
                 lastActivityAt = Instant.parse("2026-07-31T10:25:00Z"),
-            ).sessionBrowserLabel(18, now),
+            ).sessionBrowserLabel(18, now).text,
         )
         assertEquals(
             "Session 7",
-            SessionCatalogEntry(sessionIndex = 7).sessionBrowserLabel(80, now),
+            SessionCatalogEntry(sessionIndex = 7).sessionBrowserLabel(80, now).text,
         )
     }
 

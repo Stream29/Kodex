@@ -221,9 +221,9 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             runtime.resume()
         }
 
-        assertEquals(4, failure.maxRetries)
-        assertEquals("Agent response request failed after 4 retries.", failure.message)
-        assertEquals(5, requests.size)
+        assertEquals(20, failure.maxRetries)
+        assertEquals("Agent response request failed after 20 retries.", failure.message)
+        assertEquals(21, requests.size)
     }
 
     test("successful continuation resets the response retry count") {

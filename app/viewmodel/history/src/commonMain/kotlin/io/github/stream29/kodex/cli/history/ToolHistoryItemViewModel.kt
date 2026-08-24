@@ -14,7 +14,7 @@ internal class ToolHistoryItemViewModelImpl(
     override val index: Int,
     private val descriptor: HistoryItemDescriptor,
     private val context: HistoryItemLoadContext,
-) : ToolHistoryItemViewModel, LoadableHistoryItem {
+) : ToolHistoryItemViewModel, LoadableHistoryItem, ReleasableHistoryItem {
     private val mutableState: MutableStateFlow<ToolHistoryItemState>
     private val initialLoadingJob: Job
 
@@ -88,6 +88,11 @@ internal class ToolHistoryItemViewModelImpl(
 
             else -> Unit
         }
+    }
+
+    override fun release() {
+        initialLoadingJob.cancel()
+        collapse()
     }
 
     private fun ToolHistoryItemState.isExpanding(job: Job): Boolean =

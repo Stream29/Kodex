@@ -12,11 +12,46 @@ import io.github.stream29.kodex.utils.applypatch.UpdateFileChunk
 import io.github.stream29.kodex.utils.applypatch.UpdateFileHunk
 
 public data class PatchPresentation(
-    public val header: String,
+    public val action: PatchPresentationAction,
+    public val target: PatchPresentationTarget,
     public val status: PatchPresentationStatus,
     public val rawToolName: String,
     public val lines: List<PatchPresentationLine>,
-)
+) {
+    public val header: String
+        get() = "${action.label} ${target.label}"
+}
+
+public enum class PatchPresentationAction(
+    internal val label: String,
+) {
+    Editing("Editing"),
+    Edited("Edited"),
+}
+
+public sealed interface PatchPresentationTarget {
+    public val label: String
+
+    public data class SingleFile(
+        public val filename: String,
+    ) : PatchPresentationTarget {
+        init {
+            require(filename.isNotBlank()) { "A patch filename must not be blank." }
+        }
+
+        override val label: String = filename
+    }
+
+    public data class FileCount(
+        public val count: Int,
+    ) : PatchPresentationTarget {
+        init {
+            require(count >= 0) { "A patch file count must not be negative." }
+        }
+
+        override val label: String = "$count ${if (count == 1) "file" else "files"}"
+    }
+}
 
 public enum class PatchPresentationStatus {
     Running,
@@ -40,7 +75,8 @@ public enum class PatchPresentationLineKind {
 
 public fun Patch.toPendingPatchPresentation(): PatchPresentation =
     toPatchPresentation(
-        summary = fileEditSummary("Editing"),
+        action = PatchPresentationAction.Editing,
+        target = hunks.map { hunk -> hunk.path }.toPatchPresentationTarget(),
         status = PatchPresentationStatus.Running,
         bodyLines = toInputPresentationLines(),
         emptyMessage = "No patch hunks",
@@ -50,7 +86,10 @@ public fun StablePatchToolEvent.toStablePatchPresentation(): PatchPresentation =
     when (val result = result) {
         is StablePatchToolExecutionResult.Success ->
             diff.toPatchPresentation(
-                summary = result.applyResult.fileEditSummary("Edited"),
+                action = PatchPresentationAction.Edited,
+                target = result.applyResult.delta.changes
+                    .map { change -> change.path }
+                    .toPatchPresentationTarget(),
                 status = PatchPresentationStatus.Completed,
                 bodyLines = result.applyResult.toPresentationLines(),
                 emptyMessage = "No applied changes",
@@ -58,7 +97,10 @@ public fun StablePatchToolEvent.toStablePatchPresentation(): PatchPresentation =
 
         is StablePatchToolExecutionResult.Failure ->
             diff.toPatchPresentation(
-                summary = diff.fileEditSummary("Editing"),
+                action = PatchPresentationAction.Editing,
+                target = diff.hunks
+                    .map { hunk -> hunk.path }
+                    .toPatchPresentationTarget(),
                 status = PatchPresentationStatus.Failed,
                 bodyLines = diff.toInputPresentationLines(),
                 emptyMessage = "No patch hunks",
@@ -67,14 +109,16 @@ public fun StablePatchToolEvent.toStablePatchPresentation(): PatchPresentation =
     }
 
 private fun Patch.toPatchPresentation(
-    summary: String,
+    action: PatchPresentationAction,
+    target: PatchPresentationTarget,
     status: PatchPresentationStatus,
     bodyLines: List<PatchPresentationLine>,
     emptyMessage: String,
     failure: String? = null,
 ): PatchPresentation =
     PatchPresentation(
-        header = summary,
+        action = action,
+        target = target,
         status = status,
         rawToolName = "apply_patch",
         lines = buildList {
@@ -94,15 +138,17 @@ private fun Patch.toPatchPresentation(
         },
     )
 
-private fun Patch.fileEditSummary(verb: String): String =
-    hunks.map { hunk -> hunk.path }.fileEditSummary(verb)
-
-private fun PatchApplyResult.fileEditSummary(verb: String): String =
-    delta.changes.map { change -> change.path }.fileEditSummary(verb)
-
-private fun List<String>.fileEditSummary(verb: String): String {
-    val count = distinct().size
-    return "$verb $count ${if (count == 1) "file" else "files"}"
+private fun List<String>.toPatchPresentationTarget(): PatchPresentationTarget {
+    val distinctPaths = distinct()
+    if (distinctPaths.size != 1) {
+        return PatchPresentationTarget.FileCount(distinctPaths.size)
+    }
+    val path = distinctPaths.single()
+    val filename = path.substringAfterLast('/').substringAfterLast('\\')
+        .takeIf(String::isNotBlank)
+        ?: path.takeIf(String::isNotBlank)
+        ?: "file"
+    return PatchPresentationTarget.SingleFile(filename)
 }
 
 private fun Patch.toInputPresentationLines(): List<PatchPresentationLine> = buildList {

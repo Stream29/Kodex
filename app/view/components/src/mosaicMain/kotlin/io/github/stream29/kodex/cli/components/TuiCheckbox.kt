@@ -28,6 +28,7 @@ public fun TuiCheckbox(
     onKeyEvent: ((KeyEvent) -> Boolean)? = null,
     autoFocus: Boolean = false,
     onSecondaryClick: ((IntOffset?) -> Unit)? = null,
+    interactionStyle: TuiInteractionStyle = TuiInteractionStyle.TerminalInvert,
 ) {
     TuiPressable(
         onClick = { onCheckedChange(!checked) },
@@ -46,6 +47,7 @@ public fun TuiCheckbox(
                 hovered = isHovered,
                 pressed = isPressed,
                 idleTextStyle = idleTextStyle,
+                interactionStyle = interactionStyle,
             ),
         )
     }

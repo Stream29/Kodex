@@ -19,7 +19,6 @@ import io.github.stream29.kodex.cli.components.TextInput
 import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
-import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiDialogActionRow
 import io.github.stream29.kodex.cli.components.TuiTheme
@@ -79,9 +78,8 @@ internal fun BoxScope.HookEditorDialog(
             HookInputField("Name", name, width, autoFocus = true)
             Row {
                 Text("Type: ", color = SettingsForeground)
-                TuiButton(
+                SettingsContentButton(
                     label = type.settingsLabel(),
-                    color = SettingsForeground,
                     onClick = { type = type.next() },
                 )
             }
@@ -94,8 +92,8 @@ internal fun BoxScope.HookEditorDialog(
                     .fillMaxWidth()
                     .background(SettingsActionBackground),
             ) {
-                TuiButton(label = "Cancel", color = SettingsActionForeground, onClick = onDismiss)
-                TuiButton(label = "Save", color = SettingsActionForeground, onClick = ::save)
+                SettingsActionButton(label = "Cancel", onClick = onDismiss)
+                SettingsPrimaryButton(label = "Save", onClick = ::save)
             }
         }
     }
@@ -132,11 +130,10 @@ internal fun BoxScope.HookDetailsDialog(
                     .fillMaxWidth()
                     .background(SettingsActionBackground),
             ) {
-                TuiButton(label = "Close", color = SettingsActionForeground, onClick = onDismiss)
-                TuiButton(label = "Edit", color = SettingsActionForeground, onClick = onEdit)
-                TuiButton(
+                SettingsActionButton(label = "Close", onClick = onDismiss)
+                SettingsActionButton(label = "Edit", onClick = onEdit)
+                SettingsDangerButton(
                     label = "Delete",
-                    color = TuiTheme.colorScheme.error,
                     onClick = onDelete,
                 )
             }
@@ -169,15 +166,14 @@ internal fun BoxScope.HookDeleteConfirmationDialog(
                     .fillMaxWidth()
                     .background(SettingsActionBackground),
             ) {
-                TuiButton(
+                SettingsActionButton(
                     label = "Cancel",
-                    color = SettingsActionForeground,
                     autoFocus = true,
                     onClick = onDismiss,
                 )
-                TuiButton(
+                SettingsDangerButton(
                     label = "Delete",
-                    color = TuiTheme.colorScheme.error,
+                    prominent = true,
                     onClick = onConfirm,
                 )
             }

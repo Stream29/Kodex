@@ -3,8 +3,6 @@ package io.github.stream29.kodex.cli.history
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupChildHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
-import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemViewModel
-import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -13,9 +11,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * A collapsed group retains descriptors, not nested VMs. The owner factory supplies the same
- * cached child VM instances when the group is expanded, preserving child expansion state without
- * paying for child state objects or decoded payloads while the group remains closed.
+ * A collapsed group retains descriptors, not nested VMs. Expanded children are group-local and
+ * released when the group closes, keeping the collapsed resource footprint minimal.
  */
 internal class WorkGroupHistoryItemViewModelImpl(
     descriptors: List<HistoryItemDescriptor>,
@@ -57,20 +54,27 @@ internal class WorkGroupHistoryItemViewModelImpl(
         val collapsed = mutableState.value as? WorkGroupHistoryItemState.Collapsed ?: return
         lateinit var loadingJob: Job
         loadingJob = context.launch(start = CoroutineStart.LAZY) {
+            var children: List<WorkGroupChildHistoryItemViewModel> = emptyList()
+            var retainedByExpandedState = false
             try {
-                val children = descriptors.map(childFactory)
+                children = descriptors.map(childFactory)
                 children.forEach { child -> child.ensureLoaded() }
                 if (context.isCurrent() && mutableState.value.isExpanding(loadingJob)) {
                     mutableState.value = WorkGroupHistoryItemState.Expanded(
                         children = children,
                         elapsed = collapsed.elapsed,
                     )
+                    retainedByExpandedState = true
                 }
             } catch (failure: CancellationException) {
                 throw failure
             } catch (_: Throwable) {
                 if (context.isCurrent() && mutableState.value.isExpanding(loadingJob)) {
                     mutableState.value = WorkGroupHistoryItemState.Failed
+                }
+            } finally {
+                if (!retainedByExpandedState) {
+                    children.forEach { child -> child.release() }
                 }
             }
         }
@@ -86,13 +90,7 @@ internal class WorkGroupHistoryItemViewModelImpl(
             }
 
             is WorkGroupHistoryItemState.Expanded -> {
-                current.children.forEach { child ->
-                    when (child) {
-                        is PatchHistoryItemViewModel -> child.collapse()
-                        is ToolHistoryItemViewModel -> child.collapse()
-                        else -> Unit
-                    }
-                }
+                current.children.forEach { child -> child.release() }
                 mutableState.value = WorkGroupHistoryItemState.Collapsed(current.elapsed)
             }
 

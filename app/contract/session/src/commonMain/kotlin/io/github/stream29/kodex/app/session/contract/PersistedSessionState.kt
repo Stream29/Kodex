@@ -48,6 +48,7 @@ public data class PersistedSessionTopologyNode(
     public val phase: AgentExecutionPhase = AgentExecutionPhase.Empty,
     public val running: Boolean = false,
     public val activityVersion: Long = 0,
+    /** Whether the underlying catalog has direct children, discovered or not. */
     public val hasChildren: Boolean = false,
     public val materialization: PersistedAgentMaterializationState =
         PersistedAgentMaterializationState.Unloaded,
@@ -66,7 +67,13 @@ public data class PersistedSessionTopologyNode(
     }
 }
 
-/** Atomic lightweight topology for children that may not be materialized. */
+/**
+ * Atomic lightweight ordered partial tree for Agents that may not be materialized.
+ *
+ * [nodes] is the canonical root-first depth-first preorder. Sibling order is
+ * supplied by the producing repository and must not be inferred from Agent
+ * identity or display data.
+ */
 public data class PersistedSessionTopologyState(
     public val rootAddress: AgentAddress,
     public val nodes: List<PersistedSessionTopologyNode>,
@@ -76,28 +83,38 @@ public data class PersistedSessionTopologyState(
         require(revision >= 0) {
             "A persisted Session topology revision must not be negative."
         }
+        require(nodes.isNotEmpty()) {
+            "A persisted Session topology must contain its root Agent."
+        }
         require(nodes.map(PersistedSessionTopologyNode::address).distinct().size == nodes.size) {
             "Persisted Session topology Agent addresses must be unique."
         }
         require(nodes.all { node -> node.address.sessionIndex == rootAddress.sessionIndex }) {
             "Every topology node must belong to its root persisted Session."
         }
-        val nodesByAddress = nodes.associateBy(PersistedSessionTopologyNode::address)
-        val root = requireNotNull(nodesByAddress[rootAddress]) {
-            "A persisted Session topology must contain its root Agent."
+        val root = nodes.first()
+        require(root.address == rootAddress) {
+            "A persisted Session topology must start with its root Agent."
         }
         require(root.parentAddress == null && root.depth == 0) {
             "A persisted Session root Agent must have no parent and depth zero."
         }
-        nodes.forEach { node ->
-            node.parentAddress?.let { parentAddress ->
-                val parent = requireNotNull(nodesByAddress[parentAddress]) {
-                    "Every topology parent must be present in the same snapshot."
-                }
-                require(node.depth == parent.depth + 1) {
-                    "A topology child depth must be exactly one greater than its parent."
-                }
+        val ancestors = mutableListOf(root)
+        for (index in 1 until nodes.size) {
+            val node = nodes[index]
+            require(node.parentAddress != null && node.depth > 0) {
+                "Only the persisted Session root Agent may have no parent or depth zero."
             }
+            require(node.depth <= ancestors.size) {
+                "A topology preorder must not skip an ancestor depth."
+            }
+            while (ancestors.size > node.depth) {
+                ancestors.removeAt(ancestors.lastIndex)
+            }
+            require(node.parentAddress == ancestors.last().address) {
+                "A topology node must immediately follow its parent subtree in preorder."
+            }
+            ancestors += node
         }
     }
 }

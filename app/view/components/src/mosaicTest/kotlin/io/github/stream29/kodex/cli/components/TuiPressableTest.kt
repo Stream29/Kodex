@@ -3,6 +3,9 @@ package io.github.stream29.kodex.cli.components
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.jakewharton.mosaic.text.SpanStyle
+import com.jakewharton.mosaic.text.buildAnnotatedString
+import com.jakewharton.mosaic.text.withStyle
 import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.MouseEvent
@@ -33,6 +36,26 @@ val tuiPressableTest by testSuite {
                             label = "Current",
                             idleTextStyle = TextStyle.Bold,
                         ) {}
+                    }
+                },
+            )
+        }
+    }
+
+    test("button preserves styles inside an annotated label") {
+        val label = buildAnnotatedString {
+            append("Review ")
+            withStyle(SpanStyle(textStyle = TextStyle.Dim)) {
+                append("5m ago")
+            }
+        }
+
+        runMosaicTest(snapshotStrategy = ansiSnapshots) {
+            assertEquals(
+                "[Review \u001B[2m5m ago\u001B[22m]",
+                setContentAndSnapshot {
+                    Box {
+                        TuiButton(label = label) {}
                     }
                 },
             )

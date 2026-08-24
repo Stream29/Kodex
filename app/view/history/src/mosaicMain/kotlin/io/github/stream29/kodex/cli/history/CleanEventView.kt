@@ -39,7 +39,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMultiAgent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMultiAgentToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSpawnAgentResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
@@ -100,13 +99,13 @@ import io.github.stream29.kodex.tool.multiagent.SpawnForkMode
 import io.github.stream29.kodex.tool.multiagent.WaitAgentArgs
 import io.github.stream29.kodex.tool.multiagent.WaitAgentResult
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
-import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecOutput
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
 import io.github.stream29.kodex.tool.viewimage.ViewImageToolArguments
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -151,6 +150,7 @@ internal fun StableCleanEvent.render(
                 onToggleExpanded = expansion?.toggle,
                 headerTrailingText = elapsed?.historyElapsedSuffix(),
             )
+
             is StableCommandExecutionToolEvent -> renderCommandExecution(shellSessions)
             is StableJsonToolEvent -> renderJsonTool()
             is StableTextToolEvent -> renderTextTool()
@@ -160,7 +160,7 @@ internal fun StableCleanEvent.render(
             is StableMcpToolEvent -> renderMcpTool()
             is StableMultiAgentToolEvent -> renderMultiAgentTool()
             is StablePlanUpdate -> renderPlanUpdate()
-            is StableRequestUserInputToolEvent -> renderRequestUserInput()
+            is StableRequestUserInputToolEvent -> renderRequestUserInput(elapsed)
             is StableToolSearchEvent -> renderToolSearch()
             is StableWebSearchToolEvent -> renderWebSearch()
         }
@@ -192,7 +192,7 @@ public fun UnstableCleanEvent.render(
         }
 
         is PendingCustomToolEvent -> ToolEvent(
-            summary = functionToolSummary(name, namespace),
+            summary = customToolSummary(name, namespace, input),
             rawName = qualifiedName(name, namespace),
             status = "running",
             expansionKey = callId,
@@ -261,7 +261,7 @@ public fun UnstableCleanEvent.render(
 
         is PendingInvalidToolCall -> renderInvalidToolCall()
         is PendingServerToolSearch -> ToolEvent(
-            summary = "Load tools from the server",
+            summary = call.arguments.serverToolSearchSummary(),
             rawName = "server_tool_search",
             status = call.status ?: "running",
             expansionKey = call.id?.value ?: "server_tool_search",
@@ -282,7 +282,7 @@ private fun StableCleanEvent.UserMessage.renderUserMessage() {
 @Composable
 private fun StableCleanEvent.AssistantMessage.renderAssistantMessage() {
     MessageEvent(
-        header = phase?.let { "Assistant · ${it.displayName()}" } ?: "Assistant",
+        header = phase?.let { "Assistant ${it.displayName()}" } ?: "Assistant",
         content = content,
         detailStyle = TextStyle.Unspecified,
     )
@@ -320,7 +320,7 @@ private fun StableCleanEvent.Reasoning.renderReasoning() {
 @Composable
 private fun StableCleanEvent.InvalidToolCall.renderInvalidToolCall() {
     ToolEvent(
-        summary = "Unable to call a tool",
+        summary = "Model emitted an invalid tool call",
         rawName = invocation.displayName(),
         status = "failed",
         expansionKey = callId,
@@ -333,7 +333,7 @@ private fun StableCleanEvent.InvalidToolCall.renderInvalidToolCall() {
 @Composable
 private fun StableCleanEvent.ServerToolSearch.renderServerToolSearch() {
     ToolEvent(
-        summary = "Load tools from the server",
+        summary = call.arguments.serverToolSearchSummary(),
         rawName = "server_tool_search",
         status = output.status,
         expansionKey = call.id?.value ?: "server_tool_search",
@@ -458,7 +458,7 @@ private fun StableTextToolEvent.renderTextTool() {
 @Composable
 private fun StableCustomToolEvent.renderCustomTool() {
     ToolEvent(
-        summary = functionToolSummary(name, namespace),
+        summary = customToolSummary(name, namespace, input),
         rawName = qualifiedName(name, namespace),
         status = success.completedStatus(),
         expansionKey = callId,
@@ -596,24 +596,6 @@ private fun StableMultiAgentToolEvent.renderMultiAgentTool() {
 }
 
 @Composable
-private fun StableRequestUserInputToolEvent.renderRequestUserInput() {
-    ToolEvent(
-        summary = arguments.toolSummary(),
-        rawName = "request_user_input",
-        status = result.status(),
-        expansionKey = callId,
-    ) {
-        section("Arguments") { arguments.renderDetails() }
-        section("Result") {
-            when (val result = result) {
-                is StableRequestUserInputResult.Answered -> result.response.renderDetails(arguments)
-                is StableRequestUserInputResult.Failure -> Detail("Error", result.message)
-            }
-        }
-    }
-}
-
-@Composable
 private fun StableToolSearchEvent.renderToolSearch() {
     ToolEvent(
         summary = arguments.toolSummary(),
@@ -665,7 +647,7 @@ private fun PendingMultiAgentToolEvent.renderPendingMultiAgentTool() {
 @Composable
 private fun PendingInvalidToolCall.renderInvalidToolCall() {
     ToolEvent(
-        summary = "Unable to call a tool",
+        summary = "Model emitted an invalid tool call",
         rawName = invocation.displayName(),
         status = "failed",
         expansionKey = callId,
@@ -888,7 +870,7 @@ internal fun HistoryItemHeader(
 }
 
 private fun Duration.historyElapsedSuffix(): String =
-    " · +${roundToMilliseconds()}"
+    " +${roundToMilliseconds()}"
 
 internal fun Duration.roundToMilliseconds(): Duration {
     if (!isFinite()) return this
@@ -936,7 +918,7 @@ private fun ContentItem.render(textStyle: TextStyle) {
         is ContentItem.OutputText -> DetailText(text, textStyle)
         is ContentItem.InputImage -> Detail(
             label = "Image",
-            value = "${imageUrl.safeMediaReference()} · ${detail?.name?.lowercase() ?: "auto"}",
+            value = "${imageUrl.safeMediaReference()} ${detail?.name?.lowercase() ?: "auto"}",
             textStyle = textStyle,
         )
     }
@@ -1038,7 +1020,7 @@ private fun FunctionCallOutputPayload.renderDetails() {
                 is FunctionCallOutputContentItem.InputText -> Detail("Result", item.text)
                 is FunctionCallOutputContentItem.InputImage -> Detail(
                     "Image",
-                    "${item.imageUrl.safeMediaReference()} · ${item.detail?.name?.lowercase() ?: "auto"}",
+                    "${item.imageUrl.safeMediaReference()} ${item.detail?.name?.lowercase() ?: "auto"}",
                 )
 
                 is FunctionCallOutputContentItem.EncryptedContent -> Detail("Result", "[encrypted content]")
@@ -1108,19 +1090,6 @@ private fun RequestUserInputArgs.renderDetails(
                 if (option.description.isBlank()) option.label else "${option.label} (${option.description})"
             }
             ?.let { Detail("Options", it, textStyle) }
-    }
-}
-
-@Composable
-private fun RequestUserInputResponse.renderDetails(
-    arguments: RequestUserInputArgs,
-) {
-    arguments.questions.forEach { question ->
-        val answer = answers[question.id] ?: return@forEach
-        Detail(
-            label = "Answer ${question.header}",
-            value = if (question.isSecret) "[hidden]" else answer.answers.joinToString(),
-        )
     }
 }
 
@@ -1321,7 +1290,7 @@ private fun ListAgentsResult.renderDetails() {
     if (agents.isEmpty()) {
         Detail("Agents", "none")
     } else {
-        agents.forEach { agent -> Detail("Agent", "${agent.agentName} · ${agent.agentStatus.displayName()}") }
+        agents.forEach { agent -> Detail("Agent", "${agent.agentName} ${agent.agentStatus.displayName()}") }
     }
 }
 
@@ -1398,11 +1367,6 @@ private fun StableImageGenerationResult.status(): String = when (this) {
 private fun StableImageViewResult.status(): String = when (this) {
     is StableImageViewResult.Success -> "succeeded"
     is StableImageViewResult.Failure -> "failed"
-}
-
-private fun StableRequestUserInputResult.status(): String = when (this) {
-    is StableRequestUserInputResult.Answered -> "answered"
-    is StableRequestUserInputResult.Failure -> "failed"
 }
 
 private fun ToolSearchResult.status(): String = when (this) {
@@ -1502,7 +1466,7 @@ internal fun functionToolSummary(
 ): String = when (qualifiedName(name, namespace)) {
     "exec_command" -> "Run a command"
     "shell.run" -> "Run a command"
-    "write_stdin" -> "Send input to a terminal"
+    "write_stdin" -> "Interact with a terminal session"
     "view_image" -> "View an image"
     "image_gen.imagegen" -> "Generate an image"
     "request_user_input" -> "Ask the user for input"
@@ -1517,7 +1481,7 @@ internal fun functionToolSummary(
     "hosted_image_generation" -> "Generate an image"
     "spawn_agent" -> "Start an agent"
     "send_message" -> "Message an agent"
-    "followup_task" -> "Continue an agent task"
+    "followup_task" -> "Resume an agent task"
     "wait_agent" -> "Wait for an agent"
     "interrupt_agent" -> "Interrupt an agent"
     "list_agents" -> "List agents"
@@ -1525,6 +1489,20 @@ internal fun functionToolSummary(
     "get_context_remaining" -> "Check remaining context"
     "clock.curr_time" -> "Check the current time"
     else -> qualifiedName(name, namespace)
+}
+
+private fun customToolSummary(
+    name: String,
+    namespace: String?,
+    input: String,
+): String {
+    if (qualifiedName(name, namespace) != "web.run") {
+        return functionToolSummary(name, namespace)
+    }
+    val commands = runCatching {
+        HistoryViewJson.decodeFromString(SearchCommands.serializer(), input)
+    }.getOrNull()
+    return commands?.toolSummary() ?: "Search the web"
 }
 
 private fun StableCommandExecutionAction.toolSummary(
@@ -1544,8 +1522,8 @@ private fun PendingCommandExecutionAction.toolSummary(
 private fun ExecCommandArguments.toolSummary(): String =
     command.singleLineSummary()
         .takeIf(String::isNotBlank)
-        ?.let { command -> "Run command: $command" }
-        ?: "Run a command"
+        ?.let { command -> "Run: $command" }
+        ?: "Run"
 
 private fun WriteStdinArguments.toolSummary(sourceArguments: ExecCommandArguments? = null): String {
     val command = sourceArguments
@@ -1554,9 +1532,9 @@ private fun WriteStdinArguments.toolSummary(sourceArguments: ExecCommandArgument
         ?.takeIf(String::isNotBlank)
     return when {
         command == null && chars.isEmpty() -> "Wait for terminal session $sessionId"
-        command == null -> "Send input to terminal session $sessionId"
-        chars.isEmpty() -> "Read output: $command"
-        else -> "Send input: $command"
+        command == null -> "Interact with terminal session $sessionId"
+        chars.isEmpty() -> "Wait for $command"
+        else -> "Interact with $command"
     }
 }
 
@@ -1587,6 +1565,17 @@ private fun SearchToolCallParams.toolSummary(): String =
         .takeIf(String::isNotBlank)
         ?.let { query -> "Search available tools: $query" }
         ?: "Search available tools"
+
+internal fun JsonElement.serverToolSearchSummary(): String {
+    val paths = ((this as? JsonObject)?.get("paths") as? JsonArray)
+        ?.mapNotNull { value -> (value as? JsonPrimitive)?.contentOrNull }
+        ?.map(String::singleLineSummary)
+        ?.filter(String::isNotBlank)
+        .orEmpty()
+    return paths.takeIf(List<String>::isNotEmpty)
+        ?.joinToString(prefix = "Cloud tool search: ")
+        ?: "Cloud tool search"
+}
 
 private fun SearchCommands.toolSummary(): String = when {
     !searchQuery.isNullOrEmpty() -> searchQuery.orEmpty().first().q.singleLineSummary()
@@ -1626,7 +1615,7 @@ private fun SpawnAgentArgs.toolSummary(): String = "Start agent: ${taskName.sing
 
 private fun SendMessageArgs.toolSummary(): String = "Message agent: ${target.singleLineSummary()}"
 
-private fun FollowupTaskArgs.toolSummary(): String = "Continue task for agent: ${target.singleLineSummary()}"
+private fun FollowupTaskArgs.toolSummary(): String = "Resume task for agent: ${target.singleLineSummary()}"
 
 private fun WaitAgentArgs.toolSummary(): String = "Wait for an agent"
 
@@ -1653,6 +1642,10 @@ private fun String.singleLineSummary(): String =
 
 private fun String.displayStdin(): String =
     if (isEmpty()) "[poll]" else replace("\r", "\\r").replace("\n", "\\n")
+
+private val HistoryViewJson = Json {
+    ignoreUnknownKeys = true
+}
 
 private fun JsonElement.historyPreview(): String = when (this) {
     is JsonObject -> when {

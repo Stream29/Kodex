@@ -23,7 +23,6 @@ import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.ScrollState
-import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiDialogActionRow
 import io.github.stream29.kodex.cli.components.TuiDropdownMenu
@@ -224,8 +223,8 @@ internal fun BoxScope.McpServerEditorDialog(
                     .fillMaxWidth()
                     .background(SettingsActionBackground),
             ) {
-                TuiButton(label = "Cancel", color = SettingsActionForeground, onClick = onDismiss)
-                TuiButton(label = "Save", color = SettingsActionForeground, onClick = ::save)
+                SettingsActionButton(label = "Cancel", onClick = onDismiss)
+                SettingsPrimaryButton(label = "Save", onClick = ::save)
             }
         }
     }
@@ -307,15 +306,13 @@ internal fun BoxScope.McpServerDetailsDialog(
                     .fillMaxWidth()
                     .background(SettingsActionBackground),
             ) {
-                TuiButton(
+                SettingsActionButton(
                     label = if (server.enabled) "Disable" else "Enable",
-                    color = SettingsActionForeground,
                     onClick = onSetEnabled,
                 )
-                TuiButton(label = "Edit", color = SettingsActionForeground, onClick = onEdit)
-                TuiButton(
+                SettingsActionButton(label = "Edit", onClick = onEdit)
+                SettingsDangerButton(
                     label = "Delete",
-                    color = TuiTheme.colorScheme.error,
                     onClick = onDelete,
                 )
             }
@@ -324,25 +321,24 @@ internal fun BoxScope.McpServerDetailsDialog(
                     .fillMaxWidth()
                     .background(SettingsActionBackground),
             ) {
-                TuiButton(label = "Close", color = SettingsActionForeground, onClick = onDismiss)
+                SettingsActionButton(label = "Close", onClick = onDismiss)
                 when (server.authentication) {
                     McpAuthenticationState.LoginRequired,
                     McpAuthenticationState.ReauthorizationRequired,
                     is McpAuthenticationState.Failed,
                         -> {
-                        TuiButton(label = "Log in", color = SettingsActionForeground, onClick = onLogin)
+                        SettingsActionButton(label = "Log in", onClick = onLogin)
                     }
 
                     McpAuthenticationState.Authorized,
                     McpAuthenticationState.Refreshing,
                         -> {
-                        TuiButton(label = "Log out", color = SettingsActionForeground, onClick = onLogout)
+                        SettingsActionButton(label = "Log out", onClick = onLogout)
                     }
 
                     McpAuthenticationState.Authorizing -> {
-                        TuiButton(
+                        SettingsActionButton(
                             label = "Cancel login",
-                            color = SettingsActionForeground,
                             onClick = onCancelLogin,
                         )
                     }
@@ -350,9 +346,8 @@ internal fun BoxScope.McpServerDetailsDialog(
                     McpAuthenticationState.NotConfigured -> Unit
                 }
                 if (server.status is McpServerSettingsStatus.Failed) {
-                    TuiButton(
+                    SettingsActionButton(
                         label = "Reconnect",
-                        color = SettingsActionForeground,
                         onClick = onReconnect,
                     )
                 }
@@ -395,15 +390,14 @@ internal fun BoxScope.McpDeleteConfirmationDialog(
                     .fillMaxWidth()
                     .background(SettingsActionBackground),
             ) {
-                TuiButton(
+                SettingsActionButton(
                     label = "Cancel",
-                    color = SettingsActionForeground,
                     autoFocus = true,
                     onClick = onDismiss,
                 )
-                TuiButton(
+                SettingsDangerButton(
                     label = "Delete",
-                    color = TuiTheme.colorScheme.error,
+                    prominent = true,
                     onClick = onConfirm,
                 )
             }
@@ -457,16 +451,14 @@ internal fun BoxScope.McpImportDialog(
                         textStyle = TextStyle.Dim,
                     )
                     Row {
-                        TuiButton(
+                        SettingsActionButton(
                             label = "Select all",
-                            color = SettingsActionForeground,
                             enabled = preview.items.any { item -> item.selectable },
                             onClick = { decisions = preview.defaultImportDecisions() },
                         )
                         Text(" ")
-                        TuiButton(
+                        SettingsActionButton(
                             label = "Clear",
-                            color = SettingsActionForeground,
                             enabled = selectedCount > 0,
                             onClick = {
                                 decisions = preview.items.associate { item ->
@@ -485,10 +477,9 @@ internal fun BoxScope.McpImportDialog(
                             decision == McpImportDecision.Skip -> " "
                             else -> "✓"
                         }
-                        TuiButton(
-                            label = "$marker ${item.serverName} · ${item.kind.importLabel()}",
+                        SettingsContentButton(
+                            label = "$marker ${item.serverName} ${item.kind.importLabel()}",
                             modifier = Modifier.fillMaxWidth(),
-                            color = SettingsForeground,
                             enabled = item.selectable,
                             onClick = {
                                 decisions = decisions + (
@@ -511,10 +502,9 @@ internal fun BoxScope.McpImportDialog(
                     .fillMaxWidth()
                     .background(SettingsActionBackground),
             ) {
-                TuiButton(label = "Cancel", color = SettingsActionForeground, onClick = onDismiss)
-                TuiButton(
+                SettingsActionButton(label = "Cancel", onClick = onDismiss)
+                SettingsPrimaryButton(
                     label = "Import selected ($selectedCount)",
-                    color = SettingsActionForeground,
                     enabled = preview != null && selectedCount > 0,
                     onClick = {
                         preview?.let { current -> onApply(current.id, decisions) }

@@ -10,7 +10,6 @@ public data class OpenAiClientConfig(
     public val requestTimeoutMillis: Long = 90_000,
     public val retry: OpenAiClientRetryConfig = OpenAiClientRetryConfig(),
     public val sseSocketTimeoutMillis: Long = 300_000,
-    public val remoteCompactionDeadlineMillis: Long = 480_000,
     public val remoteCompactionMaxRetries: Int = 2,
 ) {
     init {
@@ -19,9 +18,6 @@ public data class OpenAiClientConfig(
         }
         require(sseSocketTimeoutMillis > 0) {
             "sseSocketTimeoutMillis must be positive."
-        }
-        require(remoteCompactionDeadlineMillis > 0) {
-            "remoteCompactionDeadlineMillis must be positive."
         }
         require(remoteCompactionMaxRetries >= 0) {
             "remoteCompactionMaxRetries must be non-negative."

@@ -6,7 +6,6 @@ import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.ktor.client.plugins.sse.SSEClientException
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.io.IOException
@@ -184,17 +183,6 @@ val openAiRemoteCompactionV2Test by testSuite {
         assertEquals(3, attempts)
     }
 
-    test("compaction deadline is terminal and does not become cancellation") {
-        assertFailsWith<OpenAiRemoteCompactionV2DeadlineExceededException> {
-            retryOpenAiStreamingTransportWithBudget(
-                retry = noRetryConfig().copy(maxRetries = 4),
-                deadlineMillis = 50,
-            ) {
-                delay(500)
-                error("The deadline should have cancelled this attempt.")
-            }
-        }
-    }
 }
 
 private fun noRetryConfig(): OpenAiClientRetryConfig = OpenAiClientRetryConfig(

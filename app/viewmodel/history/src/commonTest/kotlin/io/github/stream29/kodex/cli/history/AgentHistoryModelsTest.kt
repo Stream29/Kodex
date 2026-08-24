@@ -44,6 +44,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration
@@ -174,6 +175,60 @@ val agentHistoryModelsTest by testSuite {
                 group.collapse()
                 assertIs<WorkGroupHistoryItemState.Collapsed>(group.state.value)
                 assertIs<ToolHistoryItemState.Collapsed>(newestTool.state.value)
+
+                group.expand()
+                val expandedAgain = awaitState(group.state) { state ->
+                    state is WorkGroupHistoryItemState.Expanded
+                } as WorkGroupHistoryItemState.Expanded
+                assertNotSame(newestTool, expandedAgain.children[0])
+            } finally {
+                model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("sealing the newest run releases its previously materialized item VMs") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify { storage ->
+                storage.stable[1] = textTool("older")
+                storage.stable[2] = textTool("newer")
+            }
+            val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+            try {
+                model.awaitReady(itemCount = 2, hasOlder = false)
+                val newestTool = assertIs<ToolHistoryItemViewModel>(model.historyItems.value[0])
+                awaitState(newestTool.state) { state ->
+                    state is ToolHistoryItemState.Collapsed
+                }
+                newestTool.expand()
+                assertIs<ToolHistoryItemState.Expanded>(
+                    awaitState(newestTool.state) { state ->
+                        state is ToolHistoryItemState.Expanded
+                    },
+                )
+
+                runtime.modify { storage ->
+                    storage.stable[3] = userMessage("breaker")
+                }
+                val sealedWindow = model.awaitHistoryItems { window ->
+                    window.size == 2 &&
+                        window.peek(0) is MessageHistoryItemViewModel &&
+                        window.peek(1) is WorkGroupHistoryItemViewModel
+                }
+
+                assertIs<ToolHistoryItemState.Collapsed>(newestTool.state.value)
+                val group = assertIs<WorkGroupHistoryItemViewModel>(sealedWindow[1])
+                awaitState(group.state) { state ->
+                    state is WorkGroupHistoryItemState.Collapsed
+                }
+                group.expand()
+                val expanded = awaitState(group.state) { state ->
+                    state is WorkGroupHistoryItemState.Expanded
+                } as WorkGroupHistoryItemState.Expanded
+                assertNotSame(newestTool, expanded.children.first())
             } finally {
                 model.close()
                 repository.cancelAndJoin()
@@ -340,6 +395,7 @@ val agentHistoryModelsTest by testSuite {
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
+                model.awaitReady(itemCount = 0, hasOlder = false)
                 withTimeout(5.seconds) {
                     model.pendingTools.first { events -> events == listOf(pending) }
                 }

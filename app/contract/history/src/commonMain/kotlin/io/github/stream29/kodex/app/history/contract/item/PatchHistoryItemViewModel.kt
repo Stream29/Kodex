@@ -50,13 +50,31 @@ public sealed interface PatchHistoryItemState {
 
 /** Complete one-line header retained in every loaded patch state. */
 public data class PatchHistoryItemHeader(
-    public val summary: String,
+    public val target: PatchHistoryItemTarget,
     public val status: PatchHistoryItemStatus,
     public val elapsed: Duration,
 ) {
     init {
-        require(summary.isNotBlank()) { "A patch history summary must not be blank." }
         requireHistoryItemElapsed(elapsed)
+    }
+}
+
+/** File-count information sufficient for a patch's collapsed title. */
+public sealed interface PatchHistoryItemTarget {
+    public data class SingleFile(
+        public val filename: String,
+    ) : PatchHistoryItemTarget {
+        init {
+            require(filename.isNotBlank()) { "A patch filename must not be blank." }
+        }
+    }
+
+    public data class FileCount(
+        public val count: Int,
+    ) : PatchHistoryItemTarget {
+        init {
+            require(count >= 0) { "A patch file count must not be negative." }
+        }
     }
 }
 
