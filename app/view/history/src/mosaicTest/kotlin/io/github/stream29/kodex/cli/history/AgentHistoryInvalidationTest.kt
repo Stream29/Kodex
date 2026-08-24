@@ -6,18 +6,17 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
-import io.github.stream29.kodex.app.history.contract.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
+import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.ReasoningHistoryItemViewModel
 import io.github.stream29.kodex.cli.components.LazyListState
 import io.github.stream29.kodex.cli.components.MutableScrollInteractionSource
-import io.github.stream29.kodex.openai.ContentItem
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.test.assertEquals
@@ -25,11 +24,11 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration
 
 val agentHistoryInvalidationTest by testSuite {
-    test("destructive replacement keeps an in-flight lazy provider on one window") {
+    test("destructive replacement keeps the old window readable") {
         val oldWindow = TestHistoryItemWindow(
             generation = 0,
             items = List(70) { position ->
-                HistoryItemViewModel.Message(index = 70 - position)
+                ReasoningHistoryItemViewModel(index = 70 - position, elapsed = Duration.ZERO)
             },
         )
         val model = ReplaceableHistoryModel(oldWindow)
@@ -39,7 +38,7 @@ val agentHistoryInvalidationTest by testSuite {
                 Column(modifier = Modifier.width(40).height(12)) {
                     AgentHistoryView(
                         model = model,
-                        shellSessions = EmptyHistoryShellSessions,
+                        shellSessions = EmptyInvalidationHistoryShellSessions,
                     )
                 }
             }
@@ -47,10 +46,7 @@ val agentHistoryInvalidationTest by testSuite {
             awaitSnapshot()
 
             model.replace(
-                TestHistoryItemWindow(
-                    generation = 1,
-                    items = emptyList(),
-                ),
+                TestHistoryItemWindow(generation = 1, items = emptyList()),
                 AgentHistoryLoadState.Initializing,
             )
             assertTrue("Loading history…" in awaitSnapshot())
@@ -58,20 +54,15 @@ val agentHistoryInvalidationTest by testSuite {
             val replacement = TestHistoryItemWindow(
                 generation = 1,
                 items = List(9) { position ->
-                    HistoryItemViewModel.Message(index = 9 - position)
+                    ReasoningHistoryItemViewModel(index = 9 - position, elapsed = Duration.ZERO)
                 },
             )
-            model.replace(
-                replacement,
-                AgentHistoryLoadState.Ready(hasOlder = false),
-            )
+            model.replace(replacement, AgentHistoryLoadState.Ready(hasOlder = false))
             awaitSnapshot()
 
             assertEquals(9, model.historyItems.value.size)
             assertEquals(9, model.historyItems.value.peek(0).storageIndex)
-            repeat(oldWindow.size) { position ->
-                oldWindow.peek(position)
-            }
+            repeat(oldWindow.size) { position -> oldWindow.peek(position) }
         }
     }
 }
@@ -94,20 +85,10 @@ private class ReplaceableHistoryModel(
         MutableScrollInteractionSource()
     override val followsLatest: Boolean = false
 
-    fun replace(
-        window: HistoryItemWindow,
-        loadState: AgentHistoryLoadState,
-    ) {
+    fun replace(window: HistoryItemWindow, loadState: AgentHistoryLoadState) {
         mutableCommittedItems.value = window
         mutableLoadState.value = loadState
     }
-
-    override suspend fun read(item: HistoryItemViewModel): StableCleanEvent =
-        StableCleanEvent.UserMessage(
-            content = listOf(ContentItem.InputText(item.storageIndex.toString())),
-        )
-
-    override suspend fun elapsedSincePrevious(item: HistoryItemViewModel): Duration? = null
 
     override fun contains(generation: Long, storageIndex: Int): Boolean {
         val window = mutableCommittedItems.value
@@ -135,20 +116,13 @@ private class TestHistoryItemWindow(
     override fun get(index: Int): HistoryItemViewModel = items[index]
 }
 
-private object EmptyHistoryShellSessions : AgentShellSessionRegistry {
+private object EmptyInvalidationHistoryShellSessions : AgentShellSessionRegistry {
     override val activeSessions: StateFlow<Map<Int, AgentShellSession>> =
         MutableStateFlow(emptyMap())
 }
 
 private val HistoryItemViewModel.storageIndex: Int
     get() = when (this) {
-        is HistoryItemViewModel.Message -> index
-        is HistoryItemViewModel.Reasoning -> index
-        is HistoryItemViewModel.Tool -> index
-        is HistoryItemViewModel.RequestUserInput -> index
-        is HistoryItemViewModel.Patch -> index
-        is HistoryItemViewModel.PlanUpdate -> index
-        is HistoryItemViewModel.ContextCompaction -> index
-        is HistoryItemViewModel.WorkGroup -> indexRange.last
-        is HistoryItemViewModel.TurnTimeMarker -> error("A turn time marker has no storage index.")
+        is ReasoningHistoryItemViewModel -> index
+        else -> error("This test only uses reasoning history items.")
     }

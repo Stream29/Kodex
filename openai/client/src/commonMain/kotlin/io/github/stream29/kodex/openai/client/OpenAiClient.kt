@@ -40,6 +40,7 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.cookies.AcceptAllCookiesStorage
 import io.ktor.client.plugins.cookies.HttpCookies
 import io.ktor.client.plugins.defaultRequest
+import io.ktor.client.plugins.sse.SSEClientException
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.accept
 import io.ktor.client.request.bearerAuth
@@ -61,11 +62,13 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.IOException
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonElement
@@ -87,7 +90,6 @@ public class OpenAiClient(
                     state.reserveRetry(
                         termination = "http_status",
                         httpStatus = response.status.value,
-                        retry = config.retry,
                     )
                 } else {
                     retryable
@@ -99,7 +101,6 @@ public class OpenAiClient(
                 if (retryable && state != null) {
                     state.reserveRetry(
                         termination = "transport_exception",
-                        retry = config.retry,
                     )
                 } else {
                     retryable
@@ -181,7 +182,10 @@ public class OpenAiClient(
     }
 
     override suspend fun createResponse(request: ResponsesApiRequest): Flow<ResponsesStreamEvent> {
-        return httpClient.streamResponseEvents {
+        return httpClient.streamResponseEvents(
+            socketTimeoutMillis = config.sseSocketTimeoutMillis,
+            retry = config.retry,
+        ) {
             authenticate()
             url {
                 appendPathSegments("responses")
@@ -197,7 +201,10 @@ public class OpenAiClient(
         turnMetadata: String,
         windowId: String,
     ): Flow<ResponsesStreamEvent> {
-        return httpClient.streamResponseEvents {
+        return httpClient.streamResponseEvents(
+            socketTimeoutMillis = config.sseSocketTimeoutMillis,
+            retry = config.retry,
+        ) {
             authenticate()
             url {
                 appendPathSegments("responses")
@@ -216,8 +223,14 @@ public class OpenAiClient(
         turnMetadata: String,
         windowId: String,
     ): RemoteCompactionV2Response =
-        retryOpenAiStreamingTransportWithBudget(config.retry) { budget ->
-            httpClient.streamRemoteCompactionEvents(budget) {
+        retryOpenAiStreamingTransportWithBudget(
+            retry = config.retry.copy(maxRetries = config.remoteCompactionMaxRetries),
+            deadlineMillis = config.remoteCompactionDeadlineMillis,
+        ) { budget ->
+            httpClient.streamRemoteCompactionEvents(
+                budget = budget,
+                socketTimeoutMillis = config.sseSocketTimeoutMillis,
+            ) {
                 authenticate()
                 url {
                     appendPathSegments("responses")
@@ -319,11 +332,18 @@ private const val HeaderCodexTurnMetadata: String = "x-codex-turn-metadata"
 private const val HeaderCodexWindowId: String = "x-codex-window-id"
 
 private fun HttpClient.streamResponseEvents(
+    socketTimeoutMillis: Long,
+    retry: OpenAiClientRetryConfig,
     configureRequest: HttpRequestBuilder.() -> Unit,
 ): Flow<ResponsesStreamEvent> =
-    postSseEvents(configureRequest)
+    postSseEvents(socketTimeoutMillis, configureRequest)
         .mapNotNull { event -> event.data?.takeIf { it != "[DONE]" } }
         .map { data -> OpenAiJsonCodec.decodeFromString<ResponsesStreamEvent>(data) }
+        .catch { cause ->
+            if (!cause.isRetryableOpenAiTransportException(retry)) {
+                throw cause
+            }
+        }
 
 internal sealed interface RemoteCompactionStreamEvent {
     data class ResponseEvent(
@@ -449,9 +469,10 @@ internal class RemoteCompactionRetryBudget(
 
 private fun HttpClient.streamRemoteCompactionEvents(
     budget: RemoteCompactionRetryBudget,
+    socketTimeoutMillis: Long,
     configureRequest: HttpRequestBuilder.() -> Unit,
 ): Flow<RemoteCompactionStreamEvent> =
-    postSseEvents {
+    postSseEvents(socketTimeoutMillis) {
         configureRequest()
         attributes.put(RemoteCompactionRetryBudgetKey, budget)
     }.mapNotNull { event ->
@@ -579,32 +600,43 @@ internal suspend fun <T> retryOpenAiStreamingTransport(
     block: suspend () -> T,
 ): T = retryOpenAiStreamingTransportWithBudget(retry) { block() }
 
-private suspend fun <T> retryOpenAiStreamingTransportWithBudget(
+internal suspend fun <T> retryOpenAiStreamingTransportWithBudget(
     retry: OpenAiClientRetryConfig,
+    deadlineMillis: Long? = null,
     block: suspend (RemoteCompactionRetryBudget) -> T,
 ): T {
     val budget = RemoteCompactionRetryBudget(retry)
-    while (true) {
-        budget.beginAttempt()
-        try {
-            return block(budget).also { budget.logSuccess() }
-        } catch (cause: Throwable) {
-            if (cause is CancellationException) {
-                throw cause
+    suspend fun runAttempts(): T {
+        while (true) {
+            budget.beginAttempt()
+            try {
+                return block(budget).also { budget.logSuccess() }
+            } catch (cause: Throwable) {
+                if (cause is CancellationException) {
+                    throw cause
+                }
+                val retryable = cause.isRetryableOpenAiStreamingException(retry)
+                val termination = cause.remoteCompactionTermination()
+                if (!retryable) {
+                    budget.logFinalFailure(termination, retryable = false)
+                    throw cause
+                }
+                if (!budget.reserveRetry(termination)) {
+                    budget.logFinalFailure(termination, retryable = true)
+                    throw cause
+                }
+                delay(budget.nextDelayMillis().milliseconds)
             }
-            val retryable = cause.isRetryableOpenAiStreamingException(retry)
-            val termination = cause.remoteCompactionTermination()
-            if (!retryable) {
-                budget.logFinalFailure(termination, retryable = false)
-                throw cause
-            }
-            if (!budget.reserveRetry(termination, retry = retry)) {
-                budget.logFinalFailure(termination, retryable = true)
-                throw cause
-            }
-            delay(budget.nextDelayMillis().milliseconds)
         }
     }
+
+    if (deadlineMillis == null) {
+        return runAttempts()
+    }
+    return withTimeoutOrNull(deadlineMillis) { runAttempts() }
+        ?: throw OpenAiRemoteCompactionV2DeadlineExceededException().also {
+            budget.logFinalFailure(termination = "deadline_exceeded", retryable = false)
+        }
 }
 
 public class OpenAiRemoteCompactionV2ProtocolException(
@@ -619,6 +651,10 @@ public class OpenAiRemoteCompactionV2StreamFailureException : IOException(
     "Remote compaction v2 stream reported a retryable failure.",
 )
 
+public class OpenAiRemoteCompactionV2DeadlineExceededException : IllegalStateException(
+    "Remote compaction v2 exceeded its total streaming deadline.",
+)
+
 private fun Throwable.remoteCompactionTermination(): String = when (this) {
     is OpenAiRemoteCompactionV2ProtocolException -> "protocol_error"
     is OpenAiRemoteCompactionV2StreamIncompleteException -> "stream_incomplete"
@@ -629,7 +665,7 @@ private fun Throwable.remoteCompactionTermination(): String = when (this) {
 private fun Throwable.isRetryableOpenAiStreamingException(
     retry: OpenAiClientRetryConfig,
 ): Boolean {
-    val cause = unwrapCancellationException()
+    val cause = openAiRootCause()
     val responseException = cause as? io.ktor.client.plugins.ResponseException
     if (responseException != null) {
         return responseException.response.status.isRetryableOpenAiStatus(retry)
@@ -649,6 +685,15 @@ internal fun Throwable.isRetryableOpenAiTransportException(retry: OpenAiClientRe
     if (!retry.retryTransport) {
         return false
     }
-    val cause = unwrapCancellationException()
+    val cause = openAiRootCause()
     return cause !is CancellationException && cause is IOException
+}
+
+private fun Throwable.openAiRootCause(): Throwable {
+    var current = unwrapCancellationException()
+    while (current is SSEClientException) {
+        val nested = current.cause ?: break
+        current = nested.unwrapCancellationException()
+    }
+    return current
 }

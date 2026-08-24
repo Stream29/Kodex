@@ -5,14 +5,18 @@ import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorage
+import io.github.stream29.kodex.agentstorage.filesystem.FileSystemIndexVersioned
 import io.github.stream29.kodex.agentstorage.filesystem.ofEmpty
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
+import io.github.stream29.kodex.utils.filesystemlease.FileSystemLeaseInUseException
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.filesystemlease.FileSystemLease
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,7 +61,11 @@ public class FileSystemKodexSessionRepository internal constructor(
     override suspend fun listEntries(): List<KodexSessionEntry> = entriesMutex.withLock {
         requireOpen()
         entries.value.map { entryIndex ->
-            fileSystemSessionEntry(entryIndex, sessionDirectory(entryIndex), fileSystem)
+            this@FileSystemKodexSessionRepository.fileSystemRootSessionEntry(
+                entryIndex = entryIndex,
+                directory = sessionDirectory(entryIndex),
+                fileSystem = fileSystem,
+            )
         }
     }
 
@@ -129,8 +137,7 @@ public class FileSystemKodexSessionRepository internal constructor(
             deleteDirectoryContents(directory, except = LockFile)
         } finally {
             withContext(NonCancellable) {
-                lease.close()
-                lease.coroutineContext[Job]?.join()
+                lease.closeAndJoin()
             }
         }
         fileSystem.delete(directory, mustExist = false)
@@ -148,7 +155,7 @@ public class FileSystemKodexSessionRepository internal constructor(
                     fileSystem = fileSystem,
                     duration = SessionLeaseDuration,
                 )
-            } catch (_: io.github.stream29.kodex.utils.filesystemlease.FileSystemLeaseInUseException) {
+            } catch (_: FileSystemLeaseInUseException) {
                 delay(delayDuration)
                 delayDuration = (delayDuration * 2).coerceAtMost(100.milliseconds)
             }
@@ -253,6 +260,82 @@ internal suspend fun fileSystemSessionEntry(
         lastActivityAt = timestampIndex.takeIf { it >= 0 }?.let { index -> storage.timestamp[index] },
     )
 }
+
+private suspend fun CoroutineScope.fileSystemRootSessionEntry(
+    entryIndex: Int,
+    directory: Path,
+    fileSystem: CoroutineFileSystem,
+): KodexSessionEntry {
+    val storage = FileSystemAgentStorage(directory, fileSystem)
+    val pointedSettingsIndex = storage.settings.latestIndexFromPointerOrNull()
+    val pointedTimestampIndex = storage.timestamp.latestIndexFromPointerOrNull()
+    if (pointedSettingsIndex != null && pointedTimestampIndex != null) {
+        return storage.sessionEntry(entryIndex, pointedSettingsIndex, pointedTimestampIndex)
+    }
+
+    val lease = tryAcquireSessionLease(directory, fileSystem)
+    if (lease == null) {
+        return storage.sessionEntry(
+            entryIndex = entryIndex,
+            settingsIndex = pointedSettingsIndex ?: storage.settings.scannedLatestIndex(),
+            timestampIndex = pointedTimestampIndex ?: storage.timestamp.scannedLatestIndex(),
+        )
+    }
+    return lease.useAndRelease {
+        storage.sessionEntry(
+            entryIndex = entryIndex,
+            settingsIndex = storage.settings.repairedLatestIndex(),
+            timestampIndex = storage.timestamp.repairedLatestIndex(),
+        )
+    }
+}
+
+private suspend fun CoroutineScope.tryAcquireSessionLease(
+    directory: Path,
+    fileSystem: CoroutineFileSystem,
+): FileSystemLease? {
+    val lockPath = Path(directory, LockFile)
+    return try {
+        FileSystemLease(
+            lockPath = lockPath,
+            fileSystem = fileSystem,
+            duration = SessionLeaseDuration,
+        )
+    } catch (_: FileSystemLeaseInUseException) {
+        null
+    } catch (failure: IOException) {
+        if (fileSystem.metadataOrNull(lockPath)?.isRegularFile == true) null else throw failure
+    }
+}
+
+private suspend fun <T> FileSystemLease.useAndRelease(block: suspend () -> T): T {
+    return try {
+        async(start = CoroutineStart.UNDISPATCHED) { block() }.await()
+    } finally {
+        withContext(NonCancellable) { closeAndJoin() }
+    }
+}
+
+private suspend fun <T> FileSystemIndexVersioned<T>.scannedLatestIndex(): Int =
+    storedIndexes().lastOrNull() ?: -1
+
+private suspend fun <T> FileSystemIndexVersioned<T>.repairedLatestIndex(): Int {
+    latestIndexFromPointerOrNull()?.let { return it }
+    return scannedLatestIndex().also { rebuilt ->
+        reconcileLatestIndexUnsafe(rebuilt)
+    }
+}
+
+private suspend fun FileSystemAgentStorage.sessionEntry(
+    entryIndex: Int,
+    settingsIndex: Int,
+    timestampIndex: Int,
+): KodexSessionEntry =
+    KodexSessionEntry(
+        entryIndex = entryIndex,
+        threadName = settingsIndex.takeIf { it >= 0 }?.let { index -> settings.getUnsafe(index).threadName },
+        lastActivityAt = timestampIndex.takeIf { it >= 0 }?.let { index -> timestamp.getUnsafe(index) },
+    )
 
 /** Creates a filesystem session repository, initializing its root layout when needed. */
 public suspend fun CoroutineScope.FileSystemKodexSessionRepository(

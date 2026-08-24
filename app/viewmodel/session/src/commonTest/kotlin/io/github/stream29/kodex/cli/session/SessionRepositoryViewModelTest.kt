@@ -30,7 +30,10 @@ val sessionRepositoryViewModelTest by testSuite {
             repository.open(newest).storage.timestamp[1] =
                 Instant.parse("2026-07-31T10:05:00Z")
             val store = testSessionViewModelRegistry(repository, this)
-            val catalog = createSessionCatalogViewModelFactory(repository, this).create()
+            val catalog = createSessionCatalogViewModelFactory(
+                KodexSessionRepositoryFactory { repository },
+                this,
+            ).create()
             try {
                 assertEquals(SessionCatalogState.Unloaded, catalog.state.value)
                 val observedStates = mutableListOf<SessionCatalogState>()

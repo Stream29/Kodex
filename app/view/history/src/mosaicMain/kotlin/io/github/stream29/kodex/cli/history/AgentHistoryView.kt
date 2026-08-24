@@ -5,8 +5,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import com.jakewharton.mosaic.focus.FocusRequester
 import com.jakewharton.mosaic.layout.fillMaxSize
 import com.jakewharton.mosaic.layout.fillMaxWidth
@@ -20,8 +20,6 @@ import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
-import io.github.oshai.kotlinlogging.KotlinLogging
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
@@ -29,9 +27,24 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanE
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
-import io.github.stream29.kodex.app.history.contract.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingKind
+import io.github.stream29.kodex.app.history.contract.item.ContextCompactionHistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
+import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemState
+import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.PlanUpdateHistoryItemState
+import io.github.stream29.kodex.app.history.contract.item.PlanUpdateHistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.ReasoningHistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemState
+import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemState
+import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.TurnTimeMarkerHistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemState
+import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
 import io.github.stream29.kodex.cli.components.LazyColumn
 import io.github.stream29.kodex.cli.components.LazyListLayoutInfo
 import io.github.stream29.kodex.cli.components.LazyListState
@@ -45,7 +58,6 @@ import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiInteractionTextStyle
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import io.github.stream29.kodex.cli.components.wrapToTerminalWidth
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
@@ -63,8 +75,7 @@ public fun AgentHistoryView(
         clickPosition: IntOffset?,
     ) -> Unit)? = null,
 ) {
-    val historyItemsState = model.historyItems.collectAsState()
-    val historyItems = historyItemsState.value
+    val historyItems = model.historyItems.collectAsState().value
     val generation = historyItems.generation
     val loadState by model.loadState.collectAsState()
     val pendingTools by model.pendingTools.collectAsState()
@@ -115,7 +126,7 @@ public fun AgentHistoryView(
             contentType = { position -> historyItems.peek(position).historyContentType() },
         ) { position ->
             val item = historyItems[position]
-            if (item is HistoryItemViewModel.TurnTimeMarker) {
+            if (item is TurnTimeMarkerHistoryItemViewModel) {
                 HistoryTurnTimeMarkerRow(item.duration)
             } else {
                 val focusRequester = remember(item) { FocusRequester() }
@@ -127,11 +138,10 @@ public fun AgentHistoryView(
                         }
                     }
                 }
-                if (item is HistoryItemViewModel.WorkGroup) {
+                if (item is WorkGroupHistoryItemViewModel) {
                     StoredHistoryWorkGroup(
                         group = item,
                         generation = generation,
-                        model = model,
                         focusRequester = focusRequester,
                         shellSessions = shellSessions,
                         onOpenContextMenu = onOpenEntryContextMenu,
@@ -140,7 +150,6 @@ public fun AgentHistoryView(
                     StoredHistoryEntry(
                         item = item,
                         generation = generation,
-                        model = model,
                         focusRequester = focusRequester,
                         shellSessions = shellSessions,
                         onOpenContextMenu = onOpenEntryContextMenu,
@@ -213,7 +222,7 @@ internal fun HistoryPagingFocusEffect(
             .collectLatest { interaction ->
                 val expectedAnchorIndex = listState.firstVisibleItemIndex
                 val expectedAnchorOffset = listState.firstVisibleItemScrollOffset
-                val layoutInfo = androidx.compose.runtime.snapshotFlow { listState.layoutInfo }
+                val layoutInfo = snapshotFlow { listState.layoutInfo }
                     .first { layout ->
                         layout.matchesAnchor(
                             index = expectedAnchorIndex,
@@ -223,7 +232,6 @@ internal fun HistoryPagingFocusEffect(
                 val targetItem = layoutInfo.historyPageFocusItem(
                     towardTop = interaction.consumedDelta < 0,
                 ) ?: return@collectLatest
-
                 entryFocusRequesters[targetItem]?.requestFocus()
             }
     }
@@ -243,7 +251,8 @@ internal fun LazyListLayoutInfo.historyPageFocusItem(
 ): HistoryItemViewModel? {
     val candidates = visibleItemsInfo.filter { item ->
         item.key is HistoryItemViewModel &&
-            item.key !is HistoryItemViewModel.TurnTimeMarker &&
+            item.key !is TurnTimeMarkerHistoryItemViewModel &&
+            item.key !is WorkGroupHistoryItemViewModel &&
             item.offset >= viewportStartOffset &&
             item.offset + item.size <= viewportEndOffset
     }
@@ -257,9 +266,8 @@ internal fun LazyListLayoutInfo.historyPageFocusItem(
 
 @Composable
 internal fun StoredHistoryWorkGroup(
-    group: HistoryItemViewModel.WorkGroup,
+    group: WorkGroupHistoryItemViewModel,
     generation: Long,
-    model: AgentHistoryViewModel,
     focusRequester: FocusRequester? = null,
     shellSessions: AgentShellSessionRegistry,
     onOpenContextMenu: ((
@@ -269,55 +277,53 @@ internal fun StoredHistoryWorkGroup(
         clickPosition: IntOffset?,
     ) -> Unit)?,
 ) {
-    val elapsed by produceState<Duration?>(
-        initialValue = null,
-        model,
-        group,
-        generation,
-    ) {
-        value = try {
-            val result = model.elapsedSincePrevious(group)
-            if (!model.contains(generation, group)) return@produceState
-            result
-        } catch (failure: CancellationException) {
-            throw failure
-        } catch (failure: Throwable) {
-            if (model.contains(generation, group)) {
-                HistoryViewLogger.error(failure) {
-                    "Unable to read elapsed time for history group ${group.indexRange}."
-                }
-            }
-            null
-        }
-    }
+    val state by group.state.collectAsState()
     Column(modifier = Modifier.fillMaxWidth()) {
-        TuiPressable(
-            onClick = {
-                group.toggleExpanded()
-                model.notifyContentChanged()
-            },
-            focusRequester = focusRequester,
-            modifier = Modifier.fillMaxWidth(),
-        ) { _, isHovered, isPressed ->
-            HistoryItemHeader(
-                value = "${if (group.expanded) "v" else ">"} Take ${group.itemCount} actions",
-                elapsed = elapsed,
-                modifier = Modifier.fillMaxWidth(),
-                textStyle = tuiInteractionTextStyle(
-                    hovered = isHovered,
-                    pressed = isPressed,
-                ),
-            )
-        }
-        if (group.expanded) {
-            repeat(group.itemCount) { position ->
-                StoredHistoryEntry(
-                    item = group.childAt(position),
-                    generation = generation,
-                    model = model,
-                    shellSessions = shellSessions,
-                    onOpenContextMenu = onOpenContextMenu,
-                )
+        when (val currentState = state) {
+            is WorkGroupHistoryItemState.Loading -> Text("")
+            WorkGroupHistoryItemState.Failed -> HistoryErrorRow()
+            is WorkGroupHistoryItemState.Collapsed,
+            is WorkGroupHistoryItemState.Expanding,
+            is WorkGroupHistoryItemState.Expanded,
+                -> {
+                val expanded = currentState is WorkGroupHistoryItemState.Expanded
+                val elapsed = when (currentState) {
+                    is WorkGroupHistoryItemState.Collapsed -> currentState.elapsed
+                    is WorkGroupHistoryItemState.Expanding -> currentState.elapsed
+                    is WorkGroupHistoryItemState.Expanded -> currentState.elapsed
+                }
+                TuiPressable(
+                    onClick = {
+                        when (currentState) {
+                            is WorkGroupHistoryItemState.Collapsed -> group.expand()
+                            is WorkGroupHistoryItemState.Expanding,
+                            is WorkGroupHistoryItemState.Expanded,
+                                -> group.collapse()
+                        }
+                    },
+                    focusRequester = focusRequester,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { _, isHovered, isPressed ->
+                    HistoryItemHeader(
+                        value = "${if (expanded) "v" else ">"} Take ${group.itemCount} actions",
+                        elapsed = elapsed,
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = tuiInteractionTextStyle(
+                            hovered = isHovered,
+                            pressed = isPressed,
+                        ),
+                    )
+                }
+                if (currentState is WorkGroupHistoryItemState.Expanded) {
+                    currentState.children.forEach { child ->
+                        StoredHistoryEntry(
+                            item = child,
+                            generation = generation,
+                            shellSessions = shellSessions,
+                            onOpenContextMenu = onOpenContextMenu,
+                        )
+                    }
+                }
             }
         }
     }
@@ -327,7 +333,6 @@ internal fun StoredHistoryWorkGroup(
 internal fun StoredHistoryEntry(
     item: HistoryItemViewModel,
     generation: Long,
-    model: AgentHistoryViewModel,
     focusRequester: FocusRequester? = null,
     shellSessions: AgentShellSessionRegistry,
     onOpenContextMenu: ((
@@ -337,173 +342,217 @@ internal fun StoredHistoryEntry(
         clickPosition: IntOffset?,
     ) -> Unit)?,
 ) {
-    val storageIndex = item.storageIndex
+    val storageIndex = item.storageIndex()
     val menuAnchor = rememberTuiPopupAnchor()
     TuiPressable(
         onClick = {},
         focusRequester = focusRequester,
         onSecondaryClick = onOpenContextMenu?.let { openMenu ->
             { clickPosition ->
-                openMenu(
-                    generation,
-                    storageIndex,
-                    menuAnchor,
-                    clickPosition,
-                )
+                openMenu(generation, storageIndex, menuAnchor, clickPosition)
             }
         },
         modifier = Modifier
             .fillMaxWidth()
             .tuiPopupAnchor(menuAnchor),
     ) { _, _, _ ->
-        StoredHistoryContent(
-            item = item,
-            generation = generation,
-            model = model,
-            shellSessions = shellSessions,
-        )
+        StoredHistoryContent(item = item, shellSessions = shellSessions)
     }
 }
 
 @Composable
 private fun StoredHistoryContent(
     item: HistoryItemViewModel,
-    generation: Long,
-    model: AgentHistoryViewModel,
     shellSessions: AgentShellSessionRegistry,
 ) {
-    val loaded by produceState<StoredEventLoadState>(
-        initialValue = StoredEventLoadState.Loading,
-        model,
-        item,
-        generation,
-    ) {
-        value = try {
-            val event = model.read(item)
-            if (!model.contains(generation, item)) return@produceState
-            val elapsed = try {
-                model.elapsedSincePrevious(item)
-            } catch (failure: CancellationException) {
-                throw failure
-            } catch (failure: Throwable) {
-                if (model.contains(generation, item)) {
-                    HistoryViewLogger.error(failure) {
-                    "Unable to read elapsed time for history item ${item.storageIndex}."
-                    }
-                }
-                null
-            }
-            if (!model.contains(generation, item)) return@produceState
-            StoredEventLoadState.Loaded(event, elapsed)
-        } catch (failure: CancellationException) {
-            throw failure
-        } catch (failure: Throwable) {
-            if (!model.contains(generation, item)) return@produceState
-            HistoryViewLogger.error(failure) {
-                "Unable to read history item ${item.storageIndex}."
-            }
-            StoredEventLoadState.Failed
-        }
-    }
-
-    when (val state = loaded) {
-        StoredEventLoadState.Loading -> Text("")
-        StoredEventLoadState.Failed -> Text(
-            value = "Error",
-            color = TuiTheme.colorScheme.error,
+    when (item) {
+        is ReasoningHistoryItemViewModel -> HistoryItemHeader(
+            value = "Thinking",
+            elapsed = item.elapsed,
+            modifier = Modifier.fillMaxWidth(),
+            textStyle = TextStyle.Dim,
         )
 
-        is StoredEventLoadState.Loaded -> {
-            val expansion = remember(item) { item.expansionBinding() }
-            state.event.render(
-                shellSessions = shellSessions,
-                expansion = expansion,
-                elapsed = state.elapsed,
-            )
+        is ContextCompactionHistoryItemViewModel -> HistoryItemHeader(
+            value = "Context compacted",
+            elapsed = item.elapsed,
+            modifier = Modifier.fillMaxWidth(),
+            textStyle = TextStyle.Dim,
+        )
+
+        is MessageHistoryItemViewModel -> {
+            val state by item.state.collectAsState()
+            when (val currentState = state) {
+                is MessageHistoryItemState.Loading -> Text("")
+                MessageHistoryItemState.Failed -> HistoryErrorRow()
+                is MessageHistoryItemState.Ready -> currentState.event.render(
+                    shellSessions = shellSessions,
+                    expansion = null,
+                    elapsed = currentState.elapsed,
+                )
+            }
         }
+
+        is RequestUserInputHistoryItemViewModel -> {
+            val state by item.state.collectAsState()
+            when (val currentState = state) {
+                is RequestUserInputHistoryItemState.Loading -> Text("")
+                RequestUserInputHistoryItemState.Failed -> HistoryErrorRow()
+                is RequestUserInputHistoryItemState.Ready -> currentState.event.render(
+                    shellSessions = shellSessions,
+                    expansion = AlwaysExpandedHistoryBinding,
+                    elapsed = currentState.elapsed,
+                )
+            }
+        }
+
+        is PlanUpdateHistoryItemViewModel -> {
+            val state by item.state.collectAsState()
+            when (val currentState = state) {
+                is PlanUpdateHistoryItemState.Loading -> Text("")
+                PlanUpdateHistoryItemState.Failed -> HistoryErrorRow()
+                is PlanUpdateHistoryItemState.Ready -> currentState.event.render(
+                    shellSessions = shellSessions,
+                    expansion = AlwaysExpandedHistoryBinding,
+                    elapsed = currentState.elapsed,
+                )
+            }
+        }
+
+        is ToolHistoryItemViewModel -> {
+            val state by item.state.collectAsState()
+            when (val currentState = state) {
+                is ToolHistoryItemState.Loading -> Text("")
+                ToolHistoryItemState.Failed -> HistoryErrorRow()
+                is ToolHistoryItemState.Collapsed -> CollapsedToolHistoryRow(
+                    summary = currentState.header.summary,
+                    status = currentState.header.status,
+                    elapsed = currentState.header.elapsed,
+                    onClick = item::expand,
+                )
+
+                is ToolHistoryItemState.Expanding -> CollapsedToolHistoryRow(
+                    summary = currentState.header.summary,
+                    status = currentState.header.status,
+                    elapsed = currentState.header.elapsed,
+                    onClick = item::collapse,
+                )
+
+                is ToolHistoryItemState.Expanded -> currentState.event.render(
+                    shellSessions = shellSessions,
+                    expansion = HistoryExpansionBinding(
+                        expanded = { true },
+                        toggle = item::collapse,
+                    ),
+                    elapsed = currentState.header.elapsed,
+                )
+            }
+        }
+
+        is PatchHistoryItemViewModel -> {
+            val state by item.state.collectAsState()
+            when (val currentState = state) {
+                is PatchHistoryItemState.Loading -> Text("")
+                PatchHistoryItemState.Failed -> HistoryErrorRow()
+                is PatchHistoryItemState.Collapsed -> CollapsedToolHistoryRow(
+                    summary = currentState.header.summary,
+                    status = currentState.header.status.name.lowercase(),
+                    elapsed = currentState.header.elapsed,
+                    onClick = item::expand,
+                )
+
+                is PatchHistoryItemState.Expanding -> CollapsedToolHistoryRow(
+                    summary = currentState.header.summary,
+                    status = currentState.header.status.name.lowercase(),
+                    elapsed = currentState.header.elapsed,
+                    onClick = item::collapse,
+                )
+
+                is PatchHistoryItemState.Expanded -> currentState.event.render(
+                    shellSessions = shellSessions,
+                    expansion = HistoryExpansionBinding(
+                        expanded = { true },
+                        toggle = item::collapse,
+                    ),
+                    elapsed = currentState.header.elapsed,
+                )
+            }
+        }
+
+        is TurnTimeMarkerHistoryItemViewModel,
+        is WorkGroupHistoryItemViewModel,
+            -> error("Virtual history rows are rendered by their owning branch.")
     }
 }
 
+private val AlwaysExpandedHistoryBinding = HistoryExpansionBinding(
+    expanded = { true },
+    toggle = {},
+)
+
 @Composable
-private fun HistoryMarkerText(value: String) {
-    WrappedHistoryText(
-        value = value,
-        textStyle = TextStyle.Dim,
+private fun HistoryErrorRow() {
+    Text(
+        value = "Error",
+        color = TuiTheme.colorScheme.error,
     )
 }
 
-/**
- * Mosaic's Text clips at its measured width instead of wrapping. Subcomposing from the incoming
- * finite width keeps each lazy item independently measurable.
- */
 @Composable
-internal fun WrappedHistoryText(
-    value: String,
-    textStyle: TextStyle = TextStyle.Unspecified,
-    color: Color = Color.Unspecified,
+private fun CollapsedToolHistoryRow(
+    summary: String,
+    status: String,
+    elapsed: Duration,
+    onClick: () -> Unit,
 ) {
-    val layoutCache = remember(value) {
-        WrappedHistoryTextLayoutCache(value)
-    }
-    SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
-        check(constraints.hasBoundedWidth) {
-            "Agent history text must be measured with a finite maximum width."
-        }
-        val wrapWidth = constraints.maxWidth.coerceAtLeast(1)
-        val lines = layoutCache.linesFor(wrapWidth)
-        val placeable = subcompose(WrappedHistoryTextSlot) {
-            Column {
-                lines.forEach { line ->
-                    Text(
-                        value = line,
-                        color = color,
-                        textStyle = textStyle,
-                    )
-                }
-            }
-        }.single().measure(
-            constraints.copy(
-                minWidth = 0,
-                minHeight = 0,
-                maxHeight = Constraints.Infinity,
+    TuiPressable(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+    ) { _, isHovered, isPressed ->
+        HistoryItemHeader(
+            value = "> $summary",
+            elapsed = elapsed,
+            modifier = Modifier.fillMaxWidth(),
+            color = when (status) {
+                "failed" -> TuiTheme.colorScheme.error
+                "running", "streaming", "starting", "in_progress", "inprogress" ->
+                    TuiTheme.colorScheme.success
+
+                else -> Color.Unspecified
+            },
+            textStyle = tuiInteractionTextStyle(
+                hovered = isHovered,
+                pressed = isPressed,
             ),
         )
-        layout(
-            width = constraints.constrainWidth(placeable.width),
-            height = constraints.constrainHeight(placeable.height),
-        ) {
-            placeable.place(0, 0)
-        }
     }
 }
 
-internal class WrappedHistoryTextLayoutCache(
-    private val value: String,
-) {
-    private var cachedWidth: Int? = null
-    private var cachedLines: List<String> = emptyList()
-
-    internal fun linesFor(width: Int): List<String> {
-        if (cachedWidth != width) {
-            cachedWidth = width
-            cachedLines = value.wrapToTerminalWidth(width)
-        }
-        return cachedLines
-    }
+private fun HistoryItemViewModel.storageIndex(): Int = when (this) {
+    is MessageHistoryItemViewModel -> index
+    is ReasoningHistoryItemViewModel -> index
+    is ToolHistoryItemViewModel -> index
+    is RequestUserInputHistoryItemViewModel -> index
+    is PatchHistoryItemViewModel -> index
+    is PlanUpdateHistoryItemViewModel -> index
+    is ContextCompactionHistoryItemViewModel -> index
+    is TurnTimeMarkerHistoryItemViewModel,
+    is WorkGroupHistoryItemViewModel,
+        -> error("A virtual history item has no context-menu storage index.")
 }
 
 private fun HistoryItemViewModel.historyContentType(): HistoryContentType = when (this) {
-    is HistoryItemViewModel.Message -> HistoryContentType.Message
-    is HistoryItemViewModel.Reasoning -> HistoryContentType.Reasoning
-    is HistoryItemViewModel.Tool,
-    is HistoryItemViewModel.RequestUserInput,
-    is HistoryItemViewModel.PlanUpdate,
+    is MessageHistoryItemViewModel -> HistoryContentType.Message
+    is ReasoningHistoryItemViewModel -> HistoryContentType.Reasoning
+    is ToolHistoryItemViewModel,
+    is RequestUserInputHistoryItemViewModel,
+    is PlanUpdateHistoryItemViewModel,
         -> HistoryContentType.CompletedTool
 
-    is HistoryItemViewModel.Patch -> HistoryContentType.Patch
-    is HistoryItemViewModel.ContextCompaction -> HistoryContentType.Context
-    is HistoryItemViewModel.TurnTimeMarker -> HistoryContentType.TurnTimeMarker
-    is HistoryItemViewModel.WorkGroup -> HistoryContentType.WorkGroup
+    is PatchHistoryItemViewModel -> HistoryContentType.Patch
+    is ContextCompactionHistoryItemViewModel -> HistoryContentType.Context
+    is TurnTimeMarkerHistoryItemViewModel -> HistoryContentType.TurnTimeMarker
+    is WorkGroupHistoryItemViewModel -> HistoryContentType.WorkGroup
 }
 
 private fun UnstableCleanEvent.historyContentType(): HistoryContentType = when (this) {
@@ -538,59 +587,6 @@ private fun HistoryStreamingItem.historyContentType(): HistoryContentType = when
     }
 }
 
-private val HistoryItemViewModel.storageIndex: Int
-    get() = when (this) {
-        is HistoryItemViewModel.Message -> index
-        is HistoryItemViewModel.Reasoning -> index
-        is HistoryItemViewModel.Tool -> index
-        is HistoryItemViewModel.RequestUserInput -> index
-        is HistoryItemViewModel.Patch -> index
-        is HistoryItemViewModel.PlanUpdate -> index
-        is HistoryItemViewModel.ContextCompaction -> index
-        is HistoryItemViewModel.TurnTimeMarker ->
-            error("A turn time marker cannot be rendered as a stored history event.")
-        is HistoryItemViewModel.WorkGroup ->
-            error("A folded history work group cannot be rendered as one stored event.")
-    }
-
-private fun HistoryItemViewModel.expansionBinding(): HistoryExpansionBinding? = when (this) {
-    is HistoryItemViewModel.Reasoning -> HistoryExpansionBinding(
-        expanded = { expanded },
-        toggle = ::toggleExpanded,
-    )
-
-    is HistoryItemViewModel.Tool -> HistoryExpansionBinding(
-        expanded = { expanded },
-        toggle = ::toggleExpanded,
-    )
-
-    is HistoryItemViewModel.RequestUserInput -> HistoryExpansionBinding(
-        expanded = { expanded },
-        toggle = ::toggleExpanded,
-    )
-
-    is HistoryItemViewModel.Patch -> HistoryExpansionBinding(
-        expanded = { expanded },
-        toggle = ::toggleExpanded,
-    )
-
-    is HistoryItemViewModel.Message,
-    is HistoryItemViewModel.PlanUpdate,
-    is HistoryItemViewModel.ContextCompaction,
-    is HistoryItemViewModel.TurnTimeMarker,
-    is HistoryItemViewModel.WorkGroup,
-        -> null
-}
-
-private sealed interface StoredEventLoadState {
-    data object Loading : StoredEventLoadState
-    data object Failed : StoredEventLoadState
-    data class Loaded(
-        val event: StableCleanEvent,
-        val elapsed: Duration?,
-    ) : StoredEventLoadState
-}
-
 private data class PendingHistoryKey(
     val generation: Long,
     val identity: String,
@@ -623,20 +619,68 @@ private enum class HistoryContentType {
     Marker,
 }
 
-private fun AgentHistoryViewModel.contains(
-    generation: Long,
-    item: HistoryItemViewModel,
-): Boolean = when (item) {
-    is HistoryItemViewModel.TurnTimeMarker -> false
-    is HistoryItemViewModel.WorkGroup ->
-        contains(generation, item.indexRange.first) &&
-            contains(generation, item.indexRange.last)
-
-    else -> contains(generation, item.storageIndex)
-}
-
 private data object StreamingStartedHistoryKey
 private data object CompactingHistoryKey
 private data object WrappedHistoryTextSlot
 
-private val HistoryViewLogger = KotlinLogging.logger {}
+@Composable
+private fun HistoryMarkerText(value: String) {
+    WrappedHistoryText(
+        value = value,
+        textStyle = TextStyle.Dim,
+    )
+}
+
+/**
+ * Mosaic's Text clips at its measured width instead of wrapping. Subcomposing from the incoming
+ * finite width keeps each lazy item independently measurable.
+ */
+@Composable
+internal fun WrappedHistoryText(
+    value: String,
+    textStyle: TextStyle = TextStyle.Unspecified,
+    color: Color = Color.Unspecified,
+) {
+    val layoutCache = remember(value) { WrappedHistoryTextLayoutCache(value) }
+    SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
+        check(constraints.hasBoundedWidth) {
+            "Agent history text must be measured with a finite maximum width."
+        }
+        val wrapWidth = constraints.maxWidth.coerceAtLeast(1)
+        val lines = layoutCache.linesFor(wrapWidth)
+        val placeable = subcompose(WrappedHistoryTextSlot) {
+            Column {
+                lines.forEach { line ->
+                    Text(value = line, color = color, textStyle = textStyle)
+                }
+            }
+        }.single().measure(
+            constraints.copy(
+                minWidth = 0,
+                minHeight = 0,
+                maxHeight = Constraints.Infinity,
+            ),
+        )
+        layout(
+            width = constraints.constrainWidth(placeable.width),
+            height = constraints.constrainHeight(placeable.height),
+        ) {
+            placeable.place(0, 0)
+        }
+    }
+}
+
+internal class WrappedHistoryTextLayoutCache(
+    private val value: String,
+) {
+    private var cachedWidth: Int? = null
+    private var cachedLines: List<String> = emptyList()
+
+    internal fun linesFor(width: Int): List<String> {
+        if (cachedWidth != width) {
+            cachedWidth = width
+            cachedLines = value.wrapToTerminalWidth(width)
+        }
+        return cachedLines
+    }
+}

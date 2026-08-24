@@ -4,11 +4,15 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.openai.Response
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.ktor.client.plugins.sse.SSEClientException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.io.IOException
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 val openAiRemoteCompactionV2Test by testSuite {
     test("remote compaction v2 requires one output before completed") {
@@ -157,6 +161,39 @@ val openAiRemoteCompactionV2Test by testSuite {
         }
 
         assertEquals(1, attempts)
+    }
+
+    test("SSE transport failures wrapped by Ktor remain retryable") {
+        val failure = SSEClientException(cause = IOException("socket closed"))
+
+        assertTrue(failure.isRetryableOpenAiTransportException(noRetryConfig().copy(retryTransport = true)))
+    }
+
+    test("compaction retry budget allows two retries") {
+        var attempts = 0
+
+        assertFailsWith<OpenAiRemoteCompactionV2StreamIncompleteException> {
+            retryOpenAiStreamingTransportWithBudget(
+                retry = noRetryConfig().copy(maxRetries = 2),
+            ) {
+                attempts += 1
+                throw OpenAiRemoteCompactionV2StreamIncompleteException()
+            }
+        }
+
+        assertEquals(3, attempts)
+    }
+
+    test("compaction deadline is terminal and does not become cancellation") {
+        assertFailsWith<OpenAiRemoteCompactionV2DeadlineExceededException> {
+            retryOpenAiStreamingTransportWithBudget(
+                retry = noRetryConfig().copy(maxRetries = 4),
+                deadlineMillis = 50,
+            ) {
+                delay(500)
+                error("The deadline should have cancelled this attempt.")
+            }
+        }
     }
 }
 

@@ -32,7 +32,7 @@ public class FileSystemIndexVersioned<T>(
     private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ) : MutableIndexVersioned<T> {
     override suspend fun latestIndex(): Int {
-        readLatestIndexOrNull()?.let { return it }
+        latestIndexFromPointerOrNull()?.let { return it }
         val rebuilt = storedIndexes().lastOrNull() ?: EmptyIndex
         tryCreateLatestIndex(rebuilt)
         return rebuilt
@@ -177,12 +177,18 @@ public class FileSystemIndexVersioned<T>(
         ) {
             "Latest index file does not exist: ${directory.entryPath(index)}"
         }
-        if (readLatestIndexOrNull() != index) {
+        if (latestIndexFromPointerOrNull() != index) {
             writeLatestIndex(index)
         }
     }
 
-    private suspend fun readLatestIndexOrNull(): Int? {
+    /**
+     * Reads only the rebuildable latest-index pointer without enumerating or
+     * repairing this timeline.
+     *
+     * Returns `null` when the pointer is missing, malformed, or dangling.
+     */
+    public suspend fun latestIndexFromPointerOrNull(): Int? {
         return try {
             val index = json.decodeFromString(
                 Int.serializer(),

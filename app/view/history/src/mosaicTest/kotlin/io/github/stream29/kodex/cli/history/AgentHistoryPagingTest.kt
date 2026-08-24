@@ -19,7 +19,9 @@ import io.github.stream29.kodex.cli.components.LazyListState
 import io.github.stream29.kodex.cli.components.MutableScrollInteractionSource
 import io.github.stream29.kodex.cli.components.TuiPressable
 import io.github.stream29.kodex.cli.components.items
-import io.github.stream29.kodex.app.history.contract.HistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.ReasoningHistoryItemViewModel
+import kotlin.time.Duration
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -72,7 +74,7 @@ val agentHistoryPagingTest by testSuite {
                             items = historyItems,
                             key = { item -> item },
                         ) { key ->
-                            val index = (key as HistoryItemViewModel.Message).index
+                            val index = (key as ReasoningHistoryItemViewModel).index
                             val focusRequester = remember(key) { FocusRequester() }
                             DisposableEffect(key, focusRequester) {
                                 focusRequesters[key] = focusRequester
@@ -126,4 +128,4 @@ val agentHistoryPagingTest by testSuite {
 }
 
 private fun storedKey(index: Int): HistoryItemViewModel =
-    HistoryItemViewModel.Message(index)
+    ReasoningHistoryItemViewModel(index = index, elapsed = Duration.ZERO)

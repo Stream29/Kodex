@@ -68,6 +68,21 @@ val fileSystemLeaseTest by testSuite {
             assertFalse(lease.isActive)
             assertNull(SystemCoroutineFileSystem.metadataOrNull(lock))
         }
+
+        test("closeAndJoin returns after deleting its heartbeat") { directory ->
+            coroutineScope {
+                val lock = Path(directory, "lock.json")
+                val lease = FileSystemLease(
+                    lockPath = lock,
+                    duration = 30.seconds,
+                )
+
+                lease.closeAndJoin()
+
+                assertFalse(lease.isActive)
+                assertNull(SystemCoroutineFileSystem.metadataOrNull(lock))
+            }
+        }
     }
 }
 

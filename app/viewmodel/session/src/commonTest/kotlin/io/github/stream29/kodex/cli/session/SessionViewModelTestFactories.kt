@@ -61,8 +61,19 @@ internal fun testSessionViewModelRegistry(
     scope: kotlinx.coroutines.CoroutineScope,
     probe: SessionViewModelCreationProbe? = null,
 ): DefaultPersistedSessionViewModelRegistry =
+    testSessionViewModelRegistry(
+        repositoryFactory = KodexSessionRepositoryFactory { repository },
+        scope = scope,
+        probe = probe,
+    )
+
+internal fun testSessionViewModelRegistry(
+    repositoryFactory: KodexSessionRepositoryFactory,
+    scope: kotlinx.coroutines.CoroutineScope,
+    probe: SessionViewModelCreationProbe? = null,
+): DefaultPersistedSessionViewModelRegistry =
     DefaultPersistedSessionViewModelRegistry(
-        repository = repository,
+        repositoryFactory = repositoryFactory,
         scope = scope,
         agentFactory = testSessionAgentViewModelFactory(probe),
     )

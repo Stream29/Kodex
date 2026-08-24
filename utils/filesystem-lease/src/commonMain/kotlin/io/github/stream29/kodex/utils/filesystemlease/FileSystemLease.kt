@@ -6,8 +6,10 @@ import io.github.stream29.kodex.utils.osenvironment.processId
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -58,6 +60,11 @@ public class FileSystemLease internal constructor(
 
     override fun close() {
         cancel()
+    }
+
+    /** Cancels this lease and waits until its owned heartbeat file is released. */
+    public suspend fun closeAndJoin() {
+        coroutineContext[Job]?.cancelAndJoin()
     }
 
     private suspend fun renew(): Boolean {
