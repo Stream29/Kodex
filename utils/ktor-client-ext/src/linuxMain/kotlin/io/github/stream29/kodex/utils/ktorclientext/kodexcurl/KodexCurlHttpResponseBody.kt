@@ -16,6 +16,8 @@ import kotlinx.coroutines.launch
 import platform.posix.size_t
 import kotlin.concurrent.Volatile
 import kotlin.coroutines.CoroutineContext
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
 
 internal class KodexCurlHttpResponseBody(
     callContext: Job,
@@ -30,6 +32,7 @@ internal class KodexCurlHttpResponseBody(
 
     @Volatile
     private var paused: Boolean = false
+    private var lastNetworkActivity: TimeMark = TimeSource.Monotonic.markNow()
 
     @OptIn(ExperimentalForeignApi::class, InternalAPI::class)
     override fun onBodyChunkReceived(buffer: CPointer<ByteVar>, size: size_t, count: size_t): size_t {
@@ -42,6 +45,7 @@ internal class KodexCurlHttpResponseBody(
         return try {
             bodyChannel.writeBuffer.writeFully(buffer, 0L, chunkSize)
             bodyChannel.flushWriteBuffer()
+            if (chunkSize > 0) onNetworkActivity()
             if (!bodyChannel.hasFreeSpace) pauseUntilFreeSpaceAvailable()
             chunkSize.convert()
         } catch (_: Throwable) {
@@ -63,6 +67,15 @@ internal class KodexCurlHttpResponseBody(
                 onUnpause()
             }
         }
+    }
+
+    override fun onNetworkActivity() {
+        lastNetworkActivity = TimeSource.Monotonic.markNow()
+    }
+
+    fun isSocketTimeoutExpired(socketTimeoutMillis: Long): Boolean {
+        if (socketTimeoutMillis == Long.MAX_VALUE) return false
+        return lastNetworkActivity.elapsedNow().inWholeMilliseconds >= socketTimeoutMillis
     }
 
     override fun close(cause: Throwable?) {

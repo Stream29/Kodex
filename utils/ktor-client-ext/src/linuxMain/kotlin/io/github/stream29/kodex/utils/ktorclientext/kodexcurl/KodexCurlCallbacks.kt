@@ -24,6 +24,7 @@ internal fun onKodexCurlHeadersReceived(
 ): size_t {
     val response = userdata.fromCPointer<KodexCurlResponseBuilder>()
     val chunkSize = (size * count).toLong()
+    if (chunkSize > 0) response.responseBody.onNetworkActivity()
     response.headersBytes.writeFully(buffer, 0, chunkSize)
 
     if (isFinalHeaderLine(chunkSize, buffer) && !response.bodyStartedReceiving.isCompleted) {
@@ -70,6 +71,7 @@ internal fun onKodexCurlBodyChunkRequested(
         return KodexLibcurl.READFUNC_ABORT
     }
     if (readCount > 0) {
+        wrapper.onNetworkActivity()
         return readCount.convert()
     }
 
@@ -89,11 +91,14 @@ internal class KodexCurlRequestBodyData(
     val body: ByteReadChannel,
     val callContext: CoroutineContext,
     val onUnpause: () -> Unit,
+    val onNetworkActivity: () -> Unit,
 )
 
 internal interface KodexCurlResponseBodyData {
     @OptIn(ExperimentalForeignApi::class)
     fun onBodyChunkReceived(buffer: CPointer<ByteVar>, size: size_t, count: size_t): size_t
+
+    fun onNetworkActivity() {}
 
     fun close(cause: Throwable? = null)
 }

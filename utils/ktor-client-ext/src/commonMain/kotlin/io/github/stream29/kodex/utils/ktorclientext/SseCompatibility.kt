@@ -6,20 +6,21 @@ import io.ktor.client.plugins.api.ClientPlugin
 import io.ktor.client.plugins.api.createClientPlugin
 import io.ktor.client.plugins.sse.DefaultClientSSESession
 import io.ktor.client.plugins.sse.SSEBufferPolicy
+import io.ktor.client.plugins.sse.SSECapability
 import io.ktor.client.plugins.sse.SSEClientContent
 import io.ktor.client.request.HttpRequestBuilder
-import io.ktor.client.request.HttpRequestData
 import io.ktor.client.request.HttpRequestPipeline
 import io.ktor.client.request.ResponseAdapter
 import io.ktor.client.request.ResponseAdapterAttributeKey
-import io.ktor.client.request.takeFrom
 import io.ktor.http.Headers
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentType
 import io.ktor.http.content.OutgoingContent
 import io.ktor.util.AttributeKey
 import io.ktor.util.pipeline.PipelinePhase
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.InternalAPI
+import kotlinx.coroutines.currentCoroutineContext
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Duration.Companion.seconds
 
@@ -27,9 +28,26 @@ import kotlin.time.Duration.Companion.seconds
 public val SseCompatibility: ClientPlugin<Unit> = createClientPlugin("SseCompatibility") {
     on(AfterRender) { request, content ->
         if (request.attributes.contains(SseCompatibilityRequestAttribute)) {
-            request.attributes.put(ResponseAdapterAttributeKey, SseResponseAdapter(client))
+            request.setCapability(SSECapability, Unit)
+            request.attributes.put(ResponseAdapterAttributeKey, SseResponseAdapter)
+            request.attributes.put(SseClientForReconnectionAttribute, client)
+            val contentType = content.contentType
+            if (contentType != null) {
+                request.contentType(contentType)
+            }
+            SSEClientContent(
+                reconnectionTime = 3.seconds,
+                showCommentEvents = false,
+                showRetryEvents = false,
+                maxReconnectionAttempts = 0,
+                bufferPolicy = SSEBufferPolicy.Off,
+                callContext = currentCoroutineContext(),
+                initialRequest = request,
+                requestBody = content,
+            )
+        } else {
+            content
         }
-        content
     }
 }
 
@@ -37,16 +55,14 @@ internal val SseCompatibilityRequestAttribute: AttributeKey<Unit> =
     AttributeKey("SseCompatibilityRequest")
 
 @OptIn(InternalAPI::class)
-private class SseResponseAdapter(
-    private val client: HttpClient,
-) : ResponseAdapter {
+private object SseResponseAdapter : ResponseAdapter {
     /**
      * @return Nullable because Ktor uses `null` to mean this adapter does not
      * handle the response.
      */
     @Suppress("DEPRECATION")
     override fun adapt(
-        data: HttpRequestData,
+        data: io.ktor.client.request.HttpRequestData,
         status: HttpStatusCode,
         headers: Headers,
         responseBody: ByteReadChannel,
@@ -54,29 +70,25 @@ private class SseResponseAdapter(
         callContext: CoroutineContext,
     ): Any? =
         if (status == HttpStatusCode.OK || status == HttpStatusCode.NoContent) {
+            val sseContent = outgoingContent as? SSEClientContent
+                ?: error("SseCompatibility response received a non-SSE request body")
+            val sessionContent = SSEClientContent(
+                reconnectionTime = sseContent.reconnectionTime,
+                showCommentEvents = sseContent.showCommentEvents,
+                showRetryEvents = sseContent.showRetryEvents,
+                maxReconnectionAttempts = sseContent.maxReconnectionAttempts,
+                bufferPolicy = sseContent.bufferPolicy,
+                callContext = callContext,
+                initialRequest = sseContent.initialRequest,
+                requestBody = sseContent,
+            )
             DefaultClientSSESession(
-                content = SSEClientContent(
-                    reconnectionTime = 3.seconds,
-                    showCommentEvents = false,
-                    showRetryEvents = false,
-                    maxReconnectionAttempts = 0,
-                    bufferPolicy = SSEBufferPolicy.Off,
-                    callContext = callContext,
-                    initialRequest = initialRequest(data),
-                    requestBody = outgoingContent,
-                ),
+                content = sessionContent,
                 input = responseBody,
             )
         } else {
             null
         }
-
-    private fun initialRequest(data: HttpRequestData): HttpRequestBuilder =
-        HttpRequestBuilder()
-            .takeFrom(data)
-            .apply {
-                attributes.put(SseClientForReconnectionAttribute, client)
-            }
 }
 
 private val SseClientForReconnectionAttribute: AttributeKey<HttpClient> =

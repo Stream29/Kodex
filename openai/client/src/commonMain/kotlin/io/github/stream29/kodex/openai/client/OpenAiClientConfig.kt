@@ -9,7 +9,25 @@ public data class OpenAiClientConfig(
     public val defaultHeaders: Map<String, String> = emptyMap(),
     public val requestTimeoutMillis: Long = 90_000,
     public val retry: OpenAiClientRetryConfig = OpenAiClientRetryConfig(),
-)
+    public val sseSocketTimeoutMillis: Long = 300_000,
+    public val remoteCompactionDeadlineMillis: Long = 480_000,
+    public val remoteCompactionMaxRetries: Int = 2,
+) {
+    init {
+        require(requestTimeoutMillis > 0) {
+            "requestTimeoutMillis must be positive."
+        }
+        require(sseSocketTimeoutMillis > 0) {
+            "sseSocketTimeoutMillis must be positive."
+        }
+        require(remoteCompactionDeadlineMillis > 0) {
+            "remoteCompactionDeadlineMillis must be positive."
+        }
+        require(remoteCompactionMaxRetries >= 0) {
+            "remoteCompactionMaxRetries must be non-negative."
+        }
+    }
+}
 
 /** Codex API compatibility version maintained by Kodex rather than external cache files. */
 public const val KodexCompatibleApiClientVersion: String = "0.147.0"

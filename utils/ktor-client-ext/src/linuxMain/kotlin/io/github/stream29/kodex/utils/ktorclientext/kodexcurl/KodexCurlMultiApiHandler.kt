@@ -7,6 +7,7 @@
 package io.github.stream29.kodex.utils.ktorclientext.kodexcurl
 
 import io.ktor.client.engine.*
+import io.ktor.client.network.sockets.SocketTimeoutException
 import io.ktor.client.plugins.*
 import io.ktor.client.plugins.websocket.*
 import io.ktor.utils.io.*
@@ -136,6 +137,7 @@ internal class KodexCurlMultiApiHandler : Closeable {
                 body = request.content,
                 callContext = request.callContext,
                 onUnpause = { unpauseEasyHandle(easyHandle) },
+                onNetworkActivity = responseBody::onNetworkActivity,
             )
             requestWrapperRef = StableRef.create(requestBody)
             val requestWrapperPointer = checkNotNull(requestWrapperRef).asCPointer()
@@ -247,9 +249,13 @@ internal class KodexCurlMultiApiHandler : Closeable {
             }
         }
         curl_multi_perform(multiHandle, transfersRunning.ptr).verify()
+        handleSocketTimeouts()
+        if (activeHandles.isEmpty()) return
         if (transfersRunning.value != 0) {
             curl_multi_poll(multiHandle, null, 0.toUInt(), pollTimeout, null).verify()
         }
+        handleSocketTimeouts()
+        if (activeHandles.isEmpty()) return
         if (transfersRunning.value < activeHandles.size) handleCompleted()
     }
 
@@ -447,6 +453,23 @@ internal class KodexCurlMultiApiHandler : Closeable {
             headersBytes = responseBuilder.headersBytes.build().readByteArray(),
             responseBody = responseBuilder.responseBody,
         )
+    }
+
+    private fun handleSocketTimeouts() {
+        val timedOut = activeHandles.mapNotNull { (easyHandle, holder) ->
+            val request = holder.responseDataRef.get().request
+            val timeout = request.socketTimeout ?: return@mapNotNull null
+            val responseBody = holder.responseWrapper.get() as? KodexCurlHttpResponseBody
+                ?: return@mapNotNull null
+            if (!responseBody.isSocketTimeoutExpired(timeout)) return@mapNotNull null
+            easyHandle to SocketTimeoutException(
+                message = "Socket timeout has expired [url=${request.url}, socket_timeout=${timeout} ms]",
+                cause = null,
+            )
+        }
+        for ((easyHandle, cause) in timedOut) {
+            removeEasyHandle(easyHandle, cause)
+        }
     }
 
     private fun setupMethod(easyHandle: EasyHandle, method: String, size: Long) {

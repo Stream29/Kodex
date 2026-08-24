@@ -23,6 +23,10 @@ import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.filesystemlease.FileSystemLeaseInUseException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
@@ -36,6 +40,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 private suspend fun temporaryRepositoryRoot(): Path =
@@ -253,6 +258,115 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             repository.closeAndJoin()
         }
 
+        test("scans a dangling latest file without repair while the root lease is held") { root ->
+            val writer = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            val index = writer.createInitialized(settings("active"))
+            val lastActivityAt = Instant.parse("2026-08-24T06:00:00Z")
+            writer.open(index).storage.timestamp[1] = lastActivityAt
+            val latest = Path(root, "sessions/$index/timestamp/latest.json")
+            SystemCoroutineFileSystem.writeString(latest, "2")
+
+            val fileSystem = CountingListFileSystem()
+            val reader = FileSystemKodexSessionRepository(
+                root = root,
+                dependencies = testKodexAgentDependencies(),
+                fileSystem = fileSystem,
+            )
+            fileSystem.reset()
+
+            assertEquals(
+                listOf(KodexSessionEntry(index, "active", lastActivityAt)),
+                reader.listEntries(),
+            )
+            assertEquals(1, fileSystem.listCalls)
+            assertEquals("2", SystemCoroutineFileSystem.readString(latest))
+
+            fileSystem.reset()
+            reader.listEntries()
+            assertEquals(1, fileSystem.listCalls)
+            assertEquals("2", SystemCoroutineFileSystem.readString(latest))
+
+            reader.closeAndJoin()
+            writer.closeAndJoin()
+        }
+
+        test("repairs a dangling latest file while the root lease is available") { root ->
+            val writer = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            val index = writer.createInitialized(settings("crashed"))
+            val lastActivityAt = Instant.parse("2026-08-24T06:05:00Z")
+            writer.open(index).storage.timestamp[1] = lastActivityAt
+            writer.closeAndJoin()
+            val latest = Path(root, "sessions/$index/timestamp/latest.json")
+            val lock = Path(root, "sessions/$index/lock.json")
+            SystemCoroutineFileSystem.writeString(latest, "2")
+
+            val fileSystem = CountingListFileSystem()
+            val reader = FileSystemKodexSessionRepository(
+                root = root,
+                dependencies = testKodexAgentDependencies(),
+                fileSystem = fileSystem,
+            )
+            fileSystem.reset()
+
+            assertEquals(
+                listOf(KodexSessionEntry(index, "crashed", lastActivityAt)),
+                reader.listEntries(),
+            )
+            assertEquals(1, fileSystem.listCalls)
+            assertEquals("1", SystemCoroutineFileSystem.readString(latest))
+            assertFalse(SystemCoroutineFileSystem.exists(lock))
+
+            fileSystem.reset()
+            reader.listEntries()
+            assertEquals(0, fileSystem.listCalls)
+            reader.closeAndJoin()
+        }
+
+        test("releases a repair lease when its owner scope is cancelled") { root ->
+            val writer = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            val index = writer.createInitialized(settings("cancelled repair"))
+            writer.open(index).storage.timestamp[1] = Instant.parse("2026-08-24T06:10:00Z")
+            writer.closeAndJoin()
+            val latest = Path(root, "sessions/$index/timestamp/latest.json")
+            val lock = Path(root, "sessions/$index/lock.json")
+            SystemCoroutineFileSystem.writeString(latest, "2")
+
+            val fileSystem = SuspendingTimelineListFileSystem("timestamp")
+            val reader = FileSystemKodexSessionRepository(
+                root = root,
+                dependencies = testKodexAgentDependencies(),
+                fileSystem = fileSystem,
+            )
+            val listing = async {
+                reader.listEntries()
+            }
+            fileSystem.listStarted.await()
+            assertTrue(SystemCoroutineFileSystem.exists(lock))
+
+            reader.closeAndJoin()
+
+            assertFailsWith<CancellationException> { listing.await() }
+            assertFalse(SystemCoroutineFileSystem.exists(lock))
+            assertEquals("2", SystemCoroutineFileSystem.readString(latest))
+        }
+
+        test("owns a root lease under the repository scope") { root ->
+            val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            val index = repository.create()
+            repository.open(index).runtime.modify { storage ->
+                storage.initialize(settings("owned"))
+            }
+            val lock = Path(root, "sessions/$index/lock.json")
+            assertEquals(true, SystemCoroutineFileSystem.exists(lock))
+
+            repository.closeAndJoin()
+
+            assertFalse(SystemCoroutineFileSystem.exists(lock))
+            val reopened = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            assertEquals("owned", reopened.open(index).storage.settings[0].threadName)
+            reopened.closeAndJoin()
+        }
+
         test("reconciles a dangling latest file when opening a session") { root ->
             val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
             val index = repository.createInitialized(settings("indexed"))
@@ -369,6 +483,21 @@ private class CountingListFileSystem(
 
     fun reset() {
         listCalls = 0
+    }
+}
+
+private class SuspendingTimelineListFileSystem(
+    private val timelineName: String,
+    private val delegate: CoroutineFileSystem = SystemCoroutineFileSystem,
+) : CoroutineFileSystem by delegate {
+    val listStarted = CompletableDeferred<Unit>()
+
+    override suspend fun list(directory: Path): Collection<Path> {
+        if (directory.name == timelineName) {
+            listStarted.complete(Unit)
+            awaitCancellation()
+        }
+        return delegate.list(directory)
     }
 }
 

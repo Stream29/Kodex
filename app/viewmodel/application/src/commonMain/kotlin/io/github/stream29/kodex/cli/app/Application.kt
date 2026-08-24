@@ -3,7 +3,6 @@ package io.github.stream29.kodex.cli.app
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
-import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.filesystem.FileSystemKodexSessionRepository
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
@@ -29,6 +28,7 @@ import io.github.stream29.kodex.cli.auth.FileSystemKodexAuthStore
 import io.github.stream29.kodex.cli.auth.KodexAuthStore
 import io.github.stream29.kodex.cli.history.DefaultAgentHistoryViewModelFactory
 import io.github.stream29.kodex.cli.newsession.DEFAULT_NEW_SESSION_NAME
+import io.github.stream29.kodex.cli.session.KodexSessionRepositoryFactory
 import io.github.stream29.kodex.cli.session.PersistedSessionAgentViewModelFactory
 import io.github.stream29.kodex.cli.sessiontitle.OpenAiSessionTitleGenerator
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
@@ -84,7 +84,6 @@ import org.koin.plugin.module.dsl.koinApplication
 public class KodexApplication private constructor(
     private val dependencyGraph: KoinApplication,
     private val dependencies: KodexAgentDependencies,
-    private val sessionRepository: FileSystemKodexSessionRepository,
     private val authStore: KodexAuthStore,
     private val accountUsageStore: CodexAccountUsageStore,
     private val mcpManager: McpManager,
@@ -110,7 +109,6 @@ public class KodexApplication private constructor(
     }
 
     private fun closeInfrastructure() {
-        sessionRepository.cancel()
         accountUsageStore.close()
         mcpManager.close()
         hookManager.close()
@@ -213,7 +211,9 @@ public class KodexApplication private constructor(
                     mcpService = mcpService,
                     hooks = hooks,
                 )
-                val repository = scope.sessionRepositoryFactory(dataDirectory, dependencies)
+                val repositoryFactory = KodexSessionRepositoryFactory { ownerScope ->
+                    ownerScope.sessionRepositoryFactory(dataDirectory, dependencies)
+                }
                 val automaticTitles = AgentAutomaticTitleConfiguration(
                     generator = sessionTitleGeneratorFactory(client),
                     settingsProvider = {
@@ -257,10 +257,10 @@ public class KodexApplication private constructor(
                     }.create()
                 }
                 val store = graph.koin.get<PersistedSessionViewModelRegistry> {
-                    parametersOf(repository as KodexSessionRepository, scope, sessionAgentFactory)
+                    parametersOf(repositoryFactory, scope, sessionAgentFactory)
                 }
                 val catalogFactory = graph.koin.get<SessionCatalogViewModelFactory> {
-                    parametersOf(repository as KodexSessionRepository, scope)
+                    parametersOf(repositoryFactory, scope)
                 }
                 val composerFactory = graph.koin.get<ComposerViewModelFactory>()
                 val newSessionFactory = graph.koin.get<NewSessionViewModelFactory> {
@@ -321,7 +321,6 @@ public class KodexApplication private constructor(
                 return KodexApplication(
                     dependencyGraph = graph,
                     dependencies = dependencies,
-                    sessionRepository = repository,
                     authStore = authStore,
                     accountUsageStore = accountUsage,
                     mcpManager = mcpManager,

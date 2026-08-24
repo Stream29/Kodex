@@ -6,6 +6,7 @@ import io.github.stream29.kodex.cli.agent.DefaultComposerViewModelFactory
 import io.github.stream29.kodex.cli.agent.createAgentRuntimeViewModel
 import io.github.stream29.kodex.cli.history.createAgentHistoryViewModel
 import io.github.stream29.kodex.cli.session.DefaultPersistedSessionViewModelRegistry
+import io.github.stream29.kodex.cli.session.KodexSessionRepositoryFactory
 import kotlinx.coroutines.CoroutineScope
 
 internal fun testSessionViewModelRegistry(
@@ -14,7 +15,7 @@ internal fun testSessionViewModelRegistry(
     automaticTitleConfiguration: AgentAutomaticTitleConfiguration? = null,
 ): DefaultPersistedSessionViewModelRegistry =
     DefaultPersistedSessionViewModelRegistry(
-        repository = repository,
+        repositoryFactory = KodexSessionRepositoryFactory { repository },
         scope = scope,
         agentFactory = {
                 session,

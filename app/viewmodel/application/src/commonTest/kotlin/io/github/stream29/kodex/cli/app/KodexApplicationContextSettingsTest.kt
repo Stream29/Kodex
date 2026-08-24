@@ -37,6 +37,7 @@ val kodexApplicationContextSettingsTest by testSuite {
             throw failure
         }
         try {
+            application.viewModel.openSessionCatalogPopup().viewModel.refresh()
             val context = assertNotNull(captured)
 
             assertEquals(SystemCoroutineFileSystem.resolve(agentsDirectory), context.agentsHome)
