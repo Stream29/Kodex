@@ -9,8 +9,9 @@ import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
 /**
  * Calculates the current model-context status from one storage snapshot.
  *
- * @return Nullable because OpenAI may not yet have reported a token count for
- * the active context; `null` means remaining context cannot be calculated.
+ * @return Nullable because storage may not yet contain a token count for the
+ * active context; `null` means remaining context cannot be calculated. A
+ * successful compaction contributes its synthetic `0` reset as a usable count.
  */
 public suspend fun KodexAgentState.contextWindowTokenStatus(
     modelCatalog: OpenAiModelCatalog,
@@ -30,9 +31,8 @@ public suspend fun KodexAgentState.contextWindowTokenStatus(
 /**
  * Returns the remaining token budget before automatic compaction.
  *
- * @return Nullable because [contextWindowTokenStatus] cannot run until the
- * provider has reported the active context token count; `null` means the
- * budget is unknown.
+ * @return Nullable because [contextWindowTokenStatus] cannot run until storage
+ * contains an active context token count; `null` means the budget is unknown.
  */
 public suspend fun KodexAgentState.tokensUntilCompaction(
     modelCatalog: OpenAiModelCatalog,

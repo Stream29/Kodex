@@ -230,18 +230,18 @@ val inMemoryKodexAgentStorageTest by testSuite {
         }
     }
 
-    test("append compaction checkpoint stores replacement data exactly once") {
+    test("append compaction checkpoint stores replacement data and resets token count") {
         val storage = storage()
         val previous = storage.compaction[0]
         val retained = listOf(userMessage("retained"))
         val compaction = ResponseItem.Compaction(encryptedContent = "encrypted")
         val nextSettings = settings("next")
+        storage.tokenCount[0] = 99L
 
         val index = storage.appendCompactionCheckpoint(
             prefix = retained,
             compaction = compaction,
             timestamp = timestamp(10),
-            tokenCount = 99L,
             previousCheckpoint = previous,
             nextWindowId = "window-1",
             settings = nextSettings,
@@ -262,7 +262,8 @@ val inMemoryKodexAgentStorageTest by testSuite {
         )
         assertEquals(StableCleanEvent.ContextCompaction, storage.stable[index])
         assertEquals(nextSettings, storage.settings[index])
-        assertEquals(99L, storage.tokenCount[index])
+        assertEquals(0L, storage.tokenCount[index])
+        assertEquals(index, storage.tokenCount.latestIndex())
         assertEquals(timestamp(10), storage.timestamp[index])
         assertEquals(
             retained.flatMap(StableCleanEvent::toResponseHistoryItems) + compaction,

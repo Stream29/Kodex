@@ -44,10 +44,11 @@ import kotlin.time.Instant
  * active for the snapshot at `index`.
  * @property timestamp Sparse timestamp timeline. Entries record the time
  * associated with the state index where they are stored.
- * @property tokenCount Sparse `token_count` timeline. The value is the latest
- * OpenAI-reported context token count used for compaction scheduling, not
- * cumulative usage or billing data. Absence of a new entry at a state index
- * means OpenAI did not report a new count for that transition.
+ * @property tokenCount Sparse context token-count timeline used for compaction
+ * scheduling, not cumulative usage or billing data. Ordinary response entries
+ * are OpenAI-reported counts. Every compaction checkpoint writes a synthetic
+ * `0` to replace the previous context window's count until the next ordinary
+ * response reports a new value.
  * @property stable Sparse completed clean-event timeline. Each stored index
  * contains the event completed by that state transition. Enumerate its stored
  * indexes instead of treating [IndexVersioned.get] as a cumulative history

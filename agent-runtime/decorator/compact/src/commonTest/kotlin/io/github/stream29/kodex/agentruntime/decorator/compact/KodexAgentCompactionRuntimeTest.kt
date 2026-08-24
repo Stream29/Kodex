@@ -393,6 +393,57 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         assertEquals(listOf(persistedTurnId, persistedTurnId), hookRequests.map { it.context.turnId })
     }
 
+    test("resume does not compact again after manual compaction resets the token count") {
+        val storage = InMemoryKodexAgentStorage(
+            KodexAgentSettings(
+                model = OpenAiModelId("test-model"),
+                autoCompactionTokenLimit = 90,
+            ),
+        )
+        val compactRequests = mutableListOf<ResponsesApiRequest>()
+        val responseRequests = mutableListOf<ResponsesApiRequest>()
+        val state = KodexAgentState(
+            client = mockOpenAiClient {
+                createRemoteCompactionV2Response { request, _, _, _ ->
+                    compactRequests += request
+                    RemoteCompactionV2Response(
+                        compactionOutput = ResponseItem.Compaction(encryptedContent = "compact"),
+                        completedResponse = Response(
+                            id = "compact_response",
+                            usage = TokenUsage(80, 10, 90),
+                        ),
+                    )
+                }
+                createResponse { request ->
+                    responseRequests += request
+                    flowOf(
+                        ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = true)),
+                    )
+                }
+            },
+            storage = storage,
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
+        )
+        val runtime = KodexAgentCompactionRuntime(
+            delegate = state,
+            modelCatalog = testModelCatalog(),
+            logger = TestLogger,
+        )
+        state.appendUserMessage(userMessage("Compact once."), tokenCount = 90)
+
+        val compactIndex = runtime.compact(
+            trigger = CompactionTrigger.Manual,
+            reason = CompactionReason.UserRequested,
+            phase = CompactionPhase.StandaloneTurn,
+        )
+        runtime.resume()
+
+        assertEquals(0L, storage.tokenCount[compactIndex])
+        assertEquals(1, compactRequests.size)
+        assertEquals(1, responseRequests.size)
+    }
+
     test("loop runs mid turn compaction before follow up sampling") {
         val storage = InMemoryKodexAgentStorage(
             KodexAgentSettings(

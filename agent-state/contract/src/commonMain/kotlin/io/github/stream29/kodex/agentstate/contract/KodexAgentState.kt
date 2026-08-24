@@ -126,7 +126,9 @@ public val KodexAgentStateValue.canCompact: Boolean
  * through the complete State and Runtime chain.
  *
  * Implementations commit each storage transition before publishing its next
- * stable [state]. They publish [KodexAgentStorage.tokenCount] only when OpenAI reports it.
+ * stable [state]. Ordinary responses publish [KodexAgentStorage.tokenCount]
+ * only when OpenAI reports it; every successful compaction publishes a
+ * synthetic `0` for the new context window.
  *
  * Every operation admission and storage commit shares one fair per-instance
  * write queue. A model request retains logical ownership through its published

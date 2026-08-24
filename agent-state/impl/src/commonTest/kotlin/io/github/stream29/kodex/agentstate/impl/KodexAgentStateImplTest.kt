@@ -581,7 +581,7 @@ val kodexAgentStateImplTest by testSuite {
             assertEquals(listOf(PendingServerToolSearch(call)), storage.unstable[2])
         }
 
-        test("forced compaction stores clean prefix and provider compaction once") {
+        test("forced compaction stores clean prefix and resets reported usage to zero") {
             val storage = storage()
             val initialCheckpoint = storage.compaction[0]
             val compaction = ResponseItem.Compaction(encryptedContent = "compact")
@@ -616,12 +616,35 @@ val kodexAgentStateImplTest by testSuite {
             assertEquals(listOf(user, compaction), checkpoint.toResponseHistoryItems())
             assertEquals(StableCleanEvent.ContextCompaction, storage.stable[compactIndex])
             assertEquals(compactIndex + 1, checkpoint.historyBaseIndex)
-            assertEquals(11L, storage.tokenCount[compactIndex])
+            assertEquals(0L, storage.tokenCount[compactIndex])
+            assertEquals(compactIndex, storage.tokenCount.latestIndex())
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
             assertEquals(
                 listOf(user, ResponseItem.CompactionTrigger),
                 compactRequests.single().input,
             )
+        }
+
+        test("forced compaction writes zero when completed response omits usage") {
+            val storage = storage()
+            storage.tokenCount[0] = 90L
+            val agent = KodexAgentState(
+                client = mockOpenAiClient {
+                    createRemoteCompactionV2Response { _, _, _, _ ->
+                        RemoteCompactionV2Response(
+                            compactionOutput = ResponseItem.Compaction(encryptedContent = "compact"),
+                            completedResponse = Response(id = "compact_response"),
+                        )
+                    }
+                },
+                storage = storage,
+            )
+            agent.appendUserMessage(userMessage("Compact without usage.").content)
+
+            val compactIndex = agent.forcedCompact()
+
+            assertEquals(0L, storage.tokenCount[compactIndex])
+            assertEquals(compactIndex, storage.tokenCount.latestIndex())
         }
 
         test("settings updates wait for remote compaction to publish its checkpoint") {
