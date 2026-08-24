@@ -13,17 +13,18 @@ import kotlin.time.Instant
  * @param prefix Stable clean prefix retained after compaction.
  * @param compaction Provider compaction payload retained by the checkpoint.
  * @param timestamp Timestamp associated with the storage transition.
- * @param tokenCount Nullable because OpenAI may not report a token count for
- * a compaction response; `null` means no token-count timeline entry is written.
  * @param previousCheckpoint Checkpoint whose context-window lineage is advanced.
  * @param nextWindowId Fresh UUIDv7 identifier for the new context window.
  * @param settings Settings active after the compaction transition.
+ *
+ * Every committed checkpoint writes a synthetic token count of `0` at the same
+ * index. This prevents the previous context window's count from remaining
+ * active until an ordinary response reports the next count.
  */
 public suspend fun MutableKodexAgentStorage.appendCompactionCheckpoint(
     prefix: List<StableCleanEvent>,
     compaction: ResponseItem.Compaction?,
     timestamp: Instant,
-    tokenCount: Long?,
     previousCheckpoint: CleanCompactionCheckpoint,
     nextWindowId: String,
     settings: KodexAgentSettings,
@@ -40,12 +41,8 @@ public suspend fun MutableKodexAgentStorage.appendCompactionCheckpoint(
     )) {
         this.settings.setWithTransaction(index, settings) {
             stable.setWithTransaction(index, StableCleanEvent.ContextCompaction) {
-                if (tokenCount == null) {
+                this.tokenCount.setWithTransaction(index, 0L) {
                     this.timestamp.setWithTransaction(index, timestamp) { index }
-                } else {
-                    this.tokenCount.setWithTransaction(index, tokenCount) {
-                        this.timestamp.setWithTransaction(index, timestamp) { index }
-                    }
                 }
             }
         }

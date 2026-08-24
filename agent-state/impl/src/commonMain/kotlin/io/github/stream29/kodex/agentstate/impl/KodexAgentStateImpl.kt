@@ -294,7 +294,6 @@ private class KodexAgentStateImpl(
                 prefix = buildRemoteCompactionV2Prefix(input),
                 compaction = result.compactionOutput,
                 timestamp = now(),
-                tokenCount = result.completedResponse?.usage?.totalTokens,
                 previousCheckpoint = checkpoint,
                 nextWindowId = Uuid.generateV7().toString(),
                 settings = settings,
