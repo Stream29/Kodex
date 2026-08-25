@@ -196,7 +196,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         assertEquals(KodexAgentStateValue.AssistantMessage, state.state.value)
     }
 
-    test("loop limits consecutive retryable responses to four retries") {
+    test("loop limits consecutive retryable responses to twenty retries") {
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
         val requests = mutableListOf<ResponsesApiRequest>()
         val state = KodexAgentState(

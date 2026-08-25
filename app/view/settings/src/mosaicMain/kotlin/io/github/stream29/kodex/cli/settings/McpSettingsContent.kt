@@ -53,7 +53,7 @@ internal fun McpSettingsContent(
         } else {
             servers.forEach { server ->
                 SettingsContentButton(
-                    label = server.status.settingsLabel(),
+                    label = "${server.serverName} · ${server.status.settingsLabel()}",
                     modifier = Modifier.fillMaxWidth(),
                     idleTextStyle = TuiTheme.typography.body + TextStyle.Bold,
                     onClick = { onOpenDetails(server) },

@@ -9,8 +9,8 @@ public data class OpenAiClientConfig(
     public val defaultHeaders: Map<String, String> = emptyMap(),
     public val requestTimeoutMillis: Long = 90_000,
     public val retry: OpenAiClientRetryConfig = OpenAiClientRetryConfig(),
-    public val sseSocketTimeoutMillis: Long = 300_000,
-    public val remoteCompactionMaxRetries: Int = 2,
+    public val sseSocketTimeoutMillis: Long = 600_000,
+    public val remoteCompactionMaxRetries: Int = 20,
 ) {
     init {
         require(requestTimeoutMillis > 0) {
