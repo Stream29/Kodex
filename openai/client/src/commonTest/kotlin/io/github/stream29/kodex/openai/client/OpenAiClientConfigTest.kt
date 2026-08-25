@@ -14,8 +14,8 @@ val openAiClientConfigTest by testSuite {
             config.userAgent,
         )
         assertEquals(90_000, config.requestTimeoutMillis)
-        assertEquals(300_000, config.sseSocketTimeoutMillis)
-        assertEquals(2, config.remoteCompactionMaxRetries)
+        assertEquals(600_000, config.sseSocketTimeoutMillis)
+        assertEquals(20, config.remoteCompactionMaxRetries)
     }
 
     test("rejects invalid streaming timeout configuration") {
