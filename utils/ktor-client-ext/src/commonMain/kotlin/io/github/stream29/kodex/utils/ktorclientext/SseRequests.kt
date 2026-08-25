@@ -5,9 +5,10 @@ import io.ktor.client.plugins.HttpTimeoutCapability
 import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.plugins.expectSuccess
 import io.ktor.client.plugins.pluginOrNull
-import io.ktor.client.plugins.sse.SSESession
+import io.ktor.client.plugins.sse.SSE
+import io.ktor.client.plugins.sse.sse
 import io.ktor.client.request.HttpRequestBuilder
-import io.ktor.client.request.preparePost
+import io.ktor.http.HttpMethod
 import io.ktor.sse.ServerSentEvent
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
@@ -15,9 +16,9 @@ import kotlinx.coroutines.flow.channelFlow
 /**
  * Opens an SSE response to a POST request.
  *
- * This owns the streaming [io.ktor.client.statement.HttpStatement] lifecycle,
- * so Ktor never saves the response body before emitting events.
- * [SseCompatibility] must be installed on this client.
+ * This keeps Ktor's official SSE session inside the returned Flow lifecycle.
+ * [SSE] must be installed on this client. [SseCompatibility] can additionally
+ * support servers that omit the SSE response content type.
  */
 public fun HttpClient.postSseEvents(
     configureRequest: HttpRequestBuilder.() -> Unit,
@@ -39,23 +40,26 @@ private fun HttpClient.postSseEventsInternal(
     configureRequest: HttpRequestBuilder.() -> Unit,
 ): Flow<ServerSentEvent> =
     channelFlow {
-        check(pluginOrNull(SseCompatibility) != null) {
-            "HttpClient must install SseCompatibility before calling postSseEvents."
+        check(pluginOrNull(SSE) != null) {
+            "HttpClient must install SSE before calling postSseEvents."
         }
-        preparePost {
-            configureRequest()
-            if (socketTimeoutMillis != null) {
-                require(socketTimeoutMillis > 0) {
-                    "SSE socket timeout must be positive."
+        sse(
+            request = {
+                method = HttpMethod.Post
+                configureRequest()
+                if (socketTimeoutMillis != null) {
+                    require(socketTimeoutMillis > 0) {
+                        "SSE socket timeout must be positive."
+                    }
+                    val timeout = getCapabilityOrNull(HttpTimeoutCapability)
+                        ?: HttpTimeoutConfig()
+                    timeout.socketTimeoutMillis = socketTimeoutMillis
+                    setCapability(HttpTimeoutCapability, timeout)
                 }
-                val timeout = getCapabilityOrNull(HttpTimeoutCapability)
-                    ?: HttpTimeoutConfig()
-                timeout.socketTimeoutMillis = socketTimeoutMillis
-                setCapability(HttpTimeoutCapability, timeout)
-            }
-            expectSuccess = true
-            attributes.put(SseCompatibilityRequestAttribute, Unit)
-        }.body<SSESession, Unit> { session ->
-            session.incoming.collect(::send)
+                expectSuccess = true
+                attributes.put(SseCompatibilityRequestAttribute, Unit)
+            },
+        ) {
+            incoming.collect(::send)
         }
     }

@@ -73,7 +73,8 @@ val steerRuntimeTest by testSuite {
         state.appendUserMessage(textContent("initial"))
         val turnId = storage.settings.latestValue().turnId
         val pendingSteer = MutableStateFlow(emptyList<StableCleanEvent.Steerable>())
-        val runtime = TestRuntime(state).steerRuntime(logger = TestLogger) {
+        val delegate = TestRuntime(state)
+        val runtime = delegate.steerRuntime(logger = TestLogger) {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
@@ -98,12 +99,62 @@ val steerRuntimeTest by testSuite {
         )
         assertEquals(turnId, storage.settings.latestValue().turnId)
         assertTrue(pendingSteer.value.isEmpty())
+        assertEquals(1, delegate.resumeCount)
 
         runtime.resume()
         assertEquals(
             listOf(listOf("initial"), listOf("first"), listOf("second")),
             storage.userTextBatches(),
         )
+        assertEquals(turnId, storage.settings.latestValue().turnId)
+        assertEquals(2, delegate.resumeCount)
+    }
+
+    test("late pending input resumes the delegate before the outer turn completes") {
+        val storage = InMemoryKodexAgentStorage(testSettings())
+        val state = createKodexAgentState(
+            client = mockOpenAiClient(),
+            storage = storage,
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
+        )
+        state.appendUserMessage(textContent("initial"))
+        val turnId = storage.settings.latestValue().turnId
+        val lateSteer = userMessage("late steer")
+        val pendingSteer = MutableStateFlow(emptyList<StableCleanEvent.Steerable>())
+        var delegateInvocations = 0
+        val delegate = TestRuntime(state) {
+            when (++delegateInvocations) {
+                1 -> {
+                    state.injectHistory(
+                        listOf(
+                            StableCleanEvent.AssistantMessage(textContent("first response")),
+                        ),
+                    )
+                    pendingSteer.update { pending -> pending + lateSteer }
+                }
+
+                2 -> {
+                    assertEquals(KodexAgentStateValue.UserMessage, state.state.value)
+                    state.injectHistory(
+                        listOf(
+                            StableCleanEvent.AssistantMessage(textContent("final response")),
+                        ),
+                    )
+                }
+
+                else -> error("Unexpected delegate invocation: $delegateInvocations")
+            }
+        }
+        val runtime = delegate.steerRuntime(logger = TestLogger) {
+            pendingSteer.getAndUpdate { emptyList() }
+        }
+
+        runtime.resume()
+
+        assertEquals(2, delegateInvocations)
+        assertEquals(listOf(listOf("initial"), listOf("late steer")), storage.userTextBatches())
+        assertTrue(pendingSteer.value.isEmpty())
         assertEquals(turnId, storage.settings.latestValue().turnId)
     }
 
@@ -309,8 +360,15 @@ val steerRuntimeTest by testSuite {
 
 private class TestRuntime(
     private val delegate: KodexAgentState,
+    private val onResume: suspend () -> Unit = {},
 ) : ResumableAgentLayer, KodexAgentState by delegate {
-    override suspend fun resume(): Unit = Unit
+    var resumeCount: Int = 0
+        private set
+
+    override suspend fun resume() {
+        resumeCount += 1
+        onResume()
+    }
 }
 
 private fun textContent(text: String): List<ContentItem> =
