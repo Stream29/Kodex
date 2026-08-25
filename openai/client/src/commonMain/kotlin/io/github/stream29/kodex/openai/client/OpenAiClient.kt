@@ -40,6 +40,7 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.cookies.AcceptAllCookiesStorage
 import io.ktor.client.plugins.cookies.HttpCookies
 import io.ktor.client.plugins.defaultRequest
+import io.ktor.client.plugins.sse.SSE
 import io.ktor.client.plugins.sse.SSEClientException
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.accept
@@ -121,6 +122,7 @@ public class OpenAiClient(
         install(HttpCookies) {
             storage = AcceptAllCookiesStorage()
         }
+        install(SSE)
         install(SseCompatibility)
         defaultRequest {
             url(config.baseUrl.trimEnd('/') + "/")
@@ -653,6 +655,10 @@ private fun Throwable.isRetryableOpenAiStreamingException(
     retry: OpenAiClientRetryConfig,
 ): Boolean {
     val cause = openAiRootCause()
+    val sseResponse = (cause as? SSEClientException)?.response
+    if (sseResponse != null) {
+        return sseResponse.status.isRetryableOpenAiStatus(retry)
+    }
     val responseException = cause as? io.ktor.client.plugins.ResponseException
     if (responseException != null) {
         return responseException.response.status.isRetryableOpenAiStatus(retry)
