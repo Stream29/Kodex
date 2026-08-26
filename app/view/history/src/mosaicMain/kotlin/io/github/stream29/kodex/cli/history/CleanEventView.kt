@@ -94,7 +94,6 @@ import io.github.stream29.kodex.tool.multiagent.MultiAgentStatus
 import io.github.stream29.kodex.tool.multiagent.SendMessageArgs
 import io.github.stream29.kodex.tool.multiagent.SpawnAgentArgs
 import io.github.stream29.kodex.tool.multiagent.SpawnAgentResult
-import io.github.stream29.kodex.tool.multiagent.SpawnForkMode
 import io.github.stream29.kodex.tool.multiagent.WaitAgentArgs
 import io.github.stream29.kodex.tool.multiagent.WaitAgentResult
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
@@ -1193,10 +1192,8 @@ private fun SpawnAgentArgs.renderDetails(
 ) {
     Detail("Task", taskName, textStyle)
     Detail("Message", message, textStyle)
-    Detail("Fork history", forkTurns.displayName(), textStyle)
     model?.let { Detail("Model", it.value, textStyle) }
     reasoningEffort?.let { Detail("Reasoning", it.wireName, textStyle) }
-    serviceTier?.let { Detail("Service tier", it.requestValue, textStyle) }
 }
 
 @Composable
@@ -1440,12 +1437,6 @@ private fun PendingInvalidToolInvocation.displayName(): String = when (this) {
     is PendingInvalidToolInvocation.Function -> qualifiedName(name, namespace)
     is PendingInvalidToolInvocation.Custom -> qualifiedName(name, namespace)
     is PendingInvalidToolInvocation.ToolSearch -> "tool_search"
-}
-
-private fun SpawnForkMode.displayName(): String = when (this) {
-    SpawnForkMode.None -> "none"
-    SpawnForkMode.All -> "all"
-    is SpawnForkMode.Recent -> "${turns} turns"
 }
 
 private fun MultiAgentStatus.displayName(): String = when (this) {

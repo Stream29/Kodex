@@ -17,6 +17,7 @@ val modelCatalogModelsSerializationTest by testSuite {
               "models": [{
                 "slug": "gpt-test",
                 "display_name": "GPT Test",
+                "comp_hash": "test-hash",
                 "default_reasoning_level": "ultra",
                 "supported_reasoning_levels": [
                   {"effort": "max", "description": "Maximum reasoning"},
@@ -29,6 +30,7 @@ val modelCatalogModelsSerializationTest by testSuite {
         )
 
         val model = response.models.single()
+        assertEquals("test-hash", model.compHash)
         assertEquals(ReasoningEffort.Max, model.defaultReasoningLevel)
         assertEquals(
             listOf(

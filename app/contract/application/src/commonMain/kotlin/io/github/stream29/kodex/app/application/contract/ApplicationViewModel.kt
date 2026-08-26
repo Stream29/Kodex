@@ -23,7 +23,7 @@ public interface ApplicationViewModel : AutoCloseable {
     public val navigation: StateFlow<ApplicationNavigationState>
     public val popup: StateFlow<ApplicationPopupState>
 
-    /** Opens or reuses one Session child and selects its tab. */
+    /** Opens or reuses one Session child, unarchives it, and selects its tab. */
     public suspend fun openSession(sessionIndex: Int): PersistedSessionViewModel
 
     /** Returns false when [index] does not address the current tab list. */
@@ -41,12 +41,22 @@ public interface ApplicationViewModel : AutoCloseable {
     public suspend fun closeTab(target: SessionViewModel): Boolean
 
     /**
+     * Archives one exact persisted child and closes its tab after Archive succeeds.
+     *
+     * Returns false when [target] is no longer owned by this Application.
+     */
+    public suspend fun closeAndArchiveSession(target: PersistedSessionViewModel): Boolean
+
+    /**
      * Deletes one persisted Session and removes any matching open tab.
      *
      * A current Delete popup for [sessionIndex], or a target-owned popup for the
      * matching open child, is also closed.
      */
     public suspend fun deleteSession(sessionIndex: Int): Boolean
+
+    /** Forks one complete persisted root Session without changing navigation. */
+    public suspend fun forkSession(sessionIndex: Int): Int
 
     /**
      * Materializes the New Session currently at [tabIndex], then replaces that

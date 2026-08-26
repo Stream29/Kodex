@@ -8,6 +8,7 @@ import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerLoadState
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerState
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
+import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -72,6 +73,63 @@ val sessionTreeCliViewModelTest by testSuite {
                 assertSame(first, second)
                 assertEquals(count, fixture.viewModel.navigation.value.tabs.size)
                 assertSame(second, fixture.viewModel.navigation.value.selected)
+            } finally {
+                fixture.close()
+            }
+        }
+    }
+
+    test("opening an archived persisted session unarchives new and reused tabs") {
+        coroutineScope {
+            val fixture = applicationFixture()
+            val index = fixture.repository.create()
+            fixture.repository.open(index).runtime.modify { storage ->
+                storage.initialize(
+                    KodexAgentSettings(
+                        model = OpenAiModelId("test-model"),
+                        threadName = "Archived",
+                    ),
+                )
+            }
+            fixture.repository.getEntry(index).archive()
+            try {
+                val first = fixture.viewModel.openSession(index)
+
+                assertFalse(fixture.repository.getEntry(index).archived)
+
+                fixture.repository.getEntry(index).archive()
+                fixture.viewModel.createNewSessionTab()
+                val reused = fixture.viewModel.openSession(index)
+
+                assertSame(first, reused)
+                assertSame(reused, fixture.viewModel.navigation.value.selected)
+                assertFalse(fixture.repository.getEntry(index).archived)
+            } finally {
+                fixture.close()
+            }
+        }
+    }
+
+    test("close and archive archives the exact persisted tab before releasing it") {
+        coroutineScope {
+            val fixture = applicationFixture()
+            val index = fixture.repository.create()
+            fixture.repository.open(index).runtime.modify { storage ->
+                storage.initialize(
+                    KodexAgentSettings(
+                        model = OpenAiModelId("test-model"),
+                        threadName = "Close and archive",
+                    ),
+                )
+            }
+            try {
+                val target = fixture.viewModel.openSession(index)
+
+                assertTrue(fixture.viewModel.closeAndArchiveSession(target))
+
+                assertTrue(fixture.repository.getEntry(index).archived)
+                assertTrue(fixture.viewModel.navigation.value.tabs.none { child -> child === target })
+                assertIs<PersistedSessionLifecycleState.Closed>(target.lifecycle.value)
             } finally {
                 fixture.close()
             }

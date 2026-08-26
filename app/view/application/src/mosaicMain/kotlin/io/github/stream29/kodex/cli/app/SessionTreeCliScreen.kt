@@ -17,6 +17,7 @@ import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
+import com.jakewharton.mosaic.ui.Arrangement
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Column
@@ -52,6 +53,7 @@ import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.items
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiColorSchemeFor
+import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import io.github.stream29.kodex.cli.pathpicker.DirectoryPickerPopup
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.OpenAiLoginPopup
@@ -253,6 +255,10 @@ public fun SessionTreeCliScreen(
                     tabMenu = null
                     scope.launch { viewModel.closeTab(target) }
                 },
+                onCloseAndArchive = { target ->
+                    tabMenu = null
+                    scope.launch { viewModel.closeAndArchiveSession(target) }
+                },
                 onRename = { target ->
                     tabMenu = null
                     scope.launch { viewModel.openRenameSessionPopup(target) }
@@ -404,23 +410,12 @@ private fun BoxScope.SessionCatalogPopup(
             .background(SettingsDialogHomeBackground),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                "Sessions",
-                modifier = Modifier.fillMaxWidth().background(SettingsDialogHeaderBackground),
-                color = SettingsDialogForeground,
-                textStyle = TuiTheme.typography.headline,
-            )
-            TuiCheckbox(
-                label = "Show archived",
-                checked = state.showArchived,
-                onCheckedChange = { showArchived ->
+            SessionCatalogHeader(
+                showArchived = state.showArchived,
+                onShowArchivedChange = { showArchived ->
                     contextMenu = null
                     scope.launch { open.viewModel.setShowArchived(showArchived) }
                 },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(SettingsDialogNavigationBackground),
-                color = SettingsDialogForeground,
             )
             LazyColumn(modifier = Modifier.fillMaxWidth().height(SessionCatalogRows)) {
                 when (val current = state) {
@@ -432,13 +427,9 @@ private fun BoxScope.SessionCatalogPopup(
                         item { Text("No persisted sessions", color = SettingsDialogForeground) }
                     } else {
                         items(current.sessions, key = { entry -> entry.sessionIndex }) { entry ->
-                            val anchor = rememberTuiPopupAnchor()
-                            TuiButton(
-                                label = entry.sessionBrowserLabel(SessionCatalogWidth - 2),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(SettingsDialogNavigationBackground),
-                                color = SettingsDialogForeground,
+                            SessionCatalogRow(
+                                entry = entry,
+                                maximumLabelColumns = SessionCatalogWidth - 2,
                                 onClick = {
                                     contextMenu = null
                                     scope.launch {
@@ -446,7 +437,7 @@ private fun BoxScope.SessionCatalogPopup(
                                         application.dismissPopup(open)
                                     }
                                 },
-                                onSecondaryClick = { clickPosition ->
+                                onOpenContextMenu = { anchor, clickPosition ->
                                     contextMenu = SessionCatalogMenuRequest(
                                         entry = entry,
                                         anchor = anchor,
@@ -472,38 +463,34 @@ private fun BoxScope.SessionCatalogPopup(
         }
     }
     contextMenu?.let { request ->
-        TuiContextMenu(
-            expanded = true,
+        SessionCatalogContextMenuPopup(
+            entry = request.entry,
             anchor = request.anchor,
             clickPosition = request.clickPosition,
             onDismissRequest = { contextMenu = null },
-            backgroundColor = PopupMenuBackground,
-        ) {
-            TuiPopupMenuItem(
-                key = if (request.entry.archived) "unarchive" else "archive",
-                onClick = {
-                    contextMenu = null
-                    scope.launch {
-                        if (request.entry.archived) {
-                            open.viewModel.unarchive(request.entry.sessionIndex)
-                        } else {
-                            open.viewModel.archive(request.entry.sessionIndex)
-                        }
-                    }
-                },
-            ) {
-                Text(if (request.entry.archived) "Unarchive" else "Archive")
-            }
-            TuiPopupMenuItem(
-                key = "delete",
-                onClick = {
-                    contextMenu = null
-                    deleteTarget = request.entry
-                },
-            ) {
-                Text("Delete")
-            }
-        }
+            onFork = {
+                contextMenu = null
+                scope.launch {
+                    open.viewModel.fork(request.entry.sessionIndex)
+                }
+            },
+            onArchive = {
+                contextMenu = null
+                scope.launch {
+                    open.viewModel.archive(request.entry.sessionIndex)
+                }
+            },
+            onUnarchive = {
+                contextMenu = null
+                scope.launch {
+                    open.viewModel.unarchive(request.entry.sessionIndex)
+                }
+            },
+            onDelete = {
+                contextMenu = null
+                deleteTarget = request.entry
+            },
+        )
     }
     deleteTarget?.let { target ->
         SessionCatalogDeleteDialog(
@@ -517,6 +504,87 @@ private fun BoxScope.SessionCatalogPopup(
                 }
             },
         )
+    }
+}
+
+@Composable
+internal fun SessionCatalogHeader(
+    showArchived: Boolean,
+    onShowArchivedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(SettingsDialogHeaderBackground),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            "Sessions",
+            color = SettingsDialogForeground,
+            textStyle = TuiTheme.typography.headline,
+        )
+        TuiCheckbox(
+            label = "Show archived",
+            checked = showArchived,
+            onCheckedChange = onShowArchivedChange,
+            color = SettingsDialogForeground,
+        )
+    }
+}
+
+@Composable
+internal fun SessionCatalogRow(
+    entry: SessionCatalogEntry,
+    maximumLabelColumns: Int,
+    onClick: () -> Unit,
+    onOpenContextMenu: (TuiPopupAnchor, IntOffset?) -> Unit,
+) {
+    val anchor = rememberTuiPopupAnchor()
+    TuiButton(
+        label = entry.sessionBrowserLabel(maximumLabelColumns),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SettingsDialogNavigationBackground)
+            .tuiPopupAnchor(anchor),
+        color = SettingsDialogForeground,
+        onClick = onClick,
+        onSecondaryClick = { clickPosition ->
+            onOpenContextMenu(anchor, clickPosition)
+        },
+    )
+}
+
+@Composable
+internal fun BoxScope.SessionCatalogContextMenuPopup(
+    entry: SessionCatalogEntry,
+    anchor: TuiPopupAnchor,
+    clickPosition: IntOffset?,
+    onDismissRequest: () -> Unit,
+    onFork: () -> Unit,
+    onArchive: () -> Unit,
+    onUnarchive: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    TuiContextMenu(
+        expanded = true,
+        anchor = anchor,
+        clickPosition = clickPosition,
+        onDismissRequest = onDismissRequest,
+        backgroundColor = PopupMenuBackground,
+    ) {
+        TuiPopupMenuItem(
+            key = if (entry.archived) "unarchive" else "archive",
+            onClick = if (entry.archived) onUnarchive else onArchive,
+        ) {
+            Text(if (entry.archived) "Unarchive" else "Archive")
+        }
+        TuiPopupMenuItem(key = "delete", onClick = onDelete) {
+            Text("Delete")
+        }
+        TuiPopupMenuItem(key = "fork", onClick = onFork) {
+            Text("Fork")
+        }
     }
 }
 
@@ -667,25 +735,55 @@ private fun BoxScope.SessionTabContextMenu(
     request: SessionTabMenuRequest?,
     onDismiss: () -> Unit,
     onClose: (SessionViewModel) -> Unit,
+    onCloseAndArchive: (PersistedSessionViewModel) -> Unit,
     onRename: (SessionViewModel) -> Unit,
     onDelete: (SessionViewModel) -> Unit,
 ) {
     val current = request ?: return
-    TuiContextMenu(
-        expanded = true,
+    SessionTabContextMenuPopup(
+        target = current.target,
         anchor = current.anchor,
         clickPosition = current.clickPosition,
+        onDismiss = onDismiss,
+        onClose = { onClose(current.target) },
+        onCloseAndArchive = onCloseAndArchive,
+        onRename = { onRename(current.target) },
+        onDelete = { onDelete(current.target) },
+    )
+}
+
+@Composable
+internal fun BoxScope.SessionTabContextMenuPopup(
+    target: SessionViewModel,
+    anchor: TuiPopupAnchor,
+    clickPosition: IntOffset?,
+    onDismiss: () -> Unit,
+    onClose: () -> Unit,
+    onCloseAndArchive: (PersistedSessionViewModel) -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    TuiContextMenu(
+        expanded = true,
+        anchor = anchor,
+        clickPosition = clickPosition,
         onDismissRequest = onDismiss,
         backgroundColor = PopupMenuBackground,
     ) {
-        TuiPopupMenuItem(key = "rename", onClick = { onRename(current.target) }) {
+        TuiPopupMenuItem(key = "rename", onClick = onRename) {
             Text("Rename")
         }
-        TuiPopupMenuItem(key = "close", onClick = { onClose(current.target) }) {
+        TuiPopupMenuItem(key = "close", onClick = onClose) {
             Text("Close")
         }
-        if (current.target is PersistedSessionViewModel) {
-            TuiPopupMenuItem(key = "delete", onClick = { onDelete(current.target) }) {
+        if (target is PersistedSessionViewModel) {
+            TuiPopupMenuItem(
+                key = "close-and-archive",
+                onClick = { onCloseAndArchive(target) },
+            ) {
+                Text("Close and archive")
+            }
+            TuiPopupMenuItem(key = "delete", onClick = onDelete) {
                 Text("Delete")
             }
         }

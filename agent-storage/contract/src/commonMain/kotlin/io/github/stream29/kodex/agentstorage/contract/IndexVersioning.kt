@@ -119,8 +119,24 @@ public suspend fun <T> IndexVersioned<T>.forkTo(
     until: Int,
     target: MutableIndexVersioned<T>,
 ) {
+    forkRangeTo(from = 0, until = until, target = target)
+}
+
+/**
+ * Copies stored entries in `[from, until)` into an empty [target], rebasing
+ * their indexes so that [from] becomes index `0`.
+ */
+public suspend fun <T> IndexVersioned<T>.forkRangeTo(
+    from: Int,
+    until: Int,
+    target: MutableIndexVersioned<T>,
+) {
+    require(from >= 0) { "Fork start index must be non-negative." }
+    require(until > from) { "Fork range must not be empty." }
     require(target.latestIndex() == -1) { "Only an empty target can be forked to." }
-    this.indexes().filter { it < until }.collect { target[it] = this[it] }
+    this.indexes(from)
+        .filter { index -> index < until }
+        .collect { index -> target[index - from] = this[index] }
 }
 
 public interface MutableIndexVersioned<T> : IndexVersioned<T> {

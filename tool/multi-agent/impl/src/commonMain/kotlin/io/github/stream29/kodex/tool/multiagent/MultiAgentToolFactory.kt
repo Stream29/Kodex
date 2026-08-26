@@ -19,14 +19,16 @@ import io.github.stream29.kodex.agentsession.contract.pathOf
 import io.github.stream29.kodex.agentsession.contract.rootSession
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
-import io.github.stream29.kodex.agentstorage.contract.forkTo
 import io.github.stream29.kodex.agentstorage.contract.indexes
-import io.github.stream29.kodex.agentstorage.contract.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.latestValue
 import io.github.stream29.kodex.openai.AgentMessageInputContent
+import io.github.stream29.kodex.openai.CompactionPhase
+import io.github.stream29.kodex.openai.CompactionReason
+import io.github.stream29.kodex.openai.CompactionTrigger
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ToolSpec
+import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.kodex.tool.builder.JsonToolHandlerResult
 import io.github.stream29.kodex.tool.builder.jsonToolFailure
 import io.github.stream29.kodex.tool.builder.jsonToolSuccess
@@ -48,6 +50,7 @@ import kotlin.uuid.Uuid
 /** Creates an independent `spawn_agent` tool bound to this Agent. */
 public fun KodexAgentState.spawnAgentTool(
     agentPathResolver: AgentPathResolver,
+    modelCatalog: OpenAiModelCatalog,
 ): Tool {
     val callerSession = callerSessionProvider(agentPathResolver)
     return multiAgentTool(
@@ -64,17 +67,18 @@ public fun KodexAgentState.spawnAgentTool(
             require(agentPathResolver.resolveOrNull(childPath) == null) {
                 "Agent path already exists: $childPath"
             }
-            val forkMode = args.forkTurns
-            if (forkMode == SpawnForkMode.All) {
-                require(args.model == null && args.reasoningEffort == null) {
-                    "A full-history fork must inherit the parent model and reasoning effort."
-                }
-            }
-
-            val entryIndex = caller.subagents.create()
+            val forkBoundary = caller.forkBoundary()
+            val forkStart = requireNotNull(
+                caller.storage.compaction.floorToIndex(forkBoundary - 1),
+            ) { "Parent storage has no active compaction checkpoint." }
+            val entryIndex = caller.subagents.createFork(
+                source = caller.storage,
+                from = forkStart,
+                until = forkBoundary,
+            )
             val result = try {
                 val child = caller.subagents.open(entryIndex)
-                initializeSpawnStorage(caller, child, args, childPath, forkMode)
+                initializeSpawnStorage(caller, child, args, childPath, modelCatalog)
                 child.enqueue(
                     agentMessage(
                         author = callerPath,
@@ -475,30 +479,32 @@ private suspend fun initializeSpawnStorage(
     child: KodexAgentSession,
     args: SpawnAgentArgs,
     childPath: String,
-    forkMode: SpawnForkMode,
+    modelCatalog: OpenAiModelCatalog,
 ) {
     val sourceStorage = caller.storage
-    val childSettings = sourceStorage.settings.latestValue().forSpawn(args, childPath)
-    val forkBoundary = caller.forkBoundary()
-    when (forkMode) {
-        SpawnForkMode.None -> child.runtime.modify { storage ->
-            storage.initialize(childSettings)
-        }
-
-        SpawnForkMode.All -> {
-            child.runtime.modify { storage ->
-                sourceStorage.forkTo(forkBoundary, storage)
-            }
-            child.runtime.updateSettings(childSettings)
-        }
-
-        is SpawnForkMode.Recent -> {
-            child.runtime.modify { storage ->
-                storage.initialize(childSettings)
-            }
-            child.runtime.injectHistory(caller.activeHistory(forkBoundary, forkMode.turns))
-        }
+    val parentSettings = sourceStorage.settings.latestValue()
+    val childSettings = parentSettings.forSpawn(args, childPath)
+    val checkpoint = child.storage.compaction[child.storage.latestIndex()]
+    val sourceHash = modelCatalog.resolve(parentSettings.model).compHash
+    val targetHash = modelCatalog.resolve(childSettings.model).compHash
+    if (requiresSpawnPrecompaction(checkpoint.compaction != null, sourceHash, targetHash)) {
+        child.runtime.compact(
+            trigger = CompactionTrigger.Auto,
+            reason = CompactionReason.CompHashChanged,
+            phase = CompactionPhase.PreTurn,
+        )
     }
+    child.runtime.updateSettings(childSettings)
+}
+
+internal fun requiresSpawnPrecompaction(
+    hasCompactionPayload: Boolean,
+    sourceCompHash: String?,
+    targetCompHash: String?,
+): Boolean {
+    val source = sourceCompHash?.takeIf(String::isNotEmpty) ?: return false
+    val target = targetCompHash?.takeIf(String::isNotEmpty) ?: return false
+    return hasCompactionPayload && source != target
 }
 
 private suspend fun KodexAgentSession.forkBoundary(): Int {
@@ -515,22 +521,6 @@ private suspend fun KodexAgentSession.forkBoundary(): Int {
     return pendingIndexes.minOrNull() ?: (storage.latestIndex() + 1)
 }
 
-private suspend fun KodexAgentSession.activeHistory(
-    untilExclusive: Int,
-    turns: Int,
-): List<StableCleanEvent> {
-    val index = untilExclusive - 1
-    if (index < 0) return emptyList()
-    val checkpoint = storage.compaction[index]
-    val items = checkpoint.prefix.toMutableList()
-    storage.stable.indexes(checkpoint.historyBaseIndex).toList().forEach { eventIndex ->
-        if (eventIndex < untilExclusive) items += storage.stable[eventIndex]
-    }
-    val boundaries = items.indices.filter { itemIndex -> items[itemIndex].startsTurn }
-    if (boundaries.isEmpty()) return items
-    return items.drop(boundaries.takeLast(turns).first())
-}
-
 @OptIn(ExperimentalUuidApi::class)
 private fun KodexAgentSettings.forSpawn(
     args: SpawnAgentArgs,
@@ -542,7 +532,6 @@ private fun KodexAgentSettings.forSpawn(
     previousResponseId = null,
     promptCacheKey = null,
     reasoning = args.reasoningEffort?.let { effort -> reasoning.copy(effort = effort) } ?: reasoning,
-    serviceTier = args.serviceTier ?: serviceTier,
 )
 
 private fun validateTaskSegment(value: String) {
@@ -556,13 +545,3 @@ private fun validateTaskSegment(value: String) {
         "task_name must use only lowercase letters, digits, and underscores"
     }
 }
-
-private val StableCleanEvent.startsTurn: Boolean
-    get() = when (this) {
-        is StableCleanEvent.UserMessage -> true
-        is StableCleanEvent.AgentMessage -> content
-            .filterIsInstance<AgentMessageInputContent.InputText>()
-            .any { content -> content.text.startsWith("Message Type: NEW_TASK\n") }
-
-        else -> false
-    }

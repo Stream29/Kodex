@@ -15,6 +15,8 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgen
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
+import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.forkRangeTo
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
@@ -79,6 +81,17 @@ public class InMemoryKodexSessionRepository internal constructor(
         }
     }
 
+    override suspend fun getEntry(entryIndex: Int): KodexRootSessionEntry =
+        entriesMutex.withLock {
+            requireOpen()
+            requireSession(entryIndex).rootEntry(
+                entryIndex = entryIndex,
+                updateArchived = { updated ->
+                    updateArchived(entryIndex, updated)
+                },
+            )
+        }
+
     private suspend fun updateArchived(
         entryIndex: Int,
         archived: Boolean,
@@ -90,10 +103,26 @@ public class InMemoryKodexSessionRepository internal constructor(
     override suspend fun create(): Int = entriesMutex.withLock {
         requireOpen()
         val index = nextSessionIndex()
-        check(sessions.put(
-            index,
-            SessionNode(InMemoryKodexAgentStorage.empty()),
-        ) == null)
+        check(
+            sessions.put(
+                index,
+                SessionNode(InMemoryKodexAgentStorage.empty()),
+            ) == null
+        )
+        mutableEntries.value = (entries.value + index).sorted()
+        index
+    }
+
+    override suspend fun createFork(
+        source: KodexAgentStorage,
+        from: Int,
+        until: Int,
+    ): Int = entriesMutex.withLock {
+        requireOpen()
+        val index = nextSessionIndex()
+        val storage = InMemoryKodexAgentStorage.empty()
+        source.forkRangeTo(from, until, storage)
+        sessions[index] = SessionNode(storage)
         mutableEntries.value = (entries.value + index).sorted()
         index
     }
@@ -270,6 +299,20 @@ public class InMemoryKodexSessionRepository internal constructor(
             requireActive()
             val entryIndex = smallestMissing(entries.value)
             children[entryIndex] = SessionNode(InMemoryKodexAgentStorage.empty())
+            mutableEntries.value = (entries.value + entryIndex).sorted()
+            entryIndex
+        }
+
+        override suspend fun createFork(
+            source: KodexAgentStorage,
+            from: Int,
+            until: Int,
+        ): Int = entriesMutex.withLock {
+            requireActive()
+            val entryIndex = smallestMissing(entries.value)
+            val storage = InMemoryKodexAgentStorage.empty()
+            source.forkRangeTo(from, until, storage)
+            children[entryIndex] = SessionNode(storage)
             mutableEntries.value = (entries.value + entryIndex).sorted()
             entryIndex
         }

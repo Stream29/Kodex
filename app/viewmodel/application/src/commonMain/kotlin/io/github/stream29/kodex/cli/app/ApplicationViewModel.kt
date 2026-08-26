@@ -63,14 +63,17 @@ internal class ApplicationViewModelImpl(
         commandMutex.withLock {
             ensureOpen()
             val current = mutableNavigation.value
+            val opened = sessions.open(sessionIndex)
             current.tabs.forEachIndexed { index, tab ->
                 val persisted = tab as? PersistedSessionViewModel ?: return@forEachIndexed
                 if (persisted.sessionIndex == sessionIndex) {
+                    check(persisted === opened) {
+                        "Persisted Session registry returned a different handle for index $sessionIndex."
+                    }
                     mutableNavigation.value = current.copy(selectedIndex = index)
-                    return@withLock persisted
+                    return@withLock opened
                 }
             }
-            val opened = sessions.open(sessionIndex)
             mutableNavigation.value = ApplicationNavigationState(
                 tabs = current.tabs + opened,
                 selectedIndex = current.tabs.size,
@@ -101,21 +104,19 @@ internal class ApplicationViewModelImpl(
 
     override suspend fun closeTab(target: SessionViewModel): Boolean = commandMutex.withLock {
         ensureOpen()
-        val current = mutableNavigation.value
-        val index = current.tabs.indexOfFirst { child -> child === target }
-        if (index < 0) return@withLock false
-        closePopupOwnedBy(target)
-        val remaining = current.tabs.toMutableList().apply { removeAt(index) }
-        if (remaining.isEmpty()) remaining += createDraft()
-        val selectedIndex = when {
-            current.selectedIndex < index -> current.selectedIndex
-            current.selectedIndex > index -> current.selectedIndex - 1
-            else -> index.coerceAtMost(remaining.lastIndex)
+        closeTabLocked(target)
+    }
+
+    override suspend fun closeAndArchiveSession(
+        target: PersistedSessionViewModel,
+    ): Boolean = commandMutex.withLock {
+        ensureOpen()
+        if (mutableNavigation.value.tabs.none { child -> child === target }) {
+            return@withLock false
         }
-        mutableNavigation.value = ApplicationNavigationState(remaining, selectedIndex)
-        when (target) {
-            is PersistedSessionViewModel -> sessions.release(target.sessionIndex)
-            is NewSessionViewModel -> target.close()
+        sessions.archive(target.sessionIndex)
+        check(closeTabLocked(target)) {
+            "Persisted Session tab disappeared during a serialized close-and-archive command."
         }
         true
     }
@@ -123,6 +124,11 @@ internal class ApplicationViewModelImpl(
     override suspend fun deleteSession(sessionIndex: Int): Boolean = commandMutex.withLock {
         ensureOpen()
         deleteSessionLocked(sessionIndex)
+    }
+
+    override suspend fun forkSession(sessionIndex: Int): Int = commandMutex.withLock {
+        ensureOpen()
+        sessions.fork(sessionIndex)
     }
 
     override suspend fun materializeNewSession(
@@ -152,7 +158,10 @@ internal class ApplicationViewModelImpl(
             ensureOpen()
             installPopup(
                 ApplicationPopupState.SessionCatalog(
-                    catalogFactory.create { sessionIndex -> deleteSession(sessionIndex) },
+                    catalogFactory.create(
+                        forkSession = { sessionIndex -> forkSession(sessionIndex) },
+                        deleteSession = { sessionIndex -> deleteSession(sessionIndex) },
+                    ),
                 ),
             )
         }
@@ -245,6 +254,26 @@ internal class ApplicationViewModelImpl(
         check(ordinal < Int.MAX_VALUE) { "New Session ordinals are exhausted." }
         nextDraftOrdinal += 1
         return newSessionFactory.create(newSessionArguments(ordinal))
+    }
+
+    private suspend fun closeTabLocked(target: SessionViewModel): Boolean {
+        val current = mutableNavigation.value
+        val index = current.tabs.indexOfFirst { child -> child === target }
+        if (index < 0) return false
+        closePopupOwnedBy(target)
+        val remaining = current.tabs.toMutableList().apply { removeAt(index) }
+        if (remaining.isEmpty()) remaining += createDraft()
+        val selectedIndex = when {
+            current.selectedIndex < index -> current.selectedIndex
+            current.selectedIndex > index -> current.selectedIndex - 1
+            else -> index.coerceAtMost(remaining.lastIndex)
+        }
+        mutableNavigation.value = ApplicationNavigationState(remaining, selectedIndex)
+        when (target) {
+            is PersistedSessionViewModel -> sessions.release(target.sessionIndex)
+            is NewSessionViewModel -> target.close()
+        }
+        return true
     }
 
     private fun <T : ApplicationPopupState.Open> installPopup(created: T): T {

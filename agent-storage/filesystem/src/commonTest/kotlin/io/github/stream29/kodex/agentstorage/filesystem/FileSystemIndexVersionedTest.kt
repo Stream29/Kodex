@@ -70,6 +70,32 @@ val fileSystemIndexVersionedTest by testSuite {
             assertEquals(0, fileSystem.listCalls)
         }
 
+        test("raw range copy rebases files and latest pointer") { directory ->
+            val sourceDirectory = Path(directory, "source")
+            val targetDirectory = Path(directory, "target")
+            SystemCoroutineFileSystem.createDirectories(sourceDirectory)
+            SystemCoroutineFileSystem.createDirectories(targetDirectory)
+            val source = timeline(sourceDirectory)
+            val target = timeline(targetDirectory)
+            source[0] = 10
+            source[2] = 20
+            source[4] = 40
+
+            source.copyRangeRawTo(
+                from = 2,
+                until = 4,
+                target = target,
+                snapshotAtStart = true,
+            )
+
+            assertEquals(0, target.latestIndex())
+            assertEquals(20, target[0])
+            assertEquals(
+                SystemCoroutineFileSystem.readBytes(Path(sourceDirectory, "2.json")).toList(),
+                SystemCoroutineFileSystem.readBytes(Path(targetDirectory, "0.json")).toList(),
+            )
+        }
+
         test("rebuilds a missing latest file once") { directory ->
             val storage = timeline(directory)
             storage[0] = 10

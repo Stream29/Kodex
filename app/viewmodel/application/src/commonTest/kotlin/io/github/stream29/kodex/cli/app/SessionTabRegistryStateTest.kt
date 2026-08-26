@@ -96,7 +96,7 @@ internal suspend fun kotlinx.coroutines.CoroutineScope.applicationFixture(
     val viewModel = ApplicationViewModelImpl(
         sessions = sessions,
         newSessionFactory = drafts,
-        catalogFactory = SessionCatalogViewModelFactory { _ -> EmptySessionCatalogViewModel() },
+        catalogFactory = SessionCatalogViewModelFactory { _, _ -> EmptySessionCatalogViewModel() },
         settingsFactory = SettingsViewModelFactory {
             error("Settings are not used by this fixture.")
         },
@@ -128,6 +128,8 @@ private class EmptySessionCatalogViewModel : SessionCatalogViewModel {
     override suspend fun archive(sessionIndex: Int): Unit = Unit
 
     override suspend fun unarchive(sessionIndex: Int): Unit = Unit
+
+    override suspend fun fork(sessionIndex: Int): Int = error("Fork is not used by this fixture.")
 
     override suspend fun delete(sessionIndex: Int): Boolean = false
 

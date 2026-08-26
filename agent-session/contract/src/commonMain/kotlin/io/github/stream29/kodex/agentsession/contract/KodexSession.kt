@@ -2,6 +2,7 @@ package io.github.stream29.kodex.agentsession.contract
 
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Instant
@@ -90,6 +91,17 @@ public interface KodexSessionRepository : CoroutineScope {
      */
     public suspend fun create(): Int
 
+    /**
+     * Materializes `[from, until)` from [source] as one unopened direct entry.
+     *
+     * Implementations must remove the reserved entry if materialization fails.
+     */
+    public suspend fun createFork(
+        source: KodexAgentStorage,
+        from: Int,
+        until: Int,
+    ): Int
+
     /** Opens one direct Agent entry. */
     public suspend fun open(entryIndex: Int): KodexAgentSession
 
@@ -104,6 +116,9 @@ public interface KodexSessionRepository : CoroutineScope {
 public interface KodexRootSessionRepository : KodexSessionRepository {
     /** Lists every root Session as an actionable root entry. */
     override suspend fun listEntries(): List<KodexRootSessionEntry>
+
+    /** Reads one exact root Session as an actionable entry without scanning other metadata. */
+    public suspend fun getEntry(entryIndex: Int): KodexRootSessionEntry
 
     /**
      * Lists root Session catalog metadata.

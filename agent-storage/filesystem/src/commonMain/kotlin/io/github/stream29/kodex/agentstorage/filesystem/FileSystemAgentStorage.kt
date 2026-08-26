@@ -4,6 +4,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.CleanCompactionCheckpoi
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.indexes
+import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
@@ -122,6 +124,44 @@ public suspend fun FileSystemAgentStorage.Companion.ofEmpty(
         storage.stable.reconcileLatestIndexUnsafe(-1)
         storage.unstable.reconcileLatestIndexUnsafe(-1)
     }
+}
+
+/**
+ * Fast same-format fork: raw-copy unchanged timeline files and decode only
+ * compaction checkpoints, whose history base must be rebased.
+ */
+public suspend fun FileSystemAgentStorage.forkRangeRawTo(
+    from: Int,
+    until: Int,
+    target: FileSystemAgentStorage,
+) {
+    require(this !== target) { "Cannot fork storage into itself." }
+    require(from >= 0 && until > from) { "Invalid fork range [$from, $until)." }
+    require(until <= latestIndex() + 1) {
+        "Fork range [$from, $until) exceeds the source history."
+    }
+    val checkpointIndex = compaction.floorToIndex(from)
+    if (checkpointIndex != null) {
+        val checkpoint = compaction.getUnsafe(checkpointIndex)
+        target.compaction.setUnsafe(
+            0,
+            checkpoint.copy(historyBaseIndex = checkpoint.historyBaseIndex - from),
+        )
+    }
+    compaction.indexes(from + 1).collect { index ->
+        if (index < until) {
+            val checkpoint = compaction.getUnsafe(index)
+            target.compaction.setUnsafe(
+                index - from,
+                checkpoint.copy(historyBaseIndex = checkpoint.historyBaseIndex - from),
+            )
+        }
+    }
+    settings.copyRangeRawTo(from, until, target.settings, snapshotAtStart = true)
+    timestamp.copyRangeRawTo(from, until, target.timestamp, snapshotAtStart = true)
+    tokenCount.copyRangeRawTo(from, until, target.tokenCount, snapshotAtStart = true)
+    stable.copyRangeRawTo(from, until, target.stable)
+    unstable.copyRangeRawTo(from, until, target.unstable, snapshotAtStart = true)
 }
 
 internal suspend fun deleteRecursively(fileSystem: CoroutineFileSystem, path: Path) {

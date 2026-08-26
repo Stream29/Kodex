@@ -81,6 +81,59 @@ val fileSystemSessionViewModelOwnershipTest by testSuite {
             }
         }
 
+        test("registry forks an unopened archived root without descendants") { root ->
+            coroutineScope {
+                val dependencies = testKodexAgentDependencies()
+                val setup = FileSystemKodexSessionRepository(root, dependencies)
+                val sourceIndex = setup.create()
+                val source = setup.open(sourceIndex)
+                source.runtime.modify { storage ->
+                    storage.initialize(
+                        KodexAgentSettings(
+                            model = OpenAiModelId("test-model"),
+                            threadName = "Source",
+                        ),
+                    )
+                }
+                source.runtime.updateSettings(source.storage.settings[0].copy(cwd = Path("fork-cwd")))
+                source.subagents.open(source.subagents.create()).runtime.modify { storage ->
+                    storage.initialize(
+                        KodexAgentSettings(
+                            model = OpenAiModelId("test-model"),
+                            threadName = "Child",
+                        ),
+                    )
+                }
+                setup.listEntries().single { it.entryIndex == sourceIndex }.archive()
+                setup.cancelAndJoin()
+
+                val repositoryFactory = KodexSessionRepositoryFactory { ownerScope ->
+                    ownerScope.FileSystemKodexSessionRepository(
+                        root = root,
+                        dependencies = dependencies,
+                    )
+                }
+                val registry = testSessionViewModelRegistry(repositoryFactory, this)
+                try {
+                    val targetIndex = registry.fork(sourceIndex)
+                    val inspection = FileSystemKodexSessionRepository(root, dependencies)
+                    try {
+                        val entries = inspection.listEntries(includeArchived = true)
+                        assertTrue(entries.single { it.entryIndex == sourceIndex }.archived)
+                        assertFalse(entries.single { it.entryIndex == targetIndex }.archived)
+                        val target = inspection.open(targetIndex)
+                        assertEquals("fork-cwd", target.storage.settings[1].cwd.toString())
+                        assertEquals("[fork] Source", target.storage.settings[2].threadName)
+                        assertEquals(emptyList(), target.subagents.list())
+                    } finally {
+                        inspection.cancelAndJoin()
+                    }
+                } finally {
+                    registry.shutdown()
+                }
+            }
+        }
+
         test("closing a Catalog ViewModel closes its repository during repair") { root ->
             coroutineScope {
                 val dependencies = testKodexAgentDependencies()
@@ -109,7 +162,10 @@ val fileSystemSessionViewModelOwnershipTest by testSuite {
                         fileSystem = fileSystem,
                     ).also { repository = it }
                 }
-                val catalog = createSessionCatalogViewModelFactory(repositoryFactory, this).create { false }
+                val catalog = createSessionCatalogViewModelFactory(repositoryFactory, this).create(
+                    forkSession = { -1 },
+                    deleteSession = { false },
+                )
                 val refresh = async { catalog.refresh() }
                 fileSystem.listStarted.await()
                 assertTrue(repository.coroutineContext[Job]?.isActive == true)

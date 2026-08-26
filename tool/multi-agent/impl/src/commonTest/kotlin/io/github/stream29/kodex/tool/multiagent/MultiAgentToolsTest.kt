@@ -13,7 +13,6 @@ import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.tool.builder.ToolBuilderJson
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.schema.json.ObjectPropertyDefinition
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
@@ -21,7 +20,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
@@ -64,6 +62,16 @@ val multiAgentToolsTest by testSuite {
         assertFalse("required" in MultiAgentTools.listAgentsSpec.parameters.jsonObject())
     }
 
+    test("spawn precompaction requires a changed known comp hash and payload") {
+        assertTrue(requiresSpawnPrecompaction(true, "3000", "2911"))
+        assertFalse(requiresSpawnPrecompaction(false, "3000", "2911"))
+        assertFalse(requiresSpawnPrecompaction(true, "3000", "3000"))
+        assertFalse(requiresSpawnPrecompaction(true, null, "2911"))
+        assertFalse(requiresSpawnPrecompaction(true, "3000", null))
+        assertFalse(requiresSpawnPrecompaction(true, "", "2911"))
+        assertFalse(requiresSpawnPrecompaction(true, "3000", ""))
+    }
+
     test("static tool descriptions match the Multi-agent V2 contract") {
         assertEquals(
             """
@@ -74,7 +82,7 @@ val multiAgentToolsTest by testSuite {
                 It will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.
                 The new agent's canonical task name will be provided to it along with the message.
 
-                Note that passing `fork_turns="none"` will not pass any surrounding context to the spawned subagent, which may cause the agent to lack the context it needs to complete its task, whereas `fork_turns="all"` will provide the subagent with all surrounding context.
+                The spawned agent receives the current active context window. It does not receive completed history that has already been compacted away.
             """.trimIndent(),
             MultiAgentTools.spawnAgentSpec.description,
         )
@@ -169,7 +177,7 @@ val multiAgentToolsTest by testSuite {
         ).jsonObject()
         assertEquals(JsonNull, spawn["model"])
         assertEquals(JsonNull, spawn["reasoning_effort"])
-        assertEquals(JsonNull, spawn["service_tier"])
+        assertFalse("service_tier" in spawn)
 
         val result = ToolBuilderJson.encodeToString(
             SpawnAgentResult.serializer(),
@@ -219,57 +227,16 @@ val multiAgentToolsTest by testSuite {
         )
     }
 
-    test("spawn fork mode is decoded with the tool input") {
-        val cases = listOf(
-            "none" to SpawnForkMode.None,
-            "all" to SpawnForkMode.All,
-            "3" to SpawnForkMode.Recent(3),
+    test("spawn ignores legacy fork and service-tier fields") {
+        val args = OpenAiJsonCodec.decodeFromString(
+            SpawnAgentArgs.serializer(),
+            """{"task_name":"worker","message":"Work","fork_turns":"3","service_tier":"priority"}""",
         )
 
-        cases.forEach { (wireValue, expected) ->
-            assertEquals(
-                expected,
-                OpenAiJsonCodec.decodeFromString(
-                    SpawnAgentArgs.serializer(),
-                    "{\"task_name\":\"worker\",\"message\":\"Work\",\"fork_turns\":\"$wireValue\"}",
-                ).forkTurns,
-            )
-            assertEquals(
-                "\"$wireValue\"",
-                OpenAiJsonCodec.encodeToString(SpawnForkModeSerializer, expected),
-            )
-        }
-
-        assertEquals(
-            SpawnForkMode.All,
-            OpenAiJsonCodec.decodeFromString(
-                SpawnAgentArgs.serializer(),
-                "{\"task_name\":\"worker\",\"message\":\"Work\"}",
-            ).forkTurns,
-        )
-        assertEquals(
-            SpawnForkMode.All,
-            OpenAiJsonCodec.decodeFromString(
-                SpawnAgentArgs.serializer(),
-                "{\"task_name\":\"worker\",\"message\":\"Work\",\"fork_turns\":null}",
-            ).forkTurns,
-        )
-        assertEquals(
-            SpawnForkMode.All,
-            OpenAiJsonCodec.decodeFromString(
-                SpawnAgentArgs.serializer(),
-                "{\"task_name\":\"worker\",\"message\":\"Work\",\"fork_turns\":\" ALL \"}",
-            ).forkTurns,
-        )
-
-        listOf("\"0\"", "\"-1\"", "\"recent\"", "3").forEach { invalidValue ->
-            assertFailsWith<SerializationException> {
-                OpenAiJsonCodec.decodeFromString(
-                    SpawnAgentArgs.serializer(),
-                    "{\"task_name\":\"worker\",\"message\":\"Work\",\"fork_turns\":$invalidValue}",
-                )
-            }
-        }
+        assertEquals("worker", args.taskName)
+        assertEquals("Work", args.message)
+        assertEquals(null, args.model)
+        assertEquals(null, args.reasoningEffort)
     }
 
 }

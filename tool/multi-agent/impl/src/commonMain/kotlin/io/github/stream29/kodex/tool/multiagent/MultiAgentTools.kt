@@ -73,5 +73,5 @@ private val SpawnAgentDescription: String = """
     It will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.
     The new agent's canonical task name will be provided to it along with the message.
 
-    Note that passing `fork_turns="none"` will not pass any surrounding context to the spawned subagent, which may cause the agent to lack the context it needs to complete its task, whereas `fork_turns="all"` will provide the subagent with all surrounding context.
+    The spawned agent receives the current active context window. It does not receive completed history that has already been compacted away.
 """.trimIndent()

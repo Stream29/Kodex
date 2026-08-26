@@ -3,6 +3,8 @@ package io.github.stream29.kodex.agentstorage.filesystem
 import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.copyTo
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.use
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.io.IOException
@@ -26,10 +28,10 @@ import kotlin.uuid.Uuid
  * interruption is not repaired when the timeline is opened.
  */
 public class FileSystemIndexVersioned<T>(
-    private val directory: Path,
+    internal val directory: Path,
     private val serializer: KSerializer<T>,
     private val json: Json,
-    private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    internal val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ) : MutableIndexVersioned<T> {
     override suspend fun latestIndex(): Int {
         latestIndexFromPointerOrNull()?.let { return it }
@@ -127,6 +129,44 @@ public class FileSystemIndexVersioned<T>(
      */
     public suspend fun getUnsafe(index: Int): T {
         return json.decodeFromString(serializer, fileSystem.readString(directory.entryPath(index)))
+    }
+
+    /**
+     * Copies numbered entry files in `[from, until)` without decoding values.
+     *
+     * The destination receives rebased names.  This is intentionally limited
+     * to timelines whose payload needs no transformation.
+     */
+    public suspend fun copyRangeRawTo(
+        from: Int,
+        until: Int,
+        target: FileSystemIndexVersioned<T>,
+        snapshotAtStart: Boolean = false,
+    ) {
+        require(from >= 0 && until > from) { "Invalid fork range [$from, $until)." }
+        require(target.latestIndex() == EmptyIndex) { "Target timeline must be empty." }
+        val storedIndexes = storedIndexes()
+        val indexes = storedIndexes.filter { index -> index in from until until }
+        val synthesizedStart = snapshotAtStart && from !in indexes &&
+            storedIndexes.lastOrNull { index -> index < from }?.let { visibleIndex ->
+                target.setUnsafe(0, getUnsafe(visibleIndex))
+                true
+            } == true
+        indexes.asSequence()
+            .forEach { index ->
+                fileSystem.source(directory.entryPath(index)).use { source ->
+                    target.fileSystem.sink(
+                        target.directory.entryPath(index - from),
+                        mustCreate = true,
+                    ).use { sink ->
+                        source.copyTo(sink)
+                        sink.flush()
+                    }
+                }
+            }
+        target.reconcileLatestIndexUnsafe(
+            indexes.lastOrNull()?.minus(from) ?: if (synthesizedStart) 0 else EmptyIndex,
+        )
     }
 
     /**
