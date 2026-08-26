@@ -109,7 +109,7 @@ val fileSystemSessionViewModelOwnershipTest by testSuite {
                         fileSystem = fileSystem,
                     ).also { repository = it }
                 }
-                val catalog = createSessionCatalogViewModelFactory(repositoryFactory, this).create()
+                val catalog = createSessionCatalogViewModelFactory(repositoryFactory, this).create { false }
                 val refresh = async { catalog.refresh() }
                 fileSystem.listStarted.await()
                 assertTrue(repository.coroutineContext[Job]?.isActive == true)

@@ -32,14 +32,29 @@ public interface KodexAgentSession : CoroutineScope {
     public val runtime: AgentRuntime
 }
 
-/** Lightweight persisted metadata for one direct Agent entry. */
-public data class KodexSessionEntry(
-    public val entryIndex: Int,
+/** Read-only persisted metadata snapshot for one direct Agent entry. */
+public interface KodexSessionEntry {
+    /** Direct-entry index within the owning repository. */
+    public val entryIndex: Int
+
     /** The latest thread name, or `null` while the entry is uninitialized. */
-    public val threadName: String?,
+    public val threadName: String?
+
     /** Latest recorded entry activity, or `null` when no timestamp has been persisted. */
-    public val lastActivityAt: Instant? = null,
-)
+    public val lastActivityAt: Instant?
+}
+
+/** Root Session metadata and commands exposed only by a root repository. */
+public interface KodexRootSessionEntry : KodexSessionEntry {
+    /** Whether this root Session was archived when the snapshot was listed. */
+    public val archived: Boolean
+
+    /** Creates the idempotent archive marker for this root Session. */
+    public suspend fun archive()
+
+    /** Removes the idempotent archive marker for this root Session. */
+    public suspend fun unarchive()
+}
 
 /**
  * One collection of direct Agent entries in a recursive Codex session tree.
@@ -80,4 +95,22 @@ public interface KodexSessionRepository : CoroutineScope {
 
     /** Removes one direct Agent entry and its complete descendant tree. */
     public suspend fun delete(entryIndex: Int)
+}
+
+/**
+ * Root Session repository capabilities that are intentionally not inherited by
+ * recursive Subagent repositories.
+ */
+public interface KodexRootSessionRepository : KodexSessionRepository {
+    /** Lists every root Session as an actionable root entry. */
+    override suspend fun listEntries(): List<KodexRootSessionEntry>
+
+    /**
+     * Lists root Session catalog metadata.
+     *
+     * The complete [entries] and [list] inventory remains unaffected by
+     * [includeArchived]. When it is `false`, archived entries are filtered
+     * before their settings, timestamp, or timeline metadata is read.
+     */
+    public suspend fun listEntries(includeArchived: Boolean): List<KodexRootSessionEntry>
 }

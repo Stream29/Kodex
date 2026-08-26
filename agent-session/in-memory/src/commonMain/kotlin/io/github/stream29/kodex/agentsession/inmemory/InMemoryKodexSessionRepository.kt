@@ -6,8 +6,10 @@ import io.github.stream29.kodex.agentruntime.impl.buildSubagentRuntime
 import io.github.stream29.kodex.agentsession.contract.AgentPathResolver
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
-import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
+import io.github.stream29.kodex.agentsession.contract.KodexRootSessionEntry
+import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
 import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
+import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.multiagent.AgentPathResolverImpl
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
@@ -26,6 +28,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.time.Instant
 
 private typealias AgentRuntimeBuilder = (
     KodexAgentStateContract,
@@ -39,7 +42,7 @@ public class InMemoryKodexSessionRepository internal constructor(
     scope: CoroutineScope,
     private val dependencies: KodexAgentDependencies,
 ) :
-    KodexSessionRepository,
+    KodexRootSessionRepository,
     CoroutineScope by scope {
     private val entriesMutex: Mutex = Mutex()
     private val sessions: MutableMap<Int, SessionNode> = linkedMapOf()
@@ -57,9 +60,31 @@ public class InMemoryKodexSessionRepository internal constructor(
         entries.value
     }
 
-    override suspend fun listEntries(): List<KodexSessionEntry> = entriesMutex.withLock {
+    override suspend fun listEntries(): List<KodexRootSessionEntry> =
+        listEntries(includeArchived = true)
+
+    override suspend fun listEntries(
+        includeArchived: Boolean,
+    ): List<KodexRootSessionEntry> = entriesMutex.withLock {
         requireOpen()
-        entries.value.map { entryIndex -> requireSession(entryIndex).entry(entryIndex) }
+        entries.value.mapNotNull { entryIndex ->
+            val session = requireSession(entryIndex)
+            if (session.archived && !includeArchived) return@mapNotNull null
+            session.rootEntry(
+                entryIndex = entryIndex,
+                updateArchived = { updated ->
+                    updateArchived(entryIndex, updated)
+                },
+            )
+        }
+    }
+
+    private suspend fun updateArchived(
+        entryIndex: Int,
+        archived: Boolean,
+    ): Unit = entriesMutex.withLock {
+        requireOpen()
+        requireSession(entryIndex).archived = archived
     }
 
     override suspend fun create(): Int = entriesMutex.withLock {
@@ -302,16 +327,47 @@ public fun CoroutineScope.InMemoryKodexSessionRepository(
 private class SessionNode(
     val storage: InMemoryKodexAgentStorage,
 ) {
+    var archived: Boolean = false
     val children: MutableMap<Int, SessionNode> = linkedMapOf()
+}
+
+private data class InMemorySessionEntry(
+    override val entryIndex: Int,
+    override val threadName: String?,
+    override val lastActivityAt: Instant?,
+) : KodexSessionEntry
+
+private class InMemoryRootSessionEntry(
+    private val delegate: KodexSessionEntry,
+    override val archived: Boolean,
+    private val updateArchived: suspend (Boolean) -> Unit,
+) :
+    KodexRootSessionEntry,
+    KodexSessionEntry by delegate {
+    override suspend fun archive(): Unit = updateArchived(true)
+
+    override suspend fun unarchive(): Unit = updateArchived(false)
 }
 
 private suspend fun SessionNode.entry(entryIndex: Int): KodexSessionEntry {
     val settingsIndex = storage.settings.latestIndex()
     val timestampIndex = storage.timestamp.latestIndex()
-    return KodexSessionEntry(
+    return InMemorySessionEntry(
         entryIndex = entryIndex,
         threadName = settingsIndex.takeIf { it >= 0 }?.let { index -> storage.settings[index].threadName },
         lastActivityAt = timestampIndex.takeIf { it >= 0 }?.let { index -> storage.timestamp[index] },
+    )
+}
+
+private suspend fun SessionNode.rootEntry(
+    entryIndex: Int,
+    updateArchived: suspend (Boolean) -> Unit,
+): KodexRootSessionEntry {
+    val entry = entry(entryIndex)
+    return InMemoryRootSessionEntry(
+        delegate = entry,
+        archived = archived,
+        updateArchived = updateArchived,
     )
 }
 

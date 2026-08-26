@@ -7,6 +7,7 @@ public data class SessionCatalogEntry(
     public val sessionIndex: Int,
     public val threadName: String? = null,
     public val lastActivityAt: Instant? = null,
+    public val archived: Boolean = false,
 ) {
     init {
         require(sessionIndex >= 0) {

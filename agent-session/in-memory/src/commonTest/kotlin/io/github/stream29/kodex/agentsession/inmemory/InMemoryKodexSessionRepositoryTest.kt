@@ -2,8 +2,8 @@ package io.github.stream29.kodex.agentsession.inmemory
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
+import io.github.stream29.kodex.agentsession.contract.KodexRootSessionEntry
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
-import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
 import io.github.stream29.kodex.agentsession.multiagent.AgentPathResolverImpl
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
@@ -126,10 +126,68 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
         assertEquals(listOf(first, second), repository.list())
         assertEquals(
             listOf(
-                KodexSessionEntry(first, "Session 0", firstLastActivityAt),
-                KodexSessionEntry(second, "Named", secondLastActivityAt),
+                Triple(first, "Session 0", firstLastActivityAt),
+                Triple(second, "Named", secondLastActivityAt),
             ),
-            repository.listEntries(),
+            repository.listEntries().map { entry ->
+                Triple(entry.entryIndex, entry.threadName, entry.lastActivityAt)
+            },
+        )
+    }
+
+    test("archives and unarchives root entries without affecting index inventory") {
+        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+        val archivedIndex = repository.createInitialized(settings("archived"))
+        val activeIndex = repository.createInitialized(settings("active"))
+        val archivedEntry = repository.listEntries()
+            .single { entry -> entry.entryIndex == archivedIndex }
+
+        archivedEntry.archive()
+        archivedEntry.archive()
+
+        assertEquals(listOf(activeIndex), repository.listEntries(includeArchived = false).map { it.entryIndex })
+        val allEntries = repository.listEntries(includeArchived = true)
+        assertEquals(listOf(archivedIndex, activeIndex), allEntries.map { it.entryIndex })
+        assertEquals(listOf("archived", "active"), allEntries.map { it.threadName })
+        assertEquals(listOf(true, false), allEntries.map { it.archived })
+        assertEquals(listOf(archivedIndex, activeIndex), repository.list())
+
+        archivedEntry.unarchive()
+        archivedEntry.unarchive()
+
+        assertEquals(
+            listOf(archivedIndex, activeIndex),
+            repository.listEntries(includeArchived = false).map { it.entryIndex },
+        )
+    }
+
+    test("archived roots remain openable, forkable, deletable, and reusable") {
+        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+        val sourceIndex = repository.createInitialized(settings("source"))
+        val source = repository.open(sourceIndex)
+        repository.listEntries()
+            .single { entry -> entry.entryIndex == sourceIndex }
+            .archive()
+
+        assertSame(source, repository.open(sourceIndex))
+
+        val forkIndex = repository.create()
+        val fork = repository.open(forkIndex)
+        fork.runtime.modify { storage -> source.storage.forkTo(1, storage) }
+        assertEquals(
+            false,
+            repository.listEntries(includeArchived = true)
+                .single { entry -> entry.entryIndex == forkIndex }
+                .archived,
+        )
+
+        repository.delete(sourceIndex)
+        assertEquals(sourceIndex, repository.create())
+        assertEquals(
+            false,
+            repository.listEntries(includeArchived = true)
+                .single { entry -> entry.entryIndex == sourceIndex }
+                .archived,
         )
     }
 
@@ -153,6 +211,11 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
         val second = root.subagents.create()
 
         assertEquals(listOf(first, second), root.subagents.list())
+        assertFalse(
+            root.subagents.listEntries().any { entry ->
+                entry is KodexRootSessionEntry
+            },
+        )
         assertEquals(-1, root.subagents.open(first).storage.latestIndex())
 
         root.subagents.delete(first)

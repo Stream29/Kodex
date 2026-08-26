@@ -18,6 +18,7 @@ kotlin {
         common {
             group("processClient") {
                 withJvm()
+                withJs()
                 withMingwX64()
                 group("posix") {
                     withLinuxX64()

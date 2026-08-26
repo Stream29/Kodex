@@ -16,9 +16,8 @@ public fun String.parsePatch(): Patch {
     val lines = patch.trim().lines()
     val patchLines = checkPatchBoundariesLenient(lines)
     val normalizedPatch = patchLines.joinToString("\n")
-    val parser = IncrementalPatchParser()
-    parser.pushDelta(normalizedPatch)
-    val hunks = parser.finish()
+    val parser = PatchParser()
+    val hunks = parser.parse(patchLines)
     return Patch(
         patch = normalizedPatch,
         hunks = hunks,
@@ -26,90 +25,50 @@ public fun String.parsePatch(): Patch {
     )
 }
 
-/**
- * Parses already-normalized patch text chunks in order.
- */
-public fun Sequence<String>.parsePatch(): Patch {
-    val parser = IncrementalPatchParser()
-    val normalizedPatch = StringBuilder()
-    forEach { delta ->
-        normalizedPatch.append(delta)
-        parser.pushDelta(delta)
-    }
-    val hunks = parser.finish()
-    return Patch(
-        patch = normalizedPatch.toString(),
-        hunks = hunks,
-        environmentId = parser.environmentId,
-    )
-}
-
-internal class IncrementalPatchParser {
-    private var lineBuffer: String = ""
-    private var mode: StreamingParserMode = StreamingParserMode.NotStarted
+private class PatchParser {
+    private var mode: PatchParserMode = PatchParserMode.NotStarted
     private var lineNumber: Int = 0
-    private val mutableHunks = mutableListOf<Hunk>()
+    private val hunkBuilders = mutableListOf<HunkBuilder>()
 
-    internal var environmentId: String? = null
+    var environmentId: String? = null
         private set
 
-    internal fun pushDelta(delta: String): List<Hunk> {
-        delta.forEach { ch ->
-            if (ch == '\n') {
-                val line = lineBuffer.removeSuffix("\r")
-                lineBuffer = ""
-                lineNumber++
-                processLine(line)
-            } else {
-                lineBuffer += ch
-            }
-        }
-        return mutableHunks.toList()
-    }
-
-    internal fun finish(): List<Hunk> {
-        if (lineBuffer.isNotEmpty()) {
-            val line = lineBuffer
-            lineBuffer = ""
+    fun parse(lines: List<String>): List<Hunk> {
+        lines.forEach { line ->
             lineNumber++
-            if (line.trim() == EndPatchMarker) {
-                ensureUpdateHunkIsNotEmpty(line.trim())
-                mode = StreamingParserMode.EndedPatch
-            } else {
-                processLine(line)
-            }
+            processLine(line)
         }
-        if (mode != StreamingParserMode.EndedPatch) {
+        if (mode != PatchParserMode.EndedPatch) {
             throw ApplyPatchException("The last line of the patch must be '$EndPatchMarker'")
         }
-        return mutableHunks.toList()
+        return hunkBuilders.map { builder -> builder.build() }
     }
 
     private fun processLine(line: String) {
         val trimmed = line.trim()
         when (mode) {
-            StreamingParserMode.NotStarted -> {
+            PatchParserMode.NotStarted -> {
                 if (trimmed == BeginPatchMarker) {
-                    mode = StreamingParserMode.StartedPatch
+                    mode = PatchParserMode.StartedPatch
                     return
                 }
                 throw ApplyPatchException("The first line of the patch must be '$BeginPatchMarker'")
             }
-            StreamingParserMode.StartedPatch -> {
+            PatchParserMode.StartedPatch -> {
                 if (handleHunkHeadersAndEndPatch(trimmed)) {
                     return
                 }
                 throw invalid("'$trimmed' is not a valid hunk header")
             }
-            StreamingParserMode.AddFile -> processAddFileLine(line, trimmed)
-            StreamingParserMode.DeleteFile -> {
+            PatchParserMode.AddFile -> processAddFileLine(line, trimmed)
+            PatchParserMode.DeleteFile -> {
                 if (handleHunkHeadersAndEndPatch(trimmed)) {
                     return
                 }
                 throw invalid("'$trimmed' is not a valid hunk header")
             }
-            StreamingParserMode.UpdateFile -> processUpdateFileLine(line)
-            StreamingParserMode.EndedPatch -> {
+            PatchParserMode.UpdateFile -> processUpdateFileLine(line)
+            PatchParserMode.EndedPatch -> {
                 if (trimmed.isNotEmpty()) {
                     throw ApplyPatchException("The last line of the patch must be '$EndPatchMarker'")
                 }
@@ -123,9 +82,9 @@ internal class IncrementalPatchParser {
         }
         val lineToAdd = line.removePrefixOrNull("+")
             ?: throw invalid("'$trimmed' is not a valid hunk header")
-        val hunk = mutableHunks.last() as? AddFileHunk
+        val hunk = hunkBuilders.last() as? AddFileHunkBuilder
             ?: throw invalid("add file line outside add hunk")
-        mutableHunks[mutableHunks.lastIndex] = hunk.copy(contents = hunk.contents + lineToAdd + "\n")
+        hunk.contents.append(lineToAdd).append('\n')
     }
 
     private fun processUpdateFileLine(line: String) {
@@ -134,9 +93,9 @@ internal class IncrementalPatchParser {
             return
         }
 
-        val hunk = mutableHunks.last() as? UpdateFileHunk
+        val hunk = hunkBuilders.last() as? UpdateFileHunkBuilder
             ?: throw invalid("update file line outside update hunk")
-        val chunks = hunk.chunks.toMutableList()
+        val chunks = hunk.chunks
 
         if (chunks.lastOrNull()?.isEndOfFile == true) {
             if (updateLine.isEmpty()) {
@@ -149,7 +108,7 @@ internal class IncrementalPatchParser {
 
         if (chunks.isEmpty() && hunk.movePath == null) {
             updateLine.removePrefixOrNull(MoveToMarker)?.let { moveToPath ->
-                mutableHunks[mutableHunks.lastIndex] = hunk.copy(movePath = moveToPath)
+                hunk.movePath = moveToPath
                 return
             }
         }
@@ -163,53 +122,39 @@ internal class IncrementalPatchParser {
 
         when {
             updateLine == EmptyChangeContextMarker -> {
-                chunks += UpdateFileChunk(
+                chunks += UpdateFileChunkBuilder(
                     changeContext = null,
-                    oldLines = emptyList(),
-                    newLines = emptyList(),
-                    isEndOfFile = false,
                 )
             }
             updateLine.startsWith(ChangeContextMarker) -> {
-                chunks += UpdateFileChunk(
+                chunks += UpdateFileChunkBuilder(
                     changeContext = updateLine.removePrefix(ChangeContextMarker),
-                    oldLines = emptyList(),
-                    newLines = emptyList(),
-                    isEndOfFile = false,
                 )
             }
             updateLine == EndOfFileMarker -> {
                 if (chunks.lastOrNull()?.isEmpty() != false) {
                     throw invalid("Update hunk does not contain any lines")
                 }
-                chunks[chunks.lastIndex] = chunks.last().copy(isEndOfFile = true)
+                chunks.last().isEndOfFile = true
             }
             line.isEmpty() -> {
                 chunks.ensureCurrentChunk()
-                chunks[chunks.lastIndex] = chunks.last().copy(
-                    oldLines = chunks.last().oldLines + "",
-                    newLines = chunks.last().newLines + "",
-                )
+                chunks.last().oldLines += ""
+                chunks.last().newLines += ""
             }
             line.startsWith(" ") -> {
                 val content = line.drop(1)
                 chunks.ensureCurrentChunk()
-                chunks[chunks.lastIndex] = chunks.last().copy(
-                    oldLines = chunks.last().oldLines + content,
-                    newLines = chunks.last().newLines + content,
-                )
+                chunks.last().oldLines += content
+                chunks.last().newLines += content
             }
             line.startsWith("+") -> {
                 chunks.ensureCurrentChunk()
-                chunks[chunks.lastIndex] = chunks.last().copy(
-                    newLines = chunks.last().newLines + line.drop(1),
-                )
+                chunks.last().newLines += line.drop(1)
             }
             line.startsWith("-") -> {
                 chunks.ensureCurrentChunk()
-                chunks[chunks.lastIndex] = chunks.last().copy(
-                    oldLines = chunks.last().oldLines + line.drop(1),
-                )
+                chunks.last().oldLines += line.drop(1)
             }
             chunks.lastOrNull()?.isEmpty() == false -> {
                 throw invalid("Expected update hunk to start with a @@ context marker, got: '$line'")
@@ -220,12 +165,10 @@ internal class IncrementalPatchParser {
                 )
             }
         }
-
-        mutableHunks[mutableHunks.lastIndex] = hunk.copy(chunks = chunks)
     }
 
     private fun handleHunkHeadersAndEndPatch(trimmed: String): Boolean {
-        if (mode == StreamingParserMode.StartedPatch) {
+        if (mode == PatchParserMode.StartedPatch) {
             trimmed.removePrefixOrNull(EnvironmentIdMarker)?.let { id ->
                 if (environmentId != null) {
                     throw ApplyPatchException("apply_patch environment_id cannot be specified more than once")
@@ -241,28 +184,28 @@ internal class IncrementalPatchParser {
 
         if (trimmed == EndPatchMarker) {
             ensureUpdateHunkIsNotEmpty(trimmed)
-            mode = StreamingParserMode.EndedPatch
+            mode = PatchParserMode.EndedPatch
             return true
         }
 
         trimmed.removePrefixOrNull(AddFileMarker)?.let { path ->
             ensureUpdateHunkIsNotEmpty(trimmed)
-            mutableHunks += AddFileHunk(path = path, contents = "")
-            mode = StreamingParserMode.AddFile
+            hunkBuilders += AddFileHunkBuilder(path)
+            mode = PatchParserMode.AddFile
             return true
         }
 
         trimmed.removePrefixOrNull(DeleteFileMarker)?.let { path ->
             ensureUpdateHunkIsNotEmpty(trimmed)
-            mutableHunks += DeleteFileHunk(path)
-            mode = StreamingParserMode.DeleteFile
+            hunkBuilders += DeleteFileHunkBuilder(path)
+            mode = PatchParserMode.DeleteFile
             return true
         }
 
         trimmed.removePrefixOrNull(UpdateFileMarker)?.let { path ->
             ensureUpdateHunkIsNotEmpty(trimmed)
-            mutableHunks += UpdateFileHunk(path = path, movePath = null, chunks = emptyList())
-            mode = StreamingParserMode.UpdateFile
+            hunkBuilders += UpdateFileHunkBuilder(path)
+            mode = PatchParserMode.UpdateFile
             return true
         }
 
@@ -270,7 +213,7 @@ internal class IncrementalPatchParser {
     }
 
     private fun ensureUpdateHunkIsNotEmpty(line: String) {
-        val hunk = mutableHunks.lastOrNull() as? UpdateFileHunk ?: return
+        val hunk = hunkBuilders.lastOrNull() as? UpdateFileHunkBuilder ?: return
         if (hunk.chunks.isEmpty()) {
             throw invalid("Update file hunk for path '${hunk.path}' is empty")
         }
@@ -286,7 +229,60 @@ internal class IncrementalPatchParser {
         ApplyPatchException("Invalid patch hunk at line $lineNumber, $message")
 }
 
-private enum class StreamingParserMode {
+private sealed interface HunkBuilder {
+    val path: String
+
+    fun build(): Hunk
+}
+
+private class AddFileHunkBuilder(
+    override val path: String,
+) : HunkBuilder {
+    val contents: StringBuilder = StringBuilder()
+
+    override fun build(): Hunk = AddFileHunk(
+        path = path,
+        contents = contents.toString(),
+    )
+}
+
+private class DeleteFileHunkBuilder(
+    override val path: String,
+) : HunkBuilder {
+    override fun build(): Hunk = DeleteFileHunk(path)
+}
+
+private class UpdateFileHunkBuilder(
+    override val path: String,
+) : HunkBuilder {
+    var movePath: String? = null
+    val chunks: MutableList<UpdateFileChunkBuilder> = mutableListOf()
+
+    override fun build(): Hunk = UpdateFileHunk(
+        path = path,
+        movePath = movePath,
+        chunks = chunks.map { chunk -> chunk.build() },
+    )
+}
+
+private class UpdateFileChunkBuilder(
+    val changeContext: String?,
+) {
+    val oldLines: MutableList<String> = mutableListOf()
+    val newLines: MutableList<String> = mutableListOf()
+    var isEndOfFile: Boolean = false
+
+    fun build(): UpdateFileChunk = UpdateFileChunk(
+        changeContext = changeContext,
+        oldLines = oldLines.toList(),
+        newLines = newLines.toList(),
+        isEndOfFile = isEndOfFile,
+    )
+
+    fun isEmpty(): Boolean = oldLines.isEmpty() && newLines.isEmpty()
+}
+
+private enum class PatchParserMode {
     NotStarted,
     StartedPatch,
     AddFile,
@@ -329,16 +325,10 @@ private fun patchBoundaryError(lines: List<String>): ApplyPatchException {
 private fun String.removePrefixOrNull(prefix: String): String? =
     if (startsWith(prefix)) removePrefix(prefix) else null
 
-private fun UpdateFileChunk.isEmpty(): Boolean =
-    oldLines.isEmpty() && newLines.isEmpty()
-
-private fun MutableList<UpdateFileChunk>.ensureCurrentChunk() {
+private fun MutableList<UpdateFileChunkBuilder>.ensureCurrentChunk() {
     if (isEmpty()) {
-        this += UpdateFileChunk(
+        this += UpdateFileChunkBuilder(
             changeContext = null,
-            oldLines = emptyList(),
-            newLines = emptyList(),
-            isEndOfFile = false,
         )
     }
 }

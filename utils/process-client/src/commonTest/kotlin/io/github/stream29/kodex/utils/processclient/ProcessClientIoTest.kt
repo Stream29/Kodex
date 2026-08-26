@@ -2,16 +2,15 @@ package io.github.stream29.kodex.utils.processclient
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSource
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.readBytes
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.use
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.writeBytes
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withTimeout
-import kotlinx.io.RawSource
-import kotlinx.io.buffered
-import kotlinx.io.readString
-import kotlinx.io.writeString
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
@@ -27,13 +26,13 @@ val processClientIoTest by testSuite(
         val client = CoroutineScope(currentCoroutineContext()).ProcessClient()
         val process = client.start(interactiveProcessCommand)
         try {
-            process.stdin.buffered().apply {
-                writeString("hello from process client\n")
+            process.stdin.apply {
+                writeBytes("hello from process client\n".encodeToByteArray())
                 close()
             }
             val (output, error) = coroutineScope {
-                val output = async(Dispatchers.Default) { process.stdout.readText() }
-                val error = async(Dispatchers.Default) { process.stderr.readText() }
+                val output = async { process.stdout.readText() }
+                val error = async { process.stderr.readText() }
                 output.await() to error.await()
             }
 
@@ -71,14 +70,8 @@ val processClientIoTest by testSuite(
     }
 }
 
-private fun RawSource.readText(): String {
-    val source = buffered()
-    return try {
-        source.readString()
-    } finally {
-        source.close()
-    }
-}
+private suspend fun CoroutineRawSource.readText(): String =
+    use { source -> source.readBytes().decodeToString() }
 
 internal const val TestEnvironmentName: String = "KODEX_PROCESS_CLIENT_TEST"
 internal const val TestEnvironmentValue: String = "configured-environment"

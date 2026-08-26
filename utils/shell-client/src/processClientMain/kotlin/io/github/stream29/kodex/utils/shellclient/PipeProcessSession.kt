@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.utils.shellclient
 
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSource
 import io.github.stream29.kodex.utils.processclient.ProcessClient
 import io.github.stream29.kodex.utils.processclient.ProcessCommand
 import kotlinx.coroutines.CancellationException
@@ -20,7 +21,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.io.Buffer
 import kotlinx.io.IOException
-import kotlinx.io.RawSource
 import kotlinx.io.readByteArray
 
 internal expect val ShellPipeIoDispatcher: CoroutineDispatcher
@@ -184,14 +184,14 @@ private class PipeProcessSession(
         }
     }
 
-    private fun writeStdin(text: String) {
+    private suspend fun writeStdin(text: String) {
         val input = Buffer().apply { write(text.encodeToByteArray()) }
         process.stdin.write(input, input.size)
         process.stdin.flush()
     }
 
     private suspend fun readOutput(
-        source: RawSource,
+        source: CoroutineRawSource,
         emit: suspend (ByteArray) -> Unit,
     ) {
         try {

@@ -1,17 +1,18 @@
 package io.github.stream29.kodex.agentsession.filesystem
 
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
-import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
+import io.github.stream29.kodex.agentsession.contract.KodexRootSessionEntry
+import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
 import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemIndexVersioned
 import io.github.stream29.kodex.agentstorage.filesystem.ofEmpty
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
+import io.github.stream29.kodex.utils.filesystemlease.FileSystemLease
 import io.github.stream29.kodex.utils.filesystemlease.FileSystemLeaseInUseException
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import io.github.stream29.kodex.utils.filesystemlease.FileSystemLease
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -30,6 +31,7 @@ import kotlinx.io.files.Path
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 
 /** Filesystem-backed recursive session repository. */
 public class FileSystemKodexSessionRepository internal constructor(
@@ -40,7 +42,7 @@ public class FileSystemKodexSessionRepository internal constructor(
     private val dependencies: KodexAgentDependencies,
     initialEntries: List<Int>,
 ) :
-    KodexSessionRepository,
+    KodexRootSessionRepository,
     CoroutineScope by scope {
     private val entriesMutex = Mutex()
     private val openRoots: MutableMap<Int, KodexAgentSession> = mutableMapOf()
@@ -58,14 +60,44 @@ public class FileSystemKodexSessionRepository internal constructor(
         entries.value
     }
 
-    override suspend fun listEntries(): List<KodexSessionEntry> = entriesMutex.withLock {
+    override suspend fun listEntries(): List<KodexRootSessionEntry> =
+        listEntries(includeArchived = true)
+
+    override suspend fun listEntries(
+        includeArchived: Boolean,
+    ): List<KodexRootSessionEntry> = entriesMutex.withLock {
         requireOpen()
-        entries.value.map { entryIndex ->
-            this@FileSystemKodexSessionRepository.fileSystemRootSessionEntry(
+        entries.value.mapNotNull { entryIndex ->
+            val archived = isArchived(entryIndex)
+            if (archived && !includeArchived) return@mapNotNull null
+            val entry = fileSystemRootSessionEntry(
                 entryIndex = entryIndex,
                 directory = sessionDirectory(entryIndex),
                 fileSystem = fileSystem,
             )
+            FileSystemRootSessionEntry(
+                delegate = entry,
+                archived = archived,
+                updateArchived = { updated ->
+                    updateArchiveMarker(entryIndex, updated)
+                },
+            )
+        }
+    }
+
+    private suspend fun updateArchiveMarker(
+        entryIndex: Int,
+        archived: Boolean,
+    ): Unit = entriesMutex.withLock {
+        requireOpen()
+        requireEntry(entryIndex)
+        if (archived) {
+            fileSystem.writeString(
+                path = archiveMarker(entryIndex),
+                content = "",
+            )
+        } else {
+            fileSystem.delete(archiveMarker(entryIndex), mustExist = false)
         }
     }
 
@@ -165,6 +197,19 @@ public class FileSystemKodexSessionRepository internal constructor(
     private fun sessionDirectory(index: Int): Path =
         Path(sessionsRoot, index.toString())
 
+    private fun archiveMarker(index: Int): Path =
+        Path(sessionDirectory(index), ArchiveMarkerFile)
+
+    private suspend fun isArchived(index: Int): Boolean =
+        fileSystem.exists(archiveMarker(index))
+
+    private fun requireEntry(entryIndex: Int) {
+        require(entryIndex >= 0) { "Session entry index must be non-negative." }
+        require(entryIndex in entries.value) {
+            "No Session entry exists at index $entryIndex."
+        }
+    }
+
     private suspend fun deleteRecursively(path: Path) {
         val metadata = fileSystem.metadataOrNull(path) ?: return
         if (metadata.isDirectory) {
@@ -246,6 +291,24 @@ internal suspend fun deleteRecursively(
     fileSystem.delete(path, mustExist = false)
 }
 
+private data class FileSystemSessionEntry(
+    override val entryIndex: Int,
+    override val threadName: String?,
+    override val lastActivityAt: Instant?,
+) : KodexSessionEntry
+
+private class FileSystemRootSessionEntry(
+    private val delegate: KodexSessionEntry,
+    override val archived: Boolean,
+    private val updateArchived: suspend (Boolean) -> Unit,
+) :
+    KodexRootSessionEntry,
+    KodexSessionEntry by delegate {
+    override suspend fun archive(): Unit = updateArchived(true)
+
+    override suspend fun unarchive(): Unit = updateArchived(false)
+}
+
 internal suspend fun fileSystemSessionEntry(
     entryIndex: Int,
     directory: Path,
@@ -254,7 +317,7 @@ internal suspend fun fileSystemSessionEntry(
     val storage = FileSystemAgentStorage(directory, fileSystem)
     val settingsIndex = storage.settings.latestIndex()
     val timestampIndex = storage.timestamp.latestIndex()
-    return KodexSessionEntry(
+    return FileSystemSessionEntry(
         entryIndex = entryIndex,
         threadName = settingsIndex.takeIf { it >= 0 }?.let { index -> storage.settings[index].threadName },
         lastActivityAt = timestampIndex.takeIf { it >= 0 }?.let { index -> storage.timestamp[index] },
@@ -331,7 +394,7 @@ private suspend fun FileSystemAgentStorage.sessionEntry(
     settingsIndex: Int,
     timestampIndex: Int,
 ): KodexSessionEntry =
-    KodexSessionEntry(
+    FileSystemSessionEntry(
         entryIndex = entryIndex,
         threadName = settingsIndex.takeIf { it >= 0 }?.let { index -> settings.getUnsafe(index).threadName },
         lastActivityAt = timestampIndex.takeIf { it >= 0 }?.let { index -> timestamp.getUnsafe(index) },
@@ -360,4 +423,5 @@ public suspend fun CoroutineScope.FileSystemKodexSessionRepository(
 private const val SessionsDirectory: String = "sessions"
 internal const val SubagentsDirectory: String = "subagents"
 internal const val LockFile: String = "lock.json"
+internal const val ArchiveMarkerFile: String = "archive.mark"
 internal val SessionLeaseDuration: Duration = 30.seconds

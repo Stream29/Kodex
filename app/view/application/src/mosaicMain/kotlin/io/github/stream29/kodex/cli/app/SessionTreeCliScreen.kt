@@ -32,6 +32,7 @@ import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.cli.components.LazyColumn
@@ -40,6 +41,7 @@ import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.TuiButton
+import io.github.stream29.kodex.cli.components.TuiCheckbox
 import io.github.stream29.kodex.cli.components.TuiContextMenu
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiDialogActionRow
@@ -48,6 +50,7 @@ import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.TuiPopupMenuItem
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.items
+import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiColorSchemeFor
 import io.github.stream29.kodex.cli.pathpicker.DirectoryPickerPopup
 import io.github.stream29.kodex.cli.settings.NewLineKey
@@ -391,6 +394,8 @@ private fun BoxScope.SessionCatalogPopup(
 ) {
     val scope = rememberCoroutineScope()
     val state by open.viewModel.state.collectAsState()
+    var contextMenu by remember(open) { mutableStateOf<SessionCatalogMenuRequest?>(null) }
+    var deleteTarget by remember(open) { mutableStateOf<SessionCatalogEntry?>(null) }
     LaunchedEffect(open) { open.viewModel.refresh() }
     TuiDialog(
         onDismissRequest = { application.dismissPopup(open) },
@@ -405,16 +410,29 @@ private fun BoxScope.SessionCatalogPopup(
                 color = SettingsDialogForeground,
                 textStyle = TuiTheme.typography.headline,
             )
+            TuiCheckbox(
+                label = "Show archived",
+                checked = state.showArchived,
+                onCheckedChange = { showArchived ->
+                    contextMenu = null
+                    scope.launch { open.viewModel.setShowArchived(showArchived) }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SettingsDialogNavigationBackground),
+                color = SettingsDialogForeground,
+            )
             LazyColumn(modifier = Modifier.fillMaxWidth().height(SessionCatalogRows)) {
                 when (val current = state) {
                     SessionCatalogState.Unloaded,
-                    SessionCatalogState.Loading,
+                    is SessionCatalogState.Loading,
                         -> item { SessionCatalogLoadingIndicator() }
 
                     is SessionCatalogState.Loaded -> if (current.sessions.isEmpty()) {
                         item { Text("No persisted sessions", color = SettingsDialogForeground) }
                     } else {
                         items(current.sessions, key = { entry -> entry.sessionIndex }) { entry ->
+                            val anchor = rememberTuiPopupAnchor()
                             TuiButton(
                                 label = entry.sessionBrowserLabel(SessionCatalogWidth - 2),
                                 modifier = Modifier
@@ -422,15 +440,18 @@ private fun BoxScope.SessionCatalogPopup(
                                     .background(SettingsDialogNavigationBackground),
                                 color = SettingsDialogForeground,
                                 onClick = {
+                                    contextMenu = null
                                     scope.launch {
                                         application.openSession(entry.sessionIndex)
                                         application.dismissPopup(open)
                                     }
                                 },
-                                onSecondaryClick = {
-                                    scope.launch {
-                                        application.openDeleteSessionPopup(entry.sessionIndex)
-                                    }
+                                onSecondaryClick = { clickPosition ->
+                                    contextMenu = SessionCatalogMenuRequest(
+                                        entry = entry,
+                                        anchor = anchor,
+                                        clickPosition = clickPosition,
+                                    )
                                 },
                             )
                         }
@@ -446,6 +467,86 @@ private fun BoxScope.SessionCatalogPopup(
                     label = "Close",
                     color = SettingsDialogForeground,
                     onClick = { application.dismissPopup(open) },
+                )
+            }
+        }
+    }
+    contextMenu?.let { request ->
+        TuiContextMenu(
+            expanded = true,
+            anchor = request.anchor,
+            clickPosition = request.clickPosition,
+            onDismissRequest = { contextMenu = null },
+            backgroundColor = PopupMenuBackground,
+        ) {
+            TuiPopupMenuItem(
+                key = if (request.entry.archived) "unarchive" else "archive",
+                onClick = {
+                    contextMenu = null
+                    scope.launch {
+                        if (request.entry.archived) {
+                            open.viewModel.unarchive(request.entry.sessionIndex)
+                        } else {
+                            open.viewModel.archive(request.entry.sessionIndex)
+                        }
+                    }
+                },
+            ) {
+                Text(if (request.entry.archived) "Unarchive" else "Archive")
+            }
+            TuiPopupMenuItem(
+                key = "delete",
+                onClick = {
+                    contextMenu = null
+                    deleteTarget = request.entry
+                },
+            ) {
+                Text("Delete")
+            }
+        }
+    }
+    deleteTarget?.let { target ->
+        SessionCatalogDeleteDialog(
+            target = target,
+            onDismissRequest = { deleteTarget = null },
+            onDelete = {
+                scope.launch {
+                    if (open.viewModel.delete(target.sessionIndex)) {
+                        deleteTarget = null
+                    }
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun BoxScope.SessionCatalogDeleteDialog(
+    target: SessionCatalogEntry,
+    onDismissRequest: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val title = target.threadName ?: "Session ${target.sessionIndex}"
+    TuiDialog(
+        onDismissRequest = onDismissRequest,
+        modifier = Modifier.width(DeleteDialogWidth).background(SettingsDialogHomeBackground),
+    ) {
+        Column {
+            Text("Delete $title?", textStyle = TuiTheme.typography.title)
+            Text(
+                "This removes the persisted session.",
+                textStyle = TuiTheme.typography.supporting,
+            )
+            TuiDialogActionRow(modifier = Modifier.fillMaxWidth()) {
+                TuiButton(
+                    label = "Cancel",
+                    autoFocus = true,
+                    onClick = onDismissRequest,
+                )
+                TuiButton(
+                    label = "Delete",
+                    color = TuiTheme.colorScheme.error,
+                    onClick = onDelete,
                 )
             }
         }
@@ -718,6 +819,12 @@ private fun BoxScope.AgentHistoryRevertDialog(agent: AgentViewModel?) {
 private data class SessionTabMenuRequest(
     val target: SessionViewModel,
     val name: String,
+    val anchor: TuiPopupAnchor,
+    val clickPosition: IntOffset?,
+)
+
+private data class SessionCatalogMenuRequest(
+    val entry: SessionCatalogEntry,
     val anchor: TuiPopupAnchor,
     val clickPosition: IntOffset?,
 )

@@ -96,7 +96,7 @@ internal suspend fun kotlinx.coroutines.CoroutineScope.applicationFixture(
     val viewModel = ApplicationViewModelImpl(
         sessions = sessions,
         newSessionFactory = drafts,
-        catalogFactory = SessionCatalogViewModelFactory { EmptySessionCatalogViewModel() },
+        catalogFactory = SessionCatalogViewModelFactory { _ -> EmptySessionCatalogViewModel() },
         settingsFactory = SettingsViewModelFactory {
             error("Settings are not used by this fixture.")
         },
@@ -119,9 +119,17 @@ internal suspend fun kotlinx.coroutines.CoroutineScope.applicationFixture(
 
 private class EmptySessionCatalogViewModel : SessionCatalogViewModel {
     override val state: StateFlow<SessionCatalogState> =
-        MutableStateFlow(SessionCatalogState.Loaded(emptyList()))
+        MutableStateFlow(SessionCatalogState.Loaded(false, emptyList()))
 
     override suspend fun refresh(): Unit = Unit
+
+    override suspend fun setShowArchived(showArchived: Boolean): Unit = Unit
+
+    override suspend fun archive(sessionIndex: Int): Unit = Unit
+
+    override suspend fun unarchive(sessionIndex: Int): Unit = Unit
+
+    override suspend fun delete(sessionIndex: Int): Boolean = false
 
     override fun close(): Unit = Unit
 }

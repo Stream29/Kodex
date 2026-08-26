@@ -4,6 +4,8 @@ package io.github.stream29.kodex.utils.processclient
 
 import io.github.stream29.kodex.utils.processclient.cinterop.kodex_spawn_process
 import io.github.stream29.kodex.utils.processclient.cinterop.kodex_process_write
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSink
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSource
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.CPointerVar
@@ -168,9 +170,21 @@ private class PosixProcessSession(
     stderrDescriptor: PosixDescriptor,
     ownerScope: CoroutineScope,
 ) : ProcessSession {
-    override val stdin: RawSink = PosixRawSink(stdinDescriptor)
-    override val stdout: RawSource = PosixRawSource(stdoutDescriptor)
-    override val stderr: RawSource = PosixRawSource(stderrDescriptor)
+    private val processStdin = BlockingCoroutineRawSink(
+        PosixRawSink(stdinDescriptor),
+        PosixProcessIoDispatcher,
+    )
+    private val processStdout = BlockingCoroutineRawSource(
+        PosixRawSource(stdoutDescriptor),
+        PosixProcessIoDispatcher,
+    )
+    private val processStderr = BlockingCoroutineRawSource(
+        PosixRawSource(stderrDescriptor),
+        PosixProcessIoDispatcher,
+    )
+    override val stdin: CoroutineRawSink = processStdin
+    override val stdout: CoroutineRawSource = processStdout
+    override val stderr: CoroutineRawSource = processStderr
     override val exitCode: Deferred<Int>
         field = CompletableDeferred()
     private val closed = AtomicBoolean(false)
@@ -201,9 +215,9 @@ private class PosixProcessSession(
                 }
             }
         }
-        stdin.close()
-        stdout.close()
-        stderr.close()
+        processStdin.closeImmediately()
+        processStdout.closeImmediately()
+        processStderr.closeImmediately()
     }
 
     private fun awaitExitCode(): Int = memScoped {

@@ -1,14 +1,18 @@
 package io.github.stream29.kodex.mcp.stdio
 
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSink
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSource
 import io.github.stream29.kodex.utils.processclient.ProcessClient
 import io.github.stream29.kodex.utils.processclient.ProcessCommand
 import io.github.stream29.kodex.utils.processclient.ProcessSession
+import io.modelcontextprotocol.kotlin.sdk.client.CoroutineStdioSink
+import io.modelcontextprotocol.kotlin.sdk.client.CoroutineStdioSource
 import io.modelcontextprotocol.kotlin.sdk.client.StdioClientTransport
 import io.modelcontextprotocol.kotlin.sdk.shared.Transport
 import io.modelcontextprotocol.kotlin.sdk.shared.TransportSendOptions
 import io.modelcontextprotocol.kotlin.sdk.types.JSONRPCMessage
-import kotlinx.io.buffered
+import kotlinx.io.Buffer
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
@@ -27,15 +31,42 @@ public suspend fun ProcessClient.openMcpStdioTransport(
     return try {
         ProcessOwnedTransport(
             delegate = StdioClientTransport(
-                input = process.stdout.buffered(),
-                output = process.stdin.buffered(),
-                error = process.stderr.buffered(),
+                input = ProcessCoroutineStdioSource(process.stdout),
+                output = ProcessCoroutineStdioSink(process.stdin),
+                error = ProcessCoroutineStdioSource(process.stderr),
             ),
             process = process,
         )
     } catch (failure: Throwable) {
         process.close()
         throw failure
+    }
+}
+
+private class ProcessCoroutineStdioSource(
+    private val delegate: CoroutineRawSource,
+) : CoroutineStdioSource {
+    override suspend fun readAtMostTo(sink: Buffer, byteCount: Long): Long =
+        delegate.readAtMostTo(sink, byteCount)
+
+    override suspend fun close() {
+        delegate.close()
+    }
+}
+
+private class ProcessCoroutineStdioSink(
+    private val delegate: CoroutineRawSink,
+) : CoroutineStdioSink {
+    override suspend fun write(source: Buffer, byteCount: Long) {
+        delegate.write(source, byteCount)
+    }
+
+    override suspend fun flush() {
+        delegate.flush()
+    }
+
+    override suspend fun close() {
+        delegate.close()
     }
 }
 
