@@ -2,6 +2,8 @@
 
 package io.github.stream29.kodex.utils.processclient
 
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSink
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSource
 import kotlinx.cinterop.COpaquePointerVar
 import kotlinx.cinterop.CPointed
 import kotlinx.cinterop.CPointer
@@ -228,9 +230,21 @@ private class WindowsProcessSession(
     stderrHandle: WindowsHandle,
     ownerScope: CoroutineScope,
 ) : ProcessSession {
-    override val stdin: RawSink = WindowsRawSink(stdinHandle)
-    override val stdout: RawSource = WindowsRawSource(stdoutHandle)
-    override val stderr: RawSource = WindowsRawSource(stderrHandle)
+    private val processStdin = BlockingCoroutineRawSink(
+        WindowsRawSink(stdinHandle),
+        WindowsProcessIoDispatcher,
+    )
+    private val processStdout = BlockingCoroutineRawSource(
+        WindowsRawSource(stdoutHandle),
+        WindowsProcessIoDispatcher,
+    )
+    private val processStderr = BlockingCoroutineRawSource(
+        WindowsRawSource(stderrHandle),
+        WindowsProcessIoDispatcher,
+    )
+    override val stdin: CoroutineRawSink = processStdin
+    override val stdout: CoroutineRawSource = processStdout
+    override val stderr: CoroutineRawSource = processStderr
     override val exitCode: Deferred<Int>
         field = CompletableDeferred()
     private val closed = AtomicBoolean(false)
@@ -258,9 +272,9 @@ private class WindowsProcessSession(
         if (!exitCode.isCompleted) {
             TerminateJobObject(job.value, 1u)
         }
-        stdin.close()
-        stdout.close()
-        stderr.close()
+        processStdin.closeImmediately()
+        processStdout.closeImmediately()
+        processStderr.closeImmediately()
     }
 
     private fun awaitExitCode(): Int {

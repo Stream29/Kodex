@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 val sessionRepositoryViewModelTest by testSuite {
@@ -33,7 +34,7 @@ val sessionRepositoryViewModelTest by testSuite {
             val catalog = createSessionCatalogViewModelFactory(
                 KodexSessionRepositoryFactory { repository },
                 this,
-            ).create()
+            ).create { sessionIndex -> store.delete(sessionIndex) }
             try {
                 assertEquals(SessionCatalogState.Unloaded, catalog.state.value)
                 val observedStates = mutableListOf<SessionCatalogState>()
@@ -56,7 +57,7 @@ val sessionRepositoryViewModelTest by testSuite {
                 assertEquals(
                     listOf(
                         SessionCatalogState.Unloaded,
-                        SessionCatalogState.Loading,
+                        SessionCatalogState.Loading(false),
                         loaded,
                     ),
                     observedStates,
@@ -64,6 +65,49 @@ val sessionRepositoryViewModelTest by testSuite {
             } finally {
                 catalog.close()
                 store.shutdown()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("catalog filters and updates root archive state atomically") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val archived = repository.create()
+            val active = repository.create()
+            initialize(repository, archived, "Archived")
+            initialize(repository, active, "Active")
+            repository.listEntries()
+                .single { entry -> entry.entryIndex == archived }
+                .archive()
+            val catalog = createSessionCatalogViewModelFactory(
+                KodexSessionRepositoryFactory { repository },
+                this,
+            ).create { false }
+            try {
+                catalog.refresh()
+                assertEquals(false, catalog.state.value.showArchived)
+                assertEquals(listOf(active), catalog.state.value.sessions.map { it.sessionIndex })
+
+                catalog.setShowArchived(true)
+                val allSessions = assertIs<SessionCatalogState.Loaded>(catalog.state.value)
+                assertEquals(true, allSessions.showArchived)
+                assertEquals(listOf(active, archived), allSessions.sessions.map { it.sessionIndex })
+                assertTrue(allSessions.sessions.last().archived)
+
+                catalog.archive(active)
+                val allArchived = assertIs<SessionCatalogState.Loaded>(catalog.state.value)
+                assertTrue(allArchived.sessions.all { it.archived })
+
+                catalog.setShowArchived(false)
+                assertEquals(emptyList(), catalog.state.value.sessions)
+
+                catalog.setShowArchived(true)
+                catalog.unarchive(archived)
+                val restored = assertIs<SessionCatalogState.Loaded>(catalog.state.value)
+                assertEquals(false, restored.sessions.last().archived)
+            } finally {
+                catalog.close()
                 repository.cancelAndJoin()
             }
         }

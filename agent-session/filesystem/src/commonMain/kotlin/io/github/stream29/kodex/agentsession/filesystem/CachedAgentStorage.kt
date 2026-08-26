@@ -9,11 +9,19 @@ import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemIndexVersioned
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.utils.SafeRw
+import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.reactivecircus.cache4k.Cache
+import io.github.reactivecircus.cache4k.CacheEventListener
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 internal suspend fun FileSystemAgentStorage.cached(
     ownerScope: CoroutineScope,
@@ -99,16 +107,36 @@ private suspend fun <T : Any> FileSystemIndexVersioned<T>.cached(
     )
 }
 
-private class CachedIndexVersioned<T : Any>(
-    private val ownerScope: CoroutineScope,
+internal class CachedIndexVersioned<T : Any>(
+    ownerScope: CoroutineScope,
     private val delegate: FileSystemIndexVersioned<T>,
     private val valueCacheSize: Int,
     indexes: List<Int>,
-) : MutableIndexVersioned<T> {
+    timeSource: TimeSource = TimeSource.Monotonic,
+    cleanupInterval: Duration = CachedValueTtl,
+    cacheEventListener: CacheEventListener<Int, T>? = null,
+) : MutableIndexVersioned<T>, CoroutineScope by ownerScope.supervisorChildScope() {
     private val indexes = SafeRw<List<Int>, MutableList<Int>>(
         indexes.toMutableList(),
     )
-    private val values = Cache.Builder<Int, T>().maximumCacheSize(valueCacheSize.toLong()).build()
+    private val values = Cache.Builder<Int, T>()
+        .expireAfterAccess(CachedValueTtl)
+        .maximumCacheSize(valueCacheSize.toLong())
+        .timeSource(timeSource)
+        .apply { cacheEventListener?.let(::eventListener) }
+        .build()
+
+    init {
+        coroutineContext[Job]?.invokeOnCompletion {
+            values.invalidateAll()
+        }
+        launch {
+            while (isActive) {
+                delay(cleanupInterval)
+                values.invalidate(CacheCleanupKey)
+            }
+        }
+    }
 
     override suspend fun latestIndex(): Int {
         requireActive()
@@ -124,7 +152,12 @@ private class CachedIndexVersioned<T : Any>(
             snapshot.getOrNull(floorPosition)
                 ?: throw IllegalArgumentException("No value is visible at index $index.")
         }
-        return values.get(storedIndex) { delegate.getUnsafe(storedIndex) }
+        val value = values.get(storedIndex) { delegate.getUnsafe(storedIndex) }
+        if (!isActive) {
+            values.invalidate(storedIndex)
+            requireActive()
+        }
+        return value
     }
 
     override suspend fun floorToIndex(index: Int): Int? {
@@ -158,7 +191,12 @@ private class CachedIndexVersioned<T : Any>(
                 check(index > latest) {
                     "Cached timeline changed while appending index $index."
                 }
-                values.put(index, value)
+                if (isActive) {
+                    values.put(index, value)
+                    if (!isActive) {
+                        values.invalidate(index)
+                    }
+                }
                 cache += index
             }
         }
@@ -180,6 +218,9 @@ private class CachedIndexVersioned<T : Any>(
     }
 
     private suspend fun requireActive() {
-        check(ownerScope.isActive) { "Cached timeline is closed." }
+        check(isActive) { "Cached timeline is closed." }
     }
 }
+
+private val CachedValueTtl: Duration = 60.seconds
+private const val CacheCleanupKey: Int = -1

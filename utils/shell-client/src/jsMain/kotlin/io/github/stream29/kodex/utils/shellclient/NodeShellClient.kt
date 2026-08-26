@@ -4,12 +4,8 @@ package io.github.stream29.kodex.utils.shellclient
 
 import js.array.toJsArray
 import js.objects.Object
-import js.objects.set
 import js.objects.unsafeJso
-import js.typedarrays.toByteArray
-import node.buffer.Buffer
-import node.childProcess.ChildProcessWithoutNullStreams
-import node.childProcess.SpawnOptionsWithoutStdio
+import io.github.stream29.kodex.utils.processclient.ProcessClient
 import node.childProcess.spawn
 import node.events.EventListener
 import node.events.EventType
@@ -21,7 +17,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 import kotlin.time.Duration.Companion.seconds
 
 private const val POSIX_SIGKILL: Double = 9.0
@@ -86,6 +81,7 @@ public actual class ShellClient internal actual constructor(
 ) :
     CoroutineScope by scope,
     AutoCloseable {
+    private val processClient = scope.ProcessClient()
 
     public actual suspend fun start(command: ShellProcessCommand): ProcessSession {
         this@ShellClient.requireOpen()
@@ -102,19 +98,11 @@ public actual class ShellClient internal actual constructor(
                     environment = environment,
                 ).createSession(this@ShellClient)
             } else {
-                NodePipeTransport(
-                    process = spawn(
-                        invocation.executable,
-                        (invocation.argumentsBeforeCommand + invocation.command).toJsArray(),
-                        unsafeJso<SpawnOptionsWithoutStdio> {
-                            cwd = command.workingDirectory.toString()
-                            shell = false
-                            windowsHide = true
-                            detached = !isWindowsNode
-                            this.env = environment
-                        },
-                    ),
-                ).createSession(this@ShellClient)
+                this@ShellClient.startPipeProcess(
+                    client = processClient,
+                    invocation = invocation,
+                    command = command,
+                )
             }
         } catch (error: Throwable) {
             throw ProcessException("Failed to start Node.js child process.", error)
@@ -123,78 +111,6 @@ public actual class ShellClient internal actual constructor(
 
     public actual override fun close() {
         cancel()
-    }
-}
-
-private class NodePipeTransport(
-    private val process: ChildProcessWithoutNullStreams,
-) {
-    fun createSession(parentScope: CoroutineScope): ProcessSession {
-        val session = NodeProcessSession(
-            parentScope = parentScope,
-            writeInput = ::writeStdin,
-            closeInput = ::closeStdin,
-            terminate = ::terminateProcessTree,
-            release = ::releaseResources,
-        )
-        process.requiredStdout.collectOutput(session, NodeProcessOutputStream.StandardOutput)
-        process.requiredStderr.collectOutput(session, NodeProcessOutputStream.StandardError)
-        process.on(EventType("error"), EventListener { error: Any? ->
-            session.acceptFailure(ProcessException("Node.js child process failed: $error"))
-        })
-        process.requiredStdin.on(EventType("error"), EventListener { error: Any? ->
-            session.acceptFailure(
-                ProcessException("Failed to write to Node.js child process standard input: $error"),
-            )
-        })
-        process.on(EventType("close"), EventListener { exitCode: Any?, _: Any? ->
-            session.acceptExit((exitCode as? Number)?.toInt() ?: 1)
-        })
-        return session
-    }
-
-    private suspend fun writeStdin(text: String): Unit = suspendCancellableCoroutine { continuation ->
-        try {
-            process.requiredStdin.write(text) { error ->
-                if (error == null) {
-                    continuation.resume(Unit)
-                } else {
-                    continuation.resumeWithException(
-                        ProcessException("Failed to write to Node.js child process standard input.", error),
-                    )
-                }
-            }
-        } catch (error: Throwable) {
-            continuation.resumeWithException(
-                ProcessException("Failed to write to Node.js child process standard input.", error),
-            )
-        }
-    }
-
-    private suspend fun closeStdin(): Unit = suspendCancellableCoroutine { continuation ->
-        val stdin = process.requiredStdin
-        if (stdin.destroyed || stdin.writableEnded) {
-            continuation.resume(Unit)
-            return@suspendCancellableCoroutine
-        }
-        try {
-            stdin.end { continuation.resume(Unit) }
-        } catch (error: Throwable) {
-            continuation.resumeWithException(
-                ProcessException("Failed to close Node.js child process standard input.", error),
-            )
-        }
-    }
-
-    private suspend fun terminateProcessTree() {
-        val pid = process.pid ?: return
-        terminateNodeProcessTree(pid) {
-            process.kill(POSIX_SIGKILL)
-        }
-    }
-
-    private fun releaseResources() {
-        process.requiredStdin.destroy()
     }
 }
 
@@ -294,21 +210,6 @@ private suspend fun terminateWindowsProcessTree(pid: Double, fallback: () -> Uni
             finish()
         }
     }
-
-private fun node.stream.Readable.collectOutput(
-    session: NodeProcessSession,
-    stream: NodeProcessOutputStream,
-) {
-    on(EventType("data"), EventListener { chunk: Any? ->
-        val bytes: ByteArray = when (chunk) {
-            is String -> chunk.encodeToByteArray()
-            is Buffer<*> -> chunk.toByteArray()
-            else -> chunk.toString().encodeToByteArray()
-        }
-        pause()
-        session.acceptOutput(bytes, stream, ::resume)
-    })
-}
 
 private fun String.normalizedForNodePty(): String =
     if (isWindowsNode) {

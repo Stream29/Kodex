@@ -1,6 +1,15 @@
 plugins {
     id("kodex.kmp-host")
+    kotlin("plugin.compose")
 }
+
+val patchRendererPerformanceProbeEnabled = providers
+    .environmentVariable("KODEX_PATCH_RENDERER_PERFORMANCE_PROBE")
+    .map { value -> value == "1" }
+    .orElse(false)
+val patchRendererPerformanceProbeRepetitions = providers
+    .environmentVariable("KODEX_PATCH_RENDERER_PROBE_REPETITIONS")
+    .orElse("3")
 
 kotlin {
     sourceSets {
@@ -35,11 +44,25 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
         jvmTest.dependencies {
+            implementation(project(":app-view-patch"))
             implementation(project(":mcp-impl"))
+            implementation(project(":utils-patch"))
+            implementation(project(":utils-terminal-text"))
+            implementation(libs.mosaic.runtime)
+            implementation(libs.mosaic.testing)
             implementation(libs.kotlinx.schema.json)
             implementation(libs.ktor.server.cio)
             implementation(libs.ktor.server.core)
             implementation(libs.mcp.kotlin.sdk.server)
         }
+    }
+}
+
+tasks.named("jvmTest") {
+    inputs.property("patchRendererPerformanceProbeEnabled", patchRendererPerformanceProbeEnabled)
+    inputs.property("patchRendererPerformanceProbeRepetitions", patchRendererPerformanceProbeRepetitions)
+    if (patchRendererPerformanceProbeEnabled.get()) {
+        outputs.upToDateWhen { false }
+        outputs.doNotCacheIf("Patch renderer performance probe is enabled.") { true }
     }
 }

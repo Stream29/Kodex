@@ -1,6 +1,8 @@
 package io.github.stream29.kodex.utils.processclient
 
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSink
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
@@ -8,8 +10,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.io.RawSink
-import kotlinx.io.RawSource
 import kotlinx.io.files.Path
 import kotlin.coroutines.CoroutineContext
 
@@ -48,14 +48,14 @@ public data class ProcessCommand(
 /**
  * A direct child process with raw standard streams.
  *
- * Stream reads and writes may block. Callers choose the dispatcher on which
- * they consume the streams. [close] requests termination of the process tree;
+ * Stream reads, writes, flushes, and stream closes suspend without blocking
+ * the caller's dispatcher. [close] requests termination of the process tree;
  * the resulting status is eventually published through [exitCode].
  */
 public interface ProcessSession : AutoCloseable {
-    public val stdin: RawSink
-    public val stdout: RawSource
-    public val stderr: RawSource
+    public val stdin: CoroutineRawSink
+    public val stdout: CoroutineRawSource
+    public val stderr: CoroutineRawSource
     public val exitCode: Deferred<Int>
 
     override fun close()

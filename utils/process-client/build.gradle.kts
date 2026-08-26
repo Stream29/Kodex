@@ -5,7 +5,7 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.konan.target.Family
 
 plugins {
-    id("kodex.kmp-cli")
+    id("kodex.kmp-host")
 }
 
 kotlin {
@@ -27,7 +27,11 @@ kotlin {
         commonMain.dependencies {
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
+            api(project(":utils-kotlinx-io-coroutines"))
             implementation(project(":utils-coroutines"))
+        }
+        jsMain.dependencies {
+            implementation(libs.kotlin.wrappers.node)
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)

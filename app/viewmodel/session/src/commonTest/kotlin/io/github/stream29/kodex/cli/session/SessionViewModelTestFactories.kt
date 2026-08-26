@@ -57,7 +57,7 @@ internal fun testSessionAgentViewModelFactory(
     }
 
 internal fun testSessionViewModelRegistry(
-    repository: io.github.stream29.kodex.agentsession.contract.KodexSessionRepository,
+    repository: io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository,
     scope: kotlinx.coroutines.CoroutineScope,
     probe: SessionViewModelCreationProbe? = null,
 ): DefaultPersistedSessionViewModelRegistry =

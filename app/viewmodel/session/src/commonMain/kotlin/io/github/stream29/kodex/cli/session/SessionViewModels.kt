@@ -1,7 +1,8 @@
 package io.github.stream29.kodex.cli.session
 
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
-import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
+import io.github.stream29.kodex.agentsession.contract.KodexRootSessionEntry
+import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentstorage.contract.forkTo
 import io.github.stream29.kodex.agentstorage.contract.initialize
@@ -53,7 +54,7 @@ import org.koin.core.annotation.InjectedParam
 
 /** Creates one repository as a child of [ownerScope]. */
 public fun interface KodexSessionRepositoryFactory {
-    public suspend fun create(ownerScope: CoroutineScope): KodexSessionRepository
+    public suspend fun create(ownerScope: CoroutineScope): KodexRootSessionRepository
 }
 
 /** Repository operations shared by persisted Session, catalog, and draft factories. */
@@ -692,41 +693,127 @@ private class PersistedSessionViewModelImpl(
 private class SessionCatalogViewModelImpl(
     private val repositoryFactory: KodexSessionRepositoryFactory,
     private val scope: CoroutineScope,
+    private val deleteSession: suspend (sessionIndex: Int) -> Boolean,
 ) : SessionCatalogViewModel {
-    private val refreshMutex = Mutex()
+    private val commandMutex = Mutex()
     private val mutableState = MutableStateFlow<SessionCatalogState>(SessionCatalogState.Unloaded)
-    private var sessionRepository: KodexSessionRepository? = null
+    private var sessionRepository: KodexRootSessionRepository? = null
+    private var rootEntries: Map<Int, KodexRootSessionEntry> = emptyMap()
     override val state: StateFlow<SessionCatalogState> = mutableState.asStateFlow()
 
-    override suspend fun refresh(): Unit = refreshMutex.withLock {
+    override suspend fun refresh(): Unit = commandMutex.withLock {
+        reload(showArchived = mutableState.value.showArchived)
+    }
+
+    override suspend fun setShowArchived(showArchived: Boolean): Unit = commandMutex.withLock {
+        if (mutableState.value.showArchived == showArchived) return@withLock
+        reload(showArchived)
+    }
+
+    override suspend fun archive(sessionIndex: Int): Unit = commandMutex.withLock {
         val previous = mutableState.value
-        mutableState.value = SessionCatalogState.Loading
-        try {
-            val sessions = getOrCreateRepository().listEntries()
-                .sortedWith(
-                    compareByDescending<KodexSessionEntry> { entry -> entry.lastActivityAt }
-                        .thenByDescending(KodexSessionEntry::entryIndex),
-                )
-                .map { entry ->
-                    SessionCatalogEntry(
-                        sessionIndex = entry.entryIndex,
-                        threadName = entry.threadName,
-                        lastActivityAt = entry.lastActivityAt,
-                    )
-                }
-            mutableState.value = SessionCatalogState.Loaded(sessions)
-        } catch (failure: Throwable) {
-            mutableState.value = previous
-            throw failure
+        getRootEntry(sessionIndex).archive()
+        updateEntry(previous, sessionIndex, archived = true)
+    }
+
+    override suspend fun unarchive(sessionIndex: Int): Unit = commandMutex.withLock {
+        val previous = mutableState.value
+        getRootEntry(sessionIndex).unarchive()
+        updateEntry(previous, sessionIndex, archived = false)
+    }
+
+    override suspend fun delete(sessionIndex: Int): Boolean = commandMutex.withLock {
+        if (!deleteSession(sessionIndex)) return@withLock false
+        val previous = mutableState.value
+        sessionRepository?.let { repository ->
+            withContext(NonCancellable) { repository.cancelAndJoin() }
         }
+        sessionRepository = null
+        rootEntries = emptyMap()
+        when (previous) {
+            SessionCatalogState.Unloaded -> Unit
+            is SessionCatalogState.Loading -> Unit
+            is SessionCatalogState.Loaded -> {
+                mutableState.value = previous.copy(
+                    sessions = previous.sessions.filterNot { entry ->
+                        entry.sessionIndex == sessionIndex
+                    },
+                )
+            }
+        }
+        true
     }
 
     override fun close() {
         scope.cancel()
     }
 
-    private suspend fun getOrCreateRepository(): KodexSessionRepository =
+    private suspend fun reload(showArchived: Boolean) {
+        val previous = mutableState.value
+        mutableState.value = SessionCatalogState.Loading(showArchived)
+        try {
+            val entries = getOrCreateRepository().listEntries(includeArchived = showArchived)
+                .sortedWith(
+                    compareByDescending<KodexRootSessionEntry> { entry -> entry.lastActivityAt }
+                        .thenByDescending { entry -> entry.entryIndex },
+                )
+            val sessions = entries
+                .map { entry ->
+                    SessionCatalogEntry(
+                        sessionIndex = entry.entryIndex,
+                        threadName = entry.threadName,
+                        lastActivityAt = entry.lastActivityAt,
+                        archived = entry.archived,
+                    )
+                }
+            rootEntries = entries.associateBy { entry -> entry.entryIndex }
+            mutableState.value = SessionCatalogState.Loaded(showArchived, sessions)
+        } catch (failure: Throwable) {
+            mutableState.value = previous
+            throw failure
+        }
+    }
+
+    private suspend fun updateEntry(
+        previous: SessionCatalogState,
+        sessionIndex: Int,
+        archived: Boolean,
+    ) {
+        when (previous) {
+            SessionCatalogState.Unloaded -> Unit
+            is SessionCatalogState.Loading -> Unit
+            is SessionCatalogState.Loaded -> {
+                val index = previous.sessions.indexOfFirst { entry ->
+                    entry.sessionIndex == sessionIndex
+                }
+                if (index < 0) {
+                    reload(previous.showArchived)
+                    return
+                }
+                val updated = previous.sessions[index].copy(archived = archived)
+                val sessions = if (archived && !previous.showArchived) {
+                    rootEntries = rootEntries - sessionIndex
+                    previous.sessions.toMutableList().apply { removeAt(index) }
+                } else {
+                    previous.sessions.toMutableList().apply { set(index, updated) }
+                }
+                mutableState.value = previous.copy(sessions = sessions)
+            }
+        }
+    }
+
+    private suspend fun getOrCreateRepository(): KodexRootSessionRepository =
         sessionRepository ?: repositoryFactory.create(scope).also { sessionRepository = it }
+
+    private suspend fun getRootEntry(sessionIndex: Int): KodexRootSessionEntry {
+        rootEntries[sessionIndex]?.let { return it }
+        return requireNotNull(
+            getOrCreateRepository().listEntries()
+                .firstOrNull { entry -> entry.entryIndex == sessionIndex },
+        ) {
+            "No root Session entry exists at index $sessionIndex."
+        }
+    }
 }
 
 @Factory(binds = [SessionCatalogViewModelFactory::class])
@@ -735,7 +822,12 @@ internal fun createSessionCatalogViewModelFactory(
     @InjectedParam scope: CoroutineScope,
 ): SessionCatalogViewModelFactory =
     SessionCatalogViewModelFactory {
-        SessionCatalogViewModelImpl(repositoryFactory, scope.supervisorChildScope())
+        deleteSession ->
+        SessionCatalogViewModelImpl(
+            repositoryFactory = repositoryFactory,
+            scope = scope.supervisorChildScope(),
+            deleteSession = deleteSession,
+        )
     }
 
 private data class LightweightAgentRuntimeState(

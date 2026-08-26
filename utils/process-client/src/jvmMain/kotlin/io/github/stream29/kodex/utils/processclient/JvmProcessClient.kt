@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.utils.processclient
 
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSink
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSource
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -7,8 +9,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.io.RawSink
-import kotlinx.io.RawSource
 import kotlinx.io.asSink
 import kotlinx.io.asSource
 import java.io.File
@@ -48,9 +48,12 @@ private class JvmProcessSession(
     private val process: Process,
     ownerScope: CoroutineScope,
 ) : ProcessSession {
-    override val stdin: RawSink = process.outputStream.asSink()
-    override val stdout: RawSource = process.inputStream.asSource()
-    override val stderr: RawSource = process.errorStream.asSource()
+    private val processStdin = BlockingCoroutineRawSink(process.outputStream.asSink(), Dispatchers.IO)
+    private val processStdout = BlockingCoroutineRawSource(process.inputStream.asSource(), Dispatchers.IO)
+    private val processStderr = BlockingCoroutineRawSource(process.errorStream.asSource(), Dispatchers.IO)
+    override val stdin: CoroutineRawSink = processStdin
+    override val stdout: CoroutineRawSource = processStdout
+    override val stderr: CoroutineRawSource = processStderr
     override val exitCode: Deferred<Int>
         field = CompletableDeferred()
     private val closed = AtomicBoolean(false)
@@ -84,10 +87,10 @@ private class JvmProcessSession(
                 runCatching { process.destroyForcibly() }
             }
         }
-        runCatching { stdin.close() }
+        runCatching { processStdin.closeImmediately() }
         runCatching { exitCode.complete(process.waitFor()) }
-        runCatching { stdout.close() }
-        runCatching { stderr.close() }
+        runCatching { processStdout.closeImmediately() }
+        runCatching { processStderr.closeImmediately() }
     }
 }
 

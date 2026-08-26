@@ -150,7 +150,11 @@ internal class ApplicationViewModelImpl(
     override suspend fun openSessionCatalogPopup(): ApplicationPopupState.SessionCatalog =
         commandMutex.withLock {
             ensureOpen()
-            installPopup(ApplicationPopupState.SessionCatalog(catalogFactory.create()))
+            installPopup(
+                ApplicationPopupState.SessionCatalog(
+                    catalogFactory.create { sessionIndex -> deleteSession(sessionIndex) },
+                ),
+            )
         }
 
     override suspend fun openSettingsPopup(

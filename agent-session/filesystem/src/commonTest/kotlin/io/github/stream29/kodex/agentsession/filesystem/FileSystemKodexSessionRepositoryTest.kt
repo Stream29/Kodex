@@ -2,8 +2,8 @@ package io.github.stream29.kodex.agentsession.filesystem
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
+import io.github.stream29.kodex.agentsession.contract.KodexRootSessionEntry
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
-import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
@@ -20,9 +20,9 @@ import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
+import io.github.stream29.kodex.utils.filesystemlease.FileSystemLeaseInUseException
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import io.github.stream29.kodex.utils.filesystemlease.FileSystemLeaseInUseException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -184,6 +184,11 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             val second = rootSession.subagents.create()
 
             assertEquals(listOf(first, second), rootSession.subagents.list())
+            assertFalse(
+                rootSession.subagents.listEntries().any { entry ->
+                    entry is KodexRootSessionEntry
+                },
+            )
             assertEquals(-1, rootSession.subagents.open(first).storage.latestIndex())
 
             rootSession.subagents.delete(first)
@@ -230,10 +235,12 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             assertEquals(1, second)
             assertEquals(
                 listOf(
-                    KodexSessionEntry(first, "first", firstLastActivityAt),
-                    KodexSessionEntry(second, "second", secondLastActivityAt),
+                    Triple(first, "first", firstLastActivityAt),
+                    Triple(second, "second", secondLastActivityAt),
                 ),
-                repository.listEntries(),
+                repository.listEntries().map { entry ->
+                    Triple(entry.entryIndex, entry.threadName, entry.lastActivityAt)
+                },
             )
             repository.closeAndJoin()
         }
@@ -251,10 +258,117 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             fileSystem.reset()
 
             assertEquals(
-                listOf(KodexSessionEntry(index, "indexed", lastActivityAt)),
-                repository.listEntries(),
+                listOf(Triple(index, "indexed", lastActivityAt)),
+                repository.listEntries().map { entry ->
+                    Triple(entry.entryIndex, entry.threadName, entry.lastActivityAt)
+                },
             )
             assertEquals(0, fileSystem.listCalls)
+            repository.closeAndJoin()
+        }
+
+        test("persists an idempotent root archive marker without changing inventory") { root ->
+            val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            val archivedIndex = repository.createInitialized(settings("archived"))
+            val activeIndex = repository.createInitialized(settings("active"))
+            val marker = Path(root, "sessions/$archivedIndex/$ArchiveMarkerFile")
+            val archivedEntry = repository.listEntries()
+                .single { entry -> entry.entryIndex == archivedIndex }
+
+            archivedEntry.archive()
+            archivedEntry.archive()
+
+            assertEquals(listOf(archivedIndex, activeIndex), repository.list())
+            assertEquals(
+                listOf(activeIndex),
+                repository.listEntries(includeArchived = false).map { it.entryIndex },
+            )
+            val allEntries = repository.listEntries(includeArchived = true)
+            assertEquals(listOf(archivedIndex, activeIndex), allEntries.map { it.entryIndex })
+            assertEquals(listOf("archived", "active"), allEntries.map { it.threadName })
+            assertEquals(listOf(true, false), allEntries.map { it.archived })
+            assertTrue(SystemCoroutineFileSystem.exists(marker))
+
+            archivedEntry.unarchive()
+            archivedEntry.unarchive()
+
+            assertFalse(SystemCoroutineFileSystem.exists(marker))
+            assertEquals(
+                listOf(archivedIndex, activeIndex),
+                repository.listEntries(includeArchived = false).map { it.entryIndex },
+            )
+
+            repository.closeAndJoin()
+            val reopened = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            assertEquals(
+                listOf(archivedIndex, activeIndex),
+                reopened.listEntries(includeArchived = false).map { it.entryIndex },
+            )
+            reopened.closeAndJoin()
+        }
+
+        test("archived roots remain openable, forkable, deletable, and reusable") { root ->
+            val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            val sourceIndex = repository.createInitialized(settings("source"))
+            val source = repository.open(sourceIndex)
+            repository.listEntries()
+                .single { entry -> entry.entryIndex == sourceIndex }
+                .archive()
+
+            assertSame(source, repository.open(sourceIndex))
+
+            val forkIndex = repository.create()
+            val fork = repository.open(forkIndex)
+            fork.runtime.modify { storage -> source.storage.forkTo(1, storage) }
+            assertFalse(
+                SystemCoroutineFileSystem.exists(
+                    Path(root, "sessions/$forkIndex/$ArchiveMarkerFile"),
+                ),
+            )
+
+            repository.delete(sourceIndex)
+            assertEquals(sourceIndex, repository.create())
+            assertFalse(
+                SystemCoroutineFileSystem.exists(
+                    Path(root, "sessions/$sourceIndex/$ArchiveMarkerFile"),
+                ),
+            )
+
+            repository.delete(sourceIndex)
+            repository.delete(forkIndex)
+            repository.closeAndJoin()
+        }
+
+        test("skips archived root metadata and timeline scanning by default") { root ->
+            val setup = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            val archivedIndex = setup.createInitialized(settings("archived"))
+            val activeIndex = setup.createInitialized(settings("active"))
+            setup.listEntries()
+                .single { entry -> entry.entryIndex == archivedIndex }
+                .archive()
+            setup.closeAndJoin()
+
+            val fileSystem = CountingListFileSystem()
+            val repository = FileSystemKodexSessionRepository(
+                root = root,
+                dependencies = testKodexAgentDependencies(),
+                fileSystem = fileSystem,
+            )
+            fileSystem.reset()
+
+            assertEquals(
+                listOf(activeIndex),
+                repository.listEntries(includeArchived = false).map { it.entryIndex },
+            )
+            assertEquals(0, fileSystem.listCalls)
+
+            fileSystem.reset()
+            assertEquals(
+                listOf(archivedIndex, activeIndex),
+                repository.listEntries(includeArchived = true).map { it.entryIndex },
+            )
+            assertEquals(0, fileSystem.listCalls)
+
             repository.closeAndJoin()
         }
 
@@ -275,8 +389,10 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             fileSystem.reset()
 
             assertEquals(
-                listOf(KodexSessionEntry(index, "active", lastActivityAt)),
-                reader.listEntries(),
+                listOf(Triple(index, "active", lastActivityAt)),
+                reader.listEntries().map { entry ->
+                    Triple(entry.entryIndex, entry.threadName, entry.lastActivityAt)
+                },
             )
             assertEquals(1, fileSystem.listCalls)
             assertEquals("2", SystemCoroutineFileSystem.readString(latest))
@@ -309,8 +425,10 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             fileSystem.reset()
 
             assertEquals(
-                listOf(KodexSessionEntry(index, "crashed", lastActivityAt)),
-                reader.listEntries(),
+                listOf(Triple(index, "crashed", lastActivityAt)),
+                reader.listEntries().map { entry ->
+                    Triple(entry.entryIndex, entry.threadName, entry.lastActivityAt)
+                },
             )
             assertEquals(1, fileSystem.listCalls)
             assertEquals("1", SystemCoroutineFileSystem.readString(latest))
