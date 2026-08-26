@@ -175,10 +175,10 @@ val agentHistoryEntryInteractionTest by testSuite {
                 ),
             )
             var expanded = awaitSnapshot()
-            if ("Thinking" !in expanded) expanded = awaitSnapshot()
+            if ("Think" !in expanded) expanded = awaitSnapshot()
 
             assertIs<WorkGroupHistoryItemState.Expanded>(group.state.value)
-            assertTrue("Thinking" in expanded)
+            assertTrue("Think" in expanded)
         }
     }
 

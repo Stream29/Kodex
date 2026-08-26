@@ -73,7 +73,7 @@ class CleanEventViewTest {
             )
 
             assertEquals(
-                "root → child\ndelivered",
+                "Agent root → child\ndelivered",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
                         StableCleanEvent.AgentMessage(
@@ -145,7 +145,7 @@ class CleanEventViewTest {
             )
 
             assertEquals(
-                "• Updated Plan +1.5s\n  └ (no steps provided)",
+                "• Update Plan +1.5s\n  └ (no steps provided)",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
                         plan.render(
@@ -193,10 +193,10 @@ class CleanEventViewTest {
     }
 
     @Test
-    fun assistantPhaseUsesSpaceInsteadOfTheRemovedMiddleDotSeparator() = runTest {
+    fun assistantPhaseDoesNotChangeTheAssistantHeader() = runTest {
         runMosaicTest {
             assertEquals(
-                "Assistant commentary\nhello",
+                "Assistant\nhello",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
                         StableCleanEvent.AssistantMessage(
@@ -259,7 +259,7 @@ class CleanEventViewTest {
 
         runMosaicTest {
             assertEquals(
-                "> Search the web: Kotlin Duration",
+                "> Searching the web: Kotlin Duration",
                 setContentAndSnapshot {
                     Box(Modifier.width(60)) { pending.render() }
                 },
@@ -465,7 +465,7 @@ class CleanEventViewTest {
             }
             assertEquals(
                 """
-                • Updated Plan
+                • Update Plan
                   └ Current plan
                     [x] Inspect the current renderer
                     [>] Implement the checklist
@@ -586,7 +586,7 @@ class CleanEventViewTest {
 
         runMosaicTest {
             assertEquals(
-                "Layout: Which layout should be used?\nUnable to submit: No answer",
+                "Layout: Which layout should be used?\nFailed to submit: No answer",
                 setContentAndSnapshot {
                     Box(Modifier.width(60)) { event.render() }
                 },
@@ -659,7 +659,7 @@ class CleanEventViewTest {
             val snapshot = setContentAndSnapshot {
                 Box(Modifier.width(40)) { event.render() }
             }
-            assertEquals("> demo", snapshot)
+            assertEquals("> Running demo", snapshot)
         }
     }
 

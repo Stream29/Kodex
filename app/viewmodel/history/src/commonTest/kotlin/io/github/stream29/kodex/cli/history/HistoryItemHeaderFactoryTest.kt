@@ -87,7 +87,7 @@ class HistoryItemHeaderFactoryTest {
         val header = assertIs<ToolHistoryItemHeader.Summary>(
             event.toHistoryHeader(3.milliseconds),
         )
-        assertEquals("Cloud tool search: crm, billing", header.summary)
+        assertEquals("Search cloud tools: crm, billing", header.summary)
     }
 
     @Test
@@ -120,8 +120,10 @@ class HistoryItemHeaderFactoryTest {
         )
 
         assertEquals("completed", header(isError = false).status)
+        assertEquals("filesystem.inspect", header(isError = false).summary)
         assertEquals("completed", header(isError = null).status)
         assertEquals("failed", header(isError = true).status)
+        assertEquals("Failed to run filesystem.inspect", header(isError = true).summary)
     }
 
     @Test

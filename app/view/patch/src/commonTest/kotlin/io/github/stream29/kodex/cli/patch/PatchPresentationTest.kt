@@ -74,7 +74,7 @@ val patchPresentationTest by testSuite {
             result = StablePatchToolExecutionResult.Failure("context did not match"),
         ).toStablePatchPresentation()
 
-        assertEquals("Editing Main.kt", presentation.header)
+        assertEquals("Failed to edit Main.kt", presentation.header)
         assertEquals(PatchPresentationStatus.Failed, presentation.status)
         assertTrue(
             PatchPresentationLine(
@@ -114,7 +114,7 @@ val patchPresentationTest by testSuite {
             ),
         ).toStablePatchPresentation()
 
-        assertEquals("Edited applied.txt", presentation.header)
+        assertEquals("Edit applied.txt", presentation.header)
         assertEquals(PatchPresentationStatus.Completed, presentation.status)
         assertTrue(presentation.lines.any { it.text == "M applied.txt" })
         assertTrue(presentation.lines.any { it.text == "- old" })
@@ -170,7 +170,7 @@ val patchPresentationTest by testSuite {
             ),
         ).toStablePatchPresentation()
 
-        assertEquals("Edited 4 files", presentation.header)
+        assertEquals("Edit 4 files", presentation.header)
         assertEquals(PatchPresentationStatus.Completed, presentation.status)
         val renderedLines = presentation.lines.map(PatchPresentationLine::text)
         assertTrue("A new.txt" in renderedLines)
