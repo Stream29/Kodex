@@ -14,7 +14,7 @@ import io.github.stream29.kodex.openai.StepStatus
 @Composable
 internal fun StablePlanUpdate.renderPlanUpdate() {
     PlanUpdateView(
-        title = "Updated Plan",
+        title = "Update Plan",
         explanation = arguments.explanation,
         plan = arguments.plan,
         titleStyle = TextStyle.Bold,

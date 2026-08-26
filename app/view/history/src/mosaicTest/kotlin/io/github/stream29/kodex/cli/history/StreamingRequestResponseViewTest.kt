@@ -49,7 +49,7 @@ class StreamingRequestResponseViewTest {
                     HistoryStreamingItem.Output(HistoryStreamingKind.Message, events).renderTransientTail()
                 }
             }
-            assertEquals("Assistant streaming\nhello", awaitSnapshot())
+            assertEquals("Assistant responding\nhello", awaitSnapshot())
 
             events.emit(
                 ResponsesStreamEvent.OutputTextDelta(
@@ -59,7 +59,7 @@ class StreamingRequestResponseViewTest {
                     delta = " world",
                 ),
             )
-            assertEquals("Assistant streaming\nhello world", awaitSnapshot())
+            assertEquals("Assistant responding\nhello world", awaitSnapshot())
         }
     }
 
@@ -92,7 +92,7 @@ class StreamingRequestResponseViewTest {
                 }
             }
             assertEquals(
-                "Assistant streaming\nfirst\nsecond part",
+                "Assistant responding\nfirst\nsecond part",
                 awaitSnapshot(),
             )
         }
@@ -123,7 +123,7 @@ class StreamingRequestResponseViewTest {
                 }
             }
             val snapshot = awaitSnapshot()
-            assertTrue("Thinking streaming" in snapshot)
+            assertTrue("Thinking" in snapshot)
             assertTrue("brief summary" in snapshot)
             assertFalse("private reasoning" in snapshot)
             assertFalse("opaque provider data" in snapshot)
@@ -158,7 +158,7 @@ class StreamingRequestResponseViewTest {
                 }
             }
             assertEquals(
-                "Thinking streaming\nfirst\nsecond part",
+                "Thinking\nfirst\nsecond part",
                 awaitSnapshot(),
             )
         }
@@ -220,7 +220,7 @@ class StreamingRequestResponseViewTest {
                 }
             }
             val collapsed = awaitSnapshot()
-            assertEquals("> Run a command", collapsed)
+            assertEquals("> Running a command", collapsed)
             assertFalse("shell.run" in collapsed)
 
             val expanded = clickRow()
@@ -259,7 +259,7 @@ class StreamingRequestResponseViewTest {
                 }
             }
             val collapsed = awaitSnapshot()
-            assertEquals("> apply_patch", collapsed)
+            assertEquals("> Running apply_patch", collapsed)
         }
     }
 

@@ -26,7 +26,8 @@ public enum class PatchPresentationAction(
     internal val label: String,
 ) {
     Editing("Editing"),
-    Edited("Edited"),
+    Edit("Edit"),
+    FailedToEdit("Failed to edit"),
 }
 
 public sealed interface PatchPresentationTarget {
@@ -86,7 +87,7 @@ public fun StablePatchToolEvent.toStablePatchPresentation(): PatchPresentation =
     when (val result = result) {
         is StablePatchToolExecutionResult.Success ->
             diff.toPatchPresentation(
-                action = PatchPresentationAction.Edited,
+                action = PatchPresentationAction.Edit,
                 target = result.applyResult.delta.changes
                     .map { change -> change.path }
                     .toPatchPresentationTarget(),
@@ -97,7 +98,7 @@ public fun StablePatchToolEvent.toStablePatchPresentation(): PatchPresentation =
 
         is StablePatchToolExecutionResult.Failure ->
             diff.toPatchPresentation(
-                action = PatchPresentationAction.Editing,
+                action = PatchPresentationAction.FailedToEdit,
                 target = diff.hunks
                     .map { hunk -> hunk.path }
                     .toPatchPresentationTarget(),

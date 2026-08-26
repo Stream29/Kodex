@@ -97,37 +97,41 @@ internal fun StableCleanEvent.CompletedTool.toHistoryHeader(
         elapsed = elapsed,
     )
 
-    else -> ToolHistoryItemHeader.Summary(
-        summary = historyToolSummary(),
-        status = historyToolStatus(),
-        elapsed = elapsed,
-    )
+    else -> {
+        val status = historyToolStatus()
+        ToolHistoryItemHeader.Summary(
+            summary = historyToolSummary(failed = status == "failed"),
+            status = status,
+            elapsed = elapsed,
+        )
+    }
 }
 
-private fun StableCleanEvent.CompletedTool.historyToolSummary(): String = when (this) {
+private fun StableCleanEvent.CompletedTool.historyToolSummary(failed: Boolean): String = when (this) {
     is StableCleanEvent.InvalidToolCall -> "Model emitted an invalid tool call"
-    is StableCleanEvent.ServerToolSearch -> call.arguments.serverToolSearchSummary()
+    is StableCleanEvent.ServerToolSearch -> call.arguments.serverToolSearchSummary(failed)
     is StableCleanEvent.WebSearchCall ->
-        item.action?.historySummary() ?: "Search the web"
+        item.action?.historySummary(failed) ?: if (failed) "Failed to search the web" else "Search the web"
 
     is StableCleanEvent.ImageGenerationCall ->
-        item.revisedPrompt?.imageGenerationSummary() ?: "Generate an image"
+        item.revisedPrompt?.imageGenerationSummary(failed)
+            ?: if (failed) "Failed to generate an image" else "Generate an image"
 
     is StableCommandExecutionToolEvent ->
         error("Command execution uses a specialized history header.")
 
     is StablePatchToolEvent -> "Apply patch"
-    is StableJsonToolEvent -> functionToolSummary(name, namespace)
-    is StableTextToolEvent -> functionToolSummary(name, namespace)
-    is StableCustomToolEvent -> customToolSummary(name, namespace, input)
-    is StableImageGenerationToolEvent -> arguments.historySummary()
-    is StableImageViewToolEvent -> arguments.historySummary()
-    is StableMcpToolEvent -> qualifiedToolName(name, namespace)
-    is StableMultiAgentToolEvent -> operation.historySummary()
-    is StablePlanUpdate -> "Update the plan"
-    is StableRequestUserInputToolEvent -> arguments.historySummary()
-    is StableToolSearchEvent -> arguments.historySummary()
-    is StableWebSearchToolEvent -> commands.historySummary()
+    is StableJsonToolEvent -> functionToolSummary(name, namespace, failed)
+    is StableTextToolEvent -> functionToolSummary(name, namespace, failed)
+    is StableCustomToolEvent -> customToolSummary(name, namespace, input, failed)
+    is StableImageGenerationToolEvent -> arguments.historySummary(failed)
+    is StableImageViewToolEvent -> arguments.historySummary(failed)
+    is StableMcpToolEvent -> qualifiedToolName(name, namespace).stableToolSummary(failed)
+    is StableMultiAgentToolEvent -> operation.historySummary(failed)
+    is StablePlanUpdate -> if (failed) "Failed to update the plan" else "Update the plan"
+    is StableRequestUserInputToolEvent -> arguments.historySummary(failed)
+    is StableToolSearchEvent -> arguments.historySummary(failed)
+    is StableWebSearchToolEvent -> commands.historySummary(failed)
 }
 
 private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (this) {
@@ -164,19 +168,20 @@ private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (t
     is StableWebSearchToolEvent -> result.historyStatus()
 }
 
-private fun JsonElement.serverToolSearchSummary(): String {
+private fun JsonElement.serverToolSearchSummary(failed: Boolean): String {
     val paths = ((this as? JsonObject)?.get("paths") as? JsonArray)
         ?.mapNotNull { value -> (value as? JsonPrimitive)?.contentOrNull }
         ?.map(String::historyPreview)
         ?.filter(String::isNotBlank)
         .orEmpty()
-    return paths.takeIf(List<String>::isNotEmpty)
-        ?.joinToString(prefix = "Cloud tool search: ")
-        ?: "Cloud tool search"
+    val detail = paths.takeIf(List<String>::isNotEmpty)?.joinToString()
+    val prefix = if (failed) "Failed to search cloud tools" else "Search cloud tools"
+    return detail?.let { "$prefix: $it" } ?: prefix
 }
 
-private fun functionToolSummary(name: String, namespace: String?): String =
-    when (qualifiedToolName(name, namespace)) {
+private fun functionToolSummary(name: String, namespace: String?, failed: Boolean): String {
+    val qualifiedName = qualifiedToolName(name, namespace)
+    if (!failed) return when (qualifiedName) {
         "exec_command", "shell.run" -> "Run a command"
         "write_stdin" -> "Interact with a terminal session"
         "view_image" -> "View an image"
@@ -194,100 +199,139 @@ private fun functionToolSummary(name: String, namespace: String?): String =
         "update_plan" -> "Update the plan"
         "get_context_remaining" -> "Check remaining context"
         "clock.curr_time" -> "Check the current time"
-        else -> qualifiedToolName(name, namespace)
+        else -> qualifiedName
     }
+    return when (qualifiedName) {
+        "exec_command", "shell.run" -> "Failed to run a command"
+        "write_stdin" -> "Failed to interact with a terminal session"
+        "view_image" -> "Failed to view an image"
+        "image_gen.imagegen", "hosted_image_generation" -> "Failed to generate an image"
+        "request_user_input" -> "Failed to collect user input"
+        "tool_search", "server_tool_search" -> "Failed to search available tools"
+        "web.run", "hosted_web_search" -> "Failed to search the web"
+        "spawn_agent" -> "Failed to start an agent"
+        "send_message" -> "Failed to send a message to an agent"
+        "followup_task" -> "Failed to resume an agent task"
+        "wait_agent" -> "Failed to wait for an agent"
+        "interrupt_agent" -> "Failed to interrupt an agent"
+        "list_agents" -> "Failed to list agents"
+        "update_plan" -> "Failed to update the plan"
+        "get_context_remaining" -> "Failed to check remaining context"
+        "clock.curr_time" -> "Failed to check the current time"
+        else -> qualifiedName.stableToolSummary(failed = true)
+    }
+}
 
-private fun customToolSummary(name: String, namespace: String?, input: String): String {
+private fun customToolSummary(
+    name: String,
+    namespace: String?,
+    input: String,
+    failed: Boolean,
+): String {
     val qualifiedName = qualifiedToolName(name, namespace)
-    if (qualifiedName != "web.run") return functionToolSummary(name, namespace)
+    if (qualifiedName != "web.run") return functionToolSummary(name, namespace, failed)
     val commands = runCatching {
         HistoryHeaderJson.decodeFromString(SearchCommands.serializer(), input)
     }.getOrNull()
-    return commands?.historySummary() ?: "Search the web"
+    return commands?.historySummary(failed) ?: if (failed) "Failed to search the web" else "Search the web"
 }
 
-private fun ImageGenToolArguments.historySummary(): String = prompt.imageGenerationSummary()
+private fun ImageGenToolArguments.historySummary(failed: Boolean): String = prompt.imageGenerationSummary(failed)
 
-private fun String.imageGenerationSummary(): String =
+private fun String.imageGenerationSummary(failed: Boolean): String =
     historyPreview().takeIf(String::isNotBlank)
-        ?.let { prompt -> "Generate an image: $prompt" }
-        ?: "Generate an image"
+        ?.let { prompt -> if (failed) "Failed to generate an image: $prompt" else "Generate an image: $prompt" }
+        ?: if (failed) "Failed to generate an image" else "Generate an image"
 
-private fun ViewImageToolArguments.historySummary(): String =
+private fun ViewImageToolArguments.historySummary(failed: Boolean): String =
     path.historyPreview().takeIf(String::isNotBlank)
-        ?.let { path -> "View image: $path" }
-        ?: "View an image"
+        ?.let { path -> if (failed) "Failed to view image: $path" else "View image: $path" }
+        ?: if (failed) "Failed to view an image" else "View an image"
 
-private fun RequestUserInputArgs.historySummary(): String =
+private fun RequestUserInputArgs.historySummary(failed: Boolean): String =
     questions.firstOrNull()?.question?.historyPreview()
         ?.takeIf(String::isNotBlank)
-        ?.let { question -> "Ask the user: $question" }
-        ?: "Ask the user for input"
+        ?.let { question -> if (failed) "Failed to collect user input: $question" else "Ask the user: $question" }
+        ?: if (failed) "Failed to collect user input" else "Ask the user for input"
 
-private fun SearchToolCallParams.historySummary(): String =
+private fun SearchToolCallParams.historySummary(failed: Boolean): String =
     query.historyPreview().takeIf(String::isNotBlank)
-        ?.let { query -> "Search available tools: $query" }
-        ?: "Search available tools"
+        ?.let { query -> if (failed) "Failed to search available tools: $query" else "Search available tools: $query" }
+        ?: if (failed) "Failed to search available tools" else "Search available tools"
 
-private fun SearchCommands.historySummary(): String = when {
+private fun SearchCommands.historySummary(failed: Boolean): String = when {
     !searchQuery.isNullOrEmpty() -> searchQuery.orEmpty().first().q.historyPreview()
         .takeIf(String::isNotBlank)
-        ?.let { query -> "Search the web: $query" }
-        ?: "Search the web"
+        ?.let { query -> if (failed) "Failed to search the web: $query" else "Search the web: $query" }
+        ?: if (failed) "Failed to search the web" else "Search the web"
 
     !imageQuery.isNullOrEmpty() -> imageQuery.orEmpty().first().q.historyPreview()
         .takeIf(String::isNotBlank)
-        ?.let { query -> "Search images: $query" }
-        ?: "Search images"
+        ?.let { query -> if (failed) "Failed to search images: $query" else "Search images: $query" }
+        ?: if (failed) "Failed to search images" else "Search images"
 
-    !open.isNullOrEmpty() -> "Open a web page"
-    !click.isNullOrEmpty() -> "Follow a web link"
-    !find.isNullOrEmpty() -> "Find text on a web page"
-    !screenshot.isNullOrEmpty() -> "Capture a web page"
-    !finance.isNullOrEmpty() -> "Look up market data"
-    !weather.isNullOrEmpty() -> "Check the weather"
-    !sports.isNullOrEmpty() -> "Check sports information"
-    !time.isNullOrEmpty() -> "Check the time"
-    else -> "Use web search"
+    !open.isNullOrEmpty() -> if (failed) "Failed to open a web page" else "Open a web page"
+    !click.isNullOrEmpty() -> if (failed) "Failed to follow a web link" else "Follow a web link"
+    !find.isNullOrEmpty() -> if (failed) "Failed to search a web page for text" else "Search a web page for text"
+    !screenshot.isNullOrEmpty() -> if (failed) "Failed to capture a web page" else "Capture a web page"
+    !finance.isNullOrEmpty() -> if (failed) "Failed to look up market data" else "Look up market data"
+    !weather.isNullOrEmpty() -> if (failed) "Failed to check the weather" else "Check the weather"
+    !sports.isNullOrEmpty() -> if (failed) "Failed to check sports information" else "Check sports information"
+    !time.isNullOrEmpty() -> if (failed) "Failed to check the time" else "Check the time"
+    else -> if (failed) "Failed to use web search" else "Use web search"
 }
 
-private fun WebSearchAction.historySummary(): String = when (this) {
+private fun WebSearchAction.historySummary(failed: Boolean): String = when (this) {
     is WebSearchAction.Search -> (query ?: queries?.firstOrNull())
         ?.historyPreview()
         ?.takeIf(String::isNotBlank)
-        ?.let { query -> "Search the web: $query" }
-        ?: "Search the web"
+        ?.let { query -> if (failed) "Failed to search the web: $query" else "Search the web: $query" }
+        ?: if (failed) "Failed to search the web" else "Search the web"
 
-    is WebSearchAction.OpenPage -> "Open a web page"
-    is WebSearchAction.FindInPage -> "Find text on a web page"
-    WebSearchAction.Other -> "Use web search"
+    is WebSearchAction.OpenPage -> if (failed) "Failed to open a web page" else "Open a web page"
+    is WebSearchAction.FindInPage -> if (failed) {
+        "Failed to search a web page for text"
+    } else {
+        "Search a web page for text"
+    }
+
+    WebSearchAction.Other -> if (failed) "Failed to use web search" else "Use web search"
 }
 
-private fun StableMultiAgentOperation.historySummary(): String = when (this) {
-    is StableMultiAgentOperation.SpawnAgent -> arguments.historySummary()
-    is StableMultiAgentOperation.SendMessage -> arguments.historySummary()
-    is StableMultiAgentOperation.FollowupTask -> arguments.historySummary()
-    is StableMultiAgentOperation.WaitAgent -> "Wait for an agent"
-    is StableMultiAgentOperation.InterruptAgent -> arguments.historySummary()
-    is StableMultiAgentOperation.ListAgents -> arguments.historySummary()
+private fun StableMultiAgentOperation.historySummary(failed: Boolean): String = when (this) {
+    is StableMultiAgentOperation.SpawnAgent -> arguments.historySummary(failed)
+    is StableMultiAgentOperation.SendMessage -> arguments.historySummary(failed)
+    is StableMultiAgentOperation.FollowupTask -> arguments.historySummary(failed)
+    is StableMultiAgentOperation.WaitAgent -> if (failed) "Failed to wait for an agent" else "Wait for an agent"
+    is StableMultiAgentOperation.InterruptAgent -> arguments.historySummary(failed)
+    is StableMultiAgentOperation.ListAgents -> arguments.historySummary(failed)
 }
 
-private fun SpawnAgentArgs.historySummary(): String =
-    "Start agent: ${taskName.historyPreview()}"
+private fun SpawnAgentArgs.historySummary(failed: Boolean): String =
+    if (failed) "Failed to start agent: ${taskName.historyPreview()}" else "Start agent: ${taskName.historyPreview()}"
 
-private fun SendMessageArgs.historySummary(): String =
-    "Message agent: ${target.historyPreview()}"
+private fun SendMessageArgs.historySummary(failed: Boolean): String =
+    if (failed) "Failed to send message to agent: ${target.historyPreview()}" else {
+        "Message agent: ${target.historyPreview()}"
+    }
 
-private fun FollowupTaskArgs.historySummary(): String =
-    "Resume task for agent: ${target.historyPreview()}"
+private fun FollowupTaskArgs.historySummary(failed: Boolean): String =
+    if (failed) "Failed to resume task for agent: ${target.historyPreview()}" else {
+        "Resume task for agent: ${target.historyPreview()}"
+    }
 
-private fun InterruptAgentArgs.historySummary(): String =
-    "Interrupt agent: ${target.historyPreview()}"
+private fun InterruptAgentArgs.historySummary(failed: Boolean): String =
+    if (failed) "Failed to interrupt agent: ${target.historyPreview()}" else {
+        "Interrupt agent: ${target.historyPreview()}"
+    }
 
-private fun ListAgentsArgs.historySummary(): String =
+private fun ListAgentsArgs.historySummary(failed: Boolean): String =
     pathPrefix?.historyPreview()?.takeIf(String::isNotBlank)
-        ?.let { prefix -> "List agents under: $prefix" }
-        ?: "List agents"
+        ?.let { prefix -> if (failed) "Failed to list agents under: $prefix" else "List agents under: $prefix" }
+        ?: if (failed) "Failed to list agents" else "List agents"
+
+private fun String.stableToolSummary(failed: Boolean): String =
+    if (failed) "Failed to run $this" else this
 
 private fun Boolean?.successHistoryStatus(): String = when (this) {
     true -> "completed"

@@ -80,7 +80,6 @@ import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.FunctionCallOutputContentItem
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
 import io.github.stream29.kodex.openai.LoadableToolSpec
-import io.github.stream29.kodex.openai.MessagePhase
 import io.github.stream29.kodex.openai.ResponsesApiNamespace
 import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.openai.SearchCommands
@@ -183,7 +182,7 @@ public fun UnstableCleanEvent.render(
 ) {
     when (this) {
         is PendingFunctionToolEvent -> ToolEvent(
-            summary = functionToolSummary(name, namespace),
+            summary = functionToolOngoingSummary(name, namespace),
             rawName = qualifiedName(name, namespace),
             status = "running",
             expansionKey = callId,
@@ -192,7 +191,7 @@ public fun UnstableCleanEvent.render(
         }
 
         is PendingCustomToolEvent -> ToolEvent(
-            summary = customToolSummary(name, namespace, input),
+            summary = customToolOngoingSummary(name, namespace, input),
             rawName = qualifiedName(name, namespace),
             status = "running",
             expansionKey = callId,
@@ -206,7 +205,7 @@ public fun UnstableCleanEvent.render(
 
         is PendingMultiAgentToolEvent -> renderPendingMultiAgentTool()
         is PendingImageGenerationToolEvent -> ToolEvent(
-            summary = arguments.toolSummary(),
+            summary = arguments.ongoingToolSummary(),
             rawName = "image_gen.imagegen",
             status = "running",
             expansionKey = callId,
@@ -215,7 +214,7 @@ public fun UnstableCleanEvent.render(
         }
 
         is PendingImageViewToolEvent -> ToolEvent(
-            summary = arguments.toolSummary(),
+            summary = arguments.ongoingToolSummary(),
             rawName = "view_image",
             status = "running",
             expansionKey = callId,
@@ -224,7 +223,7 @@ public fun UnstableCleanEvent.render(
         }
 
         is PendingMcpToolEvent -> ToolEvent(
-            summary = qualifiedName(name, namespace),
+            summary = "Running ${qualifiedName(name, namespace)}",
             rawName = qualifiedName(name, namespace),
             status = "running",
             expansionKey = callId,
@@ -233,7 +232,7 @@ public fun UnstableCleanEvent.render(
         }
 
         is PendingRequestUserInputToolEvent -> ToolEvent(
-            summary = arguments.toolSummary(),
+            summary = arguments.ongoingToolSummary(),
             rawName = "request_user_input",
             status = "running",
             expansionKey = callId,
@@ -242,7 +241,7 @@ public fun UnstableCleanEvent.render(
         }
 
         is PendingToolSearchEvent -> ToolEvent(
-            summary = arguments.toolSummary(),
+            summary = arguments.ongoingToolSummary(),
             rawName = "tool_search",
             status = "running",
             expansionKey = callId,
@@ -251,7 +250,7 @@ public fun UnstableCleanEvent.render(
         }
 
         is PendingWebSearchToolEvent -> ToolEvent(
-            summary = commands.toolSummary(),
+            summary = commands.ongoingToolSummary(),
             rawName = "web.run",
             status = "running",
             expansionKey = callId,
@@ -261,7 +260,7 @@ public fun UnstableCleanEvent.render(
 
         is PendingInvalidToolCall -> renderInvalidToolCall()
         is PendingServerToolSearch -> ToolEvent(
-            summary = call.arguments.serverToolSearchSummary(),
+            summary = call.arguments.ongoingServerToolSearchSummary(),
             rawName = "server_tool_search",
             status = call.status ?: "running",
             expansionKey = call.id?.value ?: "server_tool_search",
@@ -276,13 +275,13 @@ public fun UnstableCleanEvent.render(
 
 @Composable
 private fun StableCleanEvent.UserMessage.renderUserMessage() {
-    MessageEvent("You", content, detailStyle = TextStyle.Unspecified)
+    MessageEvent("User", content, detailStyle = TextStyle.Unspecified)
 }
 
 @Composable
 private fun StableCleanEvent.AssistantMessage.renderAssistantMessage() {
     MessageEvent(
-        header = phase?.let { "Assistant ${it.displayName()}" } ?: "Assistant",
+        header = "Assistant",
         content = content,
         detailStyle = TextStyle.Unspecified,
     )
@@ -296,7 +295,7 @@ private fun StableCleanEvent.DeveloperMessage.renderDeveloperMessage() {
 @Composable
 private fun StableCleanEvent.AgentMessage.renderAgentMessage() {
     Column(modifier = Modifier.fillMaxWidth()) {
-        Header("$author → $recipient", TextStyle.Bold)
+        Header("Agent $author → $recipient", TextStyle.Bold)
         content.forEach { part ->
             when (part) {
                 is AgentMessageInputContent.InputText -> DetailText(part.text)
@@ -309,7 +308,7 @@ private fun StableCleanEvent.AgentMessage.renderAgentMessage() {
 @Composable
 private fun StableCleanEvent.Reasoning.renderReasoning() {
     ExpandableHistoryEvent(
-        header = "Thinking",
+        header = "Think",
         expansionKey = item.id?.value ?: "reasoning",
         headerStyle = TextStyle.Dim,
     ) {
@@ -333,7 +332,7 @@ private fun StableCleanEvent.InvalidToolCall.renderInvalidToolCall() {
 @Composable
 private fun StableCleanEvent.ServerToolSearch.renderServerToolSearch() {
     ToolEvent(
-        summary = call.arguments.serverToolSearchSummary(),
+        summary = call.arguments.serverToolSearchSummary(failed = output.status == "failed"),
         rawName = "server_tool_search",
         status = output.status,
         expansionKey = call.id?.value ?: "server_tool_search",
@@ -346,7 +345,8 @@ private fun StableCleanEvent.ServerToolSearch.renderServerToolSearch() {
 @Composable
 private fun StableCleanEvent.WebSearchCall.renderHostedWebSearch() {
     ToolEvent(
-        summary = item.action?.toolSummary() ?: "Search the web",
+        summary = item.action?.toolSummary(failed = item.status == "failed")
+            ?: if (item.status == "failed") "Failed to search the web" else "Search the web",
         rawName = "hosted_web_search",
         status = item.status ?: "completed",
         expansionKey = item.id?.value ?: "hosted_web_search",
@@ -360,7 +360,8 @@ private fun StableCleanEvent.WebSearchCall.renderHostedWebSearch() {
 @Composable
 private fun StableCleanEvent.ImageGenerationCall.renderHostedImageGeneration() {
     ToolEvent(
-        summary = item.revisedPrompt?.imageGenerationSummary() ?: "Generate an image",
+        summary = item.revisedPrompt?.imageGenerationSummary(failed = item.status == "failed")
+            ?: if (item.status == "failed") "Failed to generate an image" else "Generate an image",
         rawName = "hosted_image_generation",
         status = item.status,
         expansionKey = item.id?.value ?: "hosted_image_generation",
@@ -393,7 +394,10 @@ internal fun StableCommandExecutionToolEvent.renderCommandExecution(
 ) {
     val completed = session.completedForPresentation()
     ToolEvent(
-        summary = action.toolSummary(session?.arguments),
+        summary = action.toolSummary(
+            sourceArguments = session?.arguments,
+            failed = result is StableCommandExecutionResult.Failure,
+        ),
         rawName = action.toolName(),
         status = result.status(session, completed),
         expansionKey = callId,
@@ -415,7 +419,7 @@ private fun PendingCommandExecutionToolEvent.renderCommandExecution(
     val session = activeAgentShellSession(shellSessions, action.activeSessionId())
     val completed = session.completedForPresentation()
     ToolEvent(
-        summary = action.toolSummary(session?.arguments),
+        summary = action.ongoingToolSummary(session?.arguments),
         rawName = toolName,
         status = "running",
         expansionKey = callId,
@@ -432,7 +436,7 @@ private fun PendingCommandExecutionToolEvent.renderCommandExecution(
 @Composable
 private fun StableJsonToolEvent.renderJsonTool() {
     ToolEvent(
-        summary = functionToolSummary(name, namespace),
+        summary = functionToolSummary(name, namespace, failed = success == false),
         rawName = qualifiedName(name, namespace),
         status = success.completedStatus(),
         expansionKey = callId,
@@ -445,7 +449,7 @@ private fun StableJsonToolEvent.renderJsonTool() {
 @Composable
 private fun StableTextToolEvent.renderTextTool() {
     ToolEvent(
-        summary = functionToolSummary(name, namespace),
+        summary = functionToolSummary(name, namespace, failed = success == false),
         rawName = qualifiedName(name, namespace),
         status = success.completedStatus(),
         expansionKey = callId,
@@ -458,7 +462,7 @@ private fun StableTextToolEvent.renderTextTool() {
 @Composable
 private fun StableCustomToolEvent.renderCustomTool() {
     ToolEvent(
-        summary = customToolSummary(name, namespace, input),
+        summary = customToolSummary(name, namespace, input, failed = success == false),
         rawName = qualifiedName(name, namespace),
         status = success.completedStatus(),
         expansionKey = callId,
@@ -471,7 +475,7 @@ private fun StableCustomToolEvent.renderCustomTool() {
 @Composable
 private fun StableImageGenerationToolEvent.renderImageGeneration() {
     ToolEvent(
-        summary = arguments.toolSummary(),
+        summary = arguments.toolSummary(failed = result is StableImageGenerationResult.Failure),
         rawName = "image_gen.imagegen",
         status = result.status(),
         expansionKey = callId,
@@ -498,7 +502,7 @@ private fun StableImageGenerationToolEvent.renderImageGeneration() {
 @Composable
 private fun StableImageViewToolEvent.renderImageView() {
     ToolEvent(
-        summary = arguments.toolSummary(),
+        summary = arguments.toolSummary(failed = result is StableImageViewResult.Failure),
         rawName = "view_image",
         status = result.status(),
         expansionKey = callId,
@@ -520,7 +524,7 @@ private fun StableImageViewToolEvent.renderImageView() {
 @Composable
 private fun StableMcpToolEvent.renderMcpTool() {
     ToolEvent(
-        summary = qualifiedName(name, namespace),
+        summary = qualifiedName(name, namespace).stableToolSummary(result.completedStatus() == "failed"),
         rawName = qualifiedName(name, namespace),
         status = result.completedStatus(),
         expansionKey = callId,
@@ -534,7 +538,7 @@ private fun StableMcpToolEvent.renderMcpTool() {
 private fun StableMultiAgentToolEvent.renderMultiAgentTool() {
     when (val operation = operation) {
         is StableMultiAgentOperation.SpawnAgent -> ToolEvent(
-            summary = operation.arguments.toolSummary(),
+            summary = operation.arguments.toolSummary(operation.result.completedStatus() == "failed"),
             rawName = "spawn_agent",
             status = operation.result.completedStatus(),
             expansionKey = this@renderMultiAgentTool.callId,
@@ -544,7 +548,7 @@ private fun StableMultiAgentToolEvent.renderMultiAgentTool() {
         }
 
         is StableMultiAgentOperation.SendMessage -> ToolEvent(
-            summary = operation.arguments.toolSummary(),
+            summary = operation.arguments.toolSummary(operation.result.completedStatus() == "failed"),
             rawName = "send_message",
             status = operation.result.completedStatus(),
             expansionKey = this@renderMultiAgentTool.callId,
@@ -554,7 +558,7 @@ private fun StableMultiAgentToolEvent.renderMultiAgentTool() {
         }
 
         is StableMultiAgentOperation.FollowupTask -> ToolEvent(
-            summary = operation.arguments.toolSummary(),
+            summary = operation.arguments.toolSummary(operation.result.completedStatus() == "failed"),
             rawName = "followup_task",
             status = operation.result.completedStatus(),
             expansionKey = this@renderMultiAgentTool.callId,
@@ -564,7 +568,11 @@ private fun StableMultiAgentToolEvent.renderMultiAgentTool() {
         }
 
         is StableMultiAgentOperation.WaitAgent -> ToolEvent(
-            summary = operation.arguments.toolSummary(),
+            summary = if (operation.result.completedStatus() == "failed") {
+                "Failed to wait for an agent"
+            } else {
+                operation.arguments.toolSummary()
+            },
             rawName = "wait_agent",
             status = operation.result.completedStatus(),
             expansionKey = this@renderMultiAgentTool.callId,
@@ -574,7 +582,7 @@ private fun StableMultiAgentToolEvent.renderMultiAgentTool() {
         }
 
         is StableMultiAgentOperation.InterruptAgent -> ToolEvent(
-            summary = operation.arguments.toolSummary(),
+            summary = operation.arguments.toolSummary(operation.result.completedStatus() == "failed"),
             rawName = "interrupt_agent",
             status = operation.result.completedStatus(),
             expansionKey = this@renderMultiAgentTool.callId,
@@ -584,7 +592,7 @@ private fun StableMultiAgentToolEvent.renderMultiAgentTool() {
         }
 
         is StableMultiAgentOperation.ListAgents -> ToolEvent(
-            summary = operation.arguments.toolSummary(),
+            summary = operation.arguments.toolSummary(operation.result.completedStatus() == "failed"),
             rawName = "list_agents",
             status = operation.result.completedStatus(),
             expansionKey = this@renderMultiAgentTool.callId,
@@ -598,7 +606,7 @@ private fun StableMultiAgentToolEvent.renderMultiAgentTool() {
 @Composable
 private fun StableToolSearchEvent.renderToolSearch() {
     ToolEvent(
-        summary = arguments.toolSummary(),
+        summary = arguments.toolSummary(failed = result.status() == "failed"),
         rawName = "tool_search",
         status = result.status(),
         expansionKey = callId,
@@ -616,7 +624,7 @@ private fun StableToolSearchEvent.renderToolSearch() {
 @Composable
 private fun StableWebSearchToolEvent.renderWebSearch() {
     ToolEvent(
-        summary = commands.toolSummary(),
+        summary = commands.toolSummary(failed = result.status() == "failed"),
         rawName = "web.run",
         status = result.status(),
         expansionKey = callId,
@@ -634,7 +642,7 @@ private fun StableWebSearchToolEvent.renderWebSearch() {
 @Composable
 private fun PendingMultiAgentToolEvent.renderPendingMultiAgentTool() {
     ToolEvent(
-        summary = operation.toolSummary(),
+        summary = operation.ongoingToolSummary(),
         rawName = operation.toolName,
         status = "running",
         expansionKey = callId,
@@ -1445,11 +1453,6 @@ private fun MultiAgentStatus.displayName(): String = when (this) {
     MultiAgentStatus.Idle -> "idle"
 }
 
-private fun MessagePhase.displayName(): String = when (this) {
-    MessagePhase.Commentary -> "commentary"
-    MessagePhase.FinalAnswer -> "final answer"
-}
-
 private fun LoadableToolSpec.displayName(): String = when (this) {
     is ResponsesApiTool -> name
     is ResponsesApiNamespace -> name
@@ -1460,56 +1463,210 @@ private fun qualifiedName(
     namespace: String?,
 ): String = namespace?.takeIf(String::isNotBlank)?.let { "$it.$name" } ?: name
 
-internal fun functionToolSummary(
+internal fun functionToolOngoingSummary(
     name: String,
     namespace: String?,
 ): String = when (qualifiedName(name, namespace)) {
-    "exec_command" -> "Run a command"
-    "shell.run" -> "Run a command"
-    "write_stdin" -> "Interact with a terminal session"
-    "view_image" -> "View an image"
-    "image_gen.imagegen" -> "Generate an image"
-    "request_user_input" -> "Ask the user for input"
+    "exec_command",
+    "shell.run",
+        -> "Running a command"
+
+    "write_stdin" -> "Interacting with a terminal session"
+    "view_image" -> "Viewing an image"
+    "image_gen.imagegen",
+    "hosted_image_generation",
+        -> "Generating an image"
+
+    "request_user_input" -> "Waiting for user input"
     "tool_search",
     "server_tool_search",
-        -> "Search available tools"
+        -> "Searching available tools"
 
     "web.run",
     "hosted_web_search",
-        -> "Search the web"
+        -> "Searching the web"
 
-    "hosted_image_generation" -> "Generate an image"
-    "spawn_agent" -> "Start an agent"
-    "send_message" -> "Message an agent"
-    "followup_task" -> "Resume an agent task"
-    "wait_agent" -> "Wait for an agent"
-    "interrupt_agent" -> "Interrupt an agent"
-    "list_agents" -> "List agents"
-    "update_plan" -> "Update the plan"
-    "get_context_remaining" -> "Check remaining context"
-    "clock.curr_time" -> "Check the current time"
-    else -> qualifiedName(name, namespace)
+    "spawn_agent" -> "Starting an agent"
+    "send_message" -> "Sending a message to an agent"
+    "followup_task" -> "Resuming an agent task"
+    "wait_agent" -> "Waiting for an agent"
+    "interrupt_agent" -> "Interrupting an agent"
+    "list_agents" -> "Listing agents"
+    "update_plan" -> "Updating the plan"
+    "get_context_remaining" -> "Checking remaining context"
+    "clock.curr_time" -> "Checking the current time"
+    else -> "Running ${qualifiedName(name, namespace)}"
+}
+
+internal fun customToolOngoingSummary(
+    name: String,
+    namespace: String?,
+    input: String,
+): String {
+    if (qualifiedName(name, namespace) != "web.run") {
+        return functionToolOngoingSummary(name, namespace)
+    }
+    val commands = runCatching {
+        HistoryViewJson.decodeFromString(SearchCommands.serializer(), input)
+    }.getOrNull()
+    return commands?.ongoingToolSummary() ?: "Searching the web"
+}
+
+private fun PendingCommandExecutionAction.ongoingToolSummary(
+    sourceArguments: ExecCommandArguments? = null,
+): String = when (this) {
+    is PendingCommandExecutionAction.ExecCommand -> arguments.ongoingToolSummary()
+    is PendingCommandExecutionAction.WriteStdin -> arguments.ongoingToolSummary(sourceArguments)
+}
+
+private fun ExecCommandArguments.ongoingToolSummary(): String =
+    command.singleLineSummary()
+        .takeIf(String::isNotBlank)
+        ?.let { command -> "Running: $command" }
+        ?: "Running a command"
+
+private fun WriteStdinArguments.ongoingToolSummary(
+    sourceArguments: ExecCommandArguments? = null,
+): String {
+    val command = sourceArguments
+        ?.command
+        ?.singleLineSummary()
+        ?.takeIf(String::isNotBlank)
+    return when {
+        command == null && chars.isEmpty() -> "Waiting for terminal session $sessionId"
+        command == null -> "Interacting with terminal session $sessionId"
+        chars.isEmpty() -> "Waiting for $command"
+        else -> "Interacting with $command"
+    }
+}
+
+private fun ImageGenToolArguments.ongoingToolSummary(): String =
+    prompt.singleLineSummary()
+        .takeIf(String::isNotBlank)
+        ?.let { prompt -> "Generating an image: $prompt" }
+        ?: "Generating an image"
+
+private fun ViewImageToolArguments.ongoingToolSummary(): String =
+    path.singleLineSummary()
+        .takeIf(String::isNotBlank)
+        ?.let { path -> "Viewing image: $path" }
+        ?: "Viewing an image"
+
+private fun RequestUserInputArgs.ongoingToolSummary(): String =
+    questions.firstOrNull()
+        ?.question
+        ?.singleLineSummary()
+        ?.takeIf(String::isNotBlank)
+        ?.let { question -> "Waiting for user input: $question" }
+        ?: "Waiting for user input"
+
+private fun SearchToolCallParams.ongoingToolSummary(): String =
+    query.singleLineSummary()
+        .takeIf(String::isNotBlank)
+        ?.let { query -> "Searching available tools: $query" }
+        ?: "Searching available tools"
+
+internal fun JsonElement.ongoingServerToolSearchSummary(): String {
+    val paths = ((this as? JsonObject)?.get("paths") as? JsonArray)
+        ?.mapNotNull { value -> (value as? JsonPrimitive)?.contentOrNull }
+        ?.map(String::singleLineSummary)
+        ?.filter(String::isNotBlank)
+        .orEmpty()
+    return paths.takeIf(List<String>::isNotEmpty)
+        ?.joinToString(prefix = "Searching cloud tools: ")
+        ?: "Searching cloud tools"
+}
+
+private fun SearchCommands.ongoingToolSummary(): String = when {
+    !searchQuery.isNullOrEmpty() -> searchQuery.orEmpty().first().q.singleLineSummary()
+        .takeIf(String::isNotBlank)
+        ?.let { query -> "Searching the web: $query" }
+        ?: "Searching the web"
+
+    !imageQuery.isNullOrEmpty() -> imageQuery.orEmpty().first().q.singleLineSummary()
+        .takeIf(String::isNotBlank)
+        ?.let { query -> "Searching images: $query" }
+        ?: "Searching images"
+
+    !open.isNullOrEmpty() -> "Opening a web page"
+    !click.isNullOrEmpty() -> "Following a web link"
+    !find.isNullOrEmpty() -> "Searching a web page for text"
+    !screenshot.isNullOrEmpty() -> "Capturing a web page"
+    !finance.isNullOrEmpty() -> "Looking up market data"
+    !weather.isNullOrEmpty() -> "Checking the weather"
+    !sports.isNullOrEmpty() -> "Checking sports information"
+    !time.isNullOrEmpty() -> "Checking the time"
+    else -> "Using web search"
+}
+
+private fun PendingMultiAgentInvocation.ongoingToolSummary(): String = when (this) {
+    is PendingMultiAgentInvocation.SpawnAgent -> "Starting agent: ${arguments.taskName.singleLineSummary()}"
+    is PendingMultiAgentInvocation.SendMessage -> "Sending message to agent: ${arguments.target.singleLineSummary()}"
+    is PendingMultiAgentInvocation.FollowupTask -> "Resuming task for agent: ${arguments.target.singleLineSummary()}"
+    is PendingMultiAgentInvocation.WaitAgent -> "Waiting for an agent"
+    is PendingMultiAgentInvocation.InterruptAgent -> "Interrupting agent: ${arguments.target.singleLineSummary()}"
+    is PendingMultiAgentInvocation.ListAgents -> arguments.pathPrefix
+        ?.singleLineSummary()
+        ?.takeIf(String::isNotBlank)
+        ?.let { prefix -> "Listing agents under: $prefix" }
+        ?: "Listing agents"
+}
+
+internal fun functionToolSummary(
+    name: String,
+    namespace: String?,
+    failed: Boolean = false,
+): String = when (qualifiedName(name, namespace)) {
+    "exec_command",
+    "shell.run",
+        -> if (failed) "Failed to run a command" else "Run a command"
+
+    "write_stdin" -> if (failed) "Failed to interact with a terminal session" else "Interact with a terminal session"
+    "view_image" -> if (failed) "Failed to view an image" else "View an image"
+    "image_gen.imagegen" -> if (failed) "Failed to generate an image" else "Generate an image"
+    "request_user_input" -> if (failed) "Failed to collect user input" else "Ask the user for input"
+    "tool_search",
+    "server_tool_search",
+        -> if (failed) "Failed to search available tools" else "Search available tools"
+
+    "web.run",
+    "hosted_web_search",
+        -> if (failed) "Failed to search the web" else "Search the web"
+
+    "hosted_image_generation" -> if (failed) "Failed to generate an image" else "Generate an image"
+    "spawn_agent" -> if (failed) "Failed to start an agent" else "Start an agent"
+    "send_message" -> if (failed) "Failed to send a message to an agent" else "Message an agent"
+    "followup_task" -> if (failed) "Failed to resume an agent task" else "Resume an agent task"
+    "wait_agent" -> if (failed) "Failed to wait for an agent" else "Wait for an agent"
+    "interrupt_agent" -> if (failed) "Failed to interrupt an agent" else "Interrupt an agent"
+    "list_agents" -> if (failed) "Failed to list agents" else "List agents"
+    "update_plan" -> if (failed) "Failed to update the plan" else "Update the plan"
+    "get_context_remaining" -> if (failed) "Failed to check remaining context" else "Check remaining context"
+    "clock.curr_time" -> if (failed) "Failed to check the current time" else "Check the current time"
+    else -> qualifiedName(name, namespace).stableToolSummary(failed)
 }
 
 private fun customToolSummary(
     name: String,
     namespace: String?,
     input: String,
+    failed: Boolean = false,
 ): String {
     if (qualifiedName(name, namespace) != "web.run") {
-        return functionToolSummary(name, namespace)
+        return functionToolSummary(name, namespace, failed)
     }
     val commands = runCatching {
         HistoryViewJson.decodeFromString(SearchCommands.serializer(), input)
     }.getOrNull()
-    return commands?.toolSummary() ?: "Search the web"
+    return commands?.toolSummary(failed) ?: if (failed) "Failed to search the web" else "Search the web"
 }
 
 private fun StableCommandExecutionAction.toolSummary(
     sourceArguments: ExecCommandArguments? = null,
+    failed: Boolean = false,
 ): String = when (this) {
-    is StableCommandExecutionAction.ExecCommand -> arguments.toolSummary()
-    is StableCommandExecutionAction.WriteStdin -> arguments.toolSummary(sourceArguments)
+    is StableCommandExecutionAction.ExecCommand -> arguments.toolSummary(failed)
+    is StableCommandExecutionAction.WriteStdin -> arguments.toolSummary(sourceArguments, failed)
 }
 
 private fun PendingCommandExecutionAction.toolSummary(
@@ -1519,111 +1676,141 @@ private fun PendingCommandExecutionAction.toolSummary(
     is PendingCommandExecutionAction.WriteStdin -> arguments.toolSummary(sourceArguments)
 }
 
-private fun ExecCommandArguments.toolSummary(): String =
+private fun ExecCommandArguments.toolSummary(failed: Boolean = false): String =
     command.singleLineSummary()
         .takeIf(String::isNotBlank)
-        ?.let { command -> "Run: $command" }
-        ?: "Run"
+        ?.let { command -> if (failed) "Failed to run: $command" else "Run: $command" }
+        ?: if (failed) "Failed to run" else "Run"
 
-private fun WriteStdinArguments.toolSummary(sourceArguments: ExecCommandArguments? = null): String {
+private fun WriteStdinArguments.toolSummary(
+    sourceArguments: ExecCommandArguments? = null,
+    failed: Boolean = false,
+): String {
     val command = sourceArguments
         ?.command
         ?.singleLineSummary()
         ?.takeIf(String::isNotBlank)
     return when {
-        command == null && chars.isEmpty() -> "Wait for terminal session $sessionId"
-        command == null -> "Interact with terminal session $sessionId"
-        chars.isEmpty() -> "Wait for $command"
-        else -> "Interact with $command"
+        command == null && chars.isEmpty() ->
+            if (failed) "Failed to wait for terminal session $sessionId" else "Wait for terminal session $sessionId"
+
+        command == null ->
+            if (failed) "Failed to interact with terminal session $sessionId" else "Interact with terminal session $sessionId"
+
+        chars.isEmpty() -> if (failed) "Failed to wait for $command" else "Wait for $command"
+        else -> if (failed) "Failed to interact with $command" else "Interact with $command"
     }
 }
 
-private fun ImageGenToolArguments.toolSummary(): String = prompt.imageGenerationSummary()
+private fun ImageGenToolArguments.toolSummary(failed: Boolean = false): String =
+    prompt.imageGenerationSummary(failed)
 
-private fun String.imageGenerationSummary(): String =
+private fun String.imageGenerationSummary(failed: Boolean = false): String =
     singleLineSummary()
         .takeIf(String::isNotBlank)
-        ?.let { prompt -> "Generate an image: $prompt" }
-        ?: "Generate an image"
+        ?.let { prompt ->
+            if (failed) "Failed to generate an image: $prompt" else "Generate an image: $prompt"
+        }
+        ?: if (failed) "Failed to generate an image" else "Generate an image"
 
-private fun ViewImageToolArguments.toolSummary(): String =
+private fun ViewImageToolArguments.toolSummary(failed: Boolean = false): String =
     path.singleLineSummary()
         .takeIf(String::isNotBlank)
-        ?.let { path -> "View image: $path" }
-        ?: "View an image"
+        ?.let { path -> if (failed) "Failed to view image: $path" else "View image: $path" }
+        ?: if (failed) "Failed to view an image" else "View an image"
 
-private fun RequestUserInputArgs.toolSummary(): String =
+private fun RequestUserInputArgs.toolSummary(failed: Boolean = false): String =
     questions.firstOrNull()
         ?.question
         ?.singleLineSummary()
         ?.takeIf(String::isNotBlank)
-        ?.let { question -> "Ask the user: $question" }
-        ?: "Ask the user for input"
+        ?.let { question ->
+            if (failed) "Failed to collect user input: $question" else "Ask the user: $question"
+        }
+        ?: if (failed) "Failed to collect user input" else "Ask the user for input"
 
-private fun SearchToolCallParams.toolSummary(): String =
+private fun SearchToolCallParams.toolSummary(failed: Boolean = false): String =
     query.singleLineSummary()
         .takeIf(String::isNotBlank)
-        ?.let { query -> "Search available tools: $query" }
-        ?: "Search available tools"
+        ?.let { query ->
+            if (failed) "Failed to search available tools: $query" else "Search available tools: $query"
+        }
+        ?: if (failed) "Failed to search available tools" else "Search available tools"
 
-internal fun JsonElement.serverToolSearchSummary(): String {
+internal fun JsonElement.serverToolSearchSummary(failed: Boolean = false): String {
     val paths = ((this as? JsonObject)?.get("paths") as? JsonArray)
         ?.mapNotNull { value -> (value as? JsonPrimitive)?.contentOrNull }
         ?.map(String::singleLineSummary)
         ?.filter(String::isNotBlank)
         .orEmpty()
+    val prefix = if (failed) "Failed to search cloud tools: " else "Search cloud tools: "
     return paths.takeIf(List<String>::isNotEmpty)
-        ?.joinToString(prefix = "Cloud tool search: ")
-        ?: "Cloud tool search"
+        ?.joinToString(prefix = prefix)
+        ?: if (failed) "Failed to search cloud tools" else "Search cloud tools"
 }
 
-private fun SearchCommands.toolSummary(): String = when {
+private fun SearchCommands.toolSummary(failed: Boolean = false): String = when {
     !searchQuery.isNullOrEmpty() -> searchQuery.orEmpty().first().q.singleLineSummary()
         .takeIf(String::isNotBlank)
-        ?.let { query -> "Search the web: $query" }
-        ?: "Search the web"
+        ?.let { query -> if (failed) "Failed to search the web: $query" else "Search the web: $query" }
+        ?: if (failed) "Failed to search the web" else "Search the web"
 
     !imageQuery.isNullOrEmpty() -> imageQuery.orEmpty().first().q.singleLineSummary()
         .takeIf(String::isNotBlank)
-        ?.let { query -> "Search images: $query" }
-        ?: "Search images"
+        ?.let { query -> if (failed) "Failed to search images: $query" else "Search images: $query" }
+        ?: if (failed) "Failed to search images" else "Search images"
 
-    !open.isNullOrEmpty() -> "Open a web page"
-    !click.isNullOrEmpty() -> "Follow a web link"
-    !find.isNullOrEmpty() -> "Find text on a web page"
-    !screenshot.isNullOrEmpty() -> "Capture a web page"
-    !finance.isNullOrEmpty() -> "Look up market data"
-    !weather.isNullOrEmpty() -> "Check the weather"
-    !sports.isNullOrEmpty() -> "Check sports information"
-    !time.isNullOrEmpty() -> "Check the time"
-    else -> "Use web search"
+    !open.isNullOrEmpty() -> if (failed) "Failed to open a web page" else "Open a web page"
+    !click.isNullOrEmpty() -> if (failed) "Failed to follow a web link" else "Follow a web link"
+    !find.isNullOrEmpty() -> if (failed) "Failed to search a web page for text" else "Search a web page for text"
+    !screenshot.isNullOrEmpty() -> if (failed) "Failed to capture a web page" else "Capture a web page"
+    !finance.isNullOrEmpty() -> if (failed) "Failed to look up market data" else "Look up market data"
+    !weather.isNullOrEmpty() -> if (failed) "Failed to check the weather" else "Check the weather"
+    !sports.isNullOrEmpty() -> if (failed) "Failed to check sports information" else "Check sports information"
+    !time.isNullOrEmpty() -> if (failed) "Failed to check the time" else "Check the time"
+    else -> if (failed) "Failed to use web search" else "Use web search"
 }
 
-private fun WebSearchAction.toolSummary(): String = when (this) {
+private fun WebSearchAction.toolSummary(failed: Boolean = false): String = when (this) {
     is WebSearchAction.Search -> (query ?: queries?.firstOrNull())
         ?.singleLineSummary()
         ?.takeIf(String::isNotBlank)
-        ?.let { query -> "Search the web: $query" }
-        ?: "Search the web"
+        ?.let { query -> if (failed) "Failed to search the web: $query" else "Search the web: $query" }
+        ?: if (failed) "Failed to search the web" else "Search the web"
 
-    is WebSearchAction.OpenPage -> "Open a web page"
-    is WebSearchAction.FindInPage -> "Find text on a web page"
-    WebSearchAction.Other -> "Use web search"
+    is WebSearchAction.OpenPage -> if (failed) "Failed to open a web page" else "Open a web page"
+    is WebSearchAction.FindInPage ->
+        if (failed) "Failed to search a web page for text" else "Search a web page for text"
+
+    WebSearchAction.Other -> if (failed) "Failed to use web search" else "Use web search"
 }
 
-private fun SpawnAgentArgs.toolSummary(): String = "Start agent: ${taskName.singleLineSummary()}"
+private fun SpawnAgentArgs.toolSummary(failed: Boolean = false): String =
+    if (failed) "Failed to start agent: ${taskName.singleLineSummary()}" else {
+        "Start agent: ${taskName.singleLineSummary()}"
+    }
 
-private fun SendMessageArgs.toolSummary(): String = "Message agent: ${target.singleLineSummary()}"
+private fun SendMessageArgs.toolSummary(failed: Boolean = false): String =
+    if (failed) "Failed to send message to agent: ${target.singleLineSummary()}" else {
+        "Message agent: ${target.singleLineSummary()}"
+    }
 
-private fun FollowupTaskArgs.toolSummary(): String = "Resume task for agent: ${target.singleLineSummary()}"
+private fun FollowupTaskArgs.toolSummary(failed: Boolean = false): String =
+    if (failed) "Failed to resume task for agent: ${target.singleLineSummary()}" else {
+        "Resume task for agent: ${target.singleLineSummary()}"
+    }
 
 private fun WaitAgentArgs.toolSummary(): String = "Wait for an agent"
 
-private fun InterruptAgentArgs.toolSummary(): String = "Interrupt agent: ${target.singleLineSummary()}"
+private fun InterruptAgentArgs.toolSummary(failed: Boolean = false): String =
+    if (failed) "Failed to interrupt agent: ${target.singleLineSummary()}" else {
+        "Interrupt agent: ${target.singleLineSummary()}"
+    }
 
-private fun ListAgentsArgs.toolSummary(): String =
+private fun ListAgentsArgs.toolSummary(failed: Boolean = false): String =
     pathPrefix?.singleLineSummary()?.takeIf(String::isNotBlank)?.let { prefix -> "List agents under: $prefix" }
-        ?: "List agents"
+        ?.let { summary -> if (failed) "Failed to ${summary.lowercase()}" else summary }
+        ?: if (failed) "Failed to list agents" else "List agents"
 
 private fun PendingMultiAgentInvocation.toolSummary(): String = when (this) {
     is PendingMultiAgentInvocation.SpawnAgent -> arguments.toolSummary()
@@ -1633,6 +1820,9 @@ private fun PendingMultiAgentInvocation.toolSummary(): String = when (this) {
     is PendingMultiAgentInvocation.InterruptAgent -> arguments.toolSummary()
     is PendingMultiAgentInvocation.ListAgents -> arguments.toolSummary()
 }
+
+private fun String.stableToolSummary(failed: Boolean): String =
+    if (failed) "Failed to run $this" else this
 
 private fun String.singleLineSummary(): String =
     lineSequence()

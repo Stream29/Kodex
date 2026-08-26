@@ -43,7 +43,7 @@ internal fun StableRequestUserInputToolEvent.renderRequestUserInput(
 
         (result as? StableRequestUserInputResult.Failure)?.let { failure ->
             WrappedHistoryText(
-                value = "Unable to submit: ${failure.message}",
+                value = "Failed to submit: ${failure.message}",
                 textStyle = TextStyle.Dim,
                 color = TuiTheme.colorScheme.error,
             )

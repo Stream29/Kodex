@@ -373,7 +373,7 @@ private fun StoredHistoryContent(
 ) {
     when (item) {
         is ReasoningHistoryItemViewModel -> HistoryItemHeader(
-            value = "Thinking",
+            value = "Think",
             elapsed = item.elapsed,
             modifier = Modifier.fillMaxWidth(),
             textStyle = TextStyle.Dim,
@@ -580,19 +580,41 @@ private fun ToolHistoryItemHeader.CommandExecution.summary(
     session: AgentShellSession?,
 ): String = when (val action = action) {
     is CommandExecutionHistoryAction.Run ->
-        action.command.takeIf(String::isNotBlank)?.let { command -> "Run: $command" } ?: "Run"
+        action.command.takeIf(String::isNotBlank)?.let { command ->
+            if (result == CommandExecutionHistoryResult.Failure) "Failed to run: $command" else "Run: $command"
+        } ?: if (result == CommandExecutionHistoryResult.Failure) "Failed to run" else "Run"
 
     is CommandExecutionHistoryAction.Interact ->
         session?.arguments?.command?.historyCommandPreview()
             ?.takeIf(String::isNotBlank)
-            ?.let { command -> "Interact with $command" }
-            ?: "Interact with terminal session ${action.sessionId}"
+            ?.let { command ->
+                if (result == CommandExecutionHistoryResult.Failure) {
+                    "Failed to interact with $command"
+                } else {
+                    "Interact with $command"
+                }
+            }
+            ?: if (result == CommandExecutionHistoryResult.Failure) {
+                "Failed to interact with terminal session ${action.sessionId}"
+            } else {
+                "Interact with terminal session ${action.sessionId}"
+            }
 
     is CommandExecutionHistoryAction.Wait ->
         session?.arguments?.command?.historyCommandPreview()
             ?.takeIf(String::isNotBlank)
-            ?.let { command -> "Wait for $command" }
-            ?: "Wait for terminal session ${action.sessionId}"
+            ?.let { command ->
+                if (result == CommandExecutionHistoryResult.Failure) {
+                    "Failed to wait for $command"
+                } else {
+                    "Wait for $command"
+                }
+            }
+            ?: if (result == CommandExecutionHistoryResult.Failure) {
+                "Failed to wait for terminal session ${action.sessionId}"
+            } else {
+                "Wait for terminal session ${action.sessionId}"
+            }
 }
 
 private fun ToolHistoryItemHeader.CommandExecution.status(
@@ -609,8 +631,8 @@ private fun ToolHistoryItemHeader.CommandExecution.status(
 
 private fun io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemHeader.summary(): String {
     val verb = when (status) {
-        PatchHistoryItemStatus.Completed -> "Edited"
-        PatchHistoryItemStatus.Failed -> "Editing"
+        PatchHistoryItemStatus.Completed -> "Edit"
+        PatchHistoryItemStatus.Failed -> "Failed to edit"
     }
     return when (val target = target) {
         is PatchHistoryItemTarget.SingleFile -> "$verb ${target.filename}"

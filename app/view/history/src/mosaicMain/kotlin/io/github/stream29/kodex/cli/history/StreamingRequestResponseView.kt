@@ -46,7 +46,7 @@ private fun StreamingMessageTail(
 ) {
     val snapshot = rememberStreamingSnapshot(events, onContentChange)
     StreamingTextTail(
-        header = "Assistant streaming",
+        header = "Assistant responding",
         parts = snapshot.messageParts,
         headerStyle = TextStyle.Bold,
     )
@@ -59,8 +59,8 @@ private fun StreamingAgentMessageTail(
 ) {
     val snapshot = rememberStreamingSnapshot(events, onContentChange)
     val header = (snapshot.item as? ResponseItem.AgentMessage)
-        ?.let { item -> "${item.author} → ${item.recipient} streaming" }
-        ?: "Agent message streaming"
+        ?.let { item -> "Sending message: ${item.author} → ${item.recipient}" }
+        ?: "Sending an agent message"
     StreamingTextTail(
         header = header,
         parts = snapshot.messageParts,
@@ -75,7 +75,7 @@ private fun StreamingReasoningTail(
 ) {
     val snapshot = rememberStreamingSnapshot(events, onContentChange)
     StreamingTextTail(
-        header = "Thinking streaming",
+        header = "Thinking",
         parts = snapshot.reasoningSummaryParts,
         headerStyle = TextStyle.Dim,
         detailStyle = TextStyle.Dim,
@@ -327,85 +327,85 @@ private fun ResponseItem?.streamingToolPresentation(
     webSearchStatus: String?,
 ): StreamingToolPresentation = when (this) {
     is ResponseItem.FunctionCall -> StreamingToolPresentation(
-        summary = functionToolSummary(name, namespace),
+        summary = functionToolOngoingSummary(name, namespace),
         rawName = qualifiedStreamingName(name, namespace),
         status = "streaming",
     )
 
     is ResponseItem.CustomToolCall -> StreamingToolPresentation(
-        summary = functionToolSummary(name, namespace),
+        summary = customToolOngoingSummary(name, namespace, input),
         rawName = qualifiedStreamingName(name, namespace),
         status = status ?: "streaming",
     )
 
     is ResponseItem.ClientToolSearchCall -> StreamingToolPresentation(
-        summary = "Search available tools",
+        summary = "Searching available tools",
         rawName = "tool_search",
         status = status ?: "streaming",
     )
 
     is ResponseItem.ServerToolSearchCall -> StreamingToolPresentation(
-        summary = arguments.serverToolSearchSummary(),
+        summary = arguments.ongoingServerToolSearchSummary(),
         rawName = "server_tool_search",
         status = status ?: "streaming",
     )
 
     is ResponseItem.LocalShellCall -> StreamingToolPresentation(
-        summary = "Run a command",
+        summary = "Running a command",
         rawName = "shell",
         status = status.name.lowercase(),
     )
 
     is ResponseItem.WebSearchCall -> StreamingToolPresentation(
-        summary = "Search the web",
+        summary = "Searching the web",
         rawName = "hosted_web_search",
         status = webSearchStatus ?: status ?: "streaming",
     )
 
     is ResponseItem.ImageGenerationCall -> StreamingToolPresentation(
-        summary = "Generate an image",
+        summary = "Generating an image",
         rawName = "hosted_image_generation",
         status = status,
     )
 
     is ResponseItem.FunctionCallOutput -> StreamingToolPresentation(
-        summary = "Receive a tool result",
+        summary = "Receiving a tool result",
         rawName = null,
         status = "streaming",
     )
 
     is ResponseItem.McpToolCallOutput -> StreamingToolPresentation(
-        summary = "Receive an MCP tool result",
+        summary = "Receiving an MCP tool result",
         rawName = null,
         status = "streaming",
     )
 
     is ResponseItem.CustomToolCallOutput -> StreamingToolPresentation(
-        summary = "Receive a tool result",
+        summary = "Receiving a tool result",
         rawName = null,
         status = "streaming",
     )
 
     is ResponseItem.ClientToolSearchOutput -> StreamingToolPresentation(
-        summary = "Receive available tools",
+        summary = "Receiving available tools",
         rawName = null,
         status = status,
     )
 
     is ResponseItem.ServerToolSearchOutput -> StreamingToolPresentation(
-        summary = "Receive available tools",
+        summary = "Receiving available tools",
         rawName = null,
         status = status,
     )
 
     is ResponseItem.AdditionalTools -> StreamingToolPresentation(
-        summary = "Update the available tool catalog",
+        summary = "Updating the available tool catalog",
         rawName = null,
         status = "streaming",
     )
 
     else -> StreamingToolPresentation(
-        summary = "Run a tool",
+        summary = "Running a tool",
         rawName = null,
         status = "streaming",
     )

@@ -182,7 +182,7 @@ class PatchToolEventViewTest {
 
         runMosaicTest {
             assertEquals(
-                "> Editing file.txt +1.5s",
+                "> Failed to edit file.txt +1.5s",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
                         StablePatchToolEventView(
@@ -194,7 +194,7 @@ class PatchToolEventViewTest {
             )
 
             assertEquals(
-                "> Edi... +1.5s",
+                "> Fai... +1.5s",
                 setContentAndSnapshot {
                     Box(Modifier.width(14)) {
                         StablePatchToolEventView(
