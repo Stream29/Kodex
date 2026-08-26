@@ -47,6 +47,9 @@ public interface PersistedSessionViewModel : SessionViewModel {
         target: AgentHistoryTarget,
     ): Int
 
+    /** Forks the complete current root storage into a new root Session. */
+    public suspend fun fork(): Int
+
     public fun dismissNotification(notificationId: Long): Unit
 
     /**

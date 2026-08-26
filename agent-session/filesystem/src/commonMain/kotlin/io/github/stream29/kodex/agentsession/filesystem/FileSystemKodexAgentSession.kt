@@ -12,6 +12,9 @@ import io.github.stream29.kodex.agentsession.multiagent.AgentPathResolverImpl
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.forkRangeTo
+import io.github.stream29.kodex.agentstorage.filesystem.forkRangeRawTo
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
@@ -104,6 +107,30 @@ private class FileSystemSubagentRepository(
         createEmptyFileSystemAgentSessionNode(Path(directory, entryIndex.toString()), fileSystem)
         mutableEntries.value = (entries.value + entryIndex).sorted()
         entryIndex
+    }
+
+    override suspend fun createFork(
+        source: KodexAgentStorage,
+        from: Int,
+        until: Int,
+    ): Int = entriesMutex.withLock {
+        requireActive()
+        val entryIndex = smallestMissing(entries.value)
+        val agentDirectory = Path(directory, entryIndex.toString())
+        try {
+            createEmptyFileSystemAgentSessionNode(agentDirectory, fileSystem)
+            val target = FileSystemAgentStorage(agentDirectory, fileSystem)
+            when (source) {
+                is CachedAgentStorage -> source.backing.forkRangeRawTo(from, until, target)
+                is FileSystemAgentStorage -> source.forkRangeRawTo(from, until, target)
+                else -> source.forkRangeTo(from, until, target)
+            }
+            mutableEntries.value = (entries.value + entryIndex).sorted()
+            entryIndex
+        } catch (failure: Throwable) {
+            withContext(NonCancellable) { deleteRecursively(agentDirectory, fileSystem) }
+            throw failure
+        }
     }
 
     override suspend fun open(entryIndex: Int): KodexAgentSession = entriesMutex.withLock {

@@ -3,8 +3,6 @@ package io.github.stream29.kodex.cli.session
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexRootSessionEntry
 import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
-import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
-import io.github.stream29.kodex.agentstorage.contract.forkTo
 import io.github.stream29.kodex.agentstorage.contract.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -68,8 +66,12 @@ public class DefaultPersistedSessionViewModelRegistry(
     private val opened = linkedMapOf<Int, PersistedSessionViewModelImpl>()
 
     override suspend fun open(sessionIndex: Int): PersistedSessionViewModel = mutex.withLock {
-        opened[sessionIndex] ?: createOpened(sessionIndex).also {
-            opened[sessionIndex] = it
+        opened[sessionIndex]?.let { existing ->
+            existing.unarchive()
+            return@withLock existing
+        }
+        createOpened(sessionIndex).also { created ->
+            opened[sessionIndex] = created
         }
     }
 
@@ -77,7 +79,7 @@ public class DefaultPersistedSessionViewModelRegistry(
         initialSettings: (sessionIndex: Int) -> KodexAgentSettings,
     ): PersistedSessionViewModel = mutex.withLock {
         val ownerScope = scope.supervisorChildScope()
-        var repository: KodexSessionRepository? = null
+        var repository: KodexRootSessionRepository? = null
         var index: Int? = null
         try {
             val createdRepository = repositoryFactory.create(ownerScope)
@@ -102,6 +104,44 @@ public class DefaultPersistedSessionViewModelRegistry(
                 ownerScope.cancelAndJoin()
             }
             throw failure
+        }
+    }
+
+    override suspend fun archive(sessionIndex: Int): Unit = mutex.withLock {
+        opened[sessionIndex]?.let { existing ->
+            existing.archive()
+            return@withLock
+        }
+        withRepository { repository ->
+            repository.getEntry(sessionIndex).archive()
+        }
+    }
+
+    override suspend fun unarchive(sessionIndex: Int): Unit = mutex.withLock {
+        opened[sessionIndex]?.let { existing ->
+            existing.unarchive()
+            return@withLock
+        }
+        withRepository { repository ->
+            repository.getEntry(sessionIndex).unarchive()
+        }
+    }
+
+    override suspend fun fork(sessionIndex: Int): Int = mutex.withLock {
+        opened[sessionIndex]?.let { existing -> return@withLock existing.fork() }
+        val ownerScope = scope.supervisorChildScope()
+        var temporary: PersistedSessionViewModelImpl? = null
+        try {
+            val repository = repositoryFactory.create(ownerScope)
+            require(sessionIndex in repository.list()) {
+                "No persisted Session at index $sessionIndex."
+            }
+            temporary = buildOpened(sessionIndex, repository, ownerScope)
+            temporary.fork()
+        } finally {
+            withContext(NonCancellable) {
+                temporary?.shutdown() ?: ownerScope.cancelAndJoin()
+            }
         }
     }
 
@@ -147,7 +187,9 @@ public class DefaultPersistedSessionViewModelRegistry(
             require(index in repository.list()) {
                 "No persisted Session at index $index."
             }
-            buildOpened(index, repository, ownerScope)
+            buildOpened(index, repository, ownerScope).also { created ->
+                created.unarchive()
+            }
         } catch (failure: Throwable) {
             withContext(NonCancellable) { ownerScope.cancelAndJoin() }
             throw failure
@@ -156,7 +198,7 @@ public class DefaultPersistedSessionViewModelRegistry(
 
     private suspend fun buildOpened(
         index: Int,
-        repository: KodexSessionRepository,
+        repository: KodexRootSessionRepository,
         ownerScope: CoroutineScope,
         initialize: suspend (KodexAgentSession) -> Unit = {},
     ): PersistedSessionViewModelImpl {
@@ -172,7 +214,7 @@ public class DefaultPersistedSessionViewModelRegistry(
     }
 
     private suspend fun <T> withRepository(
-        block: suspend (KodexSessionRepository) -> T,
+        block: suspend (KodexRootSessionRepository) -> T,
     ): T {
         val ownerScope = scope.supervisorChildScope()
         return try {
@@ -200,7 +242,7 @@ public fun interface PersistedSessionAgentViewModelFactory {
 private class PersistedSessionViewModelImpl(
     override val sessionIndex: Int,
     private val rootSession: KodexAgentSession,
-    private val repository: KodexSessionRepository,
+    private val repository: KodexRootSessionRepository,
     private val ownerScope: CoroutineScope,
     private val agentFactory: PersistedSessionAgentViewModelFactory,
 ) : PersistedSessionViewModel {
@@ -240,6 +282,16 @@ private class PersistedSessionViewModelImpl(
         mutableLifecycle.asStateFlow()
     override val notification: StateFlow<PersistedSessionNotification?> =
         mutableNotification.asStateFlow()
+
+    suspend fun archive() {
+        ensureOpen()
+        repository.getEntry(sessionIndex).archive()
+    }
+
+    suspend fun unarchive() {
+        ensureOpen()
+        repository.getEntry(sessionIndex).unarchive()
+    }
 
     suspend fun initialize() {
         val rootAddress = AgentAddress(sessionIndex, rootSession.storage.id)
@@ -315,12 +367,55 @@ private class PersistedSessionViewModelImpl(
         ) {
             "Fork history entry $sourceIndex is no longer committed."
         }
-        val targetIndex = repository.create()
+        val targetIndex = repository.createFork(
+            source = sourceSession.runtime.storage,
+            from = 0,
+            until = target.untilExclusive,
+        )
         try {
             val targetSession = repository.open(targetIndex)
             try {
                 targetSession.runtime.modify { storage ->
-                    sourceSession.runtime.storage.forkTo(target.untilExclusive, storage)
+                    val latest = storage.latestIndex()
+                    val boundary = storage.settings[sourceIndex]
+                    val baseTitle = boundary.threadName.trim().ifEmpty {
+                        "Session $targetIndex"
+                    }
+                    storage.settings[latest + 1] = boundary.copy(
+                        threadName = "[fork] $baseTitle",
+                    )
+                }
+            } finally {
+                withContext(NonCancellable) { targetSession.cancelAndJoin() }
+            }
+            targetIndex
+        } catch (failure: Throwable) {
+            repository.delete(targetIndex)
+            publishFailure("Unable to fork Session.", failure)
+            throw failure
+        }
+    }
+
+    override suspend fun fork(): Int = mutex.withLock {
+        ensureOpen()
+        require(
+            !rootAgent.execution.value.running &&
+                rootAgent.execution.value.capabilities.canForkHistory,
+        ) {
+            "Cannot fork a running or unavailable Session."
+        }
+        val sourceStorage = rootSession.runtime.storage
+        val sourceIndex = sourceStorage.latestIndex()
+        require(sourceIndex >= 0) { "Cannot fork an uninitialized Session." }
+        val targetIndex = repository.createFork(
+            source = sourceStorage,
+            from = 0,
+            until = sourceIndex + 1,
+        )
+        try {
+            val targetSession = repository.open(targetIndex)
+            try {
+                targetSession.runtime.modify { storage ->
                     val latest = storage.latestIndex()
                     val boundary = storage.settings[sourceIndex]
                     val baseTitle = boundary.threadName.trim().ifEmpty {
@@ -693,6 +788,7 @@ private class PersistedSessionViewModelImpl(
 private class SessionCatalogViewModelImpl(
     private val repositoryFactory: KodexSessionRepositoryFactory,
     private val scope: CoroutineScope,
+    private val forkSession: suspend (sessionIndex: Int) -> Int,
     private val deleteSession: suspend (sessionIndex: Int) -> Boolean,
 ) : SessionCatalogViewModel {
     private val commandMutex = Mutex()
@@ -722,6 +818,12 @@ private class SessionCatalogViewModelImpl(
         updateEntry(previous, sessionIndex, archived = false)
     }
 
+    override suspend fun fork(sessionIndex: Int): Int = commandMutex.withLock {
+        val targetIndex = forkSession(sessionIndex)
+        reloadRepository(mutableState.value.showArchived)
+        targetIndex
+    }
+
     override suspend fun delete(sessionIndex: Int): Boolean = commandMutex.withLock {
         if (!deleteSession(sessionIndex)) return@withLock false
         val previous = mutableState.value
@@ -742,6 +844,15 @@ private class SessionCatalogViewModelImpl(
             }
         }
         true
+    }
+
+    private suspend fun reloadRepository(showArchived: Boolean) {
+        sessionRepository?.let { repository ->
+            withContext(NonCancellable) { repository.cancelAndJoin() }
+        }
+        sessionRepository = null
+        rootEntries = emptyMap()
+        reload(showArchived)
     }
 
     override fun close() {
@@ -821,11 +932,11 @@ internal fun createSessionCatalogViewModelFactory(
     @InjectedParam repositoryFactory: KodexSessionRepositoryFactory,
     @InjectedParam scope: CoroutineScope,
 ): SessionCatalogViewModelFactory =
-    SessionCatalogViewModelFactory {
-        deleteSession ->
+    SessionCatalogViewModelFactory { forkSession, deleteSession ->
         SessionCatalogViewModelImpl(
             repositoryFactory = repositoryFactory,
             scope = scope.supervisorChildScope(),
+            forkSession = forkSession,
             deleteSession = deleteSession,
         )
     }

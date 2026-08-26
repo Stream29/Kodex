@@ -166,8 +166,12 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             val nested = children.first().spawnInitialized("nested")
 
             assertSame(session, repository.open(index))
-            assertEquals(children.map { it.storage.id }, session.subagents.list().map { entry -> session.subagents.open(entry).storage.id })
-            assertEquals(listOf(nested.storage.id), children.first().subagents.list().map { entry -> children.first().subagents.open(entry).storage.id })
+            assertEquals(
+                children.map { it.storage.id },
+                session.subagents.list().map { entry -> session.subagents.open(entry).storage.id })
+            assertEquals(
+                listOf(nested.storage.id),
+                children.first().subagents.list().map { entry -> children.first().subagents.open(entry).storage.id })
             assertEquals(
                 (0..10).map(Int::toString),
                 SystemCoroutineFileSystem.list(Path(root, "sessions/0/subagents"))
@@ -272,8 +276,7 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             val archivedIndex = repository.createInitialized(settings("archived"))
             val activeIndex = repository.createInitialized(settings("active"))
             val marker = Path(root, "sessions/$archivedIndex/$ArchiveMarkerFile")
-            val archivedEntry = repository.listEntries()
-                .single { entry -> entry.entryIndex == archivedIndex }
+            val archivedEntry = repository.getEntry(archivedIndex)
 
             archivedEntry.archive()
             archivedEntry.archive()
@@ -543,20 +546,16 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
         }
 
         test("fork is a downstream operation and does not copy descendants") { root ->
-            val sourceRepository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val sourceCwd = Path(root, "source-workspace")
-            val sourceIndex = sourceRepository.createInitialized(settings("Source", sourceCwd))
-            val source = sourceRepository.open(sourceIndex)
+            val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            val sourceIndex = repository.createInitialized(settings("Source", sourceCwd))
+            val source = repository.open(sourceIndex)
             source.runtime.injectHistory(listOf(userMessage("copied")))
             source.spawnInitialized("child")
 
-            val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
-            val targetIndex = repository.create()
+            val targetIndex = repository.createFork(source.storage, from = 0, until = 2)
             val target = repository.open(targetIndex)
-            val latest = target.runtime.modify { storage ->
-                source.storage.forkTo(2, storage)
-                storage.latestIndex()
-            }
+            val latest = target.storage.latestIndex()
             target.runtime.updateSettings(
                 target.storage.settings[latest].copy(threadName = "[fork] Source"),
             )
@@ -567,7 +566,44 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             assertEquals(sourceCwd, target.storage.settings[2].cwd)
             assertEquals(emptyList(), target.subagents.list())
             repository.closeAndJoin()
+        }
+
+        test("failed fork removes its reserved session") { root ->
+            val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            val sourceIndex = repository.createInitialized(settings("Source"))
+            val source = repository.open(sourceIndex)
+            val entriesBefore = repository.list()
+
+            assertFailsWith<IllegalArgumentException> {
+                repository.createFork(
+                    source = source.storage,
+                    from = 0,
+                    until = source.storage.latestIndex() + 2,
+                )
+            }
+
+            assertEquals(entriesBefore, repository.list())
+            assertEquals(1, repository.create())
+            repository.closeAndJoin()
+        }
+
+        test("fork falls back across storage backends") { root ->
+            val sourceRepository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val targetRepository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            val source = sourceRepository.open(sourceRepository.createInitialized(settings("Source")))
+            source.runtime.injectHistory(listOf(userMessage("copied")))
+
+            val targetIndex = targetRepository.createFork(
+                source = source.storage,
+                from = 1,
+                until = 2,
+            )
+            val target = targetRepository.open(targetIndex)
+
+            assertEquals(0, target.storage.latestIndex())
+            assertEquals(userMessage("copied"), target.storage.stable[0])
             sourceRepository.closeAndJoin()
+            targetRepository.closeAndJoin()
         }
 
         test("owns each runtime for the complete Agent session lifecycle") { root ->

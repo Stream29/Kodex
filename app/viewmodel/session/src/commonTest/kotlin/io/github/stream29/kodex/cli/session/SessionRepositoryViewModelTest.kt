@@ -34,7 +34,10 @@ val sessionRepositoryViewModelTest by testSuite {
             val catalog = createSessionCatalogViewModelFactory(
                 KodexSessionRepositoryFactory { repository },
                 this,
-            ).create { sessionIndex -> store.delete(sessionIndex) }
+            ).create(
+                forkSession = { sessionIndex -> store.fork(sessionIndex) },
+                deleteSession = { sessionIndex -> store.delete(sessionIndex) },
+            )
             try {
                 assertEquals(SessionCatalogState.Unloaded, catalog.state.value)
                 val observedStates = mutableListOf<SessionCatalogState>()
@@ -83,7 +86,10 @@ val sessionRepositoryViewModelTest by testSuite {
             val catalog = createSessionCatalogViewModelFactory(
                 KodexSessionRepositoryFactory { repository },
                 this,
-            ).create { false }
+            ).create(
+                forkSession = { -1 },
+                deleteSession = { false },
+            )
             try {
                 catalog.refresh()
                 assertEquals(false, catalog.state.value.showArchived)

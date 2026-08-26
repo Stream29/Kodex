@@ -33,6 +33,7 @@ public data class ModelsResponse(
  * resolved context window when one is known.
  * @property effectiveContextWindowPercent Fraction of the resolved context
  * window usable for active conversation before the hard context limit.
+ * @property compHash Opaque provider compaction compatibility identifier.
  */
 @Serializable
 public data class ModelInfo(
@@ -53,6 +54,8 @@ public data class ModelInfo(
     public val maxContextWindow: Long? = null,
     @SerialName("auto_compact_token_limit")
     public val autoCompactionTokenLimit: Long? = null,
+    @SerialName("comp_hash")
+    public val compHash: String? = null,
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     @SerialName("effective_context_window_percent")
     public val effectiveContextWindowPercent: Long = DefaultEffectiveContextWindowPercent,

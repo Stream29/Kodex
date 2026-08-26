@@ -9,6 +9,7 @@ import io.github.stream29.kodex.agentstorage.contract.appendCompactionCheckpoint
 import io.github.stream29.kodex.agentstorage.contract.ceilToIndex
 import io.github.stream29.kodex.agentstorage.contract.floorToIndex
 import io.github.stream29.kodex.agentstorage.contract.forkTo
+import io.github.stream29.kodex.agentstorage.contract.forkRangeTo
 import io.github.stream29.kodex.agentstorage.contract.indexes
 import io.github.stream29.kodex.agentstorage.contract.indexesDescending
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
@@ -228,6 +229,22 @@ val inMemoryKodexAgentStorageTest by testSuite {
         assertFailsWith<IllegalArgumentException> {
             source.forkTo(until = 0, target = target)
         }
+    }
+
+    test("range fork rebases active state and compaction history") {
+        val source = storage(settings("initial"))
+        val target = storage(settings("target"))
+        source.settings[1] = settings("active")
+        source.compaction[2] = source.compaction[0].copy(historyBaseIndex = 3)
+        source.stable[3] = userMessage("retained")
+        source.stable[4] = assistantMessage("future")
+
+        source.forkRangeTo(from = 2, until = 4, target = target)
+
+        assertEquals(settings("active"), target.settings[0])
+        assertEquals(1, target.compaction[0].historyBaseIndex)
+        assertEquals(userMessage("retained"), target.stable[1])
+        assertEquals(listOf(1), target.stable.indexes().toList())
     }
 
     test("append compaction checkpoint stores replacement data and resets token count") {

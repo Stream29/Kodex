@@ -50,6 +50,9 @@ public interface SessionCatalogViewModel : AutoCloseable {
     /** Unarchives one root Session and updates the current snapshot. */
     public suspend fun unarchive(sessionIndex: Int): Unit
 
+    /** Forks one complete root Session and reloads the current catalog. */
+    public suspend fun fork(sessionIndex: Int): Int
+
     /** Deletes one root Session through the owning Application. */
     public suspend fun delete(sessionIndex: Int): Boolean
 
@@ -59,6 +62,7 @@ public interface SessionCatalogViewModel : AutoCloseable {
 /** Creates one lazy, independently disposable catalog popup child. */
 public fun interface SessionCatalogViewModelFactory {
     public fun create(
+        forkSession: suspend (sessionIndex: Int) -> Int,
         deleteSession: suspend (sessionIndex: Int) -> Boolean,
     ): SessionCatalogViewModel
 }

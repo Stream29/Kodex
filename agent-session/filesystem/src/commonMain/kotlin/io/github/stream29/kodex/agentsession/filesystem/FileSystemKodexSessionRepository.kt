@@ -7,7 +7,10 @@ import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
 import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemIndexVersioned
+import io.github.stream29.kodex.agentstorage.filesystem.forkRangeRawTo
 import io.github.stream29.kodex.agentstorage.filesystem.ofEmpty
+import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.forkRangeTo
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.filesystemlease.FileSystemLease
 import io.github.stream29.kodex.utils.filesystemlease.FileSystemLeaseInUseException
@@ -70,19 +73,33 @@ public class FileSystemKodexSessionRepository internal constructor(
         entries.value.mapNotNull { entryIndex ->
             val archived = isArchived(entryIndex)
             if (archived && !includeArchived) return@mapNotNull null
-            val entry = fileSystemRootSessionEntry(
-                entryIndex = entryIndex,
-                directory = sessionDirectory(entryIndex),
-                fileSystem = fileSystem,
-            )
-            FileSystemRootSessionEntry(
-                delegate = entry,
-                archived = archived,
-                updateArchived = { updated ->
-                    updateArchiveMarker(entryIndex, updated)
-                },
-            )
+            rootEntry(entryIndex, archived)
         }
+    }
+
+    override suspend fun getEntry(entryIndex: Int): KodexRootSessionEntry =
+        entriesMutex.withLock {
+            requireOpen()
+            requireEntry(entryIndex)
+            rootEntry(entryIndex, archived = isArchived(entryIndex))
+        }
+
+    private suspend fun rootEntry(
+        entryIndex: Int,
+        archived: Boolean,
+    ): KodexRootSessionEntry {
+        val entry = fileSystemRootSessionEntry(
+            entryIndex = entryIndex,
+            directory = sessionDirectory(entryIndex),
+            fileSystem = fileSystem,
+        )
+        return FileSystemRootSessionEntry(
+            delegate = entry,
+            archived = archived,
+            updateArchived = { updated ->
+                updateArchiveMarker(entryIndex, updated)
+            },
+        )
     }
 
     private suspend fun updateArchiveMarker(
@@ -112,6 +129,29 @@ public class FileSystemKodexSessionRepository internal constructor(
         fileSystem.createDirectories(Path(directory, SubagentsDirectory), mustCreate = true)
         mutableEntries.value = (entries.value + index).sorted()
         index
+    }
+
+    override suspend fun createFork(
+        source: KodexAgentStorage,
+        from: Int,
+        until: Int,
+    ): Int = entriesMutex.withLock {
+        requireOpen()
+        val (index, directory) = reserveSessionDirectory()
+        try {
+            val target = FileSystemAgentStorage.ofEmpty(
+                directory = directory,
+                fileSystem = fileSystem,
+                mustCreateDirectory = false,
+            )
+            fileSystem.createDirectories(Path(directory, SubagentsDirectory), mustCreate = true)
+            materializeFork(source, from, until, target)
+            mutableEntries.value = (entries.value + index).sorted()
+            index
+        } catch (failure: Throwable) {
+            withContext(NonCancellable) { deleteRecursively(directory) }
+            throw failure
+        }
     }
 
     private suspend fun reserveSessionDirectory(): Pair<Int, Path> {
@@ -231,6 +271,19 @@ public class FileSystemKodexSessionRepository internal constructor(
         check(coroutineContext[Job]?.isActive == true) { "Session repository is closed." }
     }
 
+}
+
+private suspend fun materializeFork(
+    source: KodexAgentStorage,
+    from: Int,
+    until: Int,
+    target: FileSystemAgentStorage,
+) {
+    when (source) {
+        is CachedAgentStorage -> source.backing.forkRangeRawTo(from, until, target)
+        is FileSystemAgentStorage -> source.forkRangeRawTo(from, until, target)
+        else -> source.forkRangeTo(from, until, target)
+    }
 }
 
 private suspend fun sessionDirectories(

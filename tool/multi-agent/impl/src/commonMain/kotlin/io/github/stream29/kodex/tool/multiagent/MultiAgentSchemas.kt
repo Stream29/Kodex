@@ -4,7 +4,6 @@ import kotlinx.schema.json.GenericPropertyDefinition
 import kotlinx.schema.json.JsonSchemaConstants.Types.NULL_TYPE
 import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.schema.json.PropertyBuilder
-import kotlinx.schema.json.obj
 import kotlinx.schema.json.string
 
 public val SpawnAgentParametersSchema: ObjectPropertyDefinition =
@@ -18,19 +17,11 @@ public val SpawnAgentParametersSchema: ObjectPropertyDefinition =
             required = true
             string { description = "Initial plain-text task for the new agent." }
         }
-        property("fork_turns") {
-            string {
-                description = "Optional number of turns to fork. Defaults to `all`. Use `none`, `all`, or a positive integer string such as `3` to fork only the most recent turns."
-            }
-        }
         property("model") {
             string { description = "Model override for the new agent. Omit unless an explicit override is needed." }
         }
         property("reasoning_effort") {
             string { description = "Reasoning effort override for the new agent. Omit to inherit the parent effort." }
-        }
-        property("service_tier") {
-            string { description = "Service tier override for the new agent. Omit unless explicitly requested." }
         }
     }
 

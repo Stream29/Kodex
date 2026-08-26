@@ -2,107 +2,29 @@ package io.github.stream29.kodex.tool.multiagent
 
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
-import io.github.stream29.kodex.openai.ServiceTier
 import kotlinx.serialization.EncodeDefault
-import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.descriptors.SerialDescriptor
-import kotlinx.serialization.encoding.Decoder
-import kotlinx.serialization.encoding.Encoder
-import kotlinx.serialization.json.JsonDecoder
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonPrimitive
-
-/** Decoded `fork_turns` selection for `spawn_agent`. */
-@Serializable(with = SpawnForkModeSerializer::class)
-public sealed interface SpawnForkMode {
-    /** Do not copy any parent conversation history. */
-    public data object None : SpawnForkMode
-
-    /** Copy the complete parent conversation history. */
-    public data object All : SpawnForkMode
-
-    /** Copy only the most recent [turns] parent turns. */
-    public data class Recent(public val turns: Int) : SpawnForkMode
-}
-
-/** Serializes [SpawnForkMode] as the string union accepted by `spawn_agent`. */
-public object SpawnForkModeSerializer : KSerializer<SpawnForkMode> {
-    override val descriptor: SerialDescriptor = JsonPrimitive.serializer().descriptor
-
-    override fun serialize(encoder: Encoder, value: SpawnForkMode) {
-        val forkTurns = when (value) {
-            SpawnForkMode.None -> "none"
-            SpawnForkMode.All -> "all"
-            is SpawnForkMode.Recent -> {
-                if (value.turns <= 0) {
-                    throw SerializationException(
-                        "fork_turns must be `none`, `all`, or a positive integer string",
-                    )
-                }
-                value.turns.toString()
-            }
-        }
-        encoder.encodeString(forkTurns)
-    }
-
-    override fun deserialize(decoder: Decoder): SpawnForkMode {
-        if (decoder is JsonDecoder) {
-            return when (val element = decoder.decodeJsonElement()) {
-                is JsonNull -> SpawnForkMode.All
-                is JsonPrimitive -> {
-                    if (!element.isString) {
-                        throw SerializationException("fork_turns must be a string")
-                    }
-                    parseSpawnForkMode(element.content)
-                }
-
-                else -> throw SerializationException("fork_turns must be a string")
-            }
-        }
-        return parseSpawnForkMode(decoder.decodeString())
-    }
-}
-
-private fun parseSpawnForkMode(value: String): SpawnForkMode {
-    val forkTurns = value.trim().ifEmpty { return SpawnForkMode.All }
-    if (forkTurns.equals("none", ignoreCase = true)) return SpawnForkMode.None
-    if (forkTurns.equals("all", ignoreCase = true)) return SpawnForkMode.All
-    val turns = forkTurns.toIntOrNull()
-    if (turns == null || turns <= 0) {
-        throw SerializationException(
-            "fork_turns must be `none`, `all`, or a positive integer string",
-        )
-    }
-    return SpawnForkMode.Recent(turns)
-}
 
 /**
  * Input for `spawn_agent`.
  *
- * @property forkTurns Defaults to the full-history fork. The serializer also treats a legacy
- * `null` value as `all`.
  * @property model Nullable because a child normally inherits its parent model; `null` means inherit.
  * @property reasoningEffort Nullable because a child normally inherits its parent effort; `null` means inherit.
- * @property serviceTier Nullable because a child normally inherits its parent tier; `null` means inherit.
+ *
+ * Unknown persisted fields such as legacy `fork_turns` and `service_tier` are
+ * intentionally ignored by the shared JSON codec.
  */
 @Serializable
 public data class SpawnAgentArgs(
     @SerialName("task_name")
     public val taskName: String,
     public val message: String,
-    @SerialName("fork_turns")
-    public val forkTurns: SpawnForkMode = SpawnForkMode.All,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val model: OpenAiModelId? = null,
     @SerialName("reasoning_effort")
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val reasoningEffort: ReasoningEffort? = null,
-    @SerialName("service_tier")
-    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
-    public val serviceTier: ServiceTier? = null,
 )
 
 /**

@@ -31,6 +31,7 @@ internal suspend fun FileSystemAgentStorage.cached(
     check(ownerScope.isActive) { "AgentSession storage is closed." }
     return CachedAgentStorage(
         ownerScope = ownerScope,
+        backing = this,
         storageId = id,
         cachedCompaction = compaction.cached(ownerScope, valueCacheSize),
         cachedSettings = settings.cached(ownerScope, valueCacheSize),
@@ -44,6 +45,7 @@ internal suspend fun FileSystemAgentStorage.cached(
 /** Session-owned cache over one filesystem AgentStorage. */
 internal class CachedAgentStorage internal constructor(
     private val ownerScope: CoroutineScope,
+    internal val backing: FileSystemAgentStorage,
     private val storageId: String,
     private val cachedCompaction: MutableIndexVersioned<CleanCompactionCheckpoint>,
     private val cachedSettings: MutableIndexVersioned<KodexAgentSettings>,

@@ -75,7 +75,7 @@ internal fun KodexAgentState.fixedTools(
                 add(CurrentTimeTools.createTool())
                 add(getContextRemainingTool(dependencies.modelCatalog))
                 add(updatePlanTool())
-                add(spawnAgentTool(agentPathResolver))
+                add(spawnAgentTool(agentPathResolver, dependencies.modelCatalog))
                 add(sendMessageTool(agentPathResolver))
                 add(followupTaskTool(agentPathResolver))
                 add(waitAgentTool(pendingSteer))

@@ -178,24 +178,63 @@ public suspend fun KodexAgentStorage.forkTo(
     until: Int,
     target: MutableKodexAgentStorage,
 ) {
+    forkRangeTo(from = 0, until = until, target = target)
+}
+
+/**
+ * Resets [target] and copies the source state range `[from, until)` into it.
+ *
+ * Stored timeline indexes are rebased by subtracting [from]. Compaction
+ * checkpoints are copied with their history base rebased by the same amount.
+ * Callers must choose a range beginning at a valid initialized snapshot.
+ */
+public suspend fun KodexAgentStorage.forkRangeTo(
+    from: Int,
+    until: Int,
+    target: MutableKodexAgentStorage,
+) {
     require(this !== target) { "Cannot fork a storage into itself." }
-    require(until > 0) { "A fork must include the initialized state at index 0." }
+    require(from >= 0) { "Fork start index must be non-negative." }
+    require(until > from) { "Fork range must not be empty." }
+    require(until <= latestIndex() + 1) { "Fork range exceeds source storage." }
     target.compaction.revertWithTransaction(0) {
         target.settings.revertWithTransaction(0) {
             target.timestamp.revertWithTransaction(0) {
                 target.tokenCount.revertWithTransaction(0) {
                     target.stable.revertWithTransaction(0) {
                         target.unstable.revertWithTransaction(0) {
-                            this.compaction.forkTo(until, target.compaction)
-                            this.settings.forkTo(until, target.settings)
-                            this.timestamp.forkTo(until, target.timestamp)
-                            this.tokenCount.forkTo(until, target.tokenCount)
-                            this.stable.forkTo(until, target.stable)
-                            this.unstable.forkTo(until, target.unstable)
+                            this.compaction.forkStateRangeTo(from, until, target.compaction) { checkpoint ->
+                                checkpoint.copy(historyBaseIndex = checkpoint.historyBaseIndex - from)
+                            }
+                            this.settings.forkStateRangeTo(from, until, target.settings)
+                            this.timestamp.forkStateRangeTo(from, until, target.timestamp)
+                            this.tokenCount.forkStateRangeTo(from, until, target.tokenCount)
+                            this.stable.forkRangeTo(from, until, target.stable)
+                            this.unstable.forkStateRangeTo(from, until, target.unstable)
                         }
                     }
                 }
             }
         }
+    }
+}
+
+private suspend fun <T> IndexVersioned<T>.forkStateRangeTo(
+    from: Int,
+    until: Int,
+    target: MutableIndexVersioned<T>,
+) = forkStateRangeTo(from, until, target) { value -> value }
+
+private suspend fun <T, R> IndexVersioned<T>.forkStateRangeTo(
+    from: Int,
+    until: Int,
+    target: MutableIndexVersioned<R>,
+    transform: (T) -> R,
+) {
+    require(target.latestIndex() == -1) { "Only an empty target can be forked to." }
+    val visibleIndex = floorToIndex(from)
+    if (visibleIndex != null) target[0] = transform(this[visibleIndex])
+    indexes(from + 1).collect { index ->
+        if (index < until) target[index - from] = transform(this[index])
     }
 }

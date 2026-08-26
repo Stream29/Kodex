@@ -37,7 +37,6 @@ import io.github.stream29.kodex.tool.multiagent.MultiAgentTools
 import io.github.stream29.kodex.tool.multiagent.FollowupTaskArgs
 import io.github.stream29.kodex.tool.multiagent.SendMessageArgs
 import io.github.stream29.kodex.tool.multiagent.SpawnAgentArgs
-import io.github.stream29.kodex.tool.multiagent.SpawnForkMode
 import io.github.stream29.kodex.tool.multiagent.followupTaskTool
 import io.github.stream29.kodex.tool.multiagent.sendMessageTool
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
@@ -100,484 +99,483 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
     } closeWith {
         cancelAndJoin()
     } asContextForEach {
-    test("creates an uninitialized root storage") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val index = repository.create()
-        val session = repository.open(index)
+        test("creates an uninitialized root storage") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val index = repository.create()
+            val session = repository.open(index)
 
-        assertEquals(-1, session.storage.latestIndex())
-        session.runtime.modify { storage -> storage.initialize(settings("root")) }
-        assertEquals(0, session.storage.latestIndex())
-        assertEquals(0L, session.storage.tokenCount[0])
-    }
-
-    test("creates zero-based root entries") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val first = repository.createInitialized(settings())
-        val second = repository.createInitialized(settings("Named"))
-        val firstLastActivityAt = Instant.parse("2026-07-31T10:00:00Z")
-        val secondLastActivityAt = Instant.parse("2026-07-31T10:05:00Z")
-        repository.open(first).storage.timestamp[1] = firstLastActivityAt
-        repository.open(second).storage.timestamp[1] = secondLastActivityAt
-
-        assertEquals(0, first)
-        assertEquals(1, second)
-        assertEquals("Session 0", repository.open(first).storage.settings[0].threadName)
-        assertEquals(listOf(first, second), repository.list())
-        assertEquals(
-            listOf(
-                Triple(first, "Session 0", firstLastActivityAt),
-                Triple(second, "Named", secondLastActivityAt),
-            ),
-            repository.listEntries().map { entry ->
-                Triple(entry.entryIndex, entry.threadName, entry.lastActivityAt)
-            },
-        )
-    }
-
-    test("archives and unarchives root entries without affecting index inventory") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val archivedIndex = repository.createInitialized(settings("archived"))
-        val activeIndex = repository.createInitialized(settings("active"))
-        val archivedEntry = repository.listEntries()
-            .single { entry -> entry.entryIndex == archivedIndex }
-
-        archivedEntry.archive()
-        archivedEntry.archive()
-
-        assertEquals(listOf(activeIndex), repository.listEntries(includeArchived = false).map { it.entryIndex })
-        val allEntries = repository.listEntries(includeArchived = true)
-        assertEquals(listOf(archivedIndex, activeIndex), allEntries.map { it.entryIndex })
-        assertEquals(listOf("archived", "active"), allEntries.map { it.threadName })
-        assertEquals(listOf(true, false), allEntries.map { it.archived })
-        assertEquals(listOf(archivedIndex, activeIndex), repository.list())
-
-        archivedEntry.unarchive()
-        archivedEntry.unarchive()
-
-        assertEquals(
-            listOf(archivedIndex, activeIndex),
-            repository.listEntries(includeArchived = false).map { it.entryIndex },
-        )
-    }
-
-    test("archived roots remain openable, forkable, deletable, and reusable") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val sourceIndex = repository.createInitialized(settings("source"))
-        val source = repository.open(sourceIndex)
-        repository.listEntries()
-            .single { entry -> entry.entryIndex == sourceIndex }
-            .archive()
-
-        assertSame(source, repository.open(sourceIndex))
-
-        val forkIndex = repository.create()
-        val fork = repository.open(forkIndex)
-        fork.runtime.modify { storage -> source.storage.forkTo(1, storage) }
-        assertEquals(
-            false,
-            repository.listEntries(includeArchived = true)
-                .single { entry -> entry.entryIndex == forkIndex }
-                .archived,
-        )
-
-        repository.delete(sourceIndex)
-        assertEquals(sourceIndex, repository.create())
-        assertEquals(
-            false,
-            repository.listEntries(includeArchived = true)
-                .single { entry -> entry.entryIndex == sourceIndex }
-                .archived,
-        )
-    }
-
-    test("returns one cached root instance and persists its recursive tree") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val index = repository.createInitialized(settings())
-        val root = repository.open(index)
-        val first = root.spawnInitialized("first")
-        val second = root.spawnInitialized("second")
-        val nested = first.spawnInitialized("nested")
-
-        assertSame(root, repository.open(index))
-        assertEquals(listOf(first.storage.id, second.storage.id), root.subagents.list().map { entry -> root.subagents.open(entry).storage.id })
-        assertEquals(listOf(nested.storage.id), first.subagents.list().map { entry -> first.subagents.open(entry).storage.id })
-    }
-
-    test("each Agent manages its direct entries") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val root = repository.open(repository.createInitialized(settings("root")))
-        val first = root.subagents.create()
-        val second = root.subagents.create()
-
-        assertEquals(listOf(first, second), root.subagents.list())
-        assertFalse(
-            root.subagents.listEntries().any { entry ->
-                entry is KodexRootSessionEntry
-            },
-        )
-        assertEquals(-1, root.subagents.open(first).storage.latestIndex())
-
-        root.subagents.delete(first)
-
-        assertEquals(listOf(second), root.subagents.list())
-        assertFailsWith<IllegalArgumentException> { root.subagents.open(first) }
-    }
-
-    test("publishes ordered direct entry snapshots") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-
-        assertEquals(emptyList(), repository.entries.value)
-        val rootIndex = repository.create()
-        assertEquals(listOf(rootIndex), repository.entries.value)
-        val root = repository.open(rootIndex)
-        assertEquals(emptyList(), root.subagents.entries.value)
-
-        val first = root.subagents.create()
-        val second = root.subagents.create()
-        assertEquals(listOf(first, second), root.subagents.entries.value)
-
-        root.subagents.delete(first)
-        assertEquals(listOf(second), root.subagents.entries.value)
-        assertEquals(first, root.subagents.create())
-        assertEquals(listOf(first, second), root.subagents.entries.value)
-
-        repository.delete(rootIndex)
-        assertEquals(emptyList(), repository.entries.value)
-    }
-
-    test("delete invalidates cached nodes and releases the numeric slot") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val index = repository.createInitialized(settings())
-        val root = repository.open(index)
-        val child = root.spawnInitialized("child")
-
-        repository.delete(index)
-
-        assertFailsWith<IllegalStateException> { root.storage.settings.latestIndex() }
-        assertFailsWith<IllegalStateException> { child.storage.settings.latestIndex() }
-        assertEquals(0, repository.createInitialized(settings()))
-    }
-
-    test("fork is a downstream operation and does not copy descendants") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val sourceIndex = repository.createInitialized(settings("Source"))
-        val source = repository.open(sourceIndex)
-        source.runtime.injectHistory(listOf(userMessage("copied")))
-        source.spawnInitialized("child")
-
-        val targetIndex = repository.create()
-        val target = repository.open(targetIndex)
-        val latest = target.runtime.modify { storage ->
-            source.storage.forkTo(2, storage)
-            storage.latestIndex()
+            assertEquals(-1, session.storage.latestIndex())
+            session.runtime.modify { storage -> storage.initialize(settings("root")) }
+            assertEquals(0, session.storage.latestIndex())
+            assertEquals(0L, session.storage.tokenCount[0])
         }
-        target.runtime.updateSettings(
-            target.storage.settings[latest].copy(threadName = "[fork] Source"),
-        )
 
-        assertEquals(listOf(1), target.storage.stable.indexes().toList())
-        assertEquals(userMessage("copied"), target.storage.stable[1])
-        assertEquals("[fork] Source", target.storage.settings[2].threadName)
-        assertEquals(emptyList(), target.subagents.list())
-    }
+        test("creates zero-based root entries") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val first = repository.createInitialized(settings())
+            val second = repository.createInitialized(settings("Named"))
+            val firstLastActivityAt = Instant.parse("2026-07-31T10:00:00Z")
+            val secondLastActivityAt = Instant.parse("2026-07-31T10:05:00Z")
+            repository.open(first).storage.timestamp[1] = firstLastActivityAt
+            repository.open(second).storage.timestamp[1] = secondLastActivityAt
 
-    test("owns each runtime for the complete Agent session lifecycle") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val root = repository.open(repository.createInitialized(settings("root")))
-        val child = root.spawnInitialized("child")
+            assertEquals(0, first)
+            assertEquals(1, second)
+            assertEquals("Session 0", repository.open(first).storage.settings[0].threadName)
+            assertEquals(listOf(first, second), repository.list())
+            assertEquals(
+                listOf(
+                    Triple(first, "Session 0", firstLastActivityAt),
+                    Triple(second, "Named", secondLastActivityAt),
+                ),
+                repository.listEntries().map { entry ->
+                    Triple(entry.entryIndex, entry.threadName, entry.lastActivityAt)
+                },
+            )
+        }
 
-        assertSame(root.storage, root.runtime.storage)
-        assertSame(child.storage, child.runtime.storage)
+        test("archives and unarchives root entries without affecting index inventory") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val archivedIndex = repository.createInitialized(settings("archived"))
+            val activeIndex = repository.createInitialized(settings("active"))
+            val archivedEntry = repository.getEntry(archivedIndex)
 
-        root.cancelAndJoin()
+            archivedEntry.archive()
+            archivedEntry.archive()
 
-        assertFalse(root.runtime.coroutineContext[Job]?.isActive ?: true)
-        assertFalse(child.runtime.coroutineContext[Job]?.isActive ?: true)
-    }
+            assertEquals(listOf(activeIndex), repository.listEntries(includeArchived = false).map { it.entryIndex })
+            val allEntries = repository.listEntries(includeArchived = true)
+            assertEquals(listOf(archivedIndex, activeIndex), allEntries.map { it.entryIndex })
+            assertEquals(listOf("archived", "active"), allEntries.map { it.threadName })
+            assertEquals(listOf(true, false), allEntries.map { it.archived })
+            assertEquals(listOf(archivedIndex, activeIndex), repository.list())
 
-    test("exposes one Unified Exec client for each Agent runtime") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val root = repository.open(repository.createInitialized(settings("root")))
-        val child = root.spawnInitialized("child")
+            archivedEntry.unarchive()
+            archivedEntry.unarchive()
 
-        assertNotSame(root.runtime.unifiedExecToolClient, child.runtime.unifiedExecToolClient)
-    }
+            assertEquals(
+                listOf(archivedIndex, activeIndex),
+                repository.listEntries(includeArchived = false).map { it.entryIndex },
+            )
+        }
 
-    test("runtime rejects concurrent resume operations") {
-        val entered = CompletableDeferred<Unit>()
-        val client = mockOpenAiClient {
-            createResponse { _, _, _, _ ->
-                flow<ResponsesStreamEvent> {
-                    entered.complete(Unit)
-                    awaitCancellation()
+        test("archived roots remain openable, forkable, deletable, and reusable") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val sourceIndex = repository.createInitialized(settings("source"))
+            val source = repository.open(sourceIndex)
+            repository.listEntries()
+                .single { entry -> entry.entryIndex == sourceIndex }
+                .archive()
+
+            assertSame(source, repository.open(sourceIndex))
+
+            val forkIndex = repository.create()
+            val fork = repository.open(forkIndex)
+            fork.runtime.modify { storage -> source.storage.forkTo(1, storage) }
+            assertEquals(
+                false,
+                repository.listEntries(includeArchived = true)
+                    .single { entry -> entry.entryIndex == forkIndex }
+                    .archived,
+            )
+
+            repository.delete(sourceIndex)
+            assertEquals(sourceIndex, repository.create())
+            assertEquals(
+                false,
+                repository.listEntries(includeArchived = true)
+                    .single { entry -> entry.entryIndex == sourceIndex }
+                    .archived,
+            )
+        }
+
+        test("returns one cached root instance and persists its recursive tree") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val index = repository.createInitialized(settings())
+            val root = repository.open(index)
+            val first = root.spawnInitialized("first")
+            val second = root.spawnInitialized("second")
+            val nested = first.spawnInitialized("nested")
+
+            assertSame(root, repository.open(index))
+            assertEquals(
+                listOf(first.storage.id, second.storage.id),
+                root.subagents.list().map { entry -> root.subagents.open(entry).storage.id })
+            assertEquals(
+                listOf(nested.storage.id),
+                first.subagents.list().map { entry -> first.subagents.open(entry).storage.id })
+        }
+
+        test("each Agent manages its direct entries") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val root = repository.open(repository.createInitialized(settings("root")))
+            val first = root.subagents.create()
+            val second = root.subagents.create()
+
+            assertEquals(listOf(first, second), root.subagents.list())
+            assertFalse(
+                root.subagents.listEntries().any { entry ->
+                    entry is KodexRootSessionEntry
+                },
+            )
+            assertEquals(-1, root.subagents.open(first).storage.latestIndex())
+
+            root.subagents.delete(first)
+
+            assertEquals(listOf(second), root.subagents.list())
+            assertFailsWith<IllegalArgumentException> { root.subagents.open(first) }
+        }
+
+        test("publishes ordered direct entry snapshots") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+
+            assertEquals(emptyList(), repository.entries.value)
+            val rootIndex = repository.create()
+            assertEquals(listOf(rootIndex), repository.entries.value)
+            val root = repository.open(rootIndex)
+            assertEquals(emptyList(), root.subagents.entries.value)
+
+            val first = root.subagents.create()
+            val second = root.subagents.create()
+            assertEquals(listOf(first, second), root.subagents.entries.value)
+
+            root.subagents.delete(first)
+            assertEquals(listOf(second), root.subagents.entries.value)
+            assertEquals(first, root.subagents.create())
+            assertEquals(listOf(first, second), root.subagents.entries.value)
+
+            repository.delete(rootIndex)
+            assertEquals(emptyList(), repository.entries.value)
+        }
+
+        test("delete invalidates cached nodes and releases the numeric slot") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val index = repository.createInitialized(settings())
+            val root = repository.open(index)
+            val child = root.spawnInitialized("child")
+
+            repository.delete(index)
+
+            assertFailsWith<IllegalStateException> { root.storage.settings.latestIndex() }
+            assertFailsWith<IllegalStateException> { child.storage.settings.latestIndex() }
+            assertEquals(0, repository.createInitialized(settings()))
+        }
+
+        test("fork is a downstream operation and does not copy descendants") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val sourceIndex = repository.createInitialized(settings("Source"))
+            val source = repository.open(sourceIndex)
+            source.runtime.injectHistory(listOf(userMessage("copied")))
+            source.spawnInitialized("child")
+
+            val targetIndex = repository.createFork(source.storage, from = 0, until = 2)
+            val target = repository.open(targetIndex)
+            val latest = target.storage.latestIndex()
+            target.runtime.updateSettings(
+                target.storage.settings[latest].copy(threadName = "[fork] Source"),
+            )
+
+            assertEquals(listOf(1), target.storage.stable.indexes().toList())
+            assertEquals(userMessage("copied"), target.storage.stable[1])
+            assertEquals("[fork] Source", target.storage.settings[2].threadName)
+            assertEquals(emptyList(), target.subagents.list())
+        }
+
+        test("owns each runtime for the complete Agent session lifecycle") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val root = repository.open(repository.createInitialized(settings("root")))
+            val child = root.spawnInitialized("child")
+
+            assertSame(root.storage, root.runtime.storage)
+            assertSame(child.storage, child.runtime.storage)
+
+            root.cancelAndJoin()
+
+            assertFalse(root.runtime.coroutineContext[Job]?.isActive ?: true)
+            assertFalse(child.runtime.coroutineContext[Job]?.isActive ?: true)
+        }
+
+        test("exposes one Unified Exec client for each Agent runtime") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val root = repository.open(repository.createInitialized(settings("root")))
+            val child = root.spawnInitialized("child")
+
+            assertNotSame(root.runtime.unifiedExecToolClient, child.runtime.unifiedExecToolClient)
+        }
+
+        test("runtime rejects concurrent resume operations") {
+            val entered = CompletableDeferred<Unit>()
+            val client = mockOpenAiClient {
+                createResponse { _, _, _, _ ->
+                    flow<ResponsesStreamEvent> {
+                        entered.complete(Unit)
+                        awaitCancellation()
+                    }
                 }
             }
-        }
-        val repository = InMemoryKodexSessionRepository(
-            testKodexAgentDependencies(client),
-        )
-        val root = repository.open(repository.createInitialized(settings("root")))
-        root.runtime.appendUserMessage(listOf(ContentItem.InputText("Start a turn.")))
+            val repository = InMemoryKodexSessionRepository(
+                testKodexAgentDependencies(client),
+            )
+            val root = repository.open(repository.createInitialized(settings("root")))
+            root.runtime.appendUserMessage(listOf(ContentItem.InputText("Start a turn.")))
 
-        val first = async(start = CoroutineStart.UNDISPATCHED) {
-            root.runtime.resume()
-        }
-        entered.await()
-        assertSame(first, root.runtime.runningTurn.value)
-
-        assertFailsWith<ConcurrentAgentRuntimeResumeException> {
-            root.runtime.resume()
-        }
-        assertSame(first, root.runtime.runningTurn.value)
-
-        first.cancelJobAndJoin()
-        assertNull(root.runtime.runningTurn.value)
-    }
-
-    test("runtime leaves host-owned pending calls in state") {
-        val client = mockOpenAiClient {
-            createResponse { _, _, _, _ ->
-                flowOf(
-                    ResponsesStreamEvent.OutputItemDone(
-                        outputIndex = 0,
-                        item = ResponseItem.FunctionCall(
-                            name = "host_only",
-                            arguments = "{}",
-                            callId = "call_host_only",
-                        ),
-                    ),
-                    ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
-                )
+            val first = async(start = CoroutineStart.UNDISPATCHED) {
+                root.runtime.resume()
             }
+            entered.await()
+            assertSame(first, root.runtime.runningTurn.value)
+
+            assertFailsWith<ConcurrentAgentRuntimeResumeException> {
+                root.runtime.resume()
+            }
+            assertSame(first, root.runtime.runningTurn.value)
+
+            first.cancelJobAndJoin()
+            assertNull(root.runtime.runningTurn.value)
         }
-        val repository = InMemoryKodexSessionRepository(
-            testKodexAgentDependencies(client),
-        )
-        val root = repository.open(repository.createInitialized(settings("root")))
-        root.runtime.appendUserMessage(listOf(ContentItem.InputText("Ask the host.")))
 
-        root.runtime.resume()
-
-        val pending = assertIs<KodexAgentStateValue.ToolPending>(root.runtime.state.value)
-        assertEquals(listOf("call_host_only"), pending.events.map { event -> event.callId })
-    }
-
-    test("cancelling a turn fails its persisted pending tool calls") {
-        val pending = CompletableDeferred<Unit>()
-        val client = mockOpenAiClient {
-            createResponse { _, _, _, _ ->
-                flow {
-                    emit(
+        test("runtime leaves host-owned pending calls in state") {
+            val client = mockOpenAiClient {
+                createResponse { _, _, _, _ ->
+                    flowOf(
                         ResponsesStreamEvent.OutputItemDone(
                             outputIndex = 0,
                             item = ResponseItem.FunctionCall(
-                                name = "unhandled",
+                                name = "host_only",
                                 arguments = "{}",
-                                callId = "call_1",
+                                callId = "call_host_only",
                             ),
                         ),
+                        ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
                     )
-                    pending.complete(Unit)
-                    awaitCancellation()
                 }
             }
-        }
-        val repository = InMemoryKodexSessionRepository(
-            testKodexAgentDependencies(client),
-        )
-        val root = repository.open(repository.createInitialized(settings("root")))
-        root.runtime.appendUserMessage(listOf(ContentItem.InputText("Start a turn.")))
+            val repository = InMemoryKodexSessionRepository(
+                testKodexAgentDependencies(client),
+            )
+            val root = repository.open(repository.createInitialized(settings("root")))
+            root.runtime.appendUserMessage(listOf(ContentItem.InputText("Ask the host.")))
 
-        val turn = async(start = CoroutineStart.UNDISPATCHED) {
             root.runtime.resume()
+
+            val pending = assertIs<KodexAgentStateValue.ToolPending>(root.runtime.state.value)
+            assertEquals(listOf("call_host_only"), pending.events.map { event -> event.callId })
         }
-        pending.await()
-        turn.cancelJobAndJoin()
 
-        val failure = assertIs<StableTextToolEvent>(root.storage.stable[3])
-        assertEquals("user interrupt", failure.result)
-        assertEquals(false, failure.success)
-        assertEquals(emptyList(), root.storage.unstable[3])
-        assertEquals(KodexAgentStateValue.ToolCompleted, root.runtime.state.value)
-        assertNull(root.runtime.runningTurn.value)
-    }
-
-    test("a child tool resolves its caller through the shared path resolver") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val root = repository.open(repository.createInitialized(settings("root")))
-        val child = root.spawnInitialized("/root/worker")
-        val sendMessageTool = child.runtime.sendMessageTool(AgentPathResolverImpl(root))
-
-        val completed = assertIs<StableMultiAgentToolEvent>(
-            sendMessageTool.handle(
-                PendingMultiAgentToolEvent(
-                    callId = "call_send",
-                    operation = PendingMultiAgentInvocation.SendMessage(
-                        SendMessageArgs("/root", "Caller is the worker."),
-                    ),
-                ),
-            ),
-        )
-
-        assertEquals(
-            StableAgentDeliveryResult.Success(""),
-            assertIs<StableMultiAgentOperation.SendMessage>(completed.operation).result,
-        )
-        assertTrue(
-            root.runtime.pendingSteer.value.any { input ->
-                input is StableCleanEvent.AgentMessage &&
-                    input.author == "/root/worker" &&
-                    input.recipient == "/root" &&
-                    input.containsText("Caller is the worker.")
-            },
-        )
-    }
-
-    test("follow-up steers and resumes an idle Agent directly") {
-        val client = mockOpenAiClient {
-            createResponse { _, _, _, _ ->
-                assistantResponse("Follow-up complete.", "followup_complete")
-            }
-        }
-        val repository = InMemoryKodexSessionRepository(
-            testKodexAgentDependencies(client),
-        )
-        val root = repository.open(repository.createInitialized(settings("root")))
-        val child = root.spawnInitialized("/root/worker")
-        val followupTool = root.runtime.followupTaskTool(AgentPathResolverImpl(root))
-
-        val completed = assertIs<StableMultiAgentToolEvent>(
-            followupTool.handle(
-                PendingMultiAgentToolEvent(
-                    callId = "call_followup",
-                    operation = PendingMultiAgentInvocation.FollowupTask(
-                        FollowupTaskArgs("/root/worker", "Continue this task."),
-                    ),
-                ),
-            ),
-        )
-
-        assertEquals(
-            StableAgentDeliveryResult.Success(""),
-            assertIs<StableMultiAgentOperation.FollowupTask>(completed.operation).result,
-        )
-        withContext(Dispatchers.Default.limitedParallelism(1)) {
-            withTimeout(10.seconds) {
-                child.runtime.state.first { state -> state == KodexAgentStateValue.AssistantMessage }
-                root.runtime.pendingSteer.first { inputs ->
-                    inputs.any { input ->
-                        input is StableCleanEvent.AgentMessage &&
-                            input.containsText("Follow-up complete.")
+        test("cancelling a turn fails its persisted pending tool calls") {
+            val pending = CompletableDeferred<Unit>()
+            val client = mockOpenAiClient {
+                createResponse { _, _, _, _ ->
+                    flow {
+                        emit(
+                            ResponsesStreamEvent.OutputItemDone(
+                                outputIndex = 0,
+                                item = ResponseItem.FunctionCall(
+                                    name = "unhandled",
+                                    arguments = "{}",
+                                    callId = "call_1",
+                                ),
+                            ),
+                        )
+                        pending.complete(Unit)
+                        awaitCancellation()
                     }
                 }
             }
+            val repository = InMemoryKodexSessionRepository(
+                testKodexAgentDependencies(client),
+            )
+            val root = repository.open(repository.createInitialized(settings("root")))
+            root.runtime.appendUserMessage(listOf(ContentItem.InputText("Start a turn.")))
+
+            val turn = async(start = CoroutineStart.UNDISPATCHED) {
+                root.runtime.resume()
+            }
+            pending.await()
+            turn.cancelJobAndJoin()
+
+            val failure = assertIs<StableTextToolEvent>(root.storage.stable[3])
+            assertEquals("user interrupt", failure.result)
+            assertEquals(false, failure.success)
+            assertEquals(emptyList(), root.storage.unstable[3])
+            assertEquals(KodexAgentStateValue.ToolCompleted, root.runtime.state.value)
+            assertNull(root.runtime.runningTurn.value)
         }
-        assertEquals(1, root.runtime.pendingSteer.value.size)
-        assertTrue(
-            root.storage.stable.indexes().toList().none { index ->
-                root.storage.stable[index] is StableCleanEvent.AgentMessage
-            },
-        )
 
-        root.runtime.resume()
+        test("a child tool resolves its caller through the shared path resolver") {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val root = repository.open(repository.createInitialized(settings("root")))
+            val child = root.spawnInitialized("/root/worker")
+            val sendMessageTool = child.runtime.sendMessageTool(AgentPathResolverImpl(root))
 
-        assertTrue(
-            root.storage.stable.indexes().toList().any { index ->
-                (root.storage.stable[index] as? StableCleanEvent.AgentMessage)
-                    ?.containsText("Follow-up complete.") == true
-            },
-        )
-    }
+            val completed = assertIs<StableMultiAgentToolEvent>(
+                sendMessageTool.handle(
+                    PendingMultiAgentToolEvent(
+                        callId = "call_send",
+                        operation = PendingMultiAgentInvocation.SendMessage(
+                            SendMessageArgs("/root", "Caller is the worker."),
+                        ),
+                    ),
+                ),
+            )
 
-    test("session runtime executes Multi-agent calls through ordinary tools") {
-        val requestMutex = Mutex()
-        var rootWindowId = ""
-        var rootRequestCount = 0
-        val rootToolNames = mutableSetOf<String>()
-        val client = mockOpenAiClient {
-            createResponse { request, _, _, windowId ->
-                val response = requestMutex.withLock {
-                    if (rootWindowId.isEmpty()) rootWindowId = windowId
-                    if (windowId != rootWindowId) {
-                        assistantResponse("Worker complete.", "worker_complete")
-                    } else {
-                        rootToolNames += request.toolNames()
-                        when (rootRequestCount++) {
-                            0 -> spawnResponse()
-                            1 -> assistantResponse("Root complete.", "root_complete")
-                            else -> error("Unexpected root request $rootRequestCount")
+            assertEquals(
+                StableAgentDeliveryResult.Success(""),
+                assertIs<StableMultiAgentOperation.SendMessage>(completed.operation).result,
+            )
+            assertTrue(
+                root.runtime.pendingSteer.value.any { input ->
+                    input is StableCleanEvent.AgentMessage &&
+                        input.author == "/root/worker" &&
+                        input.recipient == "/root" &&
+                        input.containsText("Caller is the worker.")
+                },
+            )
+        }
+
+        test("follow-up steers and resumes an idle Agent directly") {
+            val client = mockOpenAiClient {
+                createResponse { _, _, _, _ ->
+                    assistantResponse("Follow-up complete.", "followup_complete")
+                }
+            }
+            val repository = InMemoryKodexSessionRepository(
+                testKodexAgentDependencies(client),
+            )
+            val root = repository.open(repository.createInitialized(settings("root")))
+            val child = root.spawnInitialized("/root/worker")
+            val followupTool = root.runtime.followupTaskTool(AgentPathResolverImpl(root))
+
+            val completed = assertIs<StableMultiAgentToolEvent>(
+                followupTool.handle(
+                    PendingMultiAgentToolEvent(
+                        callId = "call_followup",
+                        operation = PendingMultiAgentInvocation.FollowupTask(
+                            FollowupTaskArgs("/root/worker", "Continue this task."),
+                        ),
+                    ),
+                ),
+            )
+
+            assertEquals(
+                StableAgentDeliveryResult.Success(""),
+                assertIs<StableMultiAgentOperation.FollowupTask>(completed.operation).result,
+            )
+            withContext(Dispatchers.Default.limitedParallelism(1)) {
+                withTimeout(10.seconds) {
+                    child.runtime.state.first { state -> state == KodexAgentStateValue.AssistantMessage }
+                    root.runtime.pendingSteer.first { inputs ->
+                        inputs.any { input ->
+                            input is StableCleanEvent.AgentMessage &&
+                                input.containsText("Follow-up complete.")
                         }
                     }
                 }
-                response
             }
+            assertEquals(1, root.runtime.pendingSteer.value.size)
+            assertTrue(
+                root.storage.stable.indexes().toList().none { index ->
+                    root.storage.stable[index] is StableCleanEvent.AgentMessage
+                },
+            )
+
+            root.runtime.resume()
+
+            assertTrue(
+                root.storage.stable.indexes().toList().any { index ->
+                    (root.storage.stable[index] as? StableCleanEvent.AgentMessage)
+                        ?.containsText("Follow-up complete.") == true
+                },
+            )
         }
-        val repository = InMemoryKodexSessionRepository(
-            testKodexAgentDependencies(client),
-        )
-        val root = repository.open(
-            repository.createInitialized(
-                settings("root").copy(
-                    agentMode = AgentMode.Multi,
-                    requestUserInputMode = RequestUserInputMode.NoQuestion,
-                ),
-            ),
-        )
 
-        root.runtime.appendUserMessage(listOf(ContentItem.InputText("Delegate this task.")))
-        root.runtime.resume()
-
-        val child = root.subagents.open(root.subagents.list().single())
-        withContext(Dispatchers.Default.limitedParallelism(1)) {
-            withTimeout(10.seconds) {
-                child.runtime.state.first { state -> state == KodexAgentStateValue.AssistantMessage }
-                while (
-                    root.storage.stable.indexes().toList().none { index ->
-                    root.storage.stable[index].containsWorkerCompletion()
-                    } && root.runtime.pendingSteer.value.none { input ->
-                        input is StableCleanEvent.AgentMessage &&
-                            input.containsText("Worker complete.")
+        test("session runtime executes Multi-agent calls through ordinary tools") {
+            val requestMutex = Mutex()
+            var rootWindowId = ""
+            var rootRequestCount = 0
+            val rootToolNames = mutableSetOf<String>()
+            val client = mockOpenAiClient {
+                createResponse { request, _, _, windowId ->
+                    val response = requestMutex.withLock {
+                        if (rootWindowId.isEmpty()) rootWindowId = windowId
+                        if (windowId != rootWindowId) {
+                            assistantResponse("Worker complete.", "worker_complete")
+                        } else {
+                            rootToolNames += request.toolNames()
+                            when (rootRequestCount++) {
+                                0 -> spawnResponse()
+                                else -> assistantResponse("Root complete.", "root_complete")
+                            }
+                        }
                     }
-                ) {
-                    delay(10)
+                    response
                 }
             }
-        }
-        assertEquals("/root/worker", child.storage.settings[child.storage.latestIndex()].threadName)
-        assertEquals(AgentMode.Multi, child.storage.settings[child.storage.latestIndex()].agentMode)
-        assertEquals(
-            RequestUserInputMode.NoQuestion,
-            child.storage.settings[child.storage.latestIndex()].requestUserInputMode,
-        )
-        val inheritedSettings = child.storage.settings[child.storage.latestIndex()]
-        child.runtime.updateSettings(
-            inheritedSettings.copy(
-                agentMode = AgentMode.Single,
-                requestUserInputMode = RequestUserInputMode.AskUser,
-            ),
-        )
-        assertEquals(AgentMode.Single, child.storage.settings[child.storage.latestIndex()].agentMode)
-        assertEquals(
-            RequestUserInputMode.AskUser,
-            child.storage.settings[child.storage.latestIndex()].requestUserInputMode,
-        )
-        assertEquals(AgentMode.Multi, root.storage.settings[root.storage.latestIndex()].agentMode)
-        assertEquals(
-            RequestUserInputMode.NoQuestion,
-            root.storage.settings[root.storage.latestIndex()].requestUserInputMode,
-        )
-        assertTrue(MultiAgentTools.specs.all { spec -> spec.name in rootToolNames })
-        assertTrue(
-            root.storage.stable.indexes().toList().any { index ->
-                root.storage.stable[index].toResponseHistoryItems().any { item ->
-                    item is ResponseItem.FunctionCallOutput &&
-                        item.callId == "call_spawn" &&
-                        item.output.success == true
+            val repository = InMemoryKodexSessionRepository(
+                testKodexAgentDependencies(client),
+            )
+            val root = repository.open(
+                repository.createInitialized(
+                    settings("root").copy(
+                        agentMode = AgentMode.Multi,
+                        requestUserInputMode = RequestUserInputMode.NoQuestion,
+                    ),
+                ),
+            )
+
+            root.runtime.appendUserMessage(listOf(ContentItem.InputText("Delegate this task.")))
+            root.runtime.resume()
+
+            val child = root.subagents.open(root.subagents.list().single())
+            withContext(Dispatchers.Default.limitedParallelism(1)) {
+                withTimeout(10.seconds) {
+                    child.runtime.state.first { state -> state == KodexAgentStateValue.AssistantMessage }
+                    while (
+                        root.storage.stable.indexes().toList().none { index ->
+                            root.storage.stable[index].containsWorkerCompletion()
+                        } && root.runtime.pendingSteer.value.none { input ->
+                            input is StableCleanEvent.AgentMessage &&
+                                input.containsText("Worker complete.")
+                        }
+                    ) {
+                        delay(10)
+                    }
                 }
-            },
-        )
-    }
+            }
+            assertEquals("/root/worker", child.storage.settings[child.storage.latestIndex()].threadName)
+            assertEquals(AgentMode.Multi, child.storage.settings[child.storage.latestIndex()].agentMode)
+            assertEquals(
+                RequestUserInputMode.NoQuestion,
+                child.storage.settings[child.storage.latestIndex()].requestUserInputMode,
+            )
+            val inheritedSettings = child.storage.settings[child.storage.latestIndex()]
+            child.runtime.updateSettings(
+                inheritedSettings.copy(
+                    agentMode = AgentMode.Single,
+                    requestUserInputMode = RequestUserInputMode.AskUser,
+                ),
+            )
+            assertEquals(AgentMode.Single, child.storage.settings[child.storage.latestIndex()].agentMode)
+            assertEquals(
+                RequestUserInputMode.AskUser,
+                child.storage.settings[child.storage.latestIndex()].requestUserInputMode,
+            )
+            assertEquals(AgentMode.Multi, root.storage.settings[root.storage.latestIndex()].agentMode)
+            assertEquals(
+                RequestUserInputMode.NoQuestion,
+                root.storage.settings[root.storage.latestIndex()].requestUserInputMode,
+            )
+            assertTrue(MultiAgentTools.specs.all { spec -> spec.name in rootToolNames })
+            assertTrue(
+                root.storage.stable.indexes().toList().any { index ->
+                    root.storage.stable[index].toResponseHistoryItems().any { item ->
+                        item is ResponseItem.FunctionCallOutput &&
+                            item.callId == "call_spawn" &&
+                            item.output.success == true
+                    }
+                },
+            )
+        }
     }
 }
 
@@ -609,7 +607,6 @@ private fun spawnResponse() = flowOf(
                 SpawnAgentArgs(
                     taskName = "worker",
                     message = "Complete one background turn.",
-                    forkTurns = SpawnForkMode.None,
                 ),
             ),
             callId = "call_spawn",
