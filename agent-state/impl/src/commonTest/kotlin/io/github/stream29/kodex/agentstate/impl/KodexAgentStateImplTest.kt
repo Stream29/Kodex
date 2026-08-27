@@ -8,6 +8,9 @@ import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
 import io.github.stream29.kodex.agentstorage.cleanmodels.codexRequestWindowId
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
@@ -26,6 +29,7 @@ import io.github.stream29.kodex.openai.IncompleteResponse
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiResponseStreamIncompleteException
+import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
 import io.github.stream29.kodex.openai.ReasoningItemReasoningSummary
 import io.github.stream29.kodex.openai.Response
@@ -34,9 +38,13 @@ import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.TokenUsage
+import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
@@ -581,6 +589,35 @@ val kodexAgentStateImplTest by testSuite {
             assertEquals(listOf(PendingServerToolSearch(call)), storage.unstable[2])
         }
 
+        test("model input excludes unstable clean events") {
+            val storage = storage()
+            val user = userMessage("Retry without the incomplete tool call.")
+            val call = ResponseItem.ServerToolSearchCall(
+                arguments = buildJsonObject { put("query", "tools") },
+            )
+            storage.stable[1] = StableCleanEvent.UserMessage(user.content)
+            storage.unstable[2] = listOf(PendingServerToolSearch(call))
+            val requests = mutableListOf<ResponsesApiRequest>()
+            val responseError = ResponseError(
+                message = "Retryable failure.",
+                code = "server_error",
+                type = "server_error",
+            )
+            val agent = KodexAgentState(
+                client = mockOpenAiClient {
+                    createResponse { request ->
+                        requests += request
+                        flowOf(ResponsesStreamEvent.Failed(FailedResponse(responseError)))
+                    }
+                },
+                storage = storage,
+            )
+
+            assertEquals(RequestFinish.Retryable, agent.requestResponseApi())
+            assertEquals(user, requests.single().input.last())
+            assertTrue(requests.single().input.none { item -> item is ResponseItem.ServerToolSearchCall })
+        }
+
         test("forced compaction stores clean prefix and resets reported usage to zero") {
             val storage = storage()
             val initialCheckpoint = storage.compaction[0]
@@ -611,17 +648,85 @@ val kodexAgentStateImplTest by testSuite {
             val compactIndex = agent.forcedCompact()
 
             val checkpoint = storage.compaction[compactIndex]
+            val stableCompaction = StableCleanEvent.ContextCompaction(
+                id = compaction.id,
+                encryptedContent = compaction.encryptedContent,
+            )
             assertEquals(listOf(userEvent("Compact this context.")), checkpoint.prefix)
-            assertEquals(compaction, checkpoint.compaction)
-            assertEquals(listOf(user, compaction), checkpoint.toResponseHistoryItems())
-            assertEquals(StableCleanEvent.ContextCompaction, storage.stable[compactIndex])
-            assertEquals(compactIndex + 1, checkpoint.historyBaseIndex)
+            assertEquals(
+                listOf(user),
+                checkpoint.toResponseHistoryItems(),
+            )
+            assertEquals(stableCompaction, storage.stable[compactIndex])
+            assertEquals(compactIndex, checkpoint.historyBaseIndex)
             assertEquals(0L, storage.tokenCount[compactIndex])
             assertEquals(compactIndex, storage.tokenCount.latestIndex())
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
             assertEquals(
                 listOf(user, ResponseItem.CompactionTrigger),
                 compactRequests.single().input,
+            )
+        }
+
+        test("recompaction retains prior prefix and new clean retained events") {
+            val storage = storage()
+            var compactionNumber = 0
+            val agent = KodexAgentState(
+                client = mockOpenAiClient {
+                    createRemoteCompactionV2Response { _, _, _, _ ->
+                        compactionNumber += 1
+                        RemoteCompactionV2Response(
+                            compactionOutput = ResponseItem.Compaction(
+                                encryptedContent = "compact-$compactionNumber",
+                            ),
+                            completedResponse = null,
+                        )
+                    }
+                },
+                storage = storage,
+            )
+            val firstUser = userEvent("Retain across both compactions.")
+            val planUpdate = StablePlanUpdate(
+                callId = "plan-1",
+                arguments = UpdatePlanArgs(
+                    explanation = "Keep the active plan.",
+                    plan = listOf(
+                        PlanItemArg("Retain clean events.", StepStatus.InProgress),
+                    ),
+                ),
+            )
+            val requestUserInput = StableRequestUserInputToolEvent(
+                callId = "request-user-input-1",
+                arguments = RequestUserInputArgs(
+                    questions = listOf(
+                        RequestUserInputQuestion(
+                            id = "scope",
+                            header = "Scope",
+                            question = "Which scope should be retained?",
+                        ),
+                    ),
+                ),
+                result = StableRequestUserInputResult.Failure("Input unavailable."),
+            )
+
+            agent.injectHistory(listOf(firstUser))
+            agent.forcedCompact()
+            agent.injectHistory(
+                listOf(
+                    assistantEvent("Do not retain this."),
+                    planUpdate,
+                    requestUserInput,
+                ),
+            )
+            val compactIndex = agent.forcedCompact()
+
+            assertEquals(
+                listOf(firstUser, planUpdate, requestUserInput),
+                storage.compaction[compactIndex].prefix,
+            )
+            assertEquals(
+                StableCleanEvent.ContextCompaction(encryptedContent = "compact-2"),
+                storage.stable[compactIndex],
             )
         }
 
@@ -678,7 +783,13 @@ val kodexAgentStateImplTest by testSuite {
             val settingsAt = settingsUpdate.await()
 
             assertTrue(settingsAt > compactedAt)
-            assertEquals(compactionItem, storage.compaction[compactedAt].compaction)
+            assertEquals(
+                StableCleanEvent.ContextCompaction(
+                    id = compactionItem.id,
+                    encryptedContent = compactionItem.encryptedContent,
+                ),
+                storage.stable[compactedAt],
+            )
             assertEquals("After compaction", storage.settings[settingsAt].threadName)
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
         }

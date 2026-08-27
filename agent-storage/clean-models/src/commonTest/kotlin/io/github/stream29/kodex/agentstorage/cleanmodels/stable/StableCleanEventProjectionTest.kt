@@ -96,15 +96,18 @@ val stableCleanEventProjectionTest by testSuite {
         )
     }
 
-    test("compaction marker is empty and checkpoint owns the prefix once") {
+    test("checkpoint prefix and stable compaction event project once in order") {
         val message = ResponseItem.Message(
             role = MessageRole.User,
             content = listOf(ContentItem.InputText("Retained.")),
         )
         val compaction = ResponseItem.Compaction(encryptedContent = "compact")
+        val contextCompaction = StableCleanEvent.ContextCompaction(
+            id = compaction.id,
+            encryptedContent = compaction.encryptedContent,
+        )
         val checkpoint = CleanCompactionCheckpoint(
             prefix = listOf(StableCleanEvent.UserMessage(message.content)),
-            compaction = compaction,
             historyBaseIndex = 9,
             windowNumber = 2,
             firstWindowId = "window-1",
@@ -112,7 +115,10 @@ val stableCleanEventProjectionTest by testSuite {
             windowId = "window-2",
         )
 
-        assertEquals(emptyList(), StableCleanEvent.ContextCompaction.toResponseHistoryItems())
-        assertEquals(listOf(message, compaction), checkpoint.toResponseHistoryItems())
+        assertEquals(listOf(compaction), contextCompaction.toResponseHistoryItems())
+        assertEquals(
+            listOf(message),
+            checkpoint.toResponseHistoryItems(),
+        )
     }
 }

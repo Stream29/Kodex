@@ -22,7 +22,7 @@ public data class StableRequestUserInputToolEvent(
     public val itemId: ResponseItemId? = null,
     public val arguments: RequestUserInputArgs,
     public val result: StableRequestUserInputResult,
-) : StableCleanEvent.CompletedTool {
+) : StableCleanEvent.CompletedTool, RemoteCompactionV2RetainedItem {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             stableFunctionCall(

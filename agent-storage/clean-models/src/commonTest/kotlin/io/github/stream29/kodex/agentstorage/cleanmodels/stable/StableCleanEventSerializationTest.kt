@@ -8,8 +8,6 @@ import io.github.stream29.kodex.openai.MessagePhase
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -127,15 +125,18 @@ val stableCleanEventSerializationTest by testSuite {
         assertEquals(listOf(imageGeneration), events[2].toResponseHistoryItems())
     }
 
-    test("round trips clean compaction checkpoint with stable prefix") {
+    test("round trips stable context compaction and its clean checkpoint") {
         val compaction = ResponseItem.Compaction(encryptedContent = "encrypted")
+        val contextCompaction: StableCleanEvent = StableCleanEvent.ContextCompaction(
+            id = compaction.id,
+            encryptedContent = compaction.encryptedContent,
+        )
         val checkpoint = CleanCompactionCheckpoint(
             prefix = listOf(
                 StableCleanEvent.UserMessage(
                     listOf(ContentItem.InputText("retained")),
                 ),
             ),
-            compaction = compaction,
             historyBaseIndex = 12,
             windowNumber = 3,
             firstWindowId = "window-1",
@@ -143,8 +144,13 @@ val stableCleanEventSerializationTest by testSuite {
             windowId = "window-3",
         )
 
+        val encodedCompaction = stableEventJson.encodeToString(contextCompaction)
         val encoded = stableEventJson.encodeToString(checkpoint)
 
+        assertEquals(
+            contextCompaction,
+            stableEventJson.decodeFromString<StableCleanEvent>(encodedCompaction),
+        )
         assertEquals(
             checkpoint,
             stableEventJson.decodeFromString<CleanCompactionCheckpoint>(encoded),
@@ -157,7 +163,8 @@ val stableCleanEventSerializationTest by testSuite {
                 ),
                 compaction,
             ),
-            checkpoint.toResponseHistoryItems(),
+            checkpoint.toResponseHistoryItems() +
+                contextCompaction.toResponseHistoryItems(),
         )
     }
 }

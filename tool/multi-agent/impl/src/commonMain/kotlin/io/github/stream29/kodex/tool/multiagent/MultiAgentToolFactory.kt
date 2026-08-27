@@ -484,10 +484,15 @@ private suspend fun initializeSpawnStorage(
     val sourceStorage = caller.storage
     val parentSettings = sourceStorage.settings.latestValue()
     val childSettings = parentSettings.forSpawn(args, childPath)
-    val checkpoint = child.storage.compaction[child.storage.latestIndex()]
+    val checkpointIndex = requireNotNull(
+        child.storage.compaction.floorToIndex(child.storage.latestIndex()),
+    ) { "Child storage has no active compaction checkpoint." }
+    val hasCompactionPayload =
+        child.storage.stable.floorToIndex(checkpointIndex) == checkpointIndex &&
+            child.storage.stable[checkpointIndex] is StableCleanEvent.ContextCompaction
     val sourceHash = modelCatalog.resolve(parentSettings.model).compHash
     val targetHash = modelCatalog.resolve(childSettings.model).compHash
-    if (requiresSpawnPrecompaction(checkpoint.compaction != null, sourceHash, targetHash)) {
+    if (requiresSpawnPrecompaction(hasCompactionPayload, sourceHash, targetHash)) {
         child.runtime.compact(
             trigger = CompactionTrigger.Auto,
             reason = CompactionReason.CompHashChanged,

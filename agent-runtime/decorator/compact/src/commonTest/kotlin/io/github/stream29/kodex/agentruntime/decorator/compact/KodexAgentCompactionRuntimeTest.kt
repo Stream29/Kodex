@@ -328,10 +328,15 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         assertTrue(compactRequest.turnMetadata.contains("\"phase\":\"pre_turn\""))
         assertEquals(listOf(user, ResponseItem.CompactionTrigger), compactRequest.request.input)
         assertRequestHistory(responseRequests.single(), user, compaction)
-        assertEquals(StableCleanEvent.ContextCompaction, storage.stable[2])
-        assertEquals(compaction, storage.compaction[2].compaction)
+        assertEquals(
+            StableCleanEvent.ContextCompaction(
+                id = compaction.id,
+                encryptedContent = compaction.encryptedContent,
+            ),
+            storage.stable[2],
+        )
         assertEquals(StableCleanEvent.AssistantMessage(final.content), storage.stable[3])
-        assertEquals(3, storage.compaction[2].historyBaseIndex)
+        assertEquals(2, storage.compaction[2].historyBaseIndex)
         assertEquals(initialCheckpoint.windowNumber + 1, storage.compaction[2].windowNumber)
         assertEquals(listOf(persistedTurnId, persistedTurnId), hookRequests.map { it.context.turnId })
         assertEquals(persistedTurnId, storage.settings.latestValue().turnId)
@@ -382,12 +387,8 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         assertEquals(listOf(1, compactedIndex), observedIndexes)
         assertEquals(persistedTurnId, storage.settings[compactedIndex].turnId)
         assertEquals(
-            StableCleanEvent.ContextCompaction,
+            StableCleanEvent.ContextCompaction(encryptedContent = "committed"),
             storage.stable[compactedIndex],
-        )
-        assertEquals(
-            ResponseItem.Compaction(encryptedContent = "committed"),
-            storage.compaction[compactedIndex].compaction,
         )
         assertEquals(listOf(persistedTurnId, persistedTurnId), hookRequests.map { it.context.turnId })
     }

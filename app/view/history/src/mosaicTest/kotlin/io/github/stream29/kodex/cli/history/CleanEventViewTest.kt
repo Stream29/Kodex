@@ -161,7 +161,9 @@ class CleanEventViewTest {
                 "Context compacted +1.5s",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
-                        StableCleanEvent.ContextCompaction.render(
+                        StableCleanEvent.ContextCompaction(
+                            encryptedContent = "encrypted",
+                        ).render(
                             shellSessions = null,
                             expansion = null,
                             elapsed = elapsed,

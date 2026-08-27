@@ -53,7 +53,7 @@ internal fun StableCleanEvent.toHistoryItemDescriptor(
             -> HistoryItemKind.Message
 
         is StableCleanEvent.Reasoning -> HistoryItemKind.Reasoning
-        StableCleanEvent.ContextCompaction -> HistoryItemKind.ContextCompaction
+        is StableCleanEvent.ContextCompaction -> HistoryItemKind.ContextCompaction
         is StableRequestUserInputToolEvent -> HistoryItemKind.RequestUserInput
         is StablePatchToolEvent -> HistoryItemKind.Patch
         is StablePlanUpdate -> HistoryItemKind.PlanUpdate
