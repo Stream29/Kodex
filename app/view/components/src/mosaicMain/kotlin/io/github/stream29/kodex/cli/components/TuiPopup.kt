@@ -15,6 +15,7 @@ import com.jakewharton.mosaic.focus.focusTrap
 import com.jakewharton.mosaic.layout.KeyEvent
 import com.jakewharton.mosaic.layout.LayoutCoordinates
 import com.jakewharton.mosaic.layout.MeasurePolicy
+import com.jakewharton.mosaic.layout.drawBehind
 import com.jakewharton.mosaic.layout.drawTextStyleOverlay
 import com.jakewharton.mosaic.layout.onPlaced
 import com.jakewharton.mosaic.layout.onPointerEvent
@@ -25,7 +26,6 @@ import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.ui.Alignment
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.BoxScope
-import com.jakewharton.mosaic.ui.Filler
 import com.jakewharton.mosaic.ui.Layout
 import com.jakewharton.mosaic.ui.Spacer
 import com.jakewharton.mosaic.ui.TextStyle
@@ -227,8 +227,9 @@ public fun BoxScope.TuiPopup(
  * is `true`.
  *
  * The dialog applies dim text style to the host cells behind it without replacing their characters,
- * then clears every character cell inside its measured bounds before drawing [content]. Surface
- * colors and other business styling remain the caller's responsibility through [modifier].
+ * then clears every character cell inside its measured bounds before applying caller drawing
+ * modifiers and drawing [content]. Surface colors and other business styling remain the caller's
+ * responsibility through [modifier].
  */
 @Composable
 public fun BoxScope.TuiDialog(
@@ -269,15 +270,13 @@ public fun BoxScope.TuiDialog(
         ) {
             Box(
                 modifier = dismissOnEscapeModifier
+                    .drawBehind {
+                        drawRect(char = ' ', textStyle = TextStyle.Empty)
+                    }
                     .then(modifier)
                     .focusTrap()
                     .onPointerEvent { true },
             ) {
-                Filler(
-                    char = ' ',
-                    modifier = Modifier.matchParentSize(),
-                    textStyle = TextStyle.Empty,
-                )
                 content()
             }
         }
