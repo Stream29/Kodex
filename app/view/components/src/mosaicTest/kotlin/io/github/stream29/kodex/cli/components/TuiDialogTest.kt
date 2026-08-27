@@ -75,6 +75,38 @@ val tuiDialogTest by testSuite {
         }
     }
 
+    test("dialog background covers both wide-character cell phases") {
+        val ansiSnapshots = SnapshotStrategy { mosaic ->
+            mosaic.draw().render(AnsiLevel.TRUECOLOR, supportsKittyUnderlines = false)
+        }
+
+        runMosaicTest(snapshotStrategy = ansiSnapshots) {
+            val snapshot = setContentAndSnapshot {
+                Box {
+                    TuiPopupHost(
+                        modifier = Modifier
+                            .width(6)
+                            .height(2),
+                    ) {
+                        Text("汉汉汉\nx汉汉 ")
+                        TuiDialog(
+                            onDismissRequest = {},
+                            modifier = Modifier
+                                .width(6)
+                                .height(2)
+                                .background(Color.Blue),
+                        ) {
+                            Text("ABCDEF\nGHIJKL", modifier = Modifier.focusable())
+                        }
+                    }
+                }
+            }
+
+            assertEquals("\u001B[48;2;0;0;255mABCDEF\u001B[0m", snapshot.lines()[0])
+            assertEquals("\u001B[48;2;0;0;255mGHIJKL\u001B[0m", snapshot.lines()[1])
+        }
+    }
+
     test("dialog dims existing background cells without filling empty cells") {
         val ansiSnapshots = SnapshotStrategy { mosaic ->
             mosaic.draw().render(AnsiLevel.TRUECOLOR, supportsKittyUnderlines = false)
