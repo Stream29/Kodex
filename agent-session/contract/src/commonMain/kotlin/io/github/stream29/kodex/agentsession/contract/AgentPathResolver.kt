@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.agentsession.contract
 
-import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.latestValue
 
 /**

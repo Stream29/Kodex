@@ -287,7 +287,7 @@ private class FakeMessage(
 
 private class FakeTool(
     override val index: Int,
-    private val header: ToolHistoryItemHeader = ToolHistoryItemHeader.Summary(
+    header: ToolHistoryItemHeader = ToolHistoryItemHeader.Summary(
         summary = "demo",
         status = "completed",
         elapsed = Duration.ZERO,

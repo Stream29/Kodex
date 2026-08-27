@@ -1,5 +1,3 @@
-@file:OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
-
 package io.github.stream29.kodex.tool.imagegeneration
 
 import de.infix.testBalloon.framework.core.TestConfig

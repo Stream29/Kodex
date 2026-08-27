@@ -16,8 +16,6 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.encodeToJsonElement
 
 public val ToolBuilderJson: Json = Json
 
@@ -189,14 +187,13 @@ private class FunctionOutputTool<Input>(
             is PendingFunctionToolEvent -> handleFunctionCall(pending)
 
             is PendingCustomToolEvent -> {
-                val message = "JSON tool received custom tool payload"
                 StableCustomToolEvent(
                     callId = pending.callId,
                     itemId = pending.itemId,
                     name = pending.name,
                     namespace = pending.namespace,
                     input = pending.input,
-                    result = failedOutput(message),
+                    result = failedOutput(),
                     success = false,
                 )
             }
@@ -231,8 +228,8 @@ private fun PendingFunctionToolEvent.failedResult(
         success = false,
     )
 
-private fun failedOutput(message: String): FunctionCallOutputPayload =
+private fun failedOutput(): FunctionCallOutputPayload =
     FunctionCallOutputPayload(
-        body = FunctionCallOutputBody.Text(message),
+        body = FunctionCallOutputBody.Text("JSON tool received custom tool payload"),
         success = false,
     )

@@ -18,7 +18,7 @@ public interface ResolvedSkills {
     ): SkillResourceResult<ByteArray>
 }
 
-/** Resolves the skills visible from [cwd] without publishing shared mutable state. */
+/** Resolves the skills visible from `cwd` without publishing shared mutable state. */
 public fun interface SkillsResolver {
     public suspend fun resolve(cwd: Path): ResolvedSkills
 }

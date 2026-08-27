@@ -16,6 +16,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 private suspend fun temporaryDirectory(): Path =
@@ -46,7 +47,7 @@ val fileSystemLeaseTest by testSuite {
                 first.close()
                 assertFalse(first.isActive)
                 assertTrue(currentCoroutineContext().isActive)
-                while (SystemCoroutineFileSystem.metadataOrNull(lock) != null) delay(1)
+                while (SystemCoroutineFileSystem.metadataOrNull(lock) != null) delay(1.milliseconds)
                 FileSystemLease(
                     lockPath = lock,
                     duration = 30.seconds,

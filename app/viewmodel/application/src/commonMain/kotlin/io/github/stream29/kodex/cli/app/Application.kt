@@ -39,7 +39,6 @@ import io.github.stream29.kodex.cli.settings.openGlobalSettings
 import io.github.stream29.kodex.hook.contract.HookManager
 import io.github.stream29.kodex.hook.impl.HookManagerImpl
 import io.github.stream29.kodex.hook.impl.KodexHooksImpl
-import io.github.stream29.kodex.mcp.contract.McpCodexImportSource
 import io.github.stream29.kodex.mcp.contract.McpManager
 import io.github.stream29.kodex.mcp.impl.DefaultMcpOAuthClient
 import io.github.stream29.kodex.mcp.impl.McpManagerImpl
@@ -181,7 +180,7 @@ public class KodexApplication private constructor(
             val mcpManager = scope.McpManagerImpl(
                 store = mcpConfigurationStore,
                 service = mcpService,
-                codexImportSource = McpCodexImportSource {
+                codexImportSource = {
                     CodexCliStorage(globalSettings.settings.value.codexHome)
                         .readMcpImportCandidates()
                         .map(CodexCliMcpImportCandidate::toKodexMcpImportCandidate)

@@ -21,12 +21,10 @@ import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
-import io.github.stream29.kodex.tool.plan.PlanTools
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
-import kotlinx.serialization.encodeToString
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 

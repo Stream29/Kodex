@@ -2,7 +2,6 @@ package io.github.stream29.kodex.tool.getcontextremaining
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject

@@ -17,7 +17,6 @@ import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.toList
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 

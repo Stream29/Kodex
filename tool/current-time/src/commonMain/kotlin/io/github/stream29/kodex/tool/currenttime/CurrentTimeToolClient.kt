@@ -1,5 +1,3 @@
-@file:OptIn(kotlin.time.ExperimentalTime::class)
-
 package io.github.stream29.kodex.tool.currenttime
 
 import kotlinx.datetime.LocalDateTime

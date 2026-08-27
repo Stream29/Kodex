@@ -10,7 +10,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
 
-public val scopedLoggingTest by testSuite {
+val scopedLoggingTest by testSuite {
     test("derives inherited context payload for every scope") {
         val factory = RecordingLoggerFactory()
         val global = factory.logger("runtime").global()

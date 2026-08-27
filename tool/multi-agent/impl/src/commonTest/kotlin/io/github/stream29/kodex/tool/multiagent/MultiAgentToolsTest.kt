@@ -13,7 +13,6 @@ import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.tool.builder.ToolBuilderJson
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.schema.json.ObjectPropertyDefinition
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray

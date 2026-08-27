@@ -33,7 +33,6 @@ private val initializeKodexCurl: Unit = run {
     }
 }
 
-@OptIn(InternalAPI::class)
 internal data object KodexCurl : HttpClientEngineFactory<KodexCurlEngineConfig> {
     override fun create(block: KodexCurlEngineConfig.() -> Unit): HttpClientEngine {
         check(curlGlobalInitReturnCode == 0) {

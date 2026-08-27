@@ -7,7 +7,6 @@ import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
-import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 internal fun KodexAgentSettings.toResponsesApiRequest(
@@ -57,7 +56,6 @@ internal fun CodexResponsesMetadata.toCodexClientMetadata(): CodexResponsesClien
     )
 
 /** Projects an arbitrary local storage identity into a stable UUID-shaped provider identity. */
-@OptIn(ExperimentalUuidApi::class)
 internal fun String.toCodexThreadId(): String {
     val input = (CodexThreadIdentityNamespace + this).encodeToByteArray()
     val high = (input.stableHash(CodexThreadIdentityHighSeed) and 0xffffffffffff0fffUL) or 0x8000UL

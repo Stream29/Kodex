@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
 import kotlinx.io.files.Path
@@ -227,7 +228,7 @@ val sessionTreeCliViewModelTest by testSuite {
                 assertEquals(1, popupEmissions.value)
             } finally {
                 collectors.forEach(Job::cancel)
-                collectors.forEach { collector -> collector.join() }
+                collectors.joinAll()
                 fixture.close()
             }
         }

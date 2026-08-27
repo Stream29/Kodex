@@ -14,6 +14,7 @@ import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 private suspend fun temporaryKodexHome(): Path =
@@ -21,7 +22,7 @@ private suspend fun temporaryKodexHome(): Path =
         SystemCoroutineFileSystem.createDirectories(it)
     }
 
-public val applicationLoggingTest by testSuite {
+val applicationLoggingTest by testSuite {
     // RollingFileLogWriter owns its file for the test process lifetime, so Windows
     // cannot remove it during fixture teardown. Keep it in Gradle's build output.
     testFixture { temporaryKodexHome() } asParameterForEach {
@@ -74,7 +75,7 @@ public val applicationLoggingTest by testSuite {
                         } else {
                             ""
                         }
-                        if (!current.contains("connection closed")) delay(10)
+                        if (!current.contains("connection closed")) delay(10.milliseconds)
                     }
                     current
                 }

@@ -66,7 +66,7 @@ public class PromptXmlBuilder internal constructor(
 
     internal fun build(): String = content.toString()
 
-    private fun appendTag(value: String): Unit {
+    private fun appendTag(value: String) {
         if (indented && content.isNotEmpty() && content.last() != '\n') {
             content.append('\n')
         }

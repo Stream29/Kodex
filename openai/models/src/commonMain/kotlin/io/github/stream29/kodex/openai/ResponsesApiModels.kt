@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.openai
 
 import kotlinx.serialization.EncodeDefault
-import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -26,7 +25,6 @@ import kotlinx.serialization.json.JsonObject
 public data class ResponsesApiRequest(
     public val model: OpenAiModelId,
     public val input: List<ResponseItem>,
-    @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     public val instructions: String = "",
     public val store: Boolean = false,
@@ -37,17 +35,14 @@ public data class ResponsesApiRequest(
     public val toolChoice: ToolChoice = ToolChoice.Auto,
     @SerialName("parallel_tool_calls")
     public val parallelToolCalls: Boolean = false,
-    @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     public val reasoning: Reasoning = Reasoning(),
     public val include: Set<ResponseInclude> = emptySet(),
     @SerialName("service_tier")
-    @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     public val serviceTier: ServiceTier = ServiceTier.Default,
     @SerialName("prompt_cache_key")
     public val promptCacheKey: String? = null,
-    @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     public val text: TextControls = TextControls(),
     @SerialName("client_metadata")
@@ -394,13 +389,10 @@ public enum class ResponseInclude(public val wireName: String) {
  */
 @Serializable
 public data class Reasoning(
-    @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     public val effort: ReasoningEffort = ReasoningEffort.Medium,
-    @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     public val summary: ReasoningSummary = ReasoningSummary.Auto,
-    @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     public val context: ReasoningContext = ReasoningContext.Auto,
 )
@@ -485,7 +477,6 @@ public enum class ReasoningContext {
  */
 @Serializable
 public data class TextControls(
-    @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     public val verbosity: OpenAiVerbosity = OpenAiVerbosity.Medium,
     public val format: TextFormat? = null,

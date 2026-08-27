@@ -34,7 +34,6 @@ import io.github.stream29.kodex.utils.osenvironment.userHomeDirectory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
-import kotlinx.serialization.encodeToString
 import kotlin.random.Random
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
@@ -73,7 +72,7 @@ private fun testCodexDirectory(): Path {
 private fun testSessionId(): String =
     "kodex-web-run-test-${Random.nextLong().toString().replace('-', '0')}"
 
-private suspend fun OpenAiClient.webRunClient(): WebRunToolClient =
+private fun OpenAiClient.webRunClient(): WebRunToolClient =
     WebRunToolClient(
         client = this,
         sessionId = testSessionId(),
@@ -104,14 +103,16 @@ private fun String.firstPageReference(): String =
 
 private fun String.firstNumberedLinkId(): Long =
     lineSequence()
-        .filter { line -> line.startsWith("L") && "cite" in line }
-        .mapNotNull { line ->
-            Regex("""cite\D+(\d+)""").find(line)
-                ?.groupValues
-                ?.get(1)
-                ?.toLongOrNull()
+        .firstNotNullOfOrNull { line ->
+            if (!line.startsWith("L") || "cite" !in line) {
+                null
+            } else {
+                Regex("""cite\D+(\d+)""").find(line)
+                    ?.groupValues
+                    ?.get(1)
+                    ?.toLongOrNull()
+            }
         }
-        .firstOrNull()
         ?: fail("Expected a numbered link in web.run output: ${take(500)}")
 
 val webRunToolClientTest by testSuite {
