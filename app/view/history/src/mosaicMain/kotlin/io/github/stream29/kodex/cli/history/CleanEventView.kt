@@ -141,7 +141,7 @@ internal fun StableCleanEvent.render(
             is StableCleanEvent.ServerToolSearch -> renderServerToolSearch()
             is StableCleanEvent.WebSearchCall -> renderHostedWebSearch()
             is StableCleanEvent.ImageGenerationCall -> renderHostedImageGeneration()
-            StableCleanEvent.ContextCompaction -> ContextCompactionEvent()
+            is StableCleanEvent.ContextCompaction -> ContextCompactionEvent()
             is StablePatchToolEvent -> StablePatchToolEventView(
                 event = this,
                 expanded = expansion?.expanded?.invoke(),

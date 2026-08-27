@@ -19,7 +19,7 @@ public data class StablePlanUpdate(
     @SerialName("item_id")
     public val itemId: ResponseItemId? = null,
     public val arguments: UpdatePlanArgs,
-) : StableCleanEvent.CompletedTool {
+) : StableCleanEvent.CompletedTool, RemoteCompactionV2RetainedItem {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             stableFunctionCall(

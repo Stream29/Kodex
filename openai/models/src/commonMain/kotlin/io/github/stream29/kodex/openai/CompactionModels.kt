@@ -12,7 +12,7 @@ import kotlin.uuid.Uuid
  * Agent-thread settings visible at an agent state index.
  *
  * This type intentionally excludes request input; AgentState reconstructs it
- * from persisted history and the active [CompactionCheckpoint], then projects
+ * from persisted clean history and the active compaction checkpoint, then projects
  * the request-facing fields into a [ResponsesApiRequest].
  *
  * @property model Model identifier used for the next Responses API request.
@@ -74,43 +74,6 @@ public data class KodexAgentSettings(
     public val promptCacheKey: String? = null,
     public val text: TextControls = TextControls(),
 )
-
-/**
- * Checkpoint that defines the compacted model-visible prefix active at an
- * agent state index.
- *
- * @property prefix Replacement model-visible base history. This should contain
- * the compaction summary and any retained or re-injected context needed for the
- * next model request.
- * @property historyBaseIndex First history state index not covered by [prefix].
- * Raw history items before this index remain stored for audit/forking, but are
- * excluded from the active prompt projection while this checkpoint is visible.
- * @property windowNumber Monotonic compaction-window sequence number.
- * @property firstWindowId Stable UUIDv7 identifier for the thread's first
- * context window.
- * @property previousWindowId Nullable because the first context window has no
- * predecessor; `null` means this checkpoint belongs to that first window.
- * @property windowId Stable UUIDv7 identifier for the active context window.
- */
-@Serializable
-public data class CompactionCheckpoint(
-    public val prefix: List<ResponseItem.HistoryItem>,
-    public val historyBaseIndex: Int,
-    public val windowNumber: Long,
-    public val firstWindowId: String,
-    public val previousWindowId: String? = null,
-    public val windowId: String,
-)
-
-/**
- * Returns the Codex wire window identity for this checkpoint.
- *
- * [threadId] is the stable provider-facing projection of the backing agent
- * storage identity; [windowNumber] identifies this checkpoint within that
- * thread namespace.
- */
-public fun CompactionCheckpoint.codexRequestWindowId(threadId: String): String =
-    "$threadId:$windowNumber"
 
 /**
  * Result of a remote compaction v2 Responses stream.

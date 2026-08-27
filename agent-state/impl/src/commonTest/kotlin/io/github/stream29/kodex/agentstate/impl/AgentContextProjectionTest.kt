@@ -241,14 +241,13 @@ val agentContextProjectionTest by testSuite {
                 assertFalse(compactionRequests.single().hasRequestUserInputTool())
                 assertEquals(2, compactIndex)
                 assertEquals(StableCleanEvent.UserMessage(user.content), storage.stable[1])
-                assertEquals(StableCleanEvent.ContextCompaction, storage.stable[compactIndex])
+                assertEquals(
+                    StableCleanEvent.ContextCompaction(encryptedContent = "compacted"),
+                    storage.stable[compactIndex],
+                )
                 assertEquals(
                     listOf(StableCleanEvent.UserMessage(user.content)),
                     storage.compaction[compactIndex].prefix,
-                )
-                assertEquals(
-                    ResponseItem.Compaction(encryptedContent = "compacted"),
-                    storage.compaction[compactIndex].compaction,
                 )
             } finally {
                 deleteRecursively(fixture.root)

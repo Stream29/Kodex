@@ -26,9 +26,10 @@ import kotlin.time.Instant
  * bound for a read. Reading each timeline's own latest index independently may
  * observe different upper bounds.
  *
- * The active model-visible history at a snapshot index is the clean
- * checkpoint projection followed by stable clean events in
- * `[checkpoint.historyBaseIndex, index]` and the current unstable tail.
+ * The active model-visible history at a snapshot index is the retained
+ * checkpoint prefix followed by stable clean events in
+ * `[checkpoint.historyBaseIndex, index]`. Unstable events are never model
+ * input.
  *
  * Compose [setWithTransaction] and [revertWithTransaction] when one logical
  * state transition updates multiple timelines. Callers must serialize writers.

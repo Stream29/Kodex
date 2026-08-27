@@ -917,9 +917,11 @@ val openAiForcedCompactProbeTest by testSuite {
                 request.request.input.last(),
                 "AgentState should project the remote-compaction trigger into the wire request.",
             )
-            assertTrue(checkpoint.prefix.isNotEmpty(), "Expected server compaction output to become checkpoint prefix.")
-            assertEquals(compactIndex + 1, checkpoint.historyBaseIndex)
-            assertIs<StableCleanEvent.ContextCompaction>(storage.stable[compactIndex])
+            assertTrue(checkpoint.prefix.isNotEmpty(), "Expected retained clean events in the checkpoint prefix.")
+            assertEquals(compactIndex, checkpoint.historyBaseIndex)
+            val contextCompaction =
+                assertIs<StableCleanEvent.ContextCompaction>(storage.stable[compactIndex])
+            assertTrue(contextCompaction.encryptedContent.isNotEmpty())
             assertEquals(compactIndex, storage.latestIndex())
         }
     }

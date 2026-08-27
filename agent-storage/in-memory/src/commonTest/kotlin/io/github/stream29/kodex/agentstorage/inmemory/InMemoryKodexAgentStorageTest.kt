@@ -22,7 +22,6 @@ import io.github.stream29.kodex.agentstorage.contract.setWithTransaction
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
-import io.github.stream29.kodex.openai.ResponseItem
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
@@ -70,7 +69,6 @@ val inMemoryKodexAgentStorageTest by testSuite {
         assertEquals(0, first.latestIndex())
         assertEquals(settings("initial-model"), first.settings.latestValue())
         assertEquals(emptyList(), first.compaction[0].prefix)
-        assertEquals(null, first.compaction[0].compaction)
         assertEquals(0, first.compaction[0].historyBaseIndex)
         assertEquals(0L, first.compaction[0].windowNumber)
         assertEquals(-1, first.stable.latestIndex())
@@ -235,23 +233,28 @@ val inMemoryKodexAgentStorageTest by testSuite {
         val source = storage(settings("initial"))
         val target = storage(settings("target"))
         source.settings[1] = settings("active")
-        source.compaction[2] = source.compaction[0].copy(historyBaseIndex = 3)
+        source.compaction[2] = source.compaction[0].copy(historyBaseIndex = 2)
+        val contextCompaction = StableCleanEvent.ContextCompaction(
+            encryptedContent = "encrypted",
+        )
+        source.stable[2] = contextCompaction
         source.stable[3] = userMessage("retained")
         source.stable[4] = assistantMessage("future")
 
         source.forkRangeTo(from = 2, until = 4, target = target)
 
         assertEquals(settings("active"), target.settings[0])
-        assertEquals(1, target.compaction[0].historyBaseIndex)
+        assertEquals(0, target.compaction[0].historyBaseIndex)
+        assertEquals(contextCompaction, target.stable[0])
         assertEquals(userMessage("retained"), target.stable[1])
-        assertEquals(listOf(1), target.stable.indexes().toList())
+        assertEquals(listOf(0, 1), target.stable.indexes().toList())
     }
 
     test("append compaction checkpoint stores replacement data and resets token count") {
         val storage = storage()
         val previous = storage.compaction[0]
         val retained = listOf(userMessage("retained"))
-        val compaction = ResponseItem.Compaction(encryptedContent = "encrypted")
+        val compaction = StableCleanEvent.ContextCompaction(encryptedContent = "encrypted")
         val nextSettings = settings("next")
         storage.tokenCount[0] = 99L
 
@@ -268,8 +271,7 @@ val inMemoryKodexAgentStorageTest by testSuite {
         assertEquals(
             CleanCompactionCheckpoint(
                 prefix = retained,
-                compaction = compaction,
-                historyBaseIndex = 2,
+                historyBaseIndex = 1,
                 windowNumber = 1,
                 firstWindowId = previous.firstWindowId,
                 previousWindowId = previous.windowId,
@@ -277,13 +279,13 @@ val inMemoryKodexAgentStorageTest by testSuite {
             ),
             storage.compaction[index],
         )
-        assertEquals(StableCleanEvent.ContextCompaction, storage.stable[index])
+        assertEquals(compaction, storage.stable[index])
         assertEquals(nextSettings, storage.settings[index])
         assertEquals(0L, storage.tokenCount[index])
         assertEquals(index, storage.tokenCount.latestIndex())
         assertEquals(timestamp(10), storage.timestamp[index])
         assertEquals(
-            retained.flatMap(StableCleanEvent::toResponseHistoryItems) + compaction,
+            retained.flatMap(StableCleanEvent::toResponseHistoryItems),
             storage.compaction[index].toResponseHistoryItems(),
         )
     }

@@ -1,77 +1,24 @@
 package io.github.stream29.kodex.agentstate.impl
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.RemoteCompactionV2RetainedItem
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.MessageRole
-import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.UpdatePlanArgs
-import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
-import kotlinx.serialization.SerializationException
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
+import kotlinx.serialization.json.Json
 
 private const val RemoteCompactionV2RetainedItemTokenBudget: Int = 64_000
 private const val ApproximateBytesPerToken: Int = 4
 
 internal fun buildRemoteCompactionV2Prefix(
-    input: List<ResponseItem>,
-): List<StableCleanEvent> =
-    input.retainedRemoteCompactionItems()
+    events: List<StableCleanEvent>,
+): List<RemoteCompactionV2RetainedItem> =
+    events.filterIsInstance<RemoteCompactionV2RetainedItem>()
         .truncateForRemoteCompaction(RemoteCompactionV2RetainedItemTokenBudget)
-        .map(RemoteCompactionV2RetainedItem::stableEvent)
-
-private fun List<ResponseItem>.retainedRemoteCompactionItems(): List<RemoteCompactionV2RetainedItem> =
-    buildList {
-        var index = 0
-        while (index < this@retainedRemoteCompactionItems.size) {
-            when (val item = this@retainedRemoteCompactionItems[index]) {
-                is ResponseItem.Message -> {
-                    if (item.role == MessageRole.User) {
-                        add(RemoteCompactionV2RetainedItem.UserMessage(item))
-                    }
-                }
-
-                is ResponseItem.FunctionCall -> {
-                    val output = this@retainedRemoteCompactionItems.getOrNull(index + 1)
-                        as? ResponseItem.FunctionCallOutput
-                    item.toStablePlanUpdate(output)?.let { planUpdate ->
-                        add(
-                            RemoteCompactionV2RetainedItem.PlanUpdate(
-                                stableEvent = planUpdate,
-                                arguments = item.arguments,
-                            ),
-                        )
-                        index += 1
-                    }
-                }
-
-                else -> Unit
-            }
-            index += 1
-        }
-    }
-
-private fun ResponseItem.FunctionCall.toStablePlanUpdate(
-    output: ResponseItem.FunctionCallOutput?,
-): StablePlanUpdate? {
-    if (namespace != null || name != UpdatePlanToolName || output?.callId != callId) {
-        return null
-    }
-    if (output.output.success == false) {
-        return null
-    }
-    val plan = try {
-        OpenAiJsonCodec.decodeFromString(UpdatePlanArgs.serializer(), arguments)
-    } catch (_: SerializationException) {
-        return null
-    } catch (_: IllegalArgumentException) {
-        return null
-    }
-    return StablePlanUpdate(
-        callId = callId,
-        itemId = id,
-        arguments = plan,
-    )
-}
 
 private fun List<RemoteCompactionV2RetainedItem>.truncateForRemoteCompaction(
     maxTokens: Int,
@@ -96,37 +43,40 @@ private fun List<RemoteCompactionV2RetainedItem>.truncateForRemoteCompaction(
     return retainedReversed
 }
 
-private sealed interface RemoteCompactionV2RetainedItem {
-    val stableEvent: StableCleanEvent
+private fun RemoteCompactionV2RetainedItem.approximateTokenCount(): Int =
+    when (this) {
+        is StableCleanEvent.UserMessage -> content.textTokenCount()
+        is StablePlanUpdate ->
+            Json.encodeToString(UpdatePlanArgs.serializer(), arguments).approximateTokenCount() +
+                PlanUpdatedOutput.approximateTokenCount()
 
-    fun approximateTokenCount(): Int
-
-    fun truncateToTokenBudget(maxTokens: Int): RemoteCompactionV2RetainedItem? = null
-
-    data class UserMessage(
-        val message: ResponseItem.Message,
-    ) : RemoteCompactionV2RetainedItem {
-        override val stableEvent: StableCleanEvent =
-            StableCleanEvent.UserMessage(message.content)
-
-        override fun approximateTokenCount(): Int =
-            message.messageTextTokenCount()
-
-        override fun truncateToTokenBudget(maxTokens: Int): RemoteCompactionV2RetainedItem? =
-            message.truncateTextToTokenBudget(maxTokens)?.let(::UserMessage)
+        is StableRequestUserInputToolEvent ->
+            Json.encodeToString(RequestUserInputArgs.serializer(), arguments).approximateTokenCount() +
+                result.outputText().approximateTokenCount()
     }
 
-    data class PlanUpdate(
-        override val stableEvent: StablePlanUpdate,
-        val arguments: String,
-    ) : RemoteCompactionV2RetainedItem {
-        override fun approximateTokenCount(): Int =
-            arguments.approximateTokenCount() + PlanUpdatedOutput.approximateTokenCount()
-    }
-}
+private fun RemoteCompactionV2RetainedItem.truncateToTokenBudget(
+    maxTokens: Int,
+): RemoteCompactionV2RetainedItem? =
+    when (this) {
+        is StableCleanEvent.UserMessage ->
+            content.truncateTextToTokenBudget(maxTokens)?.let(::copy)
 
-private fun ResponseItem.Message.messageTextTokenCount(): Int =
-    content.sumOf { item ->
+        is StablePlanUpdate,
+        is StableRequestUserInputToolEvent,
+            -> null
+    }
+
+private fun StableRequestUserInputResult.outputText(): String =
+    when (this) {
+        is StableRequestUserInputResult.Answered ->
+            Json.encodeToString(RequestUserInputResponse.serializer(), response)
+
+        is StableRequestUserInputResult.Failure -> message
+    }
+
+private fun List<ContentItem>.textTokenCount(): Int =
+    sumOf { item ->
         when (item) {
             is ContentItem.InputText -> item.text.approximateTokenCount()
             is ContentItem.OutputText -> item.text.approximateTokenCount()
@@ -134,10 +84,12 @@ private fun ResponseItem.Message.messageTextTokenCount(): Int =
         }
     }
 
-private fun ResponseItem.Message.truncateTextToTokenBudget(maxTokens: Int): ResponseItem.Message? {
+private fun List<ContentItem>.truncateTextToTokenBudget(
+    maxTokens: Int,
+): List<ContentItem>? {
     var remaining = maxTokens
     val truncatedContent = buildList {
-        for (item in content) {
+        for (item in this@truncateTextToTokenBudget) {
             when (item) {
                 is ContentItem.InputText -> {
                     if (remaining == 0) {
@@ -181,12 +133,11 @@ private fun ResponseItem.Message.truncateTextToTokenBudget(maxTokens: Int): Resp
             }
         }
     }
-    return takeIf { truncatedContent.isNotEmpty() }?.copy(content = truncatedContent)
+    return truncatedContent.takeIf(List<ContentItem>::isNotEmpty)
 }
 
-private fun String.approximateTokenCount(): Int {
-    return encodeToByteArray().size.approximateTokenCount()
-}
+private fun String.approximateTokenCount(): Int =
+    encodeToByteArray().size.approximateTokenCount()
 
 private fun String.truncateToTokenBudget(maxTokens: Int): String {
     if (isEmpty()) {
@@ -235,5 +186,4 @@ private fun ByteArray.nextUtf8Boundary(atLeast: Int): Int {
 private fun Byte.isUtf8ContinuationByte(): Boolean =
     (toInt() and 0b1100_0000) == 0b1000_0000
 
-private const val UpdatePlanToolName: String = "update_plan"
 private const val PlanUpdatedOutput: String = "Plan updated"

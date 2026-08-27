@@ -24,7 +24,7 @@ public sealed interface StableCleanEvent : CleanOpenAiEvent {
     @SerialName("user_message")
     public data class UserMessage(
         public val content: List<ContentItem>,
-    ) : Steerable {
+    ) : Steerable, RemoteCompactionV2RetainedItem {
         override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
             listOf(
                 ResponseItem.Message(
@@ -169,17 +169,21 @@ public sealed interface StableCleanEvent : CleanOpenAiEvent {
             listOf(item)
     }
 
-    /**
-     * Empty stable marker for a compaction boundary.
-     *
-     * The compaction checkpoint owns the replacement prefix and provider-facing
-     * compaction data exactly once.
-     */
+    /** Stable remote-compaction payload at a context-window boundary. */
     @Serializable
     @SerialName("context_compaction")
-    public data object ContextCompaction : StableCleanEvent {
+    public data class ContextCompaction(
+        public val id: ResponseItemId? = null,
+        @SerialName("encrypted_content")
+        public val encryptedContent: String,
+    ) : StableCleanEvent {
         override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
-            emptyList()
+            listOf(
+                ResponseItem.Compaction(
+                    id = id,
+                    encryptedContent = encryptedContent,
+                ),
+            )
     }
 
     /**
@@ -195,7 +199,7 @@ public sealed interface StableCleanEvent : CleanOpenAiEvent {
      * Clean input that may be delivered into an active logical turn.
      *
      * This deliberately excludes reasoning, tool events, and compaction
-     * markers: those are persisted protocol history, not external steer input.
+     * events: those are persisted protocol history, not external steer input.
      */
     @Serializable
     public sealed interface Steerable : StableCleanEvent

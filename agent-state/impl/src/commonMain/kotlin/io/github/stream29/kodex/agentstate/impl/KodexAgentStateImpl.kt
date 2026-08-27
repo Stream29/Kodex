@@ -14,6 +14,7 @@ import io.github.stream29.kodex.agentstate.contract.canMarkNewTurn
 import io.github.stream29.kodex.agentstate.contract.canRequestResponseApi
 import io.github.stream29.kodex.agentstate.tool.toPendingToolEvent
 import io.github.stream29.kodex.agentstate.tool.visibleToolSpecs
+import io.github.stream29.kodex.agentstorage.cleanmodels.CleanCompactionCheckpoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.codexRequestWindowId
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
@@ -259,8 +260,9 @@ private class KodexAgentStateImpl(
             check(snapshotIndex >= 0) { "Cannot compact an agent without initial state." }
 
             val settings = storage.settings[snapshotIndex]
-            val checkpoint = storage.compaction[snapshotIndex]
-            val input = storage.modelInputAt(snapshotIndex)
+            val cleanInput = storage.cleanModelInputAt(snapshotIndex)
+            val checkpoint = cleanInput.checkpoint
+            val input = cleanInput.toResponseItems()
             val threadId = storage.id.toCodexThreadId()
             val windowId = checkpoint.codexRequestWindowId(threadId)
             val metadata = CodexResponsesMetadata(
@@ -291,8 +293,11 @@ private class KodexAgentStateImpl(
                 windowId = clientMetadata.windowId,
             )
             storage.appendCompactionCheckpoint(
-                prefix = buildRemoteCompactionV2Prefix(input),
-                compaction = result.compactionOutput,
+                prefix = buildRemoteCompactionV2Prefix(cleanInput.stableEventsForRetention()),
+                compaction = StableCleanEvent.ContextCompaction(
+                    id = result.compactionOutput.id,
+                    encryptedContent = result.compactionOutput.encryptedContent,
+                ),
                 timestamp = now(),
                 previousCheckpoint = checkpoint,
                 nextWindowId = Uuid.generateV7().toString(),
@@ -629,17 +634,35 @@ private fun KodexAgentStateValue.requireToolPending(): KodexAgentStateValue.Tool
     this as? KodexAgentStateValue.ToolPending
         ?: throw KodexAgentStateInvalidTransitionException("complete tool calls", this)
 
-private suspend fun KodexAgentStorage.modelInputAt(index: Int): List<ResponseItem> {
+private data class CleanModelInput(
+    val checkpoint: CleanCompactionCheckpoint,
+    val stableEvents: List<StableCleanEvent>,
+) {
+    fun stableEventsForRetention(): List<StableCleanEvent> =
+        checkpoint.prefix + stableEvents
+
+    fun toResponseItems(): List<ResponseItem> =
+        checkpoint.toResponseHistoryItems() +
+            stableEvents.flatMap(StableCleanEvent::toResponseHistoryItems)
+}
+
+private suspend fun KodexAgentStorage.cleanModelInputAt(index: Int): CleanModelInput {
     val checkpoint = compaction[index]
-    val items = checkpoint.toResponseHistoryItems().toMutableList<ResponseItem>()
-    stable.indexes(checkpoint.historyBaseIndex).collect { eventIndex ->
-        if (eventIndex <= index) {
-            items += stable[eventIndex].toResponseHistoryItems()
+    val stableEvents = buildList {
+        stable.indexes(checkpoint.historyBaseIndex).collect { eventIndex ->
+            if (eventIndex <= index) {
+                add(stable[eventIndex])
+            }
         }
     }
-    items += unstableEventsAt(index).flatMap(UnstableCleanEvent::toResponseHistoryItems)
-    return items
+    return CleanModelInput(
+        checkpoint = checkpoint,
+        stableEvents = stableEvents,
+    )
 }
+
+private suspend fun KodexAgentStorage.modelInputAt(index: Int): List<ResponseItem> =
+    cleanModelInputAt(index).toResponseItems()
 
 /**
  * Derives the state from the clean stable history and unstable pending tail.
@@ -680,7 +703,7 @@ private fun StableCleanEvent.toAgentStateValueOrNull(): KodexAgentStateValue? =
 
         is StableCleanEvent.DeveloperMessage,
         is StableCleanEvent.Reasoning,
-        StableCleanEvent.ContextCompaction,
+        is StableCleanEvent.ContextCompaction,
         -> null
     }
 
