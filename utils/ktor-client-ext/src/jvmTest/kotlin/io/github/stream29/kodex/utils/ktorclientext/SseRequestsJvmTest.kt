@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.toList
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 
 private const val ResponseOne = "first"
 private const val ResponseTwo = "second"
@@ -197,7 +198,7 @@ private suspend fun withSseServer(
                 call.respondTextWriter(contentType = ContentType.Text.EventStream) {
                     write("data: $ResponseOne\n\n")
                     flush()
-                    delay(150)
+                    delay(150.milliseconds)
                     write("data: $ResponseTwo\n\n")
                     flush()
                 }
@@ -206,23 +207,23 @@ private suspend fun withSseServer(
                 call.respondTextWriter(contentType = ContentType.Text.EventStream) {
                     write(": keep-alive\n\n")
                     flush()
-                    delay(60)
+                    delay(60.milliseconds)
                     write(": keep-alive\n\n")
                     flush()
-                    delay(60)
+                    delay(60.milliseconds)
                     write("data: alive\n\n")
                     flush()
                 }
             }
             post("/idle") {
                 call.respondTextWriter(contentType = ContentType.Text.EventStream) {
-                    delay(250)
+                    delay(250.milliseconds)
                     write("data: late\n\n")
                     flush()
                 }
             }
             get("/slow") {
-                delay(250)
+                delay(250.milliseconds)
                 call.respondText("late")
             }
             post("/error") {

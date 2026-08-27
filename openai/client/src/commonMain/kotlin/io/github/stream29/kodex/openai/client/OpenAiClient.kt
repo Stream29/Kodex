@@ -31,7 +31,6 @@ import io.github.stream29.kodex.utils.ktorclientext.OpenAiSearchVersion
 import io.github.stream29.kodex.utils.ktorclientext.SseCompatibility
 import io.github.stream29.kodex.utils.ktorclientext.addAll
 import io.github.stream29.kodex.utils.ktorclientext.postSseEvents
-import io.github.stream29.kodex.utils.ktorclientext.set
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.HttpRequestRetry
@@ -364,8 +363,8 @@ internal class RemoteCompactionRetryBudget(
     private val retry: OpenAiClientRetryConfig,
     private val logger: KLogger = RemoteCompactionLogger,
 ) {
-    public val operationId: String = Random.nextLong().toString()
-    public var retries: Int = 0
+    val operationId: String = Random.nextLong().toString()
+    var retries: Int = 0
         private set
     private var lastEvent: String = "none"
     private var lastHttpStatus: Int? = null

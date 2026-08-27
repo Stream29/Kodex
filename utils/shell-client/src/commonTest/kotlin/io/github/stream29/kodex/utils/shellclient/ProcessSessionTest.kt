@@ -89,7 +89,10 @@ val processSessionTest by testSuite(
             expected = Shell(type = ShellType.Bash, path = Path("/opt/codex/bash")),
             actual = parsed,
         )
-        assertEquals(Json.encodeToString(parsed.path.toString()), Json.encodeToString(parsed))
+        assertEquals(
+            expected = Json.encodeToString(parsed.path.toString()),
+            actual = Json.encodeToString(parsed),
+        )
 
         val windowsPath = Json.decodeFromString<Shell>(
             "\"C:\\\\Tools\\\\PowerShell\\\\pwsh.exe\"",

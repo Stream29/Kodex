@@ -2,7 +2,6 @@ package io.github.stream29.kodex.agentsession.filesystem
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.reactivecircus.cache4k.CacheEvent
-import io.github.reactivecircus.cache4k.CacheEventListener
 import io.github.reactivecircus.cache4k.FakeTimeSource
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemIndexVersioned
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
@@ -28,7 +27,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
@@ -179,7 +177,7 @@ private suspend inline fun <R> withCachedTimeline(
         indexes = listOf(FirstIndex),
         timeSource = timeSource,
         cleanupInterval = 1.milliseconds,
-        cacheEventListener = CacheEventListener { event ->
+        cacheEventListener = { event ->
             events.trySend(event)
         },
     )

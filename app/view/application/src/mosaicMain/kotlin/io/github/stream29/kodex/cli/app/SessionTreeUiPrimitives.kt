@@ -190,21 +190,6 @@ internal val SettingsDialogHomeBackground: Color
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.surfaceContainer
 
-internal val SettingsDialogNewLineBackground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.surfaceContainerHighest
-
-internal val SettingsDialogSubmitKeyBackground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.surfaceContainerHigh
-
-internal val SettingsDialogModeBackground: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = TuiTheme.colorScheme.secondaryContainer
-
 internal val SettingsDialogActionBackground: Color
     @Composable
     @ReadOnlyComposable

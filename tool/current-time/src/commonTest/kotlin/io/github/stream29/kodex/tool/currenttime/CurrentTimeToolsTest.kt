@@ -1,5 +1,3 @@
-@file:OptIn(kotlin.time.ExperimentalTime::class)
-
 package io.github.stream29.kodex.tool.currenttime
 
 import de.infix.testBalloon.framework.core.testSuite
@@ -8,7 +6,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEv
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.openai.ResponsesApiNamespace
 import io.github.stream29.kodex.tool.builder.ToolBuilderJson
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.jsonObject
 import kotlin.time.Clock
 import kotlin.time.Instant

@@ -4,7 +4,6 @@ import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonObject
 import kotlin.test.assertEquals
 
 

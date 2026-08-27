@@ -3,8 +3,6 @@ package io.github.stream29.kodex.openai
 import de.infix.testBalloon.framework.core.testSuite
 
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs

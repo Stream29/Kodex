@@ -36,7 +36,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonElement
@@ -220,7 +219,7 @@ val mcpServiceImplIoTest by testSuite(
             )
             assertSame(originalClient, service.clients.value.getValue("alpha"))
             assertSame(originalTool, originalClient.listTools().single())
-            assertTrue(unavailable.result.isError == true)
+            assertEquals(true, unavailable.result.isError)
             assertTrue(
                 unavailable.result.content.single()
                     .jsonObject

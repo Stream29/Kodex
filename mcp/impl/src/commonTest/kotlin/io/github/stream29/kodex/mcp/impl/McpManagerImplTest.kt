@@ -4,7 +4,6 @@ import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
-import io.github.stream29.kodex.mcp.contract.McpCodexImportSource
 import io.github.stream29.kodex.mcp.contract.McpConfigurationStore
 import io.github.stream29.kodex.mcp.contract.McpImportDecision
 import io.github.stream29.kodex.mcp.contract.McpImportItemKind
@@ -56,7 +55,7 @@ class McpManagerImplTest {
         val manager = backgroundScope.McpManagerImpl(
             store = store,
             service = TestMcpService(),
-            codexImportSource = McpCodexImportSource { emptyList() },
+            codexImportSource = { emptyList() },
             loginAttemptFactory = { error("Login is not expected.") },
         )
         runCurrent()
@@ -136,7 +135,7 @@ class McpManagerImplTest {
         val manager = backgroundScope.McpManagerImpl(
             store = store,
             service = TestMcpService(),
-            codexImportSource = McpCodexImportSource { emptyList() },
+            codexImportSource = { emptyList() },
             loginAttemptFactory = { error("Login is not expected.") },
         )
 
@@ -177,7 +176,7 @@ class McpManagerImplTest {
         val manager = backgroundScope.McpManagerImpl(
             store = store,
             service = service,
-            codexImportSource = McpCodexImportSource {
+            codexImportSource = {
                 supportedCodexImports(
                     "conflict" to McpServerConfiguration.Stdio(command = "replacement"),
                     "new-http" to McpServerConfiguration.StreamableHttp(
@@ -252,7 +251,7 @@ class McpManagerImplTest {
         val manager = backgroundScope.McpManagerImpl(
             store = store,
             service = TestMcpService(),
-            codexImportSource = McpCodexImportSource { emptyList() },
+            codexImportSource = { emptyList() },
             loginAttemptFactory = { attempt },
         )
         runCurrent()
@@ -316,7 +315,7 @@ class McpManagerImplTest {
         val manager = backgroundScope.McpManagerImpl(
             store = store,
             service = TestMcpService(),
-            codexImportSource = McpCodexImportSource { emptyList() },
+            codexImportSource = { emptyList() },
             loginAttemptFactory = { attempt },
         )
         runCurrent()
@@ -349,7 +348,7 @@ class McpManagerImplTest {
                 mapOf("server" to McpServerConfiguration.Stdio(command = "server")),
             ),
             service = TestMcpService(mapOf("server" to client)),
-            codexImportSource = McpCodexImportSource { emptyList() },
+            codexImportSource = { emptyList() },
             loginAttemptFactory = { error("Login is not expected.") },
         )
 

@@ -8,7 +8,6 @@ import io.github.stream29.kodex.agentruntime.decorator.compact.compactionRuntime
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
-import io.github.stream29.kodex.agentsession.contract.AgentPathResolver
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentcontext.prefix.render.renderMultiAgentMode
 import io.github.stream29.kodex.agentcontext.prefix.render.renderPlanningInstructions
@@ -154,7 +153,7 @@ internal fun KodexAgentStateContract.integrationResumableAgent(
             mcpService = mcpService,
             hooks = NoOpKodexHooks,
         ),
-        agentPathResolver = AgentPathResolver { null },
+        agentPathResolver = { null },
     )
 
 private data object IntegrationShellSettings : ShellSettings {

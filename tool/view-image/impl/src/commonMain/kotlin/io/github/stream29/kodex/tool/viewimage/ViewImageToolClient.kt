@@ -4,7 +4,6 @@ import io.github.stream29.kodex.utils.images.PromptImageMode
 import io.github.stream29.kodex.utils.images.PromptImageTransformer
 import io.github.stream29.kodex.utils.images.codec.HostPromptImageTransformer
 import io.github.stream29.kodex.utils.images.codec.readPromptImage
-import io.github.stream29.kodex.utils.images.toDataUrl
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path

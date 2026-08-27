@@ -4,7 +4,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchR
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
 import io.github.stream29.kodex.openai.OpenAiResult
-import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.ResponsesApiNamespace
 import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.openai.ToolSpec

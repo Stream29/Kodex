@@ -1,9 +1,6 @@
-@file:OptIn(ExperimentalEncodingApi::class)
-
 package io.github.stream29.kodex.utils.images
 
 import kotlin.io.encoding.Base64
-import kotlin.io.encoding.ExperimentalEncodingApi
 
 private const val DataUrlPrefix: String = "data:"
 
@@ -27,7 +24,7 @@ public class ImageInputTooLargeException(
  * Wraps image bytes in a base64 data URL without decoding or validating them.
  */
 public fun ByteArray.toDataUrl(mime: String): String =
-    "data:$mime;base64,${Base64.Default.encode(this)}"
+    "data:$mime;base64,${Base64.encode(this)}"
 
 /**
  * Wraps image bytes in a base64 data URL without decoding or validating them.
@@ -68,7 +65,7 @@ public fun String.decodePromptImageDataUrlBytes(
     }
 
     val bytes = try {
-        Base64.Default.decode(encoded)
+        Base64.decode(encoded)
     } catch (e: IllegalArgumentException) {
         throw InvalidImageDataUrlException("invalid base64 payload: ${e.message}")
     }

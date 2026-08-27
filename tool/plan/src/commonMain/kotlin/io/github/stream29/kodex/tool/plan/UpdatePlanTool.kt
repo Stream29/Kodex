@@ -9,7 +9,6 @@ import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.tool.builder.ToolBuilderJson
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.typedTool
-import kotlinx.serialization.json.encodeToJsonElement
 
 /**
  * Creates the ordinary `update_plan` tool bound to this Agent.

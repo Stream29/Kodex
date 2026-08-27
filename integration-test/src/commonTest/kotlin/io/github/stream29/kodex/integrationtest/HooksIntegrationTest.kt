@@ -31,7 +31,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
@@ -44,6 +43,7 @@ import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 
 private const val HookIntegrationMarker: String = "KODEX_HOOK_INTEGRATION_OK"
 
@@ -59,7 +59,7 @@ val openAiFreshSessionHookIntegrationTest by testSuite(
     compartment = { TestCompartment.RealTime },
 ) {
     test("fresh filesystem session runs Kodex-owned hooks through natural stop") {
-        withTimeout(180_000L) {
+        withTimeout(180.seconds) {
             runFreshSessionHookIntegration()
         }
     }
@@ -83,7 +83,7 @@ private suspend fun runFreshSessionHookIntegration() {
 
         val sourceCodexHome = configuredIntegrationCodexHome()
         val model = testOpenAiModel()
-        val command = recordingHookCommand(hookLog, "{}")
+        val command = recordingHookCommand(hookLog)
         client = realOpenAiClient(CodexCliStorage(sourceCodexHome))
         modelCatalog = OpenAiModelCatalog(client)
         hooks = kodexHooks(integrationHookConfiguration(command))
@@ -193,20 +193,20 @@ private fun integrationHookConfiguration(
         ),
     )
 
-private fun recordingHookCommand(logPath: Path, output: String): String = when (Shell.default.type) {
+private fun recordingHookCommand(logPath: Path): String = when (Shell.default.type) {
     ShellType.Sh,
     ShellType.Bash,
     ShellType.Zsh,
         -> "body=\$(cat); printf '%s\\n' \"\$body\" >> ${logPath.toString().posixShellArgument()}; " +
-        "printf '%s' ${output.posixShellArgument()}"
+        "printf '%s' ${"{}".posixShellArgument()}"
 
     ShellType.PowerShell ->
         "\$body = [Console]::In.ReadToEnd(); " +
             "[IO.File]::AppendAllText('${logPath.toString().powerShellStringContent()}', " +
             "\$body + [Environment]::NewLine); " +
-            "[Console]::Out.Write('${output.powerShellStringContent()}')"
+            "[Console]::Out.Write('${"{}".powerShellStringContent()}')"
 
-    ShellType.Cmd -> "more >> \"$logPath\" & <nul set /p \"=$output\""
+    ShellType.Cmd -> "more >> \"$logPath\" & <nul set /p \"={}\""
 }
 
 private suspend fun readHookRequests(path: Path): List<JsonObject> =

@@ -57,7 +57,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlinx.serialization.encodeToString
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlin.test.assertEquals
@@ -72,9 +72,9 @@ import kotlin.test.assertTrue
 private fun settings(name: String = ""): KodexAgentSettings =
     KodexAgentSettings(model = OpenAiModelId("test-model"), threadName = name)
 
-private fun userMessage(text: String): StableCleanEvent.UserMessage =
+private fun userMessage(): StableCleanEvent.UserMessage =
     StableCleanEvent.UserMessage(
-        content = listOf(ContentItem.InputText(text)),
+        content = listOf(ContentItem.InputText("copied")),
     )
 
 private suspend fun KodexAgentSession.spawnInitialized(name: String): KodexAgentSession =
@@ -265,7 +265,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val sourceIndex = repository.createInitialized(settings("Source"))
             val source = repository.open(sourceIndex)
-            source.runtime.injectHistory(listOf(userMessage("copied")))
+            source.runtime.injectHistory(listOf(userMessage()))
             source.spawnInitialized("child")
 
             val targetIndex = repository.createFork(source.storage, from = 0, until = 2)
@@ -276,7 +276,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             )
 
             assertEquals(listOf(1), target.storage.stable.indexes().toList())
-            assertEquals(userMessage("copied"), target.storage.stable[1])
+            assertEquals(userMessage(), target.storage.stable[1])
             assertEquals("[fork] Source", target.storage.settings[2].threadName)
             assertEquals(emptyList(), target.subagents.list())
         }
@@ -307,7 +307,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             val entered = CompletableDeferred<Unit>()
             val client = mockOpenAiClient {
                 createResponse { _, _, _, _ ->
-                    flow<ResponsesStreamEvent> {
+                    flow {
                         entered.complete(Unit)
                         awaitCancellation()
                     }
@@ -538,7 +538,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
                                 input.containsText("Worker complete.")
                         }
                     ) {
-                        delay(10)
+                        delay(10.milliseconds)
                     }
                 }
             }

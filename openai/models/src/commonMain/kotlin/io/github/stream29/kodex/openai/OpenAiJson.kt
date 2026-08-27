@@ -15,8 +15,6 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 
 public object ResponseItemSerializer : KSerializer<ResponseItem> {
@@ -213,8 +211,7 @@ public object FunctionCallOutputPayloadSerializer : KSerializer<FunctionCallOutp
         require(decoder is JsonDecoder) {
             "FunctionCallOutputPayload can only be decoded as JSON."
         }
-        val element = decoder.decodeJsonElement()
-        val body = when (element) {
+        val body = when (val element = decoder.decodeJsonElement()) {
             is JsonArray -> FunctionCallOutputBody.ContentItems(
                 decoder.json.decodeFromJsonElement(contentItemsSerializer, element),
             )

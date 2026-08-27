@@ -5,7 +5,6 @@ import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.modelcontextprotocol.kotlin.sdk.types.McpJson
 import io.modelcontextprotocol.kotlin.sdk.types.ListToolsResult
 import kotlinx.schema.json.ObjectPropertyDefinition
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement

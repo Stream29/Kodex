@@ -34,7 +34,7 @@ public actual val SystemCoroutineFileSystem: CoroutineFileSystem =
 @OptIn(ExperimentalForeignApi::class)
 private fun fingerprintOrNull(path: Path): FileFingerprint? = memScoped {
     val attributes = alloc<stat>()
-    if (platform.posix.stat(path.toString(), attributes.ptr) != 0) {
+    if (stat(path.toString(), attributes.ptr) != 0) {
         if (errno == platform.posix.ENOENT) return@memScoped null
         throw IOException("Stat failed for $path: ${strerror(errno)?.toKString()}")
     }
