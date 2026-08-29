@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.agentstorage.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.CleanCompactionCheckpoint
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import kotlin.time.Instant
@@ -14,7 +14,7 @@ import kotlin.time.Instant
  * AgentState interprets exactly one initialized storage.
  *
  * A storage accepted by `KodexAgentState` must publish its initial snapshot at
- * index `0`: [settings] and [compaction] must each have a visible value there.
+ * index `0`: [settings] and [index] must each have a visible value there.
  * An empty storage may exist briefly as a newly created root session, but it
  * cannot represent a legal AgentState.
  *
@@ -26,11 +26,6 @@ import kotlin.time.Instant
  * bound for a read. Reading each timeline's own latest index independently may
  * observe different upper bounds.
  *
- * The active model-visible history at a snapshot index is the retained
- * checkpoint prefix followed by stable clean events in
- * `[checkpoint.historyBaseIndex, index]`. Unstable events are never model
- * input.
- *
  * Compose [setWithTransaction] and [revertWithTransaction] when one logical
  * state transition updates multiple timelines. Callers must serialize writers.
  *
@@ -38,8 +33,11 @@ import kotlin.time.Instant
  * keep it stable across reopen, while transient backends keep it stable for
  * the lifetime of the storage object. It is not an additional persisted
  * timeline or manifest field.
- * @property compaction Sparse checkpoint timeline. `compaction[index]` returns
- * the checkpoint active for the snapshot at `index`.
+ * @property index Sparse index-entry timeline. It stores complete standalone
+ * stable index events and context-window compaction points.
+ * @property work Sparse stable work-event timeline. Each stored index contains
+ * one completed event. The first work entry after every non-initial compaction
+ * point is a context-compaction event; writers enforce that relationship.
  * @property settings Sparse agent-thread settings timeline. `settings[index]`
  * returns the model request configuration, plan, and goal active for the
  * snapshot at `index`.
@@ -47,24 +45,20 @@ import kotlin.time.Instant
  * associated with the state index where they are stored.
  * @property tokenCount Sparse context token-count timeline used for compaction
  * scheduling, not cumulative usage or billing data. Ordinary response entries
- * are OpenAI-reported counts. Every compaction checkpoint writes a synthetic
+ * are OpenAI-reported counts. Every compaction point writes a synthetic
  * `0` to replace the previous context window's count until the next ordinary
  * response reports a new value.
- * @property stable Sparse completed clean-event timeline. Each stored index
- * contains the event completed by that state transition. Enumerate its stored
- * indexes instead of treating [IndexVersioned.get] as a cumulative history
- * snapshot.
  * @property unstable Sparse unfinished-tool snapshot timeline. Each stored
  * value is the complete ordered set of unfinished clean tool events after that
  * state transition. No visible value means the pending set is empty.
  */
 public interface KodexAgentStorage {
     public val id: String
-    public val compaction: IndexVersioned<CleanCompactionCheckpoint>
+    public val index: IndexVersioned<CleanIndexEntry>
+    public val work: IndexVersioned<StableWorkEvent>
     public val settings: IndexVersioned<KodexAgentSettings>
     public val timestamp: IndexVersioned<Instant>
     public val tokenCount: IndexVersioned<Long>
-    public val stable: IndexVersioned<StableCleanEvent>
     public val unstable: IndexVersioned<List<UnstableCleanEvent>>
 }
 
@@ -75,11 +69,11 @@ public interface KodexAgentStorage {
  */
 public suspend fun KodexAgentStorage.latestIndex(): Int =
     maxOf(
-        compaction.latestIndex(),
+        index.latestIndex(),
+        work.latestIndex(),
         settings.latestIndex(),
         timestamp.latestIndex(),
         tokenCount.latestIndex(),
-        stable.latestIndex(),
         unstable.latestIndex(),
     )
 
@@ -91,11 +85,11 @@ public suspend fun KodexAgentStorage.latestIndex(): Int =
  */
 public suspend fun KodexAgentStorage.floorToIndex(index: Int): Int? =
     listOfNotNull(
-        compaction.floorToIndex(index),
+        this.index.floorToIndex(index),
+        work.floorToIndex(index),
         settings.floorToIndex(index),
         timestamp.floorToIndex(index),
         tokenCount.floorToIndex(index),
-        stable.floorToIndex(index),
         unstable.floorToIndex(index),
     ).maxOrNull()
 
@@ -107,11 +101,11 @@ public suspend fun KodexAgentStorage.floorToIndex(index: Int): Int? =
  */
 public suspend fun KodexAgentStorage.ceilToIndex(index: Int): Int? =
     listOfNotNull(
-        compaction.ceilToIndex(index),
+        this.index.ceilToIndex(index),
+        work.ceilToIndex(index),
         settings.ceilToIndex(index),
         timestamp.ceilToIndex(index),
         tokenCount.ceilToIndex(index),
-        stable.ceilToIndex(index),
         unstable.ceilToIndex(index),
     ).minOrNull()
 
@@ -136,11 +130,11 @@ public suspend fun KodexAgentStorage.prevIndex(index: Int): Int? {
  * compose operation-level compensation when those updates form one transition.
  */
 public interface MutableKodexAgentStorage : KodexAgentStorage {
-    public override val compaction: MutableIndexVersioned<CleanCompactionCheckpoint>
+    public override val index: MutableIndexVersioned<CleanIndexEntry>
+    public override val work: MutableIndexVersioned<StableWorkEvent>
     public override val settings: MutableIndexVersioned<KodexAgentSettings>
     public override val timestamp: MutableIndexVersioned<Instant>
     public override val tokenCount: MutableIndexVersioned<Long>
-    public override val stable: MutableIndexVersioned<StableCleanEvent>
     public override val unstable: MutableIndexVersioned<List<UnstableCleanEvent>>
 }
 
@@ -149,93 +143,18 @@ public interface MutableKodexAgentStorage : KodexAgentStorage {
  *
  * This composes the suffix-removal primitive already provided by each
  * [MutableIndexVersioned]. Callers must serialize writers. A boundary of `0`
- * empties the storage for [forkTo]; a live agent state must retain index `0`.
+ * empties the storage; a live agent state must retain index `0`.
  */
 public suspend fun MutableKodexAgentStorage.revert(untilExclusive: Int) {
-    compaction.revertWithTransaction(untilExclusive) {
-        settings.revertWithTransaction(untilExclusive) {
-            timestamp.revertWithTransaction(untilExclusive) {
-                tokenCount.revertWithTransaction(untilExclusive) {
-                    stable.revertWithTransaction(untilExclusive) {
+    index.revertWithTransaction(untilExclusive) {
+        work.revertWithTransaction(untilExclusive) {
+            settings.revertWithTransaction(untilExclusive) {
+                timestamp.revertWithTransaction(untilExclusive) {
+                    tokenCount.revertWithTransaction(untilExclusive) {
                         unstable.revert(untilExclusive)
                     }
                 }
             }
         }
-    }
-}
-
-/**
- * Resets [target] and copies this storage into it.
- *
- * [until] is the exclusive state boundary. It may immediately follow any
- * committed stable event; callers own the product semantics of retaining a
- * prefix that ends inside a model/tool exchange.
- *
- * @param until Exclusive state upper bound. It must be greater than zero so
- * the target retains its required initialized snapshot.
- */
-public suspend fun KodexAgentStorage.forkTo(
-    until: Int,
-    target: MutableKodexAgentStorage,
-) {
-    forkRangeTo(from = 0, until = until, target = target)
-}
-
-/**
- * Resets [target] and copies the source state range `[from, until)` into it.
- *
- * Stored timeline indexes are rebased by subtracting [from]. Compaction
- * checkpoints are copied with their history base rebased by the same amount.
- * Callers must choose a range beginning at a valid initialized snapshot.
- */
-public suspend fun KodexAgentStorage.forkRangeTo(
-    from: Int,
-    until: Int,
-    target: MutableKodexAgentStorage,
-) {
-    require(this !== target) { "Cannot fork a storage into itself." }
-    require(from >= 0) { "Fork start index must be non-negative." }
-    require(until > from) { "Fork range must not be empty." }
-    require(until <= latestIndex() + 1) { "Fork range exceeds source storage." }
-    target.compaction.revertWithTransaction(0) {
-        target.settings.revertWithTransaction(0) {
-            target.timestamp.revertWithTransaction(0) {
-                target.tokenCount.revertWithTransaction(0) {
-                    target.stable.revertWithTransaction(0) {
-                        target.unstable.revertWithTransaction(0) {
-                            this.compaction.forkStateRangeTo(from, until, target.compaction) { checkpoint ->
-                                checkpoint.copy(historyBaseIndex = checkpoint.historyBaseIndex - from)
-                            }
-                            this.settings.forkStateRangeTo(from, until, target.settings)
-                            this.timestamp.forkStateRangeTo(from, until, target.timestamp)
-                            this.tokenCount.forkStateRangeTo(from, until, target.tokenCount)
-                            this.stable.forkRangeTo(from, until, target.stable)
-                            this.unstable.forkStateRangeTo(from, until, target.unstable)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private suspend fun <T> IndexVersioned<T>.forkStateRangeTo(
-    from: Int,
-    until: Int,
-    target: MutableIndexVersioned<T>,
-) = forkStateRangeTo(from, until, target) { value -> value }
-
-private suspend fun <T, R> IndexVersioned<T>.forkStateRangeTo(
-    from: Int,
-    until: Int,
-    target: MutableIndexVersioned<R>,
-    transform: (T) -> R,
-) {
-    require(target.latestIndex() == -1) { "Only an empty target can be forked to." }
-    val visibleIndex = floorToIndex(from)
-    if (visibleIndex != null) target[0] = transform(this[visibleIndex])
-    indexes(from + 1).collect { index ->
-        if (index < until) target[index - from] = transform(this[index])
     }
 }

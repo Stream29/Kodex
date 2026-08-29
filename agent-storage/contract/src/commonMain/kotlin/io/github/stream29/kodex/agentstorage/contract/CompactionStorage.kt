@@ -1,47 +1,43 @@
 package io.github.stream29.kodex.agentstorage.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.CleanCompactionCheckpoint
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.RemoteCompactionV2RetainedItem
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import kotlin.time.Instant
 
 /**
- * Appends a clean compaction checkpoint and stable compaction event at one
- * shared storage index.
+ * Appends one compaction point and its provider output at consecutive indexes.
  *
- * @param prefix Stable clean prefix retained after compaction.
- * @param compaction Stable provider compaction payload.
+ * @param output Stable provider compaction payload.
  * @param timestamp Timestamp associated with the storage transition.
- * @param previousCheckpoint Checkpoint whose context-window lineage is advanced.
+ * @param previousPoint Point whose context-window lineage is advanced.
  * @param nextWindowId Fresh UUIDv7 identifier for the new context window.
  * @param settings Settings active after the compaction transition.
  *
- * Every committed checkpoint writes a synthetic token count of `0` at the same
- * index. This prevents the previous context window's count from remaining
- * active until an ordinary response reports the next count.
+ * The point index also stores settings and a synthetic token count of `0`.
+ * The following output index stores the context-compaction work event and its
+ * exact timestamp.
  */
-public suspend fun MutableKodexAgentStorage.appendCompactionCheckpoint(
-    prefix: List<RemoteCompactionV2RetainedItem>,
-    compaction: StableCleanEvent.ContextCompaction,
+public suspend fun MutableKodexAgentStorage.appendCompaction(
+    output: StableContextCompaction,
     timestamp: Instant,
-    previousCheckpoint: CleanCompactionCheckpoint,
+    previousPoint: CleanCompactionPoint,
     nextWindowId: String,
     settings: KodexAgentSettings,
 ): Int {
-    val index = latestIndex() + 1
-    return this.compaction.setWithTransaction(index, CleanCompactionCheckpoint(
-        prefix = prefix,
-        historyBaseIndex = index,
-        windowNumber = previousCheckpoint.windowNumber + 1,
-        firstWindowId = previousCheckpoint.firstWindowId,
-        previousWindowId = previousCheckpoint.windowId,
+    val pointIndex = latestIndex() + 1
+    val outputIndex = pointIndex + 1
+    val point = CleanCompactionPoint(
+        windowNumber = previousPoint.windowNumber + 1,
+        firstWindowId = previousPoint.firstWindowId,
+        previousWindowId = previousPoint.windowId,
         windowId = nextWindowId,
-    )) {
-        this.settings.setWithTransaction(index, settings) {
-            stable.setWithTransaction(index, compaction) {
-                this.tokenCount.setWithTransaction(index, 0L) {
-                    this.timestamp.setWithTransaction(index, timestamp) { index }
+    )
+    return index.setWithTransaction(pointIndex, point) {
+        this.settings.setWithTransaction(pointIndex, settings) {
+            this.tokenCount.setWithTransaction(pointIndex, 0L) {
+                this.timestamp.setWithTransaction(outputIndex, timestamp) {
+                    work.setWithTransaction(outputIndex, output) { outputIndex }
                 }
             }
         }

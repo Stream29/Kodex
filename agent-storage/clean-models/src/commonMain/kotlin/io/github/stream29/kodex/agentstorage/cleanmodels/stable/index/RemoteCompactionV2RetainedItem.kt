@@ -1,4 +1,4 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable.index
 
 import kotlinx.serialization.Serializable
 
@@ -7,4 +7,4 @@ import kotlinx.serialization.Serializable
  * compaction v2.
  */
 @Serializable
-public sealed interface RemoteCompactionV2RetainedItem : StableCleanEvent
+public sealed interface RemoteCompactionV2RetainedItem : StableIndexEvent

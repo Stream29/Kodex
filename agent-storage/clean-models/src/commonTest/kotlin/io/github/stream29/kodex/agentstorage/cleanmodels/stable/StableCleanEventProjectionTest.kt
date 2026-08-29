@@ -1,7 +1,16 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.CleanCompactionCheckpoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableReasoning
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableServerToolSearch
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWorkEvent
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessagePhase
@@ -41,27 +50,27 @@ val stableCleanEventProjectionTest by testSuite {
         )
 
         val events = listOf(
-            StableCleanEvent.UserMessage(user.content),
-            StableCleanEvent.AssistantMessage(
+            StableUserMessage(user.content),
+            StableAssistantMessage(
                 content = assistant.content,
                 id = assistant.id,
                 phase = assistant.phase,
             ),
-            StableCleanEvent.DeveloperMessage(developer.content),
-            StableCleanEvent.AgentMessage(
+            StableDeveloperMessage(developer.content),
+            StableAgentMessage(
                 author = agent.author,
                 recipient = agent.recipient,
                 content = agent.content,
             ),
-            StableCleanEvent.Reasoning(reasoning),
+            StableReasoning(reasoning),
         )
 
         assertEquals(
             listOf(user, assistant, developer, agent, reasoning),
             events.flatMap(StableCleanEvent::toResponseHistoryItems),
         )
-        assertEquals("Done.", (events[1] as StableCleanEvent.AssistantMessage).text)
-        assertEquals("Summary", (events[4] as StableCleanEvent.Reasoning).display)
+        assertEquals("Done.", (events[1] as StableAssistantMessage).text)
+        assertEquals("Summary", (events[4] as StableReasoning).display)
     }
 
     test("hosted completed tools retain their concrete item types") {
@@ -79,10 +88,10 @@ val stableCleanEventProjectionTest by testSuite {
             result = "base64",
         )
 
-        val events: List<StableCleanEvent.CompletedTool> = listOf(
-            StableCleanEvent.ServerToolSearch(serverSearchCall, serverSearchOutput),
-            StableCleanEvent.WebSearchCall(webSearch),
-            StableCleanEvent.ImageGenerationCall(imageGeneration),
+        val events: List<StableWorkEvent.CompletedTool> = listOf(
+            StableServerToolSearch(serverSearchCall, serverSearchOutput),
+            StableWebSearchCall(webSearch),
+            StableImageGenerationCall(imageGeneration),
         )
 
         assertEquals(
@@ -96,29 +105,13 @@ val stableCleanEventProjectionTest by testSuite {
         )
     }
 
-    test("checkpoint prefix and stable compaction event project once in order") {
-        val message = ResponseItem.Message(
-            role = MessageRole.User,
-            content = listOf(ContentItem.InputText("Retained.")),
-        )
+    test("context compaction remains a provider-facing work event") {
         val compaction = ResponseItem.Compaction(encryptedContent = "compact")
-        val contextCompaction = StableCleanEvent.ContextCompaction(
+        val contextCompaction: StableWorkEvent = StableContextCompaction(
             id = compaction.id,
             encryptedContent = compaction.encryptedContent,
         )
-        val checkpoint = CleanCompactionCheckpoint(
-            prefix = listOf(StableCleanEvent.UserMessage(message.content)),
-            historyBaseIndex = 9,
-            windowNumber = 2,
-            firstWindowId = "window-1",
-            previousWindowId = "window-1",
-            windowId = "window-2",
-        )
 
         assertEquals(listOf(compaction), contextCompaction.toResponseHistoryItems())
-        assertEquals(
-            listOf(message),
-            checkpoint.toResponseHistoryItems(),
-        )
     }
 }

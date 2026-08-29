@@ -1,10 +1,9 @@
 package io.github.stream29.kodex.agentstorage.filesystem
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.CleanCompactionCheckpoint
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.indexes
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
@@ -24,10 +23,17 @@ public class FileSystemAgentStorage internal constructor(
 ) : MutableKodexAgentStorage {
     override val id: String = "filesystem:$directory"
 
-    override val compaction: FileSystemIndexVersioned<CleanCompactionCheckpoint> =
+    override val index: FileSystemIndexVersioned<CleanIndexEntry> =
         FileSystemIndexVersioned(
-            Path(directory, CompactionDirectory),
-            CleanCompactionCheckpoint.serializer(),
+            Path(directory, IndexDirectory),
+            CleanIndexEntry.serializer(),
+            OpenAiJsonCodec,
+            fileSystem,
+        )
+    override val work: FileSystemIndexVersioned<StableWorkEvent> =
+        FileSystemIndexVersioned(
+            Path(directory, WorkDirectory),
+            StableWorkEvent.serializer(),
             OpenAiJsonCodec,
             fileSystem,
         )
@@ -49,13 +55,6 @@ public class FileSystemAgentStorage internal constructor(
         FileSystemIndexVersioned(
             Path(directory, TokenCountDirectory),
             Long.serializer(),
-            OpenAiJsonCodec,
-            fileSystem,
-        )
-    override val stable: FileSystemIndexVersioned<StableCleanEvent> =
-        FileSystemIndexVersioned(
-            Path(directory, StableDirectory),
-            StableCleanEvent.serializer(),
             OpenAiJsonCodec,
             fileSystem,
         )
@@ -83,19 +82,19 @@ public suspend fun FileSystemAgentStorage(
     )
 }
 
-internal const val CompactionDirectory: String = "compaction"
+internal const val IndexDirectory: String = "index"
+internal const val WorkDirectory: String = "work"
 internal const val SettingsDirectory: String = "settings"
 internal const val TimestampDirectory: String = "timestamp"
 internal const val TokenCountDirectory: String = "token-count"
-internal const val StableDirectory: String = "stable"
 internal const val UnstableDirectory: String = "unstable"
 
 internal val TimelineDirectories: List<String> = listOf(
-    CompactionDirectory,
+    IndexDirectory,
+    WorkDirectory,
     SettingsDirectory,
     TimestampDirectory,
     TokenCountDirectory,
-    StableDirectory,
     UnstableDirectory,
 )
 
@@ -117,51 +116,33 @@ public suspend fun FileSystemAgentStorage.Companion.ofEmpty(
         fileSystem.createDirectories(Path(directory, name), mustCreate = true)
     }
     return FileSystemAgentStorage(directory, fileSystem).also { storage ->
-        storage.compaction.reconcileLatestIndexUnsafe(-1)
+        storage.index.reconcileLatestIndexUnsafe(-1)
+        storage.work.reconcileLatestIndexUnsafe(-1)
         storage.settings.reconcileLatestIndexUnsafe(-1)
         storage.timestamp.reconcileLatestIndexUnsafe(-1)
         storage.tokenCount.reconcileLatestIndexUnsafe(-1)
-        storage.stable.reconcileLatestIndexUnsafe(-1)
         storage.unstable.reconcileLatestIndexUnsafe(-1)
     }
 }
 
 /**
- * Fast same-format fork: raw-copy unchanged timeline files and decode only
- * compaction checkpoints, whose history base must be rebased.
+ * Copies one initialized history prefix without decoding timeline payloads.
  */
-public suspend fun FileSystemAgentStorage.forkRangeRawTo(
-    from: Int,
+public suspend fun FileSystemAgentStorage.forkRawTo(
     until: Int,
     target: FileSystemAgentStorage,
 ) {
     require(this !== target) { "Cannot fork storage into itself." }
-    require(from >= 0 && until > from) { "Invalid fork range [$from, $until)." }
+    require(until > 0) { "Fork boundary must retain the initialized snapshot." }
     require(until <= latestIndex() + 1) {
-        "Fork range [$from, $until) exceeds the source history."
+        "Fork boundary $until exceeds the source history."
     }
-    val checkpointIndex = compaction.floorToIndex(from)
-    if (checkpointIndex != null) {
-        val checkpoint = compaction.getUnsafe(checkpointIndex)
-        target.compaction.setUnsafe(
-            0,
-            checkpoint.copy(historyBaseIndex = checkpoint.historyBaseIndex - from),
-        )
-    }
-    compaction.indexes(from + 1).collect { index ->
-        if (index < until) {
-            val checkpoint = compaction.getUnsafe(index)
-            target.compaction.setUnsafe(
-                index - from,
-                checkpoint.copy(historyBaseIndex = checkpoint.historyBaseIndex - from),
-            )
-        }
-    }
-    settings.copyRangeRawTo(from, until, target.settings, snapshotAtStart = true)
-    timestamp.copyRangeRawTo(from, until, target.timestamp, snapshotAtStart = true)
-    tokenCount.copyRangeRawTo(from, until, target.tokenCount, snapshotAtStart = true)
-    stable.copyRangeRawTo(from, until, target.stable)
-    unstable.copyRangeRawTo(from, until, target.unstable, snapshotAtStart = true)
+    index.copyRangeRawTo(0, until, target.index)
+    work.copyRangeRawTo(0, until, target.work)
+    settings.copyRangeRawTo(0, until, target.settings)
+    timestamp.copyRangeRawTo(0, until, target.timestamp)
+    tokenCount.copyRangeRawTo(0, until, target.tokenCount)
+    unstable.copyRangeRawTo(0, until, target.unstable)
 }
 
 internal suspend fun deleteRecursively(fileSystem: CoroutineFileSystem, path: Path) {

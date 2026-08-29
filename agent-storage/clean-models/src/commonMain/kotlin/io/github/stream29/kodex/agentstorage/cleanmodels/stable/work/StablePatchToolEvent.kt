@@ -1,4 +1,4 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable.work
 
 import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
@@ -30,7 +30,7 @@ public data class StablePatchToolEvent(
     public val itemId: ResponseItemId? = null,
     public val diff: Patch,
     public val result: StablePatchToolExecutionResult,
-) : StableCleanEvent.CompletedTool {
+) : StableWorkEvent.CompletedTool {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.CustomToolCall(

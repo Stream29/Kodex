@@ -1,7 +1,18 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.CleanCompactionCheckpoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableServerToolSearch
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWorkEvent
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessagePhase
@@ -12,18 +23,20 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
 
 private val stableEventJson = Json
 
 val stableCleanEventSerializationTest by testSuite {
-    test("round trips exact message metadata through the stable union") {
+    test("round trips exact message metadata through the index union") {
         val item = ResponseItem.Message(
             id = ResponseItemId("assistant_1"),
             role = MessageRole.Assistant,
             content = listOf(ContentItem.OutputText("done")),
             phase = MessagePhase.FinalAnswer,
         )
-        val event: StableCleanEvent = StableCleanEvent.AssistantMessage(
+        val event: StableIndexEvent = StableAssistantMessage(
             content = item.content,
             id = item.id,
             phase = item.phase,
@@ -34,16 +47,16 @@ val stableCleanEventSerializationTest by testSuite {
 
         assertEquals(JsonPrimitive("assistant_message"), element["type"])
         assertEquals(setOf("type", "content", "id", "phase"), element.keys)
-        assertEquals(event, stableEventJson.decodeFromString<StableCleanEvent>(encoded))
+        assertEquals(event, stableEventJson.decodeFromString<StableIndexEvent>(encoded))
         assertEquals(listOf(item), event.toResponseHistoryItems())
     }
 
     test("round trips content-only user and developer messages") {
-        val events = listOf(
-            StableCleanEvent.UserMessage(
+        val events: List<StableIndexEvent> = listOf(
+            StableUserMessage(
                 listOf(ContentItem.InputText("user content")),
             ),
-            StableCleanEvent.DeveloperMessage(
+            StableDeveloperMessage(
                 listOf(ContentItem.InputText("host context")),
             ),
         )
@@ -55,12 +68,12 @@ val stableCleanEventSerializationTest by testSuite {
                 setOf("type", "content"),
                 stableEventJson.parseToJsonElement(encoded).jsonObject.keys,
             )
-            assertEquals(event, stableEventJson.decodeFromString<StableCleanEvent>(encoded))
+            assertEquals(event, stableEventJson.decodeFromString<StableIndexEvent>(encoded))
         }
     }
 
     test("round trips flattened inter-agent fields") {
-        val event: StableCleanEvent = StableCleanEvent.AgentMessage(
+        val event: StableIndexEvent = StableAgentMessage(
             author = "/root/worker",
             recipient = "/root",
             content = listOf(
@@ -73,7 +86,7 @@ val stableCleanEventSerializationTest by testSuite {
         val element = stableEventJson.parseToJsonElement(encoded).jsonObject
 
         assertEquals(setOf("type", "author", "recipient", "content"), element.keys)
-        assertEquals(event, stableEventJson.decodeFromString<StableCleanEvent>(encoded))
+        assertEquals(event, stableEventJson.decodeFromString<StableIndexEvent>(encoded))
         assertEquals(
             listOf(
                 ResponseItem.AgentMessage(
@@ -89,7 +102,7 @@ val stableCleanEventSerializationTest by testSuite {
         )
     }
 
-    test("round trips hosted completed tools through the stable union") {
+    test("round trips hosted completed tools through the work union") {
         val serverSearchCall = ResponseItem.ServerToolSearchCall(
             status = "completed",
             arguments = kotlinx.serialization.json.JsonObject(emptyMap()),
@@ -103,18 +116,18 @@ val stableCleanEventSerializationTest by testSuite {
             status = "completed",
             result = "base64",
         )
-        val events: List<StableCleanEvent.CompletedTool> = listOf(
-            StableCleanEvent.ServerToolSearch(serverSearchCall, serverSearchOutput),
-            StableCleanEvent.WebSearchCall(webSearch),
-            StableCleanEvent.ImageGenerationCall(imageGeneration),
+        val events: List<StableWorkEvent.CompletedTool> = listOf(
+            StableServerToolSearch(serverSearchCall, serverSearchOutput),
+            StableWebSearchCall(webSearch),
+            StableImageGenerationCall(imageGeneration),
         )
 
         events.forEach { event ->
-            val encoded = stableEventJson.encodeToString<StableCleanEvent>(event)
+            val encoded = stableEventJson.encodeToString<StableWorkEvent>(event)
 
             assertEquals(
                 event,
-                stableEventJson.decodeFromString<StableCleanEvent>(encoded),
+                stableEventJson.decodeFromString<StableWorkEvent>(encoded),
             )
         }
         assertEquals(
@@ -125,46 +138,59 @@ val stableCleanEventSerializationTest by testSuite {
         assertEquals(listOf(imageGeneration), events[2].toResponseHistoryItems())
     }
 
-    test("round trips stable context compaction and its clean checkpoint") {
+    test("round trips index events and compaction points through the index union") {
+        val entries: List<CleanIndexEntry> = listOf(
+            StableUserMessage(
+                listOf(ContentItem.InputText("retained")),
+            ),
+            StableAssistantMessage(
+                listOf(ContentItem.OutputText("answer")),
+            ),
+            CleanCompactionPoint(
+                windowNumber = 3,
+                firstWindowId = "window-1",
+                previousWindowId = "window-2",
+                windowId = "window-3",
+            ),
+        )
+
+        entries.forEach { entry ->
+            val encoded = stableEventJson.encodeToString<CleanIndexEntry>(entry)
+
+            assertEquals(
+                entry,
+                stableEventJson.decodeFromString<CleanIndexEntry>(encoded),
+            )
+        }
+        assertIs<StableIndexEvent>(entries[0])
+        assertIs<StableIndexEvent>(entries[1])
+        assertFalse(entries[2] is StableCleanEvent)
+        assertEquals(
+            JsonPrimitive("compaction_point"),
+            stableEventJson
+                .parseToJsonElement(
+                    stableEventJson.encodeToString<CleanIndexEntry>(entries[2]),
+                )
+                .jsonObject["type"],
+        )
+    }
+
+    test("round trips context compaction through the work union") {
         val compaction = ResponseItem.Compaction(encryptedContent = "encrypted")
-        val contextCompaction: StableCleanEvent = StableCleanEvent.ContextCompaction(
+        val contextCompaction: StableWorkEvent = StableContextCompaction(
             id = compaction.id,
             encryptedContent = compaction.encryptedContent,
         )
-        val checkpoint = CleanCompactionCheckpoint(
-            prefix = listOf(
-                StableCleanEvent.UserMessage(
-                    listOf(ContentItem.InputText("retained")),
-                ),
-            ),
-            historyBaseIndex = 12,
-            windowNumber = 3,
-            firstWindowId = "window-1",
-            previousWindowId = "window-2",
-            windowId = "window-3",
-        )
 
-        val encodedCompaction = stableEventJson.encodeToString(contextCompaction)
-        val encoded = stableEventJson.encodeToString(checkpoint)
+        val encoded = stableEventJson.encodeToString<StableWorkEvent>(contextCompaction)
 
         assertEquals(
             contextCompaction,
-            stableEventJson.decodeFromString<StableCleanEvent>(encodedCompaction),
+            stableEventJson.decodeFromString<StableWorkEvent>(encoded),
         )
         assertEquals(
-            checkpoint,
-            stableEventJson.decodeFromString<CleanCompactionCheckpoint>(encoded),
-        )
-        assertEquals(
-            listOf(
-                ResponseItem.Message(
-                    role = MessageRole.User,
-                    content = listOf(ContentItem.InputText("retained")),
-                ),
-                compaction,
-            ),
-            checkpoint.toResponseHistoryItems() +
-                contextCompaction.toResponseHistoryItems(),
+            listOf(compaction),
+            contextCompaction.toResponseHistoryItems(),
         )
     }
 }

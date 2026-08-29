@@ -1,4 +1,4 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable.work
 
 import de.infix.testBalloon.framework.core.testSuite
 

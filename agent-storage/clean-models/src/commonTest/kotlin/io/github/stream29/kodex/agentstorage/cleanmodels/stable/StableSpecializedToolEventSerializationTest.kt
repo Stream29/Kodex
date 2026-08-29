@@ -1,6 +1,21 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionAction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableToolSearchEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWorkEvent
 import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
@@ -93,6 +108,7 @@ val stableSpecializedToolEventSerializationTest by testSuite {
         )
 
         events.forEach(::assertStableToolEventRoundTrip)
+        events.forEach { event -> assertIs<StableWorkEvent>(event) }
         assertIs<ResponseItem.ClientToolSearchCall>(
             events[0].toResponseHistoryItems().first(),
         )
@@ -136,6 +152,7 @@ val stableSpecializedToolEventSerializationTest by testSuite {
         )
 
         events.forEach(::assertStableToolEventRoundTrip)
+        events.forEach { event -> assertIs<StableWorkEvent>(event) }
         assertEquals(
             listOf("exec_command", "write_stdin"),
             events.map { event -> event.projectedFunctionName() },
@@ -203,6 +220,9 @@ val stableSpecializedToolEventSerializationTest by testSuite {
         )
 
         events.forEach(::assertStableToolEventRoundTrip)
+        assertIs<StableIndexEvent>(events[0])
+        assertIs<StableIndexEvent>(events[1])
+        assertIs<StableWorkEvent>(events[2])
         assertEquals(
             listOf("request_user_input", "update_plan", "run"),
             events.map { event -> event.projectedFunctionName() },
@@ -211,13 +231,30 @@ val stableSpecializedToolEventSerializationTest by testSuite {
 }
 
 private fun assertStableToolEventRoundTrip(event: StableCleanEvent.CompletedTool) {
-    val encoded = specializedToolJson.encodeToString<StableCleanEvent>(event)
+    val encoded = when (event) {
+        is StableIndexEvent.CompletedTool ->
+            specializedToolJson.encodeToString<StableIndexEvent>(event)
+
+        is StableWorkEvent.CompletedTool ->
+            specializedToolJson.encodeToString<StableWorkEvent>(event)
+
+        else -> error("Completed tool is not assigned to a stable timeline.")
+    }
     val element = specializedToolJson.parseToJsonElement(encoded).jsonObject
     val items = event.toResponseHistoryItems()
     val call = assertIs<ResponseItem.ToolCall>(items.first())
     val output = assertIs<ResponseItem.ToolCallOutput>(items.last())
 
-    assertEquals(event, specializedToolJson.decodeFromString<StableCleanEvent>(encoded))
+    val decoded = when (event) {
+        is StableIndexEvent.CompletedTool ->
+            specializedToolJson.decodeFromString<StableIndexEvent>(encoded)
+
+        is StableWorkEvent.CompletedTool ->
+            specializedToolJson.decodeFromString<StableWorkEvent>(encoded)
+
+        else -> error("Completed tool is not assigned to a stable timeline.")
+    }
+    assertEquals(event, decoded)
     assertEquals(2, items.size)
     assertEquals(call.callId, output.callId)
     assertTrue("type" in element)

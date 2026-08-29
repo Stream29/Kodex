@@ -1,15 +1,16 @@
 package io.github.stream29.kodex.agentstorage.inmemory
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.CleanCompactionCheckpoint
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.contract.appendCompactionCheckpoint
+import io.github.stream29.kodex.agentstorage.contract.appendCompaction
 import io.github.stream29.kodex.agentstorage.contract.ceilToIndex
 import io.github.stream29.kodex.agentstorage.contract.floorToIndex
-import io.github.stream29.kodex.agentstorage.contract.forkTo
-import io.github.stream29.kodex.agentstorage.contract.forkRangeTo
 import io.github.stream29.kodex.agentstorage.contract.indexes
 import io.github.stream29.kodex.agentstorage.contract.indexesDescending
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
@@ -22,6 +23,7 @@ import io.github.stream29.kodex.agentstorage.contract.setWithTransaction
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
+import io.github.stream29.kodex.openai.ResponseItem
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
@@ -30,6 +32,7 @@ import kotlinx.coroutines.launch
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
+import kotlin.test.assertIs
 import kotlin.time.Instant
 
 private fun storage(
@@ -46,11 +49,14 @@ private fun settings(model: String): KodexAgentSettings =
 private fun timestamp(seconds: Long): Instant =
     Instant.fromEpochSeconds(seconds)
 
-private fun userMessage(text: String): StableCleanEvent.UserMessage =
-    StableCleanEvent.UserMessage(listOf(ContentItem.InputText(text)))
+private fun userMessage(text: String): StableUserMessage =
+    StableUserMessage(listOf(ContentItem.InputText(text)))
 
-private fun assistantMessage(text: String): StableCleanEvent.AssistantMessage =
-    StableCleanEvent.AssistantMessage(listOf(ContentItem.OutputText(text)))
+private fun assistantMessage(text: String): StableAssistantMessage =
+    StableAssistantMessage(listOf(ContentItem.OutputText(text)))
+
+private fun workEvent(status: String): StableWebSearchCall =
+    StableWebSearchCall(ResponseItem.WebSearchCall(status = status))
 
 private fun pendingTool(callId: String): PendingToolEvent =
     PendingCustomToolEvent(
@@ -68,33 +74,31 @@ val inMemoryKodexAgentStorageTest by testSuite {
         assertNotEquals(first.id, second.id)
         assertEquals(0, first.latestIndex())
         assertEquals(settings("initial-model"), first.settings.latestValue())
-        assertEquals(emptyList(), first.compaction[0].prefix)
-        assertEquals(0, first.compaction[0].historyBaseIndex)
-        assertEquals(0L, first.compaction[0].windowNumber)
-        assertEquals(-1, first.stable.latestIndex())
+        assertEquals(0L, assertIs<CleanCompactionPoint>(first.index[0]).windowNumber)
+        assertEquals(-1, first.work.latestIndex())
         assertEquals(-1, first.unstable.latestIndex())
     }
 
-    test("stable timeline is sparse and rejects non-tail writes") {
+    test("work timeline is sparse and rejects non-tail writes") {
         val storage = storage()
-        val first = userMessage("first")
-        val second = assistantMessage("second")
+        val first = workEvent("first")
+        val second = workEvent("second")
 
-        storage.stable[1] = first
-        storage.stable[3] = second
+        storage.work[1] = first
+        storage.work[3] = second
 
-        assertEquals(3, storage.stable.latestIndex())
-        assertEquals(first, storage.stable[2])
-        assertEquals(second, storage.stable[3])
-        assertEquals(null, storage.stable.floorToIndex(0))
-        assertEquals(1, storage.stable.floorToIndex(2))
-        assertEquals(3, storage.stable.ceilToIndex(2))
-        assertEquals(3, storage.stable.nextIndex(1))
-        assertEquals(1, storage.stable.prevIndex(3))
-        assertEquals(listOf(1, 3), storage.stable.indexes().toList())
-        assertEquals(listOf(3, 1), storage.stable.indexesDescending(3).toList())
+        assertEquals(3, storage.work.latestIndex())
+        assertEquals(first, storage.work[2])
+        assertEquals(second, storage.work[3])
+        assertEquals(null, storage.work.floorToIndex(0))
+        assertEquals(1, storage.work.floorToIndex(2))
+        assertEquals(3, storage.work.ceilToIndex(2))
+        assertEquals(3, storage.work.nextIndex(1))
+        assertEquals(1, storage.work.prevIndex(3))
+        assertEquals(listOf(1, 3), storage.work.indexes().toList())
+        assertEquals(listOf(3, 1), storage.work.indexesDescending(3).toList())
         assertFailsWith<IllegalArgumentException> {
-            storage.stable[2] = userMessage("overwrite")
+            storage.work[2] = workEvent("overwrite")
         }
     }
 
@@ -105,9 +109,9 @@ val inMemoryKodexAgentStorageTest by testSuite {
 
         storage.unstable[1] = listOf(first)
         storage.unstable[2] = listOf(first, second)
-        storage.stable[3] = assistantMessage("second completed")
+        storage.index[3] = assistantMessage("second completed")
         storage.unstable[3] = listOf(first)
-        storage.stable[4] = assistantMessage("first completed")
+        storage.index[4] = assistantMessage("first completed")
         storage.unstable[4] = emptyList()
 
         assertEquals(listOf(first, second), storage.unstable[2])
@@ -117,38 +121,38 @@ val inMemoryKodexAgentStorageTest by testSuite {
 
     test("timeline revert removes suffix and permits replacement") {
         val storage = storage()
-        val first = userMessage("first")
+        val first = workEvent("first")
 
-        storage.stable[1] = first
-        storage.stable[3] = assistantMessage("third")
-        storage.stable.revert(3)
+        storage.work[1] = first
+        storage.work[3] = workEvent("third")
+        storage.work.revert(3)
 
-        assertEquals(listOf(1), storage.stable.indexes().toList())
-        assertEquals(first, storage.stable[8])
-        storage.stable[3] = assistantMessage("replacement")
-        assertEquals(listOf(1, 3), storage.stable.indexes().toList())
+        assertEquals(listOf(1), storage.work.indexes().toList())
+        assertEquals(first, storage.work[8])
+        storage.work[3] = workEvent("replacement")
+        assertEquals(listOf(1, 3), storage.work.indexes().toList())
     }
 
     test("set transaction compensates its own and nested timeline entries") {
         val storage = storage()
-        storage.stable[1] = userMessage("initial")
+        storage.work[1] = workEvent("initial")
 
         assertFailsWith<IllegalStateException> {
-            storage.stable.setWithTransaction(2, assistantMessage("temporary")) {
+            storage.work.setWithTransaction(2, workEvent("temporary")) {
                 storage.timestamp.setWithTransaction(2, timestamp(2)) {
                     error("boom")
                 }
             }
         }
 
-        assertEquals(listOf(1), storage.stable.indexes().toList())
+        assertEquals(listOf(1), storage.work.indexes().toList())
         assertEquals(-1, storage.timestamp.latestIndex())
     }
 
     test("set transaction compensates cancellation") {
         val storage = storage()
         val job = launch(start = CoroutineStart.UNDISPATCHED) {
-            storage.stable.setWithTransaction(1, userMessage("temporary")) {
+            storage.work.setWithTransaction(1, workEvent("temporary")) {
                 storage.timestamp.setWithTransaction(1, timestamp(1)) {
                     awaitCancellation()
                 }
@@ -157,40 +161,42 @@ val inMemoryKodexAgentStorageTest by testSuite {
 
         job.cancelAndJoin()
 
-        assertEquals(-1, storage.stable.latestIndex())
+        assertEquals(-1, storage.work.latestIndex())
         assertEquals(-1, storage.timestamp.latestIndex())
     }
 
     test("revert transaction restores the original suffix on failure") {
         val storage = storage()
-        val first = userMessage("first")
-        val third = assistantMessage("third")
-        storage.stable[1] = first
-        storage.stable[3] = third
+        val first = workEvent("first")
+        val third = workEvent("third")
+        storage.work[1] = first
+        storage.work[3] = third
 
         assertFailsWith<IllegalStateException> {
-            storage.stable.revertWithTransaction(2) {
-                storage.stable[2] = assistantMessage("replacement")
+            storage.work.revertWithTransaction(2) {
+                storage.work[2] = workEvent("replacement")
                 error("boom")
             }
         }
 
-        assertEquals(listOf(1, 3), storage.stable.indexes().toList())
-        assertEquals(first, storage.stable[1])
-        assertEquals(third, storage.stable[3])
+        assertEquals(listOf(1, 3), storage.work.indexes().toList())
+        assertEquals(first, storage.work[1])
+        assertEquals(third, storage.work[3])
     }
 
     test("storage revert removes every clean timeline suffix") {
         val storage = storage()
-        storage.stable[1] = userMessage("first")
-        storage.unstable[2] = listOf(pendingTool("call"))
-        storage.timestamp[3] = timestamp(3)
-        storage.tokenCount[4] = 40L
-        storage.settings[5] = settings("later")
+        storage.index[1] = userMessage("first")
+        storage.work[2] = workEvent("work")
+        storage.unstable[3] = listOf(pendingTool("call"))
+        storage.timestamp[4] = timestamp(3)
+        storage.tokenCount[5] = 40L
+        storage.settings[6] = settings("later")
 
-        storage.revert(2)
+        storage.revert(3)
 
-        assertEquals(listOf(1), storage.stable.indexes().toList())
+        assertEquals(listOf(0, 1), storage.index.indexes().toList())
+        assertEquals(listOf(2), storage.work.indexes().toList())
         assertEquals(-1, storage.unstable.latestIndex())
         assertEquals(-1, storage.timestamp.latestIndex())
         assertEquals(-1, storage.tokenCount.latestIndex())
@@ -199,7 +205,8 @@ val inMemoryKodexAgentStorageTest by testSuite {
 
     test("global index helpers merge the six timelines") {
         val storage = storage()
-        storage.stable[2] = userMessage("two")
+        storage.index[2] = userMessage("two")
+        storage.work[3] = workEvent("three")
         storage.timestamp[4] = timestamp(4)
         storage.unstable[6] = listOf(pendingTool("six"))
 
@@ -210,83 +217,37 @@ val inMemoryKodexAgentStorageTest by testSuite {
         assertEquals(4, storage.prevIndex(6))
     }
 
-    test("fork resets target and copies only indexes below boundary") {
-        val source = storage(settings("source"))
-        val target = storage(settings("target"))
-        source.stable[1] = userMessage("first")
-        source.unstable[2] = listOf(pendingTool("pending"))
-        source.stable[3] = assistantMessage("future")
-        target.stable[1] = userMessage("stale")
-
-        source.forkTo(until = 3, target = target)
-
-        assertEquals(settings("source"), target.settings[0])
-        assertEquals(userMessage("first"), target.stable[1])
-        assertEquals(listOf(pendingTool("pending")), target.unstable[2])
-        assertEquals(listOf(1), target.stable.indexes().toList())
-        assertFailsWith<IllegalArgumentException> {
-            source.forkTo(until = 0, target = target)
-        }
-    }
-
-    test("range fork rebases active state and compaction history") {
-        val source = storage(settings("initial"))
-        val target = storage(settings("target"))
-        source.settings[1] = settings("active")
-        source.compaction[2] = source.compaction[0].copy(historyBaseIndex = 2)
-        val contextCompaction = StableCleanEvent.ContextCompaction(
-            encryptedContent = "encrypted",
-        )
-        source.stable[2] = contextCompaction
-        source.stable[3] = userMessage("retained")
-        source.stable[4] = assistantMessage("future")
-
-        source.forkRangeTo(from = 2, until = 4, target = target)
-
-        assertEquals(settings("active"), target.settings[0])
-        assertEquals(0, target.compaction[0].historyBaseIndex)
-        assertEquals(contextCompaction, target.stable[0])
-        assertEquals(userMessage("retained"), target.stable[1])
-        assertEquals(listOf(0, 1), target.stable.indexes().toList())
-    }
-
-    test("append compaction checkpoint stores replacement data and resets token count") {
+    test("append compaction stores consecutive point and output indexes") {
         val storage = storage()
-        val previous = storage.compaction[0]
-        val retained = listOf(userMessage("retained"))
-        val compaction = StableCleanEvent.ContextCompaction(encryptedContent = "encrypted")
+        val previous = assertIs<CleanCompactionPoint>(storage.index[0])
+        val output = StableContextCompaction(encryptedContent = "encrypted")
         val nextSettings = settings("next")
         storage.tokenCount[0] = 99L
 
-        val index = storage.appendCompactionCheckpoint(
-            prefix = retained,
-            compaction = compaction,
+        val outputIndex = storage.appendCompaction(
+            output = output,
             timestamp = timestamp(10),
-            previousCheckpoint = previous,
+            previousPoint = previous,
             nextWindowId = "window-1",
             settings = nextSettings,
         )
+        val pointIndex = outputIndex - 1
 
-        assertEquals(1, index)
+        assertEquals(2, outputIndex)
         assertEquals(
-            CleanCompactionCheckpoint(
-                prefix = retained,
-                historyBaseIndex = 1,
+            CleanCompactionPoint(
                 windowNumber = 1,
                 firstWindowId = previous.firstWindowId,
                 previousWindowId = previous.windowId,
                 windowId = "window-1",
             ),
-            storage.compaction[index],
+            storage.index[pointIndex],
         )
-        assertEquals(compaction, storage.stable[index])
-        assertEquals(nextSettings, storage.settings[index])
-        assertEquals(0L, storage.tokenCount[index])
-        assertEquals(index, storage.tokenCount.latestIndex())
-        assertEquals(timestamp(10), storage.timestamp[index])
-        assertEquals(
-            retained.flatMap(StableCleanEvent::toResponseHistoryItems),
-            storage.compaction[index].toResponseHistoryItems(),
-        )
+        assertEquals(output, storage.work[outputIndex])
+        assertEquals(nextSettings, storage.settings[pointIndex])
+        assertEquals(0L, storage.tokenCount[pointIndex])
+        assertEquals(pointIndex, storage.tokenCount.latestIndex())
+        assertEquals(timestamp(10), storage.timestamp[outputIndex])
+        assertEquals(outputIndex, storage.latestIndex())
     }
 }
