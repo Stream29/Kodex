@@ -9,8 +9,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingImageVi
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMultiAgentInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMultiAgentToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
@@ -25,13 +23,6 @@ import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenNamespace
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolName
-import io.github.stream29.kodex.tool.multiagent.FollowupTaskArgs
-import io.github.stream29.kodex.tool.multiagent.InterruptAgentArgs
-import io.github.stream29.kodex.tool.multiagent.ListAgentsArgs
-import io.github.stream29.kodex.tool.multiagent.MultiAgentTools
-import io.github.stream29.kodex.tool.multiagent.SendMessageArgs
-import io.github.stream29.kodex.tool.multiagent.SpawnAgentArgs
-import io.github.stream29.kodex.tool.multiagent.WaitAgentArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputTools
@@ -135,58 +126,6 @@ val pendingToolEventProjectionTest by testSuite {
             assertEquals(call.name, projected.name)
             assertEquals(call.namespace, projected.namespace)
             assertEquals(expected, projected.toPendingToolEvent())
-        }
-    }
-
-    test("projects every multi-agent call with its typed operation") {
-        val cases = listOf(
-            multiAgentCase(
-                MultiAgentTools.SpawnAgentName,
-                SpawnAgentArgs.serializer(),
-                SpawnAgentArgs("review", "Review this change."),
-                PendingMultiAgentInvocation::SpawnAgent,
-            ),
-            multiAgentCase(
-                MultiAgentTools.SendMessageName,
-                SendMessageArgs.serializer(),
-                SendMessageArgs("/root/review", "Focus on the model."),
-                PendingMultiAgentInvocation::SendMessage,
-            ),
-            multiAgentCase(
-                MultiAgentTools.FollowupTaskName,
-                FollowupTaskArgs.serializer(),
-                FollowupTaskArgs("/root/review", "Continue."),
-                PendingMultiAgentInvocation::FollowupTask,
-            ),
-            multiAgentCase(
-                MultiAgentTools.WaitAgentName,
-                WaitAgentArgs.serializer(),
-                WaitAgentArgs(timeoutMs = 30_000),
-                PendingMultiAgentInvocation::WaitAgent,
-            ),
-            multiAgentCase(
-                MultiAgentTools.InterruptAgentName,
-                InterruptAgentArgs.serializer(),
-                InterruptAgentArgs("/root/review"),
-                PendingMultiAgentInvocation::InterruptAgent,
-            ),
-            multiAgentCase(
-                MultiAgentTools.ListAgentsName,
-                ListAgentsArgs.serializer(),
-                ListAgentsArgs("/root"),
-                PendingMultiAgentInvocation::ListAgents,
-            ),
-        )
-
-        cases.forEach { (call, operation) ->
-            assertEquals(
-                PendingMultiAgentToolEvent(
-                    callId = call.callId,
-                    itemId = call.id,
-                    operation = operation,
-                ),
-                call.toPendingToolEvent(),
-            )
         }
     }
 
@@ -295,11 +234,3 @@ private fun <Arguments> functionCall(
         name = name,
         arguments = OpenAiJsonCodec.encodeToString(serializer, arguments),
     )
-
-private fun <Arguments> multiAgentCase(
-    name: String,
-    serializer: SerializationStrategy<Arguments>,
-    arguments: Arguments,
-    operation: (Arguments) -> PendingMultiAgentInvocation,
-): Pair<ResponseItem.FunctionCall, PendingMultiAgentInvocation> =
-    functionCall(name, serializer, arguments) to operation(arguments)

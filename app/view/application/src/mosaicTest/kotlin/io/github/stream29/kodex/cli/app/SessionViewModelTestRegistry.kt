@@ -20,14 +20,11 @@ internal fun testSessionViewModelRegistry(
         agentFactory = PersistedSessionAgentViewModelFactory {
                 session,
                 address,
-                parentAddress,
                 ownerScope,
-                _,
             ->
             createAgentRuntimeViewModel(
                 session = session,
                 address = address,
-                parentAddress = parentAddress,
                 ownerScope = ownerScope,
                 composerFactory = DefaultComposerViewModelFactory,
                 historyFactory = AgentRuntimeHistoryViewModelFactory {

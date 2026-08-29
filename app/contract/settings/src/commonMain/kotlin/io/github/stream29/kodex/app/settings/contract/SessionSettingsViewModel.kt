@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.app.settings.contract
 
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.RequestUserInputMode
@@ -16,7 +15,6 @@ public data class SessionSettingsConfiguration(
     public val workingDirectory: Path,
     public val reasoningEffort: ReasoningEffort,
     public val serviceTier: ServiceTier,
-    public val agentMode: AgentMode,
     public val requestUserInputMode: RequestUserInputMode,
 )
 
@@ -139,7 +137,6 @@ public interface SessionSettingsViewModel : AutoCloseable {
     public fun updateModel(expectedRevision: Long, model: OpenAiModelId): Unit
     public fun updateReasoningEffort(expectedRevision: Long, reasoningEffort: ReasoningEffort): Unit
     public fun updateServiceTier(expectedRevision: Long, serviceTier: ServiceTier): Unit
-    public fun updateAgentMode(expectedRevision: Long, agentMode: AgentMode): Unit
     public fun updateRequestUserInputMode(
         expectedRevision: Long,
         mode: RequestUserInputMode,

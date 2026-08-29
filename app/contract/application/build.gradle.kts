@@ -10,6 +10,7 @@ kotlin {
             api(project(":app-contract-session-catalog"))
             api(project(":app-contract-session"))
             api(project(":app-contract-settings"))
+            api(project(":app-shared-settings-contract"))
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
         }

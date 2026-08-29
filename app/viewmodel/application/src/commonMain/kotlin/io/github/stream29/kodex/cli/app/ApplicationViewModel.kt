@@ -352,7 +352,7 @@ internal class ApplicationViewModelImpl(
         require(
             mutableNavigation.value.tabs.any { child ->
                 child === target ||
-                    (child as? PersistedSessionViewModel)?.selectedAgent?.value === target
+                    (child as? PersistedSessionViewModel)?.rootAgent === target
             },
         ) {
             "Working-directory target is not owned by this application."

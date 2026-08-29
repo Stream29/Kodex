@@ -115,7 +115,7 @@ public val KodexAgentStateValue.canCompact: Boolean
  *
  * One state operates on exactly one AgentStorage. Session trees, parent-child
  * relationships, cross-Agent messages, and Agent scheduling belong to the
- * ordinary Multi-agent tools installed by the runtime layer.
+ * ordinary tools installed by the runtime layer.
  *
  * This interface intentionally contains both observation and state-transition
  * operations while exposing [storage] only as read-only data.

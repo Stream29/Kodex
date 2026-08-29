@@ -10,13 +10,13 @@ import kotlin.time.Instant
  * Persisted state for one agent thread.
  *
  * This contract deliberately contains no parent, child, role, or runtime
- * lifecycle. Recursive topology belongs to AgentSession, while AgentState
- * interprets exactly one initialized storage.
+ * lifecycle. The session repository owns the root session lifecycle, while
+ * AgentState interprets exactly one initialized storage.
  *
  * A storage accepted by `KodexAgentState` must publish its initial snapshot at
  * index `0`: [settings] and [compaction] must each have a visible value there.
- * An empty storage may exist briefly as a newly spawned AgentSession node, but
- * it cannot represent a legal AgentState.
+ * An empty storage may exist briefly as a newly created root session, but it
+ * cannot represent a legal AgentState.
  *
  * All timelines share one sparse state index space. A state index may contain
  * entries in one timeline or several timelines; use [nextIndex] to enumerate
@@ -41,8 +41,8 @@ import kotlin.time.Instant
  * @property compaction Sparse checkpoint timeline. `compaction[index]` returns
  * the checkpoint active for the snapshot at `index`.
  * @property settings Sparse agent-thread settings timeline. `settings[index]`
- * returns the model request configuration, agent mode, plan, and goal
- * active for the snapshot at `index`.
+ * returns the model request configuration, plan, and goal active for the
+ * snapshot at `index`.
  * @property timestamp Sparse timestamp timeline. Entries record the time
  * associated with the state index where they are stored.
  * @property tokenCount Sparse context token-count timeline used for compaction

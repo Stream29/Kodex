@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.agentstate.impl
 
 import io.github.stream29.kodex.agentcontext.prefix.render.renderPlanningInstructions
-import io.github.stream29.kodex.agentcontext.prefix.render.renderMultiAgentMode
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentcontext.prefix.impl.AgentContextPrefixResolver
 import io.github.stream29.kodex.agentcontext.prefix.render.render
@@ -169,10 +168,6 @@ private class KodexAgentStateImpl(
                 role = MessageRole.Developer,
                 content = listOf(ContentItem.InputText(renderPlanningInstructions())),
             )
-            val multiAgentContext = ResponseItem.Message(
-                role = MessageRole.Developer,
-                content = listOf(ContentItem.InputText(settings.agentMode.renderMultiAgentMode())),
-            )
             val contextPrefix = contextPrefixResolver.resolve(settings).render()
             val checkpoint = storage.compaction[snapshotIndex]
             val threadId = storage.id.toCodexThreadId()
@@ -189,7 +184,7 @@ private class KodexAgentStateImpl(
 
             client.createResponse(
                 request = settings.toResponsesApiRequest(
-                    input = listOf(planningContext, multiAgentContext) + contextPrefix + durableInput,
+                    input = listOf(planningContext) + contextPrefix + durableInput,
                     clientMetadata = clientMetadata,
                     tools = mcpService.visibleToolSpecs(settings),
                 ),

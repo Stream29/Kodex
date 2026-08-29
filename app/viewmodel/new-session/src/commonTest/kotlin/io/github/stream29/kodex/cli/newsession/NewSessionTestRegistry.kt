@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.cli.newsession
 
-import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
+import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
 import io.github.stream29.kodex.cli.agent.AgentAutomaticTitleConfiguration
 import io.github.stream29.kodex.cli.agent.DefaultComposerViewModelFactory
 import io.github.stream29.kodex.cli.agent.createAgentRuntimeViewModel
@@ -10,7 +10,7 @@ import io.github.stream29.kodex.cli.session.KodexSessionRepositoryFactory
 import kotlinx.coroutines.CoroutineScope
 
 internal fun testSessionViewModelRegistry(
-    repository: KodexSessionRepository,
+    repository: KodexRootSessionRepository,
     scope: CoroutineScope,
     automaticTitleConfiguration: AgentAutomaticTitleConfiguration? = null,
 ): DefaultPersistedSessionViewModelRegistry =
@@ -20,14 +20,11 @@ internal fun testSessionViewModelRegistry(
         agentFactory = {
                 session,
                 address,
-                parentAddress,
                 ownerScope,
-                isRoot,
             ->
             createAgentRuntimeViewModel(
                 session = session,
                 address = address,
-                parentAddress = parentAddress,
                 ownerScope = ownerScope,
                 composerFactory = DefaultComposerViewModelFactory,
                 historyFactory = {
@@ -36,7 +33,7 @@ internal fun testSessionViewModelRegistry(
                     ->
                     createAgentHistoryViewModel(agentSession.runtime, childScope)
                 },
-                automaticTitleConfiguration = automaticTitleConfiguration.takeIf { isRoot },
+                automaticTitleConfiguration = automaticTitleConfiguration,
             )
         },
     )

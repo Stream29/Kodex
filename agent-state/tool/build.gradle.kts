@@ -13,7 +13,6 @@ kotlin {
             implementation(project(":tool-image-generation-impl"))
             implementation(project(":tool-view-image-impl"))
             implementation(project(":tool-get-context-remaining"))
-            implementation(project(":tool-multi-agent-impl"))
             implementation(project(":tool-plan"))
             implementation(project(":tool-request-user-input-impl"))
             implementation(project(":tool-unified-exec-impl"))

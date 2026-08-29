@@ -8,11 +8,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Instant
 
 /**
- * One exclusively owned Agent node in a recursive Codex session tree.
+ * One exclusively owned root Agent in a Codex session.
  *
  * This interface combines one Agent's seven storage timelines with the
- * repository of its direct child Agents. [runtime] is created when this
- * session is opened and remains owned by the session's coroutine lifecycle.
+ * runtime created when this session is opened.
  *
  * A newly created Agent is deliberately uninitialized. Its runtime initially
  * observes an empty state; the caller must initialize [runtime] before
@@ -21,8 +20,6 @@ import kotlin.time.Instant
  */
 public interface KodexAgentSession : CoroutineScope {
     public val storage: MutableKodexAgentStorage
-
-    public val subagents: KodexSessionRepository
 
     /**
      * The AgentRuntime owned by this open session.
@@ -33,9 +30,9 @@ public interface KodexAgentSession : CoroutineScope {
     public val runtime: AgentRuntime
 }
 
-/** Read-only persisted metadata snapshot for one direct Agent entry. */
+/** Read-only persisted metadata snapshot for one root Session entry. */
 public interface KodexSessionEntry {
-    /** Direct-entry index within the owning repository. */
+    /** Root Session entry index within the owning repository. */
     public val entryIndex: Int
 
     /** The latest thread name, or `null` while the entry is uninitialized. */
@@ -58,16 +55,16 @@ public interface KodexRootSessionEntry : KodexSessionEntry {
 }
 
 /**
- * One collection of direct Agent entries in a recursive Codex session tree.
+ * One collection of root Session entries.
  *
  * Repeatedly opening the same active entry returns the same [KodexAgentSession]
- * instance. Root Agents and subagents share this contract; their runtime
+ * instance. The repository exposes only root Sessions; their runtime
  * composition is an implementation detail of the repository that creates
  * them.
  */
 public interface KodexSessionRepository : CoroutineScope {
     /**
-     * Ordered snapshot of this repository's direct Agent entry indices.
+     * Ordered snapshot of this repository's root Session entry indices.
      *
      * The initial value reflects the entries that existed when this repository was opened.
      * Implementations publish a replacement snapshot after each successful [create] or [delete].
@@ -102,16 +99,15 @@ public interface KodexSessionRepository : CoroutineScope {
         until: Int,
     ): Int
 
-    /** Opens one direct Agent entry. */
+    /** Opens one root Session entry. */
     public suspend fun open(entryIndex: Int): KodexAgentSession
 
-    /** Removes one direct Agent entry and its complete descendant tree. */
+    /** Removes one root Session entry and its complete storage directory. */
     public suspend fun delete(entryIndex: Int)
 }
 
 /**
- * Root Session repository capabilities that are intentionally not inherited by
- * recursive Subagent repositories.
+ * Root Session repository capabilities.
  */
 public interface KodexRootSessionRepository : KodexSessionRepository {
     /** Lists every root Session as an actionable root entry. */

@@ -10,8 +10,6 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
 import io.github.stream29.kodex.app.agent.contract.AgentAddress
-import io.github.stream29.kodex.app.agent.contract.AgentChildrenState
-import io.github.stream29.kodex.app.agent.contract.AgentChildSlot
 import io.github.stream29.kodex.app.agent.contract.AgentComposerSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.AgentExecutionCapabilities
 import io.github.stream29.kodex.app.agent.contract.AgentExecutionPhase
@@ -32,7 +30,6 @@ import io.github.stream29.kodex.cli.sessiontitle.AgentTitleGeneration
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -80,7 +77,6 @@ public class AgentAutomaticTitleConfiguration(
 internal class AgentRuntimeViewModel(
     private val session: KodexAgentSession,
     override val address: AgentAddress,
-    override val parentAddress: AgentAddress?,
     private val scope: CoroutineScope,
     initialSettings: KodexAgentSettings,
     override val models: StateFlow<List<ModelInfo>>,
@@ -104,14 +100,12 @@ internal class AgentRuntimeViewModel(
     private val mutableRuntimeOperation = MutableStateFlow<Job?>(null)
     private val mutableHistoryOperation = MutableStateFlow<Job?>(null)
     private val mutableExecution = MutableStateFlow(projectExecution(activityVersion = 0))
-    private val mutableChildren = MutableStateFlow<AgentChildrenState>(AgentChildrenState.Unloaded)
     private val mutableHistoryAction =
         MutableStateFlow<AgentHistoryActionState>(AgentHistoryActionState.None)
     private val mutableNotification = MutableStateFlow<AgentNotification?>(null)
     private val mutableLifecycle = MutableStateFlow<AgentLifecycleState>(AgentLifecycleState.Open)
     private var nextHistoryRequestId: Long = 1
     private var nextNotificationId: Long = 1
-    private var childrenRevision: Long = 0
     private var closed: Boolean = false
 
     override val requestUserInput: RequestUserInputViewModel = requestUserInputImpl
@@ -122,7 +116,6 @@ internal class AgentRuntimeViewModel(
     override val execution: StateFlow<AgentExecutionState> = mutableExecution.asStateFlow()
     override val pendingSteer: StateFlow<List<StableCleanEvent.Steerable>> =
         session.runtime.pendingSteer.asStateFlow()
-    override val directChildren: StateFlow<AgentChildrenState> = mutableChildren.asStateFlow()
     override val historyAction: StateFlow<AgentHistoryActionState> =
         mutableHistoryAction.asStateFlow()
     override val notification: StateFlow<AgentNotification?> = mutableNotification.asStateFlow()
@@ -144,12 +137,6 @@ internal class AgentRuntimeViewModel(
         scope.launch {
             session.runtime.runningTurn.collect {
                 publishExecution()
-            }
-        }
-        scope.launch {
-            session.subagents.entries.collect {
-                val current = mutableChildren.value
-                if (current !is AgentChildrenState.Unloaded) loadDirectChildren()
             }
         }
     }
@@ -242,10 +229,6 @@ internal class AgentRuntimeViewModel(
         updateSettings { current -> current.copy(serviceTier = serviceTier) }
     }
 
-    override suspend fun updateAgentMode(agentMode: AgentMode) {
-        updateSettings { current -> current.copy(agentMode = agentMode) }
-    }
-
     override suspend fun updateRequestUserInputMode(mode: RequestUserInputMode) {
         updateSettings { current -> current.copy(requestUserInputMode = mode) }
     }
@@ -271,37 +254,6 @@ internal class AgentRuntimeViewModel(
             ensureOpen()
             automaticTitle.renameThread(session.runtime, normalized)
             refreshDurableState(session.runtime.latestIndex.value)
-        }
-    }
-
-    override suspend fun loadDirectChildren() {
-        ensureOpen()
-        check(childrenRevision < Long.MAX_VALUE) { "Agent children revisions are exhausted." }
-        childrenRevision += 1
-        val revision = childrenRevision
-        mutableChildren.value = AgentChildrenState.Loading(revision)
-        try {
-            val entries = session.subagents.listEntries()
-            val slots = entries.map { entry ->
-                val child = session.subagents.open(entry.entryIndex)
-                val childState = child.runtime.state.value
-                AgentChildSlot(
-                    address = AgentAddress(address.sessionIndex, child.storage.id),
-                    threadName = entry.threadName,
-                    phase = childState.toExecutionPhase(),
-                    running = child.runtime.runningTurn.value != null,
-                    activityVersion = child.runtime.latestIndex.value.coerceAtLeast(0).toLong(),
-                    hasChildren = child.subagents.entries.value.isNotEmpty(),
-                )
-            }
-            mutableChildren.value = AgentChildrenState.Loaded(slots, revision)
-        } catch (failure: CancellationException) {
-            throw failure
-        } catch (failure: Throwable) {
-            mutableChildren.value = AgentChildrenState.Failed(
-                revision = revision,
-                message = failure.message ?: failure.toString(),
-            )
         }
     }
 
@@ -574,7 +526,6 @@ internal class AgentRuntimeViewModel(
 public suspend fun createAgentRuntimeViewModel(
     session: KodexAgentSession,
     address: AgentAddress,
-    parentAddress: AgentAddress?,
     ownerScope: CoroutineScope,
     composerFactory: ComposerViewModelFactory,
     historyFactory: AgentRuntimeHistoryViewModelFactory,
@@ -595,7 +546,6 @@ public suspend fun createAgentRuntimeViewModel(
     return AgentRuntimeViewModel(
         session = session,
         address = address,
-        parentAddress = parentAddress,
         scope = childScope,
         initialSettings = session.storage.settings[latestIndex],
         models = models,
@@ -617,7 +567,6 @@ public fun interface AgentRuntimeHistoryViewModelFactory {
 public data class AgentRuntimeViewModelArguments(
     public val session: KodexAgentSession,
     public val address: AgentAddress,
-    public val parentAddress: AgentAddress?,
     public val ownerScope: CoroutineScope,
     public val models: StateFlow<List<ModelInfo>>,
     public val automaticTitleConfiguration: AgentAutomaticTitleConfiguration?,
@@ -634,7 +583,6 @@ public class DefaultAgentRuntimeViewModelFactory(
         createAgentRuntimeViewModel(
             session = arguments.session,
             address = arguments.address,
-            parentAddress = arguments.parentAddress,
             ownerScope = arguments.ownerScope,
             composerFactory = composerFactory,
             historyFactory = historyFactory,

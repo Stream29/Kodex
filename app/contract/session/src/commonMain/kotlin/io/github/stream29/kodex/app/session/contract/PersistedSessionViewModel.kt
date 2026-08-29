@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.app.session.contract
 
-import io.github.stream29.kodex.app.agent.contract.AgentAddress
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import kotlinx.coroutines.flow.StateFlow
@@ -9,30 +8,19 @@ import kotlinx.coroutines.flow.StateFlow
  * Frontend contract for one persisted root Session surface.
  *
  * The factory returns only after the stable root Agent is available. The
- * frontend reads root and selected Agent state directly from their handles.
+ * frontend reads the root Agent state directly from its handle.
  */
 public interface PersistedSessionViewModel : SessionViewModel {
     public val sessionIndex: Int
 
     public val rootAgent: AgentViewModel
-    public val selectedAgent: StateFlow<AgentViewModel>
 
     public val summary: StateFlow<PersistedSessionSummaryState>
-    public val topology: StateFlow<PersistedSessionTopologyState>
     public val lifecycle: StateFlow<PersistedSessionLifecycleState>
     public val notification: StateFlow<PersistedSessionNotification?>
 
-    /** Refreshes lightweight topology, summary, name, and root settings. */
+    /** Refreshes lightweight summary, name, and root settings. */
     public suspend fun refresh(): Unit
-
-    /**
-     * Materializes [address] when necessary, then atomically publishes it as
-     * selected and returns the shared stable handle.
-     */
-    public suspend fun selectAgent(address: AgentAddress): AgentViewModel
-
-    /** Materializes at most the direct children of [parentAddress]. */
-    public suspend fun materializeDirectChildren(parentAddress: AgentAddress): Unit
 
     /**
      * Forks the exact owned [source] through committed [target] into a new
@@ -53,8 +41,8 @@ public interface PersistedSessionViewModel : SessionViewModel {
     public fun dismissNotification(notificationId: Long): Unit
 
     /**
-     * Stops new commands and closes all materialized children in ownership
-     * order. Repeated calls are idempotent.
+     * Stops new commands and closes the root Agent. Repeated calls are
+     * idempotent.
      */
     public suspend fun shutdown(): Unit
 }

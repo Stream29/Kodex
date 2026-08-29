@@ -4,7 +4,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -40,8 +39,6 @@ public interface AgentSettingsViewModel {
 
     public suspend fun updateServiceTier(serviceTier: ServiceTier): Unit
 
-    public suspend fun updateAgentMode(agentMode: AgentMode): Unit
-
     public suspend fun updateRequestUserInputMode(mode: RequestUserInputMode): Unit
 
     /** Atomically updates the three fields selected by the runtime model menu. */
@@ -55,14 +52,12 @@ public interface AgentSettingsViewModel {
 /**
  * Frontend contract for one materialized Agent.
  *
- * Stable identity and materialized child handles are direct properties.
- * Mutable Agent-owned state remains on this ViewModel.
+ * Stable identity and mutable Agent-owned state are direct properties.
  */
 public interface AgentViewModel :
     AgentSettingsViewModel,
     AutoCloseable {
     public val address: AgentAddress
-    public val parentAddress: AgentAddress?
 
     public val composer: ComposerViewModel
     public val history: AgentHistoryViewModel
@@ -72,7 +67,6 @@ public interface AgentViewModel :
     public val execution: StateFlow<AgentExecutionState>
     public val tokenCount: StateFlow<Long?>
     public val pendingSteer: StateFlow<List<StableCleanEvent.Steerable>>
-    public val directChildren: StateFlow<AgentChildrenState>
     public val historyAction: StateFlow<AgentHistoryActionState>
     public val notification: StateFlow<AgentNotification?>
     public val lifecycle: StateFlow<AgentLifecycleState>
@@ -102,9 +96,6 @@ public interface AgentViewModel :
 
     /** Updates only the thread name on the latest persisted settings snapshot. */
     public suspend fun renameThread(threadName: String): Unit
-
-    /** Loads or refreshes only this Agent's direct child slots. */
-    public suspend fun loadDirectChildren(): Unit
 
     /** Opens an Agent-owned confirmation and returns its request id. */
     public fun requestHistoryRevert(target: AgentHistoryTarget): Long

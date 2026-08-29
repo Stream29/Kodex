@@ -50,7 +50,6 @@ import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.verticalScroll
 import io.github.stream29.kodex.hook.contract.HookManagedState
 import io.github.stream29.kodex.mcp.contract.McpImportDecision
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -80,7 +79,6 @@ public fun BoxScope.SettingsPopup(
         model = rememberTuiDropdownState(),
         reasoning = rememberTuiDropdownState(),
         serviceTier = rememberTuiDropdownState(),
-        agentMode = rememberTuiDropdownState(),
         requestUserInputMode = rememberTuiDropdownState(),
         newLineKey = rememberTuiDropdownState(),
         submitKey = rememberTuiDropdownState(),
@@ -660,13 +658,6 @@ private fun ConfigurationSettingsContent(
         enabled = snapshot.editable,
     )
     SettingsDropdownField(
-        label = "Agent mode",
-        selectedLabel = configuration.agentMode.displayName(),
-        dropdownState = dropdowns.agentMode,
-        enabled = snapshot.editable,
-        supportingText = "Controls whether the agent may delegate work to sub-agents.",
-    )
-    SettingsDropdownField(
         label = "Questions",
         selectedLabel = configuration.requestUserInputMode.displayName(),
         dropdownState = dropdowns.requestUserInputMode,
@@ -705,12 +696,6 @@ private fun NewSessionConfigurationContent(
         label = "Service tier",
         selectedLabel = state.settings.serviceTier.displayName(),
         dropdownState = dropdowns.serviceTier,
-    )
-    SettingsDropdownField(
-        label = "Agent mode",
-        selectedLabel = state.settings.agentMode.displayName(),
-        dropdownState = dropdowns.agentMode,
-        supportingText = "Controls whether the agent may delegate work to sub-agents.",
     )
     SettingsDropdownField(
         label = "Questions",
@@ -843,15 +828,6 @@ private fun BoxScope.SessionSettingsDropdownMenus(
         onSelect = { tier -> viewModel.updateServiceTier(snapshot.revision, tier) },
     )
     TuiDropdownMenu(
-        dropdownState = dropdowns.agentMode,
-        options = AgentMode.entries.toList(),
-        selected = configuration.agentMode,
-        optionLabel = AgentMode::displayName,
-        enabled = snapshot.editable,
-        backgroundColor = PopupMenuBackground,
-        onSelect = { agentMode -> viewModel.updateAgentMode(snapshot.revision, agentMode) },
-    )
-    TuiDropdownMenu(
         dropdownState = dropdowns.requestUserInputMode,
         options = RequestUserInputMode.entries.toList(),
         selected = configuration.requestUserInputMode,
@@ -893,14 +869,6 @@ private fun BoxScope.NewSessionSettingsDropdownMenus(
         optionLabel = ServiceTier::displayName,
         backgroundColor = PopupMenuBackground,
         onSelect = { tier -> viewModel.updateServiceTier(state.revision, tier) },
-    )
-    TuiDropdownMenu(
-        dropdownState = dropdowns.agentMode,
-        options = AgentMode.entries.toList(),
-        selected = state.settings.agentMode,
-        optionLabel = AgentMode::displayName,
-        backgroundColor = PopupMenuBackground,
-        onSelect = { agentMode -> viewModel.updateAgentMode(state.revision, agentMode) },
     )
     TuiDropdownMenu(
         dropdownState = dropdowns.requestUserInputMode,
@@ -967,7 +935,6 @@ private class SettingsDropdownStates(
     val model: TuiDropdownState,
     val reasoning: TuiDropdownState,
     val serviceTier: TuiDropdownState,
-    val agentMode: TuiDropdownState,
     val requestUserInputMode: TuiDropdownState,
     val newLineKey: TuiDropdownState,
     val submitKey: TuiDropdownState,
@@ -977,7 +944,6 @@ private class SettingsDropdownStates(
         model.dismiss()
         reasoning.dismiss()
         serviceTier.dismiss()
-        agentMode.dismiss()
         requestUserInputMode.dismiss()
         newLineKey.dismiss()
         submitKey.dismiss()
@@ -1041,11 +1007,6 @@ private fun ServiceTier.displayName(): String = when (this) {
     ServiceTier.Default -> "default"
     ServiceTier.Fast -> "fast"
     ServiceTier.Flex -> "flex"
-}
-
-private fun AgentMode.displayName(): String = when (this) {
-    AgentMode.Single -> "single agent"
-    AgentMode.Multi -> "multi agent"
 }
 
 private fun RequestUserInputMode.displayName(): String = when (this) {

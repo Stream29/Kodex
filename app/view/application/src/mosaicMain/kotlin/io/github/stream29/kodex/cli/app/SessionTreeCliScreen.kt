@@ -22,14 +22,16 @@ import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
+import com.jakewharton.mosaic.ui.Spacer
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
-import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
+import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
+import io.github.stream29.kodex.app.application.contract.SidebarSettingsViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
@@ -46,6 +48,7 @@ import io.github.stream29.kodex.cli.components.TuiCheckbox
 import io.github.stream29.kodex.cli.components.TuiContextMenu
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiDialogActionRow
+import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.TuiPopupMenuItem
@@ -58,6 +61,7 @@ import io.github.stream29.kodex.cli.pathpicker.DirectoryPickerPopup
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.OpenAiLoginPopup
 import io.github.stream29.kodex.cli.settings.SettingsPopup
+import io.github.stream29.kodex.cli.settings.SidebarContent
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import kotlinx.coroutines.CancellationException
@@ -69,11 +73,13 @@ import kotlinx.coroutines.launch
 public fun SessionTreeCliScreen(
     viewModel: ApplicationViewModel,
     newLineKey: StateFlow<NewLineKey>,
+    sidebarSettings: SidebarSettingsViewModel,
 ) {
     val terminal = LocalTerminalState.current
     val navigation by viewModel.navigation.collectAsState()
     val popup by viewModel.popup.collectAsState()
     val currentNewLineKey by newLineKey.collectAsState()
+    val selectedSidebarContent by sidebarSettings.state.collectAsState()
     val tabStates = collectSessionTabRenderStates(navigation.tabs, navigation.selectedIndex)
     val sessionSummary = summarizeOpenSessions(tabStates)
     val runningFrame = rememberRunningIndicatorFrame(
@@ -84,32 +90,57 @@ public fun SessionTreeCliScreen(
     val columns = (terminal.size.columns - 1).coerceAtLeast(1)
     val rows = (terminal.size.rows - 1).coerceAtLeast(1)
     val scope = rememberCoroutineScope()
-    var sidebarPinnedExpanded by remember { mutableStateOf(false) }
-    var sidebarExpandButtonHovered by remember { mutableStateOf(false) }
-    var sidebarSurfaceHovered by remember { mutableStateOf(false) }
-    var shellSessionMenu by remember { mutableStateOf<ShellSessionMenuRequest?>(null) }
+    var leftSidebarPinnedExpanded by remember { mutableStateOf(false) }
+    var leftSidebarExpandButtonHovered by remember { mutableStateOf(false) }
+    var leftSidebarSurfaceHovered by remember { mutableStateOf(false) }
+    var rightSidebarPinnedExpanded by remember { mutableStateOf(false) }
+    var rightSidebarExpandButtonHovered by remember { mutableStateOf(false) }
+    var rightSidebarSurfaceHovered by remember { mutableStateOf(false) }
+    val leftSidebarDropdown = rememberTuiDropdownState()
+    val rightSidebarDropdown = rememberTuiDropdownState()
+    var shellSessionMenu by remember { mutableStateOf<SidebarShellSessionMenuRequest?>(null) }
     var tabMenu by remember { mutableStateOf<SessionTabMenuRequest?>(null) }
     var historyMenu by remember { mutableStateOf<HistoryEntryMenuRequest?>(null) }
-    val sidebarExpanded = sidebarPinnedExpanded ||
-        sidebarExpandButtonHovered ||
-        sidebarSurfaceHovered ||
-        shellSessionMenu != null
-    val animatedSidebarColumns by animateIntAsState(
-        targetValue = if (sidebarExpanded) SessionSidebarExpandedColumns else 0,
-        label = "session sidebar width",
+    val leftSidebarExpanded = leftSidebarPinnedExpanded ||
+        leftSidebarExpandButtonHovered ||
+        leftSidebarSurfaceHovered ||
+        leftSidebarDropdown.expanded ||
+        shellSessionMenu?.side == SessionSidebarSide.Left
+    val rightSidebarExpanded = rightSidebarPinnedExpanded ||
+        rightSidebarExpandButtonHovered ||
+        rightSidebarSurfaceHovered ||
+        rightSidebarDropdown.expanded ||
+        shellSessionMenu?.side == SessionSidebarSide.Right
+    val animatedLeftSidebarColumns by animateIntAsState(
+        targetValue = if (leftSidebarExpanded) SessionSidebarExpandedColumns else 0,
+        label = "left session sidebar width",
     )
-    val sidebarColumns = animatedSidebarColumns.coerceIn(0, SessionSidebarExpandedColumns)
-    val expandButtonBridgesHoverAnimation = sidebarExpandButtonHovered &&
-        !sidebarPinnedExpanded &&
-        sidebarColumns < SessionSidebarExpandedColumns
-    val showSidebarExpandButton =
-        (!sidebarExpanded && sidebarColumns == 0) || expandButtonBridgesHoverAnimation
-    val contentColumns = (columns - sidebarColumns).coerceAtLeast(1)
+    val animatedRightSidebarColumns by animateIntAsState(
+        targetValue = if (rightSidebarExpanded) SessionSidebarExpandedColumns else 0,
+        label = "right session sidebar width",
+    )
+    val leftSidebarColumns =
+        animatedLeftSidebarColumns.coerceIn(0, SessionSidebarExpandedColumns)
+    val rightSidebarColumns =
+        animatedRightSidebarColumns.coerceIn(0, SessionSidebarExpandedColumns)
+    val leftExpandButtonBridgesHoverAnimation = leftSidebarExpandButtonHovered &&
+        !leftSidebarPinnedExpanded &&
+        leftSidebarColumns < SessionSidebarExpandedColumns
+    val rightExpandButtonBridgesHoverAnimation = rightSidebarExpandButtonHovered &&
+        !rightSidebarPinnedExpanded &&
+        rightSidebarColumns < SessionSidebarExpandedColumns
+    val showLeftSidebarExpandButton =
+        (!leftSidebarExpanded && leftSidebarColumns == 0) ||
+            leftExpandButtonBridgesHoverAnimation
+    val showRightSidebarExpandButton =
+        (!rightSidebarExpanded && rightSidebarColumns == 0) ||
+            rightExpandButtonBridgesHoverAnimation
+    val contentColumns =
+        (columns - leftSidebarColumns - rightSidebarColumns).coerceAtLeast(1)
     val contentRows = (rows - SessionTabBarRows).coerceAtLeast(0)
     val selected = navigation.selected
     val selectedPersisted = selected as? PersistedSessionViewModel
-    val selectedAgent = collectSelectedAgent(selectedPersisted)
-    val topology = collectTopology(selectedPersisted)
+    val selectedAgent = selectedPersisted?.rootAgent
     val settingsOwner: AgentSettingsViewModel? =
         selectedAgent ?: (selected as? NewSessionViewModel)
     val runtimeDropdowns = RuntimeConfigurationDropdowns.remember(settingsOwner)
@@ -144,33 +175,31 @@ public fun SessionTreeCliScreen(
                 )
                 Box(modifier = Modifier.width(columns).height(contentRows)) {
                     Row(modifier = Modifier.width(columns).height(contentRows)) {
-                        if (sidebarColumns > 0) {
-                            SessionAgentSidebar(
-                                topology = topology,
+                        if (leftSidebarColumns > 0) {
+                            SessionSidebar(
+                                side = SessionSidebarSide.Left,
+                                content = selectedSidebarContent.left,
                                 selectedAgent = selectedAgent,
-                                columns = sidebarColumns,
+                                dropdownState = leftSidebarDropdown,
+                                columns = leftSidebarColumns,
                                 rows = contentRows,
-                                runningIndicatorFrame = runningFrame,
-                                onHoverChanged = { sidebarSurfaceHovered = it },
+                                onHoverChanged = { leftSidebarSurfaceHovered = it },
                                 onToggleExpanded = {
-                                    sidebarPinnedExpanded = !sidebarPinnedExpanded
-                                    if (!sidebarPinnedExpanded) shellSessionMenu = null
-                                },
-                                onExpandAgent = { address ->
-                                    selectedPersisted?.let { session ->
-                                        scope.launch { session.materializeDirectChildren(address) }
-                                    }
-                                },
-                                onSelectAgent = { address ->
-                                    historyMenu = null
-                                    selectedPersisted?.let { session ->
-                                        scope.launch { session.selectAgent(address) }
+                                    leftSidebarPinnedExpanded = !leftSidebarPinnedExpanded
+                                    if (!leftSidebarPinnedExpanded) {
+                                        leftSidebarDropdown.dismiss()
+                                        if (shellSessionMenu?.side == SessionSidebarSide.Left) {
+                                            shellSessionMenu = null
+                                        }
                                     }
                                 },
                                 onOpenShellSessionMenu = { request ->
                                     tabMenu = null
                                     historyMenu = null
-                                    shellSessionMenu = request
+                                    shellSessionMenu = SidebarShellSessionMenuRequest(
+                                        side = SessionSidebarSide.Left,
+                                        request = request,
+                                    )
                                 },
                             )
                         }
@@ -237,17 +266,112 @@ public fun SessionTreeCliScreen(
                                 }
                             }
                         }
+                        if (rightSidebarColumns > 0) {
+                            SessionSidebar(
+                                side = SessionSidebarSide.Right,
+                                content = selectedSidebarContent.right,
+                                selectedAgent = selectedAgent,
+                                dropdownState = rightSidebarDropdown,
+                                columns = rightSidebarColumns,
+                                rows = contentRows,
+                                onHoverChanged = { rightSidebarSurfaceHovered = it },
+                                onToggleExpanded = {
+                                    rightSidebarPinnedExpanded = !rightSidebarPinnedExpanded
+                                    if (!rightSidebarPinnedExpanded) {
+                                        rightSidebarDropdown.dismiss()
+                                        if (shellSessionMenu?.side == SessionSidebarSide.Right) {
+                                            shellSessionMenu = null
+                                        }
+                                    }
+                                },
+                                onOpenShellSessionMenu = { request ->
+                                    tabMenu = null
+                                    historyMenu = null
+                                    shellSessionMenu = SidebarShellSessionMenuRequest(
+                                        side = SessionSidebarSide.Right,
+                                        request = request,
+                                    )
+                                },
+                            )
+                        }
                     }
-                    if (showSidebarExpandButton) {
-                        SessionAgentSidebarExpandButton(
-                            onHoverChanged = { hovered -> sidebarExpandButtonHovered = hovered },
-                            onExpand = { sidebarPinnedExpanded = true },
-                        )
+                    if (showLeftSidebarExpandButton || showRightSidebarExpandButton) {
+                        Row(modifier = Modifier.width(columns).height(SessionSidebarCollapsedButtonRows)) {
+                            if (showLeftSidebarExpandButton) {
+                                SessionSidebarExpandButton(
+                                    side = SessionSidebarSide.Left,
+                                    onHoverChanged = { hovered ->
+                                        leftSidebarExpandButtonHovered = hovered &&
+                                            canExpandSessionSidebar(
+                                                columns = columns,
+                                                oppositeExpanded = rightSidebarExpanded,
+                                            )
+                                    },
+                                    onExpand = {
+                                        if (
+                                            canExpandSessionSidebar(
+                                                columns = columns,
+                                                oppositeExpanded = rightSidebarExpanded,
+                                            )
+                                        ) {
+                                            leftSidebarPinnedExpanded = true
+                                        }
+                                    },
+                                )
+                            }
+                            Spacer(Modifier.weight(1f))
+                            if (showRightSidebarExpandButton) {
+                                SessionSidebarExpandButton(
+                                    side = SessionSidebarSide.Right,
+                                    onHoverChanged = { hovered ->
+                                        rightSidebarExpandButtonHovered = hovered &&
+                                            canExpandSessionSidebar(
+                                                columns = columns,
+                                                oppositeExpanded = leftSidebarExpanded,
+                                            )
+                                    },
+                                    onExpand = {
+                                        if (
+                                            canExpandSessionSidebar(
+                                                columns = columns,
+                                                oppositeExpanded = leftSidebarExpanded,
+                                            )
+                                        ) {
+                                            rightSidebarPinnedExpanded = true
+                                        }
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
 
-            ShellSessionContextMenu(shellSessionMenu) { shellSessionMenu = null }
+            ShellSessionContextMenu(shellSessionMenu?.request) { shellSessionMenu = null }
+            SessionSidebarContentMenu(
+                dropdownState = leftSidebarDropdown,
+                selected = selectedSidebarContent.left,
+                onSelect = { content ->
+                    if (content != SidebarContent.TerminalSessions &&
+                        shellSessionMenu?.side == SessionSidebarSide.Left
+                    ) {
+                        shellSessionMenu = null
+                    }
+                    scope.launch { sidebarSettings.selectLeft(content) }
+                },
+            )
+            SessionSidebarContentMenu(
+                dropdownState = rightSidebarDropdown,
+                selected = selectedSidebarContent.right,
+                onSelect = { content ->
+                    if (content != SidebarContent.TerminalSessions &&
+                        shellSessionMenu?.side == SessionSidebarSide.Right
+                    ) {
+                        shellSessionMenu = null
+                    }
+                    scope.launch { sidebarSettings.selectRight(content) }
+                },
+            )
             SessionTabContextMenu(
                 request = tabMenu,
                 onDismiss = { tabMenu = null },
@@ -348,6 +472,11 @@ public fun SessionTreeCliScreen(
     }
 }
 
+private data class SidebarShellSessionMenuRequest(
+    val side: SessionSidebarSide,
+    val request: ShellSessionMenuRequest,
+)
+
 @Composable
 private fun collectRuntimeSettings(
     viewModel: AgentSettingsViewModel?,
@@ -367,29 +496,6 @@ private fun collectRuntimeModels(
     return key(viewModel) {
         val models by viewModel.models.collectAsState()
         models
-    }
-}
-
-@Composable
-private fun collectSelectedAgent(
-    session: PersistedSessionViewModel?,
-): AgentViewModel? {
-    if (session == null) return null
-    return key(session) {
-        val selected by session.selectedAgent.collectAsState()
-        selected
-    }
-}
-
-@Composable
-private fun collectTopology(
-    session: PersistedSessionViewModel?,
-) = if (session == null) {
-    null
-} else {
-    key(session) {
-        val topology by session.topology.collectAsState()
-        topology
     }
 }
 

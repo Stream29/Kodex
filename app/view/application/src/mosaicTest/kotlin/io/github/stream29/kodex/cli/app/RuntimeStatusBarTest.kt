@@ -16,7 +16,6 @@ import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.agent.contract.AgentExecutionState
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ModelServiceTier
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -35,12 +34,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class RuntimeStatusBarTest {
-    @Test
-    fun agentModesUseExplicitLabels() {
-        assertEquals("single agent", AgentMode.Single.displayName())
-        assertEquals("multi agent", AgentMode.Multi.displayName())
-    }
-
     @Test
     fun requestUserInputModesUseExplicitLabels() {
         assertEquals("ask user", RequestUserInputMode.AskUser.displayName())
@@ -106,7 +99,6 @@ class RuntimeStatusBarTest {
                 model = model,
                 reasoning = ReasoningEffort.Max,
                 tier = ServiceTier.Default,
-                agentMode = AgentMode.Single,
                 requestUserInputMode = RequestUserInputMode.AskUser,
             ),
         )
@@ -131,9 +123,6 @@ class RuntimeStatusBarTest {
                                 tier = tier,
                             )
                         },
-                        onAgentModeSelected = { agentMode ->
-                            configuration = configuration.copy(agentMode = agentMode)
-                        },
                         onRequestUserInputModeSelected = { mode ->
                             configuration = configuration.copy(requestUserInputMode = mode)
                         },
@@ -141,7 +130,6 @@ class RuntimeStatusBarTest {
                 }
             }
             assertTrue("[gpt-5.6-sol max]" in initial, initial)
-            assertTrue("[single agent]" in initial, initial)
 
             val modelButtonStart = initial.indexOf("[gpt-5.6-sol max]")
             assertTrue(modelButtonStart >= 0, initial)
@@ -162,61 +150,6 @@ class RuntimeStatusBarTest {
     }
 
     @Test
-    fun agentModeTriggerOpensAndSelectsMultiAgent() = runTest {
-        val model = OpenAiModelId("test-model")
-        var configuration by mutableStateOf(
-            RuntimeConfiguration(
-                model = model,
-                reasoning = ReasoningEffort.High,
-                tier = ServiceTier.Default,
-                agentMode = AgentMode.Single,
-                requestUserInputMode = RequestUserInputMode.AskUser,
-            ),
-        )
-
-        runMosaicTest {
-            val initial = setContentAndSnapshot {
-                val dropdowns = RuntimeConfigurationDropdowns.remember(owner = Unit)
-                TuiPopupHost(modifier = Modifier.width(48).height(8)) {
-                    Row {
-                        RuntimeConfigurationTriggers(configuration, dropdowns)
-                    }
-                    RuntimeConfigurationMenus(
-                        configuration = configuration,
-                        models = emptyList(),
-                        modelOptions = listOf(model),
-                        dropdowns = dropdowns,
-                        onConfigurationSelected = { selectedModel, effort, tier ->
-                            configuration = configuration.copy(
-                                model = selectedModel,
-                                reasoning = effort,
-                                tier = tier,
-                            )
-                        },
-                        onAgentModeSelected = { agentMode ->
-                            configuration = configuration.copy(agentMode = agentMode)
-                        },
-                        onRequestUserInputModeSelected = { mode ->
-                            configuration = configuration.copy(requestUserInputMode = mode)
-                        },
-                    )
-                }
-            }
-            val modeButtonStart = initial.indexOf("[single agent]")
-            assertTrue(modeButtonStart >= 0, initial)
-
-            click(modeButtonStart + 1)
-            val menu = awaitSnapshotContaining("multi agent")
-            assertTrue("[single agent]" in menu, menu)
-            sendKeyEvent(KeyboardEvent(KeyboardEvent.Down))
-            sendKeyEvent(KeyboardEvent(codepoint = 13))
-            awaitSnapshotContaining("[multi agent]")
-        }
-
-        assertEquals(AgentMode.Multi, configuration.agentMode)
-    }
-
-    @Test
     fun questionModeTriggerOpensAndSelectsNoQuestion() = runTest {
         val model = OpenAiModelId("test-model")
         var configuration by mutableStateOf(
@@ -224,7 +157,6 @@ class RuntimeStatusBarTest {
                 model = model,
                 reasoning = ReasoningEffort.High,
                 tier = ServiceTier.Default,
-                agentMode = AgentMode.Single,
                 requestUserInputMode = RequestUserInputMode.AskUser,
             ),
         )
@@ -247,9 +179,6 @@ class RuntimeStatusBarTest {
                                 reasoning = effort,
                                 tier = tier,
                             )
-                        },
-                        onAgentModeSelected = { agentMode ->
-                            configuration = configuration.copy(agentMode = agentMode)
                         },
                         onRequestUserInputModeSelected = { mode ->
                             configuration = configuration.copy(requestUserInputMode = mode)
@@ -342,7 +271,6 @@ class RuntimeStatusBarTest {
                 assertTrue(lines.first().endsWith("[Settings]"), snapshot)
                 assertTrue("[test-model high]" in snapshot, snapshot)
                 assertTrue("[ask user]" in snapshot, snapshot)
-                assertTrue("[single agent]" in snapshot, snapshot)
                 assertTrue("[cwd]" in snapshot || "[.]" in snapshot, snapshot)
                 assertEquals(newSessionStatusBarRows(columns, settings), lines.size, snapshot)
             }

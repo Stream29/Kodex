@@ -9,8 +9,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingImageVi
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMultiAgentInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMultiAgentToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
@@ -25,13 +23,6 @@ import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenNamespace
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolName
-import io.github.stream29.kodex.tool.multiagent.FollowupTaskArgs
-import io.github.stream29.kodex.tool.multiagent.InterruptAgentArgs
-import io.github.stream29.kodex.tool.multiagent.ListAgentsArgs
-import io.github.stream29.kodex.tool.multiagent.MultiAgentTools
-import io.github.stream29.kodex.tool.multiagent.SendMessageArgs
-import io.github.stream29.kodex.tool.multiagent.SpawnAgentArgs
-import io.github.stream29.kodex.tool.multiagent.WaitAgentArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputTools
 import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
@@ -107,36 +98,6 @@ private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolEvent {
                     itemId = id,
                     arguments = arguments,
                 )
-            }
-
-        namespace == null && name == MultiAgentTools.SpawnAgentName ->
-            typed(SpawnAgentArgs.serializer()) { arguments ->
-                multiAgent(PendingMultiAgentInvocation.SpawnAgent(arguments))
-            }
-
-        namespace == null && name == MultiAgentTools.SendMessageName ->
-            typed(SendMessageArgs.serializer()) { arguments ->
-                multiAgent(PendingMultiAgentInvocation.SendMessage(arguments))
-            }
-
-        namespace == null && name == MultiAgentTools.FollowupTaskName ->
-            typed(FollowupTaskArgs.serializer()) { arguments ->
-                multiAgent(PendingMultiAgentInvocation.FollowupTask(arguments))
-            }
-
-        namespace == null && name == MultiAgentTools.WaitAgentName ->
-            typed(WaitAgentArgs.serializer()) { arguments ->
-                multiAgent(PendingMultiAgentInvocation.WaitAgent(arguments))
-            }
-
-        namespace == null && name == MultiAgentTools.InterruptAgentName ->
-            typed(InterruptAgentArgs.serializer()) { arguments ->
-                multiAgent(PendingMultiAgentInvocation.InterruptAgent(arguments))
-            }
-
-        namespace == null && name == MultiAgentTools.ListAgentsName ->
-            typed(ListAgentsArgs.serializer()) { arguments ->
-                multiAgent(PendingMultiAgentInvocation.ListAgents(arguments))
             }
 
         namespace == null && name == RequestUserInputTools.Name ->
@@ -226,15 +187,6 @@ private fun ResponseItem.ClientToolSearchCall.toPendingToolEvent(): PendingToolE
     } catch (_: IllegalArgumentException) {
         invalidToolSearch()
     }
-
-private fun ResponseItem.FunctionCall.multiAgent(
-    operation: PendingMultiAgentInvocation,
-): PendingMultiAgentToolEvent =
-    PendingMultiAgentToolEvent(
-        callId = callId,
-        itemId = id,
-        operation = operation,
-    )
 
 private fun ResponseItem.FunctionCall.invalid(message: String): PendingInvalidToolCall =
     PendingInvalidToolCall(

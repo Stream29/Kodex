@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
@@ -15,19 +14,6 @@ import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.tool.imagegeneration.GeneratedImageOutput
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
-import io.github.stream29.kodex.tool.multiagent.FollowupTaskArgs
-import io.github.stream29.kodex.tool.multiagent.InterruptAgentArgs
-import io.github.stream29.kodex.tool.multiagent.InterruptAgentResult
-import io.github.stream29.kodex.tool.multiagent.ListAgentsArgs
-import io.github.stream29.kodex.tool.multiagent.ListAgentsResult
-import io.github.stream29.kodex.tool.multiagent.ListedAgent
-import io.github.stream29.kodex.tool.multiagent.MultiAgentStatus
-import io.github.stream29.kodex.tool.multiagent.SendMessageArgs
-import io.github.stream29.kodex.tool.multiagent.SpawnAgentArgs
-import io.github.stream29.kodex.tool.multiagent.SpawnAgentResult
-import io.github.stream29.kodex.tool.multiagent.SpawnForkMode
-import io.github.stream29.kodex.tool.multiagent.WaitAgentArgs
-import io.github.stream29.kodex.tool.multiagent.WaitAgentResult
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
@@ -45,7 +31,6 @@ import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -154,99 +139,6 @@ val stableSpecializedToolEventSerializationTest by testSuite {
         assertEquals(
             listOf("exec_command", "write_stdin"),
             events.map { event -> event.projectedFunctionName() },
-        )
-    }
-
-    test("round trips every multi-agent operation") {
-        val operations = listOf(
-            StableMultiAgentOperation.SpawnAgent(
-                arguments = SpawnAgentArgs(
-                    taskName = "review",
-                    message = "Review the clean model.",
-                    forkTurns = SpawnForkMode.Recent(3),
-                ),
-                result = StableSpawnAgentResult.Success(
-                    SpawnAgentResult("/root/review", nickname = "reviewer"),
-                ),
-            ),
-            StableMultiAgentOperation.SendMessage(
-                arguments = SendMessageArgs("/root/review", "Focus on serialization."),
-                result = StableAgentDeliveryResult.Success(""),
-            ),
-            StableMultiAgentOperation.FollowupTask(
-                arguments = FollowupTaskArgs("/root/review", "Inspect field naming."),
-                result = StableAgentDeliveryResult.Failure("Agent is unavailable."),
-            ),
-            StableMultiAgentOperation.WaitAgent(
-                arguments = WaitAgentArgs(timeoutMs = 30_000),
-                result = StableWaitAgentResult.Success(
-                    WaitAgentResult("Wait timed out.", timedOut = true),
-                ),
-            ),
-            StableMultiAgentOperation.InterruptAgent(
-                arguments = InterruptAgentArgs("/root/review"),
-                result = StableInterruptAgentResult.Success(
-                    InterruptAgentResult(MultiAgentStatus.Running),
-                ),
-            ),
-            StableMultiAgentOperation.ListAgents(
-                arguments = ListAgentsArgs("/root"),
-                result = StableListAgentsResult.Success(
-                    ListAgentsResult(
-                        listOf(ListedAgent("/root/review", MultiAgentStatus.Idle)),
-                    ),
-                ),
-            ),
-        )
-
-        val events = operations.mapIndexed { index, operation ->
-            val callId = "call_multi_agent_$index"
-            StableMultiAgentToolEvent(
-                callId = callId,
-                itemId = ResponseItemId("item_multi_agent_$index"),
-                operation = operation,
-            )
-        }
-        events.forEach(::assertStableToolEventRoundTrip)
-        assertEquals(
-            listOf(
-                "spawn_agent",
-                "send_message",
-                "followup_task",
-                "wait_agent",
-                "interrupt_agent",
-                "list_agents",
-            ),
-            events.map { event -> event.projectedFunctionName() },
-        )
-    }
-
-    test("multi-agent projection explicitly retains nullable defaults") {
-        val event = StableMultiAgentToolEvent(
-            callId = "call_spawn",
-            operation = StableMultiAgentOperation.SpawnAgent(
-                arguments = SpawnAgentArgs(
-                    taskName = "worker",
-                    message = "Inspect the contract.",
-                ),
-                result = StableSpawnAgentResult.Success(
-                    SpawnAgentResult(taskName = "/root/worker"),
-                ),
-            ),
-        )
-
-        val items = event.toResponseHistoryItems()
-        val call = assertIs<ResponseItem.FunctionCall>(items[0])
-        val arguments = specializedToolJson.parseToJsonElement(call.arguments).jsonObject
-        assertEquals(JsonNull, arguments["model"])
-        assertEquals(JsonNull, arguments["reasoning_effort"])
-        assertEquals(JsonNull, arguments["service_tier"])
-
-        val output = assertIs<ResponseItem.FunctionCallOutput>(items[1])
-        val body = assertIs<FunctionCallOutputBody.Text>(output.output.body)
-        assertEquals(
-            JsonNull,
-            specializedToolJson.parseToJsonElement(body.text).jsonObject["nickname"],
         )
     }
 

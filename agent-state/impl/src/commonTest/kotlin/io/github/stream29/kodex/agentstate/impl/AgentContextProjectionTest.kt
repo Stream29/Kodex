@@ -2,7 +2,6 @@ package io.github.stream29.kodex.agentstate.impl
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
-import io.github.stream29.kodex.agentcontext.prefix.render.renderMultiAgentMode
 import io.github.stream29.kodex.agentcontext.prefix.render.renderPlanningInstructions
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
@@ -14,14 +13,12 @@ import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.OpenAiModelId
-import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
 import io.github.stream29.kodex.openai.Response
 import io.github.stream29.kodex.openai.ResponseItem
@@ -29,7 +26,6 @@ import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.RequestUserInputMode
-import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.ThreadGoal
 import io.github.stream29.kodex.openai.ThreadGoalStatus
 import io.github.stream29.kodex.openai.ToolSpec
@@ -78,7 +74,6 @@ val agentContextProjectionTest by testSuite {
 
                 val input = requests.single().input
                 assertEquals(planningMessage(), input[0])
-                assertEquals(agentModeMessage(AgentMode.Single), input[1])
                 assertTrue(
                     input.contextText().contains(
                         "user instructions\n\nkodex instructions\n\n--- project-doc ---\n\nproject instructions",
@@ -88,54 +83,6 @@ val agentContextProjectionTest by testSuite {
                 assertEquals(StableCleanEvent.UserMessage(user.content), storage.stable[1])
                 assertEquals(1, storage.stable.latestIndex())
                 assertEquals(1, storage.latestIndex())
-            } finally {
-                deleteRecursively(fixture.root)
-            }
-        }
-
-        test("projects agent mode and discovered skills without plan or goal state") {
-            val fixture = contextFixture("mode-and-skills")
-            try {
-                fixture.writeUserAgentsMd("agent instructions")
-                fixture.writeSkill("test-skill", "test description")
-                val storage = InMemoryKodexAgentStorage(
-                    settings(
-                        cwd = fixture.project,
-                        agentMode = AgentMode.Multi,
-                        plan = UpdatePlanArgs(
-                            explanation = "Keep this plan out of the model prompt.",
-                            plan = listOf(
-                                PlanItemArg("Complete the implementation.", StepStatus.InProgress),
-                            ),
-                        ),
-                        goal = ThreadGoal(
-                            objective = "Finish the implementation.",
-                            status = ThreadGoalStatus.Active,
-                        ),
-                    ),
-                )
-                val requests = mutableListOf<ResponsesApiRequest>()
-                val agent = KodexAgentState(
-                    client = recordingClient(requests),
-                    storage = storage,
-                    contextSettings = fixture.settings,
-                    mcpService = ProjectionMcpService(),
-                )
-                val user = userMessage("use a tool")
-
-                agent.appendUserMessage(user.content)
-                agent.requestResponseApi()
-
-                val input = requests.single().input
-                val rendered = input.text()
-                assertEquals(planningMessage(), input[0])
-                assertEquals(agentModeMessage(AgentMode.Multi), input[1])
-                assertTrue(rendered.contains("test-skill"))
-                assertTrue(rendered.contains("test description"))
-                assertTrue(rendered.contains("agent instructions"))
-                assertTrue(!rendered.contains("Keep this plan out of the model prompt."))
-                assertTrue(!rendered.contains("Finish the implementation."))
-                assertEquals(user, input.last())
             } finally {
                 deleteRecursively(fixture.root)
             }
@@ -271,14 +218,12 @@ private fun ResponsesApiRequest.hasRequestUserInputTool(): Boolean =
 
 private fun settings(
     cwd: Path,
-    agentMode: AgentMode = AgentMode.Single,
     plan: UpdatePlanArgs = UpdatePlanArgs(plan = emptyList()),
     goal: ThreadGoal? = null,
 ): KodexAgentSettings =
     KodexAgentSettings(
         model = OpenAiModelId("test-model"),
         cwd = cwd,
-        agentMode = agentMode,
         plan = plan,
         goal = goal,
     )
@@ -288,9 +233,6 @@ private fun userMessage(text: String): ResponseItem.Message =
 
 private fun planningMessage(): ResponseItem.Message =
     message(MessageRole.Developer, renderPlanningInstructions())
-
-private fun agentModeMessage(agentMode: AgentMode): ResponseItem.Message =
-    message(MessageRole.Developer, agentMode.renderMultiAgentMode())
 
 private fun message(role: MessageRole, vararg sections: String): ResponseItem.Message =
     ResponseItem.Message(

@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.cli.history
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentDeliveryResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
@@ -10,21 +9,15 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGener
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInterruptAgentResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableListAgentsResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMultiAgentOperation
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMultiAgentToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSpawnAgentResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWaitAgentResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryAction
@@ -36,11 +29,6 @@ import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemHeader
 import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.WebSearchAction
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
-import io.github.stream29.kodex.tool.multiagent.FollowupTaskArgs
-import io.github.stream29.kodex.tool.multiagent.InterruptAgentArgs
-import io.github.stream29.kodex.tool.multiagent.ListAgentsArgs
-import io.github.stream29.kodex.tool.multiagent.SendMessageArgs
-import io.github.stream29.kodex.tool.multiagent.SpawnAgentArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
@@ -127,7 +115,6 @@ private fun StableCleanEvent.CompletedTool.historyToolSummary(failed: Boolean): 
     is StableImageGenerationToolEvent -> arguments.historySummary(failed)
     is StableImageViewToolEvent -> arguments.historySummary(failed)
     is StableMcpToolEvent -> qualifiedToolName(name, namespace).stableToolSummary(failed)
-    is StableMultiAgentToolEvent -> operation.historySummary(failed)
     is StablePlanUpdate -> if (failed) "Failed to update the plan" else "Update the plan"
     is StableRequestUserInputToolEvent -> arguments.historySummary(failed)
     is StableToolSearchEvent -> arguments.historySummary(failed)
@@ -153,7 +140,6 @@ private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (t
     is StableImageGenerationToolEvent -> result.historyStatus()
     is StableImageViewToolEvent -> result.historyStatus()
     is StableMcpToolEvent -> result.isError.mcpHistoryStatus()
-    is StableMultiAgentToolEvent -> operation.historyStatus()
     is StablePlanUpdate -> "completed"
     is StableRequestUserInputToolEvent -> when (result) {
         is StableRequestUserInputResult.Answered -> "completed"
@@ -298,38 +284,6 @@ private fun WebSearchAction.historySummary(failed: Boolean): String = when (this
     WebSearchAction.Other -> if (failed) "Failed to use web search" else "Use web search"
 }
 
-private fun StableMultiAgentOperation.historySummary(failed: Boolean): String = when (this) {
-    is StableMultiAgentOperation.SpawnAgent -> arguments.historySummary(failed)
-    is StableMultiAgentOperation.SendMessage -> arguments.historySummary(failed)
-    is StableMultiAgentOperation.FollowupTask -> arguments.historySummary(failed)
-    is StableMultiAgentOperation.WaitAgent -> if (failed) "Failed to wait for an agent" else "Wait for an agent"
-    is StableMultiAgentOperation.InterruptAgent -> arguments.historySummary(failed)
-    is StableMultiAgentOperation.ListAgents -> arguments.historySummary(failed)
-}
-
-private fun SpawnAgentArgs.historySummary(failed: Boolean): String =
-    if (failed) "Failed to start agent: ${taskName.historyPreview()}" else "Start agent: ${taskName.historyPreview()}"
-
-private fun SendMessageArgs.historySummary(failed: Boolean): String =
-    if (failed) "Failed to send message to agent: ${target.historyPreview()}" else {
-        "Message agent: ${target.historyPreview()}"
-    }
-
-private fun FollowupTaskArgs.historySummary(failed: Boolean): String =
-    if (failed) "Failed to resume task for agent: ${target.historyPreview()}" else {
-        "Resume task for agent: ${target.historyPreview()}"
-    }
-
-private fun InterruptAgentArgs.historySummary(failed: Boolean): String =
-    if (failed) "Failed to interrupt agent: ${target.historyPreview()}" else {
-        "Interrupt agent: ${target.historyPreview()}"
-    }
-
-private fun ListAgentsArgs.historySummary(failed: Boolean): String =
-    pathPrefix?.historyPreview()?.takeIf(String::isNotBlank)
-        ?.let { prefix -> if (failed) "Failed to list agents under: $prefix" else "List agents under: $prefix" }
-        ?: if (failed) "Failed to list agents" else "List agents"
-
 private fun String.stableToolSummary(failed: Boolean): String =
     if (failed) "Failed to run $this" else this
 
@@ -359,39 +313,6 @@ private fun StableWebSearchResult.historyStatus(): String = when (this) {
     is StableWebSearchResult.Failure -> "failed"
 }
 
-private fun StableMultiAgentOperation.historyStatus(): String = when (this) {
-    is StableMultiAgentOperation.SpawnAgent -> result.historyStatus()
-    is StableMultiAgentOperation.SendMessage -> result.historyStatus()
-    is StableMultiAgentOperation.FollowupTask -> result.historyStatus()
-    is StableMultiAgentOperation.WaitAgent -> result.historyStatus()
-    is StableMultiAgentOperation.InterruptAgent -> result.historyStatus()
-    is StableMultiAgentOperation.ListAgents -> result.historyStatus()
-}
-
-private fun StableSpawnAgentResult.historyStatus(): String = when (this) {
-    is StableSpawnAgentResult.Success -> "completed"
-    is StableSpawnAgentResult.Failure -> "failed"
-}
-
-private fun StableAgentDeliveryResult.historyStatus(): String = when (this) {
-    is StableAgentDeliveryResult.Success -> "completed"
-    is StableAgentDeliveryResult.Failure -> "failed"
-}
-
-private fun StableWaitAgentResult.historyStatus(): String = when (this) {
-    is StableWaitAgentResult.Success -> "completed"
-    is StableWaitAgentResult.Failure -> "failed"
-}
-
-private fun StableInterruptAgentResult.historyStatus(): String = when (this) {
-    is StableInterruptAgentResult.Success -> "completed"
-    is StableInterruptAgentResult.Failure -> "failed"
-}
-
-private fun StableListAgentsResult.historyStatus(): String = when (this) {
-    is StableListAgentsResult.Success -> "completed"
-    is StableListAgentsResult.Failure -> "failed"
-}
 
 private fun List<String>.toPatchHistoryTarget(): PatchHistoryItemTarget {
     val distinctPaths = distinct()

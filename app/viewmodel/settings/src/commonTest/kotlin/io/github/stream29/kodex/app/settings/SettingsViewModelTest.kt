@@ -30,7 +30,6 @@ import io.github.stream29.kodex.mcp.contract.McpManager
 import io.github.stream29.kodex.mcp.contract.McpManagerEffect
 import io.github.stream29.kodex.mcp.contract.McpServerDraft
 import io.github.stream29.kodex.mcp.contract.McpTransportKind
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -115,7 +114,7 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun rootKeepsStableChildrenAndSharesGlobalSettingsAuthority() = runTest {
+    fun rootSharesGlobalSettingsAuthority() = runTest {
         val settings = InMemoryKodexGlobalSettings(
             KodexGlobalSettings(codexHome = Path("codex-home")),
         )
@@ -145,11 +144,8 @@ class SettingsViewModelTest {
         newSession.updateModel(defaults.revision, OpenAiModelId("new-default"))
         runCurrent()
         val withUpdatedModel = newSession.state.value
-        newSession.updateAgentMode(withUpdatedModel.revision, AgentMode.Multi)
-        runCurrent()
-        val withUpdatedAgentMode = newSession.state.value
         newSession.updateRequestUserInputMode(
-            withUpdatedAgentMode.revision,
+            withUpdatedModel.revision,
             RequestUserInputMode.NoQuestion,
         )
         runCurrent()
@@ -158,7 +154,6 @@ class SettingsViewModelTest {
             OpenAiModelId("new-default"),
             settings.settings.value.newSession.model,
         )
-        assertEquals(AgentMode.Multi, settings.settings.value.newSession.agentMode)
         assertEquals(
             RequestUserInputMode.NoQuestion,
             settings.settings.value.newSession.requestUserInputMode,
@@ -167,7 +162,6 @@ class SettingsViewModelTest {
             OpenAiModelId("new-default"),
             newSession.state.value.settings.model,
         )
-        assertEquals(AgentMode.Multi, newSession.state.value.settings.agentMode)
         assertEquals(
             RequestUserInputMode.NoQuestion,
             newSession.state.value.settings.requestUserInputMode,
@@ -401,11 +395,6 @@ class SettingsViewModelTest {
             source.current.configuration.requestUserInputMode,
         )
         assertEquals(2, source.updateCount)
-
-        viewModel.session.updateAgentMode(first.snapshot.revision, AgentMode.Multi)
-        runCurrent()
-        assertEquals(2, source.updateCount)
-        assertEquals(AgentMode.Single, source.current.configuration.agentMode)
 
         viewModel.session.requestWorkingDirectory(first.snapshot.revision)
 
@@ -696,7 +685,6 @@ private fun initialSnapshot(): SessionSettingsSnapshot =
             workingDirectory = Path("workspace"),
             reasoningEffort = ReasoningEffort.Medium,
             serviceTier = ServiceTier.Default,
-            agentMode = AgentMode.Single,
             requestUserInputMode = RequestUserInputMode.AskUser,
         ),
         editable = true,

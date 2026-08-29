@@ -10,13 +10,6 @@ import io.github.stream29.kodex.openai.SearchResponseLength
 import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
-import io.github.stream29.kodex.tool.multiagent.FollowupTaskArgs
-import io.github.stream29.kodex.tool.multiagent.InterruptAgentArgs
-import io.github.stream29.kodex.tool.multiagent.ListAgentsArgs
-import io.github.stream29.kodex.tool.multiagent.SendMessageArgs
-import io.github.stream29.kodex.tool.multiagent.SpawnAgentArgs
-import io.github.stream29.kodex.tool.multiagent.SpawnForkMode
-import io.github.stream29.kodex.tool.multiagent.WaitAgentArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestionOption
@@ -158,17 +151,6 @@ val pendingToolEventHierarchySerializationTest by testSuite {
                     ),
                 ),
             ) to "command_execution",
-            PendingMultiAgentToolEvent(
-                callId = "call_multi_agent",
-                itemId = ResponseItemId("item_multi_agent"),
-                operation = PendingMultiAgentInvocation.SpawnAgent(
-                    SpawnAgentArgs(
-                        taskName = "review",
-                        message = "Review the clean model.",
-                        forkTurns = SpawnForkMode.Recent(3),
-                    ),
-                ),
-            ) to "multi_agent",
             PendingRequestUserInputToolEvent(
                 callId = "call_request_user_input",
                 itemId = ResponseItemId("item_request_user_input"),
@@ -223,36 +205,6 @@ val pendingToolEventHierarchySerializationTest by testSuite {
             assertEquals(
                 event,
                 pendingHierarchyJson.decodeFromString<PendingToolEvent>(encoded),
-            )
-        }
-    }
-
-    test("round trips every multi-agent pending operation") {
-        val operations = listOf(
-            PendingMultiAgentInvocation.SpawnAgent(
-                SpawnAgentArgs(
-                    taskName = "review",
-                    message = "Review the clean model.",
-                    forkTurns = SpawnForkMode.All,
-                ),
-            ),
-            PendingMultiAgentInvocation.SendMessage(
-                SendMessageArgs("/root/review", "Focus on serialization."),
-            ),
-            PendingMultiAgentInvocation.FollowupTask(
-                FollowupTaskArgs("/root/review", "Also inspect field naming."),
-            ),
-            PendingMultiAgentInvocation.WaitAgent(WaitAgentArgs(timeoutMs = 30_000)),
-            PendingMultiAgentInvocation.InterruptAgent(InterruptAgentArgs("/root/review")),
-            PendingMultiAgentInvocation.ListAgents(ListAgentsArgs("/root")),
-        )
-
-        operations.forEach { operation ->
-            val encoded = pendingHierarchyJson.encodeToString<PendingMultiAgentInvocation>(operation)
-
-            assertEquals(
-                operation,
-                pendingHierarchyJson.decodeFromString<PendingMultiAgentInvocation>(encoded),
             )
         }
     }

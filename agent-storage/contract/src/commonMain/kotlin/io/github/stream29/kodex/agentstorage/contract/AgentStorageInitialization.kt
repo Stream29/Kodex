@@ -9,9 +9,8 @@ import kotlin.uuid.Uuid
 /**
  * Publishes the required snapshot-zero state into an empty AgentStorage.
  *
- * This is the canonical initialization path for a raw child returned by
- * `KodexAgentSession.subagents.create()`. The storage must have no entry in
- * any timeline.
+ * This is the canonical initialization path for a newly created root
+ * session. The storage must have no entry in any timeline.
  */
 @OptIn(ExperimentalUuidApi::class)
 public suspend fun MutableKodexAgentStorage.initialize(initialSettings: KodexAgentSettings) {

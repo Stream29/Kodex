@@ -3,7 +3,6 @@ package io.github.stream29.kodex.agentstate.tool
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ToolSpec
@@ -11,7 +10,6 @@ import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
 import io.github.stream29.kodex.tool.currenttime.CurrentTimeTools
 import io.github.stream29.kodex.tool.getcontextremaining.GetContextRemainingTools
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenerationTools
-import io.github.stream29.kodex.tool.multiagent.MultiAgentTools
 import io.github.stream29.kodex.tool.plan.PlanTools
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputTools
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchDocument
@@ -49,9 +47,6 @@ public fun McpService.visibleToolSpecs(
         .toDeferredToolSearchDocuments()
     return buildList {
         addAll(DirectToolSpecs)
-        if (settings.agentMode == AgentMode.Multi) {
-            addAll(MultiAgentTools.specs)
-        }
         add(PlanTools.spec)
         if (settings.requestUserInputMode == RequestUserInputMode.AskUser) {
             add(RequestUserInputTools.spec)

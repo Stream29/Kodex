@@ -5,26 +5,20 @@ import io.github.stream29.kodex.agentsession.contract.KodexRootSessionEntry
 import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
 import io.github.stream29.kodex.agentstorage.contract.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
-import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.app.agent.contract.AgentAddress
-import io.github.stream29.kodex.app.agent.contract.AgentExecutionPhase
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
-import io.github.stream29.kodex.app.session.contract.PersistedAgentMaterializationState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionNotification
 import io.github.stream29.kodex.app.session.contract.PersistedSessionNotificationLevel
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
 import io.github.stream29.kodex.app.session.contract.PersistedSessionSummaryState
-import io.github.stream29.kodex.app.session.contract.PersistedSessionTopologyNode
-import io.github.stream29.kodex.app.session.contract.PersistedSessionTopologyState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -33,15 +27,11 @@ import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -225,17 +215,12 @@ public class DefaultPersistedSessionViewModelRegistry(
     }
 }
 
-/**
- * Creates one Agent child for the exact runtime handle already resolved by its
- * owning persisted Session.
- */
+/** Creates the root Agent for its owning persisted Session. */
 public fun interface PersistedSessionAgentViewModelFactory {
     public suspend fun create(
         session: KodexAgentSession,
         address: AgentAddress,
-        parentAddress: AgentAddress?,
         ownerScope: CoroutineScope,
-        isRoot: Boolean,
     ): AgentViewModel
 }
 
@@ -247,22 +232,12 @@ private class PersistedSessionViewModelImpl(
     private val agentFactory: PersistedSessionAgentViewModelFactory,
 ) : PersistedSessionViewModel {
     private val mutex = Mutex()
-    private val agents = linkedMapOf<AgentAddress, AgentViewModel>()
-    private val sessions = linkedMapOf<AgentAddress, KodexAgentSession>()
-    private val parentAddresses = linkedMapOf<AgentAddress, AgentAddress?>()
-    private val depths = linkedMapOf<AgentAddress, Int>()
-    private val directChildEdges = linkedMapOf<AgentAddress, List<TopologyChildEdge>>()
-    private val threadNames = linkedMapOf<AgentAddress, String?>()
-    private val topologyObservers = linkedMapOf<AgentAddress, Job>()
     private val mutableName = MutableStateFlow("Session $sessionIndex")
     private val mutableSummary = MutableStateFlow(PersistedSessionSummaryState())
-    private lateinit var mutableSelectedAgent: MutableStateFlow<AgentViewModel>
-    private lateinit var mutableTopology: MutableStateFlow<PersistedSessionTopologyState>
     private val mutableLifecycle =
         MutableStateFlow<PersistedSessionLifecycleState>(PersistedSessionLifecycleState.Open)
     private val mutableNotification = MutableStateFlow<PersistedSessionNotification?>(null)
     private var summaryRevision = 0L
-    private var topologyRevision = 0L
     private var nextNotificationId = 1L
     private var closed = false
 
@@ -273,11 +248,7 @@ private class PersistedSessionViewModelImpl(
         get() = rootAgent.settings
     override val models: StateFlow<List<ModelInfo>>
         get() = rootAgent.models
-    override val selectedAgent: StateFlow<AgentViewModel>
-        get() = mutableSelectedAgent.asStateFlow()
     override val summary: StateFlow<PersistedSessionSummaryState> = mutableSummary.asStateFlow()
-    override val topology: StateFlow<PersistedSessionTopologyState>
-        get() = mutableTopology.asStateFlow()
     override val lifecycle: StateFlow<PersistedSessionLifecycleState> =
         mutableLifecycle.asStateFlow()
     override val notification: StateFlow<PersistedSessionNotification?> =
@@ -295,57 +266,30 @@ private class PersistedSessionViewModelImpl(
 
     suspend fun initialize() {
         val rootAddress = AgentAddress(sessionIndex, rootSession.storage.id)
-        sessions[rootAddress] = rootSession
-        parentAddresses[rootAddress] = null
-        depths[rootAddress] = 0
-        val root = materialize(rootAddress)
-        rootAgent = root
-        threadNames[rootAddress] = root.settings.value.threadName.takeIf(String::isNotBlank)
-        mutableSelectedAgent = MutableStateFlow(root)
-        mutableTopology = MutableStateFlow(
-            PersistedSessionTopologyState(
-                rootAddress = rootAddress,
-                nodes = listOf(
-                    projectNode(rootAddress, PersistedAgentMaterializationState.Loaded),
-                ),
-            ),
+        rootAgent = agentFactory.create(
+            session = rootSession,
+            address = rootAddress,
+            ownerScope = ownerScope,
         )
-        observe(rootAddress)
+        ownerScope.launch {
+            rootAgent.settings.collect {
+                refresh()
+            }
+        }
         refresh()
     }
 
     override suspend fun refresh() = mutex.withLock {
         ensureOpen()
-        discoverDirectChildren(rootAgent.address, materialize = false)
         refreshProjection()
     }
-
-    override suspend fun selectAgent(address: AgentAddress): AgentViewModel = mutex.withLock {
-        require(address.sessionIndex == sessionIndex) {
-            "Agent belongs to another persisted Session."
-        }
-        ensureOpen()
-        val selected = agents[address] ?: materialize(findSession(address))
-        mutableSelectedAgent.value = selected
-        refreshProjection()
-        selected
-    }
-
-    override suspend fun materializeDirectChildren(parentAddress: AgentAddress) =
-        mutex.withLock {
-            ensureOpen()
-            discoverDirectChildren(parentAddress, materialize = true)
-            agents[parentAddress]?.loadDirectChildren()
-            refreshProjection()
-        }
 
     override suspend fun fork(
         source: AgentViewModel,
         target: AgentHistoryTarget,
     ): Int = mutex.withLock {
         ensureOpen()
-        val owned = agents[source.address]
-        require(owned === source) {
+        require(source === rootAgent && source.address == rootAgent.address) {
             "Fork source is not owned by this persisted Session."
         }
         require(source.history.contains(target.generation, target.storageIndex)) {
@@ -357,18 +301,16 @@ private class PersistedSessionViewModelImpl(
         ) {
             "Cannot fork a running or unavailable Agent."
         }
-        val sourceSession = sessions.getValue(source.address)
         val sourceIndex = target.untilExclusive - 1
-        require(sourceSession.runtime.storage.latestIndex() >= sourceIndex) {
+        val sourceStorage = rootSession.runtime.storage
+        require(sourceStorage.latestIndex() >= sourceIndex) {
             "Fork boundary is outside the source storage."
         }
-        require(
-            sourceSession.runtime.storage.stable.floorToIndex(sourceIndex) == sourceIndex,
-        ) {
+        require(sourceStorage.stable.floorToIndex(sourceIndex) == sourceIndex) {
             "Fork history entry $sourceIndex is no longer committed."
         }
         val targetIndex = repository.createFork(
-            source = sourceSession.runtime.storage,
+            source = sourceStorage,
             from = 0,
             until = target.untilExclusive,
         )
@@ -442,7 +384,6 @@ private class PersistedSessionViewModelImpl(
         rootAgent.renameThread(normalized)
         mutex.withLock {
             ensureOpen()
-            threadNames[rootAgent.address] = normalized
             refreshProjection()
         }
     }
@@ -457,9 +398,6 @@ private class PersistedSessionViewModelImpl(
 
     override suspend fun updateServiceTier(serviceTier: ServiceTier) =
         rootAgent.updateServiceTier(serviceTier)
-
-    override suspend fun updateAgentMode(agentMode: AgentMode) =
-        rootAgent.updateAgentMode(agentMode)
 
     override suspend fun updateRequestUserInputMode(mode: RequestUserInputMode) =
         rootAgent.updateRequestUserInputMode(mode)
@@ -490,178 +428,19 @@ private class PersistedSessionViewModelImpl(
         if (closed) return
         closed = true
         mutableLifecycle.value = PersistedSessionLifecycleState.Closing
-        topologyObservers.values.forEach(Job::cancel)
-        topologyObservers.clear()
-        agents.values.toList().asReversed().forEach(AgentViewModel::close)
-        agents.clear()
-        directChildEdges.clear()
-        sessions.clear()
+        rootAgent.close()
         mutableLifecycle.value = PersistedSessionLifecycleState.Closed
         ownerScope.cancel()
     }
 
-    private suspend fun discoverDirectChildren(
-        parentAddress: AgentAddress,
-        materialize: Boolean,
-    ) {
-        val parent = findKnownSession(parentAddress)
-        val parentDepth = requireNotNull(depths[parentAddress])
-        val children = mutableListOf<DiscoveredTopologyChild>()
-        parent.subagents.listEntries().forEach { entry ->
-            val child = parent.subagents.open(entry.entryIndex)
-            if (child.runtime.latestIndex.value < 0) return@forEach
-            val address = AgentAddress(sessionIndex, child.storage.id)
-            children += DiscoveredTopologyChild(
-                edge = TopologyChildEdge(entry.entryIndex, address),
-                session = child,
-                threadName = entry.threadName,
-            )
-        }
-        require(children.map { child -> child.edge.entryIndex }.distinct().size == children.size) {
-            "Direct Agent entry indices must be unique."
-        }
-        require(children.map { child -> child.edge.address }.distinct().size == children.size) {
-            "Direct Agent addresses must be unique."
-        }
-        children.forEach { child ->
-            if (child.edge.address in parentAddresses) {
-                require(parentAddresses[child.edge.address] == parentAddress) {
-                    "A discovered Agent address cannot move between topology parents."
-                }
-            }
-        }
-
-        val newEdges = children.map(DiscoveredTopologyChild::edge)
-        val newAddresses = newEdges.mapTo(mutableSetOf(), TopologyChildEdge::address)
-        val removedRoots = directChildEdges[parentAddress]
-            .orEmpty()
-            .map(TopologyChildEdge::address)
-            .filterNot(newAddresses::contains)
-        val removedAddresses = linkedSetOf<AgentAddress>()
-        removedRoots.forEach { removedRoot ->
-            discoveredSubtreeAddresses(removedRoot).forEach { removedAddress ->
-                check(removedAddresses.add(removedAddress)) {
-                    "Removed Agent topology subtrees must not overlap."
-                }
-            }
-        }
-
-        directChildEdges[parentAddress] = newEdges
-        children.forEach { child ->
-            val address = child.edge.address
-            sessions[address] = child.session
-            parentAddresses[address] = parentAddress
-            depths[address] = parentDepth + 1
-            threadNames[address] = child.threadName
-        }
-
-        if (mutableSelectedAgent.value.address in removedAddresses) {
-            var fallbackAddress = parentAddresses[mutableSelectedAgent.value.address]
-            while (fallbackAddress != null && fallbackAddress in removedAddresses) {
-                fallbackAddress = requireNotNull(parentAddresses[fallbackAddress])
-            }
-            val retainedAddress = requireNotNull(fallbackAddress) {
-                "Removing a topology subtree must retain the root Agent."
-            }
-            mutableSelectedAgent.value = agents[retainedAddress] ?: materialize(retainedAddress)
-        }
-        removedAddresses.toList().asReversed().forEach(::removeDiscoveredAgent)
-
-        children.forEach { child -> observe(child.edge.address) }
-        if (materialize) {
-            children.forEach { child -> materialize(child.edge.address) }
-        }
-    }
-
-    private suspend fun findSession(address: AgentAddress): AgentAddress {
-        if (address in sessions) return address
-        suspend fun visit(parentAddress: AgentAddress): Boolean {
-            discoverDirectChildren(parentAddress, materialize = false)
-            if (address in sessions) return true
-            return directChildEdges[parentAddress].orEmpty().any { child ->
-                visit(child.address)
-            }
-        }
-        require(visit(rootAgent.address)) {
-            "Agent ${address.agentId} does not belong to Session $sessionIndex."
-        }
-        return address
-    }
-
-    private fun findKnownSession(address: AgentAddress): KodexAgentSession =
-        requireNotNull(sessions[address]) {
-            "Agent ${address.agentId} has not been discovered."
-        }
-
-    private suspend fun materialize(address: AgentAddress): AgentViewModel {
-        agents[address]?.let { return it }
-        val created = agentFactory.create(
-            session = findKnownSession(address),
-            address = address,
-            parentAddress = parentAddresses[address],
-            ownerScope = ownerScope,
-            isRoot = parentAddresses[address] == null,
-        )
-        agents[address] = created
-        threadNames[address] = created.settings.value.threadName.takeIf(String::isNotBlank)
-        return created
-    }
-
-    private fun observe(address: AgentAddress) {
-        if (address in topologyObservers) return
-        val session = findKnownSession(address)
-        topologyObservers[address] = ownerScope.launch {
-            launch {
-                var observedEntries = session.subagents.entries.value
-                session.subagents.entries.collect { currentEntries ->
-                    if (currentEntries != observedEntries) {
-                        observedEntries = currentEntries
-                        mutex.withLock {
-                            if (!closed) {
-                                discoverDirectChildren(address, materialize = false)
-                                refreshProjection()
-                            }
-                        }
-                    }
-                }
-            }
-            launch {
-                combine(
-                    session.runtime.state
-                        .map(KodexAgentStateValue::toExecutionPhase)
-                        .distinctUntilChanged(),
-                    session.runtime.runningTurn
-                        .map { runningTurn -> runningTurn != null }
-                        .distinctUntilChanged(),
-                    session.runtime.latestIndex,
-                ) { phase, running, latestIndex ->
-                    LightweightAgentRuntimeState(phase, running, latestIndex)
-                }.distinctUntilChanged().collect { runtimeState ->
-                    if (runtimeState.latestIndex < 0) return@collect
-                    val threadName = session.storage.settings[runtimeState.latestIndex]
-                        .threadName
-                        .takeIf(String::isNotBlank)
-                    mutex.withLock {
-                        if (!closed) {
-                            threadNames[address] = threadName
-                            refreshProjection()
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     private fun refreshProjection() {
-        mutableName.value = threadNames[rootAgent.address] ?: "Session $sessionIndex"
+        val threadName = rootAgent.settings.value.threadName
+            .takeIf(String::isNotBlank)
+        mutableName.value = threadName ?: "Session $sessionIndex"
 
         val projectedSummary = PersistedSessionSummaryState(
             rootRunning = rootSession.runtime.runningTurn.value != null,
-            aggregateRunning = sessions.values.any {
-                it.runtime.runningTurn.value != null
-            },
             lastActivityAt = null,
-            agentCount = sessions.size.coerceAtLeast(1),
         )
         if (mutableSummary.value.copy(revision = 0) != projectedSummary) {
             check(summaryRevision < Long.MAX_VALUE) {
@@ -670,102 +449,6 @@ private class PersistedSessionViewModelImpl(
             summaryRevision += 1
             mutableSummary.value = projectedSummary.copy(revision = summaryRevision)
         }
-
-        val projectedTopology = PersistedSessionTopologyState(
-            rootAddress = rootAgent.address,
-            nodes = topologyAddressesInPreorder()
-                .map { address ->
-                    projectNode(
-                        address = address,
-                        materialization = if (address in agents) {
-                            PersistedAgentMaterializationState.Loaded
-                        } else {
-                            PersistedAgentMaterializationState.Unloaded
-                        },
-                    )
-                },
-        )
-        if (mutableTopology.value.copy(revision = 0) != projectedTopology) {
-            check(topologyRevision < Long.MAX_VALUE) {
-                "Session topology revisions are exhausted."
-            }
-            topologyRevision += 1
-            mutableTopology.value = projectedTopology.copy(revision = topologyRevision)
-        }
-    }
-
-    private fun topologyAddressesInPreorder(): List<AgentAddress> {
-        val addresses = mutableListOf<AgentAddress>()
-        val visited = mutableSetOf<AgentAddress>()
-
-        fun visit(address: AgentAddress) {
-            check(visited.add(address)) {
-                "A discovered Agent may occur only once in the topology."
-            }
-            check(address in sessions) {
-                "Every topology edge must resolve to a discovered Agent."
-            }
-            addresses += address
-            directChildEdges[address].orEmpty().forEach { child ->
-                check(parentAddresses[child.address] == address) {
-                    "Every topology edge must agree with its child's parent."
-                }
-                visit(child.address)
-            }
-        }
-
-        visit(rootAgent.address)
-        check(visited.size == sessions.size) {
-            "Every discovered Agent must be reachable from the topology root."
-        }
-        return addresses
-    }
-
-    private fun discoveredSubtreeAddresses(rootAddress: AgentAddress): List<AgentAddress> {
-        val addresses = mutableListOf<AgentAddress>()
-        val visited = mutableSetOf<AgentAddress>()
-
-        fun visit(address: AgentAddress) {
-            check(visited.add(address)) {
-                "A discovered Agent may occur only once in a topology subtree."
-            }
-            addresses += address
-            directChildEdges[address].orEmpty().forEach { child -> visit(child.address) }
-        }
-
-        visit(rootAddress)
-        return addresses
-    }
-
-    private fun removeDiscoveredAgent(address: AgentAddress) {
-        check(address != rootAgent.address) {
-            "The persisted Session root Agent cannot be removed from its topology."
-        }
-        directChildEdges.remove(address)
-        topologyObservers.remove(address)?.cancel()
-        agents.remove(address)?.close()
-        sessions.remove(address)
-        parentAddresses.remove(address)
-        depths.remove(address)
-        threadNames.remove(address)
-    }
-
-    private fun projectNode(
-        address: AgentAddress,
-        materialization: PersistedAgentMaterializationState,
-    ): PersistedSessionTopologyNode {
-        val session = findKnownSession(address)
-        return PersistedSessionTopologyNode(
-            address = address,
-            parentAddress = parentAddresses[address],
-            depth = depths.getValue(address),
-            threadName = threadNames[address],
-            phase = session.runtime.state.value.toExecutionPhase(),
-            running = session.runtime.runningTurn.value != null,
-            activityVersion = session.runtime.latestIndex.value.coerceAtLeast(0).toLong(),
-            hasChildren = session.subagents.entries.value.isNotEmpty(),
-            materialization = materialization,
-        )
     }
 
     private fun publishFailure(message: String, failure: Throwable) {
@@ -868,15 +551,14 @@ private class SessionCatalogViewModelImpl(
                     compareByDescending<KodexRootSessionEntry> { entry -> entry.lastActivityAt }
                         .thenByDescending { entry -> entry.entryIndex },
                 )
-            val sessions = entries
-                .map { entry ->
-                    SessionCatalogEntry(
-                        sessionIndex = entry.entryIndex,
-                        threadName = entry.threadName,
-                        lastActivityAt = entry.lastActivityAt,
-                        archived = entry.archived,
-                    )
-                }
+            val sessions = entries.map { entry ->
+                SessionCatalogEntry(
+                    sessionIndex = entry.entryIndex,
+                    threadName = entry.threadName,
+                    lastActivityAt = entry.lastActivityAt,
+                    archived = entry.archived,
+                )
+            }
             rootEntries = entries.associateBy { entry -> entry.entryIndex }
             mutableState.value = SessionCatalogState.Loaded(showArchived, sessions)
         } catch (failure: Throwable) {
@@ -940,31 +622,3 @@ internal fun createSessionCatalogViewModelFactory(
             deleteSession = deleteSession,
         )
     }
-
-private data class LightweightAgentRuntimeState(
-    val phase: AgentExecutionPhase,
-    val running: Boolean,
-    val latestIndex: Int,
-)
-
-private data class TopologyChildEdge(
-    val entryIndex: Int,
-    val address: AgentAddress,
-)
-
-private data class DiscoveredTopologyChild(
-    val edge: TopologyChildEdge,
-    val session: KodexAgentSession,
-    val threadName: String?,
-)
-
-private fun KodexAgentStateValue.toExecutionPhase(): AgentExecutionPhase = when (this) {
-    KodexAgentStateValue.Empty -> AgentExecutionPhase.Empty
-    KodexAgentStateValue.UserMessage -> AgentExecutionPhase.UserMessage
-    is KodexAgentStateValue.RequestResponse -> AgentExecutionPhase.Responding
-    KodexAgentStateValue.AssistantMessage -> AgentExecutionPhase.AssistantMessage
-    is KodexAgentStateValue.ToolPending -> AgentExecutionPhase.ToolPending
-    KodexAgentStateValue.ToolCompleted -> AgentExecutionPhase.ToolCompleted
-    KodexAgentStateValue.ExternalWrite -> AgentExecutionPhase.ExternalWrite
-    KodexAgentStateValue.Compacting -> AgentExecutionPhase.Compacting
-}

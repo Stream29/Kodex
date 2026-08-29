@@ -1,17 +1,7 @@
 package io.github.stream29.kodex.openai
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-
-/** Selects whether one Agent may delegate work to subagents. */
-@Serializable
-public enum class AgentMode {
-    @SerialName("single")
-    Single,
-
-    @SerialName("multi")
-    Multi,
-}
+import kotlinx.serialization.SerialName
 
 /** Selects whether an Agent may ask the user a structured question. */
 @Serializable

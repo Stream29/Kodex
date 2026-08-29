@@ -8,6 +8,7 @@ import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModelFactory
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
+import io.github.stream29.kodex.app.application.contract.SidebarSettingsViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
@@ -77,8 +78,9 @@ import org.koin.plugin.module.dsl.koinApplication
 /**
  * Process host and composition root.
  *
- * The frontend receives only [viewModel]. Infrastructure children remain
- * private and are injected into their exact ViewModel factories here.
+ * The frontend receives application ViewModels and presentation settings.
+ * Infrastructure children remain private and are injected into their exact
+ * ViewModel factories here.
  */
 public class KodexApplication private constructor(
     private val dependencyGraph: KoinApplication,
@@ -90,6 +92,7 @@ public class KodexApplication private constructor(
     private val applicationScope: CoroutineScope,
     public val viewModel: ApplicationViewModel,
     public val newLineKey: StateFlow<NewLineKey>,
+    public val sidebarSettings: SidebarSettingsViewModel,
 ) : AutoCloseable {
     private var closed = false
 
@@ -237,19 +240,16 @@ public class KodexApplication private constructor(
                 val sessionAgentFactory = PersistedSessionAgentViewModelFactory {
                         agentSession,
                         address,
-                        parentAddress,
                         ownerScope,
-                        isRoot,
                     ->
                     graph.koin.get<DefaultAgentRuntimeViewModelFactory> {
                         parametersOf(
                             AgentRuntimeViewModelArguments(
                                 session = agentSession,
                                 address = address,
-                                parentAddress = parentAddress,
                                 ownerScope = ownerScope,
                                 models = modelCatalog.models,
-                                automaticTitleConfiguration = automaticTitles.takeIf { isRoot },
+                                automaticTitleConfiguration = automaticTitles,
                             ),
                             agentHistoryFactory,
                         )
@@ -317,6 +317,10 @@ public class KodexApplication private constructor(
                         started = SharingStarted.Eagerly,
                         initialValue = globalSettings.settings.value.newLineKey,
                     )
+                val sidebarSettings = SidebarSettingsViewModelImpl(
+                    globalSettings = globalSettings,
+                    scope = scope,
+                )
                 return KodexApplication(
                     dependencyGraph = graph,
                     dependencies = dependencies,
@@ -327,6 +331,7 @@ public class KodexApplication private constructor(
                     applicationScope = scope,
                     viewModel = applicationViewModel,
                     newLineKey = newLineKey,
+                    sidebarSettings = sidebarSettings,
                 ).also {
                     ApplicationLogger.info { "Application opened." }
                 }
@@ -400,7 +405,6 @@ private fun io.github.stream29.kodex.cli.settings.KodexNewSessionSettings.toAgen
 ): KodexAgentSettings = KodexAgentSettings(
     model = model,
     cwd = workingDirectory,
-    agentMode = agentMode,
     requestUserInputMode = requestUserInputMode,
     reasoning = Reasoning(effort = reasoningEffort),
     serviceTier = serviceTier,

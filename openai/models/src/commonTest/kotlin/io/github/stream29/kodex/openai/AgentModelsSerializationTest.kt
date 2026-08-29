@@ -8,11 +8,6 @@ import kotlin.test.assertEquals
 private val json = OpenAiJsonCodec
 
 val agentModelsSerializationTest by testSuite {
-    test("agent modes use stable wire names") {
-        assertEquals("\"single\"", json.encodeToString(AgentMode.Single))
-        assertEquals("\"multi\"", json.encodeToString(AgentMode.Multi))
-    }
-
     test("request user input modes use stable wire names") {
         assertEquals("\"ask_user\"", json.encodeToString(RequestUserInputMode.AskUser))
         assertEquals("\"no_question\"", json.encodeToString(RequestUserInputMode.NoQuestion))
