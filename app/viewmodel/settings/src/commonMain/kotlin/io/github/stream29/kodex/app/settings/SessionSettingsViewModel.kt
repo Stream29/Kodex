@@ -8,7 +8,6 @@ import io.github.stream29.kodex.app.settings.contract.SessionSettingsEffect
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsState
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.SessionWorkingDirectoryPicker
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -70,10 +69,6 @@ internal class SessionSettingsViewModelImpl(
 
     override fun updateServiceTier(expectedRevision: Long, serviceTier: ServiceTier) {
         updateConfiguration(expectedRevision) { copy(serviceTier = serviceTier) }
-    }
-
-    override fun updateAgentMode(expectedRevision: Long, agentMode: AgentMode) {
-        updateConfiguration(expectedRevision) { copy(agentMode = agentMode) }
     }
 
     override fun updateRequestUserInputMode(

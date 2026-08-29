@@ -8,17 +8,14 @@ import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.Reasoning
 import io.github.stream29.kodex.openai.ReasoningEffort
-import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
 import io.github.stream29.kodex.tool.currenttime.CurrentTimeTools
 import io.github.stream29.kodex.tool.getcontextremaining.GetContextRemainingTools
-import io.github.stream29.kodex.tool.multiagent.MultiAgentTools
 import io.github.stream29.kodex.tool.plan.PlanTools
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputTools
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools
@@ -29,7 +26,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 val kodexVisibleToolSpecsTest by testSuite {
-    test("combines fixed agent-mode-dependent and dynamic specs") {
+    test("combines fixed and dynamic specs") {
         val service = TestMcpService()
         val fixedSpecs = listOf(
             ApplyPatchTools.spec,
@@ -39,57 +36,20 @@ val kodexVisibleToolSpecsTest by testSuite {
             UnifiedExecTools.writeStdinSpec,
             WebRunTools.spec,
         )
-        val singleAgentSpecs = service.visibleToolSpecs(
+        val specs = service.visibleToolSpecs(
             KodexAgentSettings(
                 model = OpenAiModelId("test-model"),
-                agentMode = AgentMode.Single,
                 reasoning = Reasoning(effort = ReasoningEffort.Max),
-            ),
-        )
-        val multiAgentSpecs = service.visibleToolSpecs(
-            KodexAgentSettings(
-                model = OpenAiModelId("test-model"),
-                agentMode = AgentMode.Multi,
-                reasoning = Reasoning(effort = ReasoningEffort.Low),
-            ),
-        )
-        val singleAgentWithoutQuestions = service.visibleToolSpecs(
-            KodexAgentSettings(
-                model = OpenAiModelId("test-model"),
-                agentMode = AgentMode.Single,
-                requestUserInputMode = RequestUserInputMode.NoQuestion,
-            ),
-        )
-        val multiAgentWithoutQuestions = service.visibleToolSpecs(
-            KodexAgentSettings(
-                model = OpenAiModelId("test-model"),
-                agentMode = AgentMode.Multi,
-                requestUserInputMode = RequestUserInputMode.NoQuestion,
             ),
         )
 
         assertEquals(
             fixedSpecs + PlanTools.spec + RequestUserInputTools.spec,
-            singleAgentSpecs.dropLast(1),
+            specs.dropLast(1),
         )
-        assertEquals(
-            fixedSpecs + MultiAgentTools.specs + PlanTools.spec + RequestUserInputTools.spec,
-            multiAgentSpecs.dropLast(1),
-        )
-        assertEquals(
-            fixedSpecs + PlanTools.spec,
-            singleAgentWithoutQuestions.dropLast(1),
-        )
-        assertEquals(
-            fixedSpecs + MultiAgentTools.specs + PlanTools.spec,
-            multiAgentWithoutQuestions.dropLast(1),
-        )
-        val singleAgentToolSearch = assertIs<ToolSpec.ToolSearch>(singleAgentSpecs.last())
-        assertEquals(singleAgentToolSearch, multiAgentSpecs.last())
-        assertEquals(singleAgentToolSearch, singleAgentWithoutQuestions.last())
-        assertEquals(singleAgentToolSearch, multiAgentWithoutQuestions.last())
-        assertTrue(singleAgentToolSearch.description.contains("None currently enabled."))
-        assertTrue(singleAgentToolSearch.description.contains("Kodex local tools").not())
+        val toolSearch = assertIs<ToolSpec.ToolSearch>(specs.last())
+        assertTrue(toolSearch.description.contains("None currently enabled."))
+        assertTrue(toolSearch.description.contains("Kodex local tools").not())
         assertTrue(
             emptyList<McpTool>()
                 .toDeferredToolSearchDocuments()

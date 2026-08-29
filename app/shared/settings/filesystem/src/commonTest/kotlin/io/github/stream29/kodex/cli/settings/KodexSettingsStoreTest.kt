@@ -9,7 +9,6 @@ import io.github.stream29.kodex.mcp.contract.McpOAuthConfiguration
 import io.github.stream29.kodex.mcp.contract.McpOAuthTokenEndpointAuthMethod
 import io.github.stream29.kodex.mcp.contract.McpSecret
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.RequestUserInputMode
@@ -93,13 +92,16 @@ val kodexSettingsStoreTest by testSuite(
                     model = OpenAiModelId("session-model"),
                     reasoningEffort = ReasoningEffort.High,
                     serviceTier = ServiceTier.Flex,
-                    agentMode = AgentMode.Multi,
                     requestUserInputMode = RequestUserInputMode.NoQuestion,
                 ),
                 sessionTitle = SessionTitleSettings(
                     enabled = false,
                     model = OpenAiModelId("title-model"),
                     reasoningEffort = ReasoningEffort.Medium,
+                ),
+                sidebars = SidebarSettings(
+                    left = SidebarContent.None,
+                    right = SidebarContent.TerminalSessions,
                 ),
                 hooks = mapOf(
                     "finish_check" to HookBody(
@@ -121,10 +123,36 @@ val kodexSettingsStoreTest by testSuite(
             assertTrue(yaml.contains("auth_source: kodex"), yaml)
             assertTrue(yaml.contains("service_tier: flex"), yaml)
             assertTrue(yaml.contains("request_user_input_mode: no_question"), yaml)
+            assertTrue(yaml.contains("left: none"), yaml)
+            assertTrue(yaml.contains("right: terminal_sessions"), yaml)
             assertTrue(yaml.contains("mcp_servers: {}"), yaml)
             assertTrue(yaml.contains("hooks:"), yaml)
             assertEquals(emptyList(), temporarySettingsFiles(root))
             assertEquals(expected, openStore(root).settings.value)
+        }
+    }
+
+    test("sparse sidebar settings use current defaults independently") {
+        withSettingsDirectory("sidebar-defaults") { root ->
+            val defaults = KodexGlobalSettings(
+                codexHome = Path(root, "codex"),
+                sidebars = SidebarSettings(
+                    left = SidebarContent.None,
+                    right = SidebarContent.TerminalSessions,
+                ),
+            )
+            SystemCoroutineFileSystem.writeString(
+                settingsPath(root),
+                """
+                sidebars:
+                  left: terminal_sessions
+                """.trimIndent() + "\n",
+            )
+
+            val loaded = openStore(root, defaults).settings.value
+
+            assertEquals(SidebarContent.TerminalSessions, loaded.sidebars.left)
+            assertEquals(SidebarContent.TerminalSessions, loaded.sidebars.right)
         }
     }
 
@@ -301,13 +329,16 @@ val kodexSettingsStoreTest by testSuite(
                     model = OpenAiModelId("default-model"),
                     reasoningEffort = ReasoningEffort.High,
                     serviceTier = ServiceTier.Flex,
-                    agentMode = AgentMode.Multi,
                     requestUserInputMode = RequestUserInputMode.NoQuestion,
                 ),
                 sessionTitle = SessionTitleSettings(
                     enabled = false,
                     model = OpenAiModelId("default-title-model"),
                     reasoningEffort = ReasoningEffort.Medium,
+                ),
+                sidebars = SidebarSettings(
+                    left = SidebarContent.None,
+                    right = SidebarContent.TerminalSessions,
                 ),
                 mcpServers = mapOf(
                     "default" to McpServerConfiguration.Stdio(command = "default-server"),
@@ -346,9 +377,9 @@ val kodexSettingsStoreTest by testSuite(
             assertEquals(OpenAiModelId("configured-model"), loaded.newSession.model)
             assertEquals(ReasoningEffort.High, loaded.newSession.reasoningEffort)
             assertEquals(ServiceTier.Flex, loaded.newSession.serviceTier)
-            assertEquals(AgentMode.Multi, loaded.newSession.agentMode)
             assertEquals(RequestUserInputMode.NoQuestion, loaded.newSession.requestUserInputMode)
             assertEquals(defaults.sessionTitle.copy(enabled = true), loaded.sessionTitle)
+            assertEquals(defaults.sidebars, loaded.sidebars)
             assertEquals(defaults.mcpServers, loaded.mcpServers)
             assertEquals(defaults.hooks, loaded.hooks)
             assertEquals(original, SystemCoroutineFileSystem.readString(settingsPath(root)))
@@ -382,7 +413,6 @@ val kodexSettingsStoreTest by testSuite(
             )
             assertTrue("new_line_key: enter" in yaml, yaml)
             assertTrue("model: configured-model" in yaml, yaml)
-            assertTrue("agent_mode: single" in yaml, yaml)
             assertTrue("mcp_servers: {}" in yaml, yaml)
             assertEquals(updated, openStore(root).settings.value)
         }

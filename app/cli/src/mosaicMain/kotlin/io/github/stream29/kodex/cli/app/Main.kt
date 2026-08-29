@@ -30,6 +30,7 @@ public fun main() {
                     SessionTreeCliScreen(
                         viewModel = application.viewModel,
                         newLineKey = application.newLineKey,
+                        sidebarSettings = application.sidebarSettings,
                     )
                 }
             } finally {

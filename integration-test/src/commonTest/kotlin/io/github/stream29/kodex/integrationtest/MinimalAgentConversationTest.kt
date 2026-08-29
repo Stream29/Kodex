@@ -9,7 +9,6 @@ import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
-import io.github.stream29.kodex.agentcontext.prefix.render.renderMultiAgentMode
 import io.github.stream29.kodex.agentcontext.prefix.render.renderPlanningInstructions
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -28,7 +27,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequest
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.hook.contract.NoOpKodexHooks
 import io.github.stream29.kodex.mcp.contract.McpService
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.FunctionCallOutputContentItem
@@ -153,7 +151,6 @@ internal fun KodexAgentStateContract.integrationResumableAgent(
             mcpService = mcpService,
             hooks = NoOpKodexHooks,
         ),
-        agentPathResolver = { null },
     )
 
 private data object IntegrationShellSettings : ShellSettings {
@@ -165,10 +162,6 @@ private val defaultTransientInputs: List<ResponseItem.Message> =
         ResponseItem.Message(
             role = MessageRole.Developer,
             content = listOf(ContentItem.InputText(renderPlanningInstructions())),
-        ),
-        ResponseItem.Message(
-            role = MessageRole.Developer,
-            content = listOf(ContentItem.InputText(AgentMode.Single.renderMultiAgentMode())),
         ),
     )
 
@@ -419,18 +412,13 @@ val minimalAgentConversationTest by testSuite {
 
             assertEquals("Hello from the storage-backed loop.", storage.lastAssistantMessage())
             assertEquals(3, storage.latestIndex())
-            assertEquals(emptyList(), requests[0].tools)
-            assertEquals(emptyList(), requests[1].tools)
+            assertEquals(user, requests[0].input.last())
             assertEquals(
-                requestInput(user),
-                requests[0].input,
-            )
-            assertEquals(
-                requestInput(
+                listOf(
                     user,
                     assistantMessage("Preparing the greeting."),
                 ),
-                requests[1].input,
+                requests[1].input.takeLast(2),
             )
             assertIs<StableCleanEvent.UserMessage>(storage.stable[1])
             assertIs<StableCleanEvent.AssistantMessage>(storage.stable[2])
@@ -471,8 +459,6 @@ val openAiStoryContinuationProbeTest by testSuite {
             println("story probe continuation: $continuation")
 
             assertEquals(2, client.requests.size)
-            assertEquals(emptyList(), client.requests[0].request.tools)
-            assertEquals(emptyList(), client.requests[1].request.tools)
             assertTrue(firstStory.isNotBlank(), "Expected a non-empty first story.")
             assertTrue(continuation.isNotBlank(), "Expected a non-empty continuation.")
             assertNotEquals(firstStory, continuation, "Expected the continuation to add new text.")

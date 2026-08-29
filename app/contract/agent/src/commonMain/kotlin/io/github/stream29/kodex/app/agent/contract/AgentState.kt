@@ -27,7 +27,7 @@ public data class AgentExecutionCapabilities(
 )
 
 /**
- * Low-frequency execution facts consumed by controls and lightweight topology.
+ * Low-frequency execution facts consumed by controls and lightweight summaries.
  *
  * Stream events, pending steer content, settings, tokens, and failures
  * are intentionally absent.
@@ -57,7 +57,7 @@ public interface AgentShellSession : AutoCloseable {
 }
 
 /**
- * Stable child handle exposing only the process sessions owned by one Agent.
+ * Stable handle exposing only the process sessions owned by one Agent.
  *
  * The underlying shell client and its execution methods remain private.
  */
@@ -67,58 +67,6 @@ public interface AgentShellSessionRegistry {
      * execution layer for final output reads.
      */
     public val activeSessions: StateFlow<Map<Int, AgentShellSession>>
-}
-
-/** Lightweight direct-child information that does not require a child ViewModel. */
-public data class AgentChildSlot(
-    public val address: AgentAddress,
-    public val threadName: String? = null,
-    public val phase: AgentExecutionPhase = AgentExecutionPhase.Empty,
-    public val running: Boolean = false,
-    public val activityVersion: Long = 0,
-    public val hasChildren: Boolean = false,
-) {
-    init {
-        require(threadName == null || threadName.isNotBlank()) {
-            "An Agent child thread name must be null or non-blank."
-        }
-        require(activityVersion >= 0) { "An Agent child activity version must not be negative." }
-    }
-}
-
-/** Direct-child discovery/materialization state for one Agent. */
-public sealed interface AgentChildrenState {
-    public data object Unloaded : AgentChildrenState
-
-    public data class Loading(
-        public val revision: Long,
-    ) : AgentChildrenState {
-        init {
-            require(revision >= 0) { "An Agent children revision must not be negative." }
-        }
-    }
-
-    public data class Loaded(
-        public val children: List<AgentChildSlot>,
-        public val revision: Long,
-    ) : AgentChildrenState {
-        init {
-            require(revision >= 0) { "An Agent children revision must not be negative." }
-            require(children.map(AgentChildSlot::address).distinct().size == children.size) {
-                "Direct Agent child addresses must be unique."
-            }
-        }
-    }
-
-    public data class Failed(
-        public val revision: Long,
-        public val message: String,
-    ) : AgentChildrenState {
-        init {
-            require(revision >= 0) { "An Agent children revision must not be negative." }
-            require(message.isNotBlank()) { "An Agent children failure message must not be blank." }
-        }
-    }
 }
 
 /** One committed history boundary selected for revert or fork. */

@@ -36,7 +36,7 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
-/** Filesystem-backed recursive session repository. */
+/** Filesystem-backed root session repository. */
 public class FileSystemKodexSessionRepository internal constructor(
     scope: CoroutineScope,
     root: Path,
@@ -126,7 +126,6 @@ public class FileSystemKodexSessionRepository internal constructor(
             fileSystem = fileSystem,
             mustCreateDirectory = false,
         )
-        fileSystem.createDirectories(Path(directory, SubagentsDirectory), mustCreate = true)
         mutableEntries.value = (entries.value + index).sorted()
         index
     }
@@ -144,7 +143,6 @@ public class FileSystemKodexSessionRepository internal constructor(
                 fileSystem = fileSystem,
                 mustCreateDirectory = false,
             )
-            fileSystem.createDirectories(Path(directory, SubagentsDirectory), mustCreate = true)
             materializeFork(source, from, until, target)
             mutableEntries.value = (entries.value + index).sorted()
             index
@@ -310,29 +308,6 @@ internal fun smallestMissing(values: List<Int>): Int {
     return candidate
 }
 
-internal suspend fun childDirectories(
-    directory: Path,
-    fileSystem: CoroutineFileSystem,
-): List<Pair<Int, Path>> =
-    fileSystem.list(directory)
-        .filterNot { path -> path.name.startsWith(".") }
-        .mapNotNull { child ->
-            val index = child.name.toIntOrNull()
-                ?.takeIf { it >= 0 }
-                ?: return@mapNotNull null
-            if (fileSystem.metadataOrNull(child)?.isDirectory != true) return@mapNotNull null
-            index to child
-        }
-        .sortedBy { (index) -> index }
-
-internal suspend fun createEmptyFileSystemAgentSessionNode(
-    directory: Path,
-    fileSystem: CoroutineFileSystem,
-) {
-    FileSystemAgentStorage.ofEmpty(directory, fileSystem)
-    fileSystem.createDirectories(Path(directory, SubagentsDirectory), mustCreate = true)
-}
-
 internal suspend fun deleteRecursively(
     path: Path,
     fileSystem: CoroutineFileSystem,
@@ -474,7 +449,6 @@ public suspend fun CoroutineScope.FileSystemKodexSessionRepository(
 }
 
 private const val SessionsDirectory: String = "sessions"
-internal const val SubagentsDirectory: String = "subagents"
 internal const val LockFile: String = "lock.json"
 internal const val ArchiveMarkerFile: String = "archive.mark"
 internal val SessionLeaseDuration: Duration = 30.seconds

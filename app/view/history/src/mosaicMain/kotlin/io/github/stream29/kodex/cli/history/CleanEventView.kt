@@ -21,7 +21,6 @@ import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentDeliveryResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
@@ -31,19 +30,13 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGener
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInterruptAgentResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableListAgentsResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMultiAgentOperation
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMultiAgentToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSpawnAgentResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWaitAgentResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
@@ -55,8 +48,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingImageVi
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMultiAgentInvocation
-import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMultiAgentToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
@@ -85,17 +76,6 @@ import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.WebSearchAction
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
-import io.github.stream29.kodex.tool.multiagent.FollowupTaskArgs
-import io.github.stream29.kodex.tool.multiagent.InterruptAgentArgs
-import io.github.stream29.kodex.tool.multiagent.InterruptAgentResult
-import io.github.stream29.kodex.tool.multiagent.ListAgentsArgs
-import io.github.stream29.kodex.tool.multiagent.ListAgentsResult
-import io.github.stream29.kodex.tool.multiagent.MultiAgentStatus
-import io.github.stream29.kodex.tool.multiagent.SendMessageArgs
-import io.github.stream29.kodex.tool.multiagent.SpawnAgentArgs
-import io.github.stream29.kodex.tool.multiagent.SpawnAgentResult
-import io.github.stream29.kodex.tool.multiagent.WaitAgentArgs
-import io.github.stream29.kodex.tool.multiagent.WaitAgentResult
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
@@ -156,7 +136,6 @@ internal fun StableCleanEvent.render(
             is StableImageGenerationToolEvent -> renderImageGeneration()
             is StableImageViewToolEvent -> renderImageView()
             is StableMcpToolEvent -> renderMcpTool()
-            is StableMultiAgentToolEvent -> renderMultiAgentTool()
             is StablePlanUpdate -> renderPlanUpdate()
             is StableRequestUserInputToolEvent -> renderRequestUserInput(elapsed)
             is StableToolSearchEvent -> renderToolSearch()
@@ -202,7 +181,6 @@ public fun UnstableCleanEvent.render(
         is PendingPlanUpdate -> renderPlanUpdate()
         is PendingCommandExecutionToolEvent -> renderCommandExecution(shellSessions)
 
-        is PendingMultiAgentToolEvent -> renderPendingMultiAgentTool()
         is PendingImageGenerationToolEvent -> ToolEvent(
             summary = arguments.ongoingToolSummary(),
             rawName = "image_gen.imagegen",
@@ -534,75 +512,6 @@ private fun StableMcpToolEvent.renderMcpTool() {
 }
 
 @Composable
-private fun StableMultiAgentToolEvent.renderMultiAgentTool() {
-    when (val operation = operation) {
-        is StableMultiAgentOperation.SpawnAgent -> ToolEvent(
-            summary = operation.arguments.toolSummary(operation.result.completedStatus() == "failed"),
-            rawName = "spawn_agent",
-            status = operation.result.completedStatus(),
-            expansionKey = this@renderMultiAgentTool.callId,
-        ) {
-            section("Arguments") { operation.arguments.renderDetails() }
-            section("Result") { operation.result.renderDetails() }
-        }
-
-        is StableMultiAgentOperation.SendMessage -> ToolEvent(
-            summary = operation.arguments.toolSummary(operation.result.completedStatus() == "failed"),
-            rawName = "send_message",
-            status = operation.result.completedStatus(),
-            expansionKey = this@renderMultiAgentTool.callId,
-        ) {
-            section("Arguments") { operation.arguments.renderDetails() }
-            section("Result") { operation.result.renderDetails() }
-        }
-
-        is StableMultiAgentOperation.FollowupTask -> ToolEvent(
-            summary = operation.arguments.toolSummary(operation.result.completedStatus() == "failed"),
-            rawName = "followup_task",
-            status = operation.result.completedStatus(),
-            expansionKey = this@renderMultiAgentTool.callId,
-        ) {
-            section("Arguments") { operation.arguments.renderDetails() }
-            section("Result") { operation.result.renderDetails() }
-        }
-
-        is StableMultiAgentOperation.WaitAgent -> ToolEvent(
-            summary = if (operation.result.completedStatus() == "failed") {
-                "Failed to wait for an agent"
-            } else {
-                operation.arguments.toolSummary()
-            },
-            rawName = "wait_agent",
-            status = operation.result.completedStatus(),
-            expansionKey = this@renderMultiAgentTool.callId,
-        ) {
-            section("Arguments") { operation.arguments.renderDetails() }
-            section("Result") { operation.result.renderDetails() }
-        }
-
-        is StableMultiAgentOperation.InterruptAgent -> ToolEvent(
-            summary = operation.arguments.toolSummary(operation.result.completedStatus() == "failed"),
-            rawName = "interrupt_agent",
-            status = operation.result.completedStatus(),
-            expansionKey = this@renderMultiAgentTool.callId,
-        ) {
-            section("Arguments") { operation.arguments.renderDetails() }
-            section("Result") { operation.result.renderDetails() }
-        }
-
-        is StableMultiAgentOperation.ListAgents -> ToolEvent(
-            summary = operation.arguments.toolSummary(operation.result.completedStatus() == "failed"),
-            rawName = "list_agents",
-            status = operation.result.completedStatus(),
-            expansionKey = this@renderMultiAgentTool.callId,
-        ) {
-            section("Arguments") { operation.arguments.renderDetails() }
-            section("Result") { operation.result.renderDetails() }
-        }
-    }
-}
-
-@Composable
 private fun StableToolSearchEvent.renderToolSearch() {
     ToolEvent(
         summary = arguments.toolSummary(failed = result.status() == "failed"),
@@ -635,19 +544,6 @@ private fun StableWebSearchToolEvent.renderWebSearch() {
                 is StableWebSearchResult.Failure -> Detail("Error", result.message)
             }
         }
-    }
-}
-
-@Composable
-private fun PendingMultiAgentToolEvent.renderPendingMultiAgentTool() {
-    ToolEvent(
-        summary = operation.ongoingToolSummary(),
-        rawName = operation.toolName,
-        status = "running",
-        expansionKey = callId,
-        detailStyle = TextStyle.Dim,
-    ) {
-        section("Arguments") { operation.renderDetails(TextStyle.Dim) }
     }
 }
 
@@ -1173,133 +1069,6 @@ private fun WebSearchAction.renderDetails() {
 }
 
 @Composable
-private fun PendingMultiAgentInvocation.renderDetails(
-    textStyle: TextStyle = TextStyle.Unspecified,
-) {
-    when (this) {
-        is PendingMultiAgentInvocation.SpawnAgent -> arguments.renderDetails(textStyle)
-        is PendingMultiAgentInvocation.SendMessage -> arguments.renderDetails(textStyle)
-        is PendingMultiAgentInvocation.FollowupTask -> arguments.renderDetails(textStyle)
-        is PendingMultiAgentInvocation.WaitAgent -> arguments.renderDetails(textStyle)
-        is PendingMultiAgentInvocation.InterruptAgent -> arguments.renderDetails(textStyle)
-        is PendingMultiAgentInvocation.ListAgents -> arguments.renderDetails(textStyle)
-    }
-}
-
-@Composable
-private fun SpawnAgentArgs.renderDetails(
-    textStyle: TextStyle = TextStyle.Unspecified,
-) {
-    Detail("Task", taskName, textStyle)
-    Detail("Message", message, textStyle)
-    model?.let { Detail("Model", it.value, textStyle) }
-    reasoningEffort?.let { Detail("Reasoning", it.wireName, textStyle) }
-}
-
-@Composable
-private fun SendMessageArgs.renderDetails(
-    textStyle: TextStyle = TextStyle.Unspecified,
-) {
-    Detail("Target", target, textStyle)
-    Detail("Message", message, textStyle)
-}
-
-@Composable
-private fun FollowupTaskArgs.renderDetails(
-    textStyle: TextStyle = TextStyle.Unspecified,
-) {
-    Detail("Target", target, textStyle)
-    Detail("Message", message, textStyle)
-}
-
-@Composable
-private fun WaitAgentArgs.renderDetails(
-    textStyle: TextStyle = TextStyle.Unspecified,
-) {
-    Detail("Timeout", timeoutMs?.let { "${it}ms" } ?: "default", textStyle)
-}
-
-@Composable
-private fun InterruptAgentArgs.renderDetails(
-    textStyle: TextStyle = TextStyle.Unspecified,
-) {
-    Detail("Target", target, textStyle)
-}
-
-@Composable
-private fun ListAgentsArgs.renderDetails(
-    textStyle: TextStyle = TextStyle.Unspecified,
-) {
-    Detail("Path prefix", pathPrefix ?: "all", textStyle)
-}
-
-@Composable
-private fun StableSpawnAgentResult.renderDetails() {
-    when (this) {
-        is StableSpawnAgentResult.Success -> value.renderDetails()
-        is StableSpawnAgentResult.Failure -> Detail("Error", message)
-    }
-}
-
-@Composable
-private fun SpawnAgentResult.renderDetails() {
-    Detail("Agent", taskName)
-    nickname?.takeIf(String::isNotBlank)?.let { Detail("Nickname", it) }
-}
-
-@Composable
-private fun StableAgentDeliveryResult.renderDetails() {
-    when (this) {
-        is StableAgentDeliveryResult.Success -> Detail("Result", output)
-        is StableAgentDeliveryResult.Failure -> Detail("Error", message)
-    }
-}
-
-@Composable
-private fun StableWaitAgentResult.renderDetails() {
-    when (this) {
-        is StableWaitAgentResult.Success -> value.renderDetails()
-        is StableWaitAgentResult.Failure -> Detail("Error", message)
-    }
-}
-
-@Composable
-private fun WaitAgentResult.renderDetails() {
-    Detail("Result", message)
-    Detail("Timed out", timedOut.toString())
-}
-
-@Composable
-private fun StableInterruptAgentResult.renderDetails() {
-    when (this) {
-        is StableInterruptAgentResult.Success -> value.renderDetails()
-        is StableInterruptAgentResult.Failure -> Detail("Error", message)
-    }
-}
-
-@Composable
-private fun InterruptAgentResult.renderDetails() {
-    Detail("Previous status", previousStatus.displayName())
-}
-
-@Composable
-private fun StableListAgentsResult.renderDetails() {
-    when (this) {
-        is StableListAgentsResult.Success -> value.renderDetails()
-        is StableListAgentsResult.Failure -> Detail("Error", message)
-    }
-}
-
-@Composable
-private fun ListAgentsResult.renderDetails() {
-    if (agents.isEmpty()) {
-        Detail("Agents", "none")
-    } else {
-        agents.forEach { agent -> Detail("Agent", "${agent.agentName} ${agent.agentStatus.displayName()}") }
-    }
-}
-
-@Composable
 private fun LoadableTools(
     label: String,
     tools: List<LoadableToolSpec>,
@@ -1384,31 +1153,6 @@ private fun StableWebSearchResult.status(): String = when (this) {
     is StableWebSearchResult.Failure -> "failed"
 }
 
-private fun StableSpawnAgentResult.completedStatus(): String = when (this) {
-    is StableSpawnAgentResult.Success -> "succeeded"
-    is StableSpawnAgentResult.Failure -> "failed"
-}
-
-private fun StableAgentDeliveryResult.completedStatus(): String = when (this) {
-    is StableAgentDeliveryResult.Success -> "succeeded"
-    is StableAgentDeliveryResult.Failure -> "failed"
-}
-
-private fun StableWaitAgentResult.completedStatus(): String = when (this) {
-    is StableWaitAgentResult.Success -> "succeeded"
-    is StableWaitAgentResult.Failure -> "failed"
-}
-
-private fun StableInterruptAgentResult.completedStatus(): String = when (this) {
-    is StableInterruptAgentResult.Success -> "succeeded"
-    is StableInterruptAgentResult.Failure -> "failed"
-}
-
-private fun StableListAgentsResult.completedStatus(): String = when (this) {
-    is StableListAgentsResult.Success -> "succeeded"
-    is StableListAgentsResult.Failure -> "failed"
-}
-
 private fun Boolean?.completedStatus(): String = when (this) {
     true -> "succeeded"
     false -> "failed"
@@ -1437,11 +1181,6 @@ private fun PendingInvalidToolInvocation.displayName(): String = when (this) {
     is PendingInvalidToolInvocation.Function -> qualifiedName(name, namespace)
     is PendingInvalidToolInvocation.Custom -> qualifiedName(name, namespace)
     is PendingInvalidToolInvocation.ToolSearch -> "tool_search"
-}
-
-private fun MultiAgentStatus.displayName(): String = when (this) {
-    MultiAgentStatus.Running -> "running"
-    MultiAgentStatus.Idle -> "idle"
 }
 
 private fun LoadableToolSpec.displayName(): String = when (this) {
@@ -1588,19 +1327,6 @@ private fun SearchCommands.ongoingToolSummary(): String = when {
     !sports.isNullOrEmpty() -> "Checking sports information"
     !time.isNullOrEmpty() -> "Checking the time"
     else -> "Using web search"
-}
-
-private fun PendingMultiAgentInvocation.ongoingToolSummary(): String = when (this) {
-    is PendingMultiAgentInvocation.SpawnAgent -> "Starting agent: ${arguments.taskName.singleLineSummary()}"
-    is PendingMultiAgentInvocation.SendMessage -> "Sending message to agent: ${arguments.target.singleLineSummary()}"
-    is PendingMultiAgentInvocation.FollowupTask -> "Resuming task for agent: ${arguments.target.singleLineSummary()}"
-    is PendingMultiAgentInvocation.WaitAgent -> "Waiting for an agent"
-    is PendingMultiAgentInvocation.InterruptAgent -> "Interrupting agent: ${arguments.target.singleLineSummary()}"
-    is PendingMultiAgentInvocation.ListAgents -> arguments.pathPrefix
-        ?.singleLineSummary()
-        ?.takeIf(String::isNotBlank)
-        ?.let { prefix -> "Listing agents under: $prefix" }
-        ?: "Listing agents"
 }
 
 internal fun functionToolSummary(
@@ -1774,42 +1500,6 @@ private fun WebSearchAction.toolSummary(failed: Boolean = false): String = when 
         if (failed) "Failed to search a web page for text" else "Search a web page for text"
 
     WebSearchAction.Other -> if (failed) "Failed to use web search" else "Use web search"
-}
-
-private fun SpawnAgentArgs.toolSummary(failed: Boolean = false): String =
-    if (failed) "Failed to start agent: ${taskName.singleLineSummary()}" else {
-        "Start agent: ${taskName.singleLineSummary()}"
-    }
-
-private fun SendMessageArgs.toolSummary(failed: Boolean = false): String =
-    if (failed) "Failed to send message to agent: ${target.singleLineSummary()}" else {
-        "Message agent: ${target.singleLineSummary()}"
-    }
-
-private fun FollowupTaskArgs.toolSummary(failed: Boolean = false): String =
-    if (failed) "Failed to resume task for agent: ${target.singleLineSummary()}" else {
-        "Resume task for agent: ${target.singleLineSummary()}"
-    }
-
-private fun WaitAgentArgs.toolSummary(): String = "Wait for an agent"
-
-private fun InterruptAgentArgs.toolSummary(failed: Boolean = false): String =
-    if (failed) "Failed to interrupt agent: ${target.singleLineSummary()}" else {
-        "Interrupt agent: ${target.singleLineSummary()}"
-    }
-
-private fun ListAgentsArgs.toolSummary(failed: Boolean = false): String =
-    pathPrefix?.singleLineSummary()?.takeIf(String::isNotBlank)?.let { prefix -> "List agents under: $prefix" }
-        ?.let { summary -> if (failed) "Failed to ${summary.lowercase()}" else summary }
-        ?: if (failed) "Failed to list agents" else "List agents"
-
-private fun PendingMultiAgentInvocation.toolSummary(): String = when (this) {
-    is PendingMultiAgentInvocation.SpawnAgent -> arguments.toolSummary()
-    is PendingMultiAgentInvocation.SendMessage -> arguments.toolSummary()
-    is PendingMultiAgentInvocation.FollowupTask -> arguments.toolSummary()
-    is PendingMultiAgentInvocation.WaitAgent -> arguments.toolSummary()
-    is PendingMultiAgentInvocation.InterruptAgent -> arguments.toolSummary()
-    is PendingMultiAgentInvocation.ListAgents -> arguments.toolSummary()
 }
 
 private fun String.stableToolSummary(failed: Boolean): String =

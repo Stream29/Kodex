@@ -9,7 +9,6 @@ kotlin {
             api(project(":utils-kotlinx-io-coroutines"))
             api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-runtime-impl"))
-            implementation(project(":agent-session-multi-agent"))
             implementation(project(":agent-state-impl"))
             implementation(project(":agent-storage-filesystem"))
             implementation(project(":utils-coroutines"))

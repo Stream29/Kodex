@@ -1,10 +1,8 @@
 package io.github.stream29.kodex.agentruntime.impl
 
-import io.github.stream29.kodex.agentsession.contract.AgentPathResolver
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.tool.toDeferredToolSearchDocuments
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.latestValue
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpService
@@ -18,12 +16,6 @@ import io.github.stream29.kodex.tool.currenttime.CurrentTimeTools
 import io.github.stream29.kodex.tool.getcontextremaining.getContextRemainingTool
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenerationToolClient
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenerationTools
-import io.github.stream29.kodex.tool.multiagent.followupTaskTool
-import io.github.stream29.kodex.tool.multiagent.interruptAgentTool
-import io.github.stream29.kodex.tool.multiagent.listAgentsTool
-import io.github.stream29.kodex.tool.multiagent.sendMessageTool
-import io.github.stream29.kodex.tool.multiagent.spawnAgentTool
-import io.github.stream29.kodex.tool.multiagent.waitAgentTool
 import io.github.stream29.kodex.tool.plan.updatePlanTool
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchEngine
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecToolClient
@@ -46,8 +38,6 @@ internal data class KodexAgentFixedTools(
 
 internal fun KodexAgentState.fixedTools(
     dependencies: KodexAgentDependencies,
-    agentPathResolver: AgentPathResolver,
-    pendingSteer: StateFlow<List<StableCleanEvent.Steerable>>,
 ): KodexAgentFixedTools {
     val agentSettingsProvider: suspend () -> KodexAgentSettings = {
         storage.settings.latestValue()
@@ -75,12 +65,6 @@ internal fun KodexAgentState.fixedTools(
                 add(CurrentTimeTools.createTool())
                 add(getContextRemainingTool(dependencies.modelCatalog))
                 add(updatePlanTool())
-                add(spawnAgentTool(agentPathResolver, dependencies.modelCatalog))
-                add(sendMessageTool(agentPathResolver))
-                add(followupTaskTool(agentPathResolver))
-                add(waitAgentTool(pendingSteer))
-                add(interruptAgentTool(agentPathResolver))
-                add(listAgentsTool(agentPathResolver))
                 addAll(UnifiedExecTools.createTools(unifiedExecClient))
                 add(
                     WebRunTools.createTool(

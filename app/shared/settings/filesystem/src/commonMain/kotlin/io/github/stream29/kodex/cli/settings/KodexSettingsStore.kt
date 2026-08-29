@@ -6,7 +6,6 @@ import com.charleskorn.kaml.Yaml
 import com.charleskorn.kaml.YamlConfiguration
 import io.github.stream29.kodex.hook.contract.HookConfiguration
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.RequestUserInputMode
@@ -136,6 +135,7 @@ private data class GlobalSettingsFile(
     val newSession: NewSessionFile? = null,
     @SerialName("session_title")
     val sessionTitle: SessionTitleFile? = null,
+    val sidebars: SidebarSettingsFile? = null,
     @SerialName("mcp_servers")
     val mcpServers: Map<String, McpServerConfiguration>? = null,
     val hooks: HookConfiguration? = null,
@@ -148,6 +148,7 @@ private data class GlobalSettingsFile(
             newLineKey = newLineKey ?: defaults.newLineKey,
             newSession = newSession?.applyTo(defaults.newSession) ?: defaults.newSession,
             sessionTitle = sessionTitle?.applyTo(defaults.sessionTitle) ?: defaults.sessionTitle,
+            sidebars = sidebars?.applyTo(defaults.sidebars) ?: defaults.sidebars,
             mcpServers = mcpServers ?: defaults.mcpServers,
             hooks = hooks ?: defaults.hooks,
         )
@@ -161,8 +162,29 @@ private data class GlobalSettingsFile(
                 newLineKey = settings.newLineKey,
                 newSession = NewSessionFile.from(settings.newSession),
                 sessionTitle = SessionTitleFile.from(settings.sessionTitle),
+                sidebars = SidebarSettingsFile.from(settings.sidebars),
                 mcpServers = settings.mcpServers,
                 hooks = settings.hooks,
+            )
+    }
+}
+
+@Serializable
+private data class SidebarSettingsFile(
+    val left: SidebarContent? = null,
+    val right: SidebarContent? = null,
+) {
+    fun applyTo(defaults: SidebarSettings): SidebarSettings =
+        defaults.copy(
+            left = left ?: defaults.left,
+            right = right ?: defaults.right,
+        )
+
+    companion object {
+        fun from(settings: SidebarSettings): SidebarSettingsFile =
+            SidebarSettingsFile(
+                left = settings.left,
+                right = settings.right,
             )
     }
 }
@@ -174,8 +196,6 @@ private data class NewSessionFile(
     val reasoningEffort: ReasoningEffort? = null,
     @SerialName("service_tier")
     val serviceTier: String? = null,
-    @SerialName("agent_mode")
-    val agentMode: AgentMode? = null,
     @SerialName("request_user_input_mode")
     val requestUserInputMode: RequestUserInputMode? = null,
 ) {
@@ -184,7 +204,6 @@ private data class NewSessionFile(
             model = model?.let(::OpenAiModelId) ?: defaults.model,
             reasoningEffort = reasoningEffort ?: defaults.reasoningEffort,
             serviceTier = serviceTier?.toServiceTier() ?: defaults.serviceTier,
-            agentMode = agentMode ?: defaults.agentMode,
             requestUserInputMode = requestUserInputMode ?: defaults.requestUserInputMode,
         )
 
@@ -194,7 +213,6 @@ private data class NewSessionFile(
                 model = settings.model.value,
                 reasoningEffort = settings.reasoningEffort,
                 serviceTier = settings.serviceTier.requestValue,
-                agentMode = settings.agentMode,
                 requestUserInputMode = settings.requestUserInputMode,
             )
     }

@@ -8,12 +8,6 @@ import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
-import io.github.stream29.kodex.tool.multiagent.FollowupTaskArgs
-import io.github.stream29.kodex.tool.multiagent.InterruptAgentArgs
-import io.github.stream29.kodex.tool.multiagent.ListAgentsArgs
-import io.github.stream29.kodex.tool.multiagent.SendMessageArgs
-import io.github.stream29.kodex.tool.multiagent.SpawnAgentArgs
-import io.github.stream29.kodex.tool.multiagent.WaitAgentArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
@@ -203,38 +197,6 @@ val pendingToolEventSerializationTest by testSuite {
                     WriteStdinArguments(7),
                 ),
             ) to ("write_stdin" to null),
-            PendingMultiAgentToolEvent(
-                callId = "call_spawn",
-                operation = PendingMultiAgentInvocation.SpawnAgent(
-                    SpawnAgentArgs("worker", "Review this."),
-                ),
-            ) to ("spawn_agent" to null),
-            PendingMultiAgentToolEvent(
-                callId = "call_send",
-                operation = PendingMultiAgentInvocation.SendMessage(
-                    SendMessageArgs("/root/worker", "Continue."),
-                ),
-            ) to ("send_message" to null),
-            PendingMultiAgentToolEvent(
-                callId = "call_followup",
-                operation = PendingMultiAgentInvocation.FollowupTask(
-                    FollowupTaskArgs("/root/worker", "Review tests."),
-                ),
-            ) to ("followup_task" to null),
-            PendingMultiAgentToolEvent(
-                callId = "call_wait",
-                operation = PendingMultiAgentInvocation.WaitAgent(WaitAgentArgs()),
-            ) to ("wait_agent" to null),
-            PendingMultiAgentToolEvent(
-                callId = "call_interrupt",
-                operation = PendingMultiAgentInvocation.InterruptAgent(
-                    InterruptAgentArgs("/root/worker"),
-                ),
-            ) to ("interrupt_agent" to null),
-            PendingMultiAgentToolEvent(
-                callId = "call_list",
-                operation = PendingMultiAgentInvocation.ListAgents(ListAgentsArgs()),
-            ) to ("list_agents" to null),
             PendingRequestUserInputToolEvent(
                 callId = "call_request_user_input",
                 arguments = RequestUserInputArgs(emptyList()),

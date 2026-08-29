@@ -39,11 +39,10 @@ internal class SessionViewModelCreationProbe {
 internal fun testSessionAgentViewModelFactory(
     probe: SessionViewModelCreationProbe? = null,
 ): PersistedSessionAgentViewModelFactory =
-    PersistedSessionAgentViewModelFactory { session, address, parentAddress, ownerScope, _ ->
+    PersistedSessionAgentViewModelFactory { session, address, ownerScope ->
         val created = createAgentRuntimeViewModel(
             session = session,
             address = address,
-            parentAddress = parentAddress,
             ownerScope = ownerScope,
             composerFactory = DefaultComposerViewModelFactory,
             historyFactory = AgentRuntimeHistoryViewModelFactory { agentSession, childScope ->

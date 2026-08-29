@@ -7,10 +7,8 @@ import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentruntime.decorator.steer.steerRuntime
-import io.github.stream29.kodex.agentruntime.decorator.subagent.subagentParentNotificationRuntime
 import io.github.stream29.kodex.agentruntime.decorator.tool.toolRuntime
 import io.github.stream29.kodex.agentruntime.decorator.turnhook.turnHookRuntime
-import io.github.stream29.kodex.agentsession.contract.AgentPathResolver
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -39,14 +37,12 @@ import kotlinx.coroutines.withContext
 /** Builds the root Agent runtime. */
 public fun KodexAgentState.buildMasterAgentRuntime(
     dependencies: KodexAgentDependencies,
-    agentPathResolver: AgentPathResolver,
 ): AgentRuntime {
     val sessionLogger = RuntimeLogger.session(storage.id)
     return try {
         buildAgentRuntime(sessionLogger) { pendingSteer, agentLogger ->
             masterRuntimeLayer(
                 dependencies = dependencies,
-                agentPathResolver = agentPathResolver,
                 pendingSteer = pendingSteer,
                 logger = agentLogger,
             )
@@ -68,13 +64,12 @@ public fun KodexAgentState.buildMasterAgentRuntime(
 
 private fun KodexAgentState.masterRuntimeLayer(
     dependencies: KodexAgentDependencies,
-    agentPathResolver: AgentPathResolver,
     pendingSteer: MutableStateFlow<List<StableCleanEvent.Steerable>>,
     logger: KLogger,
 ): AgentRuntimeLayer {
     val mcpTools = mcpToolsState(dependencies.mcpService)
     val toolSearch = toolSearchState(mcpTools)
-    val fixedTools = fixedTools(dependencies, agentPathResolver, pendingSteer)
+    val fixedTools = fixedTools(dependencies)
     return fixedTools.tools.closeOnFailure {
         AgentRuntimeLayer(
             delegate = compactionRuntime(
@@ -101,73 +96,6 @@ private fun KodexAgentState.masterRuntimeLayer(
                         fixedTools.tools.closeAll(logger)
                     }
                 },
-            unifiedExecToolClient = fixedTools.unifiedExecToolClient,
-        )
-    }
-}
-
-/** Builds a spawned Agent runtime under the root Session [sessionId]. */
-public fun KodexAgentState.buildSubagentRuntime(
-    dependencies: KodexAgentDependencies,
-    agentPathResolver: AgentPathResolver,
-    sessionId: String,
-): AgentRuntime {
-    val sessionLogger = RuntimeLogger.session(sessionId)
-    return buildAgentRuntime(sessionLogger) { pendingSteer, agentLogger ->
-        subagentRuntimeLayer(
-            dependencies = dependencies,
-            agentPathResolver = agentPathResolver,
-            pendingSteer = pendingSteer,
-            logger = agentLogger,
-        )
-    }
-}
-
-private fun KodexAgentState.subagentRuntimeLayer(
-    dependencies: KodexAgentDependencies,
-    agentPathResolver: AgentPathResolver,
-    pendingSteer: MutableStateFlow<List<StableCleanEvent.Steerable>>,
-    logger: KLogger,
-): AgentRuntimeLayer {
-    val mcpTools = mcpToolsState(dependencies.mcpService)
-    val toolSearch = toolSearchState(mcpTools)
-    val fixedTools = fixedTools(dependencies, agentPathResolver, pendingSteer)
-    return fixedTools.tools.closeOnFailure {
-        AgentRuntimeLayer(
-            delegate = compactionRuntime(
-                modelCatalog = dependencies.modelCatalog,
-                logger = logger,
-                compactionHooks = dependencies.hooks,
-            )
-                .steerRuntime(logger = logger) {
-                    pendingSteer.getAndUpdate { emptyList() }
-                }
-                .toolRuntime(
-                    fixedTools = fixedTools.tools,
-                    dynamicTools = mcpTools,
-                    toolSearch = toolSearch,
-                    toolHooks = dependencies.hooks,
-                    logger = logger,
-                )
-                .turnHookRuntime(
-                    hooks = dependencies.hooks,
-                    logger = logger,
-                )
-                .also {
-                    coroutineContext.job.invokeOnCompletion {
-                        fixedTools.tools.closeAll(logger)
-                    }
-                }
-                .subagentParentNotificationRuntime(
-                    logger = logger,
-                    notifyParent = { message ->
-                        agentPathResolver.resolveOrNull(message.recipient)?.let { parent ->
-                            parent.runtime.pendingSteer.update { pending ->
-                                pending + message
-                            }
-                        }
-                    },
-                ),
             unifiedExecToolClient = fixedTools.unifiedExecToolClient,
         )
     }

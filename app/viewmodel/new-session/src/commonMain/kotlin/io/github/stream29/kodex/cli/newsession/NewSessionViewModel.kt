@@ -9,7 +9,6 @@ import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRe
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.AgentMode
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -89,10 +88,6 @@ internal class NewSessionViewModelImpl(
 
     override suspend fun updateServiceTier(serviceTier: ServiceTier) {
         updateSettings { current -> current.copy(serviceTier = serviceTier) }
-    }
-
-    override suspend fun updateAgentMode(agentMode: AgentMode) {
-        updateSettings { current -> current.copy(agentMode = agentMode) }
     }
 
     override suspend fun updateRequestUserInputMode(mode: RequestUserInputMode) {

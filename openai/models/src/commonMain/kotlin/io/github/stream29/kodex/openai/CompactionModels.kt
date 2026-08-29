@@ -29,8 +29,6 @@ import kotlin.uuid.Uuid
  * @property turnId UUIDv7 identity of the active logical user turn. Accepting
  * a new user message is the only operation that rotates it; compaction and
  * other state transitions retain the current value.
- * @property agentMode Whether this Agent may delegate work to subagents. It is
- * independent of the task checklist and current goal.
  * @property requestUserInputMode Whether future requests expose the structured
  * user-question tool. Changing it does not alter already-issued tool calls.
  * @property plan Full replacement `update_plan` snapshot. An empty plan means
@@ -58,7 +56,6 @@ public data class KodexAgentSettings(
     public val autoCompactionTokenLimit: Long? = null,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val turnId: String = Uuid.generateV7().toString(),
-    public val agentMode: AgentMode = AgentMode.Single,
     public val requestUserInputMode: RequestUserInputMode = RequestUserInputMode.AskUser,
     public val plan: UpdatePlanArgs = UpdatePlanArgs(plan = emptyList()),
     public val goal: ThreadGoal? = null,

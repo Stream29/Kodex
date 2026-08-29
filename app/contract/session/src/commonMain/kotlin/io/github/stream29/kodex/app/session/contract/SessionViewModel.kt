@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 public sealed interface SessionViewModel :
     AgentSettingsViewModel,
     AutoCloseable {
-    /** Root/tab display name, independent of selected-subagent settings. */
+    /** Root/tab display name, independent of agent settings. */
     public val name: StateFlow<String>
 
     public suspend fun rename(name: String): Unit

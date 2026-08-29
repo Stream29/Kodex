@@ -81,7 +81,7 @@ val fileSystemSessionViewModelOwnershipTest by testSuite {
             }
         }
 
-        test("registry forks an unopened archived root without descendants") { root ->
+        test("registry forks an unopened archived root") { root ->
             coroutineScope {
                 val dependencies = testKodexAgentDependencies()
                 val setup = FileSystemKodexSessionRepository(root, dependencies)
@@ -96,14 +96,6 @@ val fileSystemSessionViewModelOwnershipTest by testSuite {
                     )
                 }
                 source.runtime.updateSettings(source.storage.settings[0].copy(cwd = Path("fork-cwd")))
-                source.subagents.open(source.subagents.create()).runtime.modify { storage ->
-                    storage.initialize(
-                        KodexAgentSettings(
-                            model = OpenAiModelId("test-model"),
-                            threadName = "Child",
-                        ),
-                    )
-                }
                 setup.listEntries().single { it.entryIndex == sourceIndex }.archive()
                 setup.cancelAndJoin()
 
@@ -124,7 +116,6 @@ val fileSystemSessionViewModelOwnershipTest by testSuite {
                         val target = inspection.open(targetIndex)
                         assertEquals("fork-cwd", target.storage.settings[1].cwd.toString())
                         assertEquals("[fork] Source", target.storage.settings[2].threadName)
-                        assertEquals(emptyList(), target.subagents.list())
                     } finally {
                         inspection.cancelAndJoin()
                     }
