@@ -146,7 +146,7 @@ public class KodexApplication private constructor(
         ): KodexApplication {
             val scope = CoroutineScope(currentCoroutineContext()).supervisorChildScope()
             val resolvedWorkingDirectory = SystemCoroutineFileSystem.resolve(workingDirectory)
-            val resolvedAgentsDirectory = SystemCoroutineFileSystem.resolve(agentsDirectory)
+            val resolvedAgentsDirectory = resolveAllowingMissing(agentsDirectory)
             val globalSettings = openGlobalSettings(
                 settingsDirectory = dataDirectory,
                 defaults = KodexGlobalSettings(codexHome = codexDirectory),
@@ -423,6 +423,19 @@ private fun configuredCodexSourceHome(): Path =
         ?: Path(requireUserHomeDirectory(), ".codex")
 
 private fun defaultAgentsHome(): Path = Path(requireUserHomeDirectory(), ".agents")
+
+private suspend fun resolveAllowingMissing(path: Path): Path {
+    if (SystemCoroutineFileSystem.metadataOrNull(path) != null) {
+        return SystemCoroutineFileSystem.resolve(path)
+    }
+    val parent = path.parent
+    val resolvedParent = if (parent == null) {
+        SystemCoroutineFileSystem.resolve(Path("."))
+    } else {
+        resolveAllowingMissing(parent)
+    }
+    return Path(resolvedParent, path.name)
+}
 
 private val ApplicationLogger: KLogger by lazy {
     KotlinLogging.logger {}.global()

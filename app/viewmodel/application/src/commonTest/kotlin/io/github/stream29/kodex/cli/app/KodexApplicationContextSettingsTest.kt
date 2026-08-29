@@ -9,15 +9,16 @@ import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 val kodexApplicationContextSettingsTest by testSuite {
-    test("passes the actual data directory as Kodex Home context") {
+    test("accepts a missing Agents Home and passes the actual context directories") {
         val root = temporaryDirectory("application-context-settings")
         val codexDirectory = Path(root, "codex-source")
         val agentsDirectory = Path(root, "agents-home")
         val workingDirectory = Path(root, "working-directory")
         val dataDirectory = Path(root, "custom-kodex-home")
-        listOf(codexDirectory, agentsDirectory, workingDirectory, dataDirectory).forEach { directory ->
+        listOf(codexDirectory, workingDirectory, dataDirectory).forEach { directory ->
             SystemCoroutineFileSystem.createDirectories(directory)
         }
         var captured: AgentContextSettings? = null
@@ -40,7 +41,11 @@ val kodexApplicationContextSettingsTest by testSuite {
             application.viewModel.openSessionCatalogPopup().viewModel.refresh()
             val context = assertNotNull(captured)
 
-            assertEquals(SystemCoroutineFileSystem.resolve(agentsDirectory), context.agentsHome)
+            assertEquals(
+                Path(SystemCoroutineFileSystem.resolve(root), agentsDirectory.name),
+                context.agentsHome,
+            )
+            assertNull(SystemCoroutineFileSystem.metadataOrNull(agentsDirectory))
             assertEquals(dataDirectory, context.kodexHome)
         } finally {
             application.close()
