@@ -1,7 +1,8 @@
 package io.github.stream29.kodex.agentstorage.inmemory
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.CleanCompactionCheckpoint
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
@@ -16,31 +17,31 @@ import kotlin.uuid.Uuid
  * Process-local mutable storage for tests and transient agent sessions.
  *
  * This implementation keeps all published values in memory. Construction
- * publishes the required snapshot-zero settings and checkpoint, so it can
+ * publishes the required snapshot-zero settings and compaction point, so it can
  * always back a legal empty agent state.
  */
 @OptIn(ExperimentalUuidApi::class)
 public class InMemoryKodexAgentStorage private constructor(
-    initialCompaction: MutableList<IndexedValue<CleanCompactionCheckpoint>>,
+    initialIndex: MutableList<IndexedValue<CleanIndexEntry>>,
     initialSettings: MutableList<IndexedValue<KodexAgentSettings>>,
 ) : MutableKodexAgentStorage {
     private val identity: Any = Any()
 
     public constructor(initialSettings: KodexAgentSettings) : this(
-        initialCompaction = initializedCompaction(),
+        initialIndex = initializedIndex(),
         initialSettings = mutableListOf(IndexedValue(0, initialSettings)),
     )
 
     public override val id: String = "memory:${identity.hashCode().toUInt().toString(16)}"
-    public override val compaction: MutableIndexVersioned<CleanCompactionCheckpoint> =
-        InMemoryIndexVersioned(initialCompaction)
+    public override val index: MutableIndexVersioned<CleanIndexEntry> =
+        InMemoryIndexVersioned(initialIndex)
+    public override val work: MutableIndexVersioned<StableWorkEvent> =
+        InMemoryIndexVersioned()
     public override val settings: MutableIndexVersioned<KodexAgentSettings> =
         InMemoryIndexVersioned(initialSettings)
     public override val timestamp: MutableIndexVersioned<Instant> =
         InMemoryIndexVersioned()
     public override val tokenCount: MutableIndexVersioned<Long> =
-        InMemoryIndexVersioned()
-    public override val stable: MutableIndexVersioned<StableCleanEvent> =
         InMemoryIndexVersioned()
     public override val unstable: MutableIndexVersioned<List<UnstableCleanEvent>> =
         InMemoryIndexVersioned()
@@ -49,21 +50,19 @@ public class InMemoryKodexAgentStorage private constructor(
         /** Creates the uninitialized storage backing a freshly spawned AgentSession. */
         public fun empty(): InMemoryKodexAgentStorage =
             InMemoryKodexAgentStorage(
-                initialCompaction = mutableListOf(),
+                initialIndex = mutableListOf(),
                 initialSettings = mutableListOf(),
             )
     }
 }
 
 @OptIn(ExperimentalUuidApi::class)
-private fun initializedCompaction(): MutableList<IndexedValue<CleanCompactionCheckpoint>> {
+private fun initializedIndex(): MutableList<IndexedValue<CleanIndexEntry>> {
     val windowId = Uuid.generateV7().toString()
     return mutableListOf(
         IndexedValue(
             0,
-            CleanCompactionCheckpoint(
-                prefix = emptyList(),
-                historyBaseIndex = 0,
+            CleanCompactionPoint(
                 windowNumber = 0,
                 firstWindowId = windowId,
                 windowId = windowId,

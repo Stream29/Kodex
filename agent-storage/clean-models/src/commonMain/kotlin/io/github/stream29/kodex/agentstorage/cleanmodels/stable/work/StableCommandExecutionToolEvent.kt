@@ -1,5 +1,8 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable.work
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableFunctionCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableJsonOutput
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableTextOutput
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
@@ -23,7 +26,7 @@ public data class StableCommandExecutionToolEvent(
     public val itemId: ResponseItemId? = null,
     public val action: StableCommandExecutionAction,
     public val result: StableCommandExecutionResult,
-) : StableCleanEvent.CompletedTool {
+) : StableWorkEvent.CompletedTool {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             action.toFunctionCall(callId, itemId),

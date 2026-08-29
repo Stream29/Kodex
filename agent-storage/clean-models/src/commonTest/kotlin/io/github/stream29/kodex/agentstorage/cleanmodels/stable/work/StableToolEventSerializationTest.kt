@@ -1,6 +1,7 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable.work
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
@@ -21,7 +22,7 @@ private val toolEventJson = Json
 val stableToolEventSerializationTest by testSuite {
     test("function fallbacks reconstruct calls and typed outputs") {
         val arguments = buildJsonObject { put("query", "design context") }
-        val events: List<StableCleanEvent.CompletedTool> = listOf(
+        val events: List<StableWorkEvent.CompletedTool> = listOf(
             StableJsonToolEvent(
                 callId = "call_json",
                 itemId = ResponseItemId("item_json"),
@@ -98,8 +99,8 @@ val stableToolEventSerializationTest by testSuite {
             put("query", "connected tools")
             put("limit", "invalid")
         }
-        val events: List<StableCleanEvent.InvalidToolCall> = listOf(
-            StableCleanEvent.InvalidToolCall(
+        val events: List<StableInvalidToolCall> = listOf(
+            StableInvalidToolCall(
                 callId = "call_function",
                 itemId = ResponseItemId("item_function"),
                 invocation = InvalidToolInvocation.Function(
@@ -109,7 +110,7 @@ val stableToolEventSerializationTest by testSuite {
                 ),
                 message = functionMessage,
             ),
-            StableCleanEvent.InvalidToolCall(
+            StableInvalidToolCall(
                 callId = "call_custom",
                 itemId = ResponseItemId("item_custom"),
                 invocation = InvalidToolInvocation.Custom(
@@ -118,7 +119,7 @@ val stableToolEventSerializationTest by testSuite {
                 ),
                 message = customMessage,
             ),
-            StableCleanEvent.InvalidToolCall(
+            StableInvalidToolCall(
                 callId = "call_tool_search",
                 itemId = ResponseItemId("item_tool_search"),
                 invocation = InvalidToolInvocation.ToolSearch(searchArguments),
@@ -129,7 +130,7 @@ val stableToolEventSerializationTest by testSuite {
         events.forEach(::assertToolEventRoundTripWithoutRawItems)
         events.forEach { event ->
             val element = toolEventJson.parseToJsonElement(
-                toolEventJson.encodeToString<StableCleanEvent>(event),
+                toolEventJson.encodeToString<StableWorkEvent>(event),
             ).jsonObject
             assertEquals(JsonPrimitive("invalid_tool_call"), element["type"])
         }
@@ -189,7 +190,7 @@ val stableToolEventSerializationTest by testSuite {
         val arguments = buildJsonObject {
             put("query", "design context")
         }
-        val event: StableCleanEvent = StableMcpToolEvent(
+        val event: StableWorkEvent = StableMcpToolEvent(
             callId = "call_mcp",
             itemId = ResponseItemId("item_mcp"),
             name = "search",
@@ -204,7 +205,7 @@ val stableToolEventSerializationTest by testSuite {
         assertEquals(JsonPrimitive("mcp_tool_event"), element["type"])
         assertTrue("call" !in element)
         assertTrue("output" !in element)
-        assertEquals(event, toolEventJson.decodeFromString<StableCleanEvent>(encoded))
+        assertEquals(event, toolEventJson.decodeFromString<StableWorkEvent>(encoded))
         assertEquals(
             listOf(
                 ResponseItem.FunctionCall(
@@ -225,14 +226,14 @@ val stableToolEventSerializationTest by testSuite {
 }
 
 private fun assertToolEventRoundTripWithoutRawItems(
-    event: StableCleanEvent.CompletedTool,
+    event: StableWorkEvent.CompletedTool,
 ) {
-    val encoded = toolEventJson.encodeToString<StableCleanEvent>(event)
+    val encoded = toolEventJson.encodeToString<StableWorkEvent>(event)
     val element = toolEventJson.parseToJsonElement(encoded).jsonObject
 
     assertTrue("call" !in element)
     assertTrue("output" !in element)
-    assertEquals(event, toolEventJson.decodeFromString<StableCleanEvent>(encoded))
+    assertEquals(event, toolEventJson.decodeFromString<StableWorkEvent>(encoded))
     assertEquals(2, event.toResponseHistoryItems().size)
 }
 

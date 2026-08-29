@@ -10,7 +10,7 @@ import kotlinx.serialization.json.JsonElement
  * Pending call whose input was rejected during parsing.
  *
  * The tool runtime completes this call without invoking the requested tool and
- * moves the corresponding failure into [io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent.InvalidToolCall].
+ * moves the corresponding failure into [io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableInvalidToolCall].
  */
 @Serializable
 @SerialName("invalid_tool_call")

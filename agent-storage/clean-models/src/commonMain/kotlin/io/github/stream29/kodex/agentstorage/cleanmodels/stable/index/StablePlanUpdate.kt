@@ -1,5 +1,7 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable.index
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableFunctionCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableTextOutput
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.openai.UpdatePlanArgs
@@ -19,7 +21,7 @@ public data class StablePlanUpdate(
     @SerialName("item_id")
     public val itemId: ResponseItemId? = null,
     public val arguments: UpdatePlanArgs,
-) : StableCleanEvent.CompletedTool, RemoteCompactionV2RetainedItem {
+) : StableIndexEvent.CompletedTool, RemoteCompactionV2RetainedItem {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             stableFunctionCall(

@@ -1,5 +1,7 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable.work
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableFunctionCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableTextOutput
 import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.SearchResponse
 import io.github.stream29.kodex.openai.ResponseItem
@@ -10,7 +12,7 @@ import kotlinx.serialization.Serializable
 /**
  * Stable completed local `web.run` interaction.
  *
- * Hosted web search uses [StableCleanEvent.WebSearchCall].
+ * Hosted web search uses [StableWebSearchCall].
  */
 @Serializable
 @SerialName("web_search_tool_event")
@@ -21,7 +23,7 @@ public data class StableWebSearchToolEvent(
     public val itemId: ResponseItemId? = null,
     public val commands: SearchCommands,
     public val result: StableWebSearchResult,
-) : StableCleanEvent.CompletedTool {
+) : StableWorkEvent.CompletedTool {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             stableFunctionCall(

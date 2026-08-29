@@ -1,5 +1,7 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable.work
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableFunctionCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableFunctionOutput
 import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.FunctionCallOutputContentItem
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
@@ -27,7 +29,7 @@ public data class StableImageViewToolEvent(
     public val itemId: ResponseItemId? = null,
     public val arguments: ViewImageToolArguments,
     public val result: StableImageViewResult,
-) : StableCleanEvent.CompletedTool {
+) : StableWorkEvent.CompletedTool {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             stableFunctionCall(

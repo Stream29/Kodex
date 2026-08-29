@@ -1,25 +1,26 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolJson
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.InvalidToolInvocation
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionAction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableInvalidToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableMcpToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableToolSearchEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
@@ -140,7 +141,7 @@ public fun PendingToolEvent.toFailedToolEvent(message: String): StableCleanEvent
             )
 
         is PendingInvalidToolCall ->
-            StableCleanEvent.InvalidToolCall(
+            StableInvalidToolCall(
                 callId = callId,
                 itemId = itemId,
                 invocation = invocation.toStableInvocation(),

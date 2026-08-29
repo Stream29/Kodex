@@ -1,5 +1,6 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable.work
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableJsonElement
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
@@ -22,7 +23,7 @@ public data class StableToolSearchEvent(
     public val itemId: ResponseItemId? = null,
     public val arguments: SearchToolCallParams,
     public val result: ToolSearchResult,
-) : StableCleanEvent.CompletedTool {
+) : StableWorkEvent.CompletedTool {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.ClientToolSearchCall(

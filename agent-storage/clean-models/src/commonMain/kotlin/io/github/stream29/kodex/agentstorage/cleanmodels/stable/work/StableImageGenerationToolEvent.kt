@@ -1,5 +1,7 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable.work
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableFunctionCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableFunctionOutput
 import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.FunctionCallOutputContentItem
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
@@ -14,7 +16,7 @@ import kotlinx.serialization.Serializable
 /**
  * Stable completed local `imagegen` interaction.
  *
- * Hosted image generation uses [StableCleanEvent.ImageGenerationCall].
+ * Hosted image generation uses [StableImageGenerationCall].
  */
 @Serializable
 @SerialName("image_generation_tool_event")
@@ -25,7 +27,7 @@ public data class StableImageGenerationToolEvent(
     public val itemId: ResponseItemId? = null,
     public val arguments: ImageGenToolArguments,
     public val result: StableImageGenerationResult,
-) : StableCleanEvent.CompletedTool {
+) : StableWorkEvent.CompletedTool {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             stableFunctionCall(

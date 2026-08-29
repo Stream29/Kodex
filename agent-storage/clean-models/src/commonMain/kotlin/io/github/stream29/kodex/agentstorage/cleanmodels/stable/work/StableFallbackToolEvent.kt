@@ -1,5 +1,8 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable.work
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolJson
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableFunctionCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableTextOutput
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
@@ -20,7 +23,7 @@ public data class StableJsonToolEvent(
     public val arguments: JsonElement,
     public val result: JsonElement,
     public val success: Boolean? = null,
-) : StableCleanEvent.CompletedTool {
+) : StableWorkEvent.CompletedTool {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             stableFunctionCall(
@@ -51,7 +54,7 @@ public data class StableTextToolEvent(
     public val arguments: JsonElement,
     public val result: String,
     public val success: Boolean? = null,
-) : StableCleanEvent.CompletedTool {
+) : StableWorkEvent.CompletedTool {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             stableFunctionCall(
@@ -82,7 +85,7 @@ public data class StableCustomToolEvent(
     public val input: String,
     public val result: FunctionCallOutputPayload,
     public val success: Boolean? = null,
-) : StableCleanEvent.CompletedTool {
+) : StableWorkEvent.CompletedTool {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.CustomToolCall(

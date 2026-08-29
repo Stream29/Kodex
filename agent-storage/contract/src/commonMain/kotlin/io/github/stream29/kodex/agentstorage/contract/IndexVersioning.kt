@@ -2,7 +2,6 @@ package io.github.stream29.kodex.agentstorage.contract
 
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withContext
@@ -104,39 +103,6 @@ public fun <T> IndexVersioned<T>.indexesDescending(from: Int): Flow<Int> = flow 
         emit(index)
         index = prevIndex(index)
     }
-}
-
-/**
- * Copies visible entries into an empty mutable timeline.
- *
- * This copies stored indexes lower than [until]. For append-only logs, [until]
- * is the exclusive item boundary. For sparse timelines, callers must ensure
- * this boundary matches their intended fork semantics.
- *
- * @param until Exclusive upper bound.
- */
-public suspend fun <T> IndexVersioned<T>.forkTo(
-    until: Int,
-    target: MutableIndexVersioned<T>,
-) {
-    forkRangeTo(from = 0, until = until, target = target)
-}
-
-/**
- * Copies stored entries in `[from, until)` into an empty [target], rebasing
- * their indexes so that [from] becomes index `0`.
- */
-public suspend fun <T> IndexVersioned<T>.forkRangeTo(
-    from: Int,
-    until: Int,
-    target: MutableIndexVersioned<T>,
-) {
-    require(from >= 0) { "Fork start index must be non-negative." }
-    require(until > from) { "Fork range must not be empty." }
-    require(target.latestIndex() == -1) { "Only an empty target can be forked to." }
-    this.indexes(from)
-        .filter { index -> index < until }
-        .collect { index -> target[index - from] = this[index] }
 }
 
 public interface MutableIndexVersioned<T> : IndexVersioned<T> {
