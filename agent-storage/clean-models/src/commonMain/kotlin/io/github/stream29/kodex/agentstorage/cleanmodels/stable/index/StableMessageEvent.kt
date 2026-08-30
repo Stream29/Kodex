@@ -14,7 +14,7 @@ import kotlinx.serialization.Serializable
 @SerialName("user_message")
 public data class StableUserMessage(
     public val content: List<ContentItem>,
-) : StableIndexEvent.Steerable, RemoteCompactionV2RetainedItem {
+) : StableIndexEvent.Steerable, CompactionRetainedItem {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             ResponseItem.Message(

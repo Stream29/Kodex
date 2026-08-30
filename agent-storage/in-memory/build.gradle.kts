@@ -10,6 +10,7 @@ kotlin {
             implementation(project(":utils-read-write-mutex"))
         }
         commonTest.dependencies {
+            implementation(project(":agent-storage-contract-ext"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

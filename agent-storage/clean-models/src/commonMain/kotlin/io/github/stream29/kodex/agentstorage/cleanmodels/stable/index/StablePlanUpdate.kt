@@ -21,7 +21,7 @@ public data class StablePlanUpdate(
     @SerialName("item_id")
     public val itemId: ResponseItemId? = null,
     public val arguments: UpdatePlanArgs,
-) : StableIndexEvent.CompletedTool, RemoteCompactionV2RetainedItem {
+) : StableIndexEvent.CompletedTool, CompactionRetainedItem {
     override fun toResponseHistoryItems(): List<ResponseItem.HistoryItem> =
         listOf(
             stableFunctionCall(

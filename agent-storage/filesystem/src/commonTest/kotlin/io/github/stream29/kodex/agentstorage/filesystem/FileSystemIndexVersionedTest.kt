@@ -42,8 +42,12 @@ val fileSystemIndexVersionedTest by testSuite {
             val reopened = timeline(directory)
             assertEquals(8, reopened.latestIndex())
             assertEquals(30, reopened[7])
+            assertEquals(30, reopened.getExact(3))
+            assertNull(reopened.getExact(7))
             assertEquals(3, reopened.floorToIndex(7))
             assertEquals(8, reopened.ceilToIndex(7))
+            assertEquals(listOf(3, 8), reopened.indexesIn(3..8))
+            assertEquals(listOf(0, 3), reopened.indexesIn(0..7))
             assertNull(reopened.floorToIndex(-1))
             assertNull(reopened.ceilToIndex(9))
 

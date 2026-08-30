@@ -47,6 +47,14 @@ public class FileSystemIndexVersioned<T>(
         return getUnsafe(storedIndex)
     }
 
+    override suspend fun getExact(index: Int): T? {
+        require(index >= 0) { "Index $index must be non-negative." }
+        if (fileSystem.metadataOrNull(directory.entryPath(index))?.isRegularFile != true) {
+            return null
+        }
+        return getUnsafe(index)
+    }
+
     override suspend fun floorToIndex(index: Int): Int? {
         if (index >= 0 && fileSystem.metadataOrNull(directory.entryPath(index))?.isRegularFile == true) {
             return index
@@ -59,6 +67,43 @@ public class FileSystemIndexVersioned<T>(
             return index
         }
         return storedIndexes().binaryCeil(index)
+    }
+
+    override suspend fun indexesIn(range: IntRange): List<Int> {
+        if (range.isEmpty()) return emptyList()
+        require(range.first >= 0) {
+            "Index lower bound ${range.first} must be non-negative."
+        }
+        val indexes = storedIndexes()
+        val first = indexes.binaryCeil(range.first)
+        if (first == null) return emptyList()
+        val firstPosition = indexes.binarySearch(first)
+        val lastExclusive = if (range.last == Int.MAX_VALUE) {
+            indexes.size
+        } else {
+            val next = indexes.binaryCeil(range.last + 1)
+            if (next == null) indexes.size else indexes.binarySearch(next)
+        }
+        return indexes.subList(firstPosition, lastExclusive).toList()
+    }
+
+    override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>> {
+        if (range.isEmpty()) return emptyList()
+        require(range.first >= 0) {
+            "Index lower bound ${range.first} must be non-negative."
+        }
+        val indexes = storedIndexes()
+        val first = indexes.binaryCeil(range.first) ?: return emptyList()
+        val firstPosition = indexes.binarySearch(first)
+        val lastExclusive = if (range.last == Int.MAX_VALUE) {
+            indexes.size
+        } else {
+            val next = indexes.binaryCeil(range.last + 1)
+            if (next == null) indexes.size else indexes.binarySearch(next)
+        }
+        return indexes
+            .subList(firstPosition, lastExclusive)
+            .map { index -> index to getUnsafe(index) }
     }
 
     override suspend fun set(index: Int, value: T) {

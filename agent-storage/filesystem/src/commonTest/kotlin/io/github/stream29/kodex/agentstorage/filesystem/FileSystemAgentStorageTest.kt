@@ -4,7 +4,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchCall
-import io.github.stream29.kodex.agentstorage.contract.initialize
+import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -40,26 +40,26 @@ val fileSystemAgentStorageTest by testSuite {
             val work = StableWebSearchCall(
                 ResponseItem.WebSearchCall(status = "completed"),
             )
-            source.index[1] = message
+            source.index[2] = message
             source.work[2] = work
 
             val reopened = FileSystemAgentStorage(sourceDirectory)
             assertIs<CleanCompactionPoint>(reopened.index[0])
-            assertEquals(message, reopened.index[1])
+            assertEquals(message, reopened.index[2])
             assertEquals(work, reopened.work[2])
 
             val target = FileSystemAgentStorage.ofEmpty(targetDirectory)
             reopened.forkRawTo(until = 3, target = target)
 
             assertEquals(2, target.latestIndex())
-            assertEquals(message, target.index[1])
+            assertEquals(message, target.index[2])
             assertEquals(work, target.work[2])
             assertEquals(
                 SystemCoroutineFileSystem.readBytes(
-                    Path(sourceDirectory, IndexDirectory, "1.json"),
+                    Path(sourceDirectory, IndexDirectory, "2.json"),
                 ).toList(),
                 SystemCoroutineFileSystem.readBytes(
-                    Path(targetDirectory, IndexDirectory, "1.json"),
+                    Path(targetDirectory, IndexDirectory, "2.json"),
                 ).toList(),
             )
         } finally {
