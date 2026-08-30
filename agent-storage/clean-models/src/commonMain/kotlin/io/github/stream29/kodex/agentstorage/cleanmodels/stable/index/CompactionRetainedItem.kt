@@ -7,4 +7,4 @@ import kotlinx.serialization.Serializable
  * compaction v2.
  */
 @Serializable
-public sealed interface RemoteCompactionV2RetainedItem : StableIndexEvent
+public sealed interface CompactionRetainedItem : StableIndexEvent

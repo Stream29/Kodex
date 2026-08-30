@@ -11,5 +11,8 @@ kotlin {
             api(libs.kotlinx.serialization.json)
             implementation(project(":openai-json-codec"))
         }
+        commonTest.dependencies {
+            implementation(project(":agent-storage-contract-ext"))
+        }
     }
 }

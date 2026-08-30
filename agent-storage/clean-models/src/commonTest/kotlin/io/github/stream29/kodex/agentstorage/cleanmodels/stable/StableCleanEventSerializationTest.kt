@@ -146,12 +146,7 @@ val stableCleanEventSerializationTest by testSuite {
             StableAssistantMessage(
                 listOf(ContentItem.OutputText("answer")),
             ),
-            CleanCompactionPoint(
-                windowNumber = 3,
-                firstWindowId = "window-1",
-                previousWindowId = "window-2",
-                windowId = "window-3",
-            ),
+            CleanCompactionPoint,
         )
 
         entries.forEach { entry ->
