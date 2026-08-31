@@ -4,8 +4,8 @@ import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
 import io.github.stream29.kodex.openai.ClickOperation
 import io.github.stream29.kodex.openai.FindOperation

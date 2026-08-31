@@ -8,11 +8,12 @@ import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.indexes
+import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.latestValue
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.hook.contract.turn.HookPromptFragment
@@ -92,7 +93,7 @@ val turnHookRuntimeTest by testSuite {
 
         assertEquals("hello again", hookRequests.single().prompt)
         assertEquals(1, requests.size)
-        assertEquals(hookRequests.single().context.turnId, storage.settings.latestValue().turnId)
+        assertEquals(hookRequests.single().context.turnId, storage.settings[storage.latestIndex()].turnId)
         val history = storage.stableHistoryItems()
         assertEquals(3, history.size)
         assertEquals(MessageRole.User, assertIs<ResponseItem.Message>(history[0]).role)
@@ -135,7 +136,7 @@ val turnHookRuntimeTest by testSuite {
         runtime.appendUserMessage(listOf(ContentItem.InputText("actual prompt")))
         runtime.injectHistory(
             listOf(
-                StableCleanEvent.UserMessage(
+                StableUserMessage(
                     content = listOf(ContentItem.InputText("selected skill instructions")),
                 ),
             ),
@@ -606,16 +607,14 @@ val turnHookRuntimeTest by testSuite {
                 ),
             )
 
-        runtime.markNewTurn()
         runtime.appendUserMessage(listOf(ContentItem.InputText("one")))
         assertEquals(Unit, runtime.resume())
-        runtime.markNewTurn()
         runtime.appendUserMessage(listOf(ContentItem.InputText("two")))
         assertEquals(Unit, runtime.resume())
 
         assertEquals(2, turnIds.size)
         assertNotEquals(turnIds[0], turnIds[1])
-        assertEquals(turnIds[1], storage.settings.latestValue().turnId)
+        assertEquals(turnIds[1], storage.settings[storage.latestIndex()].turnId)
     }
     }
 }
@@ -653,12 +652,16 @@ private fun ResponseItem.Message.inputText(): String =
         .joinToString(separator = "", transform = ContentItem.InputText::text)
 
 private suspend fun KodexAgentStorage.stableEvents(): List<StableCleanEvent> =
-    stable.indexes().toList().map { index -> stable[index] }
+    (index.indexesIn(0..latestIndex()) + work.indexesIn(0..latestIndex()))
+        .distinct()
+        .sorted()
+        .mapNotNull { entryIndex ->
+            index.getExact(entryIndex) as? StableCleanEvent
+                ?: work.getExact(entryIndex) as? StableCleanEvent
+        }
 
 private suspend fun KodexAgentStorage.stableHistoryItems(): List<ResponseItem.HistoryItem> =
-    stable.indexes().toList().flatMap { index ->
-        stable[index].toResponseHistoryItems()
-    }
+    stableEvents().flatMap(StableCleanEvent::toResponseHistoryItems)
 
 private fun testSettings(): KodexAgentSettings =
     KodexAgentSettings(model = OpenAiModelId("test-model"))

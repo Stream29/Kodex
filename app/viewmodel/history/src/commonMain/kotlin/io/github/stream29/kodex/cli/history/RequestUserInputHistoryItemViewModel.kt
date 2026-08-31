@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.cli.history
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemViewModel
 import kotlinx.coroutines.CancellationException
@@ -20,7 +20,7 @@ internal class RequestUserInputHistoryItemViewModelImpl(
     init {
         loadingJob = context.launch(start = CoroutineStart.LAZY) {
             try {
-                val event = context.read(index) as? StableRequestUserInputToolEvent
+                val event = context.read(descriptor) as? StableRequestUserInputToolEvent
                     ?: error("History item $index is not a request-user-input tool.")
                 if (context.isCurrent()) {
                     mutableState.value = RequestUserInputHistoryItemState.Ready(

@@ -18,8 +18,6 @@ import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ResponseItem
 import kotlinx.coroutines.flow.toList
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
@@ -29,8 +27,6 @@ private fun storage(): InMemoryKodexAgentStorage =
             model = OpenAiModelId("test-model"),
         ),
     )
-
-private fun timestamp(index: Int): Instant = Instant.fromEpochSeconds(index.toLong())
 
 private fun user(text: String): StableUserMessage =
     StableUserMessage(listOf(ContentItem.InputText(text)))
@@ -89,7 +85,7 @@ private class CountingStorage(
         get() = delegate.unstable
 }
 
-val stableTimelineReadTest by testSuite {
+val agentStorageContractExtTest by testSuite {
     test("index flows enumerate sparse indexes in both directions") {
         val mutable = storage()
         mutable.index[1] = user("one")
@@ -162,66 +158,4 @@ val stableTimelineReadTest by testSuite {
         )
     }
 
-    test("bounded read does not decode collapsed work payloads") {
-        val mutable = storage()
-        mutable.index[1] = user("prompt")
-        mutable.timestamp[1] = timestamp(1)
-        repeat(2_000) { offset ->
-            val index = offset + 2
-            mutable.work[index] = work("work-$index")
-            mutable.timestamp[index] = timestamp(index)
-        }
-        mutable.index[2_002] = assistant("done")
-        mutable.timestamp[2_002] = timestamp(2_002)
-
-        val counted = CountingStorage(mutable)
-        val lowerExclusive = counted.stableTimelineLowerExclusive(
-            upperInclusive = 2_002,
-            maxEntries = 128,
-        )
-        val entries = counted.readStableTimeline(
-            upperInclusive = 2_002,
-            lowerExclusive = lowerExclusive,
-        )
-
-        assertTrue(entries.isNotEmpty())
-        assertEquals(0, counted.countedWork.exactReads)
-        assertTrue(entries.any { it.event is StableAssistantMessage })
-        assertTrue(entries.any { it.isOpaqueWork })
-        assertFalse(entries.any { it.event is StableWebSearchCall })
-    }
-
-    test("materializes singleton work and computes elapsed in timeline order") {
-        val mutable = storage()
-        mutable.index[1] = user("prompt")
-        mutable.work[2] = work("done")
-        mutable.index[3] = assistant("answer")
-        for (index in 1..3) mutable.timestamp[index] = timestamp(index)
-
-        val entries = mutable.readStableTimeline(upperInclusive = 3)
-
-        assertEquals(listOf(3, 2, 1), entries.map(StableTimelineEntry::index))
-        assertIs<StableAssistantMessage>(entries[0].event)
-        assertIs<StableWebSearchCall>(entries[1].event)
-        assertIs<StableUserMessage>(entries[2].event)
-        assertEquals(1, entries[0].elapsed.inWholeSeconds)
-        assertEquals(1, entries[1].elapsed.inWholeSeconds)
-        assertEquals(0, entries[2].elapsed.inWholeSeconds)
-    }
-
-    test("renders a compaction output without exposing its point") {
-        val mutable = storage()
-        mutable.index[1] = user("prompt")
-        mutable.index[3] = assistant("answer")
-        mutable.index[4] = CleanCompactionPoint
-        mutable.work[5] = StableContextCompaction(encryptedContent = "encrypted")
-        mutable.index[6] = user("next")
-        for (index in 1..6) mutable.timestamp[index] = timestamp(index)
-
-        val entries = mutable.readStableTimeline(upperInclusive = 6)
-
-        assertEquals(listOf(6, 5, 3, 1), entries.map(StableTimelineEntry::index))
-        assertTrue(entries.none { it.index == 4 })
-        assertIs<StableContextCompaction>(entries[1].event)
-    }
 }

@@ -6,10 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.agentstorage.contract.nextIndex
-import io.github.stream29.kodex.agentstorage.contract.prevIndex
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
@@ -23,7 +20,6 @@ import io.github.stream29.kodex.app.history.contract.item.PlanUpdateHistoryItemV
 import io.github.stream29.kodex.app.history.contract.item.ReasoningHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewModel
-import io.github.stream29.kodex.app.history.contract.item.TurnTimeMarkerHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupChildHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
 import io.github.stream29.kodex.cli.components.LazyListState
@@ -31,7 +27,6 @@ import io.github.stream29.kodex.cli.components.MutableScrollInteractionSource
 import io.github.stream29.kodex.cli.components.ScrollInputSource
 import io.github.stream29.kodex.cli.components.ScrollInteraction
 import io.github.stream29.kodex.cli.components.ScrollOrientation
-import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +37,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.core.annotation.Factory
@@ -51,7 +45,7 @@ import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Instant
 
-/** Newest-first, demand-extended History View state for one Agent. */
+/** Newest-first History state backed by a bounded, index-driven local window. */
 internal class AgentHistoryViewModelImpl(
     private val agentState: KodexAgentState,
     private val scope: CoroutineScope,
@@ -59,26 +53,27 @@ internal class AgentHistoryViewModelImpl(
 ) : AgentHistoryViewModel {
     private val commands = Channel<HistoryCommand>(capacity = Channel.BUFFERED)
     private val olderDemandPending = MutableStateFlow(false)
-    private val timelineCursor = HistoryTimelineCursor(agentState)
+    private val newerDemandPending = MutableStateFlow(false)
+    private val turnDurationResolver = HistoryTurnDurationResolver(agentState.storage)
     private var activeGeneration: Long = 0
     private var closed = false
 
     private val itemCache = mutableMapOf<Int, HistoryItemViewModel>()
     private val groupCache = mutableMapOf<GroupKey, WorkGroupHistoryItemViewModelImpl>()
-
     private val mutableHistoryItems = MutableStateFlow(
         HistoryItemWindowImpl(
             generation = 0,
-            sequence = HistorySequence.Empty,
+            items = emptyList(),
+            hasOlder = false,
+            hasNewer = false,
             onOlderDemand = ::registerOlderDemand,
+            onNewerDemand = ::registerNewerDemand,
         ),
     )
     private val mutableLoadState =
         MutableStateFlow<AgentHistoryLoadState>(AgentHistoryLoadState.Initializing)
     private val mutablePendingTools = MutableStateFlow<List<UnstableCleanEvent>>(emptyList())
     private val mutableStreamingItem = MutableStateFlow<HistoryStreamingItem?>(null)
-    private val mutableLatestTurnTimeMarker =
-        MutableStateFlow<TurnTimeMarkerHistoryItemViewModel?>(null)
     private val mutableActiveTurnDuration = MutableStateFlow<Duration?>(null)
 
     override val historyItems: StateFlow<HistoryItemWindow> =
@@ -162,7 +157,7 @@ internal class AgentHistoryViewModelImpl(
             snapshotFlow { listState.canScrollForward }.collect { canScrollForward ->
                 if (mutableFollowsLatest) {
                     if (canScrollForward) listState.requestScrollToStart()
-                } else if (!canScrollForward) {
+                } else if (!canScrollForward && !mutableHistoryItems.value.hasNewer) {
                     mutableFollowsLatest = true
                 }
             }
@@ -171,12 +166,11 @@ internal class AgentHistoryViewModelImpl(
 
     private fun registerOlderDemand(
         window: HistoryItemWindowImpl,
-        index: Int,
     ) {
         if (
             mutableHistoryItems.value === window &&
-            index >= (window.size - OlderDemandDistance).coerceAtLeast(0) &&
-            (mutableLoadState.value as? AgentHistoryLoadState.Ready)?.hasOlder == true &&
+            window.hasOlder &&
+            mutableLoadState.value == AgentHistoryLoadState.Ready &&
             olderDemandPending.compareAndSet(expect = false, update = true)
         ) {
             if (commands.trySend(HistoryCommand.LoadOlder).isFailure) {
@@ -185,9 +179,25 @@ internal class AgentHistoryViewModelImpl(
         }
     }
 
+    private fun registerNewerDemand(
+        window: HistoryItemWindowImpl,
+    ) {
+        if (
+            mutableHistoryItems.value === window &&
+            window.hasNewer &&
+            mutableLoadState.value == AgentHistoryLoadState.Ready &&
+            newerDemandPending.compareAndSet(expect = false, update = true)
+        ) {
+            if (commands.trySend(HistoryCommand.LoadNewer).isFailure) {
+                newerDemandPending.value = false
+            }
+        }
+    }
+
     override fun contains(generation: Long, storageIndex: Int): Boolean {
         val window = mutableHistoryItems.value
-        return generation == window.generation && window.sequence.containsStableIndex(storageIndex)
+        return generation == window.generation &&
+            window.containsStableIndex(storageIndex)
     }
 
     override fun notifyContentChanged() {
@@ -196,12 +206,13 @@ internal class AgentHistoryViewModelImpl(
 
     override fun requestScrollToLatest() {
         mutableFollowsLatest = true
-        listState.requestScrollToStart()
+        commands.trySend(HistoryCommand.JumpToLatest)
     }
 
     override fun close() {
         closed = true
         commands.close()
+        releaseAllCachedItems()
         scope.cancel()
     }
 
@@ -212,6 +223,7 @@ internal class AgentHistoryViewModelImpl(
             isGenerationCurrent = {
                 !closed && activeGeneration == generation
             },
+            turnDurationResolver = turnDurationResolver,
         )
 
     private fun materialize(
@@ -253,241 +265,383 @@ internal class AgentHistoryViewModelImpl(
         }
     }
 
-    private fun materializeChild(
-        descriptor: HistoryItemDescriptor,
-        generation: Long = activeGeneration,
-    ): WorkGroupChildHistoryItemViewModel {
-        check(descriptor.isFoldable()) {
-            "Only foldable descriptors can be nested in a history work group."
-        }
-        return createItem(descriptor, generation) as WorkGroupChildHistoryItemViewModel
-    }
-
     private fun materializeProjection(
         item: HistoryProjectionItem,
         generation: Long = activeGeneration,
     ): HistoryItemViewModel = when (item) {
         is HistoryProjectionItem.Stable -> materialize(item.descriptor, generation)
         is HistoryProjectionItem.WorkGroup -> {
-            item.descriptors.forEach { descriptor ->
-                itemCache.remove(descriptor.index)?.release()
-            }
+            itemCache.keys
+                .filter { index -> index in item.indexRange }
+                .forEach { index -> itemCache.remove(index)?.release() }
             val key = GroupKey(
-                oldestIndex = item.descriptors.last().index,
-                newestIndex = item.descriptors.first().index,
+                oldestIndex = item.indexRange.first,
+                newestIndex = item.indexRange.last,
             )
             groupCache.getOrPut(key) {
                 WorkGroupHistoryItemViewModelImpl(
-                    descriptors = item.descriptors,
-                    groupElapsed = item.groupElapsed,
+                    indexRange = item.indexRange,
+                    itemCount = item.itemCount,
+                    groupElapsed = item.elapsed,
                     context = itemContext(generation),
-                    childFactory = { descriptor ->
-                        materializeChild(descriptor, generation)
+                    childFactory = {
+                        materializeGroupChildren(item, generation)
                     },
                 )
             }
         }
     }
 
+    private suspend fun materializeGroupChildren(
+        group: HistoryProjectionItem.WorkGroup,
+        generation: Long,
+    ): List<WorkGroupChildHistoryItemViewModel> = withContext(Dispatchers.Default) {
+        val values = agentState.storage.work.valuesIn(group.indexRange)
+        check(values.size == group.itemCount) {
+            "History work group ${group.indexRange} expected ${group.itemCount} values, " +
+                "but storage returned ${values.size}."
+        }
+        var previousIndex = agentState.storage.visibleStableIndexAtOrBefore(
+            group.indexRange.first - 1,
+        )
+        val descriptors = values.map { (index, event) ->
+            event.toHistoryItemDescriptor(
+                index = index,
+                source = HistoryItemSource.Work,
+                elapsed = agentState.storage.elapsedBetween(previousIndex, index),
+            ).also {
+                previousIndex = index
+            }
+        }
+        descriptors.asReversed().map { descriptor ->
+            check(descriptor.isFoldable()) {
+                "Only foldable work events can be nested in a History work group."
+            }
+            createItem(descriptor, generation) as WorkGroupChildHistoryItemViewModel
+        }
+    }
+
+    private fun pruneCaches(items: List<HistoryProjectionItem>) {
+        val retainedIndexes = items.mapNotNullTo(mutableSetOf()) { item ->
+            (item as? HistoryProjectionItem.Stable)?.descriptor?.index
+        }
+        itemCache.keys
+            .filterNot(retainedIndexes::contains)
+            .forEach { index -> itemCache.remove(index)?.release() }
+
+        val retainedGroups = items.mapNotNullTo(mutableSetOf()) { item ->
+            (item as? HistoryProjectionItem.WorkGroup)?.let { group ->
+                GroupKey(group.indexRange.first, group.indexRange.last)
+            }
+        }
+        groupCache.keys
+            .filterNot(retainedGroups::contains)
+            .forEach { key -> groupCache.remove(key)?.collapse() }
+    }
+
+    private fun materializeChunk(
+        fromInclusive: Int,
+        chunk: LoadedHistoryChunk,
+        generation: Long,
+    ): HistoryWindowChunk = HistoryWindowChunk(
+        fromInclusive = fromInclusive,
+        projections = chunk.items,
+        items = chunk.items.map { item -> materializeProjection(item, generation) },
+    )
+
+    private fun visibleChunks(chunks: List<HistoryWindowChunk>): Set<HistoryWindowChunk> {
+        val visibleKeys = listState.layoutInfo.visibleItemsInfo.map { item -> item.key }
+        if (visibleKeys.isEmpty()) return emptySet()
+        return chunks.filterTo(mutableSetOf()) { chunk ->
+            chunk.items.any { item -> visibleKeys.any { key -> key === item } }
+        }
+    }
+
+    private fun captureViewportAnchor(
+        chunks: List<HistoryWindowChunk>,
+    ): HistoryViewportAnchor? {
+        val anchorInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
+            item.index == listState.firstVisibleItemIndex
+        } ?: return null
+        val anchorItem = anchorInfo.key as? HistoryItemViewModel ?: return null
+        if (chunks.none { chunk -> chunk.items.any { item -> item === anchorItem } }) return null
+        return HistoryViewportAnchor(
+            item = anchorItem,
+            scrollOffset = listState.firstVisibleItemScrollOffset,
+        )
+    }
+
+    private fun releaseAllCachedItems() {
+        itemCache.values.forEach(HistoryItemViewModel::release)
+        itemCache.clear()
+        groupCache.values.forEach(WorkGroupHistoryItemViewModelImpl::collapse)
+        groupCache.clear()
+    }
+
     private suspend fun runHistoryLoop() {
         var initialized = false
         var observedLatestIndex = -1
+        var observedTurnIndexEntry: Int? = null
         var nextOlderIndex: Int? = null
+        var hasNewer = false
         var lastInvalidation: Pair<Int, Int>? = null
-        var newestOpenItems: List<HistoryProjectionItem> = emptyList()
-        var newestTimeMarkers: List<TurnTimeMarkerHistoryItemViewModel> = emptyList()
-        var sealedSequence: HistorySequence = HistorySequence.Empty
         var activeTurn = runningTurn.value != null
+        var activeTurnStart: Instant? = null
+        var chunks: List<HistoryWindowChunk> = emptyList()
 
-        fun publishCurrent(generation: Long = mutableHistoryItems.value.generation) {
-            var sequence = HistorySequence.concat(
-                HistorySequence.of(
-                    newestOpenItems.map { materializeProjection(it, generation) },
-                ),
-                sealedSequence,
-            )
-            newestTimeMarkers.forEach { marker ->
-                sequence = sequence.insert(marker)
+        fun publishActiveTurnDuration() {
+            mutableActiveTurnDuration.value = if (activeTurn) {
+                activeTurnStart?.let { start ->
+                    (Clock.System.now() - start)
+                        .takeIf { duration ->
+                            duration >= Duration.ZERO && duration.isFinite()
+                        }
+                }
+            } else {
+                null
             }
-            mutableLatestTurnTimeMarker.value?.let { marker ->
-                sequence = sequence.insert(marker)
-            }
-            publishHistoryItems(sequence, generation)
         }
 
-        suspend fun updateLatestTurnState() {
-            val latestIndex = observedLatestIndex
-            val timeMarker = if (latestIndex >= 0 && !activeTurn) {
-                timelineCursor.latestTurnTimeMarker(latestIndex)
+        suspend fun refreshActiveTurnStart(force: Boolean = false) {
+            val currentIndexEntry = if (observedLatestIndex >= 0) {
+                agentState.storage.index.floorToIndex(observedLatestIndex)
             } else {
                 null
             }
-            val activeDuration = if (latestIndex >= 0 && activeTurn) {
-                timelineCursor.activeTurnDuration(latestIndex)
-            } else {
-                null
-            }
-            val previousTimeMarker = mutableLatestTurnTimeMarker.value
-            val previousActiveDuration = mutableActiveTurnDuration.value
-            if (previousTimeMarker == timeMarker && previousActiveDuration == activeDuration) {
+            if (!activeTurn) {
+                activeTurnStart = null
+                observedTurnIndexEntry = currentIndexEntry
+                publishActiveTurnDuration()
                 return
             }
-            mutableLatestTurnTimeMarker.value = timeMarker
-            mutableActiveTurnDuration.value = activeDuration
-            if (previousTimeMarker != timeMarker) publishCurrent()
+            if (force || currentIndexEntry != observedTurnIndexEntry) {
+                activeTurnStart = turnDurationResolver.activeTurnStartTimestamp(
+                    observedLatestIndex,
+                )
+                observedTurnIndexEntry = currentIndexEntry
+            }
+            publishActiveTurnDuration()
         }
 
-        suspend fun reload(latestIndex: Int, invalidate: Boolean) {
+        suspend fun replaceWindow(
+            latestIndex: Int,
+            invalidate: Boolean,
+        ) {
             val currentGeneration = mutableHistoryItems.value.generation
-            val reloadGeneration = if (invalidate) {
-                check(currentGeneration < Long.MAX_VALUE) { "History generations are exhausted." }
+            val replacementGeneration = if (invalidate) {
+                check(currentGeneration < Long.MAX_VALUE) {
+                    "History generations are exhausted."
+                }
                 currentGeneration + 1
             } else {
                 currentGeneration
             }
-            if (invalidate) {
-                activeGeneration = reloadGeneration
-                itemCache.clear()
-                groupCache.clear()
-                timelineCursor.reset()
-            } else {
-                activeGeneration = reloadGeneration
+            if (!initialized || invalidate) {
+                mutableLoadState.value = AgentHistoryLoadState.Initializing
             }
-            timelineCursor.refreshThrough(latestIndex)
-            newestTimeMarkers = emptyList()
-            newestOpenItems = emptyList()
-            sealedSequence = HistorySequence.Empty
-            publishHistoryItems(
-                sequence = HistorySequence.Empty,
-                generation = reloadGeneration,
-            )
-            mutableLoadState.value = AgentHistoryLoadState.Initializing
-            val batch = loadBatch(latestIndex)
-            val projection = projectNewestHistory(batch.items, timelineCursor.endIndexes())
+            if (invalidate) {
+                activeGeneration = replacementGeneration
+                releaseAllCachedItems()
+                chunks = emptyList()
+                publishHistoryItems(
+                    chunks = chunks,
+                    generation = replacementGeneration,
+                    hasOlder = false,
+                    hasNewer = false,
+                )
+            } else {
+                activeGeneration = replacementGeneration
+            }
+
+            val batch = withContext(Dispatchers.Default) {
+                agentState.storage.readHistoryChunk(
+                    fromInclusive = latestIndex,
+                    snapshotIndex = latestIndex,
+                )
+            }
             observedLatestIndex = latestIndex
             nextOlderIndex = batch.nextOlderIndex
+            hasNewer = false
             initialized = true
-            newestOpenItems = projection.openItems
-            sealedSequence = HistorySequence.of(
-                timelineCursor.mergeTimeline(
-                    projection.sealedItems.map {
-                        materializeProjection(it, reloadGeneration)
-                    },
-                ).map { entry -> entry.item },
-            )
-            publishCurrent(reloadGeneration)
-            updateLatestTurnState()
-            mutableLoadState.value = AgentHistoryLoadState.Ready(
+            chunks = if (batch.items.isEmpty()) {
+                emptyList()
+            } else {
+                listOf(materializeChunk(latestIndex, batch, replacementGeneration))
+            }
+            pruneCaches(chunks.flatMap { chunk -> chunk.projections })
+            publishHistoryItems(
+                chunks = chunks,
+                generation = replacementGeneration,
                 hasOlder = nextOlderIndex != null,
+                hasNewer = false,
             )
+            mutableLoadState.value = AgentHistoryLoadState.Ready
+            refreshActiveTurnStart(force = invalidate)
         }
 
         suspend fun refresh(latestIndex: Int) {
             if (!initialized) {
-                reload(latestIndex, invalidate = false)
+                replaceWindow(latestIndex, invalidate = false)
                 return
             }
             if (latestIndex < observedLatestIndex) {
                 lastInvalidation = observedLatestIndex to latestIndex
-                reload(latestIndex, invalidate = true)
+                replaceWindow(latestIndex, invalidate = true)
                 return
             }
             if (latestIndex == observedLatestIndex) return
+            if (!mutableFollowsLatest || hasNewer) {
+                observedLatestIndex = latestIndex
+                hasNewer = chunks.isNotEmpty()
+                publishHistoryItems(
+                    chunks = chunks,
+                    hasOlder = nextOlderIndex != null,
+                    hasNewer = hasNewer,
+                )
+                mutableLoadState.value = AgentHistoryLoadState.Ready
+                refreshActiveTurnStart()
+                return
+            }
 
-            val addedBoundaries = timelineCursor.refreshThrough(latestIndex)
-            val current = mutableHistoryItems.value.sequence
-            val newestLoaded = current.newestStableIndex
-            val newestStored = withContext(Dispatchers.Default) {
-                agentState.storage.stable.floorToIndex(latestIndex)
+            if (chunks.isEmpty()) {
+                replaceWindow(latestIndex, invalidate = false)
+                return
+            }
+            val visibleChunks = visibleChunks(chunks)
+            val batch = withContext(Dispatchers.Default) {
+                agentState.storage.readHistoryChunk(
+                    fromInclusive = latestIndex,
+                    snapshotIndex = latestIndex,
+                )
             }
             observedLatestIndex = latestIndex
-            if (newestStored == null || newestStored == newestLoaded) {
-                if (addedBoundaries.isNotEmpty()) {
-                    newestTimeMarkers = (
-                        timelineCursor.timeMarkersFor(addedBoundaries) + newestTimeMarkers
-                        ).distinctBy { marker -> marker.markerIndex to marker.endIndex }
-                }
-                val previousTimeMarker = mutableLatestTurnTimeMarker.value
-                updateLatestTurnState()
-                if (
-                    addedBoundaries.isNotEmpty() &&
-                    previousTimeMarker == mutableLatestTurnTimeMarker.value
-                ) {
-                    publishCurrent()
-                }
+            if (batch.items.isEmpty()) {
+                refreshActiveTurnStart()
                 return
             }
-            if (newestLoaded == null) {
-                reload(latestIndex, invalidate = false)
-                return
+            val newChunk = materializeChunk(latestIndex, batch, activeGeneration)
+            val retained = chunks.dropWhile { chunk ->
+                chunk.newestStorageIndex >= newChunk.oldestStorageIndex
             }
-
-            val additions = loadNewerThan(
-                fromInclusive = newestStored,
-                exclusiveBoundary = newestLoaded,
+            var combined = listOf(newChunk) + retained
+            val lastVisibleChunk = combined.indexOfLast(visibleChunks::contains)
+            val keepCount = if (lastVisibleChunk < 0) {
+                1
+            } else {
+                (lastVisibleChunk + 2).coerceAtMost(combined.size)
+            }
+            val removedOlder = combined.drop(keepCount)
+            combined = combined.take(keepCount)
+            chunks = combined
+            if (removedOlder.isNotEmpty()) {
+                nextOlderIndex = removedOlder.first().fromInclusive
+            } else if (retained.isEmpty()) {
+                nextOlderIndex = batch.nextOlderIndex
+            }
+            hasNewer = false
+            pruneCaches(chunks.flatMap { chunk -> chunk.projections })
+            publishHistoryItems(
+                chunks = chunks,
+                hasOlder = nextOlderIndex != null,
+                hasNewer = false,
             )
-            if (additions.isNotEmpty()) {
-                val projectionInput = ArrayList<HistoryItemDescriptor>(
-                    additions.size + newestOpenItems.size,
-                )
-                projectionInput += additions
-                projectionInput += newestOpenItems.flatMap { it.descriptors() }
-                val projection = projectNewestHistory(
-                    projectionInput,
-                    timelineCursor.endIndexes(),
-                )
-                newestOpenItems = projection.openItems
-                val projectedSealed = timelineCursor.mergeTimeline(
-                    projection.sealedItems.map {
-                        materializeProjection(it, activeGeneration)
-                    },
-                ).map { entry -> entry.item }
-                val mergedSealed = (
-                    newestTimeMarkers + projectedSealed
-                    )
-                    .distinctBy { item ->
-                        when (item) {
-                            is TurnTimeMarkerHistoryItemViewModel ->
-                                item.markerIndex to item.endIndex
-
-                            else -> item
-                        }
-                    }
-                    .sortedByDescending { item -> item.newestOrderKey }
-                newestTimeMarkers = emptyList()
-                sealedSequence = HistorySequence.concat(
-                    HistorySequence.of(mergedSealed),
-                    sealedSequence,
-                )
-                publishCurrent()
-            }
-            updateLatestTurnState()
+            mutableLoadState.value = AgentHistoryLoadState.Ready
+            refreshActiveTurnStart()
         }
 
         suspend fun loadOlder() {
             try {
-                val firstIndex = nextOlderIndex
-                if (firstIndex == null) {
-                    mutableLoadState.value = AgentHistoryLoadState.Ready(hasOlder = false)
+                val fromInclusive = nextOlderIndex
+                if (fromInclusive == null) {
+                    mutableLoadState.value = AgentHistoryLoadState.Ready
                     return
                 }
                 mutableLoadState.value = AgentHistoryLoadState.LoadingOlder
-                val batch = loadBatch(firstIndex)
-                val projectedItems = timelineCursor.mergeTimeline(
-                    projectSealedHistory(batch.items, timelineCursor.endIndexes())
-                        .map { materializeProjection(it, activeGeneration) },
-                ).map { entry -> entry.item }
-                nextOlderIndex = batch.nextOlderIndex
-                sealedSequence = HistorySequence.concat(
-                    sealedSequence,
-                    HistorySequence.of(projectedItems),
-                )
-                publishCurrent()
-                mutableLoadState.value = AgentHistoryLoadState.Ready(
+                val viewportAnchor = captureViewportAnchor(chunks)
+                val visibleChunks = visibleChunks(chunks)
+                val batch = withContext(Dispatchers.Default) {
+                    agentState.storage.readHistoryChunk(
+                        fromInclusive = fromInclusive,
+                        snapshotIndex = observedLatestIndex,
+                    )
+                }
+                if (batch.items.isEmpty()) {
+                    nextOlderIndex = batch.nextOlderIndex
+                } else {
+                    val loaded = materializeChunk(fromInclusive, batch, activeGeneration)
+                    var combined = chunks + loaded
+                    val firstVisibleChunk = combined.indexOfFirst(visibleChunks::contains)
+                    val removeCount = (firstVisibleChunk - 1).coerceAtLeast(0)
+                    if (removeCount > 0) {
+                        combined = combined.drop(removeCount)
+                        hasNewer = true
+                    }
+                    chunks = combined
+                    nextOlderIndex = batch.nextOlderIndex
+                }
+                pruneCaches(chunks.flatMap { chunk -> chunk.projections })
+                publishHistoryItems(
+                    chunks = chunks,
                     hasOlder = nextOlderIndex != null,
+                    hasNewer = hasNewer,
+                    viewportAnchor = viewportAnchor,
                 )
+                mutableLoadState.value = AgentHistoryLoadState.Ready
+                olderDemandPending.value = false
             } finally {
                 olderDemandPending.value = false
+            }
+        }
+
+        suspend fun loadNewer() {
+            try {
+                val head = chunks.firstOrNull()
+                if (head == null) {
+                    replaceWindow(observedLatestIndex, invalidate = false)
+                    return
+                }
+                mutableLoadState.value = AgentHistoryLoadState.LoadingNewer
+                val viewportAnchor = captureViewportAnchor(chunks)
+                val visibleChunks = visibleChunks(chunks)
+                val batch = withContext(Dispatchers.Default) {
+                    agentState.storage.readNewerHistoryChunk(
+                        afterExclusive = head.newestStorageIndex,
+                        snapshotIndex = observedLatestIndex,
+                    )
+                }
+                if (batch == null || batch.items.isEmpty()) {
+                    hasNewer = false
+                } else {
+                    val fromInclusive = batch.items.maxOf { item -> item.newestStorageIndex }
+                    val loaded = materializeChunk(fromInclusive, batch, activeGeneration)
+                    val retained = chunks.dropWhile { chunk ->
+                        chunk.newestStorageIndex >= loaded.oldestStorageIndex
+                    }
+                    var combined = listOf(loaded) + retained
+                    val lastVisibleChunk = combined.indexOfLast(visibleChunks::contains)
+                    val keepCount = if (lastVisibleChunk < 0) {
+                        1
+                    } else {
+                        (lastVisibleChunk + 2).coerceAtMost(combined.size)
+                    }
+                    val removedOlder = combined.drop(keepCount)
+                    combined = combined.take(keepCount)
+                    if (removedOlder.isNotEmpty()) {
+                        nextOlderIndex = removedOlder.first().fromInclusive
+                    }
+                    chunks = combined
+                    hasNewer = loaded.newestStorageIndex < observedLatestIndex
+                }
+                pruneCaches(chunks.flatMap { chunk -> chunk.projections })
+                publishHistoryItems(
+                    chunks = chunks,
+                    hasOlder = nextOlderIndex != null,
+                    hasNewer = hasNewer,
+                    viewportAnchor = viewportAnchor,
+                )
+                mutableLoadState.value = AgentHistoryLoadState.Ready
+            } finally {
+                newerDemandPending.value = false
             }
         }
 
@@ -496,9 +650,15 @@ internal class AgentHistoryViewModelImpl(
                 when (command) {
                     is HistoryCommand.Refresh -> refresh(command.latestIndex)
                     HistoryCommand.LoadOlder -> loadOlder()
+                    HistoryCommand.LoadNewer -> loadNewer()
+                    HistoryCommand.JumpToLatest -> {
+                        replaceWindow(observedLatestIndex, invalidate = false)
+                        listState.requestScrollToStart()
+                    }
                     is HistoryCommand.UpdateLatestTurn -> {
+                        val changed = activeTurn != command.active
                         activeTurn = command.active
-                        updateLatestTurnState()
+                        refreshActiveTurnStart(force = changed && activeTurn)
                     }
 
                     is HistoryCommand.ExternalWriteFinished -> {
@@ -508,7 +668,7 @@ internal class AgentHistoryViewModelImpl(
                             invalidation != lastInvalidation
                         ) {
                             lastInvalidation = invalidation
-                            reload(command.endIndex, invalidate = true)
+                            replaceWindow(command.endIndex, invalidate = true)
                         } else {
                             refresh(command.endIndex)
                         }
@@ -519,66 +679,12 @@ internal class AgentHistoryViewModelImpl(
                 throw failure
             } catch (failure: Throwable) {
                 olderDemandPending.value = false
+                newerDemandPending.value = false
                 mutableLoadState.value = AgentHistoryLoadState.Failed(
                     failure.message ?: failure.toString(),
                 )
             }
         }
-    }
-
-    private suspend fun loadBatch(fromInclusive: Int): LoadedHistoryBatch =
-        withContext(Dispatchers.Default) {
-            if (fromInclusive < 0) return@withContext LoadedHistoryBatch(emptyList(), null)
-            val items = ArrayList<HistoryItemDescriptor>(MaximumHistoryBatchSize)
-            var index = agentState.storage.stable.floorToIndex(fromInclusive)
-            var projectedItemCount = 0
-            while (index != null && projectedItemCount < HistoryBatchSize) {
-                val event = agentState.storage.stable[index]
-                items += event.toHistoryItemDescriptor(index, historyElapsed(index))
-                projectedItemCount += 1
-                if (timelineCursor.hasTimeMarkerAtEndIndex(index)) projectedItemCount += 1
-                index = agentState.storage.stable.prevIndex(index)
-            }
-            while (
-                index != null &&
-                projectedItemCount < MaximumHistoryBatchSize &&
-                items.lastOrNull()?.isFoldable() == true
-            ) {
-                val event = agentState.storage.stable[index]
-                items += event.toHistoryItemDescriptor(index, historyElapsed(index))
-                projectedItemCount += 1
-                if (timelineCursor.hasTimeMarkerAtEndIndex(index)) projectedItemCount += 1
-                index = agentState.storage.stable.prevIndex(index)
-            }
-            LoadedHistoryBatch(items, index)
-        }
-
-    private suspend fun historyElapsed(index: Int): Duration {
-        val previousIndex = agentState.storage.stable.prevIndex(index) ?: return Duration.ZERO
-        val timestamp = agentState.storage.timestamp
-        if (
-            timestamp.floorToIndex(previousIndex) != previousIndex ||
-            timestamp.floorToIndex(index) != index
-        ) {
-            return Duration.ZERO
-        }
-        return (timestamp[index] - timestamp[previousIndex])
-            .takeIf { it >= Duration.ZERO && it.isFinite() }
-            ?: Duration.ZERO
-    }
-
-    private suspend fun loadNewerThan(
-        fromInclusive: Int,
-        exclusiveBoundary: Int,
-    ): List<HistoryItemDescriptor> = withContext(Dispatchers.Default) {
-        val items = mutableListOf<HistoryItemDescriptor>()
-        var index: Int? = fromInclusive
-        while (index != null && index > exclusiveBoundary) {
-            val event = agentState.storage.stable[index]
-            items += event.toHistoryItemDescriptor(index, historyElapsed(index))
-            index = agentState.storage.stable.prevIndex(index)
-        }
-        items
     }
 
     private suspend fun loadPendingTools(latestIndex: Int): List<UnstableCleanEvent> =
@@ -594,18 +700,46 @@ internal class AgentHistoryViewModelImpl(
         }
 
     private fun publishHistoryItems(
-        sequence: HistorySequence,
+        chunks: List<HistoryWindowChunk>,
         generation: Long = mutableHistoryItems.value.generation,
+        hasOlder: Boolean,
+        hasNewer: Boolean,
+        viewportAnchor: HistoryViewportAnchor? = null,
     ) {
+        val items = chunks.flatMap { chunk -> chunk.items }
         val current = mutableHistoryItems.value
-        if (current.generation == generation && current.sequence === sequence) return
+        if (
+            current.generation == generation &&
+            current.items.sameIdentities(items) &&
+            current.hasOlder == hasOlder &&
+            current.hasNewer == hasNewer
+        ) {
+            return
+        }
         activeGeneration = generation
         mutableHistoryItems.value = HistoryItemWindowImpl(
             generation = generation,
-            sequence = sequence,
+            items = items,
+            hasOlder = hasOlder,
+            hasNewer = hasNewer,
             onOlderDemand = ::registerOlderDemand,
+            onNewerDemand = ::registerNewerDemand,
         )
-        notifyContentChanged()
+        if (mutableFollowsLatest) {
+            listState.requestScrollToStart()
+        } else if (viewportAnchor != null) {
+            val localIndex = items.indexOfFirst { item -> item === viewportAnchor.item }
+            if (localIndex >= 0) {
+                val transientPrefix =
+                    (if (mutableStreamingItem.value == null) 0 else 1) +
+                        mutablePendingTools.value.size +
+                        (if (hasNewer) 1 else 0)
+                listState.scrollToItem(
+                    index = transientPrefix + localIndex,
+                    scrollOffset = viewportAnchor.scrollOffset,
+                )
+            }
+        }
     }
 
     private fun publishPendingTools(pending: List<UnstableCleanEvent>) {
@@ -632,7 +766,10 @@ internal class AgentHistoryViewModelImpl(
             ScrollInputSource.Keyboard,
                 -> if (interaction.consumedDelta < 0) {
                 mutableFollowsLatest = false
-            } else if (!listState.canScrollForward) {
+            } else if (
+                !listState.canScrollForward &&
+                !mutableHistoryItems.value.hasNewer
+            ) {
                 mutableFollowsLatest = true
             }
 
@@ -665,100 +802,6 @@ public class DefaultAgentHistoryViewModelFactory(
         createAgentHistoryViewModel(agentState, ownerScope, runningTurn)
 }
 
-internal sealed interface HistoryProjectionItem {
-    data class Stable(val descriptor: HistoryItemDescriptor) : HistoryProjectionItem
-
-    data class WorkGroup(
-        val descriptors: List<HistoryItemDescriptor>,
-        val groupElapsed: Duration,
-    ) : HistoryProjectionItem
-}
-
-internal data class NewestHistoryProjection(
-    val openItems: List<HistoryProjectionItem>,
-    val sealedItems: List<HistoryProjectionItem>,
-)
-
-internal fun projectNewestHistory(
-    items: List<HistoryItemDescriptor>,
-    turnEndIndexes: Set<Int> = emptySet(),
-): NewestHistoryProjection {
-    var openItemCount = 0
-    while (
-        openItemCount < items.size &&
-        items[openItemCount].isFoldable() &&
-        (
-            openItemCount == 0 ||
-                items[openItemCount].index !in turnEndIndexes
-            )
-    ) {
-        openItemCount += 1
-    }
-    return NewestHistoryProjection(
-        openItems = items.subList(0, openItemCount).map(HistoryProjectionItem::Stable),
-        sealedItems = projectSealedHistory(
-            items = items.subList(openItemCount, items.size),
-            turnEndIndexes = turnEndIndexes,
-        ),
-    )
-}
-
-internal fun projectSealedHistory(
-    items: List<HistoryItemDescriptor>,
-    turnEndIndexes: Set<Int> = emptySet(),
-): List<HistoryProjectionItem> {
-    if (items.isEmpty()) return emptyList()
-    val projected = ArrayList<HistoryProjectionItem>(items.size)
-    var position = 0
-    while (position < items.size) {
-        val first = items[position]
-        if (!first.isFoldable()) {
-            projected += HistoryProjectionItem.Stable(first)
-            position += 1
-            continue
-        }
-
-        val start = position
-        position += 1
-        while (
-            position < items.size &&
-            items[position].isFoldable() &&
-            items[position].index !in turnEndIndexes
-        ) {
-            position += 1
-        }
-        if (position - start == 1) {
-            projected += HistoryProjectionItem.Stable(first)
-        } else {
-            val descriptors = items.subList(start, position).toList()
-            projected += HistoryProjectionItem.WorkGroup(
-                descriptors = descriptors,
-                groupElapsed = groupElapsed(descriptors),
-            )
-        }
-    }
-    return projected
-}
-
-private fun groupElapsed(descriptors: List<HistoryItemDescriptor>): Duration {
-    // Each child duration starts at the preceding stable timestamp. Summing the contiguous run
-    // therefore gives the interval represented by the group, including the gap before its oldest
-    // child.
-    return descriptors.fold(Duration.ZERO) { total, descriptor ->
-        total + descriptor.elapsed
-    }
-}
-
-private fun HistoryProjectionItem.descriptors(): List<HistoryItemDescriptor> = when (this) {
-    is HistoryProjectionItem.Stable -> listOf(descriptor)
-    is HistoryProjectionItem.WorkGroup -> descriptors
-}
-
-private fun HistoryProjectionItem.descriptorOrNull(): HistoryItemDescriptor? = when (this) {
-    is HistoryProjectionItem.Stable -> descriptor
-    is HistoryProjectionItem.WorkGroup -> null
-}
-
 private fun KodexAgentStateValue.toStreamingItem(): HistoryStreamingItem? = when (this) {
     KodexAgentStateValue.RequestResponse.Started -> HistoryStreamingItem.Started
     is KodexAgentStateValue.RequestResponse.Message ->
@@ -780,7 +823,7 @@ private fun KodexAgentStateValue.toStreamingItem(): HistoryStreamingItem? = when
     else -> null
 }
 
-private val HistoryItemViewModel.storageIndexOrNull: Int?
+private val HistoryItemViewModel.storageIndex: Int
     get() = when (this) {
         is MessageHistoryItemViewModel -> index
         is ReasoningHistoryItemViewModel -> index
@@ -789,504 +832,90 @@ private val HistoryItemViewModel.storageIndexOrNull: Int?
         is PatchHistoryItemViewModel -> index
         is PlanUpdateHistoryItemViewModel -> index
         is ContextCompactionHistoryItemViewModel -> index
-        is TurnTimeMarkerHistoryItemViewModel,
-        is WorkGroupHistoryItemViewModel,
-            -> null
-    }
-
-private val HistoryItemViewModel.newestStoredIndex: Int
-    get() = when (this) {
         is WorkGroupHistoryItemViewModel -> indexRange.last
-        is TurnTimeMarkerHistoryItemViewModel -> endIndex
-        else -> storageIndexOrNull ?: error("History item has no stable index.")
     }
-
-private val HistoryItemViewModel.newestOrderKey: Long
-    get() = when (this) {
-        is WorkGroupHistoryItemViewModel -> stableOrderKey(indexRange.last)
-        is TurnTimeMarkerHistoryItemViewModel -> timeMarkerOrderKey(endIndex)
-        else -> stableOrderKey(storageIndexOrNull ?: error("History item has no index."))
-    }
-
-private fun HistoryItemViewModel.isFoldable(): Boolean =
-    this is WorkGroupChildHistoryItemViewModel
-
-private fun stableOrderKey(index: Int): Long = index.toLong() * 2L + 1L
-
-private fun timeMarkerOrderKey(endIndex: Int): Long = endIndex.toLong() * 2L + 2L
-
-private data class LoadedHistoryBatch(
-    val items: List<HistoryItemDescriptor>,
-    val nextOlderIndex: Int?,
-)
 
 private data class GroupKey(
     val oldestIndex: Int,
     val newestIndex: Int,
 )
 
-private data class TurnMarker(
-    val index: Int,
-    val turnId: String,
-)
-
-private data class TurnBoundary(
-    val marker: TurnMarker,
-    val nextMarker: TurnMarker,
-    val endIndex: Int?,
-)
-
-private sealed interface HistoryTimelineEntry {
-    val item: HistoryItemViewModel
-    val sourceOrderKey: Long
-
-    data class Stable(
-        val sourceIndex: Int,
-        override val item: HistoryItemViewModel,
-    ) : HistoryTimelineEntry {
-        override val sourceOrderKey: Long = sourceIndex.toLong() * 2L + 1L
+private val HistoryProjectionItem.oldestStorageIndex: Int
+    get() = when (this) {
+        is HistoryProjectionItem.Stable -> descriptor.index
+        is HistoryProjectionItem.WorkGroup -> indexRange.first
     }
 
-    data class TurnTimeMarker(
-        val sourceIndex: Int,
-        override val item: TurnTimeMarkerHistoryItemViewModel,
-    ) : HistoryTimelineEntry {
-        override val sourceOrderKey: Long = sourceIndex.toLong() * 2L
+private val HistoryProjectionItem.newestStorageIndex: Int
+    get() = when (this) {
+        is HistoryProjectionItem.Stable -> descriptor.index
+        is HistoryProjectionItem.WorkGroup -> indexRange.last
     }
-}
-
-private class HistoryTimelineCursor(
-    private val agentState: KodexAgentState,
-) {
-    private val markers = mutableListOf<TurnMarker>()
-    private val boundaries = mutableListOf<TurnBoundary>()
-    private val boundariesByEndIndex = mutableMapOf<Int, MutableList<TurnBoundary>>()
-    private val turnEndIndexes = mutableSetOf<Int>()
-    private val timeMarkerCache =
-        mutableMapOf<Pair<Int, Int>, TurnTimeMarkerHistoryItemViewModel?>()
-    private var scannedSettingsIndex: Int? = null
-    private var scannedThrough: Int = -1
-    private var previousTurnId: String? = null
-
-    suspend fun refreshThrough(latestIndex: Int): List<TurnBoundary> =
-        withContext(Dispatchers.Default) {
-            if (latestIndex < scannedThrough) reset()
-            var index = if (scannedSettingsIndex == null) {
-                agentState.storage.settings.ceilToIndex(0)
-            } else {
-                agentState.storage.settings.nextIndex(scannedSettingsIndex!!)
-            }
-            val addedBoundaries = mutableListOf<TurnBoundary>()
-            while (index != null && index <= latestIndex) {
-                val settings = agentState.storage.settings[index]
-                if (previousTurnId == null || settings.turnId != previousTurnId) {
-                    val marker = TurnMarker(index = index, turnId = settings.turnId)
-                    markers.lastOrNull()?.let { previous ->
-                        val boundary = TurnBoundary(
-                            marker = previous,
-                            nextMarker = marker,
-                            endIndex = agentState.storage.stable.prevIndex(marker.index),
-                        )
-                        boundaries += boundary
-                        boundary.endIndex?.let { endIndex ->
-                            boundariesByEndIndex.getOrPut(endIndex) { mutableListOf() } += boundary
-                            turnEndIndexes += endIndex
-                        }
-                        addedBoundaries += boundary
-                    }
-                    markers += marker
-                }
-                previousTurnId = settings.turnId
-                scannedSettingsIndex = index
-                index = agentState.storage.settings.nextIndex(index)
-            }
-            scannedThrough = latestIndex
-            addedBoundaries
-        }
-
-    fun reset() {
-        markers.clear()
-        boundaries.clear()
-        boundariesByEndIndex.clear()
-        turnEndIndexes.clear()
-        timeMarkerCache.clear()
-        scannedSettingsIndex = null
-        scannedThrough = -1
-        previousTurnId = null
-    }
-
-    fun endIndexes(): Set<Int> = turnEndIndexes
-
-    suspend fun hasTimeMarkerAtEndIndex(index: Int): Boolean =
-        boundariesByEndIndex[index]?.any { boundary -> timeMarkerFor(boundary) != null } == true
-
-    suspend fun mergeTimeline(items: List<HistoryItemViewModel>): List<HistoryTimelineEntry> {
-        if (items.isEmpty() || boundariesByEndIndex.isEmpty()) {
-            return items.map { item ->
-                HistoryTimelineEntry.Stable(item.newestStoredIndex, item)
-            }
-        }
-        val result = ArrayList<HistoryTimelineEntry>(items.size)
-        for (item in items) {
-            boundariesByEndIndex[item.newestStoredIndex]?.forEach { boundary ->
-                timeMarkerFor(boundary)?.let { marker ->
-                    result += HistoryTimelineEntry.TurnTimeMarker(
-                        sourceIndex = boundary.nextMarker.index,
-                        item = marker,
-                    )
-                }
-            }
-            result += HistoryTimelineEntry.Stable(item.newestStoredIndex, item)
-        }
-        require(result.zipWithNext().all { (newer, older) ->
-            newer.sourceOrderKey > older.sourceOrderKey
-        }) {
-            "Merged history timeline entries must be newest-first."
-        }
-        return result
-    }
-
-    suspend fun timeMarkersFor(
-        boundaries: List<TurnBoundary>,
-    ): List<TurnTimeMarkerHistoryItemViewModel> =
-        boundaries.mapNotNull { boundary -> timeMarkerFor(boundary) }
-
-    suspend fun latestTurnTimeMarker(
-        latestIndex: Int,
-    ): TurnTimeMarkerHistoryItemViewModel? = withContext(Dispatchers.Default) {
-        val marker = markers.lastOrNull() ?: return@withContext null
-        val endIndex = agentState.storage.stable.floorToIndex(latestIndex)
-            ?.takeIf { it > marker.index }
-            ?: return@withContext null
-        val cacheKey = marker.index to endIndex
-        if (cacheKey in timeMarkerCache) return@withContext timeMarkerCache[cacheKey]
-        val startTimestamp = startTimestamp(marker.index, endIndex)
-            ?: return@withContext null
-        val duration = exactTimestamp(endIndex)?.let { timestamp -> timestamp - startTimestamp }
-            ?: return@withContext null
-        val result = duration
-            .takeIf { it >= Duration.ZERO && it.isFinite() }
-            ?.let {
-                TurnTimeMarkerHistoryItemViewModel(
-                    markerIndex = marker.index,
-                    endIndex = endIndex,
-                    duration = it,
-                )
-            }
-        timeMarkerCache[cacheKey] = result
-        result
-    }
-
-    suspend fun activeTurnDuration(latestIndex: Int): Duration? =
-        withContext(Dispatchers.Default) {
-            val marker = markers.lastOrNull() ?: return@withContext null
-            val latestStableIndex = agentState.storage.stable.floorToIndex(latestIndex)
-            val startTimestamp = startTimestamp(marker.index, latestStableIndex)
-                ?: return@withContext null
-            (Clock.System.now() - startTimestamp)
-                .takeIf { it >= Duration.ZERO && it.isFinite() }
-        }
-
-    private suspend fun timeMarkerFor(
-        boundary: TurnBoundary,
-    ): TurnTimeMarkerHistoryItemViewModel? {
-        val endIndex = boundary.endIndex ?: return null
-        if (endIndex <= boundary.marker.index) return null
-        val cacheKey = boundary.marker.index to endIndex
-        if (cacheKey in timeMarkerCache) return timeMarkerCache[cacheKey]
-        val marker = withContext(Dispatchers.Default) {
-            val startTimestamp = startTimestamp(boundary.marker.index, endIndex)
-                ?: return@withContext null
-            val endTimestamp = exactTimestamp(endIndex) ?: return@withContext null
-            val duration = (endTimestamp - startTimestamp)
-                .takeIf { it >= Duration.ZERO && it.isFinite() }
-                ?: return@withContext null
-            TurnTimeMarkerHistoryItemViewModel(
-                markerIndex = boundary.marker.index,
-                endIndex = endIndex,
-                duration = duration,
-            )
-        }
-        timeMarkerCache[cacheKey] = marker
-        return marker
-    }
-
-    private suspend fun startTimestamp(markerIndex: Int, endIndex: Int?): Instant? {
-        exactTimestamp(markerIndex)?.let { return it }
-        if (markerIndex != 0) return null
-        val firstStableIndex = agentState.storage.stable.ceilToIndex(markerIndex + 1)
-            ?.takeIf { endIndex == null || it <= endIndex }
-            ?: return null
-        return exactTimestamp(firstStableIndex)
-    }
-
-    private suspend fun exactTimestamp(index: Int): Instant? {
-        val timestamp = agentState.storage.timestamp
-        if (timestamp.floorToIndex(index) != index) return null
-        return timestamp[index]
-    }
-}
 
 private sealed interface HistoryCommand {
     data class Refresh(val latestIndex: Int) : HistoryCommand
     data object LoadOlder : HistoryCommand
+    data object LoadNewer : HistoryCommand
+    data object JumpToLatest : HistoryCommand
     data class UpdateLatestTurn(val active: Boolean) : HistoryCommand
     data class ExternalWriteFinished(val startIndex: Int, val endIndex: Int) : HistoryCommand
 }
 
 private class HistoryItemWindowImpl(
     override val generation: Long,
-    val sequence: HistorySequence,
-    private val onOlderDemand: (HistoryItemWindowImpl, Int) -> Unit,
+    val items: List<HistoryItemViewModel>,
+    override val hasOlder: Boolean,
+    override val hasNewer: Boolean,
+    private val onOlderDemand: (HistoryItemWindowImpl) -> Unit,
+    private val onNewerDemand: (HistoryItemWindowImpl) -> Unit,
 ) : HistoryItemWindow {
-    override val size: Int = sequence.size
+    override val size: Int = items.size
 
-    override fun peek(index: Int): HistoryItemViewModel = sequence[index]
+    override fun peek(index: Int): HistoryItemViewModel = items[index]
 
     override fun get(index: Int): HistoryItemViewModel {
-        val item = sequence[index]
+        val item = items[index]
         item.ensureLoaded()
-        onOlderDemand(this, index)
         return item
     }
-}
 
-/**
- * Immutable balanced rope. Publishing a batch costs `O(log n)` structural nodes and indexed reads
- * cost `O(log n)` while retaining exact item instances.
- */
-private data class HistorySequenceEntry(
-    val item: HistoryItemViewModel,
-    val newestOrderKey: Long,
-    val oldestOrderKey: Long,
-    val newestStableIndex: Int?,
-    val oldestStableIndex: Int?,
-) {
-    fun containsStableIndex(index: Int): Boolean {
-        val oldest = oldestStableIndex ?: return false
-        val newest = newestStableIndex ?: return false
-        return index in oldest..newest
+    override fun requestOlder() {
+        onOlderDemand(this)
     }
 
-    companion object {
-        fun of(item: HistoryItemViewModel): HistorySequenceEntry =
+    override fun requestNewer() {
+        onNewerDemand(this)
+    }
+
+    fun containsStableIndex(index: Int): Boolean =
+        items.any { item ->
             when (item) {
-                is WorkGroupHistoryItemViewModel -> HistorySequenceEntry(
-                    item = item,
-                    newestOrderKey = stableOrderKey(item.indexRange.last),
-                    oldestOrderKey = stableOrderKey(item.indexRange.first),
-                    newestStableIndex = item.indexRange.last,
-                    oldestStableIndex = item.indexRange.first,
-                )
-
-                is TurnTimeMarkerHistoryItemViewModel -> HistorySequenceEntry(
-                    item = item,
-                    newestOrderKey = timeMarkerOrderKey(item.endIndex),
-                    oldestOrderKey = timeMarkerOrderKey(item.endIndex),
-                    newestStableIndex = null,
-                    oldestStableIndex = null,
-                )
-
-                else -> {
-                    val index = item.storageIndexOrNull
-                        ?: error("A stable history item must have an index.")
-                    HistorySequenceEntry(
-                        item = item,
-                        newestOrderKey = stableOrderKey(index),
-                        oldestOrderKey = stableOrderKey(index),
-                        newestStableIndex = index,
-                        oldestStableIndex = index,
-                    )
-                }
+                is WorkGroupHistoryItemViewModel -> index in item.indexRange
+                else -> item.storageIndex == index
             }
-    }
+        }
 }
 
-private sealed interface HistorySequence {
-    val size: Int
-    val height: Int
-    val newestOrderKey: Long
-    val oldestOrderKey: Long
-    val newestStableIndex: Int?
-    val oldestStableIndex: Int?
-
-    operator fun get(index: Int): HistoryItemViewModel
-
-    fun containsStableIndex(index: Int): Boolean
-
-    fun insert(item: HistoryItemViewModel): HistorySequence
-
-    data object Empty : HistorySequence {
-        override val size: Int = 0
-        override val height: Int = 0
-        override val newestOrderKey: Long
-            get() = error("An empty history sequence has no newest index.")
-        override val oldestOrderKey: Long
-            get() = error("An empty history sequence has no oldest index.")
-        override val newestStableIndex: Int? = null
-        override val oldestStableIndex: Int? = null
-
-        override fun get(index: Int): HistoryItemViewModel =
-            throw IndexOutOfBoundsException("History item index $index is out of bounds for 0 items.")
-
-        override fun containsStableIndex(index: Int): Boolean = false
-
-        override fun insert(item: HistoryItemViewModel): HistorySequence = of(listOf(item))
+private data class HistoryWindowChunk(
+    val fromInclusive: Int,
+    val projections: List<HistoryProjectionItem>,
+    val items: List<HistoryItemViewModel>,
+) {
+    init {
+        require(projections.isNotEmpty())
+        require(projections.size == items.size)
     }
 
-    class Leaf(
-        val entries: List<HistorySequenceEntry>,
-    ) : HistorySequence {
-        init {
-            require(entries.isNotEmpty())
-            require(entries.size <= HistoryLeafSize)
-            require(entries.zipWithNext().all { (newer, older) ->
-                newer.oldestOrderKey > older.newestOrderKey
-            })
-        }
-
-        override val size: Int = entries.size
-        override val height: Int = 1
-        override val newestOrderKey: Long = entries.first().newestOrderKey
-        override val oldestOrderKey: Long = entries.last().oldestOrderKey
-        override val newestStableIndex: Int? =
-            entries.firstNotNullOfOrNull { entry -> entry.newestStableIndex }
-        override val oldestStableIndex: Int? =
-            entries.asReversed().firstNotNullOfOrNull { entry -> entry.oldestStableIndex }
-
-        override fun get(index: Int): HistoryItemViewModel = entries[index].item
-
-        override fun containsStableIndex(index: Int): Boolean {
-            val oldest = oldestStableIndex ?: return false
-            val newest = newestStableIndex ?: return false
-            return index in oldest..newest
-        }
-
-        override fun insert(item: HistoryItemViewModel): HistorySequence {
-            val entry = HistorySequenceEntry.of(item)
-            if (entries.any { existing -> existing.newestOrderKey == entry.newestOrderKey }) {
-                return this
-            }
-            val position = entries.indexOfFirst { existing ->
-                existing.newestOrderKey < entry.newestOrderKey
-            }.takeIf { it >= 0 } ?: entries.size
-            val updated = entries.toMutableList().apply { add(position, entry) }
-            return if (updated.size <= HistoryLeafSize) Leaf(updated)
-            else Branch(Leaf(updated.take(HistoryLeafSize)), Leaf(updated.drop(HistoryLeafSize)))
-        }
-    }
-
-    class Branch(
-        val left: HistorySequence,
-        val right: HistorySequence,
-    ) : HistorySequence {
-        init {
-            require(left !== Empty && right !== Empty)
-            require(left.oldestOrderKey > right.newestOrderKey)
-        }
-
-        override val size: Int = checkedHistorySize(left.size, right.size)
-        override val height: Int = maxOf(left.height, right.height) + 1
-        override val newestOrderKey: Long = left.newestOrderKey
-        override val oldestOrderKey: Long = right.oldestOrderKey
-        override val newestStableIndex: Int? = left.newestStableIndex ?: right.newestStableIndex
-        override val oldestStableIndex: Int? = right.oldestStableIndex ?: left.oldestStableIndex
-
-        override fun get(index: Int): HistoryItemViewModel {
-            if (index !in 0 until size) {
-                throw IndexOutOfBoundsException(
-                    "History item index $index is out of bounds for $size items.",
-                )
-            }
-            return if (index < left.size) left[index] else right[index - left.size]
-        }
-
-        override fun containsStableIndex(index: Int): Boolean {
-            val oldest = oldestStableIndex ?: return false
-            val newest = newestStableIndex ?: return false
-            return index in oldest..newest
-        }
-
-        override fun insert(item: HistoryItemViewModel): HistorySequence {
-            val entry = HistorySequenceEntry.of(item)
-            return when {
-                entry.newestOrderKey > newestOrderKey -> concat(of(listOf(item)), this)
-                entry.oldestOrderKey < oldestOrderKey -> concat(this, of(listOf(item)))
-                entry.newestOrderKey < left.oldestOrderKey -> concat(left, right.insert(item))
-                else -> concat(left.insert(item), right)
-            }
-        }
-    }
-
-    companion object {
-        fun of(items: List<HistoryItemViewModel>): HistorySequence {
-            var result: HistorySequence = Empty
-            items.map(HistorySequenceEntry.Companion::of)
-                .chunked(HistoryLeafSize)
-                .forEach { chunk -> result = concat(result, Leaf(chunk)) }
-            return result
-        }
-
-        fun concat(left: HistorySequence, right: HistorySequence): HistorySequence {
-            if (left === Empty) return right
-            if (right === Empty) return left
-            return when {
-                left.height > right.height + 1 -> {
-                    check(left is Branch)
-                    balance(left.left, concat(left.right, right))
-                }
-
-                right.height > left.height + 1 -> {
-                    check(right is Branch)
-                    balance(concat(left, right.left), right.right)
-                }
-
-                else -> Branch(left, right)
-            }
-        }
-
-        private fun balance(left: HistorySequence, right: HistorySequence): HistorySequence =
-            when {
-                left.height > right.height + 1 -> {
-                    check(left is Branch)
-                    if (left.left.height >= left.right.height) {
-                        Branch(left.left, Branch(left.right, right))
-                    } else {
-                        val middle = left.right
-                        check(middle is Branch)
-                        Branch(
-                            Branch(left.left, middle.left),
-                            Branch(middle.right, right),
-                        )
-                    }
-                }
-
-                right.height > left.height + 1 -> {
-                    check(right is Branch)
-                    if (right.right.height >= right.left.height) {
-                        Branch(Branch(left, right.left), right.right)
-                    } else {
-                        val middle = right.left
-                        check(middle is Branch)
-                        Branch(
-                            Branch(left, middle.left),
-                            Branch(middle.right, right.right),
-                        )
-                    }
-                }
-
-                else -> Branch(left, right)
-            }
-    }
+    val newestStorageIndex: Int = projections.first().newestStorageIndex
+    val oldestStorageIndex: Int = projections.last().oldestStorageIndex
 }
 
-private const val HistoryBatchSize: Int = 64
-private const val MaximumHistoryBatchSize: Int = HistoryBatchSize * 2
-private const val HistoryLeafSize: Int = 64
-private const val OlderDemandDistance: Int = 8
+private data class HistoryViewportAnchor(
+    val item: HistoryItemViewModel,
+    val scrollOffset: Int,
+)
 
-private fun checkedHistorySize(left: Int, right: Int): Int {
-    val size = left.toLong() + right
-    require(size <= Int.MAX_VALUE) { "History item count exceeds Int.MAX_VALUE." }
-    return size.toInt()
-}
+private fun List<HistoryItemViewModel>.sameIdentities(
+    other: List<HistoryItemViewModel>,
+): Boolean =
+    size == other.size && indices.all { index -> this[index] === other[index] }

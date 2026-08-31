@@ -11,14 +11,20 @@ import com.jakewharton.mosaic.testing.MosaicSnapshots
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionAction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableMcpToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableReasoning
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
@@ -65,7 +71,7 @@ class CleanEventViewTest {
                 "Assistant\nhello",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
-                        StableCleanEvent.AssistantMessage(
+                        StableAssistantMessage(
                             content = listOf(ContentItem.OutputText("hello")),
                         ).render()
                     }
@@ -76,7 +82,7 @@ class CleanEventViewTest {
                 "Agent root → child\ndelivered",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
-                        StableCleanEvent.AgentMessage(
+                        StableAgentMessage(
                             author = "root",
                             recipient = "child",
                             content = listOf(AgentMessageInputContent.InputText("delivered")),
@@ -97,7 +103,7 @@ class CleanEventViewTest {
             result = "done",
             success = true,
         )
-        val plan = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate(
+        val plan = io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate(
             callId = "plan",
             arguments = UpdatePlanArgs(plan = emptyList()),
         )
@@ -107,7 +113,7 @@ class CleanEventViewTest {
                 "Assistant +1.5s\nhello",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
-                        StableCleanEvent.AssistantMessage(
+                        StableAssistantMessage(
                             content = listOf(ContentItem.OutputText("hello")),
                         ).render(
                             shellSessions = null,
@@ -161,7 +167,7 @@ class CleanEventViewTest {
                 "Context compacted +1.5s",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
-                        StableCleanEvent.ContextCompaction(
+                        StableContextCompaction(
                             encryptedContent = "encrypted",
                         ).render(
                             shellSessions = null,
@@ -181,7 +187,7 @@ class CleanEventViewTest {
                 "Assistant +1.501s\nhello",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
-                        StableCleanEvent.AssistantMessage(
+                        StableAssistantMessage(
                             content = listOf(ContentItem.OutputText("hello")),
                         ).render(
                             shellSessions = null,
@@ -201,7 +207,7 @@ class CleanEventViewTest {
                 "Assistant\nhello",
                 setContentAndSnapshot {
                     Box(Modifier.width(40)) {
-                        StableCleanEvent.AssistantMessage(
+                        StableAssistantMessage(
                             content = listOf(ContentItem.OutputText("hello")),
                             phase = MessagePhase.Commentary,
                         ).render()
@@ -449,7 +455,7 @@ class CleanEventViewTest {
 
     @Test
     fun planRendersAsAnInlineChecklist() = runTest {
-        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate(
+        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate(
             callId = "plan",
             arguments = UpdatePlanArgs(
                 explanation = "Current plan",
@@ -512,7 +518,7 @@ class CleanEventViewTest {
                 ),
             ),
         )
-        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent(
+        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent(
             callId = "input",
             arguments = arguments,
             result = StableRequestUserInputResult.Answered(
@@ -536,7 +542,7 @@ class CleanEventViewTest {
 
     @Test
     fun completedRequestUserInputRendersOtherAsReadOnlyFreeForm() = runTest {
-        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent(
+        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent(
             callId = "input",
             arguments = RequestUserInputArgs(
                 questions = listOf(
@@ -572,7 +578,7 @@ class CleanEventViewTest {
 
     @Test
     fun failedRequestUserInputRendersItsQuestionAndErrorDirectly() = runTest {
-        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent(
+        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent(
             callId = "input",
             arguments = RequestUserInputArgs(
                 questions = listOf(
@@ -598,7 +604,7 @@ class CleanEventViewTest {
 
     @Test
     fun reasoningUsesOnlyTheDisplaySummary() = runTest {
-        val event = StableCleanEvent.Reasoning(
+        val event = StableReasoning(
             ResponseItem.Reasoning(
                 summary = listOf(ReasoningItemReasoningSummary.SummaryText("short summary")),
                 content = listOf(ReasoningItemContent.ReasoningText("private full reasoning")),

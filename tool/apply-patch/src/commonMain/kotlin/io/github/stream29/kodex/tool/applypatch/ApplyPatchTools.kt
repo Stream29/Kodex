@@ -1,9 +1,9 @@
 package io.github.stream29.kodex.tool.applypatch
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent

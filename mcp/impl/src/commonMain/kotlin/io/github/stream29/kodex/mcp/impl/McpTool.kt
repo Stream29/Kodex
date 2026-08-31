@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.mcp.impl
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent

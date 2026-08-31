@@ -14,6 +14,7 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.tool.contract.Tool
@@ -64,7 +65,7 @@ public fun KodexAgentState.buildMasterAgentRuntime(
 
 private fun KodexAgentState.masterRuntimeLayer(
     dependencies: KodexAgentDependencies,
-    pendingSteer: MutableStateFlow<List<StableCleanEvent.Steerable>>,
+    pendingSteer: MutableStateFlow<List<StableIndexEvent.Steerable>>,
     logger: KLogger,
 ): AgentRuntimeLayer {
     val mcpTools = mcpToolsState(dependencies.mcpService)
@@ -104,12 +105,12 @@ private fun KodexAgentState.masterRuntimeLayer(
 private fun KodexAgentState.buildAgentRuntime(
     sessionLogger: KLogger,
     buildLayer: (
-        MutableStateFlow<List<StableCleanEvent.Steerable>>,
+        MutableStateFlow<List<StableIndexEvent.Steerable>>,
         KLogger,
     ) -> AgentRuntimeLayer,
 ): AgentRuntime {
     val logger = sessionLogger.agent(storage.id)
-    val pendingSteer = MutableStateFlow(emptyList<StableCleanEvent.Steerable>())
+    val pendingSteer = MutableStateFlow(emptyList<StableIndexEvent.Steerable>())
     return try {
         val layer = buildLayer(pendingSteer, logger)
         logger.info { "Agent runtime opened." }
@@ -139,7 +140,7 @@ private data class AgentRuntimeLayer(
 
 private class AgentRuntimeImpl(
     private val delegate: ResumableAgentLayer,
-    override val pendingSteer: MutableStateFlow<List<StableCleanEvent.Steerable>>,
+    override val pendingSteer: MutableStateFlow<List<StableIndexEvent.Steerable>>,
     override val unifiedExecToolClient: UnifiedExecToolClient,
     private val logger: KLogger,
 ) : AgentRuntime, KodexAgentState by delegate {

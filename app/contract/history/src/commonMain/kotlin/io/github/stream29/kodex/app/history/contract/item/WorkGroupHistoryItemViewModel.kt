@@ -14,7 +14,7 @@ public interface WorkGroupHistoryItemViewModel : HistoryItemViewModel {
     /** Non-empty sparse storage span covered by this group, with a non-negative first index. */
     public val indexRange: IntRange
 
-    /** Number of stable items represented by this group; always greater than one. */
+    /** Number of stable items represented by this group; always positive. */
     public val itemCount: Int
 
     public val state: StateFlow<WorkGroupHistoryItemState>
@@ -64,8 +64,8 @@ public sealed interface WorkGroupHistoryItemState {
         public val elapsed: Duration,
     ) : WorkGroupHistoryItemState {
         init {
-            require(children.size > 1) {
-                "An expanded history work group must contain at least two children."
+            require(children.isNotEmpty()) {
+                "An expanded history work group must contain at least one child."
             }
             require(children.zipWithNext().all { (newer, older) ->
                 newer.index > older.index

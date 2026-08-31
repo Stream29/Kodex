@@ -5,9 +5,8 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
-import io.github.stream29.kodex.agentstorage.contract.indexes
 import io.github.stream29.kodex.agentstorage.contract.latestValue
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -24,7 +23,6 @@ import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.toList
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
@@ -73,9 +71,8 @@ val updatePlanToolTest by testSuite {
             assertEquals(StablePlanUpdate(callId = call.callId, arguments = plan), completed)
             assertEquals(plan, state.storage.settings.latestValue().plan)
             assertEquals(KodexAgentStateValue.ToolCompleted, state.state.value)
-            val persisted = state.storage.stable.indexes().toList()
-                .map { index -> state.storage.stable[index] }
-                .filterIsInstance<StablePlanUpdate>()
+            val persisted = state.storage.index.indexesIn(0..state.latestIndex.value)
+                .mapNotNull { index -> state.storage.index.getExact(index) as? StablePlanUpdate }
                 .single()
             assertEquals(completed, persisted)
         }

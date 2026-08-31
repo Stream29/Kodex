@@ -8,13 +8,14 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState as createKodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
-import io.github.stream29.kodex.agentstorage.contract.indexes
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
-import io.github.stream29.kodex.agentstorage.contract.latestValue
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -33,6 +34,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 val steerRuntimeTest by testSuite {
@@ -71,8 +73,8 @@ val steerRuntimeTest by testSuite {
             mcpService = TestMcpService(),
         )
         state.appendUserMessage(textContent("initial"))
-        val turnId = storage.settings.latestValue().turnId
-        val pendingSteer = MutableStateFlow(emptyList<StableCleanEvent.Steerable>())
+        val turnId = storage.settings[storage.latestIndex()].turnId
+        val pendingSteer = MutableStateFlow(emptyList<StableIndexEvent.Steerable>())
         val delegate = TestRuntime(state)
         val runtime = delegate.steerRuntime(logger = TestLogger) {
             pendingSteer.getAndUpdate { emptyList() }
@@ -95,9 +97,10 @@ val steerRuntimeTest by testSuite {
         )
         assertEquals(
             listOf(stableUserMessage("first"), stableUserMessage("second")),
-            storage.stable.indexes().toList().takeLast(2).map { index -> storage.stable[index] },
+            storage.index.indexesIn(2..storage.latestIndex()).takeLast(2)
+                .map { index -> storage.index[index] },
         )
-        assertEquals(turnId, storage.settings.latestValue().turnId)
+        assertEquals(turnId, storage.settings[storage.latestIndex()].turnId)
         assertTrue(pendingSteer.value.isEmpty())
         assertEquals(1, delegate.resumeCount)
 
@@ -106,7 +109,7 @@ val steerRuntimeTest by testSuite {
             listOf(listOf("initial"), listOf("first"), listOf("second")),
             storage.userTextBatches(),
         )
-        assertEquals(turnId, storage.settings.latestValue().turnId)
+        assertEquals(turnId, storage.settings[storage.latestIndex()].turnId)
         assertEquals(2, delegate.resumeCount)
     }
 
@@ -119,16 +122,16 @@ val steerRuntimeTest by testSuite {
             mcpService = TestMcpService(),
         )
         state.appendUserMessage(textContent("initial"))
-        val turnId = storage.settings.latestValue().turnId
+        val turnId = storage.settings[storage.latestIndex()].turnId
         val lateSteer = userMessage("late steer")
-        val pendingSteer = MutableStateFlow(emptyList<StableCleanEvent.Steerable>())
+        val pendingSteer = MutableStateFlow(emptyList<StableIndexEvent.Steerable>())
         var delegateInvocations = 0
         val delegate = TestRuntime(state) {
             when (++delegateInvocations) {
                 1 -> {
                     state.injectHistory(
                         listOf(
-                            StableCleanEvent.AssistantMessage(textContent("first response")),
+                            StableAssistantMessage(textContent("first response")),
                         ),
                     )
                     pendingSteer.update { pending -> pending + lateSteer }
@@ -138,7 +141,7 @@ val steerRuntimeTest by testSuite {
                     assertEquals(KodexAgentStateValue.UserMessage, state.state.value)
                     state.injectHistory(
                         listOf(
-                            StableCleanEvent.AssistantMessage(textContent("final response")),
+                            StableAssistantMessage(textContent("final response")),
                         ),
                     )
                 }
@@ -155,7 +158,7 @@ val steerRuntimeTest by testSuite {
         assertEquals(2, delegateInvocations)
         assertEquals(listOf(listOf("initial"), listOf("late steer")), storage.userTextBatches())
         assertTrue(pendingSteer.value.isEmpty())
-        assertEquals(turnId, storage.settings.latestValue().turnId)
+        assertNotEquals(turnId, storage.settings[storage.latestIndex()].turnId)
     }
 
     test("assistant message state accepts pending input") {
@@ -168,7 +171,7 @@ val steerRuntimeTest by testSuite {
         )
         state.injectHistory(
             listOf(
-                StableCleanEvent.AssistantMessage(
+                StableAssistantMessage(
                     content = textContent("finished"),
                 ),
             ),
@@ -194,7 +197,7 @@ val steerRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val message = StableCleanEvent.AgentMessage(
+        val message = StableAgentMessage(
             author = "/root/worker",
             recipient = "/root",
             content = listOf(
@@ -203,15 +206,15 @@ val steerRuntimeTest by testSuite {
                 ),
             ),
         )
-        val pendingSteer = MutableStateFlow(listOf<StableCleanEvent.Steerable>(message))
+        val pendingSteer = MutableStateFlow(listOf<StableIndexEvent.Steerable>(message))
         val runtime = TestRuntime(state).steerRuntime(logger = TestLogger) {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
         runtime.resume()
 
-        val index = storage.stable.indexes().toList().single()
-        assertEquals(message, storage.stable[index])
+        val index = storage.index.indexesIn(1..storage.latestIndex()).single()
+        assertEquals(message, storage.index[index])
         assertEquals(KodexAgentStateValue.UserMessage, state.state.value)
         assertTrue(pendingSteer.value.isEmpty())
     }
@@ -224,16 +227,16 @@ val steerRuntimeTest by testSuite {
             contextSettings = TestAgentContextSettings,
             mcpService = TestMcpService(),
         )
-        val message = StableCleanEvent.UserMessage(textContent("continue"))
-        val pendingSteer = MutableStateFlow(listOf<StableCleanEvent.Steerable>(message))
+        val message = StableUserMessage(textContent("continue"))
+        val pendingSteer = MutableStateFlow(listOf<StableIndexEvent.Steerable>(message))
         val runtime = TestRuntime(state).steerRuntime(logger = TestLogger) {
             pendingSteer.getAndUpdate { emptyList() }
         }
 
         runtime.resume()
 
-        val index = storage.stable.indexes().toList().single()
-        assertEquals(message, storage.stable[index])
+        val index = storage.index.indexesIn(1..storage.latestIndex()).single()
+        assertEquals(message, storage.index[index])
         assertTrue(pendingSteer.value.isEmpty())
     }
 
@@ -251,7 +254,7 @@ val steerRuntimeTest by testSuite {
             callId = "call_1",
         )
         state.appendUserMessage(textContent("initial"))
-        val turnId = storage.settings.latestValue().turnId
+        val turnId = storage.settings[storage.latestIndex()].turnId
         state.setPending(pending)
         state.completeToolCall(
             StableTextToolEvent(
@@ -275,7 +278,7 @@ val steerRuntimeTest by testSuite {
             listOf(listOf("initial"), listOf("adjust the next step")),
             storage.userTextBatches(),
         )
-        assertEquals(turnId, storage.settings.latestValue().turnId)
+        assertEquals(turnId, storage.settings[storage.latestIndex()].turnId)
     }
 
     test("frontend can retract pending steer before runtime delivery") {
@@ -374,18 +377,18 @@ private class TestRuntime(
 private fun textContent(text: String): List<ContentItem> =
     listOf(ContentItem.InputText(text))
 
-private fun userSteer(text: String): List<StableCleanEvent.Steerable> =
+private fun userSteer(text: String): List<StableIndexEvent.Steerable> =
     listOf(userMessage(text))
 
-private fun userMessage(text: String): StableCleanEvent.UserMessage =
-    StableCleanEvent.UserMessage(textContent(text))
+private fun userMessage(text: String): StableUserMessage =
+    StableUserMessage(textContent(text))
 
-private fun stableUserMessage(text: String): StableCleanEvent.UserMessage =
-    StableCleanEvent.UserMessage(textContent(text))
+private fun stableUserMessage(text: String): StableUserMessage =
+    StableUserMessage(textContent(text))
 
 private suspend fun InMemoryKodexAgentStorage.userTextBatches(): List<List<String>> =
-    stable.indexes().toList().mapNotNull { index ->
-        val message = stable[index] as? StableCleanEvent.UserMessage ?: return@mapNotNull null
+    index.indexesIn(0..latestIndex()).mapNotNull { index ->
+        val message = this.index[index] as? StableUserMessage ?: return@mapNotNull null
         message.content.filterIsInstance<ContentItem.InputText>().map(ContentItem.InputText::text)
     }.toList()
 

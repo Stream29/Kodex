@@ -8,8 +8,8 @@ import com.jakewharton.mosaic.testing.MosaicSnapshots
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolExecutionResult
 import io.github.stream29.kodex.utils.applypatch.AddFileHunk
 import io.github.stream29.kodex.utils.applypatch.Patch
 import io.github.stream29.kodex.utils.applypatch.UpdateFileChunk

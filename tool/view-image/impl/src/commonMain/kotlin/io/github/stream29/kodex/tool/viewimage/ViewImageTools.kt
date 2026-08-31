@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.tool.viewimage
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingImageViewToolEvent
 import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.tool.contract.Tool

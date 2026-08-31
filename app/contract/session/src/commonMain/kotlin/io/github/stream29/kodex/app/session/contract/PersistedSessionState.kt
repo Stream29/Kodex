@@ -1,20 +1,5 @@
 package io.github.stream29.kodex.app.session.contract
 
-import kotlin.time.Instant
-
-/** Root-session facts used by persisted Session controls. */
-public data class PersistedSessionSummaryState(
-    public val rootRunning: Boolean = false,
-    public val lastActivityAt: Instant? = null,
-    public val revision: Long = 0,
-) {
-    init {
-        require(revision >= 0) {
-            "A persisted Session summary revision must not be negative."
-        }
-    }
-}
-
 /**
  * UI-facing lifetime of one persisted Session handle.
  *

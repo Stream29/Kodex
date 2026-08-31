@@ -1,13 +1,14 @@
 package io.github.stream29.kodex.cli.history
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionAction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableMcpToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableServerToolSearch
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryAction
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryResult
 import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemStatus
@@ -67,7 +68,7 @@ class HistoryItemHeaderFactoryTest {
 
     @Test
     fun serverToolSearchHeaderUsesItsStructuredPaths() {
-        val event = StableCleanEvent.ServerToolSearch(
+        val event = StableServerToolSearch(
             call = ResponseItem.ServerToolSearchCall(
                 status = "completed",
                 arguments = JsonObject(

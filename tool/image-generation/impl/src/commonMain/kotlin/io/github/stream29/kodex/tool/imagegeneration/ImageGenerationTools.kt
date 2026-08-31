@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.tool.imagegeneration
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingImageGenerationToolEvent
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ResponsesApiNamespace

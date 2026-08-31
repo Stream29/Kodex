@@ -21,7 +21,7 @@ import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
 import io.github.stream29.kodex.cli.components.EllipsizedTextWithTrailingContent
 import io.github.stream29.kodex.cli.components.TuiColorScheme
 import io.github.stream29.kodex.cli.components.TuiPressable

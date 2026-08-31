@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.app.history.contract.item
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
 import io.github.stream29.kodex.openai.UpdatePlanArgs
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -63,13 +63,6 @@ public class ExpandableHistoryItemContractTest {
             ContextCompactionHistoryItemViewModel(
                 index = 1,
                 elapsed = Duration.INFINITE,
-            )
-        }
-        assertFailsWith<IllegalArgumentException> {
-            TurnTimeMarkerHistoryItemViewModel(
-                markerIndex = 1,
-                endIndex = 2,
-                duration = (-1).milliseconds,
             )
         }
         assertFailsWith<IllegalArgumentException> {

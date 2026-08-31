@@ -2,16 +2,15 @@ package io.github.stream29.kodex.agentsession.filesystem
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
-import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.agentstorage.contract.forkTo
-import io.github.stream29.kodex.agentstorage.contract.indexes
-import io.github.stream29.kodex.agentstorage.contract.initialize
+import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
@@ -52,8 +51,8 @@ private fun settings(
 ): KodexAgentSettings =
     KodexAgentSettings(model = OpenAiModelId("test-model"), cwd = cwd, threadName = name)
 
-private fun userMessage(text: String): StableCleanEvent.UserMessage =
-    StableCleanEvent.UserMessage(
+private fun userMessage(text: String): StableUserMessage =
+    StableUserMessage(
         content = listOf(ContentItem.InputText(text)),
     )
 
@@ -85,7 +84,7 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
 
             assertEquals(-1, session.storage.latestIndex())
             session.runtime.modify { storage -> storage.initialize(settings("root")) }
-            assertEquals(0, session.storage.latestIndex())
+            assertEquals(1, session.storage.latestIndex())
             assertEquals(0L, session.storage.tokenCount[0])
             repository.closeAndJoin()
         }
@@ -97,7 +96,7 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             val session = repository.open(index)
             val storageId = session.storage.id
             val timestamp = Instant.parse("2026-07-22T00:00:00Z")
-            val stableEvent = StableCleanEvent.AssistantMessage(
+            val stableEvent = StableAssistantMessage(
                 listOf(ContentItem.OutputText("persisted clean event")),
             )
             val pendingEvents: List<UnstableCleanEvent> = listOf(
@@ -111,17 +110,17 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
                     ),
                 ),
             )
-            session.storage.timestamp[1] = timestamp
-            session.storage.stable[1] = stableEvent
-            session.storage.unstable[1] = pendingEvents
+            session.storage.timestamp[2] = timestamp
+            session.storage.index[2] = stableEvent
+            session.storage.unstable[2] = pendingEvents
             val directory = Path(root, "sessions/0")
             assertEquals(
                 setOf(
-                    "compaction",
+                    "index",
                     "settings",
                     "timestamp",
                     "token-count",
-                    "stable",
+                    "work",
                     "unstable",
                     "lock.json",
                 ),
@@ -139,8 +138,8 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             assertEquals(listOf(index), reopened.entries.value)
             assertEquals(storageId, reopenedSession.storage.id)
             assertEquals(cwd, reopenedSession.storage.settings[0].cwd)
-            assertEquals(stableEvent, reopenedSession.storage.stable[1])
-            assertEquals(pendingEvents, reopenedSession.storage.unstable[1])
+            assertEquals(stableEvent, reopenedSession.storage.index[2])
+            assertEquals(pendingEvents, reopenedSession.storage.unstable[2])
             reopened.closeAndJoin()
         }
 
@@ -151,8 +150,8 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             val second = repository.createInitialized(settings("second"))
             val firstLastActivityAt = Instant.parse("2026-07-31T10:00:00Z")
             val secondLastActivityAt = Instant.parse("2026-07-31T10:05:00Z")
-            repository.open(first).storage.timestamp[1] = firstLastActivityAt
-            repository.open(second).storage.timestamp[1] = secondLastActivityAt
+            repository.open(first).storage.timestamp[2] = firstLastActivityAt
+            repository.open(second).storage.timestamp[2] = secondLastActivityAt
 
             assertEquals(0, first)
             assertEquals(1, second)
@@ -177,7 +176,7 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             )
             val index = repository.createInitialized(settings("indexed"))
             val lastActivityAt = Instant.parse("2026-08-14T12:00:00Z")
-            repository.open(index).storage.timestamp[1] = lastActivityAt
+            repository.open(index).storage.timestamp[2] = lastActivityAt
             fileSystem.reset()
 
             assertEquals(
@@ -239,9 +238,7 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
 
             assertSame(source, repository.open(sourceIndex))
 
-            val forkIndex = repository.create()
-            val fork = repository.open(forkIndex)
-            fork.runtime.modify { storage -> source.storage.forkTo(1, storage) }
+            val forkIndex = repository.createFork(sourceIndex)
             assertFalse(
                 SystemCoroutineFileSystem.exists(
                     Path(root, "sessions/$forkIndex/$ArchiveMarkerFile"),
@@ -298,9 +295,9 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             val writer = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
             val index = writer.createInitialized(settings("active"))
             val lastActivityAt = Instant.parse("2026-08-24T06:00:00Z")
-            writer.open(index).storage.timestamp[1] = lastActivityAt
+            writer.open(index).storage.timestamp[2] = lastActivityAt
             val latest = Path(root, "sessions/$index/timestamp/latest.json")
-            SystemCoroutineFileSystem.writeString(latest, "2")
+            SystemCoroutineFileSystem.writeString(latest, "3")
 
             val fileSystem = CountingListFileSystem()
             val reader = FileSystemKodexSessionRepository(
@@ -317,12 +314,12 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
                 },
             )
             assertEquals(1, fileSystem.listCalls)
-            assertEquals("2", SystemCoroutineFileSystem.readString(latest))
+            assertEquals("3", SystemCoroutineFileSystem.readString(latest))
 
             fileSystem.reset()
             reader.listEntries()
             assertEquals(1, fileSystem.listCalls)
-            assertEquals("2", SystemCoroutineFileSystem.readString(latest))
+            assertEquals("3", SystemCoroutineFileSystem.readString(latest))
 
             reader.closeAndJoin()
             writer.closeAndJoin()
@@ -332,11 +329,11 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             val writer = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
             val index = writer.createInitialized(settings("crashed"))
             val lastActivityAt = Instant.parse("2026-08-24T06:05:00Z")
-            writer.open(index).storage.timestamp[1] = lastActivityAt
+            writer.open(index).storage.timestamp[2] = lastActivityAt
             writer.closeAndJoin()
             val latest = Path(root, "sessions/$index/timestamp/latest.json")
             val lock = Path(root, "sessions/$index/lock.json")
-            SystemCoroutineFileSystem.writeString(latest, "2")
+            SystemCoroutineFileSystem.writeString(latest, "3")
 
             val fileSystem = CountingListFileSystem()
             val reader = FileSystemKodexSessionRepository(
@@ -353,7 +350,7 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
                 },
             )
             assertEquals(1, fileSystem.listCalls)
-            assertEquals("1", SystemCoroutineFileSystem.readString(latest))
+            assertEquals("2", SystemCoroutineFileSystem.readString(latest))
             assertFalse(SystemCoroutineFileSystem.exists(lock))
 
             fileSystem.reset()
@@ -365,11 +362,11 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
         test("releases a repair lease when its owner scope is cancelled") { root ->
             val writer = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
             val index = writer.createInitialized(settings("cancelled repair"))
-            writer.open(index).storage.timestamp[1] = Instant.parse("2026-08-24T06:10:00Z")
+            writer.open(index).storage.timestamp[2] = Instant.parse("2026-08-24T06:10:00Z")
             writer.closeAndJoin()
             val latest = Path(root, "sessions/$index/timestamp/latest.json")
             val lock = Path(root, "sessions/$index/lock.json")
-            SystemCoroutineFileSystem.writeString(latest, "2")
+            SystemCoroutineFileSystem.writeString(latest, "3")
 
             val fileSystem = SuspendingTimelineListFileSystem("timestamp")
             val reader = FileSystemKodexSessionRepository(
@@ -387,7 +384,7 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
 
             assertFailsWith<CancellationException> { listing.await() }
             assertFalse(SystemCoroutineFileSystem.exists(lock))
-            assertEquals("2", SystemCoroutineFileSystem.readString(latest))
+            assertEquals("3", SystemCoroutineFileSystem.readString(latest))
         }
 
         test("owns a root lease under the repository scope") { root ->
@@ -469,56 +466,32 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             val source = repository.open(sourceIndex)
             source.runtime.injectHistory(listOf(userMessage("copied")))
 
-            val targetIndex = repository.createFork(source.storage, from = 0, until = 2)
+            val targetIndex = repository.createFork(sourceIndex)
             val target = repository.open(targetIndex)
             val latest = target.storage.latestIndex()
             target.runtime.updateSettings(
                 target.storage.settings[latest].copy(threadName = "[fork] Source"),
             )
 
-            assertEquals(listOf(1), target.storage.stable.indexes().toList())
-            assertEquals(userMessage("copied"), target.storage.stable[1])
-            assertEquals("[fork] Source", target.storage.settings[2].threadName)
-            assertEquals(sourceCwd, target.storage.settings[2].cwd)
+            assertEquals(listOf(0, 1, 2), target.storage.index.indexesIn(0..latest))
+            assertEquals(userMessage("copied"), target.storage.index[2])
+            assertEquals("[fork] Source", target.storage.settings[3].threadName)
+            assertEquals(sourceCwd, target.storage.settings[3].cwd)
             repository.closeAndJoin()
         }
 
         test("failed fork removes its reserved session") { root ->
             val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
             val sourceIndex = repository.createInitialized(settings("Source"))
-            val source = repository.open(sourceIndex)
             val entriesBefore = repository.list()
 
             assertFailsWith<IllegalArgumentException> {
-                repository.createFork(
-                    source = source.storage,
-                    from = 0,
-                    until = source.storage.latestIndex() + 2,
-                )
+                repository.createFork(sourceEntryIndex = sourceIndex + 1)
             }
 
             assertEquals(entriesBefore, repository.list())
             assertEquals(1, repository.create())
             repository.closeAndJoin()
-        }
-
-        test("fork falls back across storage backends") { root ->
-            val sourceRepository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-            val targetRepository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
-            val source = sourceRepository.open(sourceRepository.createInitialized(settings("Source")))
-            source.runtime.injectHistory(listOf(userMessage("copied")))
-
-            val targetIndex = targetRepository.createFork(
-                source = source.storage,
-                from = 1,
-                until = 2,
-            )
-            val target = targetRepository.open(targetIndex)
-
-            assertEquals(0, target.storage.latestIndex())
-            assertEquals(userMessage("copied"), target.storage.stable[0])
-            sourceRepository.closeAndJoin()
-            targetRepository.closeAndJoin()
         }
 
         test("owns each runtime for the complete Agent session lifecycle") { root ->

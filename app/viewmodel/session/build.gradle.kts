@@ -11,9 +11,11 @@ kotlin {
             implementation(project(":agent-state-contract"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(project(":agent-storage-contract"))
+            implementation(project(":agent-storage-contract-ext"))
             implementation(project(":utils-coroutines"))
         }
         commonTest.dependencies {
+            implementation(project(":agent-storage-contract-ext"))
             implementation(project(":agent-session-filesystem"))
             implementation(project(":app-viewmodel-agent"))
             implementation(project(":app-viewmodel-history"))

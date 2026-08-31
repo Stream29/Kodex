@@ -105,7 +105,11 @@ public class KodexAgentCompactionRuntime(
             val index = if (hooks == null) {
                 delegate.compact(trigger, reason, phase)
             } else {
-                val context = storage.settings[latestIndex.value].toHookTurnContext(storage.id)
+                val settings = storage.settings[latestIndex.value]
+                val context = settings.toHookTurnContext(
+                    sessionId = storage.id,
+                    turnId = settings.turnId,
+                )
                 val request = CompactionHookRequest(
                     context = context,
                     trigger = trigger.toHookTrigger(),

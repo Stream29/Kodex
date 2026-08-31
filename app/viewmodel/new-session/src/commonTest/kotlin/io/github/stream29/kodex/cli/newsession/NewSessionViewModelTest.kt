@@ -4,6 +4,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
 import io.github.stream29.kodex.cli.agent.AgentAutomaticTitleConfiguration
 import io.github.stream29.kodex.cli.agent.AgentAutomaticTitleSettings
 import io.github.stream29.kodex.cli.agent.DefaultComposerViewModelFactory
@@ -97,11 +98,8 @@ val newSessionViewModelTest by testSuite {
                 )
                 assertEquals(
                     ContentItem.InputText("Start this session"),
-                    repository.open(persisted.sessionIndex).storage.stable[1]
-                        .let { event ->
-                            (event as io.github.stream29.kodex.agentstorage.cleanmodels.stable
-                            .StableCleanEvent.UserMessage).content.single()
-                        },
+                    repository.open(persisted.sessionIndex).storage.index[2]
+                        .let { event -> (event as StableUserMessage).content.single() },
                 )
                 assertTrue(model.composer.state.value.text.isEmpty())
                 assertFailsWith<IllegalStateException> { model.materialize() }

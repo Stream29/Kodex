@@ -18,11 +18,15 @@ import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.agentstorage.contract.indexes
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
+import io.github.stream29.kodex.agentstorage.cleanmodels.CleanOpenAiEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.hook.contract.NoOpKodexHooks
@@ -262,23 +266,32 @@ private fun testAuthStorage(): CodexCliStorage =
 internal fun testOpenAiModel(): OpenAiModelId = OpenAiModelId("gpt-5.6-sol")
 
 private suspend fun KodexAgentStateContract.appendUserMessage(text: String): Int {
-    markNewTurn()
     return appendUserMessage(listOf(ContentItem.InputText(text)))
 }
 
 private suspend fun InMemoryKodexAgentStorage.lastAssistantMessage(): String? {
     var message: String? = null
-    stable.indexes().collect { index ->
-        val event = stable[index]
-        if (event is StableCleanEvent.AssistantMessage) {
+    for (index in this.index.indexesIn(0..latestIndex())) {
+        val event = this.index.getExact(index)
+        if (event is StableAssistantMessage) {
             message = event.text
         }
     }
     return message
 }
 
-private suspend fun InMemoryKodexAgentStorage.historyItems(): List<ResponseItem.HistoryItem> =
-    stable.indexes().toList().flatMap { index -> stable[index].toResponseHistoryItems() }
+private suspend fun InMemoryKodexAgentStorage.historyItems(): List<ResponseItem.HistoryItem> {
+    val upperBound = latestIndex()
+    return (index.indexesIn(0..upperBound) + work.indexesIn(0..upperBound))
+        .distinct()
+        .sorted()
+        .flatMap { index ->
+            (
+                this.index.getExact(index) as? CleanOpenAiEvent
+                    ?: work.getExact(index) as? CleanOpenAiEvent
+                )?.toResponseHistoryItems().orEmpty()
+        }
+}
 
 private fun userMessage(text: String): ResponseItem.Message =
     ResponseItem.Message(
@@ -411,7 +424,7 @@ val minimalAgentConversationTest by testSuite {
             runtime.resume()
 
             assertEquals("Hello from the storage-backed loop.", storage.lastAssistantMessage())
-            assertEquals(3, storage.latestIndex())
+            assertEquals(4, storage.latestIndex())
             assertEquals(user, requests[0].input.last())
             assertEquals(
                 listOf(
@@ -420,13 +433,12 @@ val minimalAgentConversationTest by testSuite {
                 ),
                 requests[1].input.takeLast(2),
             )
-            assertIs<StableCleanEvent.UserMessage>(storage.stable[1])
-            assertIs<StableCleanEvent.AssistantMessage>(storage.stable[2])
-            assertIs<StableCleanEvent.AssistantMessage>(storage.stable[3])
+            assertIs<StableUserMessage>(storage.index[2])
+            assertIs<StableAssistantMessage>(storage.index[3])
+            assertIs<StableAssistantMessage>(storage.index[4])
             assertEquals(OpenAiModelId("test-model"), storage.settings[2].model)
-            assertEquals(0, storage.compaction[3].historyBaseIndex)
             assertTrue(storage.timestamp[3] > Instant.fromEpochSeconds(0))
-            assertEquals(-1, storage.tokenCount.latestIndex())
+            assertEquals(0, storage.tokenCount.latestIndex())
         }
     }
 }
@@ -877,12 +889,12 @@ val openAiForcedCompactProbeTest by testSuite {
                     promptCacheKey = "kodex-forced-compact-probe",
                 ),
             )
-            storage.stable[1] = StableCleanEvent.UserMessage(
+            storage.index[2] = StableUserMessage(
                 userMessage(
                     "请记住：项目代号是 Cedar，目标是把 Kotlin agent state 的上下文压缩链路跑通。",
                 ).content,
             )
-            storage.stable[2] = StableCleanEvent.AssistantMessage(
+            storage.index[3] = StableAssistantMessage(
                 assistantMessage("已记录 Cedar 项目的目标。").content,
             )
             val agent = KodexAgentState(
@@ -894,7 +906,6 @@ val openAiForcedCompactProbeTest by testSuite {
 
             val compactIndex = agent.forcedCompact()
 
-            val checkpoint = storage.compaction[compactIndex]
             assertEquals(1, client.remoteCompactionV2Requests.size)
             val request = client.remoteCompactionV2Requests.single()
             assertEquals(model, request.request.model)
@@ -903,10 +914,9 @@ val openAiForcedCompactProbeTest by testSuite {
                 request.request.input.last(),
                 "AgentState should project the remote-compaction trigger into the wire request.",
             )
-            assertTrue(checkpoint.prefix.isNotEmpty(), "Expected retained clean events in the checkpoint prefix.")
-            assertEquals(compactIndex, checkpoint.historyBaseIndex)
+            assertIs<CleanCompactionPoint>(storage.index[compactIndex - 1])
             val contextCompaction =
-                assertIs<StableCleanEvent.ContextCompaction>(storage.stable[compactIndex])
+                assertIs<StableContextCompaction>(storage.work[compactIndex])
             assertTrue(contextCompaction.encryptedContent.isNotEmpty())
             assertEquals(compactIndex, storage.latestIndex())
         }

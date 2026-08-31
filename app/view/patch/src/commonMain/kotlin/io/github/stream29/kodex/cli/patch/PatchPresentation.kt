@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.cli.patch
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolExecutionResult
 import io.github.stream29.kodex.utils.applypatch.AddFileHunk
 import io.github.stream29.kodex.utils.applypatch.DeleteFileHunk
 import io.github.stream29.kodex.utils.applypatch.Patch

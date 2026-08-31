@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.agentsession.filesystem
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.CleanCompactionCheckpoint
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
@@ -33,11 +33,11 @@ internal suspend fun FileSystemAgentStorage.cached(
         ownerScope = ownerScope,
         backing = this,
         storageId = id,
-        cachedCompaction = compaction.cached(ownerScope, valueCacheSize),
+        cachedIndex = index.cached(ownerScope, valueCacheSize),
+        cachedWork = work.cached(ownerScope, valueCacheSize),
         cachedSettings = settings.cached(ownerScope, valueCacheSize),
         cachedTimestamp = timestamp.cached(ownerScope, valueCacheSize),
         cachedTokenCount = tokenCount.cached(ownerScope, valueCacheSize),
-        cachedStable = stable.cached(ownerScope, valueCacheSize),
         cachedUnstable = unstable.cached(ownerScope, valueCacheSize),
     )
 }
@@ -47,11 +47,11 @@ internal class CachedAgentStorage internal constructor(
     private val ownerScope: CoroutineScope,
     internal val backing: FileSystemAgentStorage,
     private val storageId: String,
-    private val cachedCompaction: MutableIndexVersioned<CleanCompactionCheckpoint>,
+    private val cachedIndex: MutableIndexVersioned<CleanIndexEntry>,
+    private val cachedWork: MutableIndexVersioned<StableWorkEvent>,
     private val cachedSettings: MutableIndexVersioned<KodexAgentSettings>,
     private val cachedTimestamp: MutableIndexVersioned<kotlin.time.Instant>,
     private val cachedTokenCount: MutableIndexVersioned<Long>,
-    private val cachedStable: MutableIndexVersioned<StableCleanEvent>,
     private val cachedUnstable: MutableIndexVersioned<List<UnstableCleanEvent>>,
 ) : MutableKodexAgentStorage {
     override val id: String
@@ -59,10 +59,15 @@ internal class CachedAgentStorage internal constructor(
             requireActive()
             return storageId
         }
-    override val compaction: MutableIndexVersioned<CleanCompactionCheckpoint>
+    override val index: MutableIndexVersioned<CleanIndexEntry>
         get() {
             requireActive()
-            return cachedCompaction
+            return cachedIndex
+        }
+    override val work: MutableIndexVersioned<StableWorkEvent>
+        get() {
+            requireActive()
+            return cachedWork
         }
     override val settings: MutableIndexVersioned<KodexAgentSettings>
         get() {
@@ -78,11 +83,6 @@ internal class CachedAgentStorage internal constructor(
         get() {
             requireActive()
             return cachedTokenCount
-        }
-    override val stable: MutableIndexVersioned<StableCleanEvent>
-        get() {
-            requireActive()
-            return cachedStable
         }
     override val unstable: MutableIndexVersioned<List<UnstableCleanEvent>>
         get() {
@@ -162,6 +162,20 @@ internal class CachedIndexVersioned<T : Any>(
         return value
     }
 
+    override suspend fun getExact(index: Int): T? {
+        requireActive()
+        require(index >= 0) { "Index $index must be non-negative." }
+        val stored = indexes.readSession { snapshot ->
+            snapshot.binarySearch(index).takeIf { it >= 0 }?.let { snapshot[it] }
+        } ?: return null
+        val value = values.get(stored) { delegate.getUnsafe(stored) }
+        if (!isActive) {
+            values.invalidate(stored)
+            requireActive()
+        }
+        return value
+    }
+
     override suspend fun floorToIndex(index: Int): Int? {
         requireActive()
         return indexes.readSession { snapshot ->
@@ -175,6 +189,51 @@ internal class CachedIndexVersioned<T : Any>(
         return indexes.readSession { snapshot ->
             val position = snapshot.binarySearch(index)
             snapshot.getOrNull(if (position >= 0) position else -position - 1)
+        }
+    }
+
+    override suspend fun indexesIn(range: IntRange): List<Int> {
+        requireActive()
+        if (range.isEmpty()) return emptyList()
+        require(range.first >= 0) {
+            "Index lower bound ${range.first} must be non-negative."
+        }
+        return indexes.readSession { snapshot ->
+            val firstPosition = snapshot.binarySearch(range.first).let { position ->
+                if (position >= 0) position else -position - 1
+            }
+            if (firstPosition >= snapshot.size) {
+                emptyList()
+            } else {
+                val lastPosition = snapshot.binarySearch(range.last).let { position ->
+                    if (position >= 0) position + 1 else -position - 1
+                }
+                snapshot.subList(firstPosition, lastPosition).toList()
+            }
+        }
+    }
+
+    override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>> {
+        requireActive()
+        if (range.isEmpty()) return emptyList()
+        require(range.first >= 0) {
+            "Index lower bound ${range.first} must be non-negative."
+        }
+        val storedIndexes = indexes.readSession { snapshot ->
+            val firstPosition = snapshot.binarySearch(range.first).let { position ->
+                if (position >= 0) position else -position - 1
+            }
+            if (firstPosition >= snapshot.size) {
+                emptyList()
+            } else {
+                val lastPosition = snapshot.binarySearch(range.last).let { position ->
+                    if (position >= 0) position + 1 else -position - 1
+                }
+                snapshot.subList(firstPosition, lastPosition).toList()
+            }
+        }
+        return storedIndexes.map { index ->
+            index to values.get(index) { delegate.getUnsafe(index) }
         }
     }
 

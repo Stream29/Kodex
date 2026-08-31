@@ -6,10 +6,9 @@ import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
-import io.github.stream29.kodex.agentstorage.contract.forkTo
-import io.github.stream29.kodex.agentstorage.contract.indexes
-import io.github.stream29.kodex.agentstorage.contract.initialize
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
@@ -57,8 +56,8 @@ import kotlin.test.assertTrue
 private fun settings(name: String = ""): KodexAgentSettings =
     KodexAgentSettings(model = OpenAiModelId("test-model"), threadName = name)
 
-private fun userMessage(): StableCleanEvent.UserMessage =
-    StableCleanEvent.UserMessage(
+private fun userMessage(): StableUserMessage =
+    StableUserMessage(
         content = listOf(ContentItem.InputText("copied")),
     )
 
@@ -85,7 +84,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
 
             assertEquals(-1, session.storage.latestIndex())
             session.runtime.modify { storage -> storage.initialize(settings("root")) }
-            assertEquals(0, session.storage.latestIndex())
+            assertEquals(1, session.storage.latestIndex())
             assertEquals(0L, session.storage.tokenCount[0])
         }
 
@@ -95,8 +94,8 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             val second = repository.createInitialized(settings("Named"))
             val firstLastActivityAt = Instant.parse("2026-07-31T10:00:00Z")
             val secondLastActivityAt = Instant.parse("2026-07-31T10:05:00Z")
-            repository.open(first).storage.timestamp[1] = firstLastActivityAt
-            repository.open(second).storage.timestamp[1] = secondLastActivityAt
+            repository.open(first).storage.timestamp[2] = firstLastActivityAt
+            repository.open(second).storage.timestamp[2] = secondLastActivityAt
 
             assertEquals(0, first)
             assertEquals(1, second)
@@ -148,9 +147,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
 
             assertSame(source, repository.open(sourceIndex))
 
-            val forkIndex = repository.create()
-            val fork = repository.open(forkIndex)
-            fork.runtime.modify { storage -> source.storage.forkTo(1, storage) }
+            val forkIndex = repository.createFork(sourceIndex)
             assertEquals(
                 false,
                 repository.listEntries(includeArchived = true)
@@ -185,16 +182,16 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             val source = repository.open(sourceIndex)
             source.runtime.injectHistory(listOf(userMessage()))
 
-            val targetIndex = repository.createFork(source.storage, from = 0, until = 2)
+            val targetIndex = repository.createFork(sourceIndex)
             val target = repository.open(targetIndex)
             val latest = target.storage.latestIndex()
             target.runtime.updateSettings(
                 target.storage.settings[latest].copy(threadName = "[fork] Source"),
             )
 
-            assertEquals(listOf(1), target.storage.stable.indexes().toList())
-            assertEquals(userMessage(), target.storage.stable[1])
-            assertEquals("[fork] Source", target.storage.settings[2].threadName)
+            assertEquals(listOf(0, 1, 2), target.storage.index.indexesIn(0..latest))
+            assertEquals(userMessage(), target.storage.index[2])
+            assertEquals("[fork] Source", target.storage.settings[3].threadName)
         }
 
         test("owns each runtime for the complete Agent session lifecycle") {
@@ -306,10 +303,10 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
             pending.await()
             turn.cancelJobAndJoin()
 
-            val failure = assertIs<StableTextToolEvent>(root.storage.stable[3])
+            val failure = assertIs<StableTextToolEvent>(root.storage.work[4])
             assertEquals("user interrupt", failure.result)
             assertEquals(false, failure.success)
-            assertEquals(emptyList(), root.storage.unstable[3])
+            assertEquals(emptyList(), root.storage.unstable[4])
             assertEquals(KodexAgentStateValue.ToolCompleted, root.runtime.state.value)
             assertNull(root.runtime.runningTurn.value)
         }

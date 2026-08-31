@@ -18,6 +18,11 @@ kotlin {
             implementation(libs.mosaic.runtime)
         }
         mosaicTest.dependencies {
+            implementation(project(":agent-session-in-memory"))
+            implementation(project(":agent-session-test"))
+            implementation(project(":agent-storage-contract-ext"))
+            implementation(project(":app-viewmodel-history"))
+            implementation(project(":utils-coroutines"))
             implementation(libs.mosaic.testing)
         }
     }

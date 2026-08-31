@@ -11,16 +11,17 @@ import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
 import io.github.stream29.kodex.agentstate.tool.toDeferredToolSearchDocuments
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableInvalidToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableMcpToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.indexes
+import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.latestValue
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.hook.contract.tool.HookToolInvocation
@@ -121,7 +122,7 @@ val kodexToolRuntimeTest by testSuite {
         assertTrue(toolSearchSpec.description.contains("- shared: Tools exposed by shared."))
         assertTrue(toolSearchSpec.description.contains("Kodex local tools").not())
         assertTrue(toolSearchSpec.description.contains("MCP servers").not())
-        assertEquals(listOf(0), storage.settings.indexes().toList())
+        assertEquals(listOf(0), storage.settings.indexesIn(0..storage.latestIndex()))
     }
 
     test("deferred search output and handler use the active catalog") {
@@ -286,8 +287,8 @@ val kodexToolRuntimeTest by testSuite {
                 arguments = JsonObject(emptyMap()),
                 result = mcpTextResult("done"),
             ),
-            storage.stable.indexes().toList()
-                .map { index -> storage.stable[index] }
+            storage.work.indexesIn(0..storage.latestIndex())
+                .map { index -> storage.work[index] }
                 .filterIsInstance<StableMcpToolEvent>()
                 .single(),
         )
@@ -547,7 +548,6 @@ val kodexToolRuntimeTest by testSuite {
         val mcpService = TestMcpService()
         val initialSettings = KodexAgentSettings(
             model = OpenAiModelId("test-model"),
-            turnId = "turn_started",
             cwd = initialRoot,
         )
         val fixture = testStateWithCalls(
@@ -573,8 +573,8 @@ val kodexToolRuntimeTest by testSuite {
                 "hook input\n",
                 SystemCoroutineFileSystem.readString(Path(updatedRoot, "hook.txt")),
             )
-            val completed = fixture.state.storage.stable.indexes().toList()
-                .map { index -> fixture.state.storage.stable[index] }
+            val completed = fixture.state.storage.work.indexesIn(0..fixture.state.latestIndex.value)
+                .map { index -> fixture.state.storage.work[index] }
                 .filterIsInstance<StablePatchToolEvent>()
                 .single()
             assertIs<StablePatchToolExecutionResult.Success>(completed.result)
@@ -649,9 +649,9 @@ val kodexToolRuntimeTest by testSuite {
             .testToolRuntime(mcpService, NoOpToolHooks)
             .resume()
 
-        val completed = fixture.state.storage.stable.indexes().toList()
-            .map { index -> fixture.state.storage.stable[index] }
-            .filterIsInstance<StableCleanEvent.InvalidToolCall>()
+            val completed = fixture.state.storage.work.indexesIn(0..fixture.state.latestIndex.value)
+                .map { index -> fixture.state.storage.work[index] }
+            .filterIsInstance<StableInvalidToolCall>()
             .single()
         assertEquals(
             InvalidToolInvocation.Function(
@@ -683,8 +683,8 @@ val kodexToolRuntimeTest by testSuite {
             .resume()
 
         assertEquals(plan, fixture.state.storage.settings.latestValue().plan)
-        val completed = fixture.state.storage.stable.indexes().toList()
-            .map { index -> fixture.state.storage.stable[index] }
+        val completed = fixture.state.storage.index.indexesIn(0..fixture.state.latestIndex.value)
+            .map { index -> fixture.state.storage.index[index] }
             .filterIsInstance<StablePlanUpdate>()
             .single()
         assertEquals(plan, completed.arguments)
@@ -835,7 +835,6 @@ private suspend fun CoroutineScope.testStateWithCalls(
     mcpService: McpService,
     settings: KodexAgentSettings = KodexAgentSettings(
         model = OpenAiModelId("test-model"),
-        turnId = "turn_started",
     ),
     vararg calls: ResponseItem.ToolCall,
 ): ToolCallTestState {
@@ -913,9 +912,14 @@ private fun assistantResponse(responseId: String): Flow<ResponsesStreamEvent> = 
 )
 
 private suspend fun KodexAgentStorage.stableHistoryItems(): List<ResponseItem.HistoryItem> =
-    stable.indexes().toList().flatMap { index ->
-        stable[index].toResponseHistoryItems()
-    }
+    (index.indexesIn(0..latestIndex()) + work.indexesIn(0..latestIndex()))
+        .distinct()
+        .sorted()
+        .mapNotNull { entryIndex ->
+            (index.getExact(entryIndex) as? StableCleanEvent
+                ?: work.getExact(entryIndex) as? StableCleanEvent)
+        }
+        .flatMap(StableCleanEvent::toResponseHistoryItems)
 
 private suspend fun deleteRecursively(path: Path) {
     val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return

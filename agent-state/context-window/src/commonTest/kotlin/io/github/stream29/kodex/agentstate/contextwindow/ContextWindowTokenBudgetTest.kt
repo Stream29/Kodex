@@ -46,7 +46,7 @@ val contextWindowTokenBudgetTest by testSuite {
                 autoCompactionTokenLimit = 800L,
             ),
         )
-        storage.tokenCount[0] = 760L
+        storage.tokenCount[1] = 760L
 
         assertEquals(40L, testState(storage).tokensUntilCompaction(testCatalog()))
     }
@@ -58,13 +58,14 @@ val contextWindowTokenBudgetTest by testSuite {
                 autoCompactionTokenLimit = 800L,
             ),
         )
-        storage.tokenCount[0] = 0L
+        storage.tokenCount[1] = 0L
 
         assertEquals(800L, testState(storage).tokensUntilCompaction(testCatalog()))
     }
 
     test("reports an unknown budget before OpenAI reports token usage") {
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
+        storage.tokenCount.revert(0)
 
         assertNull(testState(storage).tokensUntilCompaction(testCatalog()))
     }

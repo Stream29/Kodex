@@ -1,10 +1,10 @@
 package io.github.stream29.kodex.cli.agent
 
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.indexes
 import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.clearPending
@@ -114,7 +114,7 @@ internal class AgentRuntimeViewModel(
     override val settings: StateFlow<KodexAgentSettings> = mutableSettings.asStateFlow()
     override val tokenCount: StateFlow<Long?> = mutableTokenCount.asStateFlow()
     override val execution: StateFlow<AgentExecutionState> = mutableExecution.asStateFlow()
-    override val pendingSteer: StateFlow<List<StableCleanEvent.Steerable>> =
+    override val pendingSteer: StateFlow<List<StableIndexEvent.Steerable>> =
         session.runtime.pendingSteer.asStateFlow()
     override val historyAction: StateFlow<AgentHistoryActionState> =
         mutableHistoryAction.asStateFlow()
@@ -169,7 +169,7 @@ internal class AgentRuntimeViewModel(
         try {
             if (execution.value.running) {
                 session.runtime.pendingSteer.update { pending ->
-                    pending + StableCleanEvent.UserMessage(content)
+                    pending + StableUserMessage(content)
                 }
                 AgentComposerSubmissionResult.QueuedAsSteer
             } else {
@@ -334,7 +334,8 @@ internal class AgentRuntimeViewModel(
             automaticTitle.replaceHistory {
                 session.runtime.modify { storage ->
                     require(
-                        storage.stable.floorToIndex(target.storageIndex) == target.storageIndex,
+                        storage.index.getExact(target.storageIndex) != null ||
+                            storage.work.getExact(target.storageIndex) != null,
                     ) {
                         "History entry ${target.storageIndex} is no longer committed."
                     }
@@ -447,7 +448,6 @@ internal class AgentRuntimeViewModel(
                 "Cannot submit a new turn while this Agent is running."
             }
             clearNotification()
-            session.runtime.markNewTurn()
             session.runtime.appendUserMessage(content)
             launchOwnedOperation(
                 failureMessage = failureMessage,
@@ -669,11 +669,11 @@ private fun KodexAgentStateValue.singleRequestUserInputOrNull(): PendingRequestU
 
 private suspend fun MutableKodexAgentStorage.hasNonblankUserTextBefore(
     untilExclusive: Int,
-): Boolean = stable.indexes()
-    .takeWhile { index -> index < untilExclusive }
-    .firstOrNull { index ->
-        val event = stable[index] as? StableCleanEvent.UserMessage
-        event?.content?.any { content ->
+): Boolean = index.indexesIn(0 until untilExclusive)
+    .firstOrNull { eventIndex ->
+        val event = index.getExact(eventIndex) as? StableIndexEvent
+        val userMessage = event as? StableUserMessage
+        userMessage?.content?.any { content ->
             (content as? ContentItem.InputText)?.text?.isNotBlank() == true
         } == true
     } != null

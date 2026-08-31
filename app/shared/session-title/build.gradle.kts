@@ -18,6 +18,7 @@ kotlin {
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
             implementation(project(":agent-storage-contract"))
+            implementation(project(":agent-storage-contract-ext"))
             implementation(project(":utils-coroutines"))
             implementation(project(":openai-client-test"))
             implementation(libs.kotlinx.coroutines.test)

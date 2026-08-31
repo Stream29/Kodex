@@ -42,6 +42,7 @@ kotlin {
             implementation(libs.kotlinx.io.core)
         }
         commonTest.dependencies {
+            implementation(project(":agent-storage-contract-ext"))
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
             implementation(project(":app-shared-auth-contract"))

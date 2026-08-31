@@ -9,7 +9,8 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.RequestFinish
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
-import io.github.stream29.kodex.agentstorage.contract.indexes
+import io.github.stream29.kodex.agentstorage.cleanmodels.CleanOpenAiEvent
+import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
@@ -108,8 +109,16 @@ val openAiMcpToolRoundTripProbeTest by testSuite {
                 )
                 runtime.resume()
 
-                val history = storage.stable.indexes().toList()
-                    .flatMap { index -> storage.stable[index].toResponseHistoryItems() }
+                val upperBound = storage.latestIndex()
+                val history = (storage.index.indexesIn(0..upperBound) + storage.work.indexesIn(0..upperBound))
+                    .distinct()
+                    .sorted()
+                    .flatMap { index ->
+                        (
+                            storage.index.getExact(index) as? CleanOpenAiEvent
+                                ?: storage.work.getExact(index) as? CleanOpenAiEvent
+                            )?.toResponseHistoryItems().orEmpty()
+                    }
                 val call = history
                     .filterIsInstance<ResponseItem.FunctionCall>()
                     .single { item ->

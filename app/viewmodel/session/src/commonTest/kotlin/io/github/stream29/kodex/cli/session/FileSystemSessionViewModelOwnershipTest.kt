@@ -3,7 +3,7 @@ package io.github.stream29.kodex.cli.session
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.filesystem.FileSystemKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
-import io.github.stream29.kodex.agentstorage.contract.initialize
+import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
@@ -114,8 +114,8 @@ val fileSystemSessionViewModelOwnershipTest by testSuite {
                         assertTrue(entries.single { it.entryIndex == sourceIndex }.archived)
                         assertFalse(entries.single { it.entryIndex == targetIndex }.archived)
                         val target = inspection.open(targetIndex)
-                        assertEquals("fork-cwd", target.storage.settings[1].cwd.toString())
-                        assertEquals("[fork] Source", target.storage.settings[2].threadName)
+                        assertEquals("fork-cwd", target.storage.settings[2].cwd.toString())
+                        assertEquals("Source", target.storage.settings[2].threadName)
                     } finally {
                         inspection.cancelAndJoin()
                     }
@@ -137,12 +137,12 @@ val fileSystemSessionViewModelOwnershipTest by testSuite {
                             threadName = "Catalog",
                         ),
                     )
-                    storage.timestamp[1] = Instant.parse("2026-08-24T08:00:00Z")
+                    storage.timestamp[2] = Instant.parse("2026-08-24T08:00:00Z")
                 }
                 setup.cancelAndJoin()
                 val latest = Path(root, "sessions/$index/timestamp/latest.json")
                 val lock = Path(root, "sessions/$index/lock.json")
-                SystemCoroutineFileSystem.writeString(latest, "2")
+                SystemCoroutineFileSystem.writeString(latest, "3")
 
                 val fileSystem = SuspendingViewModelTimelineFileSystem("timestamp")
                 lateinit var repository: FileSystemKodexSessionRepository
@@ -168,7 +168,7 @@ val fileSystemSessionViewModelOwnershipTest by testSuite {
                 repository.coroutineContext[Job]?.join()
                 assertFalse(repository.coroutineContext[Job]?.isActive == true)
                 assertFalse(SystemCoroutineFileSystem.exists(lock))
-                assertEquals("2", SystemCoroutineFileSystem.readString(latest))
+                assertEquals("3", SystemCoroutineFileSystem.readString(latest))
             }
         }
     }
