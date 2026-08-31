@@ -7,6 +7,13 @@ import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 
 val inMemoryKodexGlobalSettingsTest by testSuite {
+    test("sidebars default to history index and terminal sessions") {
+        val sidebars = SidebarSettings()
+
+        assertEquals(SidebarContent.HistoryIndex, sidebars.left)
+        assertEquals(SidebarContent.TerminalSessions, sidebars.right)
+    }
+
     test("publishes a complete updated settings snapshot") {
         val initial = KodexGlobalSettings(codexHome = Path("/home/test/.codex"))
         val settings = InMemoryKodexGlobalSettings(initial)

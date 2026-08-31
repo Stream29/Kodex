@@ -4,6 +4,7 @@ import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
+import io.github.stream29.kodex.cli.settings.SidebarSettings
 import io.github.stream29.kodex.hook.contract.HookDraft
 import io.github.stream29.kodex.hook.contract.HookManagedState
 import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
@@ -31,6 +32,7 @@ public data class GlobalSettingsState(
     public val authSource: KodexAuthSource,
     public val newLineKey: NewLineKey,
     public val sessionTitle: SessionTitleSettings,
+    public val sidebars: SidebarSettings,
     public val effectiveSessionTitleModel: OpenAiModelId,
     public val modelOptions: List<OpenAiModelId>,
 ) {
@@ -262,6 +264,8 @@ public interface GlobalSettingsViewModel : AutoCloseable {
     public fun updateSessionTitleEnabled(enabled: Boolean): Unit
     public fun updateSessionTitleModel(model: OpenAiModelId): Unit
     public fun updateSessionTitleReasoningEffort(reasoningEffort: ReasoningEffort): Unit
+    public fun updateLeftSidebarWidth(columns: Int): Unit
+    public fun updateRightSidebarWidth(columns: Int): Unit
 
     public fun requestLogin(): Unit
     public fun refreshUsage(): Unit

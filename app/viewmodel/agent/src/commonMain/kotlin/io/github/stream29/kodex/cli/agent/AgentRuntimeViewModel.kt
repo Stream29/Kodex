@@ -24,6 +24,7 @@ import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModelFactory
+import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.cli.sessiontitle.AgentTitleGeneration
@@ -109,6 +110,12 @@ internal class AgentRuntimeViewModel(
     private var closed: Boolean = false
 
     override val requestUserInput: RequestUserInputViewModel = requestUserInputImpl
+    override val historyIndex: HistoryIndexViewModel = HistoryIndexViewModelImpl(
+        timeline = session.storage.index,
+        latestIndex = session.runtime.latestIndex,
+        agentState = session.runtime.state,
+        scope = scope,
+    )
     override val shellSessions: AgentShellSessionRegistry =
         UnifiedExecShellSessionRegistry(session.runtime.unifiedExecToolClient.activeSessions, scope)
     override val settings: StateFlow<KodexAgentSettings> = mutableSettings.asStateFlow()

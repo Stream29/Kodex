@@ -66,6 +66,7 @@ class SessionTabContextMenuTest {
             }
 
             assertEquals("close-and-archive", selection)
+            assertTrue("Index: ${target.sessionIndex}" in menuSnapshot, menuSnapshot)
             assertTrue("Rename" in menuSnapshot, menuSnapshot)
             assertTrue("Close" in menuSnapshot, menuSnapshot)
             assertTrue("Close and archive" in menuSnapshot, menuSnapshot)
@@ -103,6 +104,7 @@ class SessionTabContextMenuTest {
                 menuSnapshot = awaitSnapshotContaining("Close")
             }
 
+            assertFalse("Index:" in menuSnapshot, menuSnapshot)
             assertTrue("Rename" in menuSnapshot, menuSnapshot)
             assertTrue("Close" in menuSnapshot, menuSnapshot)
             assertFalse("Close and archive" in menuSnapshot, menuSnapshot)

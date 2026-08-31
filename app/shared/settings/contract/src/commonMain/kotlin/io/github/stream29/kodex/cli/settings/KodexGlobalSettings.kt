@@ -49,11 +49,28 @@ public data class KodexGlobalSettings(
     }
 }
 
-/** Content selected for the independent left and right session sidebars. */
+/** Content and preferred widths for the independent left and right session sidebars. */
 public data class SidebarSettings(
-    public val left: SidebarContent = SidebarContent.TerminalSessions,
-    public val right: SidebarContent = SidebarContent.None,
-)
+    public val left: SidebarContent = SidebarContent.HistoryIndex,
+    public val right: SidebarContent = SidebarContent.TerminalSessions,
+    public val leftWidth: Int = DefaultSidebarWidthColumns,
+    public val rightWidth: Int = DefaultSidebarWidthColumns,
+) {
+    init {
+        require(leftWidth >= MinimumSidebarWidthColumns) {
+            "The left sidebar width must be at least $MinimumSidebarWidthColumns columns."
+        }
+        require(rightWidth >= MinimumSidebarWidthColumns) {
+            "The right sidebar width must be at least $MinimumSidebarWidthColumns columns."
+        }
+    }
+}
+
+/** Default preferred width of either session sidebar. */
+public const val DefaultSidebarWidthColumns: Int = 28
+
+/** Smallest persisted width that retains the collapse control and one splitter column. */
+public const val MinimumSidebarWidthColumns: Int = 4
 
 /** Content that a session sidebar can display. */
 @Serializable
@@ -65,6 +82,10 @@ public enum class SidebarContent {
     /** Displays terminal sessions owned by the selected agent. */
     @SerialName("terminal_sessions")
     TerminalSessions,
+
+    /** Displays the selected agent's sparse index timeline. */
+    @SerialName("history_index")
+    HistoryIndex,
 }
 
 /** Selects whether subscription credentials come from Codex or Kodex storage. */

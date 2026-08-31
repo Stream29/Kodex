@@ -20,6 +20,10 @@ val sidebarSettingsViewModelTest by testSuite {
             KodexGlobalSettings(
                 codexHome = Path("/codex"),
                 newLineKey = NewLineKey.Enter,
+                sidebars = SidebarSettings(
+                    leftWidth = 24,
+                    rightWidth = 32,
+                ),
             ),
         )
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
@@ -34,6 +38,8 @@ val sidebarSettingsViewModelTest by testSuite {
                 SidebarSettings(
                     left = SidebarContent.TerminalSessions,
                     right = SidebarContent.TerminalSessions,
+                    leftWidth = 24,
+                    rightWidth = 32,
                 ),
                 rightUpdated,
             )
@@ -43,8 +49,22 @@ val sidebarSettingsViewModelTest by testSuite {
                 SidebarSettings(
                     left = SidebarContent.None,
                     right = SidebarContent.TerminalSessions,
+                    leftWidth = 24,
+                    rightWidth = 32,
                 ),
                 viewModel.state.first { it.left == SidebarContent.None },
+            )
+
+            viewModel.resizeLeft(30)
+            viewModel.resizeRight(18)
+            assertEquals(
+                SidebarSettings(
+                    left = SidebarContent.None,
+                    right = SidebarContent.TerminalSessions,
+                    leftWidth = 30,
+                    rightWidth = 18,
+                ),
+                viewModel.state.first { it.leftWidth == 30 && it.rightWidth == 18 },
             )
             assertEquals(NewLineKey.Enter, store.settings.value.newLineKey)
         } finally {

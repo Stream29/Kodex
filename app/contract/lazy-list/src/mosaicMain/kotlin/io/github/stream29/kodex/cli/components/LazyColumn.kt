@@ -11,6 +11,7 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.SubcomposeLayout
 import com.jakewharton.mosaic.ui.SubcomposeLayoutState
 import com.jakewharton.mosaic.ui.SubcomposeMeasureScope
+import com.jakewharton.mosaic.ui.MosaicComposable
 import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
@@ -57,6 +58,7 @@ public fun LazyColumn(
     }
     val itemProvider = itemProviderState.value
     val subcomposeState = remember { SubcomposeLayoutState(maxSlotsToRetainForReuse = 2) }
+    val prefetchState = remember(subcomposeState) { LazyColumnPrefetchState() }
     val beyondBoundsLayout = remember(state) {
         LazyColumnBeyondBoundsLayout(state)
     }
@@ -66,10 +68,15 @@ public fun LazyColumn(
     val bringIntoViewElement = remember(state, interactionSource) {
         LazyColumnBringIntoViewElement(state, interactionSource)
     }
+    val remeasurementElement = remember(state) {
+        LazyColumnRemeasurementElement(state)
+    }
     beyondBoundsLayout.updateProvider(itemProvider)
+    RunLazyColumnPrefetch(prefetchState, subcomposeState)
     SubcomposeLayout(
         state = subcomposeState,
         modifier = modifier
+            .then(remeasurementElement)
             .scrollable(
                 state = state,
                 enabled = userScrollEnabled,
@@ -99,6 +106,7 @@ public fun LazyColumn(
             beyondBoundsLayout = beyondBoundsLayout,
             constraints = constraints,
             reverseLayout = reverseLayout,
+            prefetchState = prefetchState,
         )
     }
 }
@@ -109,6 +117,7 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
     beyondBoundsLayout: LazyColumnBeyondBoundsLayout,
     constraints: Constraints,
     reverseLayout: Boolean,
+    prefetchState: LazyColumnPrefetchState,
 ) = run {
     check(constraints.hasBoundedHeight) {
         "A lazy column must be measured with a finite maximum height."
@@ -132,6 +141,7 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
             firstIndex = 0,
             lastIndex = -1,
         )
+        prefetchState.schedule(null)
         return@run layout(
             width = constraints.constrainWidth(0),
             height = constraints.constrainHeight(viewportHeight),
@@ -141,12 +151,16 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
     val measuredItems = mutableMapOf<Int, MeasuredLazyItem>()
     fun measureItem(layoutIndex: Int): MeasuredLazyItem = measuredItems.getOrPut(layoutIndex) {
         val itemIndex = itemProvider.itemIndexAt(layoutIndex)
-        val placeables = subcompose(
-            slotId = itemProvider.keyAtLayoutIndex(layoutIndex),
-            contentType = itemProvider.contentTypeAtLayoutIndex(layoutIndex),
-        ) {
+        val key = itemProvider.keyAtLayoutIndex(layoutIndex)
+        val prefetchedContent = prefetchState.contentFor(itemProvider, layoutIndex, key)
+        val itemContent: @Composable @MosaicComposable () -> Unit = prefetchedContent ?: {
             itemProvider.ItemAtLayoutIndex(layoutIndex)
-        }.map { measurable: Measurable ->
+        }
+        val placeables = subcompose(
+            slotId = key,
+            contentType = itemProvider.contentTypeAtLayoutIndex(layoutIndex),
+            content = itemContent,
+        ).map { measurable: Measurable ->
             measurable.measure(itemConstraints)
         }
         MeasuredLazyItem(
@@ -172,14 +186,38 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
         is LazyAnchorRequest.Position -> request.scrollOffset
         else -> 0
     }
+    val pendingScrollDelta = state.pendingScrollDelta()
     val alignToEnd =
-        (!reverseLayout && request == LazyAnchorRequest.End) ||
-            (reverseLayout && request == LazyAnchorRequest.Start)
+        pendingScrollDelta == 0 &&
+            ((!reverseLayout && request == LazyAnchorRequest.End) ||
+                (reverseLayout && request == LazyAnchorRequest.Start))
     val overscanRows = viewportHeight.coerceAtLeast(1)
-    var firstMeasuredIndex = minOf(
-        (requestedIndex - overscanRows * 2).coerceAtLeast(0),
-        forcedRange?.first ?: requestedIndex,
-    )
+    var consumedScroll = pendingScrollDelta
+
+    if (!alignToEnd && pendingScrollDelta < 0) {
+        requestedOffset = saturatedAdd(requestedOffset, pendingScrollDelta)
+        while (requestedOffset < 0 && requestedIndex > 0) {
+            requestedIndex--
+            requestedOffset = saturatedAdd(requestedOffset, measureItem(requestedIndex).height)
+        }
+        if (requestedOffset < 0) {
+            consumedScroll = saturatedAdd(pendingScrollDelta, -requestedOffset)
+            requestedOffset = 0
+        }
+    } else if (!alignToEnd && pendingScrollDelta > 0) {
+        requestedOffset = saturatedAdd(requestedOffset, pendingScrollDelta)
+    }
+
+    var firstMeasuredIndex = requestedIndex
+    var rowsBeforeAnchor = 0
+    while (firstMeasuredIndex > 0 && rowsBeforeAnchor < overscanRows) {
+        firstMeasuredIndex--
+        rowsBeforeAnchor = saturatedAdd(
+            rowsBeforeAnchor,
+            measureItem(firstMeasuredIndex).height,
+        )
+    }
+    firstMeasuredIndex = minOf(firstMeasuredIndex, forcedRange?.first ?: requestedIndex)
 
     for (index in firstMeasuredIndex..requestedIndex) {
         measureItem(index)
@@ -190,7 +228,6 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
             val itemHeight = measureItem(requestedIndex).height
             if (itemHeight > 0 && requestedOffset < itemHeight) break
             if (requestedIndex == lastLayoutIndex) {
-                requestedOffset = if (itemHeight == 0) 0 else (itemHeight - 1).coerceAtLeast(0)
                 break
             }
             requestedOffset = (requestedOffset - itemHeight).coerceAtLeast(0)
@@ -239,6 +276,7 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
         viewportStart = saturatedAdd(viewportStart, measureItem(firstMeasuredIndex).height)
     }
 
+    var viewportStartBeforeTailClamp = viewportStart
     if (reachesEnd) {
         var totalMeasuredHeight = measuredHeight(firstMeasuredIndex, lastMeasuredIndex)
         val desiredTailWindow = saturatedAdd(viewportHeight, overscanRows)
@@ -248,11 +286,17 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
             viewportStart = saturatedAdd(viewportStart, addedHeight)
             totalMeasuredHeight = saturatedAdd(totalMeasuredHeight, addedHeight)
         }
+        viewportStartBeforeTailClamp = viewportStart
         viewportStart = if (alignToEnd) {
             (totalMeasuredHeight - viewportHeight).coerceAtLeast(0)
         } else {
             viewportStart.coerceAtMost((totalMeasuredHeight - viewportHeight).coerceAtLeast(0))
         }
+    }
+
+    if (pendingScrollDelta > 0) {
+        val tailCorrection = (viewportStartBeforeTailClamp - viewportStart).coerceAtLeast(0)
+        consumedScroll = (pendingScrollDelta - tailCorrection).coerceIn(0, pendingScrollDelta)
     }
 
     if (!reachesEnd) {
@@ -267,6 +311,7 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
         keys = (firstMeasuredIndex..lastMeasuredIndex).map { index -> measureItem(index).key },
         heights = (firstMeasuredIndex..lastMeasuredIndex).map { index -> measureItem(index).height },
         viewportSize = viewportHeight,
+        reachesStart = firstMeasuredIndex == 0,
         reachesEnd = reachesEnd,
     )
     val anchor = measuredWindow.anchorAt(viewportStart)
@@ -319,6 +364,25 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
         measuredWindow = measuredWindow,
         canScrollBackward = canScrollBackward,
         canScrollForward = canScrollForward,
+        consumedScroll = consumedScroll,
+    )
+    val prefetchLayoutIndex = when {
+        state.lastScrollDirection > 0 && lastMeasuredIndex < lastLayoutIndex ->
+            lastMeasuredIndex + 1
+        state.lastScrollDirection < 0 && firstMeasuredIndex > 0 ->
+            firstMeasuredIndex - 1
+        else -> null
+    }
+    prefetchState.schedule(
+        prefetchLayoutIndex?.let { layoutIndex ->
+            LazyColumnPrefetchRequest(
+                provider = itemProvider,
+                layoutIndex = layoutIndex,
+                key = itemProvider.keyAtLayoutIndex(layoutIndex),
+                contentType = itemProvider.contentTypeAtLayoutIndex(layoutIndex),
+                constraints = itemConstraints,
+            )
+        }
     )
 
     layout(

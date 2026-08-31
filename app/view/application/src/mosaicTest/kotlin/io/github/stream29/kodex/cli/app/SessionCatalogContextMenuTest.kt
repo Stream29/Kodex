@@ -34,9 +34,9 @@ class SessionCatalogContextMenuTest {
             sendMouseEvent(MouseEvent(4, 0, MouseEvent.Type.Release))
         }
 
-        assertTrue("[Archive]" in result.menuSnapshot, result.menuSnapshot)
+        assertTrue("[Archive" in result.menuSnapshot, result.menuSnapshot)
         assertTrue("Delete" in result.menuSnapshot, result.menuSnapshot)
-        assertFalse("[Unarchive]" in result.menuSnapshot, result.menuSnapshot)
+        assertFalse("[Unarchive" in result.menuSnapshot, result.menuSnapshot)
         assertTrue("selection=archive" in result.selectionSnapshot, result.selectionSnapshot)
     }
 
@@ -58,9 +58,9 @@ class SessionCatalogContextMenuTest {
             )
         }
 
-        assertTrue("[Unarchive]" in result.menuSnapshot, result.menuSnapshot)
+        assertTrue("[Unarchive" in result.menuSnapshot, result.menuSnapshot)
         assertTrue("Delete" in result.menuSnapshot, result.menuSnapshot)
-        assertFalse("[Archive]" in result.menuSnapshot, result.menuSnapshot)
+        assertFalse("[Archive" in result.menuSnapshot, result.menuSnapshot)
         assertTrue("selection=unarchive" in result.selectionSnapshot, result.selectionSnapshot)
     }
 
@@ -73,7 +73,7 @@ class SessionCatalogContextMenuTest {
             sendKeyEvent(KeyboardEvent(codepoint = KeyboardEvent.Menu))
         }
 
-        assertTrue("[Archive]" in result.menuSnapshot, result.menuSnapshot)
+        assertTrue("[Archive" in result.menuSnapshot, result.menuSnapshot)
         assertTrue("Delete" in result.menuSnapshot, result.menuSnapshot)
         assertTrue("selection=delete" in result.selectionSnapshot, result.selectionSnapshot)
     }
@@ -134,6 +134,7 @@ private suspend fun selectSessionCatalogMenu(
 
         openMenu()
         menuSnapshot = awaitSnapshotContaining(if (entry.archived) "Unarchive" else "Archive")
+        assertTrue("Index: ${entry.sessionIndex}" in menuSnapshot, menuSnapshot)
         if (moveDown) {
             sendKeyEvent(KeyboardEvent(KeyboardEvent.Down))
             awaitSnapshot()

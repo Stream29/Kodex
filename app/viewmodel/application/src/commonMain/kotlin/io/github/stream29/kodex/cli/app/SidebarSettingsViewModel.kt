@@ -34,4 +34,16 @@ internal class SidebarSettingsViewModelImpl(
             settings.copy(sidebars = settings.sidebars.copy(right = content))
         }
     }
+
+    override suspend fun resizeLeft(columns: Int) {
+        globalSettings.update { settings ->
+            settings.copy(sidebars = settings.sidebars.copy(leftWidth = columns))
+        }
+    }
+
+    override suspend fun resizeRight(columns: Int) {
+        globalSettings.update { settings ->
+            settings.copy(sidebars = settings.sidebars.copy(rightWidth = columns))
+        }
+    }
 }

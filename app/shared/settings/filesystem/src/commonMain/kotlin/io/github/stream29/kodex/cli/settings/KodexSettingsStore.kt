@@ -173,11 +173,17 @@ private data class GlobalSettingsFile(
 private data class SidebarSettingsFile(
     val left: SidebarContent? = null,
     val right: SidebarContent? = null,
+    @SerialName("left_width")
+    val leftWidth: Int? = null,
+    @SerialName("right_width")
+    val rightWidth: Int? = null,
 ) {
     fun applyTo(defaults: SidebarSettings): SidebarSettings =
         defaults.copy(
             left = left ?: defaults.left,
             right = right ?: defaults.right,
+            leftWidth = leftWidth ?: defaults.leftWidth,
+            rightWidth = rightWidth ?: defaults.rightWidth,
         )
 
     companion object {
@@ -185,6 +191,8 @@ private data class SidebarSettingsFile(
             SidebarSettingsFile(
                 left = settings.left,
                 right = settings.right,
+                leftWidth = settings.leftWidth,
+                rightWidth = settings.rightWidth,
             )
     }
 }

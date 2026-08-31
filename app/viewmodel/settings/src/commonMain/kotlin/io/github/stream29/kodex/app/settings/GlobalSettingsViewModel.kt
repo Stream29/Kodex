@@ -220,6 +220,18 @@ internal class GlobalSettingsViewModelImpl(
         }
     }
 
+    override fun updateLeftSidebarWidth(columns: Int) {
+        enqueueSettingsUpdate {
+            copy(sidebars = sidebars.copy(leftWidth = columns))
+        }
+    }
+
+    override fun updateRightSidebarWidth(columns: Int) {
+        enqueueSettingsUpdate {
+            copy(sidebars = sidebars.copy(rightWidth = columns))
+        }
+    }
+
     override fun requestLogin() {
         if (!closed && mutableAuthentication.value is SettingsAuthenticationState.Unavailable) {
             dismissUsageReset()
@@ -476,6 +488,7 @@ private fun KodexGlobalSettings.toGlobalSettingsState(
         authSource = authSource,
         newLineKey = newLineKey,
         sessionTitle = sessionTitle,
+        sidebars = sidebars,
         effectiveSessionTitleModel = effectiveTitleModel,
         modelOptions = modelOptions,
     )

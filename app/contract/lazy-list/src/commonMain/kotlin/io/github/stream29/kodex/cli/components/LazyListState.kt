@@ -57,6 +57,11 @@ public class LazyListState(
     /** `null` until a measure pass has published a contiguous window around the current anchor. */
     private var measuredWindow: LazyMeasuredWindow? = null
     private var hasMeasuredItems: Boolean = false
+    private var remeasurement: LazyListRemeasurement? = null
+    private var scrollToBeConsumed: Int = 0
+    private var needsRemeasureAfterScroll: Boolean = false
+    internal var lastScrollDirection: Int = 0
+        private set
 
     init {
         require(initialFirstVisibleItemIndex >= 0) { "Initial lazy list index cannot be negative." }
@@ -85,34 +90,58 @@ public class LazyListState(
 
     override fun scrollBy(delta: Int): Int {
         if (delta == 0) return 0
-        val window = measuredWindow ?: return 0
-        val currentPosition = window.positionOf(
-            index = firstVisibleItemIndex,
-            offset = firstVisibleItemScrollOffset,
-        ) ?: return 0
-        val maximumPosition = if (window.reachesEnd) {
-            (window.totalHeight - window.viewportSize).coerceAtLeast(0)
-        } else {
-            (window.totalHeight - window.viewportSize).coerceAtLeast(currentPosition)
-        }
-        val targetPosition = (currentPosition.toLong() + delta)
-            .coerceIn(0L, maximumPosition.toLong())
-            .toInt()
-        val consumed = targetPosition - currentPosition
-        if (consumed == 0) return 0
-
+        if (delta < 0 && !canScrollBackward || delta > 0 && !canScrollForward) return 0
+        val previousScrollDirection = lastScrollDirection
+        lastScrollDirection = if (delta > 0) 1 else -1
         scrollInProgressState.value = true
         return try {
-            val anchor = window.anchorAt(targetPosition)
-            requestedAnchorState.value = LazyAnchorRequest.None
-            firstVisibleItemIndexState.intValue = anchor.index
-            firstVisibleItemScrollOffsetState.intValue = anchor.offset
-            anchorKey = anchor.key
-            canScrollBackwardState.value = anchor.index > 0 || anchor.offset > 0
-            canScrollForwardState.value = !window.reachesEnd || targetPosition < maximumPosition
+            val consumed = tryScrollWithoutRemeasure(delta) ?: scrollWithRemeasure(delta)
+            if (consumed == 0) {
+                lastScrollDirection = previousScrollDirection
+            }
             consumed
         } finally {
             scrollInProgressState.value = false
+        }
+    }
+
+    private fun tryScrollWithoutRemeasure(delta: Int): Int? {
+        val window = measuredWindow ?: return null
+        val currentPosition = window.positionOf(
+            index = firstVisibleItemIndex,
+            offset = firstVisibleItemScrollOffset,
+        ) ?: return null
+        val targetPositionLong = currentPosition.toLong() + delta
+        if (targetPositionLong !in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) return null
+        val targetPosition = targetPositionLong.toInt()
+        val maximumPosition = (window.totalHeight - window.viewportSize).coerceAtLeast(0)
+        if (targetPosition < 0 || targetPosition > maximumPosition) return null
+
+        val anchor = window.anchorAt(targetPosition)
+        requestedAnchorState.value = LazyAnchorRequest.None
+        firstVisibleItemIndexState.intValue = anchor.index
+        firstVisibleItemScrollOffsetState.intValue = anchor.offset
+        anchorKey = anchor.key
+        canScrollBackwardState.value = !window.reachesStart || targetPosition > 0
+        canScrollForwardState.value = !window.reachesEnd || targetPosition < maximumPosition
+        needsRemeasureAfterScroll = true
+        return delta
+    }
+
+    private fun scrollWithRemeasure(delta: Int): Int {
+        val remeasurement = remeasurement ?: return 0
+        check(scrollToBeConsumed == 0) {
+            "Lazy list cannot start a scroll while another scroll delta is pending."
+        }
+        scrollToBeConsumed = delta
+        return try {
+            remeasurement.forceRemeasure()
+            val unconsumed = scrollToBeConsumed
+            scrollToBeConsumed = 0
+            delta - unconsumed
+        } catch (throwable: Throwable) {
+            scrollToBeConsumed = 0
+            throw throwable
         }
     }
 
@@ -120,17 +149,46 @@ public class LazyListState(
     public fun scrollToItem(index: Int, scrollOffset: Int = 0) {
         require(index >= 0) { "Lazy list index cannot be negative." }
         require(scrollOffset >= 0) { "Lazy list scroll offset cannot be negative." }
+        scrollToBeConsumed = 0
+        lastScrollDirection = 0
         requestedAnchorState.value = LazyAnchorRequest.Position(index, scrollOffset)
     }
 
     /** Requests the logical start as the next measured position. */
     public fun requestScrollToStart() {
+        scrollToBeConsumed = 0
+        lastScrollDirection = 0
         requestedAnchorState.value = LazyAnchorRequest.Start
     }
 
     /** Requests the logical end as the next measured position. */
     public fun requestScrollToEnd() {
+        scrollToBeConsumed = 0
+        lastScrollDirection = 0
         requestedAnchorState.value = LazyAnchorRequest.End
+    }
+
+    internal fun attachRemeasurement(remeasurement: LazyListRemeasurement) {
+        check(this.remeasurement == null || this.remeasurement === remeasurement) {
+            "A LazyListState cannot be attached to multiple LazyColumns."
+        }
+        this.remeasurement = remeasurement
+    }
+
+    internal fun detachRemeasurement(remeasurement: LazyListRemeasurement) {
+        if (this.remeasurement === remeasurement) {
+            this.remeasurement = null
+            scrollToBeConsumed = 0
+            needsRemeasureAfterScroll = false
+        }
+    }
+
+    internal fun pendingScrollDelta(): Int = scrollToBeConsumed
+
+    internal fun forceRemeasureIfNeeded() {
+        if (needsRemeasureAfterScroll) {
+            remeasurement?.forceRemeasure()
+        }
     }
 
     internal fun resolveAnchor(
@@ -168,6 +226,7 @@ public class LazyListState(
         measuredWindow: LazyMeasuredWindow,
         canScrollBackward: Boolean,
         canScrollForward: Boolean,
+        consumedScroll: Int,
     ) {
         firstVisibleItemIndexState.intValue = anchorIndex
         firstVisibleItemScrollOffsetState.intValue = anchorOffset
@@ -175,6 +234,8 @@ public class LazyListState(
         this.measuredWindow = measuredWindow
         canScrollBackwardState.value = canScrollBackward
         canScrollForwardState.value = canScrollForward
+        scrollToBeConsumed -= consumedScroll
+        needsRemeasureAfterScroll = false
         anchorKey = if (provider.itemCount == 0) NoAnchorKey else provider.keyAt(anchorIndex)
         hasMeasuredItems = true
         requestedAnchorState.value = LazyAnchorRequest.None
@@ -192,12 +253,14 @@ public class LazyListState(
             keys = emptyList(),
             heights = emptyList(),
             viewportSize = viewportSize,
+            reachesStart = true,
             reachesEnd = true,
         )
         canScrollBackwardState.value = false
         canScrollForwardState.value = false
         anchorKey = NoAnchorKey
         hasMeasuredItems = false
+        needsRemeasureAfterScroll = false
         requestedAnchorState.value = LazyAnchorRequest.None
     }
 }
@@ -223,6 +286,7 @@ internal data class LazyMeasuredWindow(
     val keys: List<Any>,
     val heights: List<Int>,
     val viewportSize: Int,
+    val reachesStart: Boolean,
     val reachesEnd: Boolean,
 ) {
     init {
@@ -272,3 +336,7 @@ internal data class LazyWindowAnchor(
 )
 
 private object NoAnchorKey
+
+internal fun interface LazyListRemeasurement {
+    fun forceRemeasure()
+}
