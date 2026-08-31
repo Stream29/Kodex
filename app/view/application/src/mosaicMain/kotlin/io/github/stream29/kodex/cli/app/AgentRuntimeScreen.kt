@@ -15,6 +15,11 @@ import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
@@ -272,7 +277,7 @@ internal fun boundedComposerRows(availableRows: Int, desiredRows: Int): Int {
 }
 
 internal fun pendingSteerPreviewLines(
-    pending: List<StableCleanEvent.Steerable>,
+    pending: List<StableIndexEvent.Steerable>,
     columns: Int,
     maximumRows: Int,
 ): List<String> {
@@ -294,11 +299,11 @@ internal fun pendingSteerPreviewLines(
     }
 }
 
-private fun StableCleanEvent.Steerable.previewText(): String = when (this) {
-    is StableCleanEvent.UserMessage -> content.previewContentText()
-    is StableCleanEvent.AssistantMessage -> "Assistant: ${content.previewContentText()}"
-    is StableCleanEvent.DeveloperMessage -> "Developer: ${content.previewContentText()}"
-    is StableCleanEvent.AgentMessage -> "$author → $recipient: ${content.previewAgentMessageText()}"
+private fun StableIndexEvent.Steerable.previewText(): String = when (this) {
+    is StableUserMessage -> content.previewContentText()
+    is StableAssistantMessage -> "Assistant: ${content.previewContentText()}"
+    is StableDeveloperMessage -> "Developer: ${content.previewContentText()}"
+    is StableAgentMessage -> "$author → $recipient: ${content.previewAgentMessageText()}"
 }.ifBlank { "[empty message]" }
 
 private fun List<ContentItem>.previewContentText(): String =

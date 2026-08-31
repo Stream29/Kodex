@@ -47,8 +47,8 @@ internal fun collectSessionTabRenderStates(
             val running = when (target) {
                 is NewSessionViewModel -> false
                 is PersistedSessionViewModel -> {
-                    val summary by target.summary.collectAsState()
-                    summary.rootRunning
+                    val execution by target.rootAgent.execution.collectAsState()
+                    execution.running
                 }
             }
             add(

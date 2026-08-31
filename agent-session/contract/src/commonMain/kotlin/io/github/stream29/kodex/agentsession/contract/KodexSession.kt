@@ -89,15 +89,15 @@ public interface KodexSessionRepository : CoroutineScope {
     public suspend fun create(): Int
 
     /**
-     * Materializes `[from, until)` from [source] as one unopened direct entry.
+     * Materializes a full copy of the source entry as one unopened direct entry.
+     *
+     * History range semantics are implemented by reverting the returned target
+     * after it has been opened. Backends may use their native full-copy
+     * primitive; this API does not expose a slow generic range copier.
      *
      * Implementations must remove the reserved entry if materialization fails.
      */
-    public suspend fun createFork(
-        source: KodexAgentStorage,
-        from: Int,
-        until: Int,
-    ): Int
+    public suspend fun createFork(sourceEntryIndex: Int): Int
 
     /** Opens one root Session entry. */
     public suspend fun open(entryIndex: Int): KodexAgentSession

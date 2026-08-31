@@ -2,8 +2,8 @@ package io.github.stream29.kodex.tool.viewimage
 
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingImageViewToolEvent
 import io.github.stream29.kodex.utils.images.ImageMimeType
 import io.github.stream29.kodex.utils.images.detectImageInfo

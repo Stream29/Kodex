@@ -1,6 +1,9 @@
 package io.github.stream29.kodex.cli.history
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewModel
 import kotlinx.coroutines.CancellationException
@@ -21,7 +24,7 @@ internal class ToolHistoryItemViewModelImpl(
     init {
         initialLoadingJob = context.launch(start = CoroutineStart.LAZY) {
             try {
-                val event = context.read(index)
+                val event = context.read(descriptor)
                 val tool = event as? StableCleanEvent.CompletedTool
                     ?: error("History item $index is not a completed tool.")
                 check(tool.isOrdinaryHistoryTool()) {
@@ -52,7 +55,7 @@ internal class ToolHistoryItemViewModelImpl(
         lateinit var loadingJob: Job
         loadingJob = context.launch(start = CoroutineStart.LAZY) {
             try {
-                val event = context.read(index)
+                val event = context.read(descriptor)
                 val tool = event as? StableCleanEvent.CompletedTool
                     ?: error("History item $index is not a completed tool.")
                 check(tool.isOrdinaryHistoryTool()) {
@@ -100,9 +103,9 @@ internal class ToolHistoryItemViewModelImpl(
 }
 
 internal fun StableCleanEvent.CompletedTool.isOrdinaryHistoryTool(): Boolean = when (this) {
-    is io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent,
-    is io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate,
-    is io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent,
+    is StablePatchToolEvent,
+    is StablePlanUpdate,
+    is StableRequestUserInputToolEvent,
         -> false
 
     else -> true

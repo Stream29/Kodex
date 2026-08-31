@@ -2,7 +2,8 @@ package io.github.stream29.kodex.agentstate.impl
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
@@ -59,13 +60,13 @@ val hostedWebSearchTest by testSuite {
         agent.requestResponseApi()
 
         assertEquals(1, requests.size)
-        assertEquals(StableCleanEvent.WebSearchCall(webSearchCall), storage.stable[2])
+        assertEquals(StableWebSearchCall(webSearchCall), storage.work[3])
         assertEquals(
-            StableCleanEvent.AssistantMessage(assistantMessage.content),
-            storage.stable[3],
+            StableAssistantMessage(assistantMessage.content),
+            storage.index[4],
         )
         assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
-        assertIs<StableCleanEvent.WebSearchCall>(storage.stable[2])
+        assertIs<StableWebSearchCall>(storage.work[3])
     }
     }
 }

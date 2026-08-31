@@ -11,7 +11,7 @@ import kotlin.time.Duration.Companion.milliseconds
 
 public class WorkGroupHistoryItemContractTest {
     @Test
-    public fun expandedStateAcceptsOnlyMultipleFoldableChildren() {
+    public fun expandedStateAcceptsAnyNonEmptyNewestFirstChildren() {
         val children = listOf<WorkGroupChildHistoryItemViewModel>(
             ReasoningHistoryItemViewModel(index = 10, elapsed = Duration.ZERO),
             TestToolHistoryItemViewModel(index = 7),
@@ -24,9 +24,16 @@ public class WorkGroupHistoryItemContractTest {
         )
 
         assertEquals(children, expanded.children)
-        assertFailsWith<IllegalArgumentException> {
+        assertEquals(
+            children.take(1),
             WorkGroupHistoryItemState.Expanded(
                 children = children.take(1),
+                elapsed = Duration.ZERO,
+            ).children,
+        )
+        assertFailsWith<IllegalArgumentException> {
+            WorkGroupHistoryItemState.Expanded(
+                children = emptyList(),
                 elapsed = Duration.ZERO,
             )
         }

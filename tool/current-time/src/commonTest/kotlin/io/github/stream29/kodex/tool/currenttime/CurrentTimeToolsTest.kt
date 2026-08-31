@@ -2,7 +2,7 @@ package io.github.stream29.kodex.tool.currenttime
 
 import de.infix.testBalloon.framework.core.testSuite
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.openai.ResponsesApiNamespace
 import io.github.stream29.kodex.tool.builder.ToolBuilderJson

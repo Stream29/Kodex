@@ -7,6 +7,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-state-contract"))
             api(project(":agent-context-contract"))
+            api(project(":agent-storage-contract-ext"))
             api(project(":mcp-contract"))
             api(project(":openai-client-contract"))
             api(libs.kotlinx.coroutines.core)

@@ -227,7 +227,7 @@ private class PosixProcess(
                         complete(exitCode)
                         return@launch
                     }
-                    delay(10.milliseconds)
+                    delay(InteractiveProcessPollInterval)
                 }
             } catch (failure: CancellationException) {
                 throw failure
@@ -477,6 +477,8 @@ private fun Int.setNonBlocking() {
     }
     checkPlatformResult(fcntl(this, F_SETFL, flags or O_NONBLOCK), "set process file descriptor non-blocking")
 }
+
+private val InteractiveProcessPollInterval = 16.milliseconds
 
 private fun checkPlatformResult(result: Int, operation: String) {
     if (result == -1) {

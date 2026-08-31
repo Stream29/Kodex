@@ -15,11 +15,10 @@ public interface PersistedSessionViewModel : SessionViewModel {
 
     public val rootAgent: AgentViewModel
 
-    public val summary: StateFlow<PersistedSessionSummaryState>
     public val lifecycle: StateFlow<PersistedSessionLifecycleState>
     public val notification: StateFlow<PersistedSessionNotification?>
 
-    /** Refreshes lightweight summary, name, and root settings. */
+    /** Refreshes the lightweight name projection from root settings. */
     public suspend fun refresh(): Unit
 
     /**

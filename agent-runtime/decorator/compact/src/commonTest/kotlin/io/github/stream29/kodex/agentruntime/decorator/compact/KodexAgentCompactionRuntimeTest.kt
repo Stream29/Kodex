@@ -8,11 +8,12 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
-import io.github.stream29.kodex.agentstorage.contract.latestValue
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.hook.contract.compaction.CompactionHookRequest
@@ -187,8 +188,8 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         assertRequestHistory(requests[0], user)
         assertRequestHistory(requests[1], user, assistantMessage("Preparing the answer."))
         assertEquals(
-            StableCleanEvent.AssistantMessage(assistantMessage("Done.").content),
-            storage.stable[5],
+            StableAssistantMessage(assistantMessage("Done.").content),
+            storage.index[4],
         )
         assertEquals(13, storage.tokenCount[5])
         assertEquals(5, storage.latestIndex())
@@ -272,7 +273,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
                 autoCompactionTokenLimit = 90,
             ),
         )
-        val initialCheckpoint = storage.compaction[0]
+        val initialCheckpoint = storage.index[0] as CleanCompactionPoint
         val compactRequests = mutableListOf<RecordedRemoteCompactionV2Request>()
         val responseRequests = mutableListOf<ResponsesApiRequest>()
         val compaction = ResponseItem.Compaction(encryptedContent = "pre-turn-compact")
@@ -318,7 +319,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         val user = userMessage("Keep this context.")
 
         state.appendUserMessage(user, tokenCount = 90)
-        val persistedTurnId = storage.settings.latestValue().turnId
+        val persistedTurnId = storage.settings[storage.latestIndex()].turnId
         runtime.resume()
 
         assertEquals(1, compactRequests.size)
@@ -329,17 +330,16 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         assertEquals(listOf(user, ResponseItem.CompactionTrigger), compactRequest.request.input)
         assertRequestHistory(responseRequests.single(), user, compaction)
         assertEquals(
-            StableCleanEvent.ContextCompaction(
+            StableContextCompaction(
                 id = compaction.id,
                 encryptedContent = compaction.encryptedContent,
             ),
-            storage.stable[2],
+            storage.work[4],
         )
-        assertEquals(StableCleanEvent.AssistantMessage(final.content), storage.stable[3])
-        assertEquals(2, storage.compaction[2].historyBaseIndex)
-        assertEquals(initialCheckpoint.windowNumber + 1, storage.compaction[2].windowNumber)
+        assertEquals(StableAssistantMessage(final.content), storage.index[5])
+        assertEquals(initialCheckpoint.windowNumber + 1, (storage.index[3] as CleanCompactionPoint).windowNumber)
         assertEquals(listOf(persistedTurnId, persistedTurnId), hookRequests.map { it.context.turnId })
-        assertEquals(persistedTurnId, storage.settings.latestValue().turnId)
+        assertEquals(persistedTurnId, storage.settings[storage.latestIndex()].turnId)
     }
 
     test("manual compaction runs observation hooks around the commit") {
@@ -375,7 +375,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             ),
         )
         state.appendUserMessage(userMessage("Compact this."))
-        val persistedTurnId = storage.settings.latestValue().turnId
+        val persistedTurnId = storage.settings[storage.latestIndex()].turnId
 
         val compactedIndex = runtime.compact(
             trigger = CompactionTrigger.Manual,
@@ -387,8 +387,8 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         assertEquals(listOf(1, compactedIndex), observedIndexes)
         assertEquals(persistedTurnId, storage.settings[compactedIndex].turnId)
         assertEquals(
-            StableCleanEvent.ContextCompaction(encryptedContent = "committed"),
-            storage.stable[compactedIndex],
+            StableContextCompaction(encryptedContent = "committed"),
+            storage.work[compactedIndex],
         )
         assertEquals(listOf(persistedTurnId, persistedTurnId), hookRequests.map { it.context.turnId })
     }
@@ -512,7 +512,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         )
         assertTrue(compactRequests.single().turnMetadata.contains("\"phase\":\"mid_turn\""))
         assertRequestHistory(responseRequests[1], user, compaction)
-        assertEquals(StableCleanEvent.AssistantMessage(final.content), storage.stable[5])
+        assertEquals(StableAssistantMessage(final.content), storage.index[8])
     }
 
     test("loop stops at pending tool call without issuing another request") {
@@ -555,7 +555,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
 
         assertEquals(1, requests.size)
         assertEquals(KodexAgentStateValue.ToolPending(listOf(pending)), state.state.value)
-        assertEquals(pending, storage.unstable[2].single())
+        assertEquals(pending, storage.unstable[3].single())
     }
     }
 }

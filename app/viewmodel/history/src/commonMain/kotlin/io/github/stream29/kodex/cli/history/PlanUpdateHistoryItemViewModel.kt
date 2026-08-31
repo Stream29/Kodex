@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.cli.history
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
 import io.github.stream29.kodex.app.history.contract.item.PlanUpdateHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.PlanUpdateHistoryItemViewModel
 import kotlinx.coroutines.CancellationException
@@ -20,7 +20,7 @@ internal class PlanUpdateHistoryItemViewModelImpl(
     init {
         loadingJob = context.launch(start = CoroutineStart.LAZY) {
             try {
-                val event = context.read(index) as? StablePlanUpdate
+                val event = context.read(descriptor) as? StablePlanUpdate
                     ?: error("History item $index is not a plan update.")
                 if (context.isCurrent()) {
                     mutableState.value = PlanUpdateHistoryItemState.Ready(

@@ -3,7 +3,7 @@ package io.github.stream29.kodex.cli.session
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
-import io.github.stream29.kodex.agentstorage.contract.initialize
+import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -26,9 +26,9 @@ val sessionRepositoryViewModelTest by testSuite {
             val newest = repository.create()
             initialize(repository, oldest, "Oldest")
             initialize(repository, newest, "Newest")
-            repository.open(oldest).storage.timestamp[1] =
+            repository.open(oldest).storage.timestamp[2] =
                 Instant.parse("2026-07-31T10:00:00Z")
-            repository.open(newest).storage.timestamp[1] =
+            repository.open(newest).storage.timestamp[2] =
                 Instant.parse("2026-07-31T10:05:00Z")
             val store = testSessionViewModelRegistry(repository, this)
             val catalog = createSessionCatalogViewModelFactory(

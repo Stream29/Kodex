@@ -85,7 +85,7 @@ private suspend fun ToolHookDescriptor.toInvocation(
 ): HookToolInvocation {
     val settings = storage.settings.latestValue()
     return HookToolInvocation(
-        context = settings.toHookTurnContext(storage.id),
+        context = settings.toHookTurnContext(storage.id, settings.turnId),
         toolName = toolName,
         toolUseId = toolUseId,
         input = input,

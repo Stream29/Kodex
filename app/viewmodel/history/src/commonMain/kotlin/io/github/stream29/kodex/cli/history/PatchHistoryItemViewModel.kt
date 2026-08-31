@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.cli.history
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
 import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemViewModel
 import kotlinx.coroutines.CancellationException
@@ -21,7 +21,7 @@ internal class PatchHistoryItemViewModelImpl(
     init {
         initialLoadingJob = context.launch(start = CoroutineStart.LAZY) {
             try {
-                val event = context.read(index) as? StablePatchToolEvent
+                val event = context.read(descriptor) as? StablePatchToolEvent
                     ?: error("History item $index is not a patch tool.")
                 if (context.isCurrent()) {
                     mutableState.value = PatchHistoryItemState.Collapsed(
@@ -48,7 +48,7 @@ internal class PatchHistoryItemViewModelImpl(
         lateinit var loadingJob: Job
         loadingJob = context.launch(start = CoroutineStart.LAZY) {
             try {
-                val event = context.read(index) as? StablePatchToolEvent
+                val event = context.read(descriptor) as? StablePatchToolEvent
                     ?: error("History item $index is not a patch tool.")
                 if (context.isCurrent() && mutableState.value.isExpanding(loadingJob)) {
                     mutableState.value = PatchHistoryItemState.Expanded(

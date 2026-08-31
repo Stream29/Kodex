@@ -3,6 +3,7 @@ package io.github.stream29.kodex.agentstate.contract
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
@@ -93,10 +94,6 @@ public val KodexAgentStateValue.canAppendUserMessage: Boolean
         this == KodexAgentStateValue.UserMessage ||
         this == KodexAgentStateValue.AssistantMessage ||
         this == KodexAgentStateValue.ToolCompleted
-
-/** Whether marking the start of a new logical turn is legal. */
-public val KodexAgentStateValue.canMarkNewTurn: Boolean
-    get() = canAppendUserMessage
 
 /** Whether requesting a Responses API continuation is legal. */
 public val KodexAgentStateValue.canRequestResponseApi: Boolean
@@ -226,23 +223,15 @@ public interface KodexAgentState : CoroutineScope {
      * transition in the supplied order. Pending calls must enter through a
      * model response, and pending completion must use [completeToolCall].
      */
-    public suspend fun injectHistory(events: List<StableCleanEvent>): Int
+    public suspend fun injectHistory(events: List<StableIndexEvent.Steerable>): Int
 
     /**
-     * Marks the next user message as the start of a new logical turn.
+     * Appends one user message and updates the settings turn id when it starts
+     * a new logical turn.
      *
-     * An empty agent already owns the initial turn id, so this is a no-op in
-     * [KodexAgentStateValue.Empty]. Other legal states atomically persist a new
-     * UUIDv7 turn id without changing conversation state.
-     */
-    public suspend fun markNewTurn(): Int
-
-    /**
-     * Appends one user message without changing the persisted turn id.
-     *
-     * A formal user submission starts with [markNewTurn], while a runtime
-     * inserting user input into the current turn calls this operation directly.
-     * A user-role context injection must use [injectHistory].
+     * A user message following an assistant commentary message continues the
+     * current turn. A user message following an assistant final message starts
+     * a new turn. A user-role context injection must use [injectHistory].
      */
     public suspend fun appendUserMessage(content: List<ContentItem>): Int
 

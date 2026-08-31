@@ -12,7 +12,6 @@ import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.forkRangeTo
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
@@ -97,15 +96,12 @@ public class InMemoryKodexSessionRepository internal constructor(
         index
     }
 
-    override suspend fun createFork(
-        source: KodexAgentStorage,
-        from: Int,
-        until: Int,
-    ): Int = entriesMutex.withLock {
+    override suspend fun createFork(sourceEntryIndex: Int): Int = entriesMutex.withLock {
         requireOpen()
+        val source = requireSession(sourceEntryIndex).storage
         val index = nextSessionIndex()
         val storage = InMemoryKodexAgentStorage.empty()
-        source.forkRangeTo(from, until, storage)
+        cloneStorage(source, storage)
         sessions[index] = SessionNode(storage)
         mutableEntries.value = (entries.value + index).sorted()
         index
@@ -250,11 +246,11 @@ private class SessionAgentStorage(
     delegate: InMemoryKodexAgentStorage,
 ) : MutableKodexAgentStorage {
     override val id: String = delegate.id
-    override val compaction = SessionIndexVersioned(parentScope, delegate.compaction)
+    override val index = SessionIndexVersioned(parentScope, delegate.index)
+    override val work = SessionIndexVersioned(parentScope, delegate.work)
     override val settings = SessionIndexVersioned(parentScope, delegate.settings)
     override val timestamp = SessionIndexVersioned(parentScope, delegate.timestamp)
     override val tokenCount = SessionIndexVersioned(parentScope, delegate.tokenCount)
-    override val stable = SessionIndexVersioned(parentScope, delegate.stable)
     override val unstable = SessionIndexVersioned(parentScope, delegate.unstable)
 }
 
@@ -275,6 +271,11 @@ private class SessionIndexVersioned<T>(
         return delegate[index]
     }
 
+    override suspend fun getExact(index: Int): T? {
+        requireActive()
+        return delegate.getExact(index)
+    }
+
     override suspend fun floorToIndex(index: Int): Int? {
         requireActive()
         return delegate.floorToIndex(index)
@@ -283,6 +284,16 @@ private class SessionIndexVersioned<T>(
     override suspend fun ceilToIndex(index: Int): Int? {
         requireActive()
         return delegate.ceilToIndex(index)
+    }
+
+    override suspend fun indexesIn(range: IntRange): List<Int> {
+        requireActive()
+        return delegate.indexesIn(range)
+    }
+
+    override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>> {
+        requireActive()
+        return delegate.valuesIn(range)
     }
 
     override suspend fun set(index: Int, value: T) {
@@ -301,5 +312,26 @@ private class SessionIndexVersioned<T>(
 
     private fun requireActive() {
         check(coroutineContext[Job]?.isActive == true) { "AgentSession timeline is closed." }
+    }
+}
+
+private suspend fun cloneStorage(
+    source: KodexAgentStorage,
+    target: MutableKodexAgentStorage,
+) {
+    cloneTimeline(source.index, target.index)
+    cloneTimeline(source.work, target.work)
+    cloneTimeline(source.settings, target.settings)
+    cloneTimeline(source.timestamp, target.timestamp)
+    cloneTimeline(source.tokenCount, target.tokenCount)
+    cloneTimeline(source.unstable, target.unstable)
+}
+
+private suspend fun <T> cloneTimeline(
+    source: io.github.stream29.kodex.agentstorage.contract.IndexVersioned<T>,
+    target: MutableIndexVersioned<T>,
+) {
+    for (index in source.indexesIn(0..Int.MAX_VALUE)) {
+        target.set(index, requireNotNull(source.getExact(index)))
     }
 }

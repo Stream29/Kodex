@@ -4,6 +4,8 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentcontext.prefix.render.renderPlanningInstructions
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
@@ -80,8 +82,8 @@ val agentContextProjectionTest by testSuite {
                     ),
                 )
                 assertEquals(user, input.last())
-                assertEquals(StableCleanEvent.UserMessage(user.content), storage.stable[1])
-                assertEquals(1, storage.stable.latestIndex())
+                assertEquals(StableUserMessage(user.content), storage.index[1])
+                assertEquals(1, storage.index.latestIndex())
                 assertEquals(1, storage.latestIndex())
             } finally {
                 deleteRecursively(fixture.root)
@@ -186,15 +188,11 @@ val agentContextProjectionTest by testSuite {
                     assertIs<ToolSpec.ToolSearch>(compactionRequests.single().tools.last())
                 assertTrue(toolSearchSpec.description.contains("- projection: Projection tools."))
                 assertFalse(compactionRequests.single().hasRequestUserInputTool())
-                assertEquals(2, compactIndex)
-                assertEquals(StableCleanEvent.UserMessage(user.content), storage.stable[1])
+                assertEquals(3, compactIndex)
+                assertEquals(StableUserMessage(user.content), storage.index[1])
                 assertEquals(
-                    StableCleanEvent.ContextCompaction(encryptedContent = "compacted"),
-                    storage.stable[compactIndex],
-                )
-                assertEquals(
-                    listOf(StableCleanEvent.UserMessage(user.content)),
-                    storage.compaction[compactIndex].prefix,
+                    StableContextCompaction(encryptedContent = "compacted"),
+                    storage.work[compactIndex],
                 )
             } finally {
                 deleteRecursively(fixture.root)

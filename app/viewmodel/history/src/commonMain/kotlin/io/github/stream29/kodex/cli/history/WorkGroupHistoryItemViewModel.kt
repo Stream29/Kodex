@@ -11,26 +11,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * A collapsed group retains descriptors, not nested VMs. Expanded children are group-local and
- * released when the group closes, keeping the collapsed resource footprint minimal.
+ * A collapsed group retains only its sparse range, count, and elapsed time. Work payloads and
+ * nested VMs are created only on explicit expansion, then released when the group closes.
  */
 internal class WorkGroupHistoryItemViewModelImpl(
-    descriptors: List<HistoryItemDescriptor>,
+    override val indexRange: IntRange,
+    override val itemCount: Int,
     private val groupElapsed: kotlin.time.Duration,
     private val context: HistoryItemLoadContext,
-    private val childFactory: (HistoryItemDescriptor) -> WorkGroupChildHistoryItemViewModel,
+    private val childFactory: suspend () -> List<WorkGroupChildHistoryItemViewModel>,
 ) : WorkGroupHistoryItemViewModel, LoadableHistoryItem {
-    private val descriptors = descriptors.toList()
-
     init {
-        require(this.descriptors.size > 1)
-        require(this.descriptors.all(HistoryItemDescriptor::isFoldable))
+        require(!indexRange.isEmpty())
+        require(itemCount > 0)
     }
-
-    override val indexRange: IntRange =
-        descriptors.last().index..descriptors.first().index
-
-    override val itemCount: Int = descriptors.size
 
     private val mutableState: MutableStateFlow<WorkGroupHistoryItemState>
     private val initialLoadingJob: Job
@@ -57,7 +51,11 @@ internal class WorkGroupHistoryItemViewModelImpl(
             var children: List<WorkGroupChildHistoryItemViewModel> = emptyList()
             var retainedByExpandedState = false
             try {
-                children = descriptors.map(childFactory)
+                children = childFactory()
+                check(children.size == itemCount) {
+                    "History work group $indexRange expected $itemCount children, " +
+                        "but loaded ${children.size}."
+                }
                 children.forEach { child -> child.ensureLoaded() }
                 if (context.isCurrent() && mutableState.value.isExpanding(loadingJob)) {
                     mutableState.value = WorkGroupHistoryItemState.Expanded(
@@ -84,6 +82,10 @@ internal class WorkGroupHistoryItemViewModelImpl(
 
     override fun collapse() {
         when (val current = mutableState.value) {
+            is WorkGroupHistoryItemState.Loading -> {
+                current.loadingJob.cancel()
+            }
+
             is WorkGroupHistoryItemState.Expanding -> {
                 current.loadingJob.cancel()
                 mutableState.value = WorkGroupHistoryItemState.Collapsed(current.elapsed)

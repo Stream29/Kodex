@@ -13,9 +13,9 @@ import kotlin.time.Duration
 /**
  * One immutable newest-first snapshot of the materialized history-item window.
  *
- * The window is the only first-level collection exposed to the View. Its implementation owns the
- * persistent index and requests older projection when the renderer reads near its older edge.
- * Individual item ViewModels remain alive across window publication and viewport changes.
+ * The window is the only first-level collection exposed to the View. The renderer requests
+ * adjacent storage chunks when either edge enters the viewport. The implementation may evict the
+ * opposite edge, including its item ViewModels, after preserving the visible LazyColumn anchor.
  */
 @Stable
 public interface HistoryItemWindow {
@@ -24,22 +24,32 @@ public interface HistoryItemWindow {
 
     public val size: Int
 
+    public val hasOlder: Boolean
+
+    public val hasNewer: Boolean
+
     /** Returns an already materialized child without registering viewport demand. */
     public fun peek(index: Int): HistoryItemViewModel
 
-    /** Returns a child and registers demand near the loaded older edge. */
+    /** Returns a child and starts its payload loading if necessary. */
     public operator fun get(index: Int): HistoryItemViewModel
+
+    /** Requests the adjacent older structural chunk. Duplicate in-flight demand is ignored. */
+    public fun requestOlder()
+
+    /** Requests the adjacent newer structural chunk. Duplicate in-flight demand is ignored. */
+    public fun requestNewer()
 }
 
 /** Current structural loading state of the materialized history sequence. */
 public sealed interface AgentHistoryLoadState {
     public data object Initializing : AgentHistoryLoadState
 
-    public data class Ready(
-        public val hasOlder: Boolean,
-    ) : AgentHistoryLoadState
+    public data object Ready : AgentHistoryLoadState
 
     public data object LoadingOlder : AgentHistoryLoadState
+
+    public data object LoadingNewer : AgentHistoryLoadState
 
     public data class Failed(
         public val message: String,

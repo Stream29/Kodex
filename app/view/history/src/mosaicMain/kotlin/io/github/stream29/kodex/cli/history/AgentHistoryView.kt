@@ -28,6 +28,7 @@ import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
+import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingKind
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryAction
@@ -48,7 +49,6 @@ import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistor
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemHeader
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewModel
-import io.github.stream29.kodex.app.history.contract.item.TurnTimeMarkerHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
 import io.github.stream29.kodex.cli.components.LazyColumn
@@ -126,53 +126,75 @@ public fun AgentHistoryView(
             pending[position].render(shellSessions)
         }
 
+        if (historyItems.hasNewer && loadState == AgentHistoryLoadState.Ready) {
+            item(key = NewerHistoryDemandKey) {
+                HistoryEdgeDemandEffect(
+                    historyItems = historyItems,
+                    listState = model.listState,
+                    edgePosition = 0,
+                    request = historyItems::requestNewer,
+                )
+            }
+        } else if (loadState is AgentHistoryLoadState.LoadingNewer) {
+            item(key = NewerHistoryLoadingKey) {}
+        }
+
         items(
             count = historyItems.size,
             key = historyItems::peek,
             contentType = { position -> historyItems.peek(position).historyContentType() },
         ) { position ->
             val item = historyItems[position]
-            if (item is TurnTimeMarkerHistoryItemViewModel) {
-                HistoryTurnTimeMarkerRow(item.duration)
-            } else {
-                val focusRequester = remember(item) { FocusRequester() }
-                DisposableEffect(item, focusRequester) {
-                    entryFocusRequesters[item] = focusRequester
-                    onDispose {
-                        if (entryFocusRequesters[item] === focusRequester) {
-                            entryFocusRequesters.remove(item)
-                        }
+            val focusRequester = remember(item) { FocusRequester() }
+            DisposableEffect(item, focusRequester) {
+                entryFocusRequesters[item] = focusRequester
+                onDispose {
+                    if (entryFocusRequesters[item] === focusRequester) {
+                        entryFocusRequesters.remove(item)
                     }
                 }
-                if (item is WorkGroupHistoryItemViewModel) {
-                    StoredHistoryWorkGroup(
-                        group = item,
-                        generation = generation,
-                        focusRequester = focusRequester,
-                        shellSessions = shellSessions,
-                        onOpenContextMenu = onOpenEntryContextMenu,
-                    )
-                } else {
-                    StoredHistoryEntry(
-                        item = item,
-                        generation = generation,
-                        focusRequester = focusRequester,
-                        shellSessions = shellSessions,
-                        onOpenContextMenu = onOpenEntryContextMenu,
-                    )
-                }
+            }
+            if (item is WorkGroupHistoryItemViewModel) {
+                StoredHistoryWorkGroup(
+                    group = item,
+                    generation = generation,
+                    focusRequester = focusRequester,
+                    shellSessions = shellSessions,
+                    onOpenContextMenu = onOpenEntryContextMenu,
+                )
+            } else {
+                StoredHistoryEntry(
+                    item = item,
+                    generation = generation,
+                    focusRequester = focusRequester,
+                    shellSessions = shellSessions,
+                    onOpenContextMenu = onOpenEntryContextMenu,
+                )
+            }
+        }
+
+        if (historyItems.hasOlder && loadState == AgentHistoryLoadState.Ready) {
+            item(key = OlderHistoryDemandKey) {
+                HistoryEdgeDemandEffect(
+                    historyItems = historyItems,
+                    listState = model.listState,
+                    edgePosition = historyItems.size - 1,
+                    request = historyItems::requestOlder,
+                )
             }
         }
 
         when (val state = loadState) {
-            AgentHistoryLoadState.Initializing,
-            AgentHistoryLoadState.LoadingOlder,
-                -> item(
+            AgentHistoryLoadState.Initializing -> item(
                 key = HistoryMarkerKey(generation, HistoryMarker.Loading),
                 contentType = HistoryContentType.Marker,
             ) {
                 HistoryMarkerText("Loading history…")
             }
+
+            AgentHistoryLoadState.LoadingOlder -> item(key = OlderHistoryLoadingKey) {}
+
+            AgentHistoryLoadState.LoadingNewer -> Unit
 
             is AgentHistoryLoadState.Failed -> item(
                 key = HistoryMarkerKey(generation, HistoryMarker.Failure),
@@ -184,12 +206,13 @@ public fun AgentHistoryView(
                 )
             }
 
-            is AgentHistoryLoadState.Ready -> {
+            AgentHistoryLoadState.Ready -> {
                 if (
                     streamingItem == null &&
                     pendingTools.isEmpty() &&
                     historyItems.size == 0 &&
-                    !state.hasOlder
+                    !historyItems.hasOlder &&
+                    !historyItems.hasNewer
                 ) {
                     item(
                         key = HistoryMarkerKey(generation, HistoryMarker.Empty),
@@ -200,6 +223,23 @@ public fun AgentHistoryView(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun HistoryEdgeDemandEffect(
+    historyItems: HistoryItemWindow,
+    listState: LazyListState,
+    edgePosition: Int,
+    request: () -> Unit,
+) {
+    if (edgePosition !in 0 until historyItems.size) return
+    val edgeItem = historyItems.peek(edgePosition)
+    LaunchedEffect(historyItems, edgeItem, listState) {
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.any { item -> item.key === edgeItem }
+        }.first { visible -> visible }
+        request()
     }
 }
 
@@ -257,7 +297,6 @@ internal fun LazyListLayoutInfo.historyPageFocusItem(
 ): HistoryItemViewModel? {
     val candidates = visibleItemsInfo.filter { item ->
         item.key is HistoryItemViewModel &&
-            item.key !is TurnTimeMarkerHistoryItemViewModel &&
             item.key !is WorkGroupHistoryItemViewModel &&
             item.offset >= viewportStartOffset &&
             item.offset + item.size <= viewportEndOffset
@@ -311,7 +350,12 @@ internal fun StoredHistoryWorkGroup(
                     modifier = Modifier.fillMaxWidth(),
                 ) { _, isHovered, isPressed ->
                     HistoryItemHeader(
-                        value = "${if (expanded) "v" else ">"} Take ${group.itemCount} actions",
+                        value = buildString {
+                            append(if (expanded) "v" else ">")
+                            append(" Take ")
+                            append(group.itemCount)
+                            append(if (group.itemCount == 1) " action" else " actions")
+                        },
                         elapsed = elapsed,
                         modifier = Modifier.fillMaxWidth(),
                         textStyle = tuiInteractionTextStyle(
@@ -391,11 +435,18 @@ private fun StoredHistoryContent(
             when (val currentState = state) {
                 is MessageHistoryItemState.Loading -> Text("")
                 MessageHistoryItemState.Failed -> HistoryErrorRow()
-                is MessageHistoryItemState.Ready -> currentState.event.render(
-                    shellSessions = shellSessions,
-                    expansion = null,
-                    elapsed = currentState.elapsed,
-                )
+                is MessageHistoryItemState.Ready -> Column(
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    currentState.event.render(
+                        shellSessions = shellSessions,
+                        expansion = null,
+                        elapsed = currentState.elapsed,
+                    )
+                    currentState.turnDuration?.let { duration ->
+                        HistoryTurnTimeMarkerRow(duration)
+                    }
+                }
             }
         }
 
@@ -483,7 +534,6 @@ private fun StoredHistoryContent(
             }
         }
 
-        is TurnTimeMarkerHistoryItemViewModel,
         is WorkGroupHistoryItemViewModel,
             -> error("Virtual history rows are rendered by their owning branch.")
     }
@@ -666,7 +716,6 @@ private fun HistoryItemViewModel.storageIndex(): Int = when (this) {
     is PatchHistoryItemViewModel -> index
     is PlanUpdateHistoryItemViewModel -> index
     is ContextCompactionHistoryItemViewModel -> index
-    is TurnTimeMarkerHistoryItemViewModel,
     is WorkGroupHistoryItemViewModel,
         -> error("A virtual history item has no context-menu storage index.")
 }
@@ -681,7 +730,6 @@ private fun HistoryItemViewModel.historyContentType(): HistoryContentType = when
 
     is PatchHistoryItemViewModel -> HistoryContentType.Patch
     is ContextCompactionHistoryItemViewModel -> HistoryContentType.Context
-    is TurnTimeMarkerHistoryItemViewModel -> HistoryContentType.TurnTimeMarker
     is WorkGroupHistoryItemViewModel -> HistoryContentType.WorkGroup
 }
 
@@ -727,6 +775,14 @@ private data class HistoryMarkerKey(
     val marker: HistoryMarker,
 )
 
+private data object OlderHistoryDemandKey
+
+private data object OlderHistoryLoadingKey
+
+private data object NewerHistoryDemandKey
+
+private data object NewerHistoryLoadingKey
+
 private enum class HistoryMarker {
     Loading,
     Failure,
@@ -745,7 +801,6 @@ private enum class HistoryContentType {
     Patch,
     Context,
     WorkGroup,
-    TurnTimeMarker,
     Marker,
 }
 

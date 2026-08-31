@@ -13,6 +13,7 @@ kotlin {
             implementation(project(":utils-coroutines"))
         }
         commonTest.dependencies {
+            implementation(project(":agent-storage-contract-ext"))
             implementation(project(":agent-session-test"))
             implementation(project(":openai-client-test"))
             implementation(project(":openai-json-codec"))

@@ -20,25 +20,35 @@ import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionAction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableInvalidToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableJsonToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableMcpToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableReasoning
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableServerToolSearch
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableToolSearchEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
@@ -112,16 +122,16 @@ internal fun StableCleanEvent.render(
         LocalHistoryElapsed provides elapsed,
     ) {
         when (this) {
-            is StableCleanEvent.UserMessage -> renderUserMessage()
-            is StableCleanEvent.AssistantMessage -> renderAssistantMessage()
-            is StableCleanEvent.DeveloperMessage -> renderDeveloperMessage()
-            is StableCleanEvent.AgentMessage -> renderAgentMessage()
-            is StableCleanEvent.Reasoning -> renderReasoning()
-            is StableCleanEvent.InvalidToolCall -> renderInvalidToolCall()
-            is StableCleanEvent.ServerToolSearch -> renderServerToolSearch()
-            is StableCleanEvent.WebSearchCall -> renderHostedWebSearch()
-            is StableCleanEvent.ImageGenerationCall -> renderHostedImageGeneration()
-            is StableCleanEvent.ContextCompaction -> ContextCompactionEvent()
+            is StableUserMessage -> renderUserMessage()
+            is StableAssistantMessage -> renderAssistantMessage()
+            is StableDeveloperMessage -> renderDeveloperMessage()
+            is StableAgentMessage -> renderAgentMessage()
+            is StableReasoning -> renderReasoning()
+            is StableInvalidToolCall -> renderInvalidToolCall()
+            is StableServerToolSearch -> renderServerToolSearch()
+            is StableWebSearchCall -> renderHostedWebSearch()
+            is StableImageGenerationCall -> renderHostedImageGeneration()
+            is StableContextCompaction -> ContextCompactionEvent()
             is StablePatchToolEvent -> StablePatchToolEventView(
                 event = this,
                 expanded = expansion?.expanded?.invoke(),
@@ -251,12 +261,12 @@ public fun UnstableCleanEvent.render(
 }
 
 @Composable
-private fun StableCleanEvent.UserMessage.renderUserMessage() {
+private fun StableUserMessage.renderUserMessage() {
     MessageEvent("User", content, detailStyle = TextStyle.Unspecified)
 }
 
 @Composable
-private fun StableCleanEvent.AssistantMessage.renderAssistantMessage() {
+private fun StableAssistantMessage.renderAssistantMessage() {
     MessageEvent(
         header = "Assistant",
         content = content,
@@ -265,12 +275,12 @@ private fun StableCleanEvent.AssistantMessage.renderAssistantMessage() {
 }
 
 @Composable
-private fun StableCleanEvent.DeveloperMessage.renderDeveloperMessage() {
+private fun StableDeveloperMessage.renderDeveloperMessage() {
     MessageEvent("Developer", content, detailStyle = TextStyle.Dim)
 }
 
 @Composable
-private fun StableCleanEvent.AgentMessage.renderAgentMessage() {
+private fun StableAgentMessage.renderAgentMessage() {
     Column(modifier = Modifier.fillMaxWidth()) {
         Header("Agent $author → $recipient", TextStyle.Bold)
         content.forEach { part ->
@@ -283,7 +293,7 @@ private fun StableCleanEvent.AgentMessage.renderAgentMessage() {
 }
 
 @Composable
-private fun StableCleanEvent.Reasoning.renderReasoning() {
+private fun StableReasoning.renderReasoning() {
     ExpandableHistoryEvent(
         header = "Think",
         expansionKey = item.id?.value ?: "reasoning",
@@ -294,7 +304,7 @@ private fun StableCleanEvent.Reasoning.renderReasoning() {
 }
 
 @Composable
-private fun StableCleanEvent.InvalidToolCall.renderInvalidToolCall() {
+private fun StableInvalidToolCall.renderInvalidToolCall() {
     ToolEvent(
         summary = "Model emitted an invalid tool call",
         rawName = invocation.displayName(),
@@ -307,7 +317,7 @@ private fun StableCleanEvent.InvalidToolCall.renderInvalidToolCall() {
 }
 
 @Composable
-private fun StableCleanEvent.ServerToolSearch.renderServerToolSearch() {
+private fun StableServerToolSearch.renderServerToolSearch() {
     ToolEvent(
         summary = call.arguments.serverToolSearchSummary(failed = output.status == "failed"),
         rawName = "server_tool_search",
@@ -320,7 +330,7 @@ private fun StableCleanEvent.ServerToolSearch.renderServerToolSearch() {
 }
 
 @Composable
-private fun StableCleanEvent.WebSearchCall.renderHostedWebSearch() {
+private fun StableWebSearchCall.renderHostedWebSearch() {
     ToolEvent(
         summary = item.action?.toolSummary(failed = item.status == "failed")
             ?: if (item.status == "failed") "Failed to search the web" else "Search the web",
@@ -335,7 +345,7 @@ private fun StableCleanEvent.WebSearchCall.renderHostedWebSearch() {
 }
 
 @Composable
-private fun StableCleanEvent.ImageGenerationCall.renderHostedImageGeneration() {
+private fun StableImageGenerationCall.renderHostedImageGeneration() {
     ToolEvent(
         summary = item.revisedPrompt?.imageGenerationSummary(failed = item.status == "failed")
             ?: if (item.status == "failed") "Failed to generate an image" else "Generate an image",

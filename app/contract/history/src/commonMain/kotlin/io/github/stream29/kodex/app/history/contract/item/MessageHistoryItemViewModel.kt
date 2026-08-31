@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.app.history.contract.item
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Duration
@@ -25,11 +25,14 @@ public sealed interface MessageHistoryItemState {
 
     /** The View can render the complete message without another storage read. */
     public data class Ready(
-        public val event: StableCleanEvent.Steerable,
+        public val event: StableIndexEvent.Steerable,
         public val elapsed: Duration,
+        /** Complete turn duration rendered below a final assistant message. */
+        public val turnDuration: Duration? = null,
     ) : MessageHistoryItemState {
         init {
             requireHistoryItemElapsed(elapsed)
+            turnDuration?.let(::requireHistoryItemElapsed)
         }
     }
 

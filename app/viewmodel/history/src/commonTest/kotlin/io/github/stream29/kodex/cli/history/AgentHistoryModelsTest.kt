@@ -3,10 +3,11 @@ package io.github.stream29.kodex.cli.history
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
-import io.github.stream29.kodex.agentstorage.contract.initialize
+import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
@@ -21,7 +22,6 @@ import io.github.stream29.kodex.app.history.contract.item.ReasoningHistoryItemVi
 import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewModel
-import io.github.stream29.kodex.app.history.contract.item.TurnTimeMarkerHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
 import io.github.stream29.kodex.cli.components.ScrollInputSource
@@ -52,63 +52,14 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 val agentHistoryModelsTest by testSuite {
-    test("projects only multi-item sealed work runs") {
-        val projected = projectSealedHistory(
-            listOf(
-                descriptor(20, HistoryItemKind.Message),
-                descriptor(19, HistoryItemKind.Reasoning),
-                descriptor(18, HistoryItemKind.Patch),
-                descriptor(17, HistoryItemKind.Tool),
-                descriptor(16, HistoryItemKind.PlanUpdate),
-                descriptor(15, HistoryItemKind.Reasoning),
-                descriptor(14, HistoryItemKind.ContextCompaction),
-                descriptor(13, HistoryItemKind.Tool),
-                descriptor(12, HistoryItemKind.Patch),
-                descriptor(11, HistoryItemKind.RequestUserInput),
-                descriptor(10, HistoryItemKind.Tool),
-            ),
-        )
-
-        assertEquals(8, projected.size)
-        assertStableDescriptor(projected[0], index = 20, kind = HistoryItemKind.Message)
-        assertGroup(projected[1], indexes = listOf(19, 18, 17))
-        assertStableDescriptor(projected[2], index = 16, kind = HistoryItemKind.PlanUpdate)
-        assertStableDescriptor(projected[3], index = 15, kind = HistoryItemKind.Reasoning)
-        assertStableDescriptor(projected[4], index = 14, kind = HistoryItemKind.ContextCompaction)
-        assertGroup(projected[5], indexes = listOf(13, 12))
-        assertStableDescriptor(projected[6], index = 11, kind = HistoryItemKind.RequestUserInput)
-        assertStableDescriptor(projected[7], index = 10, kind = HistoryItemKind.Tool)
-    }
-
-    test("keeps the newest foldable prefix open") {
-        val projection = projectNewestHistory(
-            listOf(
-                descriptor(30, HistoryItemKind.Reasoning),
-                descriptor(29, HistoryItemKind.Tool),
-                descriptor(28, HistoryItemKind.Message),
-                descriptor(27, HistoryItemKind.Tool),
-                descriptor(26, HistoryItemKind.Patch),
-            ),
-        )
-
-        assertEquals(
-            listOf(30, 29),
-            projection.openItems.map { item ->
-                assertIs<HistoryProjectionItem.Stable>(item).descriptor.index
-            },
-        )
-        assertStableDescriptor(projection.sealedItems[0], 28, HistoryItemKind.Message)
-        assertGroup(projection.sealedItems[1], indexes = listOf(27, 26))
-    }
-
     test("loads sparse history items newest-first and retains item state") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                storage.stable[1] = userMessage("one")
-                storage.stable[4] = userMessage("four")
-                storage.stable[9] = userMessage("nine")
+                storage.index[1] = userMessage("one")
+                storage.index[4] = userMessage("four")
+                storage.index[9] = userMessage("nine")
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
@@ -122,7 +73,7 @@ val agentHistoryModelsTest by testSuite {
                 val message = assertIs<MessageHistoryItemViewModel>(window[0])
                 val ready = awaitState(message.state) { state -> state is MessageHistoryItemState.Ready }
                 assertEquals(9, message.index)
-                assertIs<StableCleanEvent.UserMessage>(
+                assertIs<StableUserMessage>(
                     (ready as MessageHistoryItemState.Ready).event,
                 )
                 assertSame(message, model.historyItems.value.peek(0))
@@ -138,9 +89,10 @@ val agentHistoryModelsTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                storage.stable[1] = textTool("older")
-                storage.stable[2] = textTool("newer")
-                storage.stable[3] = userMessage("breaker")
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                storage.work[2] = textTool("older")
+                storage.work[3] = textTool("newer")
+                storage.index[4] = userMessage("breaker")
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
@@ -157,7 +109,7 @@ val agentHistoryModelsTest by testSuite {
                 val expanded = awaitState(group.state) { state ->
                     state is WorkGroupHistoryItemState.Expanded
                 } as WorkGroupHistoryItemState.Expanded
-                assertEquals(listOf(2, 1), expanded.children.map { child -> child.index })
+                assertEquals(listOf(3, 2), expanded.children.map { child -> child.index })
 
                 val newestTool = assertIs<ToolHistoryItemViewModel>(expanded.children[0])
                 assertIs<ToolHistoryItemState.Collapsed>(
@@ -188,13 +140,44 @@ val agentHistoryModelsTest by testSuite {
         }
     }
 
+    test("expands a singleton sealed work group") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify { storage ->
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                storage.index[1] = userMessage("prompt")
+                storage.work[2] = textTool("only")
+                storage.index[3] = userMessage("breaker")
+            }
+            val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+            try {
+                model.awaitReady(itemCount = 3, hasOlder = false)
+                val group = assertIs<WorkGroupHistoryItemViewModel>(
+                    model.historyItems.value[1],
+                )
+                assertEquals(1, group.itemCount)
+                awaitState(group.state) { it is WorkGroupHistoryItemState.Collapsed }
+                group.expand()
+                val expanded = awaitState(group.state) { state ->
+                    state is WorkGroupHistoryItemState.Expanded
+                } as WorkGroupHistoryItemState.Expanded
+                assertEquals(listOf(2), expanded.children.map { child -> child.index })
+            } finally {
+                model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
     test("sealing the newest run releases its previously materialized item VMs") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                storage.stable[1] = textTool("older")
-                storage.stable[2] = textTool("newer")
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                storage.work[2] = textTool("older")
+                storage.work[3] = textTool("newer")
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
@@ -211,7 +194,7 @@ val agentHistoryModelsTest by testSuite {
                 )
 
                 runtime.modify { storage ->
-                    storage.stable[3] = userMessage("breaker")
+                    storage.index[4] = userMessage("breaker")
                 }
                 val sealedWindow = model.awaitHistoryItems { window ->
                     window.size == 2 &&
@@ -236,19 +219,111 @@ val agentHistoryModelsTest by testSuite {
         }
     }
 
+    test("publishes a new index event without a following work event") {
+        coroutineScope {
+            val workCount = 2_000
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify { storage ->
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                repeat(workCount) { position ->
+                    storage.work[position + 1] = textTool("work-$position")
+                }
+                storage.index[workCount + 1] = userMessage("previous")
+            }
+            val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+            try {
+                model.awaitReady(itemCount = 2, hasOlder = false)
+
+                val newIndex = workCount + 2
+                runtime.modify { storage ->
+                    storage.index[newIndex] = userMessage("new")
+                }
+
+                val window = model.awaitHistoryItems { history ->
+                    history.size >= 1 && history.peek(0).storageIndex == newIndex
+                }
+                assertIs<MessageHistoryItemViewModel>(window.peek(0))
+            } finally {
+                model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("unmeasured History does not retain obsolete latest chunks") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify { storage ->
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+            }
+            val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+            try {
+                model.awaitReady(itemCount = 0, hasOlder = false)
+
+                repeat(20) { position ->
+                    val index = position + 1
+                    runtime.modify { storage ->
+                        storage.index[index] = userMessage("$index")
+                    }
+                    val window = model.awaitHistoryItems { history ->
+                        history.size > 0 && history.peek(0).storageIndex == index
+                    }
+                    assertEquals(1, window.size)
+                }
+            } finally {
+                model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("keeps a newly appended work event materialized in the open prefix") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify { storage ->
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                storage.index[1] = userMessage("previous")
+            }
+            val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+            try {
+                model.awaitReady(itemCount = 1, hasOlder = false)
+
+                runtime.modify { storage ->
+                    storage.work[2] = textTool("new")
+                }
+
+                val window = model.awaitHistoryItems { history ->
+                    history.size > 0 && history.peek(0) is ToolHistoryItemViewModel
+                }
+                assertEquals(1, window.size)
+                assertTrue(window.hasOlder)
+            } finally {
+                model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
     test("uses zero for the first item and exact non-negative elapsed values") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                storage.stable[1] = userMessage("one")
+                storage.index[1] = userMessage("one")
                 storage.timestamp[1] = Instant.fromEpochSeconds(100)
-                storage.stable[4] = userMessage("four")
+                storage.index[4] = userMessage("four")
                 storage.timestamp[4] = Instant.fromEpochSeconds(111)
-                storage.stable[9] = userMessage("nine")
+                storage.index[9] = userMessage("nine")
                 storage.timestamp[9] = Instant.fromEpochSeconds(125)
             }
-            val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+            val model = createAgentHistoryViewModel(
+                agentState = runtime,
+                ownerScope = supervisorChildScope(),
+                runningTurn = MutableStateFlow(Job()),
+            )
             try {
                 model.awaitReady(itemCount = 3, hasOlder = false)
                 val window = model.historyItems.value
@@ -266,25 +341,30 @@ val agentHistoryModelsTest by testSuite {
         }
     }
 
-    test("projects a completed turn footer into the stable timeline") {
+    test("attaches a completed turn footer to its final assistant message") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 val firstTurn = KodexAgentSettings(
                     model = OpenAiModelId("test-model"),
-                    turnId = "turn-1",
                 )
                 storage.initialize(firstTurn)
                 val turnStart = storage.timestamp[0]
                 storage.timestamp[1] = turnStart + 10.seconds
-                storage.stable[1] = userMessage("first")
+                storage.index[1] = userMessage("first")
                 storage.timestamp[2] = turnStart + 30.seconds
-                storage.stable[2] = textTool("first-tool")
+                storage.work[2] = textTool("first-tool")
                 storage.timestamp[3] = turnStart + 40.seconds
-                storage.settings[3] = firstTurn.copy(turnId = "turn-2")
+                storage.index[3] = StableAssistantMessage(
+                    content = listOf(ContentItem.OutputText("first answer")),
+                )
                 storage.timestamp[4] = turnStart + 50.seconds
-                storage.stable[4] = userMessage("second")
+                storage.index[4] = userMessage("second")
+                storage.timestamp[5] = turnStart + 60.seconds
+                storage.index[5] = StableAssistantMessage(
+                    content = listOf(ContentItem.OutputText("second answer")),
+                )
             }
             val model = createAgentHistoryViewModel(
                 agentState = runtime,
@@ -294,15 +374,59 @@ val agentHistoryModelsTest by testSuite {
             try {
                 model.awaitReady(itemCount = 5, hasOlder = false)
                 val window = model.historyItems.value
-                val latestFooter = assertIs<TurnTimeMarkerHistoryItemViewModel>(window.peek(0))
-                assertEquals(3, latestFooter.markerIndex)
-                assertEquals(4, latestFooter.endIndex)
-                assertEquals(10.seconds, latestFooter.duration)
+                val latestFinal = assertIs<MessageHistoryItemViewModel>(window[0])
+                assertEquals(5, latestFinal.index)
+                assertEquals(10.seconds, messageReady(latestFinal).turnDuration)
 
-                val firstFooter = assertIs<TurnTimeMarkerHistoryItemViewModel>(window.peek(2))
-                assertEquals(0, firstFooter.markerIndex)
-                assertEquals(2, firstFooter.endIndex)
-                assertEquals(30.seconds, firstFooter.duration)
+                val firstFinal = assertIs<MessageHistoryItemViewModel>(window[2])
+                assertEquals(3, firstFinal.index)
+                assertEquals(30.seconds, messageReady(firstFinal).turnDuration)
+            } finally {
+                model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("consecutive steer messages do not create an extra turn footer") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify { storage ->
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                storage.index[1] = userMessage("first")
+                storage.index[2] = StableAssistantMessage(
+                    content = listOf(ContentItem.OutputText("final")),
+                )
+                storage.index[3] = userMessage("steer one")
+                storage.index[4] = userMessage("steer two")
+                storage.index[5] = StableAssistantMessage(
+                    content = listOf(ContentItem.OutputText("next final")),
+                )
+                val turnStart = storage.timestamp[0]
+                for (index in 1..5) {
+                    storage.timestamp[index] = turnStart + index.toLong().seconds
+                }
+            }
+            val model = createAgentHistoryViewModel(
+                agentState = runtime,
+                ownerScope = supervisorChildScope(),
+                runningTurn = MutableStateFlow<Job?>(null),
+            )
+            try {
+                model.awaitReady(itemCount = 5, hasOlder = false)
+                val window = model.historyItems.value
+                val newestFinal = assertIs<MessageHistoryItemViewModel>(window[0])
+                val firstFinal = assertIs<MessageHistoryItemViewModel>(window[3])
+                assertEquals(2.seconds, messageReady(newestFinal).turnDuration)
+                assertEquals(1.seconds, messageReady(firstFinal).turnDuration)
+                assertEquals(
+                    listOf(null, null),
+                    listOf(
+                        messageReady(assertIs<MessageHistoryItemViewModel>(window[1])).turnDuration,
+                        messageReady(assertIs<MessageHistoryItemViewModel>(window[2])).turnDuration,
+                    ),
+                )
             } finally {
                 model.close()
                 repository.cancelAndJoin()
@@ -316,7 +440,7 @@ val agentHistoryModelsTest by testSuite {
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 repeat(20) { position ->
-                    storage.stable[position + 1] = userMessage("$position")
+                    storage.index[position + 1] = userMessage("$position")
                 }
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
@@ -344,33 +468,31 @@ val agentHistoryModelsTest by testSuite {
         }
     }
 
-    test("retains stable item identity while loading older batches") {
+    test("retains stable item identity while LazyColumn demands older items") {
         coroutineScope {
-            val itemCount = 130
+            val itemCount = 3
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
                 repeat(itemCount) { position ->
-                    storage.stable[position + 1] = userMessage("$position")
+                    storage.index[position + 1] = userMessage("$position")
                 }
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
-                model.awaitReady(itemCount = 64, hasOlder = true)
+                model.awaitReady(itemCount = 1, hasOlder = true)
                 val newest = model.historyItems.value.peek(0)
-                val oldest = model.historyItems.value.peek(63)
-                model.historyItems.value[63]
-                model.awaitReady(itemCount = 128, hasOlder = true)
+                model.historyItems.value.requestOlder()
+                model.awaitReady(itemCount = 2, hasOlder = true)
                 assertSame(newest, model.historyItems.value.peek(0))
-                assertSame(oldest, model.historyItems.value.peek(63))
 
-                val secondOldest = model.historyItems.value.peek(127)
-                model.historyItems.value[127]
+                val secondOldest = model.historyItems.value.peek(1)
+                model.historyItems.value.requestOlder()
                 model.awaitReady(itemCount = itemCount, hasOlder = false)
                 assertSame(newest, model.historyItems.value.peek(0))
-                assertSame(secondOldest, model.historyItems.value.peek(127))
-                assertEquals(130, model.historyItems.value.peek(0).storageIndex)
-                assertEquals(1, model.historyItems.value.peek(129).storageIndex)
+                assertSame(secondOldest, model.historyItems.value.peek(1))
+                assertEquals(3, model.historyItems.value.peek(0).storageIndex)
+                assertEquals(1, model.historyItems.value.peek(2).storageIndex)
             } finally {
                 model.close()
                 repository.cancelAndJoin()
@@ -445,41 +567,48 @@ val agentHistoryModelsTest by testSuite {
     }
 }
 
-private fun descriptor(index: Int, kind: HistoryItemKind): HistoryItemDescriptor =
-    HistoryItemDescriptor(index = index, kind = kind, elapsed = Duration.ZERO)
-
-private fun assertStableDescriptor(
-    item: HistoryProjectionItem,
-    index: Int,
-    kind: HistoryItemKind,
-) {
-    val stable = assertIs<HistoryProjectionItem.Stable>(item)
-    assertEquals(index, stable.descriptor.index)
-    assertEquals(kind, stable.descriptor.kind)
-}
-
-private fun assertGroup(item: HistoryProjectionItem, indexes: List<Int>) {
-    val group = assertIs<HistoryProjectionItem.WorkGroup>(item)
-    assertEquals(indexes, group.descriptors.map { descriptor -> descriptor.index })
-    assertEquals(indexes.size, group.descriptors.size)
-}
-
 private suspend fun AgentHistoryViewModel.awaitReady(
     itemCount: Int,
     hasOlder: Boolean? = null,
 ) {
     withContext(kotlinx.coroutines.Dispatchers.Default) {
         withTimeout(5.seconds) {
-            val state = loadState.first { current ->
-                current is AgentHistoryLoadState.Failed ||
-                    (
-                        current is AgentHistoryLoadState.Ready &&
-                            historyItems.value.size == itemCount &&
-                            (hasOlder == null || current.hasOlder == hasOlder)
-                        )
-            }
-            if (state is AgentHistoryLoadState.Failed) {
-                error("History loading failed: ${state.message}")
+            while (true) {
+                val state = loadState.first { current ->
+                    current == AgentHistoryLoadState.Ready ||
+                        current is AgentHistoryLoadState.Failed
+                }
+                if (state is AgentHistoryLoadState.Failed) {
+                    error("History loading failed: ${state.message}")
+                }
+                val window = historyItems.value
+                if (
+                    window.size == itemCount &&
+                    (hasOlder == null || window.hasOlder == hasOlder)
+                ) {
+                    return@withTimeout
+                }
+                val needsEndDiscovery =
+                    window.size == itemCount && hasOlder == false && window.hasOlder
+                check(
+                    (window.size < itemCount || needsEndDiscovery) &&
+                        window.hasOlder &&
+                        window.size > 0
+                ) {
+                    "Expected $itemCount History items with hasOlder=$hasOlder, but observed " +
+                        "${window.size} items with hasOlder=${window.hasOlder}."
+                }
+                window.requestOlder()
+                loadState.first { updated ->
+                    updated is AgentHistoryLoadState.Failed ||
+                        (
+                            updated == AgentHistoryLoadState.Ready &&
+                                (
+                                    historyItems.value !== window ||
+                                        historyItems.value.hasOlder != window.hasOlder
+                                    )
+                            )
+                }
             }
         }
     }
@@ -518,12 +647,10 @@ private val HistoryItemViewModel.storageIndex: Int
         is PlanUpdateHistoryItemViewModel -> index
         is ContextCompactionHistoryItemViewModel -> index
         is WorkGroupHistoryItemViewModel -> indexRange.last
-        is TurnTimeMarkerHistoryItemViewModel ->
-            error("A turn time marker has no stable storage index.")
     }
 
-private fun userMessage(text: String): StableCleanEvent.UserMessage =
-    StableCleanEvent.UserMessage(
+private fun userMessage(text: String): StableUserMessage =
+    StableUserMessage(
         content = listOf(ContentItem.InputText(text)),
     )
 

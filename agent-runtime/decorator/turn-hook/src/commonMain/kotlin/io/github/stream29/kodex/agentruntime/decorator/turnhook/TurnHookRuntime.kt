@@ -6,9 +6,11 @@ import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.contract.indexesDescending
 import io.github.stream29.kodex.agentstorage.contract.latestValue
 import io.github.stream29.kodex.hook.contract.turn.HookPromptFragment
 import io.github.stream29.kodex.hook.contract.toHookTurnContext
@@ -34,7 +36,11 @@ public class TurnHookRuntime internal constructor(
     private val logger: KLogger,
 ) : ResumableAgentLayer, KodexAgentState by delegate {
     override suspend fun resume() {
-        val context = storage.settings.latestValue().toHookTurnContext(storage.id)
+        val settings = storage.settings.latestValue()
+        val context = settings.toHookTurnContext(
+            sessionId = storage.id,
+            turnId = settings.turnId,
+        )
         currentUserPromptTextOrNull()?.let { prompt ->
             when (
                 val result = logger.runHook("UserPromptSubmit") {
@@ -124,7 +130,7 @@ public class TurnHookRuntime internal constructor(
         if (contexts.isEmpty()) return
         injectHistory(
             contexts.map { context ->
-                StableCleanEvent.DeveloperMessage(
+                StableDeveloperMessage(
                     content = listOf(ContentItem.InputText(context)),
                 )
             },
@@ -138,24 +144,25 @@ public class TurnHookRuntime internal constructor(
      */
     private suspend fun currentUserPromptTextOrNull(): String? {
         if (state.value != KodexAgentStateValue.UserMessage) return null
-        val message = storage.stable
-            .indexesDescending(latestIndex.value)
-            .map { index -> storage.stable[index] }
+        val message = storage.index
+            .indexesIn(0..latestIndex.value)
+            .asReversed()
+            .mapNotNull { index -> storage.index.getExact(index) as? StableIndexEvent }
             .takeWhile { event ->
-                event is StableCleanEvent.UserMessage ||
-                    event is StableCleanEvent.DeveloperMessage
+                event is StableUserMessage ||
+                    event is StableDeveloperMessage
             }
-            .firstOrNull { event -> event is StableCleanEvent.UserMessage }
-            as? StableCleanEvent.UserMessage
+            .firstOrNull { event -> event is StableUserMessage }
+            as? StableUserMessage
         return message?.content?.userPromptText()
     }
 
     private suspend fun latestAssistantMessageSince(historyStartIndex: Int): String? =
-        storage.stable
-            .indexesDescending(latestIndex.value)
-            .takeWhile { index -> index > historyStartIndex }
+        storage.index
+            .indexesIn((historyStartIndex + 1)..latestIndex.value)
+            .asReversed()
             .map { index ->
-                (storage.stable[index] as? StableCleanEvent.AssistantMessage)
+                (storage.index.getExact(index) as? StableAssistantMessage)
                     ?.assistantOutputText()
             }
             .firstOrNull { text -> text != null }
@@ -193,7 +200,7 @@ private fun List<ContentItem>.userPromptText(): String =
     filterIsInstance<ContentItem.InputText>()
         .joinToString(separator = "", transform = ContentItem.InputText::text)
 
-private fun StableCleanEvent.AssistantMessage.assistantOutputText(): String? {
+private fun StableAssistantMessage.assistantOutputText(): String? {
     val output = content.filterIsInstance<ContentItem.OutputText>()
     return output
         .joinToString(separator = "", transform = ContentItem.OutputText::text)
@@ -215,8 +222,8 @@ private fun PendingRequestUserInputToolEvent.questionTextOrNull(): String? =
 private const val RequestUserInputCancelledByStopHook: String =
     "request_user_input cancelled by Stop hook"
 
-private fun List<HookPromptFragment>.toHookPromptEvent(): StableCleanEvent.UserMessage =
-    StableCleanEvent.UserMessage(
+private fun List<HookPromptFragment>.toHookPromptEvent(): StableUserMessage =
+    StableUserMessage(
         content = map { fragment ->
             ContentItem.InputText(fragment.toHookPromptXml())
         },

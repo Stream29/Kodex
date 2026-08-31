@@ -3,15 +3,15 @@ package io.github.stream29.kodex.cli.session
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexRootSessionEntry
 import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
-import io.github.stream29.kodex.agentstorage.contract.initialize
+import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
+import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.app.agent.contract.AgentAddress
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionNotification
 import io.github.stream29.kodex.app.session.contract.PersistedSessionNotificationLevel
-import io.github.stream29.kodex.app.session.contract.PersistedSessionSummaryState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
@@ -233,11 +233,9 @@ private class PersistedSessionViewModelImpl(
 ) : PersistedSessionViewModel {
     private val mutex = Mutex()
     private val mutableName = MutableStateFlow("Session $sessionIndex")
-    private val mutableSummary = MutableStateFlow(PersistedSessionSummaryState())
     private val mutableLifecycle =
         MutableStateFlow<PersistedSessionLifecycleState>(PersistedSessionLifecycleState.Open)
     private val mutableNotification = MutableStateFlow<PersistedSessionNotification?>(null)
-    private var summaryRevision = 0L
     private var nextNotificationId = 1L
     private var closed = false
 
@@ -248,7 +246,6 @@ private class PersistedSessionViewModelImpl(
         get() = rootAgent.settings
     override val models: StateFlow<List<ModelInfo>>
         get() = rootAgent.models
-    override val summary: StateFlow<PersistedSessionSummaryState> = mutableSummary.asStateFlow()
     override val lifecycle: StateFlow<PersistedSessionLifecycleState> =
         mutableLifecycle.asStateFlow()
     override val notification: StateFlow<PersistedSessionNotification?> =
@@ -281,7 +278,7 @@ private class PersistedSessionViewModelImpl(
 
     override suspend fun refresh() = mutex.withLock {
         ensureOpen()
-        refreshProjection()
+        refreshName()
     }
 
     override suspend fun fork(
@@ -306,20 +303,22 @@ private class PersistedSessionViewModelImpl(
         require(sourceStorage.latestIndex() >= sourceIndex) {
             "Fork boundary is outside the source storage."
         }
-        require(sourceStorage.stable.floorToIndex(sourceIndex) == sourceIndex) {
+        require(
+            sourceStorage.index.getExact(sourceIndex) != null ||
+                sourceStorage.work.getExact(sourceIndex) != null,
+        ) {
             "Fork history entry $sourceIndex is no longer committed."
         }
         val targetIndex = repository.createFork(
-            source = sourceStorage,
-            from = 0,
-            until = target.untilExclusive,
+            sourceEntryIndex = source.address.sessionIndex,
         )
         try {
             val targetSession = repository.open(targetIndex)
             try {
                 targetSession.runtime.modify { storage ->
-                    val latest = storage.latestIndex()
                     val boundary = storage.settings[sourceIndex]
+                    storage.revert(target.untilExclusive)
+                    val latest = storage.latestIndex()
                     val baseTitle = boundary.threadName.trim().ifEmpty {
                         "Session $targetIndex"
                     }
@@ -350,9 +349,7 @@ private class PersistedSessionViewModelImpl(
         val sourceIndex = sourceStorage.latestIndex()
         require(sourceIndex >= 0) { "Cannot fork an uninitialized Session." }
         val targetIndex = repository.createFork(
-            source = sourceStorage,
-            from = 0,
-            until = sourceIndex + 1,
+            sourceEntryIndex = rootAgent.address.sessionIndex,
         )
         try {
             val targetSession = repository.open(targetIndex)
@@ -384,7 +381,7 @@ private class PersistedSessionViewModelImpl(
         rootAgent.renameThread(normalized)
         mutex.withLock {
             ensureOpen()
-            refreshProjection()
+            refreshName()
         }
     }
 
@@ -433,22 +430,10 @@ private class PersistedSessionViewModelImpl(
         ownerScope.cancel()
     }
 
-    private fun refreshProjection() {
+    private fun refreshName() {
         val threadName = rootAgent.settings.value.threadName
             .takeIf(String::isNotBlank)
         mutableName.value = threadName ?: "Session $sessionIndex"
-
-        val projectedSummary = PersistedSessionSummaryState(
-            rootRunning = rootSession.runtime.runningTurn.value != null,
-            lastActivityAt = null,
-        )
-        if (mutableSummary.value.copy(revision = 0) != projectedSummary) {
-            check(summaryRevision < Long.MAX_VALUE) {
-                "Session summary revisions are exhausted."
-            }
-            summaryRevision += 1
-            mutableSummary.value = projectedSummary.copy(revision = summaryRevision)
-        }
     }
 
     private fun publishFailure(message: String, failure: Throwable) {

@@ -5,8 +5,6 @@ import kotlinx.io.files.Path
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 
 /**
  * Agent-thread settings visible at an agent state index.
@@ -26,9 +24,6 @@ import kotlin.uuid.Uuid
  * threshold to the selected model metadata; `null` means use the catalog
  * policy, or 90% of the resolved model context window when no catalog-specific
  * threshold is present.
- * @property turnId UUIDv7 identity of the active logical user turn. Accepting
- * a new user message is the only operation that rotates it; compaction and
- * other state transitions retain the current value.
  * @property requestUserInputMode Whether future requests expose the structured
  * user-question tool. Changing it does not alter already-issued tool calls.
  * @property plan Full replacement `update_plan` snapshot. An empty plan means
@@ -45,17 +40,29 @@ import kotlin.uuid.Uuid
  * @property promptCacheKey Nullable because prompt-cache affinity is optional;
  * `null` means no explicit prompt cache key is stored.
  */
-@OptIn(ExperimentalUuidApi::class)
 @Serializable
 public data class KodexAgentSettings(
     public val model: OpenAiModelId,
+    /**
+     * OpenAI turn identity used by requests built from this settings snapshot.
+     *
+     * An empty value is accepted only for legacy/uninitialized payloads; new
+     * storage initialization supplies a generated identity.
+     */
+    public val turnId: String = "",
+    /** Monotonic provider context-window number for this settings snapshot. */
+    public val windowNumber: Long = 0,
+    /** First provider context-window id in this thread's lineage. */
+    public val firstWindowId: String = "",
+    /** Immediately preceding provider context-window id, if any. */
+    public val previousWindowId: String? = null,
+    /** Provider context-window id represented by this settings snapshot. */
+    public val windowId: String = "",
     @Serializable(with = PathAsStringSerializer::class)
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val cwd: Path = Path("."),
     public val threadName: String = "",
     public val autoCompactionTokenLimit: Long? = null,
-    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
-    public val turnId: String = Uuid.generateV7().toString(),
     public val requestUserInputMode: RequestUserInputMode = RequestUserInputMode.AskUser,
     public val plan: UpdatePlanArgs = UpdatePlanArgs(plan = emptyList()),
     public val goal: ThreadGoal? = null,
@@ -71,6 +78,10 @@ public data class KodexAgentSettings(
     public val promptCacheKey: String? = null,
     public val text: TextControls = TextControls(),
 )
+
+/** Returns the provider-facing request-window identity for this snapshot. */
+public fun KodexAgentSettings.codexRequestWindowId(threadId: String): String =
+    "$threadId:$windowNumber"
 
 /**
  * Result of a remote compaction v2 Responses stream.

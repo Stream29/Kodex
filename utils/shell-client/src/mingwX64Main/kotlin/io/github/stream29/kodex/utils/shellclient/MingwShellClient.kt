@@ -240,7 +240,7 @@ private class WindowsProcess(
                         complete(exitCode)
                         return@launch
                     }
-                    delay(10.milliseconds)
+                    delay(InteractiveProcessPollInterval)
                 }
             } catch (failure: CancellationException) {
                 throw failure
@@ -585,3 +585,5 @@ private fun createWindowsProcessJob(process: CPointer<out CPointed>): CPointer<o
 
 private fun String.normalizedForWindowsPty(): String =
     replace("\r\n", "\r").replace("\n", "\r").replace("\b", "\u007f")
+
+private val InteractiveProcessPollInterval = 16.milliseconds

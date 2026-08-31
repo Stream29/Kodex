@@ -18,7 +18,12 @@ import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.ReasoningItemReasoningSummary
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 
 /** Renders the one active operation that belongs after the persisted history tail. */
@@ -150,16 +155,32 @@ private fun rememberStreamingSnapshot(
     var snapshot by remember(events) { mutableStateOf(StreamingResponseSnapshot()) }
     val latestOnContentChange = rememberUpdatedState(onContentChange)
     LaunchedEffect(events) {
-        events.collect { event ->
-            val updatedSnapshot = snapshot.reduce(event)
-            if (updatedSnapshot != snapshot) {
-                latestOnContentChange.value()
-                snapshot = updatedSnapshot
+        coroutineScope {
+            val pendingSnapshots = Channel<StreamingResponseSnapshot>(Channel.CONFLATED)
+            launch {
+                var accumulated = StreamingResponseSnapshot()
+                events.collect { event ->
+                    val updated = accumulated.reduce(event)
+                    if (updated != accumulated) {
+                        accumulated = updated
+                        pendingSnapshots.trySend(updated)
+                    }
+                }
+            }
+            while (isActive) {
+                delay(StreamingUiUpdateIntervalMillis)
+                val updated = pendingSnapshots.tryReceive().getOrNull() ?: continue
+                if (updated != snapshot) {
+                    latestOnContentChange.value()
+                    snapshot = updated
+                }
             }
         }
     }
     return snapshot
 }
+
+private const val StreamingUiUpdateIntervalMillis: Long = 50L
 
 /** Local replay accumulator; it is deliberately not a cross-layer presentation model. */
 private data class StreamingResponseSnapshot(

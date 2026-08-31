@@ -3,8 +3,9 @@ package io.github.stream29.kodex.cli.session
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.contract.initialize
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
@@ -36,8 +37,8 @@ val agentHistoryActionTest by testSuite {
             val root = repository.open(index)
             root.runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                storage.stable[1] = userMessage("retain")
-                storage.stable[4] = StableCleanEvent.AssistantMessage(
+                storage.index[2] = userMessage("retain")
+                storage.index[4] = StableAssistantMessage(
                     listOf(ContentItem.OutputText("remove")),
                 )
             }
@@ -47,17 +48,17 @@ val agentHistoryActionTest by testSuite {
             try {
                 val initialGeneration = agent.history.awaitStorageIndex(4)
                 val requestId = agent.requestHistoryRevert(
-                    AgentHistoryTarget(initialGeneration, storageIndex = 1),
+                    AgentHistoryTarget(initialGeneration, storageIndex = 2),
                 )
 
                 agent.confirmHistoryRevert(requestId)
 
                 withContext(Dispatchers.Default) {
                     withTimeout(5.seconds) {
-                        root.runtime.latestIndex.first { latestIndex -> latestIndex == 1 }
+                        root.runtime.latestIndex.first { latestIndex -> latestIndex == 2 }
                     }
                 }
-                assertEquals(1, root.storage.latestIndex())
+                assertEquals(2, root.storage.latestIndex())
                 val currentGeneration = withContext(Dispatchers.Default) {
                     withTimeout(5.seconds) {
                         agent.history.historyItems.first { window ->
@@ -65,16 +66,16 @@ val agentHistoryActionTest by testSuite {
                         }.generation
                     }
                 }
-                agent.history.awaitStorageIndex(1)
+                agent.history.awaitStorageIndex(2)
                 root.runtime.modify { storage ->
-                    storage.stable[2] = StableCleanEvent.AssistantMessage(
+                    storage.index[3] = StableAssistantMessage(
                         listOf(ContentItem.OutputText("invalidate")),
                     )
                 }
-                val changedGeneration = agent.history.awaitStorageIndex(2)
+                val changedGeneration = agent.history.awaitStorageIndex(3)
                 assertEquals(currentGeneration, changedGeneration)
                 val staleRequest = agent.requestHistoryRevert(
-                    AgentHistoryTarget(currentGeneration, storageIndex = 1),
+                    AgentHistoryTarget(currentGeneration, storageIndex = 2),
                 )
                 root.runtime.modify { storage ->
                     storage.revert(2)
@@ -108,19 +109,19 @@ val agentHistoryActionTest by testSuite {
                         threadName = "Source",
                     ),
                 )
-                storage.stable[1] = userMessage("fork")
+                storage.index[2] = userMessage("fork")
             }
             val store = testSessionViewModelRegistry(repository, this)
             val session = store.open(index)
             try {
-                val generation = session.rootAgent.history.awaitStorageIndex(1)
+                val generation = session.rootAgent.history.awaitStorageIndex(2)
                 val forkIndex = session.fork(
                     session.rootAgent,
-                    AgentHistoryTarget(generation, storageIndex = 1),
+                    AgentHistoryTarget(generation, storageIndex = 2),
                 )
 
                 assertEquals(listOf(index, forkIndex), repository.list())
-                assertEquals("[fork] Source", repository.open(forkIndex).storage.settings[2].threadName)
+                assertEquals("[fork] Source", repository.open(forkIndex).storage.settings[3].threadName)
             } finally {
                 store.shutdown()
                 repository.cancelAndJoin()
@@ -135,8 +136,8 @@ val agentHistoryActionTest by testSuite {
             val root = repository.open(index)
             root.runtime.modify { storage ->
                 storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
-                storage.stable[1] = userMessage("retain")
-                storage.stable[4] = StableCleanEvent.AssistantMessage(
+                storage.index[2] = userMessage("retain")
+                storage.index[4] = StableAssistantMessage(
                     listOf(ContentItem.OutputText("remove")),
                 )
             }
@@ -145,7 +146,7 @@ val agentHistoryActionTest by testSuite {
             try {
                 val generation = agent.history.awaitStorageIndex(4)
                 val requestId = agent.requestHistoryRevert(
-                    AgentHistoryTarget(generation, storageIndex = 1),
+                    AgentHistoryTarget(generation, storageIndex = 2),
                 )
                 val frontendCaller = launch(start = CoroutineStart.UNDISPATCHED) {
                     agent.confirmHistoryRevert(requestId)
@@ -156,10 +157,10 @@ val agentHistoryActionTest by testSuite {
                 frontendCaller.cancelAndJoin()
                 withContext(Dispatchers.Default) {
                     withTimeout(5.seconds) {
-                        root.runtime.latestIndex.first { latestIndex -> latestIndex == 1 }
+                        root.runtime.latestIndex.first { latestIndex -> latestIndex == 2 }
                     }
                 }
-                assertEquals(1, root.storage.latestIndex())
+                assertEquals(2, root.storage.latestIndex())
             } finally {
                 store.shutdown()
                 repository.cancelAndJoin()
@@ -168,8 +169,8 @@ val agentHistoryActionTest by testSuite {
     }
 }
 
-private fun userMessage(text: String): StableCleanEvent.UserMessage =
-    StableCleanEvent.UserMessage(listOf(ContentItem.InputText(text)))
+private fun userMessage(text: String): StableUserMessage =
+    StableUserMessage(listOf(ContentItem.InputText(text)))
 
 private suspend fun AgentHistoryViewModel.awaitStorageIndex(storageIndex: Int): Long =
     withContext(Dispatchers.Default) {

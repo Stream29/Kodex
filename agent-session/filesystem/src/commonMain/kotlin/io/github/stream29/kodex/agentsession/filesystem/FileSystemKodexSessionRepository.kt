@@ -6,11 +6,10 @@ import io.github.stream29.kodex.agentsession.contract.KodexRootSessionEntry
 import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
 import io.github.stream29.kodex.agentsession.contract.KodexSessionEntry
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorage
-import io.github.stream29.kodex.agentstorage.filesystem.FileSystemIndexVersioned
-import io.github.stream29.kodex.agentstorage.filesystem.forkRangeRawTo
+import io.github.stream29.kodex.agentstorage.filesystem.forkRawTo
 import io.github.stream29.kodex.agentstorage.filesystem.ofEmpty
-import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
-import io.github.stream29.kodex.agentstorage.contract.forkRangeTo
+import io.github.stream29.kodex.agentstorage.filesystem.FileSystemIndexVersioned
+import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.filesystemlease.FileSystemLease
 import io.github.stream29.kodex.utils.filesystemlease.FileSystemLeaseInUseException
@@ -130,12 +129,10 @@ public class FileSystemKodexSessionRepository internal constructor(
         index
     }
 
-    override suspend fun createFork(
-        source: KodexAgentStorage,
-        from: Int,
-        until: Int,
-    ): Int = entriesMutex.withLock {
+    override suspend fun createFork(sourceEntryIndex: Int): Int = entriesMutex.withLock {
         requireOpen()
+        requireEntry(sourceEntryIndex)
+        val source = FileSystemAgentStorage(sessionDirectory(sourceEntryIndex), fileSystem)
         val (index, directory) = reserveSessionDirectory()
         try {
             val target = FileSystemAgentStorage.ofEmpty(
@@ -143,7 +140,7 @@ public class FileSystemKodexSessionRepository internal constructor(
                 fileSystem = fileSystem,
                 mustCreateDirectory = false,
             )
-            materializeFork(source, from, until, target)
+            materializeFork(source, target)
             mutableEntries.value = (entries.value + index).sorted()
             index
         } catch (failure: Throwable) {
@@ -272,16 +269,10 @@ public class FileSystemKodexSessionRepository internal constructor(
 }
 
 private suspend fun materializeFork(
-    source: KodexAgentStorage,
-    from: Int,
-    until: Int,
+    source: FileSystemAgentStorage,
     target: FileSystemAgentStorage,
 ) {
-    when (source) {
-        is CachedAgentStorage -> source.backing.forkRangeRawTo(from, until, target)
-        is FileSystemAgentStorage -> source.forkRangeRawTo(from, until, target)
-        else -> source.forkRangeTo(from, until, target)
-    }
+    source.forkRawTo(until = source.latestIndex() + 1, target = target)
 }
 
 private suspend fun sessionDirectories(

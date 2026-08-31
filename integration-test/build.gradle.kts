@@ -21,6 +21,7 @@ kotlin {
             implementation(project(":agent-state-impl"))
             implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-contract"))
+            implementation(project(":agent-storage-contract-ext"))
             implementation(project(":agent-storage-in-memory"))
             implementation(project(":hook-contract"))
             implementation(project(":hook-impl"))

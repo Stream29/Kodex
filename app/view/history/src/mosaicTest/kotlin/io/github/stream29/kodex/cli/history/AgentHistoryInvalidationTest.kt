@@ -19,11 +19,74 @@ import io.github.stream29.kodex.cli.components.LazyListState
 import io.github.stream29.kodex.cli.components.MutableScrollInteractionSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.yield
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration
 
 val agentHistoryInvalidationTest by testSuite {
+    test("LazyColumn requests older History only when its demand marker is measured") {
+        var olderRequests = 0
+        val window = TestHistoryItemWindow(
+            generation = 0,
+            items = List(70) { position ->
+                ReasoningHistoryItemViewModel(index = 70 - position, elapsed = Duration.ZERO)
+            },
+            hasOlder = true,
+            onRequestOlder = { olderRequests += 1 },
+        )
+        val model = ReplaceableHistoryModel(window)
+        model.replace(window, AgentHistoryLoadState.Ready)
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Column(modifier = Modifier.width(40).height(12)) {
+                    AgentHistoryView(
+                        model = model,
+                        shellSessions = EmptyInvalidationHistoryShellSessions,
+                    )
+                }
+            }
+            assertEquals(0, olderRequests)
+
+            model.listState.scrollToItem(index = 70)
+            awaitSnapshot()
+            yield()
+            assertEquals(1, olderRequests)
+        }
+    }
+
+    test("LazyColumn requests newer History only when its demand marker is measured") {
+        var newerRequests = 0
+        val window = TestHistoryItemWindow(
+            generation = 0,
+            items = List(70) { position ->
+                ReasoningHistoryItemViewModel(index = 70 - position, elapsed = Duration.ZERO)
+            },
+            hasNewer = true,
+            onRequestNewer = { newerRequests += 1 },
+        )
+        val model = ReplaceableHistoryModel(window)
+        model.listState.scrollToItem(index = 60)
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Column(modifier = Modifier.width(40).height(12)) {
+                    AgentHistoryView(
+                        model = model,
+                        shellSessions = EmptyInvalidationHistoryShellSessions,
+                    )
+                }
+            }
+            assertEquals(0, newerRequests)
+
+            model.listState.scrollToItem(index = 0)
+            awaitSnapshot()
+            yield()
+            assertEquals(1, newerRequests)
+        }
+    }
+
     test("destructive replacement keeps the old window readable") {
         val oldWindow = TestHistoryItemWindow(
             generation = 0,
@@ -57,7 +120,7 @@ val agentHistoryInvalidationTest by testSuite {
                     ReasoningHistoryItemViewModel(index = 9 - position, elapsed = Duration.ZERO)
                 },
             )
-            model.replace(replacement, AgentHistoryLoadState.Ready(hasOlder = false))
+            model.replace(replacement, AgentHistoryLoadState.Ready)
             awaitSnapshot()
 
             assertEquals(9, model.historyItems.value.size)
@@ -72,7 +135,7 @@ private class ReplaceableHistoryModel(
 ) : AgentHistoryViewModel {
     private val mutableCommittedItems = MutableStateFlow(initialWindow)
     private val mutableLoadState = MutableStateFlow<AgentHistoryLoadState>(
-        AgentHistoryLoadState.Ready(hasOlder = false),
+        AgentHistoryLoadState.Ready,
     )
 
     override val historyItems: StateFlow<HistoryItemWindow> = mutableCommittedItems
@@ -108,12 +171,24 @@ private class ReplaceableHistoryModel(
 private class TestHistoryItemWindow(
     override val generation: Long,
     private val items: List<HistoryItemViewModel>,
+    override val hasOlder: Boolean = false,
+    override val hasNewer: Boolean = false,
+    private val onRequestOlder: () -> Unit = {},
+    private val onRequestNewer: () -> Unit = {},
 ) : HistoryItemWindow {
     override val size: Int = items.size
 
     override fun peek(index: Int): HistoryItemViewModel = items[index]
 
     override fun get(index: Int): HistoryItemViewModel = items[index]
+
+    override fun requestOlder() {
+        onRequestOlder()
+    }
+
+    override fun requestNewer() {
+        onRequestNewer()
+    }
 }
 
 private object EmptyInvalidationHistoryShellSessions : AgentShellSessionRegistry {

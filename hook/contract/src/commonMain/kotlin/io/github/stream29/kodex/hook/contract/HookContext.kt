@@ -43,8 +43,12 @@ public fun KodexAgentSettings.toHookSessionContext(sessionId: String): HookSessi
  * Projects one persisted Agent settings snapshot into Hook turn data.
  *
  * @param sessionId Identity of the Agent storage that owns [this].
+ * @param turnId Persisted identity of the active logical user turn.
  */
-public fun KodexAgentSettings.toHookTurnContext(sessionId: String): HookTurnContext =
+public fun KodexAgentSettings.toHookTurnContext(
+    sessionId: String,
+    turnId: String,
+): HookTurnContext =
     HookTurnContext(
         session = toHookSessionContext(sessionId),
         turnId = turnId,
