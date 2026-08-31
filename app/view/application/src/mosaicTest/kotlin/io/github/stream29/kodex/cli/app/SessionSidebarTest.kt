@@ -2,19 +2,33 @@ package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.terminal.KeyboardEvent
+import com.jakewharton.mosaic.terminal.MouseEvent
+import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.Color
+import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
+import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
+import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
+import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryDetail
+import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryKind
+import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
+import io.github.stream29.kodex.app.agent.contract.HistoryIndexWindow
+import io.github.stream29.kodex.cli.components.LazyListState
+import io.github.stream29.kodex.cli.components.DefaultTuiColorScheme
 import io.github.stream29.kodex.cli.components.TuiDropdownState
 import io.github.stream29.kodex.cli.components.TuiPopupHost
+import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
@@ -28,6 +42,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.math.roundToInt
 
 class SessionSidebarTest {
     @Test
@@ -217,11 +232,420 @@ class SessionSidebarTest {
     }
 
     @Test
+    fun historyIndexRendersAConnectedOldestFirstTimeline() = runTest {
+        val viewModel = TestHistoryIndexViewModel(
+            entries = listOf(
+                HistoryIndexEntry(0, HistoryIndexEntryKind.CompactionPoint, "Context compacted"),
+                HistoryIndexEntry(2, HistoryIndexEntryKind.UserMessage, "Question"),
+                HistoryIndexEntry(5, HistoryIndexEntryKind.AssistantFinal, "Answer"),
+            ),
+        )
+        runMosaicTest {
+            setContentAndSnapshot {
+                HistoryIndexSidebarBody(
+                    viewModel = viewModel,
+                    columns = 28,
+                    rows = 4,
+                )
+            }
+            val snapshot = awaitSnapshotContaining("Answer")
+
+            assertEquals(
+                listOf(
+                    "┌● Context compacted",
+                    "├● Question",
+                    "└● Answer",
+                ),
+                snapshot.lines().map(String::trimEnd).filter(String::isNotEmpty),
+            )
+        }
+    }
+
+    @Test
+    fun historyIndexContextMenuShowsIndexAndChecksOut() = runTest {
+        var checkOutCount = 0
+        runMosaicTest {
+            setContentAndSnapshot {
+                TuiPopupHost(modifier = Modifier.width(30).height(5)) {
+                    val anchor = rememberTuiPopupAnchor()
+                    Text("entry", modifier = Modifier.tuiPopupAnchor(anchor))
+                    HistoryIndexContextMenuPopup(
+                        anchor = anchor,
+                        clickPosition = null,
+                        index = 42,
+                        onDismissRequest = {},
+                        onCheckOut = { checkOutCount += 1 },
+                    )
+                }
+            }
+            val snapshot = awaitSnapshotContaining("Check out")
+            assertTrue("Index: 42" in snapshot, snapshot)
+
+            sendKeyEvent(KeyboardEvent(codepoint = 13))
+            awaitSnapshot()
+        }
+
+        assertEquals(1, checkOutCount)
+    }
+
+    @Test
+    fun historyIndexHoverIsOpaqueAndFollowsThePointer() = runTest {
+        val viewModel = TestHistoryIndexViewModel(
+            entries = listOf(
+                HistoryIndexEntry(
+                    index = 7,
+                    kind = HistoryIndexEntryKind.UserMessage,
+                    summary = "Complete content",
+                ),
+            ),
+        )
+        var request: HistoryIndexInteractionRequest? = null
+        runMosaicTest {
+            setContentAndSnapshot {
+                TuiPopupHost(modifier = Modifier.width(40).height(8)) {
+                    val anchor = rememberTuiPopupAnchor()
+                    Column {
+                        Text("entry", modifier = Modifier.tuiPopupAnchor(anchor))
+                        repeat(7) {
+                            Text("x".repeat(40))
+                        }
+                    }
+                    val current = remember(anchor) {
+                        HistoryIndexInteractionRequest(
+                            side = SessionSidebarSide.Left,
+                            viewModel = viewModel,
+                            generation = 0,
+                            index = 7,
+                            anchor = anchor,
+                        ).also {
+                            it.pointerPosition = IntOffset(x = 4, y = 0)
+                        }
+                    }
+                    request = current
+                    HistoryIndexHoverPopup(
+                        request = current,
+                        contentColumns = 30,
+                        contentRows = 7,
+                        onHoverChanged = {},
+                    )
+                }
+            }
+            val snapshot = awaitSnapshotContaining("Complete content")
+            assertTrue("User message" in snapshot, snapshot)
+            assertFalse("Index: 7" in snapshot, snapshot)
+            assertEquals(5, snapshot.lines()[1].indexOf("User message"), snapshot)
+            assertTrue("User message    x" in snapshot.lines()[1], snapshot)
+
+            request?.pointerPosition = IntOffset(x = 10, y = 0)
+            val moved = awaitSnapshot()
+            assertEquals(11, moved.lines()[1].indexOf("User message"), moved)
+        }
+    }
+
+    @Test
+    fun historyIndexRowTracksTheLastPointerPosition() = runTest {
+        val viewModel = TestHistoryIndexViewModel(
+            entries = listOf(
+                HistoryIndexEntry(
+                    index = 7,
+                    kind = HistoryIndexEntryKind.UserMessage,
+                    summary = "Content",
+                ),
+            ),
+        )
+        var request: HistoryIndexInteractionRequest? = null
+        runMosaicTest {
+            setContentAndSnapshot {
+                HistoryIndexSidebarBody(
+                    viewModel = viewModel,
+                    columns = 20,
+                    rows = 1,
+                    onHoverChanged = { current, hovered ->
+                        if (hovered) request = current
+                    },
+                )
+            }
+
+            sendMouseEvent(MouseEvent(4, 0, MouseEvent.Type.Motion))
+            awaitSnapshot()
+            assertEquals(IntOffset(x = 4, y = 0), request?.pointerPosition)
+
+            sendMouseEvent(MouseEvent(9, 0, MouseEvent.Type.Motion))
+            awaitSnapshot()
+            assertEquals(IntOffset(x = 9, y = 0), request?.pointerPosition)
+        }
+    }
+
+    @Test
+    fun historyIndexInitiallyFollowsTheLatestEntry() = runTest {
+        val viewModel = TestHistoryIndexViewModel(
+            entries = listOf(
+                HistoryIndexEntry(0, HistoryIndexEntryKind.CompactionPoint, "Context compacted"),
+                HistoryIndexEntry(1, HistoryIndexEntryKind.UserMessage, "Question"),
+                HistoryIndexEntry(2, HistoryIndexEntryKind.AssistantCommentary, "Thinking"),
+            ),
+        )
+        val listState = LazyListState().apply { requestScrollToEnd() }
+        runMosaicTest {
+            setContentAndSnapshot {
+                HistoryIndexSidebarBody(
+                    viewModel = viewModel,
+                    columns = 28,
+                    rows = 2,
+                    listState = listState,
+                )
+            }
+            awaitSnapshotContaining("Thinking")
+
+            viewModel.append(
+                HistoryIndexEntry(3, HistoryIndexEntryKind.AssistantFinal, "Answer"),
+            )
+            val snapshot = awaitSnapshotContaining("Answer")
+            assertTrue("Question" !in snapshot, snapshot)
+            assertFalse(listState.canScrollForward)
+        }
+    }
+
+    @Test
+    fun historyIndexStopsFollowingWhileReadingOlderEntries() = runTest {
+        val viewModel = TestHistoryIndexViewModel(
+            entries = listOf(
+                HistoryIndexEntry(0, HistoryIndexEntryKind.CompactionPoint, "Context compacted"),
+                HistoryIndexEntry(1, HistoryIndexEntryKind.UserMessage, "Question"),
+                HistoryIndexEntry(2, HistoryIndexEntryKind.AssistantCommentary, "Thinking"),
+            ),
+        )
+        val listState = LazyListState().apply { requestScrollToEnd() }
+        runMosaicTest {
+            setContentAndSnapshot {
+                HistoryIndexSidebarBody(
+                    viewModel = viewModel,
+                    columns = 28,
+                    rows = 2,
+                    listState = listState,
+                )
+            }
+            awaitSnapshotContaining("Thinking")
+
+            sendKeyEvent(KeyboardEvent(KeyboardEvent.PageUp))
+            awaitSnapshotContaining("Context compacted")
+            viewModel.append(
+                HistoryIndexEntry(3, HistoryIndexEntryKind.AssistantFinal, "Answer"),
+            )
+            val readingOlder = awaitSnapshot()
+            assertTrue("Context compacted" in readingOlder, readingOlder)
+            assertTrue("Answer" !in readingOlder, readingOlder)
+            assertTrue(listState.canScrollForward)
+
+            sendKeyEvent(KeyboardEvent(KeyboardEvent.PageDown))
+            awaitSnapshotContaining("Answer")
+            viewModel.append(
+                HistoryIndexEntry(4, HistoryIndexEntryKind.AgentMessage, "Agent body"),
+            )
+            val followingAgain = awaitSnapshotContaining("Agent body")
+            assertTrue("Context compacted" !in followingAgain, followingAgain)
+            assertFalse(listState.canScrollForward)
+        }
+    }
+
+    @Test
+    fun splitterUsesBackgroundStateColorsWithoutAGlyph() = runTest {
+        val scheme = DefaultTuiColorScheme
+        val ansiSnapshots = SnapshotStrategy { mosaic ->
+            mosaic.draw().render(AnsiLevel.TRUECOLOR, supportsKittyUnderlines = false)
+        }
+        runMosaicTest(snapshotStrategy = ansiSnapshots) {
+            val idle = setContentAndSnapshot {
+                TuiTheme(colorScheme = scheme) {
+                    Row {
+                        SessionSidebar(
+                            side = SessionSidebarSide.Left,
+                            content = SidebarContent.None,
+                            selectedAgent = null,
+                            dropdownState = rememberTuiDropdownState(),
+                            columns = 8,
+                            rows = 2,
+                            onHoverChanged = {},
+                            onToggleExpanded = {},
+                            onOpenShellSessionMenu = {},
+                        )
+                        Text("M")
+                    }
+                }
+            }
+            assertFalse(scheme.surfaceContainerHover.backgroundEscape() in idle, idle)
+            assertFalse(scheme.surfaceContainerActive.backgroundEscape() in idle, idle)
+            assertFalse("│" in idle || "|" in idle, idle)
+
+            sendMouseEvent(MouseEvent(7, 1, MouseEvent.Type.Motion))
+            val hovered = awaitSnapshot()
+            assertTrue(scheme.surfaceContainerHover.backgroundEscape() in hovered, hovered)
+
+            sendMouseEvent(MouseEvent(7, 1, MouseEvent.Type.Press, MouseEvent.Button.Left))
+            val active = awaitSnapshot()
+            assertTrue(scheme.surfaceContainerActive.backgroundEscape() in active, active)
+
+            sendMouseEvent(MouseEvent(7, 1, MouseEvent.Type.Release))
+            awaitSnapshot()
+        }
+    }
+
+    @Test
+    fun splitterTracksCapturedPointerWhileItsBoundaryMoves() = runTest {
+        var columns by mutableStateOf(8)
+        val started = mutableListOf<Int>()
+        val resized = mutableListOf<Int>()
+        val ended = mutableListOf<Int>()
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                SessionSidebar(
+                    side = SessionSidebarSide.Left,
+                    content = SidebarContent.None,
+                    selectedAgent = null,
+                    dropdownState = rememberTuiDropdownState(),
+                    columns = columns,
+                    rows = 2,
+                    onHoverChanged = {},
+                    onToggleExpanded = {},
+                    onOpenShellSessionMenu = {},
+                    onResizeStart = started::add,
+                    onResize = { requested ->
+                        resized += requested
+                        columns = requested
+                    },
+                    onResizeEnd = ended::add,
+                )
+            }
+
+            sendMouseEvent(MouseEvent(7, 1, MouseEvent.Type.Press, MouseEvent.Button.Left))
+            awaitSnapshot()
+            sendMouseEvent(MouseEvent(11, 1, MouseEvent.Type.Drag, MouseEvent.Button.Left))
+            awaitSnapshot()
+            sendMouseEvent(MouseEvent(13, 1, MouseEvent.Type.Drag, MouseEvent.Button.Left))
+            awaitSnapshot()
+            sendMouseEvent(MouseEvent(13, 1, MouseEvent.Type.Release))
+            awaitSnapshot()
+        }
+
+        assertEquals(listOf(8), started)
+        assertEquals(listOf(12, 14, 14), resized)
+        assertEquals(listOf(14), ended)
+        assertEquals(14, columns)
+    }
+
+    @Test
+    fun shiftDragIsNotConsumedByTheSplitter() = runTest {
+        val events = mutableListOf<Int>()
+        runMosaicTest {
+            setContentAndSnapshot {
+                SessionSidebar(
+                    side = SessionSidebarSide.Left,
+                    content = SidebarContent.None,
+                    selectedAgent = null,
+                    dropdownState = rememberTuiDropdownState(),
+                    columns = 8,
+                    rows = 2,
+                    onHoverChanged = {},
+                    onToggleExpanded = {},
+                    onOpenShellSessionMenu = {},
+                    onResizeStart = events::add,
+                    onResize = events::add,
+                    onResizeEnd = events::add,
+                )
+            }
+
+            sendMouseEvent(
+                MouseEvent(
+                    x = 7,
+                    y = 1,
+                    type = MouseEvent.Type.Press,
+                    button = MouseEvent.Button.Left,
+                    shift = true,
+                ),
+            )
+            awaitSnapshot()
+            sendMouseEvent(
+                MouseEvent(
+                    x = 10,
+                    y = 1,
+                    type = MouseEvent.Type.Drag,
+                    button = MouseEvent.Button.Left,
+                    shift = true,
+                ),
+            )
+            awaitSnapshot()
+        }
+
+        assertTrue(events.isEmpty())
+    }
+
+    @Test
     fun expansionRequiresRoomForSidebarsAndContent() {
-        assertFalse(canExpandSessionSidebar(columns = 28, oppositeExpanded = false))
-        assertTrue(canExpandSessionSidebar(columns = 29, oppositeExpanded = false))
-        assertFalse(canExpandSessionSidebar(columns = 56, oppositeExpanded = true))
-        assertTrue(canExpandSessionSidebar(columns = 57, oppositeExpanded = true))
+        assertFalse(
+            canExpandSessionSidebar(
+                columns = 28,
+                requestedColumns = 28,
+                oppositeColumns = 0,
+            ),
+        )
+        assertTrue(
+            canExpandSessionSidebar(
+                columns = 29,
+                requestedColumns = 28,
+                oppositeColumns = 0,
+            ),
+        )
+        assertFalse(
+            canExpandSessionSidebar(
+                columns = 56,
+                requestedColumns = 21,
+                oppositeColumns = 35,
+            ),
+        )
+        assertTrue(
+            canExpandSessionSidebar(
+                columns = 57,
+                requestedColumns = 21,
+                oppositeColumns = 35,
+            ),
+        )
+    }
+
+    @Test
+    fun layoutAndResizeKeepOneMainContentColumn() {
+        assertEquals(
+            SessionSidebarColumns(left = 25, content = 1, right = 25),
+            resolveSessionSidebarColumns(
+                columns = 51,
+                leftColumns = 30,
+                rightColumns = 30,
+            ),
+        )
+        assertEquals(
+            29,
+            clampSessionSidebarResize(
+                columns = 50,
+                oppositeColumns = 20,
+                requestedColumns = 40,
+            ),
+        )
+        assertEquals(
+            4,
+            clampSessionSidebarResize(
+                columns = 50,
+                oppositeColumns = 20,
+                requestedColumns = 2,
+            ),
+        )
+        assertEquals(
+            null,
+            clampSessionSidebarResize(
+                columns = 4,
+                oppositeColumns = 0,
+                requestedColumns = 4,
+            ),
+        )
     }
 
     @Test
@@ -248,6 +672,37 @@ private class TestAgentShellSession : AgentShellSession {
     }
 }
 
+private class TestHistoryIndexViewModel(
+    entries: List<HistoryIndexEntry>,
+) : HistoryIndexViewModel {
+    private val mutableEntries = entries.associateByTo(linkedMapOf()) { entry -> entry.index }
+    override val window = MutableStateFlow(
+        HistoryIndexWindow(
+            generation = 0,
+            indexes = entries.map(HistoryIndexEntry::index),
+        ),
+    )
+
+    override fun contains(generation: Long, index: Int): Boolean =
+        generation == window.value.generation && index in mutableEntries
+
+    override suspend fun load(generation: Long, index: Int): HistoryIndexEntry =
+        requireNotNull(mutableEntries[index])
+
+    override suspend fun loadDetail(
+        generation: Long,
+        index: Int,
+    ): HistoryIndexEntryDetail {
+        val entry = load(generation, index)
+        return HistoryIndexEntryDetail(entry.kind, entry.summary)
+    }
+
+    fun append(entry: HistoryIndexEntry) {
+        mutableEntries[entry.index] = entry
+        window.value = window.value.copy(indexes = window.value.indexes + entry.index)
+    }
+}
+
 private suspend fun TestMosaic<String>.awaitSnapshotContaining(expected: String): String {
     var latest = ""
     repeat(5) {
@@ -260,4 +715,10 @@ private suspend fun TestMosaic<String>.awaitSnapshotContaining(expected: String)
     }
     assertTrue(expected in latest, latest)
     return latest
+}
+
+private fun Color.backgroundEscape(): String {
+    val (red, green, blue) = this
+    return "48;2;${(red * 255).roundToInt()};${(green * 255).roundToInt()};" +
+        "${(blue * 255).roundToInt()}"
 }

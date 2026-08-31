@@ -65,8 +65,11 @@ import io.github.stream29.kodex.cli.settings.SidebarContent
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 /** Application shell; all mutable child state is collected by its exact renderer. */
 @Composable
@@ -79,7 +82,7 @@ public fun SessionTreeCliScreen(
     val navigation by viewModel.navigation.collectAsState()
     val popup by viewModel.popup.collectAsState()
     val currentNewLineKey by newLineKey.collectAsState()
-    val selectedSidebarContent by sidebarSettings.state.collectAsState()
+    val sidebarConfiguration by sidebarSettings.state.collectAsState()
     val tabStates = collectSessionTabRenderStates(navigation.tabs, navigation.selectedIndex)
     val sessionSummary = summarizeOpenSessions(tabStates)
     val runningFrame = rememberRunningIndicatorFrame(
@@ -93,50 +96,75 @@ public fun SessionTreeCliScreen(
     var leftSidebarPinnedExpanded by remember { mutableStateOf(false) }
     var leftSidebarExpandButtonHovered by remember { mutableStateOf(false) }
     var leftSidebarSurfaceHovered by remember { mutableStateOf(false) }
+    var leftSidebarResizing by remember { mutableStateOf(false) }
+    var leftSidebarResizeColumns by remember { mutableStateOf<Int?>(null) }
     var rightSidebarPinnedExpanded by remember { mutableStateOf(false) }
     var rightSidebarExpandButtonHovered by remember { mutableStateOf(false) }
     var rightSidebarSurfaceHovered by remember { mutableStateOf(false) }
+    var rightSidebarResizing by remember { mutableStateOf(false) }
+    var rightSidebarResizeColumns by remember { mutableStateOf<Int?>(null) }
     val leftSidebarDropdown = rememberTuiDropdownState()
     val rightSidebarDropdown = rememberTuiDropdownState()
     var shellSessionMenu by remember { mutableStateOf<SidebarShellSessionMenuRequest?>(null) }
+    var historyIndexHover by remember { mutableStateOf<HistoryIndexInteractionRequest?>(null) }
+    var historyIndexPopupHovered by remember { mutableStateOf(false) }
+    var historyIndexHoverCloseJob by remember { mutableStateOf<Job?>(null) }
+    var historyIndexMenu by remember { mutableStateOf<HistoryIndexMenuRequest?>(null) }
     var tabMenu by remember { mutableStateOf<SessionTabMenuRequest?>(null) }
     var historyMenu by remember { mutableStateOf<HistoryEntryMenuRequest?>(null) }
     val leftSidebarExpanded = leftSidebarPinnedExpanded ||
         leftSidebarExpandButtonHovered ||
         leftSidebarSurfaceHovered ||
+        leftSidebarResizing ||
         leftSidebarDropdown.expanded ||
-        shellSessionMenu?.side == SessionSidebarSide.Left
+        shellSessionMenu?.side == SessionSidebarSide.Left ||
+        historyIndexHover?.side == SessionSidebarSide.Left ||
+        historyIndexMenu?.target?.side == SessionSidebarSide.Left
     val rightSidebarExpanded = rightSidebarPinnedExpanded ||
         rightSidebarExpandButtonHovered ||
         rightSidebarSurfaceHovered ||
+        rightSidebarResizing ||
         rightSidebarDropdown.expanded ||
-        shellSessionMenu?.side == SessionSidebarSide.Right
+        shellSessionMenu?.side == SessionSidebarSide.Right ||
+        historyIndexHover?.side == SessionSidebarSide.Right ||
+        historyIndexMenu?.target?.side == SessionSidebarSide.Right
+    val leftSidebarPreferredColumns =
+        leftSidebarResizeColumns ?: sidebarConfiguration.leftWidth
+    val rightSidebarPreferredColumns =
+        rightSidebarResizeColumns ?: sidebarConfiguration.rightWidth
+    val targetSidebarColumns = resolveSessionSidebarColumns(
+        columns = columns,
+        leftColumns = if (leftSidebarExpanded) leftSidebarPreferredColumns else 0,
+        rightColumns = if (rightSidebarExpanded) rightSidebarPreferredColumns else 0,
+    )
     val animatedLeftSidebarColumns by animateIntAsState(
-        targetValue = if (leftSidebarExpanded) SessionSidebarExpandedColumns else 0,
+        targetValue = targetSidebarColumns.left,
         label = "left session sidebar width",
     )
     val animatedRightSidebarColumns by animateIntAsState(
-        targetValue = if (rightSidebarExpanded) SessionSidebarExpandedColumns else 0,
+        targetValue = targetSidebarColumns.right,
         label = "right session sidebar width",
     )
-    val leftSidebarColumns =
-        animatedLeftSidebarColumns.coerceIn(0, SessionSidebarExpandedColumns)
-    val rightSidebarColumns =
-        animatedRightSidebarColumns.coerceIn(0, SessionSidebarExpandedColumns)
+    val displayedSidebarColumns = resolveSessionSidebarColumns(
+        columns = columns,
+        leftColumns = leftSidebarResizeColumns ?: animatedLeftSidebarColumns,
+        rightColumns = rightSidebarResizeColumns ?: animatedRightSidebarColumns,
+    )
+    val leftSidebarColumns = displayedSidebarColumns.left
+    val rightSidebarColumns = displayedSidebarColumns.right
     val leftExpandButtonBridgesHoverAnimation = leftSidebarExpandButtonHovered &&
         !leftSidebarPinnedExpanded &&
-        leftSidebarColumns < SessionSidebarExpandedColumns
+        leftSidebarColumns < targetSidebarColumns.left
     val rightExpandButtonBridgesHoverAnimation = rightSidebarExpandButtonHovered &&
         !rightSidebarPinnedExpanded &&
-        rightSidebarColumns < SessionSidebarExpandedColumns
+        rightSidebarColumns < targetSidebarColumns.right
     val showLeftSidebarExpandButton =
         (!leftSidebarExpanded && leftSidebarColumns == 0) ||
             leftExpandButtonBridgesHoverAnimation
     val showRightSidebarExpandButton =
         (!rightSidebarExpanded && rightSidebarColumns == 0) ||
             rightExpandButtonBridgesHoverAnimation
-    val contentColumns =
-        (columns - leftSidebarColumns - rightSidebarColumns).coerceAtLeast(1)
+    val contentColumns = displayedSidebarColumns.content
     val contentRows = (rows - SessionTabBarRows).coerceAtLeast(0)
     val selected = navigation.selected
     val selectedPersisted = selected as? PersistedSessionViewModel
@@ -146,6 +174,95 @@ public fun SessionTreeCliScreen(
     val runtimeDropdowns = RuntimeConfigurationDropdowns.remember(settingsOwner)
     val runtimeSettings = collectRuntimeSettings(settingsOwner)
     val runtimeModels = collectRuntimeModels(settingsOwner)
+
+    fun closeHistoryIndexHoverAfterGrace(
+        request: HistoryIndexInteractionRequest? = historyIndexHover,
+    ) {
+        historyIndexHoverCloseJob?.cancel()
+        historyIndexHoverCloseJob = scope.launch {
+            delay(HistoryIndexHoverCloseGrace)
+            if (
+                !historyIndexPopupHovered &&
+                (request == null || historyIndexHover == request)
+            ) {
+                historyIndexHover = null
+            }
+        }
+    }
+
+    fun updateHistoryIndexRowHover(
+        request: HistoryIndexInteractionRequest,
+        hovered: Boolean,
+    ) {
+        if (hovered) {
+            if (historyIndexMenu != null) return
+            historyIndexHoverCloseJob?.cancel()
+            historyIndexPopupHovered = false
+            historyIndexHover = request
+        } else if (historyIndexHover == request) {
+            closeHistoryIndexHoverAfterGrace(request)
+        }
+    }
+
+    LaunchedEffect(
+        selectedAgent,
+        sidebarConfiguration.left,
+        sidebarConfiguration.right,
+        popup,
+    ) {
+        historyIndexHoverCloseJob?.cancel()
+        historyIndexHover = null
+        historyIndexPopupHovered = false
+        historyIndexMenu = null
+    }
+    DisposableEffect(Unit) {
+        onDispose { historyIndexHoverCloseJob?.cancel() }
+    }
+
+    LaunchedEffect(
+        leftSidebarResizing,
+        leftSidebarResizeColumns,
+        sidebarConfiguration.leftWidth,
+        leftSidebarExpanded,
+        animatedLeftSidebarColumns,
+        targetSidebarColumns.left,
+    ) {
+        val resized = leftSidebarResizeColumns ?: return@LaunchedEffect
+        if (
+            !leftSidebarResizing &&
+            (
+                !leftSidebarExpanded ||
+                    (
+                        sidebarConfiguration.leftWidth == resized &&
+                            animatedLeftSidebarColumns == targetSidebarColumns.left
+                        )
+                )
+        ) {
+            leftSidebarResizeColumns = null
+        }
+    }
+    LaunchedEffect(
+        rightSidebarResizing,
+        rightSidebarResizeColumns,
+        sidebarConfiguration.rightWidth,
+        rightSidebarExpanded,
+        animatedRightSidebarColumns,
+        targetSidebarColumns.right,
+    ) {
+        val resized = rightSidebarResizeColumns ?: return@LaunchedEffect
+        if (
+            !rightSidebarResizing &&
+            (
+                !rightSidebarExpanded ||
+                    (
+                        sidebarConfiguration.rightWidth == resized &&
+                            animatedRightSidebarColumns == targetSidebarColumns.right
+                        )
+                )
+        ) {
+            rightSidebarResizeColumns = null
+        }
+    }
 
     TuiTheme(colorScheme = tuiColorSchemeFor(terminal.theme)) {
         TuiPopupHost {
@@ -162,6 +279,8 @@ public fun SessionTreeCliScreen(
                     onOpenTabMenu = { target, name, anchor, position ->
                         shellSessionMenu = null
                         historyMenu = null
+                        historyIndexHover = null
+                        historyIndexMenu = null
                         tabMenu = SessionTabMenuRequest(target, name, anchor, position)
                     },
                     onCreateNewSession = {
@@ -178,7 +297,7 @@ public fun SessionTreeCliScreen(
                         if (leftSidebarColumns > 0) {
                             SessionSidebar(
                                 side = SessionSidebarSide.Left,
-                                content = selectedSidebarContent.left,
+                                content = sidebarConfiguration.left,
                                 selectedAgent = selectedAgent,
                                 dropdownState = leftSidebarDropdown,
                                 columns = leftSidebarColumns,
@@ -196,10 +315,75 @@ public fun SessionTreeCliScreen(
                                 onOpenShellSessionMenu = { request ->
                                     tabMenu = null
                                     historyMenu = null
+                                    historyIndexHover = null
+                                    historyIndexMenu = null
                                     shellSessionMenu = SidebarShellSessionMenuRequest(
                                         side = SessionSidebarSide.Left,
                                         request = request,
                                     )
+                                },
+                                onHistoryIndexHoverChanged = ::updateHistoryIndexRowHover,
+                                onOpenHistoryIndexMenu = { request ->
+                                    historyIndexHoverCloseJob?.cancel()
+                                    historyIndexHover = null
+                                    historyIndexPopupHovered = false
+                                    tabMenu = null
+                                    historyMenu = null
+                                    shellSessionMenu = null
+                                    historyIndexMenu = request
+                                },
+                                resizable = clampSessionSidebarResize(
+                                    columns = columns,
+                                    oppositeColumns = rightSidebarColumns,
+                                    requestedColumns = leftSidebarColumns,
+                                ) != null,
+                                onResizeStart = { currentColumns ->
+                                    val accepted = clampSessionSidebarResize(
+                                        columns = columns,
+                                        oppositeColumns = rightSidebarColumns,
+                                        requestedColumns = currentColumns,
+                                    )
+                                    if (accepted != null) {
+                                        leftSidebarResizeColumns = accepted
+                                        leftSidebarResizing = true
+                                    }
+                                },
+                                onResize = { requestedColumns ->
+                                    if (leftSidebarResizing) {
+                                        clampSessionSidebarResize(
+                                            columns = columns,
+                                            oppositeColumns = rightSidebarColumns,
+                                            requestedColumns = requestedColumns,
+                                        )?.let { accepted ->
+                                            leftSidebarResizeColumns = accepted
+                                        }
+                                    }
+                                },
+                                onResizeEnd = { requestedColumns ->
+                                    if (leftSidebarResizing) {
+                                        val accepted = clampSessionSidebarResize(
+                                            columns = columns,
+                                            oppositeColumns = rightSidebarColumns,
+                                            requestedColumns = requestedColumns,
+                                        ) ?: leftSidebarResizeColumns
+                                        leftSidebarResizing = false
+                                        if (accepted != null) {
+                                            leftSidebarResizeColumns = accepted
+                                            if (accepted != sidebarConfiguration.leftWidth) {
+                                                scope.launch {
+                                                    try {
+                                                        sidebarSettings.resizeLeft(accepted)
+                                                    } catch (failure: CancellationException) {
+                                                        throw failure
+                                                    } catch (_: Throwable) {
+                                                        if (leftSidebarResizeColumns == accepted) {
+                                                            leftSidebarResizeColumns = null
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 },
                             )
                         }
@@ -240,6 +424,8 @@ public fun SessionTreeCliScreen(
                                             onOpenHistoryEntryContextMenu = { target, anchor, position ->
                                                 tabMenu = null
                                                 shellSessionMenu = null
+                                                historyIndexHover = null
+                                                historyIndexMenu = null
                                                 historyMenu = HistoryEntryMenuRequest(
                                                     session = selected,
                                                     agent = agent,
@@ -269,7 +455,7 @@ public fun SessionTreeCliScreen(
                         if (rightSidebarColumns > 0) {
                             SessionSidebar(
                                 side = SessionSidebarSide.Right,
-                                content = selectedSidebarContent.right,
+                                content = sidebarConfiguration.right,
                                 selectedAgent = selectedAgent,
                                 dropdownState = rightSidebarDropdown,
                                 columns = rightSidebarColumns,
@@ -287,10 +473,75 @@ public fun SessionTreeCliScreen(
                                 onOpenShellSessionMenu = { request ->
                                     tabMenu = null
                                     historyMenu = null
+                                    historyIndexHover = null
+                                    historyIndexMenu = null
                                     shellSessionMenu = SidebarShellSessionMenuRequest(
                                         side = SessionSidebarSide.Right,
                                         request = request,
                                     )
+                                },
+                                onHistoryIndexHoverChanged = ::updateHistoryIndexRowHover,
+                                onOpenHistoryIndexMenu = { request ->
+                                    historyIndexHoverCloseJob?.cancel()
+                                    historyIndexHover = null
+                                    historyIndexPopupHovered = false
+                                    tabMenu = null
+                                    historyMenu = null
+                                    shellSessionMenu = null
+                                    historyIndexMenu = request
+                                },
+                                resizable = clampSessionSidebarResize(
+                                    columns = columns,
+                                    oppositeColumns = leftSidebarColumns,
+                                    requestedColumns = rightSidebarColumns,
+                                ) != null,
+                                onResizeStart = { currentColumns ->
+                                    val accepted = clampSessionSidebarResize(
+                                        columns = columns,
+                                        oppositeColumns = leftSidebarColumns,
+                                        requestedColumns = currentColumns,
+                                    )
+                                    if (accepted != null) {
+                                        rightSidebarResizeColumns = accepted
+                                        rightSidebarResizing = true
+                                    }
+                                },
+                                onResize = { requestedColumns ->
+                                    if (rightSidebarResizing) {
+                                        clampSessionSidebarResize(
+                                            columns = columns,
+                                            oppositeColumns = leftSidebarColumns,
+                                            requestedColumns = requestedColumns,
+                                        )?.let { accepted ->
+                                            rightSidebarResizeColumns = accepted
+                                        }
+                                    }
+                                },
+                                onResizeEnd = { requestedColumns ->
+                                    if (rightSidebarResizing) {
+                                        val accepted = clampSessionSidebarResize(
+                                            columns = columns,
+                                            oppositeColumns = leftSidebarColumns,
+                                            requestedColumns = requestedColumns,
+                                        ) ?: rightSidebarResizeColumns
+                                        rightSidebarResizing = false
+                                        if (accepted != null) {
+                                            rightSidebarResizeColumns = accepted
+                                            if (accepted != sidebarConfiguration.rightWidth) {
+                                                scope.launch {
+                                                    try {
+                                                        sidebarSettings.resizeRight(accepted)
+                                                    } catch (failure: CancellationException) {
+                                                        throw failure
+                                                    } catch (_: Throwable) {
+                                                        if (rightSidebarResizeColumns == accepted) {
+                                                            rightSidebarResizeColumns = null
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 },
                             )
                         }
@@ -304,14 +555,26 @@ public fun SessionTreeCliScreen(
                                         leftSidebarExpandButtonHovered = hovered &&
                                             canExpandSessionSidebar(
                                                 columns = columns,
-                                                oppositeExpanded = rightSidebarExpanded,
+                                                requestedColumns =
+                                                    sidebarConfiguration.leftWidth,
+                                                oppositeColumns = if (rightSidebarExpanded) {
+                                                    rightSidebarPreferredColumns
+                                                } else {
+                                                    0
+                                                },
                                             )
                                     },
                                     onExpand = {
                                         if (
                                             canExpandSessionSidebar(
                                                 columns = columns,
-                                                oppositeExpanded = rightSidebarExpanded,
+                                                requestedColumns =
+                                                    sidebarConfiguration.leftWidth,
+                                                oppositeColumns = if (rightSidebarExpanded) {
+                                                    rightSidebarPreferredColumns
+                                                } else {
+                                                    0
+                                                },
                                             )
                                         ) {
                                             leftSidebarPinnedExpanded = true
@@ -327,14 +590,26 @@ public fun SessionTreeCliScreen(
                                         rightSidebarExpandButtonHovered = hovered &&
                                             canExpandSessionSidebar(
                                                 columns = columns,
-                                                oppositeExpanded = leftSidebarExpanded,
+                                                requestedColumns =
+                                                    sidebarConfiguration.rightWidth,
+                                                oppositeColumns = if (leftSidebarExpanded) {
+                                                    leftSidebarPreferredColumns
+                                                } else {
+                                                    0
+                                                },
                                             )
                                     },
                                     onExpand = {
                                         if (
                                             canExpandSessionSidebar(
                                                 columns = columns,
-                                                oppositeExpanded = leftSidebarExpanded,
+                                                requestedColumns =
+                                                    sidebarConfiguration.rightWidth,
+                                                oppositeColumns = if (leftSidebarExpanded) {
+                                                    leftSidebarPreferredColumns
+                                                } else {
+                                                    0
+                                                },
                                             )
                                         ) {
                                             rightSidebarPinnedExpanded = true
@@ -347,10 +622,37 @@ public fun SessionTreeCliScreen(
                 }
             }
 
+            HistoryIndexHoverPopup(
+                request = historyIndexHover.takeIf { historyIndexMenu == null },
+                contentColumns = contentColumns,
+                contentRows = contentRows,
+                onHoverChanged = { hovered ->
+                    historyIndexPopupHovered = hovered
+                    if (hovered) {
+                        historyIndexHoverCloseJob?.cancel()
+                    } else {
+                        closeHistoryIndexHoverAfterGrace()
+                    }
+                },
+            )
+            HistoryIndexContextMenu(
+                request = historyIndexMenu,
+                selectedAgent = selectedAgent,
+                onDismissRequest = { historyIndexMenu = null },
+                onCheckOut = { target ->
+                    historyIndexMenu = null
+                    if (
+                        selectedAgent?.historyIndex === target.viewModel &&
+                        target.viewModel.contains(target.generation, target.index)
+                    ) {
+                        selectedAgent.history.requestScrollToStorageIndex(target.index)
+                    }
+                },
+            )
             ShellSessionContextMenu(shellSessionMenu?.request) { shellSessionMenu = null }
             SessionSidebarContentMenu(
                 dropdownState = leftSidebarDropdown,
-                selected = selectedSidebarContent.left,
+                selected = sidebarConfiguration.left,
                 onSelect = { content ->
                     if (content != SidebarContent.TerminalSessions &&
                         shellSessionMenu?.side == SessionSidebarSide.Left
@@ -362,7 +664,7 @@ public fun SessionTreeCliScreen(
             )
             SessionSidebarContentMenu(
                 dropdownState = rightSidebarDropdown,
-                selected = selectedSidebarContent.right,
+                selected = sidebarConfiguration.right,
                 onSelect = { content ->
                     if (content != SidebarContent.TerminalSessions &&
                         shellSessionMenu?.side == SessionSidebarSide.Right
@@ -680,6 +982,13 @@ internal fun BoxScope.SessionCatalogContextMenuPopup(
         backgroundColor = PopupMenuBackground,
     ) {
         TuiPopupMenuItem(
+            key = "session-index-information",
+            onClick = {},
+            enabled = false,
+        ) {
+            Text("Index: ${entry.sessionIndex}")
+        }
+        TuiPopupMenuItem(
             key = if (entry.archived) "unarchive" else "archive",
             onClick = if (entry.archived) onUnarchive else onArchive,
         ) {
@@ -876,6 +1185,15 @@ internal fun BoxScope.SessionTabContextMenuPopup(
         onDismissRequest = onDismiss,
         backgroundColor = PopupMenuBackground,
     ) {
+        if (target is PersistedSessionViewModel) {
+            TuiPopupMenuItem(
+                key = "session-index-information",
+                onClick = {},
+                enabled = false,
+            ) {
+                Text("Index: ${target.sessionIndex}")
+            }
+        }
         TuiPopupMenuItem(key = "rename", onClick = onRename) {
             Text("Rename")
         }
@@ -1042,6 +1360,7 @@ private data class HistoryEntryMenuRequest(
 )
 
 private const val SessionTabBarRows: Int = 1
+private val HistoryIndexHoverCloseGrace = 180.milliseconds
 private const val SessionCatalogWidth: Int = 64
 private const val SessionCatalogRows: Int = 16
 private const val RenameDialogWidth: Int = 48

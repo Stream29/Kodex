@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.cli.components
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -401,6 +402,7 @@ val lazyColumnTest by testSuite {
             assertEquals(0, state.layoutInfo.totalItemsCount)
             assertFalse(state.canScrollBackward)
             assertFalse(state.canScrollForward)
+            assertEquals(0, state.scrollBy(3))
 
             items = listOf(TestItem("A", 1), TestItem("B", 1), TestItem("C", 1))
             assertEquals("A0\nB0", awaitSnapshot())
@@ -432,6 +434,141 @@ val lazyColumnTest by testSuite {
         }
 
         assertEquals(3, state.firstVisibleItemIndex)
+    }
+
+    test("same-frame wheel burst is independent of item granularity") {
+        val fineState = LazyListState()
+        runMosaicTest {
+            setContentAndSnapshot {
+                TestLazyColumn(
+                    items = List(100) { index -> TestItem(index.toString(), 1) },
+                    state = fineState,
+                    viewportHeight = 6,
+                )
+            }
+            repeat(10) {
+                sendMouseEvent(
+                    MouseEvent(0, 0, MouseEvent.Type.Press, MouseEvent.Button.WheelDown)
+                )
+            }
+            awaitSnapshot()
+        }
+        assertEquals(30, fineState.firstVisibleItemIndex)
+        assertEquals(0, fineState.firstVisibleItemScrollOffset)
+
+        val coarseState = LazyListState()
+        runMosaicTest {
+            setContentAndSnapshot {
+                TestLazyColumn(
+                    items = listOf(TestItem("item", 100)),
+                    state = coarseState,
+                    viewportHeight = 6,
+                )
+            }
+            repeat(10) {
+                sendMouseEvent(
+                    MouseEvent(0, 0, MouseEvent.Type.Press, MouseEvent.Button.WheelDown)
+                )
+            }
+            awaitSnapshot()
+        }
+        assertEquals(0, coarseState.firstVisibleItemIndex)
+        assertEquals(30, coarseState.firstVisibleItemScrollOffset)
+    }
+
+    test("reverse-layout wheel burst is independent of item granularity") {
+        val fineState = LazyListState()
+        runMosaicTest {
+            setContentAndSnapshot {
+                TestLazyColumn(
+                    items = List(100) { index -> TestItem(index.toString(), 1) },
+                    state = fineState,
+                    viewportHeight = 6,
+                    reverseLayout = true,
+                )
+            }
+            repeat(10) {
+                sendMouseEvent(
+                    MouseEvent(0, 0, MouseEvent.Type.Press, MouseEvent.Button.WheelUp)
+                )
+            }
+            awaitSnapshot()
+        }
+        assertEquals(35, fineState.firstVisibleItemIndex)
+        assertEquals(0, fineState.firstVisibleItemScrollOffset)
+
+        val coarseState = LazyListState()
+        runMosaicTest {
+            setContentAndSnapshot {
+                TestLazyColumn(
+                    items = listOf(TestItem("item", 100)),
+                    state = coarseState,
+                    viewportHeight = 6,
+                    reverseLayout = true,
+                )
+            }
+            assertEquals(94, coarseState.firstVisibleItemScrollOffset)
+            repeat(10) {
+                sendMouseEvent(
+                    MouseEvent(0, 0, MouseEvent.Type.Press, MouseEvent.Button.WheelUp)
+                )
+            }
+            awaitSnapshot()
+        }
+        assertEquals(0, coarseState.firstVisibleItemIndex)
+        assertEquals(64, coarseState.firstVisibleItemScrollOffset)
+    }
+
+    test("scrolling precomposes and premeasures the next item beyond the cache") {
+        val state = LazyListState()
+        val composed = mutableSetOf<Int>()
+        val measured = mutableSetOf<Int>()
+        val disposed = mutableSetOf<Int>()
+        var frameTrigger by mutableIntStateOf(0)
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Column {
+                    Text(frameTrigger.toString())
+                    LazyColumn(Modifier.height(2), state) {
+                        items(count = 20, key = { index -> index }) { index ->
+                            composed += index
+                            DisposableEffect(index) {
+                                onDispose { disposed += index }
+                            }
+                            Layout(
+                                content = { Text(index.toString()) },
+                                measurePolicy = MeasurePolicy { measurables, constraints ->
+                                    measured += index
+                                    val placeable = measurables.single().measure(constraints)
+                                    layout(placeable.width, placeable.height) {
+                                        placeable.place(0, 0)
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            assertFalse(5 in composed)
+            assertFalse(5 in measured)
+
+            assertEquals(1, state.scrollBy(1))
+            awaitSnapshot()
+            repeat(4) {
+                if (5 in composed && 5 in measured) return@repeat
+                frameTrigger++
+                awaitSnapshot()
+            }
+
+            assertTrue(5 in composed)
+            assertTrue(5 in measured)
+            assertFalse(5 in disposed)
+
+            assertEquals(-1, state.scrollBy(-1))
+            awaitSnapshot()
+            assertTrue(5 in disposed)
+        }
     }
 
     test("wheel input round trips from the logical end") {

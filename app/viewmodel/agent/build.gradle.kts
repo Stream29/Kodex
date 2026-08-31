@@ -19,6 +19,7 @@ kotlin {
         commonTest.dependencies {
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
+            implementation(project(":agent-storage-in-memory"))
             implementation(project(":utils-coroutines"))
             implementation(project(":app-viewmodel-history"))
         }

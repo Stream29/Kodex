@@ -445,6 +445,18 @@ private fun GlobalSettingsContent(
         onUseReset = viewModel::requestUsageReset,
         onUpdateSessionTitleEnabled = viewModel::updateSessionTitleEnabled,
     )
+    SettingsSection(title = "Sidebars") {
+        SettingsSidebarWidthItem(
+            label = "Left sidebar width",
+            columns = state.sidebars.leftWidth,
+            onChange = viewModel::updateLeftSidebarWidth,
+        )
+        SettingsSidebarWidthItem(
+            label = "Right sidebar width",
+            columns = state.sidebars.rightWidth,
+            onChange = viewModel::updateRightSidebarWidth,
+        )
+    }
     SettingsSection(title = "Input") {
         SettingsDropdownField(
             label = "New line key",
@@ -629,6 +641,29 @@ internal fun SettingsPathField(
             label = "Browse",
             enabled = enabled,
             onClick = onBrowse,
+        )
+    }
+}
+
+@Composable
+internal fun SettingsSidebarWidthItem(
+    label: String,
+    columns: Int,
+    onChange: (Int) -> Unit,
+) {
+    SettingsItem(
+        label = label,
+        supportingText = "$columns columns",
+    ) {
+        SettingsActionButton(
+            label = "-",
+            enabled = columns > MinimumSidebarWidthColumns,
+            onClick = { onChange(columns - 1) },
+        )
+        SettingsActionButton(
+            label = "+",
+            enabled = columns < Int.MAX_VALUE,
+            onClick = { onChange(columns + 1) },
         )
     }
 }

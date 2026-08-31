@@ -17,6 +17,7 @@ import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.UsageResetState
 import io.github.stream29.kodex.cli.settings.InMemoryKodexGlobalSettings
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
+import io.github.stream29.kodex.cli.settings.SidebarSettings
 import io.github.stream29.kodex.hook.contract.HookDraft
 import io.github.stream29.kodex.hook.contract.HookManagedState
 import io.github.stream29.kodex.hook.contract.HookManager
@@ -170,6 +171,15 @@ class SettingsViewModelTest {
             settings.settings.value.codexHome,
             global.state.value.codexHome,
         )
+
+        global.updateLeftSidebarWidth(36)
+        global.updateRightSidebarWidth(19)
+        runCurrent()
+        assertEquals(
+            SidebarSettings(leftWidth = 36, rightWidth = 19),
+            settings.settings.value.sidebars,
+        )
+        assertEquals(settings.settings.value.sidebars, global.state.value.sidebars)
 
         viewModel.close()
         runCurrent()

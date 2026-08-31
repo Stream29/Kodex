@@ -100,8 +100,10 @@ val kodexSettingsStoreTest by testSuite(
                     reasoningEffort = ReasoningEffort.Medium,
                 ),
                 sidebars = SidebarSettings(
-                    left = SidebarContent.None,
+                    left = SidebarContent.HistoryIndex,
                     right = SidebarContent.TerminalSessions,
+                    leftWidth = 34,
+                    rightWidth = 21,
                 ),
                 hooks = mapOf(
                     "finish_check" to HookBody(
@@ -123,8 +125,10 @@ val kodexSettingsStoreTest by testSuite(
             assertTrue(yaml.contains("auth_source: kodex"), yaml)
             assertTrue(yaml.contains("service_tier: flex"), yaml)
             assertTrue(yaml.contains("request_user_input_mode: no_question"), yaml)
-            assertTrue(yaml.contains("left: none"), yaml)
+            assertTrue(yaml.contains("left: history_index"), yaml)
             assertTrue(yaml.contains("right: terminal_sessions"), yaml)
+            assertTrue(yaml.contains("left_width: 34"), yaml)
+            assertTrue(yaml.contains("right_width: 21"), yaml)
             assertTrue(yaml.contains("mcp_servers: {}"), yaml)
             assertTrue(yaml.contains("hooks:"), yaml)
             assertEquals(emptyList(), temporarySettingsFiles(root))
@@ -139,6 +143,8 @@ val kodexSettingsStoreTest by testSuite(
                 sidebars = SidebarSettings(
                     left = SidebarContent.None,
                     right = SidebarContent.TerminalSessions,
+                    leftWidth = 31,
+                    rightWidth = 37,
                 ),
             )
             SystemCoroutineFileSystem.writeString(
@@ -153,6 +159,24 @@ val kodexSettingsStoreTest by testSuite(
 
             assertEquals(SidebarContent.TerminalSessions, loaded.sidebars.left)
             assertEquals(SidebarContent.TerminalSessions, loaded.sidebars.right)
+            assertEquals(31, loaded.sidebars.leftWidth)
+            assertEquals(37, loaded.sidebars.rightWidth)
+        }
+    }
+
+    test("rejects sidebar widths below the component minimum") {
+        withSettingsDirectory("invalid-sidebar-width") { root ->
+            SystemCoroutineFileSystem.writeString(
+                settingsPath(root),
+                """
+                sidebars:
+                  left_width: 3
+                """.trimIndent() + "\n",
+            )
+
+            assertFailsWith<IllegalArgumentException> {
+                openStore(root)
+            }
         }
     }
 

@@ -3,8 +3,10 @@ package io.github.stream29.kodex.cli.history
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
@@ -559,6 +561,79 @@ val agentHistoryModelsTest by testSuite {
                 assertFalse(model.followsLatest)
                 model.requestScrollToLatest()
                 assertTrue(model.followsLatest)
+            } finally {
+                model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("checks out index entries as pure bounded History navigation") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify { storage ->
+                storage.index[1] = userMessage("one")
+                storage.index[2] = userMessage("two")
+                storage.index[3] = userMessage("three")
+            }
+            val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+            try {
+                model.awaitReady(itemCount = 3, hasOlder = false)
+
+                model.requestScrollToStorageIndex(1)
+                val older = model.awaitHistoryItems { window ->
+                    window.hasNewer &&
+                        (0 until window.size).any { position ->
+                            window.peek(position).storageIndex == 1
+                        }
+                }
+                assertFalse(model.followsLatest)
+                assertEquals(1, older.peek(0).storageIndex)
+
+                runtime.modify { storage ->
+                    storage.index[4] = userMessage("four")
+                }
+                model.awaitHistoryItems { window -> window.hasNewer }
+                assertEquals(1, model.historyItems.value.peek(0).storageIndex)
+
+                model.requestScrollToStorageIndex(4)
+                val latest = model.awaitHistoryItems { window ->
+                    !window.hasNewer &&
+                        window.size > 0 &&
+                        window.peek(0).storageIndex == 4
+                }
+                assertEquals(4, latest.peek(0).storageIndex)
+                assertTrue(model.followsLatest)
+            } finally {
+                model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("checks out a compaction point at its visible compaction result") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify { storage ->
+                storage.index[1] = userMessage("prompt")
+                storage.index[2] = CleanCompactionPoint
+                storage.work[3] = StableContextCompaction(encryptedContent = "encrypted")
+                storage.index[4] = userMessage("after")
+            }
+            val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+            try {
+                model.awaitReady(itemCount = 3, hasOlder = false)
+
+                model.requestScrollToStorageIndex(2)
+                val checkedOut = model.awaitHistoryItems { window ->
+                    window.hasNewer &&
+                        window.size > 0 &&
+                        window.peek(0) is ContextCompactionHistoryItemViewModel
+                }
+                assertEquals(3, checkedOut.peek(0).storageIndex)
+                assertFalse(model.followsLatest)
             } finally {
                 model.close()
                 repository.cancelAndJoin()

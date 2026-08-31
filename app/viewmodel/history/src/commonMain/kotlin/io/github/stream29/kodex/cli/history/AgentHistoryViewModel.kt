@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
@@ -207,6 +208,10 @@ internal class AgentHistoryViewModelImpl(
     override fun requestScrollToLatest() {
         mutableFollowsLatest = true
         commands.trySend(HistoryCommand.JumpToLatest)
+    }
+
+    override fun requestScrollToStorageIndex(storageIndex: Int) {
+        commands.trySend(HistoryCommand.SeekToStorageIndex(storageIndex))
     }
 
     override fun close() {
@@ -645,6 +650,62 @@ internal class AgentHistoryViewModelImpl(
             }
         }
 
+        suspend fun seekToStorageIndex(storageIndex: Int) {
+            val snapshotIndex = agentState.latestIndex.value
+            val indexEntry = withContext(Dispatchers.Default) {
+                agentState.storage.index.getExact(storageIndex)
+            } ?: error("The selected History entry is no longer available.")
+            val displayIndex = if (indexEntry is CleanCompactionPoint && storageIndex > 0) {
+                storageIndex + 1
+            } else {
+                storageIndex
+            }
+            check(displayIndex <= snapshotIndex) {
+                "The selected History entry is no longer available."
+            }
+            mutableLoadState.value = AgentHistoryLoadState.Initializing
+            val batch = withContext(Dispatchers.Default) {
+                agentState.storage.readHistoryChunk(
+                    fromInclusive = displayIndex,
+                    snapshotIndex = snapshotIndex,
+                )
+            }
+            check(batch.items.isNotEmpty()) {
+                "The selected History entry has no visible History item."
+            }
+            val loaded = materializeChunk(displayIndex, batch, activeGeneration)
+            val newer = withContext(Dispatchers.Default) {
+                agentState.storage.readNewerHistoryChunk(
+                    afterExclusive = loaded.newestStorageIndex,
+                    snapshotIndex = snapshotIndex,
+                )
+            } != null
+            observedLatestIndex = snapshotIndex
+            nextOlderIndex = batch.nextOlderIndex
+            hasNewer = newer
+            initialized = true
+            chunks = listOf(loaded)
+            mutableFollowsLatest = !newer
+            pruneCaches(chunks.flatMap { chunk -> chunk.projections })
+            publishHistoryItems(
+                chunks = chunks,
+                hasOlder = nextOlderIndex != null,
+                hasNewer = newer,
+            )
+            if (newer) {
+                val localIndex = loaded.items.indexOfFirst { item ->
+                    item.storageIndex == displayIndex
+                }.takeIf { index -> index >= 0 } ?: 0
+                val transientPrefix =
+                    (if (mutableStreamingItem.value == null) 0 else 1) +
+                        mutablePendingTools.value.size +
+                        1
+                listState.scrollToItem(transientPrefix + localIndex)
+            }
+            mutableLoadState.value = AgentHistoryLoadState.Ready
+            refreshActiveTurnStart()
+        }
+
         for (command in commands) {
             try {
                 when (command) {
@@ -655,6 +716,10 @@ internal class AgentHistoryViewModelImpl(
                         replaceWindow(observedLatestIndex, invalidate = false)
                         listState.requestScrollToStart()
                     }
+
+                    is HistoryCommand.SeekToStorageIndex ->
+                        seekToStorageIndex(command.storageIndex)
+
                     is HistoryCommand.UpdateLatestTurn -> {
                         val changed = activeTurn != command.active
                         activeTurn = command.active
@@ -857,6 +922,7 @@ private sealed interface HistoryCommand {
     data object LoadOlder : HistoryCommand
     data object LoadNewer : HistoryCommand
     data object JumpToLatest : HistoryCommand
+    data class SeekToStorageIndex(val storageIndex: Int) : HistoryCommand
     data class UpdateLatestTurn(val active: Boolean) : HistoryCommand
     data class ExternalWriteFinished(val startIndex: Int, val endIndex: Int) : HistoryCommand
 }

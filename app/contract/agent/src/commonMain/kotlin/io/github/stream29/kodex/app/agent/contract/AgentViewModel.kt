@@ -61,6 +61,7 @@ public interface AgentViewModel :
 
     public val composer: ComposerViewModel
     public val history: AgentHistoryViewModel
+    public val historyIndex: HistoryIndexViewModel
     public val requestUserInput: RequestUserInputViewModel
     public val shellSessions: AgentShellSessionRegistry
 

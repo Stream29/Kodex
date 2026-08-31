@@ -117,5 +117,8 @@ public interface AgentHistoryViewModel : AutoCloseable {
     /** Restores follow-latest intent and requests the logical newest position. */
     public fun requestScrollToLatest()
 
+    /** Navigates to the committed History item represented by one index-timeline storage index. */
+    public fun requestScrollToStorageIndex(storageIndex: Int)
+
     override fun close()
 }

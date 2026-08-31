@@ -2,8 +2,6 @@ package io.github.stream29.kodex.cli.components
 
 import com.jakewharton.mosaic.layout.BringIntoViewModifierNode
 import com.jakewharton.mosaic.layout.LayoutCoordinates
-import com.jakewharton.mosaic.layout.Remeasurement
-import com.jakewharton.mosaic.layout.RemeasurementModifier
 import com.jakewharton.mosaic.layout.bringIntoView
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.node.ModifierNodeElement
@@ -20,19 +18,12 @@ import kotlinx.coroutines.launch
 internal data class LazyColumnBringIntoViewElement(
     private val state: LazyListState,
     private val interactionSource: MutableScrollInteractionSource?,
-) : ModifierNodeElement<LazyColumnBringIntoViewNode>(),
-    RemeasurementModifier {
-    private lateinit var remeasurement: Remeasurement
-
+) : ModifierNodeElement<LazyColumnBringIntoViewNode>() {
     override fun create(): LazyColumnBringIntoViewNode =
         LazyColumnBringIntoViewNode(this)
 
     override fun update(node: LazyColumnBringIntoViewNode) {
         node.element = this
-    }
-
-    override fun onRemeasurementAvailable(remeasurement: Remeasurement) {
-        this.remeasurement = remeasurement
     }
 
     fun bringChildIntoView(
@@ -61,7 +52,7 @@ internal data class LazyColumnBringIntoViewElement(
                 consumedDelta = consumedDelta,
             )
         )
-        remeasurement.forceRemeasure()
+        state.forceRemeasureIfNeeded()
     }
 }
 
