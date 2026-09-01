@@ -26,6 +26,7 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.BoxScope
+import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
@@ -63,6 +64,7 @@ import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import io.github.stream29.kodex.cli.components.wrapToTerminalWidth
 import io.github.stream29.kodex.cli.settings.MinimumSidebarWidthColumns
 import io.github.stream29.kodex.cli.settings.SidebarContent
+import io.github.stream29.kodex.utils.terminaltext.takeFirstFittingTerminalWidth
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -80,6 +82,7 @@ internal fun SessionSidebar(
     onHoverChanged: (Boolean) -> Unit,
     onToggleExpanded: () -> Unit,
     onOpenShellSessionMenu: (ShellSessionMenuRequest) -> Unit,
+    onShellSessionHoverChanged: (ShellSessionInteractionRequest, Boolean) -> Unit = { _, _ -> },
     onHistoryIndexHoverChanged: (HistoryIndexInteractionRequest, Boolean) -> Unit = { _, _ -> },
     onOpenHistoryIndexMenu: (HistoryIndexMenuRequest) -> Unit = {},
     resizable: Boolean = true,
@@ -119,6 +122,7 @@ internal fun SessionSidebar(
                 rows = rows,
                 onToggleExpanded = onToggleExpanded,
                 onOpenShellSessionMenu = onOpenShellSessionMenu,
+                onShellSessionHoverChanged = onShellSessionHoverChanged,
                 onHistoryIndexHoverChanged = onHistoryIndexHoverChanged,
                 onOpenHistoryIndexMenu = onOpenHistoryIndexMenu,
             )
@@ -147,6 +151,7 @@ private fun SessionSidebarContent(
     rows: Int,
     onToggleExpanded: () -> Unit,
     onOpenShellSessionMenu: (ShellSessionMenuRequest) -> Unit,
+    onShellSessionHoverChanged: (ShellSessionInteractionRequest, Boolean) -> Unit,
     onHistoryIndexHoverChanged: (HistoryIndexInteractionRequest, Boolean) -> Unit,
     onOpenHistoryIndexMenu: (HistoryIndexMenuRequest) -> Unit,
 ) {
@@ -163,8 +168,10 @@ private fun SessionSidebarContent(
                 SidebarContent.None -> Unit
                 SidebarContent.TerminalSessions -> TerminalSessionsSidebarBody(
                     selectedAgent = selectedAgent,
+                    side = side,
                     columns = columns,
                     rows = rows - 1,
+                    onHoverChanged = onShellSessionHoverChanged,
                     onOpenShellSessionMenu = onOpenShellSessionMenu,
                 )
 
@@ -508,28 +515,24 @@ private fun SessionSidebarDirectionButton(
 @Composable
 private fun TerminalSessionsSidebarBody(
     selectedAgent: AgentViewModel?,
+    side: SessionSidebarSide,
     columns: Int,
     rows: Int,
+    onHoverChanged: (ShellSessionInteractionRequest, Boolean) -> Unit,
     onOpenShellSessionMenu: (ShellSessionMenuRequest) -> Unit,
 ) {
-    val shellSessionItems = collectOngoingShellSessions(selectedAgent).map { session ->
-        ShellSessionSidebarItem(
-            session = session,
-            lines = shellSessionSidebarLines(
-                sessionId = session.sessionId,
-                command = session.arguments.command,
-                columns = columns,
-            ),
-        )
-    }
+    val shellSessions = collectOngoingShellSessions(selectedAgent)
     LazyColumn(modifier = Modifier.width(columns).height(rows)) {
-        items(shellSessionItems, key = { item -> item.session.sessionId }) { item ->
+        items(shellSessions, key = AgentShellSession::sessionId) { session ->
             ShellSessionSidebarRow(
-                lines = item.lines,
+                side = side,
+                session = session,
+                columns = columns,
+                onHoverChanged = onHoverChanged,
                 onOpenMenu = { anchor, clickPosition ->
                     onOpenShellSessionMenu(
                         ShellSessionMenuRequest(
-                            session = item.session,
+                            session = session,
                             anchor = anchor,
                             clickPosition = clickPosition,
                         ),
@@ -582,36 +585,58 @@ internal fun BoxScope.SessionSidebarContentMenu(
 
 @Composable
 internal fun ShellSessionSidebarRow(
-    lines: List<String>,
+    side: SessionSidebarSide,
+    session: AgentShellSession,
+    columns: Int,
+    onHoverChanged: (ShellSessionInteractionRequest, Boolean) -> Unit,
     onOpenMenu: (TuiPopupAnchor, IntOffset?) -> Unit,
 ) {
     val anchor = rememberTuiPopupAnchor()
+    val request = remember(side, session, anchor) {
+        ShellSessionInteractionRequest(
+            side = side,
+            session = session,
+            anchor = anchor,
+        )
+    }
+    DisposableEffect(request) {
+        onDispose { onHoverChanged(request, false) }
+    }
+    val summary = remember(session.arguments.command, columns) {
+        shellSessionSidebarSummary(
+            command = session.arguments.command,
+            columns = columns,
+        )
+    }
     TuiPressable(
         onClick = {},
         onSecondaryClick = { position -> onOpenMenu(anchor, position) },
-        modifier = Modifier.fillMaxWidth().tuiPopupAnchor(anchor),
+        modifier = Modifier
+            .fillMaxWidth()
+            .tuiPopupAnchor(anchor)
+            .onPointerEvent { event ->
+                if (event.type == MouseEvent.Type.Motion) {
+                    request.pointerPosition = event.position
+                }
+                false
+            }
+            .onPointerHover(
+                onPointerEnter = { onHoverChanged(request, true) },
+                onPointerExit = { onHoverChanged(request, false) },
+            ),
     ) { _, hovered, pressed ->
-        val textStyle = tuiInteractionTextStyle(
-            hovered = hovered,
-            pressed = pressed,
-            idleTextStyle = TextStyle.Dim,
-        )
-        Column(
+        EllipsizedText(
+            value = summary,
             modifier = Modifier
                 .fillMaxWidth()
                 .background(SettingsDialogNavigationBackground),
-        ) {
-            lines.forEach { line ->
-                Text(
-                    value = line,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(SettingsDialogNavigationBackground),
-                    color = SettingsDialogForeground,
-                    textStyle = textStyle,
-                )
-            }
-        }
+            color = SettingsDialogForeground,
+            textStyle = tuiInteractionTextStyle(
+                hovered = hovered,
+                pressed = pressed,
+                idleTextStyle = TextStyle.Dim,
+            ),
+        )
     }
 }
 
@@ -643,6 +668,39 @@ internal fun BoxScope.ShellSessionContextMenu(
 }
 
 @Composable
+internal fun BoxScope.ShellSessionHoverPopup(
+    request: ShellSessionInteractionRequest?,
+    contentColumns: Int,
+    contentRows: Int,
+    onHoverChanged: (Boolean) -> Unit,
+    onDismissRequest: () -> Unit,
+) {
+    val current = request ?: return
+    if (contentColumns <= 0 || contentRows <= 0 || !current.anchor.isPlaced) return
+    val completed by current.session.completed.collectAsState()
+    LaunchedEffect(current, completed) {
+        if (completed) onDismissRequest()
+    }
+    if (completed) return
+    var visible by remember(current) { mutableStateOf(false) }
+    LaunchedEffect(current) {
+        delay(SidebarHoverDelay)
+        visible = true
+    }
+    if (!visible) return
+    SidebarHoverPopupSurface(
+        anchor = current.anchor,
+        side = current.side,
+        pointerPosition = current.pointerPosition,
+        title = "Session ${current.session.sessionId}",
+        content = current.session.arguments.command,
+        contentColumns = contentColumns,
+        contentRows = contentRows,
+        onHoverChanged = onHoverChanged,
+    )
+}
+
+@Composable
 internal fun BoxScope.HistoryIndexHoverPopup(
     request: HistoryIndexInteractionRequest?,
     contentColumns: Int,
@@ -655,7 +713,7 @@ internal fun BoxScope.HistoryIndexHoverPopup(
         mutableStateOf<HistoryIndexHoverState>(HistoryIndexHoverState.Waiting)
     }
     LaunchedEffect(current) {
-        delay(HistoryIndexHoverDelay)
+        delay(SidebarHoverDelay)
         state.value = try {
             if (!current.viewModel.contains(current.generation, current.index)) {
                 HistoryIndexHoverState.Failed
@@ -686,27 +744,56 @@ internal fun BoxScope.HistoryIndexHoverPopup(
             content = loaded.detail.content
         }
     }
+    SidebarHoverPopupSurface(
+        anchor = current.anchor,
+        side = current.side,
+        pointerPosition = current.pointerPosition,
+        title = title,
+        content = content,
+        contentColumns = contentColumns,
+        contentRows = contentRows,
+        titleColor = if (loaded == HistoryIndexHoverState.Failed) {
+            TuiTheme.colorScheme.error
+        } else {
+            SettingsDialogForeground
+        },
+        onHoverChanged = onHoverChanged,
+    )
+}
+
+@Composable
+private fun BoxScope.SidebarHoverPopupSurface(
+    anchor: TuiPopupAnchor,
+    side: SessionSidebarSide,
+    pointerPosition: IntOffset?,
+    title: String,
+    content: String,
+    contentColumns: Int,
+    contentRows: Int,
+    titleColor: Color = SettingsDialogForeground,
+    onHoverChanged: (Boolean) -> Unit,
+) {
     val popupWidth = maxOf(
         title.terminalCellWidth(),
         content.lineSequence().maxOfOrNull(String::terminalCellWidth) ?: 0,
     ).coerceIn(1, contentColumns)
     val lines = content.wrapToTerminalWidth(popupWidth)
     val popupHeight = (lines.size + 1).coerceIn(1, contentRows)
-    val listState = remember(current, content) { LazyListState() }
+    val listState = remember(anchor, content) { LazyListState() }
     TuiPopup(
-        anchor = current.anchor,
+        anchor = anchor,
         onDismissRequest = null,
         positionProvider = remember(
-            current.side,
-            current.pointerPosition,
+            side,
+            pointerPosition,
             contentColumns,
             contentRows,
         ) {
-            HistoryIndexPopupPositionProvider(
-                side = current.side,
+            SidebarHoverPopupPositionProvider(
+                side = side,
                 contentColumns = contentColumns,
                 contentRows = contentRows,
-                pointerPosition = current.pointerPosition,
+                pointerPosition = pointerPosition,
             )
         },
         modifier = Modifier
@@ -732,11 +819,7 @@ internal fun BoxScope.HistoryIndexHoverPopup(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(SettingsDialogHeaderBackground),
-                color = if (loaded == HistoryIndexHoverState.Failed) {
-                    TuiTheme.colorScheme.error
-                } else {
-                    SettingsDialogForeground
-                },
+                color = titleColor,
             )
             if (popupHeight > 1) {
                 LazyColumn(
@@ -843,6 +926,15 @@ internal data class ShellSessionMenuRequest(
 )
 
 @Stable
+internal class ShellSessionInteractionRequest(
+    val side: SessionSidebarSide,
+    val session: AgentShellSession,
+    val anchor: TuiPopupAnchor,
+) {
+    var pointerPosition: IntOffset? by mutableStateOf(null)
+}
+
+@Stable
 internal class HistoryIndexInteractionRequest(
     val side: SessionSidebarSide,
     val viewModel: HistoryIndexViewModel,
@@ -911,7 +1003,7 @@ private sealed interface HistoryIndexHoverState {
     data class Ready(val detail: HistoryIndexEntryDetail) : HistoryIndexHoverState
 }
 
-private class HistoryIndexPopupPositionProvider(
+private class SidebarHoverPopupPositionProvider(
     private val side: SessionSidebarSide,
     private val contentColumns: Int,
     private val contentRows: Int,
@@ -967,7 +1059,7 @@ private class HistoryIndexPopupPositionProvider(
                 (surfaceSize.width - popupContentSize.width).coerceAtLeast(0),
             ),
             y = requestedY.coerceIn(
-                HistoryIndexPopupTopRow.coerceAtMost(
+                SidebarHoverPopupTopRow.coerceAtMost(
                     (surfaceSize.height - popupContentSize.height).coerceAtLeast(0),
                 ),
                 (surfaceSize.height - popupContentSize.height).coerceAtLeast(0),
@@ -976,16 +1068,57 @@ private class HistoryIndexPopupPositionProvider(
     }
 }
 
-private data class ShellSessionSidebarItem(
-    val session: AgentShellSession,
-    val lines: List<String>,
-)
-
-internal fun shellSessionSidebarLines(
-    sessionId: Int,
+internal fun shellSessionSidebarSummary(
     command: String,
     columns: Int,
-): List<String> = "$sessionId: $command".wrapToTerminalWidth(columns.coerceAtLeast(1))
+): String {
+    if (columns <= 0) return ""
+    val prefix = "● "
+    val prefixWidth = prefix.terminalCellWidth()
+    if (columns <= prefixWidth) return prefix.takeFirstFittingTerminalWidth(columns)
+
+    val contentWidth = columns - prefixWidth
+    val content = StringBuilder()
+    var remainingWidth = contentWidth
+    var truncated = false
+    val lines = command.lineSequence().iterator()
+    var firstLine = true
+    while (lines.hasNext()) {
+        val line = lines.next()
+        if (!firstLine) {
+            if (remainingWidth == 0) {
+                truncated = true
+                break
+            }
+            content.append(' ')
+            remainingWidth -= 1
+        }
+        firstLine = false
+
+        val fitting = line.takeFirstFittingTerminalWidth(remainingWidth)
+        content.append(fitting)
+        remainingWidth -= fitting.terminalCellWidth()
+        if (fitting.length < line.length) {
+            truncated = true
+            break
+        }
+        if (remainingWidth == 0 && lines.hasNext()) {
+            truncated = true
+            break
+        }
+    }
+
+    if (!truncated) return prefix + content
+    val ellipsis = "..."
+    val visibleContent = if (contentWidth <= ellipsis.terminalCellWidth()) {
+        content.toString().takeFirstFittingTerminalWidth(contentWidth)
+    } else {
+        content.toString().takeFirstFittingTerminalWidth(
+            contentWidth - ellipsis.terminalCellWidth(),
+        ) + ellipsis
+    }
+    return prefix + visibleContent
+}
 
 internal fun canExpandSessionSidebar(
     columns: Int,
@@ -1057,5 +1190,5 @@ internal const val SessionSidebarCollapsedButtonColumns: Int = 3
 internal const val SessionSidebarCollapsedButtonRows: Int = 1
 internal const val SessionSidebarSplitterColumns: Int = 1
 internal const val SessionSidebarMinimumContentColumns: Int = 1
-private val HistoryIndexHoverDelay = 300.milliseconds
-private const val HistoryIndexPopupTopRow: Int = 1
+private val SidebarHoverDelay = 300.milliseconds
+private const val SidebarHoverPopupTopRow: Int = 1

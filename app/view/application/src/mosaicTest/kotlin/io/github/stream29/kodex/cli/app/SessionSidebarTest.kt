@@ -232,6 +232,77 @@ class SessionSidebarTest {
     }
 
     @Test
+    fun terminalSessionRowsUseDistinctSingleLineBulletsWithoutIds() = runTest {
+        runMosaicTest {
+            setContentAndSnapshot {
+                Column(modifier = Modifier.width(12)) {
+                    ShellSessionSidebarRow(
+                        side = SessionSidebarSide.Left,
+                        session = TestAgentShellSession(
+                            sessionId = 41,
+                            command = "first",
+                        ),
+                        columns = 12,
+                        onHoverChanged = { _, _ -> },
+                        onOpenMenu = { _, _ -> },
+                    )
+                    ShellSessionSidebarRow(
+                        side = SessionSidebarSide.Left,
+                        session = TestAgentShellSession(
+                            sessionId = 42,
+                            command = "abcdefghijklmnop",
+                        ),
+                        columns = 12,
+                        onHoverChanged = { _, _ -> },
+                        onOpenMenu = { _, _ -> },
+                    )
+                }
+            }
+
+            val snapshot = awaitSnapshot()
+            assertTrue("● first" in snapshot, snapshot)
+            assertTrue("● abcdefg..." in snapshot, snapshot)
+            assertFalse("41" in snapshot, snapshot)
+            assertFalse("42" in snapshot, snapshot)
+            assertEquals(2, snapshot.lines().count { line -> "● " in line }, snapshot)
+        }
+    }
+
+    @Test
+    fun terminalSessionHoverShowsIdAndCompleteCommand() = runTest {
+        val session = TestAgentShellSession(
+            sessionId = 42,
+            command = "echo first\necho second",
+        )
+        runMosaicTest {
+            setContentAndSnapshot {
+                TuiPopupHost(modifier = Modifier.width(40).height(8)) {
+                    val anchor = rememberTuiPopupAnchor()
+                    Text("● echo...", modifier = Modifier.tuiPopupAnchor(anchor))
+                    val request = remember(anchor) {
+                        ShellSessionInteractionRequest(
+                            side = SessionSidebarSide.Left,
+                            session = session,
+                            anchor = anchor,
+                        )
+                    }
+                    ShellSessionHoverPopup(
+                        request = request,
+                        contentColumns = 30,
+                        contentRows = 7,
+                        onHoverChanged = {},
+                        onDismissRequest = {},
+                    )
+                }
+            }
+
+            val snapshot = awaitSnapshotContaining("echo second")
+            assertTrue("Session 42" in snapshot, snapshot)
+            assertTrue("echo first" in snapshot, snapshot)
+        }
+    }
+
+    @Test
     fun historyIndexRendersAConnectedOldestFirstTimeline() = runTest {
         val viewModel = TestHistoryIndexViewModel(
             entries = listOf(
@@ -649,21 +720,27 @@ class SessionSidebarTest {
     }
 
     @Test
-    fun shellSessionRowsWrapHardLines() {
+    fun shellSessionSummaryFlattensAndTruncatesCommands() {
         assertEquals(
-            listOf("42: abcd", "efghijkl", "next"),
-            shellSessionSidebarLines(
-                sessionId = 42,
-                command = "abcdefghijkl\nnext",
-                columns = 8,
-            ),
+            "● abc...",
+            shellSessionSidebarSummary(command = "abcdefghijkl\nnext", columns = 8),
+        )
+        assertEquals(
+            "● ab cd",
+            shellSessionSidebarSummary(command = "ab\ncd", columns = 10),
+        )
+        assertEquals(
+            "●",
+            shellSessionSidebarSummary(command = "command", columns = 1),
         )
     }
 }
 
-private class TestAgentShellSession : AgentShellSession {
-    override val sessionId: Int = 1
-    override val arguments: ExecCommandArguments = ExecCommandArguments(command = "sleep 1")
+private class TestAgentShellSession(
+    override val sessionId: Int = 1,
+    command: String = "sleep 1",
+) : AgentShellSession {
+    override val arguments: ExecCommandArguments = ExecCommandArguments(command = command)
     override val completed: StateFlow<Boolean> = MutableStateFlow(false)
     var closeCount: Int = 0
 
