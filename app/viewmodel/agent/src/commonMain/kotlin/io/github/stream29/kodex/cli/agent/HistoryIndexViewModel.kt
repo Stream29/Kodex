@@ -96,6 +96,7 @@ internal class HistoryIndexViewModelImpl(
         HistoryIndexEntryDetail(
             kind = entry.toHistoryIndexEntryKind(),
             content = entry.toHistoryIndexDetail(),
+            requestUserInput = entry as? StableRequestUserInputToolEvent,
         )
     }
 

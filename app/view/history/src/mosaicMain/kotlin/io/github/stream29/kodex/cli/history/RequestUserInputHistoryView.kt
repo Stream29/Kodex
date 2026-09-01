@@ -1,9 +1,11 @@
 package io.github.stream29.kodex.cli.history
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Column
+import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
@@ -18,95 +20,147 @@ internal fun StableRequestUserInputToolEvent.renderRequestUserInput(
     elapsed: Duration?,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        if (arguments.questions.isEmpty()) {
-            HistoryItemHeader(
-                value = "Ask the user",
-                elapsed = elapsed,
-                modifier = Modifier.fillMaxWidth(),
-                textStyle = TextStyle.Bold,
-            )
-        } else {
-            arguments.questions.forEachIndexed { index, question ->
-                val elapsedSuffix = if (index == 0) {
-                    elapsed?.let { duration -> " +${duration.roundToMilliseconds()}" }.orEmpty()
-                } else {
-                    ""
-                }
-                WrappedHistoryText(
-                    value = "${question.header}: ${question.question}$elapsedSuffix",
-                    textStyle = TextStyle.Bold,
-                )
-                val answered = result as? StableRequestUserInputResult.Answered
-                answered?.response?.answers?.get(question.id)?.renderReadOnly(question)
-            }
-        }
-
-        (result as? StableRequestUserInputResult.Failure)?.let { failure ->
-            WrappedHistoryText(
-                value = "Failed to submit: ${failure.message}",
-                textStyle = TextStyle.Dim,
-                color = TuiTheme.colorScheme.error,
-            )
+        requestUserInputHistoryRows(elapsed).forEach { row ->
+            RequestUserInputHistoryRow(row)
         }
     }
 }
 
+/** One renderer-neutral row in the completed read-only request-user-input form. */
+@Immutable
+public data class RequestUserInputHistoryRowModel(
+    public val value: String,
+    public val role: RequestUserInputHistoryRowRole,
+)
+
+/** Visual role shared by the main History and History Index hover renderers. */
+public enum class RequestUserInputHistoryRowRole {
+    Header,
+    Body,
+    Supporting,
+    Error,
+}
+
+/** Projects the completed exchange into the exact rows used by the read-only History form. */
+public fun StableRequestUserInputToolEvent.requestUserInputHistoryRows(
+    elapsed: Duration? = null,
+): List<RequestUserInputHistoryRowModel> = buildList {
+    if (arguments.questions.isEmpty()) {
+        add(
+            RequestUserInputHistoryRowModel(
+                value = "Ask the user" + elapsed.historySuffix(),
+                role = RequestUserInputHistoryRowRole.Header,
+            ),
+        )
+    } else {
+        val answered = (result as? StableRequestUserInputResult.Answered)?.response?.answers
+        arguments.questions.forEachIndexed { index, question ->
+            add(
+                RequestUserInputHistoryRowModel(
+                    value = "${question.header}: ${question.question}" +
+                        if (index == 0) elapsed.historySuffix() else "",
+                    role = RequestUserInputHistoryRowRole.Header,
+                ),
+            )
+            answered?.get(question.id)?.let { answer ->
+                addAll(answer.readOnlyRows(question))
+            }
+        }
+    }
+
+    (result as? StableRequestUserInputResult.Failure)?.let { failure ->
+        add(
+            RequestUserInputHistoryRowModel(
+                value = "Failed to submit: ${failure.message}",
+                role = RequestUserInputHistoryRowRole.Error,
+            ),
+        )
+    }
+}
+
+/** Renders one shared read-only request-user-input row. */
 @Composable
-private fun RequestUserInputAnswer.renderReadOnly(
+public fun RequestUserInputHistoryRow(row: RequestUserInputHistoryRowModel) {
+    val textStyle = when (row.role) {
+        RequestUserInputHistoryRowRole.Header -> TextStyle.Bold
+        RequestUserInputHistoryRowRole.Supporting,
+        RequestUserInputHistoryRowRole.Error,
+            -> TextStyle.Dim
+
+        RequestUserInputHistoryRowRole.Body -> TextStyle.Unspecified
+    }
+    val color = if (row.role == RequestUserInputHistoryRowRole.Error) {
+        TuiTheme.colorScheme.error
+    } else {
+        Color.Unspecified
+    }
+    WrappedHistoryText(
+        value = row.value,
+        textStyle = textStyle,
+        color = color,
+    )
+}
+
+private fun RequestUserInputAnswer.readOnlyRows(
     question: RequestUserInputQuestion,
-) {
-    if (answers.isEmpty()) return
+): List<RequestUserInputHistoryRowModel> {
+    if (answers.isEmpty()) return emptyList()
     if (question.isSecret) {
-        ReadOnlyFreeFormAnswer("[hidden]")
-        return
+        return freeFormRows("[hidden]")
     }
 
     val options = question.options.orEmpty()
     if (options.isEmpty()) {
-        answers.forEach { value ->
-            ReadOnlyFreeFormAnswer(value.removePrefix(UserNotePrefix))
-        }
-        return
-    }
-
-    var renderedOther = false
-    answers.forEach { value ->
-        if (value.startsWith(UserNotePrefix)) {
-            if (!renderedOther) {
-                ReadOnlySelectedOption("Other")
-                renderedOther = true
+        return buildList {
+            answers.forEach { value ->
+                addAll(freeFormRows(value.removePrefix(UserNotePrefix)))
             }
-            ReadOnlyFreeFormAnswer(value.removePrefix(UserNotePrefix))
-        } else {
-            ReadOnlySelectedOption(value)
-            options
-                .firstOrNull { option -> option.label == value }
-                ?.description
-                ?.takeIf(String::isNotBlank)
-                ?.let { description ->
-                    WrappedHistoryText(
-                        value = "  $description",
-                        textStyle = TextStyle.Dim,
-                    )
+        }
+    }
+
+    return buildList {
+        var renderedOther = false
+        answers.forEach { value ->
+            if (value.startsWith(UserNotePrefix)) {
+                if (!renderedOther) {
+                    add(selectedOptionRow("Other"))
+                    renderedOther = true
                 }
+                addAll(freeFormRows(value.removePrefix(UserNotePrefix)))
+            } else {
+                add(selectedOptionRow(value))
+                options
+                    .firstOrNull { option -> option.label == value }
+                    ?.description
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { description ->
+                        add(
+                            RequestUserInputHistoryRowModel(
+                                value = "  $description",
+                                role = RequestUserInputHistoryRowRole.Supporting,
+                            ),
+                        )
+                    }
+            }
         }
     }
 }
 
-@Composable
-private fun ReadOnlySelectedOption(
-    label: String,
-) {
-    WrappedHistoryText("[● $label]")
-}
+private fun selectedOptionRow(label: String): RequestUserInputHistoryRowModel =
+    RequestUserInputHistoryRowModel(
+        value = "[● $label]",
+        role = RequestUserInputHistoryRowRole.Body,
+    )
 
-@Composable
-private fun ReadOnlyFreeFormAnswer(
-    value: String,
-) {
-    value.lines().forEachIndexed { index, line ->
-        WrappedHistoryText("${if (index == 0) "  > " else "    "}$line")
+private fun freeFormRows(value: String): List<RequestUserInputHistoryRowModel> =
+    value.lines().mapIndexed { index, line ->
+        RequestUserInputHistoryRowModel(
+            value = "${if (index == 0) "  > " else "    "}$line",
+            role = RequestUserInputHistoryRowRole.Body,
+        )
     }
-}
+
+private fun Duration?.historySuffix(): String =
+    this?.let { duration -> " +${duration.roundToMilliseconds()}" }.orEmpty()
 
 private const val UserNotePrefix: String = "user_note: "
