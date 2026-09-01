@@ -18,6 +18,8 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntryDetail
@@ -33,6 +35,11 @@ import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import io.github.stream29.kodex.cli.settings.SidebarContent
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestionOption
+import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -448,6 +455,85 @@ class SessionSidebarTest {
     }
 
     @Test
+    fun requestUserInputHoverReusesTheHistoryReadOnlyForm() = runTest {
+        val event = StableRequestUserInputToolEvent(
+            callId = "request",
+            arguments = RequestUserInputArgs(
+                questions = listOf(
+                    RequestUserInputQuestion(
+                        id = "layout",
+                        header = "Layout",
+                        question = "Which layout should be used?",
+                        options = listOf(
+                            RequestUserInputQuestionOption("Compact", "Use less space"),
+                            RequestUserInputQuestionOption("Detailed", "Show every field"),
+                        ),
+                    ),
+                    RequestUserInputQuestion(
+                        id = "note",
+                        header = "Note",
+                        question = "Anything else?",
+                    ),
+                ),
+            ),
+            result = StableRequestUserInputResult.Answered(
+                RequestUserInputResponse(
+                    answers = mapOf(
+                        "layout" to RequestUserInputAnswer(listOf("Compact")),
+                        "note" to RequestUserInputAnswer(listOf("Keep it readable")),
+                    ),
+                ),
+            ),
+        )
+        val viewModel = TestHistoryIndexViewModel(
+            entries = listOf(
+                HistoryIndexEntry(
+                    index = 7,
+                    kind = HistoryIndexEntryKind.RequestUserInput,
+                    summary = "Which layout should be used?",
+                ),
+            ),
+            details = mapOf(
+                7 to HistoryIndexEntryDetail(
+                    kind = HistoryIndexEntryKind.RequestUserInput,
+                    content = "fallback",
+                    requestUserInput = event,
+                ),
+            ),
+        )
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                TuiPopupHost(modifier = Modifier.width(60).height(12)) {
+                    val anchor = rememberTuiPopupAnchor()
+                    Text("entry", modifier = Modifier.tuiPopupAnchor(anchor))
+                    HistoryIndexHoverPopup(
+                        request = HistoryIndexInteractionRequest(
+                            side = SessionSidebarSide.Left,
+                            viewModel = viewModel,
+                            generation = 0,
+                            index = 7,
+                            anchor = anchor,
+                        ),
+                        contentColumns = 50,
+                        contentRows = 11,
+                        onHoverChanged = {},
+                    )
+                }
+            }
+            val snapshot = awaitSnapshotContaining("Keep it readable")
+            assertTrue("Layout: Which layout should be used?" in snapshot, snapshot)
+            assertTrue("[● Compact]" in snapshot, snapshot)
+            assertTrue("  Use less space" in snapshot, snapshot)
+            assertTrue("Note: Anything else?" in snapshot, snapshot)
+            assertTrue("  > Keep it readable" in snapshot, snapshot)
+            assertFalse("Detailed" in snapshot, snapshot)
+            assertFalse("Options:" in snapshot, snapshot)
+            assertFalse("Answer:" in snapshot, snapshot)
+        }
+    }
+
+    @Test
     fun historyIndexInitiallyFollowsTheLatestEntry() = runTest {
         val viewModel = TestHistoryIndexViewModel(
             entries = listOf(
@@ -751,6 +837,7 @@ private class TestAgentShellSession(
 
 private class TestHistoryIndexViewModel(
     entries: List<HistoryIndexEntry>,
+    private val details: Map<Int, HistoryIndexEntryDetail> = emptyMap(),
 ) : HistoryIndexViewModel {
     private val mutableEntries = entries.associateByTo(linkedMapOf()) { entry -> entry.index }
     override val window = MutableStateFlow(
@@ -770,6 +857,7 @@ private class TestHistoryIndexViewModel(
         generation: Long,
         index: Int,
     ): HistoryIndexEntryDetail {
+        details[index]?.let { return it }
         val entry = load(generation, index)
         return HistoryIndexEntryDetail(entry.kind, entry.summary)
     }

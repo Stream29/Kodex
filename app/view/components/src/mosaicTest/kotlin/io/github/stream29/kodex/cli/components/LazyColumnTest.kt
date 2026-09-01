@@ -519,11 +519,10 @@ val lazyColumnTest by testSuite {
         assertEquals(64, coarseState.firstVisibleItemScrollOffset)
     }
 
-    test("scrolling precomposes and premeasures the next item beyond the cache") {
+    test("scrolling precomposes and premeasures the predictive row window") {
         val state = LazyListState()
         val composed = mutableSetOf<Int>()
-        val measured = mutableSetOf<Int>()
-        val disposed = mutableSetOf<Int>()
+        val measureCounts = mutableMapOf<Int, Int>()
         var frameTrigger by mutableIntStateOf(0)
 
         runMosaicTest {
@@ -533,13 +532,10 @@ val lazyColumnTest by testSuite {
                     LazyColumn(Modifier.height(2), state) {
                         items(count = 20, key = { index -> index }) { index ->
                             composed += index
-                            DisposableEffect(index) {
-                                onDispose { disposed += index }
-                            }
                             Layout(
                                 content = { Text(index.toString()) },
                                 measurePolicy = MeasurePolicy { measurables, constraints ->
-                                    measured += index
+                                    measureCounts[index] = (measureCounts[index] ?: 0) + 1
                                     val placeable = measurables.single().measure(constraints)
                                     layout(placeable.width, placeable.height) {
                                         placeable.place(0, 0)
@@ -551,23 +547,113 @@ val lazyColumnTest by testSuite {
                 }
             }
             assertFalse(5 in composed)
-            assertFalse(5 in measured)
+            assertFalse(5 in measureCounts)
 
             assertEquals(1, state.scrollBy(1))
             awaitSnapshot()
-            repeat(4) {
-                if (5 in composed && 5 in measured) return@repeat
+            repeat(12) {
+                if ((5..8).all { index -> index in composed && index in measureCounts }) {
+                    return@repeat
+                }
+                frameTrigger++
+                awaitSnapshot()
+            }
+
+            assertTrue((5..8).all(composed::contains))
+            assertTrue((5..8).all(measureCounts::containsKey))
+
+            assertEquals(2, state.scrollBy(2))
+            val prefetchedCountsBeforeCrossing = (5..8).associateWith(measureCounts::getValue)
+            assertEquals(1, state.scrollBy(1))
+            assertEquals(
+                prefetchedCountsBeforeCrossing,
+                (5..8).associateWith(measureCounts::getValue),
+            )
+        }
+    }
+
+    test("reverse layout reuses the predictive row window") {
+        val state = LazyListState()
+        val measureCounts = mutableMapOf<Int, Int>()
+        var frameTrigger by mutableIntStateOf(0)
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Column {
+                    Text(frameTrigger.toString())
+                    LazyColumn(Modifier.height(2), state, reverseLayout = true) {
+                        items(count = 20, key = { index -> index }) { index ->
+                            Layout(
+                                content = { Text(index.toString()) },
+                                measurePolicy = MeasurePolicy { measurables, constraints ->
+                                    measureCounts[index] = (measureCounts[index] ?: 0) + 1
+                                    val placeable = measurables.single().measure(constraints)
+                                    layout(placeable.width, placeable.height) {
+                                        placeable.place(0, 0)
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            assertEquals(-1, state.scrollBy(-1))
+            awaitSnapshot()
+            repeat(12) {
+                if ((5..8).all(measureCounts::containsKey)) return@repeat
+                frameTrigger++
+                awaitSnapshot()
+            }
+
+            assertTrue((5..8).all(measureCounts::containsKey))
+            assertEquals(-2, state.scrollBy(-2))
+            val prefetchedCountsBeforeCrossing = (5..8).associateWith(measureCounts::getValue)
+            assertEquals(-1, state.scrollBy(-1))
+            assertEquals(
+                prefetchedCountsBeforeCrossing,
+                (5..8).associateWith(measureCounts::getValue),
+            )
+        }
+    }
+
+    test("predictive premeasurement stops after the target rows") {
+        val state = LazyListState()
+        val composed = mutableSetOf<Int>()
+        val measured = mutableSetOf<Int>()
+        var frameTrigger by mutableIntStateOf(0)
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Column {
+                    Text(frameTrigger.toString())
+                    LazyColumn(Modifier.height(2), state) {
+                        items(count = 20, key = { index -> index }) { index ->
+                            composed += index
+                            Layout(
+                                content = {},
+                                measurePolicy = MeasurePolicy { _, _ ->
+                                    measured += index
+                                    layout(width = 1, height = if (index == 5) 100 else 1) {}
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            assertEquals(1, state.scrollBy(1))
+            awaitSnapshot()
+            repeat(6) {
+                if (5 in measured) return@repeat
                 frameTrigger++
                 awaitSnapshot()
             }
 
             assertTrue(5 in composed)
             assertTrue(5 in measured)
-            assertFalse(5 in disposed)
-
-            assertEquals(-1, state.scrollBy(-1))
-            awaitSnapshot()
-            assertTrue(5 in disposed)
+            assertFalse(6 in composed)
+            assertFalse(6 in measured)
         }
     }
 

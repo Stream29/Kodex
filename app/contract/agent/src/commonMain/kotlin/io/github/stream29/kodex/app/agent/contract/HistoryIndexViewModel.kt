@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.app.agent.contract
 
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
 import kotlinx.coroutines.flow.StateFlow
 
 /** Oldest-first snapshot of one Agent's sparse index timeline. */
@@ -32,6 +33,7 @@ public data class HistoryIndexEntry(
 public data class HistoryIndexEntryDetail(
     public val kind: HistoryIndexEntryKind,
     public val content: String,
+    public val requestUserInput: StableRequestUserInputToolEvent? = null,
 )
 
 /** Sparse index timeline owned by one materialized Agent ViewModel. */

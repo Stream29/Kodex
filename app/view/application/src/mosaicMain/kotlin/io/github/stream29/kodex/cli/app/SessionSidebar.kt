@@ -62,6 +62,9 @@ import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiInteractionTextStyle
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import io.github.stream29.kodex.cli.components.wrapToTerminalWidth
+import io.github.stream29.kodex.cli.history.RequestUserInputHistoryRow
+import io.github.stream29.kodex.cli.history.RequestUserInputHistoryRowModel
+import io.github.stream29.kodex.cli.history.requestUserInputHistoryRows
 import io.github.stream29.kodex.cli.settings.MinimumSidebarWidthColumns
 import io.github.stream29.kodex.cli.settings.SidebarContent
 import io.github.stream29.kodex.utils.terminaltext.takeFirstFittingTerminalWidth
@@ -744,6 +747,10 @@ internal fun BoxScope.HistoryIndexHoverPopup(
             content = loaded.detail.content
         }
     }
+    val requestUserInputRows = (loaded as? HistoryIndexHoverState.Ready)
+        ?.detail
+        ?.requestUserInput
+        ?.requestUserInputHistoryRows()
     SidebarHoverPopupSurface(
         anchor = current.anchor,
         side = current.side,
@@ -752,6 +759,7 @@ internal fun BoxScope.HistoryIndexHoverPopup(
         content = content,
         contentColumns = contentColumns,
         contentRows = contentRows,
+        requestUserInputRows = requestUserInputRows,
         titleColor = if (loaded == HistoryIndexHoverState.Failed) {
             TuiTheme.colorScheme.error
         } else {
@@ -770,16 +778,24 @@ private fun BoxScope.SidebarHoverPopupSurface(
     content: String,
     contentColumns: Int,
     contentRows: Int,
+    requestUserInputRows: List<RequestUserInputHistoryRowModel>? = null,
     titleColor: Color = SettingsDialogForeground,
     onHoverChanged: (Boolean) -> Unit,
 ) {
     val popupWidth = maxOf(
         title.terminalCellWidth(),
-        content.lineSequence().maxOfOrNull(String::terminalCellWidth) ?: 0,
+        requestUserInputRows
+            ?.flatMap { row -> row.value.lineSequence().toList() }
+            ?.maxOfOrNull(String::terminalCellWidth)
+            ?: content.lineSequence().maxOfOrNull(String::terminalCellWidth)
+            ?: 0,
     ).coerceIn(1, contentColumns)
     val lines = content.wrapToTerminalWidth(popupWidth)
-    val popupHeight = (lines.size + 1).coerceIn(1, contentRows)
-    val listState = remember(anchor, content) { LazyListState() }
+    val bodyHeight = requestUserInputRows?.sumOf { row ->
+        row.value.wrapToTerminalWidth(popupWidth).size.coerceAtLeast(1)
+    } ?: lines.size
+    val popupHeight = (bodyHeight + 1).coerceIn(1, contentRows)
+    val listState = remember(anchor, content, requestUserInputRows) { LazyListState() }
     TuiPopup(
         anchor = anchor,
         onDismissRequest = null,
@@ -829,14 +845,20 @@ private fun BoxScope.SidebarHoverPopupSurface(
                         .background(SettingsDialogHomeBackground),
                     state = listState,
                 ) {
-                    items(lines) { line ->
-                        Text(
-                            value = line,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(SettingsDialogHomeBackground),
-                            color = SettingsDialogForeground,
-                        )
+                    if (requestUserInputRows == null) {
+                        items(lines) { line ->
+                            Text(
+                                value = line,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(SettingsDialogHomeBackground),
+                                color = SettingsDialogForeground,
+                            )
+                        }
+                    } else {
+                        items(requestUserInputRows) { row ->
+                            RequestUserInputHistoryRow(row)
+                        }
                     }
                 }
             }

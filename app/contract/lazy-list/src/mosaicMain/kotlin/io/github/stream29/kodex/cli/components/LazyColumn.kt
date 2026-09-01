@@ -366,21 +366,31 @@ private fun SubcomposeMeasureScope.measureLazyColumn(
         canScrollForward = canScrollForward,
         consumedScroll = consumedScroll,
     )
-    val prefetchLayoutIndex = when {
-        state.lastScrollDirection > 0 && lastMeasuredIndex < lastLayoutIndex ->
-            lastMeasuredIndex + 1
-        state.lastScrollDirection < 0 && firstMeasuredIndex > 0 ->
-            firstMeasuredIndex - 1
-        else -> null
-    }
+    val prefetchTargetRows = (viewportHeight.toLong() * PrefetchWindowViewports)
+        .coerceAtMost(Int.MAX_VALUE.toLong())
+        .toInt()
+    val prefetchLayoutIndices = calculatePrefetchLayoutIndices(
+        direction = state.lastScrollDirection,
+        firstMeasuredIndex = firstMeasuredIndex,
+        lastMeasuredIndex = lastMeasuredIndex,
+        lastLayoutIndex = lastLayoutIndex,
+        targetRows = prefetchTargetRows,
+    )
     prefetchState.schedule(
-        prefetchLayoutIndex?.let { layoutIndex ->
-            LazyColumnPrefetchRequest(
-                provider = itemProvider,
-                layoutIndex = layoutIndex,
-                key = itemProvider.keyAtLayoutIndex(layoutIndex),
-                contentType = itemProvider.contentTypeAtLayoutIndex(layoutIndex),
-                constraints = itemConstraints,
+        if (prefetchLayoutIndices.isEmpty()) {
+            null
+        } else {
+            LazyColumnPrefetchPlan(
+                targetRows = prefetchTargetRows,
+                requests = prefetchLayoutIndices.map { layoutIndex ->
+                    LazyColumnPrefetchRequest(
+                        provider = itemProvider,
+                        layoutIndex = layoutIndex,
+                        key = itemProvider.keyAtLayoutIndex(layoutIndex),
+                        contentType = itemProvider.contentTypeAtLayoutIndex(layoutIndex),
+                        constraints = itemConstraints,
+                    )
+                },
             )
         }
     )
@@ -414,6 +424,28 @@ private class MeasuredLazyItem(
 private fun saturatedAdd(left: Int, right: Int): Int =
     (left.toLong() + right).coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
 
+private fun calculatePrefetchLayoutIndices(
+    direction: Int,
+    firstMeasuredIndex: Int,
+    lastMeasuredIndex: Int,
+    lastLayoutIndex: Int,
+    targetRows: Int,
+): List<Int> {
+    if (direction == 0 || targetRows <= 0) return emptyList()
+    val edgeIndex = if (direction > 0) lastMeasuredIndex else firstMeasuredIndex
+    val firstPrefetchIndex = edgeIndex + direction
+    if (firstPrefetchIndex !in 0..lastLayoutIndex) return emptyList()
+    val availableItems = if (direction > 0) {
+        lastLayoutIndex - firstPrefetchIndex + 1
+    } else {
+        firstPrefetchIndex + 1
+    }
+
+    return List(minOf(targetRows, availableItems)) { offset ->
+        firstPrefetchIndex + offset * direction
+    }
+}
+
 private fun calculateNearestItemsRange(firstVisibleItemIndex: Int): IntRange {
     val windowStart =
         firstVisibleItemIndex / NearestItemsSlidingWindowSize * NearestItemsSlidingWindowSize
@@ -428,3 +460,4 @@ private fun calculateNearestItemsRange(firstVisibleItemIndex: Int): IntRange {
 
 private const val NearestItemsSlidingWindowSize = 30
 private const val NearestItemsExtraItemCount = 100
+private const val PrefetchWindowViewports = 2
