@@ -106,6 +106,9 @@ public fun SessionTreeCliScreen(
     val leftSidebarDropdown = rememberTuiDropdownState()
     val rightSidebarDropdown = rememberTuiDropdownState()
     var shellSessionMenu by remember { mutableStateOf<SidebarShellSessionMenuRequest?>(null) }
+    var shellSessionHover by remember { mutableStateOf<ShellSessionInteractionRequest?>(null) }
+    var shellSessionPopupHovered by remember { mutableStateOf(false) }
+    var shellSessionHoverCloseJob by remember { mutableStateOf<Job?>(null) }
     var historyIndexHover by remember { mutableStateOf<HistoryIndexInteractionRequest?>(null) }
     var historyIndexPopupHovered by remember { mutableStateOf(false) }
     var historyIndexHoverCloseJob by remember { mutableStateOf<Job?>(null) }
@@ -118,6 +121,7 @@ public fun SessionTreeCliScreen(
         leftSidebarResizing ||
         leftSidebarDropdown.expanded ||
         shellSessionMenu?.side == SessionSidebarSide.Left ||
+        shellSessionHover?.side == SessionSidebarSide.Left ||
         historyIndexHover?.side == SessionSidebarSide.Left ||
         historyIndexMenu?.target?.side == SessionSidebarSide.Left
     val rightSidebarExpanded = rightSidebarPinnedExpanded ||
@@ -126,6 +130,7 @@ public fun SessionTreeCliScreen(
         rightSidebarResizing ||
         rightSidebarDropdown.expanded ||
         shellSessionMenu?.side == SessionSidebarSide.Right ||
+        shellSessionHover?.side == SessionSidebarSide.Right ||
         historyIndexHover?.side == SessionSidebarSide.Right ||
         historyIndexMenu?.target?.side == SessionSidebarSide.Right
     val leftSidebarPreferredColumns =
@@ -175,12 +180,44 @@ public fun SessionTreeCliScreen(
     val runtimeSettings = collectRuntimeSettings(settingsOwner)
     val runtimeModels = collectRuntimeModels(settingsOwner)
 
+    fun closeShellSessionHoverAfterGrace(
+        request: ShellSessionInteractionRequest? = shellSessionHover,
+    ) {
+        shellSessionHoverCloseJob?.cancel()
+        shellSessionHoverCloseJob = scope.launch {
+            delay(SidebarHoverCloseGrace)
+            if (
+                !shellSessionPopupHovered &&
+                (request == null || shellSessionHover == request)
+            ) {
+                shellSessionHover = null
+            }
+        }
+    }
+
+    fun updateShellSessionRowHover(
+        request: ShellSessionInteractionRequest,
+        hovered: Boolean,
+    ) {
+        if (hovered) {
+            if (shellSessionMenu != null || historyIndexMenu != null) return
+            historyIndexHoverCloseJob?.cancel()
+            historyIndexHover = null
+            historyIndexPopupHovered = false
+            shellSessionHoverCloseJob?.cancel()
+            shellSessionPopupHovered = false
+            shellSessionHover = request
+        } else if (shellSessionHover == request) {
+            closeShellSessionHoverAfterGrace(request)
+        }
+    }
+
     fun closeHistoryIndexHoverAfterGrace(
         request: HistoryIndexInteractionRequest? = historyIndexHover,
     ) {
         historyIndexHoverCloseJob?.cancel()
         historyIndexHoverCloseJob = scope.launch {
-            delay(HistoryIndexHoverCloseGrace)
+            delay(SidebarHoverCloseGrace)
             if (
                 !historyIndexPopupHovered &&
                 (request == null || historyIndexHover == request)
@@ -195,7 +232,10 @@ public fun SessionTreeCliScreen(
         hovered: Boolean,
     ) {
         if (hovered) {
-            if (historyIndexMenu != null) return
+            if (historyIndexMenu != null || shellSessionMenu != null) return
+            shellSessionHoverCloseJob?.cancel()
+            shellSessionHover = null
+            shellSessionPopupHovered = false
             historyIndexHoverCloseJob?.cancel()
             historyIndexPopupHovered = false
             historyIndexHover = request
@@ -210,13 +250,19 @@ public fun SessionTreeCliScreen(
         sidebarConfiguration.right,
         popup,
     ) {
+        shellSessionHoverCloseJob?.cancel()
+        shellSessionHover = null
+        shellSessionPopupHovered = false
         historyIndexHoverCloseJob?.cancel()
         historyIndexHover = null
         historyIndexPopupHovered = false
         historyIndexMenu = null
     }
     DisposableEffect(Unit) {
-        onDispose { historyIndexHoverCloseJob?.cancel() }
+        onDispose {
+            shellSessionHoverCloseJob?.cancel()
+            historyIndexHoverCloseJob?.cancel()
+        }
     }
 
     LaunchedEffect(
@@ -278,6 +324,8 @@ public fun SessionTreeCliScreen(
                     },
                     onOpenTabMenu = { target, name, anchor, position ->
                         shellSessionMenu = null
+                        shellSessionHoverCloseJob?.cancel()
+                        shellSessionHover = null
                         historyMenu = null
                         historyIndexHover = null
                         historyIndexMenu = null
@@ -310,9 +358,17 @@ public fun SessionTreeCliScreen(
                                         if (shellSessionMenu?.side == SessionSidebarSide.Left) {
                                             shellSessionMenu = null
                                         }
+                                        if (shellSessionHover?.side == SessionSidebarSide.Left) {
+                                            shellSessionHoverCloseJob?.cancel()
+                                            shellSessionHover = null
+                                        }
                                     }
                                 },
+                                onShellSessionHoverChanged = ::updateShellSessionRowHover,
                                 onOpenShellSessionMenu = { request ->
+                                    shellSessionHoverCloseJob?.cancel()
+                                    shellSessionHover = null
+                                    shellSessionPopupHovered = false
                                     tabMenu = null
                                     historyMenu = null
                                     historyIndexHover = null
@@ -324,6 +380,9 @@ public fun SessionTreeCliScreen(
                                 },
                                 onHistoryIndexHoverChanged = ::updateHistoryIndexRowHover,
                                 onOpenHistoryIndexMenu = { request ->
+                                    shellSessionHoverCloseJob?.cancel()
+                                    shellSessionHover = null
+                                    shellSessionPopupHovered = false
                                     historyIndexHoverCloseJob?.cancel()
                                     historyIndexHover = null
                                     historyIndexPopupHovered = false
@@ -424,6 +483,8 @@ public fun SessionTreeCliScreen(
                                             onOpenHistoryEntryContextMenu = { target, anchor, position ->
                                                 tabMenu = null
                                                 shellSessionMenu = null
+                                                shellSessionHoverCloseJob?.cancel()
+                                                shellSessionHover = null
                                                 historyIndexHover = null
                                                 historyIndexMenu = null
                                                 historyMenu = HistoryEntryMenuRequest(
@@ -468,9 +529,17 @@ public fun SessionTreeCliScreen(
                                         if (shellSessionMenu?.side == SessionSidebarSide.Right) {
                                             shellSessionMenu = null
                                         }
+                                        if (shellSessionHover?.side == SessionSidebarSide.Right) {
+                                            shellSessionHoverCloseJob?.cancel()
+                                            shellSessionHover = null
+                                        }
                                     }
                                 },
+                                onShellSessionHoverChanged = ::updateShellSessionRowHover,
                                 onOpenShellSessionMenu = { request ->
+                                    shellSessionHoverCloseJob?.cancel()
+                                    shellSessionHover = null
+                                    shellSessionPopupHovered = false
                                     tabMenu = null
                                     historyMenu = null
                                     historyIndexHover = null
@@ -482,6 +551,9 @@ public fun SessionTreeCliScreen(
                                 },
                                 onHistoryIndexHoverChanged = ::updateHistoryIndexRowHover,
                                 onOpenHistoryIndexMenu = { request ->
+                                    shellSessionHoverCloseJob?.cancel()
+                                    shellSessionHover = null
+                                    shellSessionPopupHovered = false
                                     historyIndexHoverCloseJob?.cancel()
                                     historyIndexHover = null
                                     historyIndexPopupHovered = false
@@ -622,6 +694,24 @@ public fun SessionTreeCliScreen(
                 }
             }
 
+            ShellSessionHoverPopup(
+                request = shellSessionHover.takeIf { shellSessionMenu == null },
+                contentColumns = contentColumns,
+                contentRows = contentRows,
+                onHoverChanged = { hovered ->
+                    shellSessionPopupHovered = hovered
+                    if (hovered) {
+                        shellSessionHoverCloseJob?.cancel()
+                    } else {
+                        closeShellSessionHoverAfterGrace()
+                    }
+                },
+                onDismissRequest = {
+                    shellSessionHoverCloseJob?.cancel()
+                    shellSessionHover = null
+                    shellSessionPopupHovered = false
+                },
+            )
             HistoryIndexHoverPopup(
                 request = historyIndexHover.takeIf { historyIndexMenu == null },
                 contentColumns = contentColumns,
@@ -659,6 +749,12 @@ public fun SessionTreeCliScreen(
                     ) {
                         shellSessionMenu = null
                     }
+                    if (content != SidebarContent.TerminalSessions &&
+                        shellSessionHover?.side == SessionSidebarSide.Left
+                    ) {
+                        shellSessionHoverCloseJob?.cancel()
+                        shellSessionHover = null
+                    }
                     scope.launch { sidebarSettings.selectLeft(content) }
                 },
             )
@@ -670,6 +766,12 @@ public fun SessionTreeCliScreen(
                         shellSessionMenu?.side == SessionSidebarSide.Right
                     ) {
                         shellSessionMenu = null
+                    }
+                    if (content != SidebarContent.TerminalSessions &&
+                        shellSessionHover?.side == SessionSidebarSide.Right
+                    ) {
+                        shellSessionHoverCloseJob?.cancel()
+                        shellSessionHover = null
                     }
                     scope.launch { sidebarSettings.selectRight(content) }
                 },
@@ -1360,7 +1462,7 @@ private data class HistoryEntryMenuRequest(
 )
 
 private const val SessionTabBarRows: Int = 1
-private val HistoryIndexHoverCloseGrace = 180.milliseconds
+private val SidebarHoverCloseGrace = 180.milliseconds
 private const val SessionCatalogWidth: Int = 64
 private const val SessionCatalogRows: Int = 16
 private const val RenameDialogWidth: Int = 48
