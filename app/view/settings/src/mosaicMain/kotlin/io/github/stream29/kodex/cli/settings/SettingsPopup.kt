@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.cli.settings
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -30,6 +29,8 @@ import io.github.stream29.kodex.app.settings.contract.SessionSettingsSnapshot
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsState
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
+import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationOperation
+import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationOperationState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
@@ -70,14 +71,13 @@ public fun BoxScope.SettingsPopup(
     onDismissRequest: () -> Unit,
     onOpenLogin: () -> Unit,
 ) {
-    DisposableEffect(viewModel) {
-        onDispose(viewModel::close)
-    }
     val selectedPage by viewModel.selectedPage.collectAsState()
     val dropdowns = SettingsDropdownStates(
         authentication = rememberTuiDropdownState(),
         model = rememberTuiDropdownState(),
         reasoning = rememberTuiDropdownState(),
+        titleModel = rememberTuiDropdownState(),
+        titleReasoning = rememberTuiDropdownState(),
         serviceTier = rememberTuiDropdownState(),
         requestUserInputMode = rememberTuiDropdownState(),
         newLineKey = rememberTuiDropdownState(),
@@ -101,6 +101,7 @@ public fun BoxScope.SettingsPopup(
         mutableStateOf<HookManagedState?>(null)
     }
     var hookDetailsName by remember(viewModel) { mutableStateOf<String?>(null) }
+    var logoutConfirmationOpen by remember(viewModel) { mutableStateOf(false) }
     val currentOpenLogin by rememberUpdatedState(onOpenLogin)
 
     LaunchedEffect(viewModel.global) {
@@ -130,7 +131,8 @@ public fun BoxScope.SettingsPopup(
         hookEditorRequest = null
         hookDeleteRequest = null
         hookDetailsName = null
-        if (selectedPage != SettingsPage.Global) {
+        logoutConfirmationOpen = false
+        if (selectedPage != SettingsPage.Mcp) {
             mcpImportOpen = false
             viewModel.global.dismissCodexMcpImport()
         }
@@ -189,6 +191,7 @@ public fun BoxScope.SettingsPopup(
                         },
                         onAddHook = { hookEditorRequest = HookEditorRequest() },
                         onOpenHook = { hook -> hookDetailsName = hook.name },
+                        onRequestLogout = { logoutConfirmationOpen = true },
                     )
                 }
             }
@@ -210,8 +213,17 @@ public fun BoxScope.SettingsPopup(
         page = selectedPage,
         dropdowns = dropdowns,
     )
-    if (selectedPage == SettingsPage.Global) {
+    if (selectedPage == SettingsPage.OpenAi) {
         UsageResetDialogHost(viewModel.global)
+    }
+    if (logoutConfirmationOpen) {
+        OpenAiLogoutConfirmationDialog(
+            onDismiss = { logoutConfirmationOpen = false },
+            onConfirm = {
+                logoutConfirmationOpen = false
+                viewModel.global.logoutKodex()
+            },
+        )
     }
     renameRequest?.let { request ->
         RenameSessionDialog(
@@ -380,38 +392,48 @@ private fun SettingsPageContent(
     onImportMcp: () -> Unit,
     onAddHook: () -> Unit,
     onOpenHook: (HookManagedState) -> Unit,
+    onRequestLogout: () -> Unit,
 ) {
     when (page) {
-        SettingsPage.Global -> GlobalSettingsContent(
+        SettingsPage.General -> GeneralSettingsContent(
             viewModel = viewModel.global,
             dropdowns = dropdowns,
+        )
+
+        SettingsPage.OpenAi -> OpenAiSettingsContent(
+            viewModel = viewModel.global,
+            dropdowns = dropdowns,
+            onRequestLogout = onRequestLogout,
+        )
+
+        SettingsPage.Mcp -> McpSettingsPageContent(
+            viewModel = viewModel.global,
             onAddMcp = onAddMcp,
             onOpenMcp = onOpenMcp,
             onImportMcp = onImportMcp,
+        )
+
+        SettingsPage.Hooks -> HookSettingsPageContent(
+            viewModel = viewModel.global,
             onAddHook = onAddHook,
             onOpenHook = onOpenHook,
         )
 
-        SettingsPage.Session -> SessionSettingsContent(viewModel.session, dropdowns)
-        SettingsPage.NewSession -> NewSessionSettingsContent(viewModel.newSession, dropdowns)
+        SettingsPage.CurrentSession -> SessionSettingsContent(viewModel.session, dropdowns)
+        SettingsPage.NewSession -> NewSessionSettingsContent(
+            viewModel = viewModel.newSession,
+            globalViewModel = viewModel.global,
+            dropdowns = dropdowns,
+        )
     }
 }
 
 @Composable
-private fun GlobalSettingsContent(
+private fun GeneralSettingsContent(
     viewModel: GlobalSettingsViewModel,
     dropdowns: SettingsDropdownStates,
-    onAddMcp: () -> Unit,
-    onOpenMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
-    onImportMcp: () -> Unit,
-    onAddHook: () -> Unit,
-    onOpenHook: (HookManagedState) -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
-    val authentication by viewModel.authentication.collectAsState()
-    val accountUsage by viewModel.accountUsage.collectAsState()
-    val mcpServers by viewModel.mcpServers.collectAsState()
-    val hooks by viewModel.hooks.collectAsState()
 
     SettingsSection(title = "General") {
         SettingsPathField(
@@ -420,31 +442,6 @@ private fun GlobalSettingsContent(
             onBrowse = viewModel::requestCodexHome,
         )
     }
-    SettingsSection(title = "Integrations") {
-        McpSettingsContent(
-            servers = mcpServers,
-            onAdd = onAddMcp,
-            onOpenDetails = onOpenMcp,
-            onImport = onImportMcp,
-        )
-        HookSettingsContent(
-            hooks = hooks,
-            onAdd = onAddHook,
-            onOpenDetails = onOpenHook,
-        )
-    }
-    GlobalAuthenticationAndTitleSettingsContent(
-        state = state,
-        authentication = authentication,
-        accountUsage = accountUsage,
-        authenticationDropdown = dropdowns.authentication,
-        modelDropdown = dropdowns.model,
-        reasoningDropdown = dropdowns.reasoning,
-        onOpenLogin = viewModel::requestLogin,
-        onRefreshUsage = viewModel::refreshUsage,
-        onUseReset = viewModel::requestUsageReset,
-        onUpdateSessionTitleEnabled = viewModel::updateSessionTitleEnabled,
-    )
     SettingsSection(title = "Sidebars") {
         SettingsSidebarWidthItem(
             label = "Left sidebar width",
@@ -472,39 +469,83 @@ private fun GlobalSettingsContent(
 }
 
 @Composable
-internal fun GlobalAuthenticationAndTitleSettingsContent(
-    state: GlobalSettingsState,
-    authentication: SettingsAuthenticationState,
-    accountUsage: SettingsAccountUsageState,
-    authenticationDropdown: TuiDropdownState,
-    modelDropdown: TuiDropdownState,
-    reasoningDropdown: TuiDropdownState,
-    onOpenLogin: () -> Unit,
-    onRefreshUsage: () -> Unit,
-    onUseReset: () -> Unit,
-    onUpdateSessionTitleEnabled: (Boolean) -> Unit,
+private fun OpenAiSettingsContent(
+    viewModel: GlobalSettingsViewModel,
+    dropdowns: SettingsDropdownStates,
+    onRequestLogout: () -> Unit,
 ) {
+    val state by viewModel.state.collectAsState()
+    val authentication by viewModel.authentication.collectAsState()
+    val operation by viewModel.authenticationOperation.collectAsState()
+    val accountUsage by viewModel.accountUsage.collectAsState()
+    val operationRunning = operation.isRunning()
+
     SettingsSection(title = "Account") {
         SettingsDropdownField(
             label = "Authentication",
             selectedLabel = state.authSource.dialogLabel(),
-            dropdownState = authenticationDropdown,
+            dropdownState = dropdowns.authentication,
+            enabled = !operationRunning,
         )
         AuthenticationSettingsContent(
+            authSource = state.authSource,
             authState = authentication,
-            onOpenLogin = onOpenLogin,
+            operation = operation,
+            onOpenLogin = viewModel::requestLogin,
+            onReload = viewModel::reloadAuthentication,
+            onRequestLogout = onRequestLogout,
+            onDismissOperationFailure = viewModel::dismissAuthenticationOperationFailure,
         )
         CodexAccountUsageSettingsContent(
             state = accountUsage,
-            onRefresh = onRefreshUsage,
-            onUseReset = onUseReset,
+            onRefresh = viewModel::refreshUsage,
+            onUseReset = viewModel::requestUsageReset,
         )
     }
-    SettingsSection(title = "Session titles") {
+}
+
+@Composable
+private fun McpSettingsPageContent(
+    viewModel: GlobalSettingsViewModel,
+    onAddMcp: () -> Unit,
+    onOpenMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
+    onImportMcp: () -> Unit,
+) {
+    val servers by viewModel.mcpServers.collectAsState()
+    McpSettingsContent(
+        servers = servers,
+        onAdd = onAddMcp,
+        onOpenDetails = onOpenMcp,
+        onImport = onImportMcp,
+    )
+}
+
+@Composable
+private fun HookSettingsPageContent(
+    viewModel: GlobalSettingsViewModel,
+    onAddHook: () -> Unit,
+    onOpenHook: (HookManagedState) -> Unit,
+) {
+    val hooks by viewModel.hooks.collectAsState()
+    HookSettingsContent(
+        hooks = hooks,
+        onAdd = onAddHook,
+        onOpenDetails = onOpenHook,
+    )
+}
+
+@Composable
+internal fun SessionTitleSettingsContent(
+    state: GlobalSettingsState,
+    modelDropdown: TuiDropdownState,
+    reasoningDropdown: TuiDropdownState,
+    onUpdateEnabled: (Boolean) -> Unit,
+) {
+    SettingsSection(title = "Title generation") {
         SettingsCheckboxItem(
             label = "Automatic session title",
             checked = state.sessionTitle.enabled,
-            onCheckedChange = onUpdateSessionTitleEnabled,
+            onCheckedChange = onUpdateEnabled,
         )
         SettingsDropdownField(
             label = "Title model",
@@ -529,36 +570,100 @@ internal fun GlobalAuthenticationAndTitleSettingsContent(
 
 @Composable
 internal fun AuthenticationSettingsContent(
+    authSource: KodexAuthSource,
     authState: SettingsAuthenticationState,
+    operation: SettingsAuthenticationOperationState,
     onOpenLogin: () -> Unit,
+    onReload: () -> Unit,
+    onRequestLogout: () -> Unit,
+    onDismissOperationFailure: () -> Unit,
 ) {
+    val operationRunning = operation.isRunning()
     Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
-        when (authState) {
-            is SettingsAuthenticationState.Authenticated -> {
-                val identity = authState.email
-                    ?.let { email -> "Signed in as $email" }
-                    ?: authState.accountId
-                        ?.let { accountId -> "Signed in as account $accountId" }
-                    ?: "Signed in"
-                SettingsItem(
-                    label = "OpenAI account",
-                    supportingText = authState.planType?.let { plan ->
-                        "$identity Plan: ${plan.rawValue}"
-                    } ?: identity,
-                )
-            }
+        SettingsItem(
+            label = "OpenAI account",
+            supportingText = authState.settingsSummary(),
+        )
 
-            is SettingsAuthenticationState.Unavailable -> {
+        when (authSource) {
+            KodexAuthSource.Codex -> {
                 SettingsItem(
-                    label = "OpenAI account",
+                    label = "Codex credentials",
                     supportingText =
-                        "Authentication unavailable: ${authState.reason.settingsDescription()}",
+                        "Managed by Codex CLI. Update credentials there, then reload, " +
+                            "or select Kodex to sign in here.",
+                    enabled = !operationRunning,
                 ) {
                     SettingsActionButton(
-                        label = "Sign in",
+                        label = "Reload",
+                        enabled = !operationRunning,
+                        onClick = onReload,
+                    )
+                }
+            }
+
+            KodexAuthSource.Kodex -> {
+                SettingsItem(
+                    label = "Browser sign-in",
+                    enabled = !operationRunning,
+                ) {
+                    SettingsActionButton(
+                        label = if (authState is SettingsAuthenticationState.Authenticated) {
+                            "Sign in again"
+                        } else {
+                            "Sign in"
+                        },
+                        enabled = !operationRunning,
                         onClick = onOpenLogin,
                     )
                 }
+                SettingsItem(
+                    label = "Private credentials",
+                    enabled = !operationRunning,
+                ) {
+                    SettingsActionButton(
+                        label = "Reload",
+                        enabled = !operationRunning,
+                        onClick = onReload,
+                    )
+                }
+                if (authState is SettingsAuthenticationState.Authenticated) {
+                    SettingsItem(
+                        label = "Remove private credentials",
+                        enabled = !operationRunning,
+                    ) {
+                        SettingsDangerButton(
+                            label = "Log out",
+                            enabled = !operationRunning,
+                            onClick = onRequestLogout,
+                        )
+                    }
+                }
+            }
+        }
+
+        when (operation) {
+            SettingsAuthenticationOperationState.Idle -> Unit
+            SettingsAuthenticationOperationState.Reloading -> SettingsItem(
+                label = "Authentication operation",
+                supportingText = "Reloading credentials…",
+                enabled = false,
+            )
+
+            SettingsAuthenticationOperationState.SigningOut -> SettingsItem(
+                label = "Authentication operation",
+                supportingText = "Signing out…",
+                enabled = false,
+            )
+
+            is SettingsAuthenticationOperationState.Failed -> SettingsItem(
+                label = "Authentication operation",
+                supportingText = operation.failureDescription(),
+            ) {
+                SettingsActionButton(
+                    label = "Dismiss",
+                    onClick = onDismissOperationFailure,
+                )
             }
         }
     }
@@ -704,12 +809,20 @@ private fun ConfigurationSettingsContent(
 @Composable
 private fun NewSessionSettingsContent(
     viewModel: NewSessionSettingsViewModel,
+    globalViewModel: GlobalSettingsViewModel,
     dropdowns: SettingsDropdownStates,
 ) {
     val state by viewModel.state.collectAsState()
+    val globalState by globalViewModel.state.collectAsState()
     SettingsSection(title = "Model behavior") {
         NewSessionConfigurationContent(state, dropdowns)
     }
+    SessionTitleSettingsContent(
+        state = globalState,
+        modelDropdown = dropdowns.titleModel,
+        reasoningDropdown = dropdowns.titleReasoning,
+        onUpdateEnabled = globalViewModel::updateSessionTitleEnabled,
+    )
 }
 
 @Composable
@@ -772,42 +885,28 @@ private fun BoxScope.SettingsDropdownMenus(
     dropdowns: SettingsDropdownStates,
 ) {
     when (page) {
-        SettingsPage.Global -> GlobalSettingsDropdownMenus(viewModel.global, dropdowns)
-        SettingsPage.Session -> SessionSettingsDropdownMenus(viewModel.session, dropdowns)
-        SettingsPage.NewSession -> NewSessionSettingsDropdownMenus(viewModel.newSession, dropdowns)
+        SettingsPage.General -> GeneralSettingsDropdownMenus(viewModel.global, dropdowns)
+        SettingsPage.OpenAi -> OpenAiSettingsDropdownMenus(viewModel.global, dropdowns)
+        SettingsPage.Mcp,
+        SettingsPage.Hooks,
+            -> Unit
+
+        SettingsPage.CurrentSession ->
+            SessionSettingsDropdownMenus(viewModel.session, dropdowns)
+
+        SettingsPage.NewSession -> {
+            NewSessionSettingsDropdownMenus(viewModel.newSession, dropdowns)
+            SessionTitleSettingsDropdownMenus(viewModel.global, dropdowns)
+        }
     }
 }
 
 @Composable
-private fun BoxScope.GlobalSettingsDropdownMenus(
+private fun BoxScope.GeneralSettingsDropdownMenus(
     viewModel: GlobalSettingsViewModel,
     dropdowns: SettingsDropdownStates,
 ) {
     val state by viewModel.state.collectAsState()
-    TuiDropdownMenu(
-        dropdownState = dropdowns.authentication,
-        options = KodexAuthSource.entries.toList(),
-        selected = state.authSource,
-        optionLabel = KodexAuthSource::dialogLabel,
-        backgroundColor = PopupMenuBackground,
-        onSelect = viewModel::updateAuthSource,
-    )
-    TuiDropdownMenu(
-        dropdownState = dropdowns.model,
-        options = state.modelOptions,
-        selected = state.effectiveSessionTitleModel,
-        optionLabel = OpenAiModelId::value,
-        backgroundColor = PopupMenuBackground,
-        onSelect = viewModel::updateSessionTitleModel,
-    )
-    TuiDropdownMenu(
-        dropdownState = dropdowns.reasoning,
-        options = knownReasoningEfforts,
-        selected = state.sessionTitle.reasoningEffort,
-        optionLabel = ReasoningEffort::displayName,
-        backgroundColor = PopupMenuBackground,
-        onSelect = viewModel::updateSessionTitleReasoningEffort,
-    )
     TuiDropdownMenu(
         dropdownState = dropdowns.newLineKey,
         options = NewLineKey.entries.toList(),
@@ -823,6 +922,50 @@ private fun BoxScope.GlobalSettingsDropdownMenus(
         optionLabel = SubmitKey::dialogLabel,
         backgroundColor = PopupMenuBackground,
         onSelect = { submitKey -> viewModel.updateNewLineKey(submitKey.newLineKey) },
+    )
+}
+
+@Composable
+private fun BoxScope.OpenAiSettingsDropdownMenus(
+    viewModel: GlobalSettingsViewModel,
+    dropdowns: SettingsDropdownStates,
+) {
+    val state by viewModel.state.collectAsState()
+    val operation by viewModel.authenticationOperation.collectAsState()
+    TuiDropdownMenu(
+        dropdownState = dropdowns.authentication,
+        options = KodexAuthSource.entries.toList(),
+        selected = state.authSource,
+        optionLabel = KodexAuthSource::dialogLabel,
+        enabled = !operation.isRunning(),
+        backgroundColor = PopupMenuBackground,
+        onSelect = viewModel::updateAuthSource,
+    )
+}
+
+@Composable
+private fun BoxScope.SessionTitleSettingsDropdownMenus(
+    viewModel: GlobalSettingsViewModel,
+    dropdowns: SettingsDropdownStates,
+) {
+    val state by viewModel.state.collectAsState()
+    TuiDropdownMenu(
+        dropdownState = dropdowns.titleModel,
+        options = state.modelOptions,
+        selected = state.effectiveSessionTitleModel,
+        optionLabel = OpenAiModelId::value,
+        enabled = state.sessionTitle.enabled,
+        backgroundColor = PopupMenuBackground,
+        onSelect = viewModel::updateSessionTitleModel,
+    )
+    TuiDropdownMenu(
+        dropdownState = dropdowns.titleReasoning,
+        options = knownReasoningEfforts,
+        selected = state.sessionTitle.reasoningEffort,
+        optionLabel = ReasoningEffort::displayName,
+        enabled = state.sessionTitle.enabled,
+        backgroundColor = PopupMenuBackground,
+        onSelect = viewModel::updateSessionTitleReasoningEffort,
     )
 }
 
@@ -916,6 +1059,46 @@ private fun BoxScope.NewSessionSettingsDropdownMenus(
 }
 
 @Composable
+private fun BoxScope.OpenAiLogoutConfirmationDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val width = (LocalTerminalState.current.size.columns - 4)
+        .coerceIn(1, AuthenticationLogoutMaximumWidth)
+    TuiDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.width(width).background(SettingsDialogBackground),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogBackground)) {
+            Text(
+                value = "Log out of OpenAI",
+                modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
+                color = SettingsForeground,
+                textStyle = TuiTheme.typography.headline,
+            )
+            Text(
+                value = "Remove Kodex private credentials? Codex CLI credentials are not affected.",
+                color = SettingsForeground,
+            )
+            TuiDialogActionRow(
+                modifier = Modifier.fillMaxWidth().background(SettingsActionBackground),
+            ) {
+                SettingsActionButton(
+                    label = "Cancel",
+                    autoFocus = true,
+                    onClick = onDismiss,
+                )
+                SettingsDangerButton(
+                    label = "Log out",
+                    prominent = true,
+                    onClick = onConfirm,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun BoxScope.RenameSessionDialog(
     request: SessionSettingsEffect.RenameSession,
     onDismiss: () -> Unit,
@@ -969,6 +1152,8 @@ private class SettingsDropdownStates(
     val authentication: TuiDropdownState,
     val model: TuiDropdownState,
     val reasoning: TuiDropdownState,
+    val titleModel: TuiDropdownState,
+    val titleReasoning: TuiDropdownState,
     val serviceTier: TuiDropdownState,
     val requestUserInputMode: TuiDropdownState,
     val newLineKey: TuiDropdownState,
@@ -978,6 +1163,8 @@ private class SettingsDropdownStates(
         authentication.dismiss()
         model.dismiss()
         reasoning.dismiss()
+        titleModel.dismiss()
+        titleReasoning.dismiss()
         serviceTier.dismiss()
         requestUserInputMode.dismiss()
         newLineKey.dismiss()
@@ -985,11 +1172,42 @@ private class SettingsDropdownStates(
     }
 }
 
-private fun SettingsPage.settingsLabel(): String = when (this) {
-    SettingsPage.Global -> "Global"
-    SettingsPage.Session -> "Session"
+internal fun SettingsPage.settingsLabel(): String = when (this) {
+    SettingsPage.General -> "General"
+    SettingsPage.OpenAi -> "OpenAI"
+    SettingsPage.Mcp -> "MCP"
+    SettingsPage.Hooks -> "Hooks"
+    SettingsPage.CurrentSession -> "Current session"
     SettingsPage.NewSession -> "New session"
 }
+
+private fun SettingsAuthenticationState.settingsSummary(): String =
+    when (this) {
+        is SettingsAuthenticationState.Authenticated -> {
+            val identity = email
+                ?.let { value -> "Signed in as $value" }
+                ?: accountId
+                    ?.let { value -> "Signed in as account $value" }
+                ?: "Signed in"
+            planType?.let { plan -> "$identity Plan: ${plan.rawValue}" } ?: identity
+        }
+
+        is SettingsAuthenticationState.Unavailable ->
+            "Authentication unavailable: ${reason.settingsDescription()}"
+    }
+
+private fun SettingsAuthenticationOperationState.isRunning(): Boolean =
+    this === SettingsAuthenticationOperationState.Reloading ||
+        this === SettingsAuthenticationOperationState.SigningOut
+
+private fun SettingsAuthenticationOperationState.Failed.failureDescription(): String =
+    when (operation) {
+        SettingsAuthenticationOperation.Reload ->
+            "Could not reload credentials."
+
+        SettingsAuthenticationOperation.Logout ->
+            "Could not log out. Existing credentials were kept."
+    }
 
 private fun OpenAiAuthState.Unavailable.settingsDescription(): String =
     when (this) {
@@ -1062,3 +1280,4 @@ private val knownReasoningEfforts: List<ReasoningEffort> = listOf(
 private const val SettingsMaximumWidth: Int = 84
 private const val SettingsNavigationWidth: Int = 18
 private const val RenameMaximumWidth: Int = 72
+private const val AuthenticationLogoutMaximumWidth: Int = 72

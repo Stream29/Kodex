@@ -74,6 +74,23 @@ public sealed interface SettingsAuthenticationState {
     ) : SettingsAuthenticationState
 }
 
+/** One account-management command owned by Settings > OpenAI. */
+public enum class SettingsAuthenticationOperation {
+    Reload,
+    Logout,
+}
+
+/** Frontend-safe lifecycle of the current account-management command. */
+public sealed interface SettingsAuthenticationOperationState {
+    public data object Idle : SettingsAuthenticationOperationState
+    public data object Reloading : SettingsAuthenticationOperationState
+    public data object SigningOut : SettingsAuthenticationOperationState
+
+    public data class Failed(
+        public val operation: SettingsAuthenticationOperation,
+    ) : SettingsAuthenticationOperationState
+}
+
 /** Account-usage projection that keeps reset-attempt idempotency data private. */
 public sealed interface SettingsAccountUsageState {
     public data object Unavailable : SettingsAccountUsageState
@@ -237,6 +254,7 @@ public sealed interface GlobalSettingsEffect {
 public interface GlobalSettingsViewModel : AutoCloseable {
     public val state: StateFlow<GlobalSettingsState>
     public val authentication: StateFlow<SettingsAuthenticationState>
+    public val authenticationOperation: StateFlow<SettingsAuthenticationOperationState>
 
     /** Account-isolated projection without authentication or idempotency credentials. */
     public val accountUsage: StateFlow<SettingsAccountUsageState>
@@ -268,6 +286,9 @@ public interface GlobalSettingsViewModel : AutoCloseable {
     public fun updateRightSidebarWidth(columns: Int): Unit
 
     public fun requestLogin(): Unit
+    public fun reloadAuthentication(): Unit
+    public fun logoutKodex(): Unit
+    public fun dismissAuthenticationOperationFailure(): Unit
     public fun refreshUsage(): Unit
     public fun requestUsageReset(): Unit
     public fun selectUsageReset(option: UsageResetOption): Unit

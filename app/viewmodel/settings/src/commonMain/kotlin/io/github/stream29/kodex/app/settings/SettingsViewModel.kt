@@ -4,12 +4,12 @@ import io.github.stream29.kodex.app.settings.contract.SessionSettingsDataSource
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
+import io.github.stream29.kodex.cli.auth.KodexAuthStore
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettingsStore
 import io.github.stream29.kodex.hook.contract.HookManager
 import io.github.stream29.kodex.mcp.contract.McpManager
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageStore
-import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,14 +30,14 @@ internal class SettingsViewModelImpl(
     override val selectedPage: StateFlow<SettingsPage> = mutableSelectedPage.asStateFlow()
 
     init {
-        if (initialPage == SettingsPage.Global) global.onVisible()
+        if (initialPage == SettingsPage.OpenAi) global.onVisible()
     }
 
     override fun selectPage(page: SettingsPage) {
         if (closed || mutableSelectedPage.value == page) return
-        if (page != SettingsPage.Global) global.dismissUsageReset()
+        if (page != SettingsPage.OpenAi) global.dismissUsageReset()
         mutableSelectedPage.value = page
-        if (page == SettingsPage.Global) global.onVisible()
+        if (page == SettingsPage.OpenAi) global.onVisible()
     }
 
     override fun close() {
@@ -59,7 +59,7 @@ internal class SettingsViewModelImpl(
 public fun createSettingsViewModel(
     initialPage: SettingsPage,
     globalSettings: KodexGlobalSettingsStore,
-    authentication: OpenAiAuthStore,
+    authentication: KodexAuthStore,
     accountUsage: CodexAccountUsageStore,
     mcpManager: McpManager,
     hookManager: HookManager,
@@ -70,7 +70,7 @@ public fun createSettingsViewModel(
 ): SettingsViewModel {
     val global = GlobalSettingsViewModelImpl(
         globalSettings = globalSettings,
-        authentication = authentication,
+        authenticationStore = authentication,
         accountUsageStore = accountUsage,
         mcpManager = mcpManager,
         hookManager = hookManager,
@@ -101,7 +101,7 @@ public fun createSettingsViewModel(
 public data class SettingsViewModelDependencies(
     public val initialPage: SettingsPage,
     public val globalSettings: KodexGlobalSettingsStore,
-    public val authentication: OpenAiAuthStore,
+    public val authentication: KodexAuthStore,
     public val accountUsage: CodexAccountUsageStore,
     public val mcpManager: McpManager,
     public val hookManager: HookManager,

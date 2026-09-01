@@ -210,10 +210,20 @@ internal class ApplicationViewModelImpl(
         )
     }
 
-    override suspend fun openLoginPopup(): ApplicationPopupState.Login =
+    override suspend fun openLoginPopup(
+        returnTo: ApplicationPopupState.Settings,
+    ): ApplicationPopupState.Login =
         commandMutex.withLock {
             ensureOpen()
-            installPopup(ApplicationPopupState.Login(loginFactory.create()))
+            check(mutablePopup.value === returnTo) {
+                "OpenAI Login can only return to the current Settings popup."
+            }
+            val created = ApplicationPopupState.Login(
+                viewModel = loginFactory.create(),
+                returnTo = returnTo,
+            )
+            mutablePopup.value = created
+            created
         }
 
     override suspend fun openWorkingDirectoryPopup(
@@ -234,8 +244,15 @@ internal class ApplicationViewModelImpl(
     override fun dismissPopup(expected: ApplicationPopupState.Open): Boolean {
         val current = mutablePopup.value
         if (current !== expected) return false
-        if (!mutablePopup.compareAndSet(current, ApplicationPopupState.Closed)) return false
-        current.closeChild()
+        val replacement = when (current) {
+            is ApplicationPopupState.Login -> current.returnTo
+            else -> ApplicationPopupState.Closed
+        }
+        if (!mutablePopup.compareAndSet(current, replacement)) return false
+        when (current) {
+            is ApplicationPopupState.Login -> current.viewModel.close()
+            else -> current.closeChild()
+        }
         return true
     }
 
@@ -291,8 +308,8 @@ internal class ApplicationViewModelImpl(
             is ApplicationPopupState.WorkingDirectory ->
                 current.viewModel.target.belongsTo(target)
 
+            is ApplicationPopupState.Login -> current.returnTo.target === target
             is ApplicationPopupState.DeleteSession,
-            is ApplicationPopupState.Login,
             is ApplicationPopupState.SessionCatalog,
                 -> false
         }
@@ -432,7 +449,10 @@ private class WorkingDirectoryPopupViewModelImpl(
 private fun ApplicationPopupState.Open.closeChild() {
     when (this) {
         is ApplicationPopupState.DeleteSession -> viewModel.close()
-        is ApplicationPopupState.Login -> viewModel.close()
+        is ApplicationPopupState.Login -> {
+            viewModel.close()
+            returnTo.viewModel.close()
+        }
         is ApplicationPopupState.RenameSession -> viewModel.close()
         is ApplicationPopupState.SessionCatalog -> viewModel.close()
         is ApplicationPopupState.Settings -> viewModel.close()

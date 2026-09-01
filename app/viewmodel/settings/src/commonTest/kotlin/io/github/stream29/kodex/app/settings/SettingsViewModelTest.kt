@@ -12,10 +12,15 @@ import io.github.stream29.kodex.app.settings.contract.SessionSettingsSnapshot
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsState
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsTargetKind
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
+import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationOperation
+import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationOperationState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.UsageResetState
+import io.github.stream29.kodex.cli.auth.KodexAuthLoginAttempt
+import io.github.stream29.kodex.cli.auth.KodexAuthStore
 import io.github.stream29.kodex.cli.settings.InMemoryKodexGlobalSettings
+import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
 import io.github.stream29.kodex.cli.settings.SidebarSettings
 import io.github.stream29.kodex.hook.contract.HookDraft
@@ -46,7 +51,6 @@ import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetAttempt
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetCredit
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetCredits
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
-import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -121,7 +125,7 @@ class SettingsViewModelTest {
         )
         val source = TestSessionSettingsDataSource()
         val viewModel = createSettingsViewModel(
-            initialPage = SettingsPage.Session,
+            initialPage = SettingsPage.CurrentSession,
             globalSettings = settings,
             authentication = TestAuthStore(),
             accountUsage = TestAccountUsageStore(),
@@ -138,7 +142,7 @@ class SettingsViewModelTest {
         assertSame(global, viewModel.global)
         assertSame(session, viewModel.session)
         assertSame(newSession, viewModel.newSession)
-        assertEquals(SettingsPage.Session, viewModel.selectedPage.value)
+        assertEquals(SettingsPage.CurrentSession, viewModel.selectedPage.value)
 
         viewModel.selectPage(SettingsPage.NewSession)
         val defaults = newSession.state.value
@@ -199,7 +203,7 @@ class SettingsViewModelTest {
             ),
         )
         val viewModel = createSettingsViewModel(
-            initialPage = SettingsPage.Global,
+            initialPage = SettingsPage.OpenAi,
             globalSettings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(codexHome = Path("codex-home")),
             ),
@@ -224,6 +228,88 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun kodexAuthenticationSupportsReloadAndLogout() = runTest {
+        val auth = TestAuthStore(authenticatedState())
+        val viewModel = createSettingsViewModel(
+            initialPage = SettingsPage.OpenAi,
+            globalSettings = InMemoryKodexGlobalSettings(
+                KodexGlobalSettings(
+                    codexHome = Path("codex-home"),
+                    authSource = KodexAuthSource.Kodex,
+                ),
+            ),
+            authentication = auth,
+            accountUsage = TestAccountUsageStore(),
+            mcpManager = TestMcpManager(),
+            hookManager = TestHookManager(),
+            models = MutableStateFlow(emptyList()),
+            ownerScope = backgroundScope,
+        )
+        runCurrent()
+
+        viewModel.global.reloadAuthentication()
+        runCurrent()
+        assertEquals(1, auth.reloadCount)
+        assertEquals(
+            SettingsAuthenticationOperationState.Idle,
+            viewModel.global.authenticationOperation.value,
+        )
+
+        viewModel.global.logoutKodex()
+        runCurrent()
+        assertEquals(1, auth.logoutCount)
+        assertEquals(
+            OpenAiAuthState.Unavailable.CredentialsNotFound,
+            auth.state.value,
+        )
+        assertIs<SettingsAuthenticationState.Unavailable>(
+            viewModel.global.authentication.value,
+        )
+
+        viewModel.close()
+    }
+
+    @Test
+    fun authenticationOperationFailureIsTypedAndDismissible() = runTest {
+        val auth = TestAuthStore(
+            initialState = authenticatedState(),
+            reloadFailure = IllegalStateException("reload failed"),
+        )
+        val viewModel = createSettingsViewModel(
+            initialPage = SettingsPage.OpenAi,
+            globalSettings = InMemoryKodexGlobalSettings(
+                KodexGlobalSettings(
+                    codexHome = Path("codex-home"),
+                    authSource = KodexAuthSource.Kodex,
+                ),
+            ),
+            authentication = auth,
+            accountUsage = TestAccountUsageStore(),
+            mcpManager = TestMcpManager(),
+            hookManager = TestHookManager(),
+            models = MutableStateFlow(emptyList()),
+            ownerScope = backgroundScope,
+        )
+
+        viewModel.global.reloadAuthentication()
+        runCurrent()
+
+        assertEquals(
+            SettingsAuthenticationOperationState.Failed(
+                SettingsAuthenticationOperation.Reload,
+            ),
+            viewModel.global.authenticationOperation.value,
+        )
+        viewModel.global.dismissAuthenticationOperationFailure()
+        assertEquals(
+            SettingsAuthenticationOperationState.Idle,
+            viewModel.global.authenticationOperation.value,
+        )
+
+        viewModel.close()
+    }
+
+    @Test
     fun accountUsageProjectionNeverPublishesResetAttemptCredentials() = runTest {
         val snapshot = usageSnapshot()
         val accountUsage = TestAccountUsageStore(
@@ -236,7 +322,7 @@ class SettingsViewModelTest {
             ),
         )
         val viewModel = createSettingsViewModel(
-            initialPage = SettingsPage.Global,
+            initialPage = SettingsPage.OpenAi,
             globalSettings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(codexHome = Path("codex-home")),
             ),
@@ -263,7 +349,7 @@ class SettingsViewModelTest {
         val releaseRefresh = CompletableDeferred<Unit>()
         val accountUsage = TestAccountUsageStore(refreshGate = releaseRefresh)
         val viewModel = createSettingsViewModel(
-            initialPage = SettingsPage.Global,
+            initialPage = SettingsPage.OpenAi,
             globalSettings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(codexHome = Path("codex-home")),
             ),
@@ -296,7 +382,7 @@ class SettingsViewModelTest {
         var pickerInitialDirectory: Path? = null
         lateinit var picker: TestDirectoryPickerViewModel
         val viewModel = createSettingsViewModel(
-            initialPage = SettingsPage.Global,
+            initialPage = SettingsPage.General,
             globalSettings = settings,
             authentication = TestAuthStore(),
             accountUsage = TestAccountUsageStore(),
@@ -334,7 +420,7 @@ class SettingsViewModelTest {
         var pickerInitialDirectory: Path? = null
         lateinit var picker: TestDirectoryPickerViewModel
         val viewModel = createSettingsViewModel(
-            initialPage = SettingsPage.Session,
+            initialPage = SettingsPage.CurrentSession,
             globalSettings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(codexHome = Path("codex-home")),
             ),
@@ -372,7 +458,7 @@ class SettingsViewModelTest {
     fun sessionChildRejectsStaleRevisionAndNeverResolvesAnotherTarget() = runTest {
         val source = TestSessionSettingsDataSource()
         val viewModel = createSettingsViewModel(
-            initialPage = SettingsPage.Session,
+            initialPage = SettingsPage.CurrentSession,
             globalSettings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(codexHome = Path("codex-home")),
             ),
@@ -424,7 +510,7 @@ class SettingsViewModelTest {
             ),
         )
         val viewModel = createSettingsViewModel(
-            initialPage = SettingsPage.Global,
+            initialPage = SettingsPage.OpenAi,
             globalSettings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(codexHome = Path("codex-home")),
             ),
@@ -470,7 +556,7 @@ class SettingsViewModelTest {
         )
         val manager = TestMcpManager(listOf(initialServer))
         val viewModel = createSettingsViewModel(
-            initialPage = SettingsPage.Global,
+            initialPage = SettingsPage.Mcp,
             globalSettings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(codexHome = Path("codex-home")),
             ),
@@ -513,9 +599,40 @@ class SettingsViewModelTest {
 
 private class TestAuthStore(
     initialState: OpenAiAuthState = OpenAiAuthState.Unavailable.CredentialsNotFound,
-) : OpenAiAuthStore {
-    override val state: StateFlow<OpenAiAuthState> = MutableStateFlow(initialState)
+    private val reloadFailure: Throwable? = null,
+    private val logoutFailure: Throwable? = null,
+) : KodexAuthStore {
+    private val mutableState = MutableStateFlow(initialState)
+    override val state: StateFlow<OpenAiAuthState> = mutableState
+    var reloadCount: Int = 0
+    var logoutCount: Int = 0
+
+    override suspend fun reload() {
+        reloadCount += 1
+        reloadFailure?.let { throw it }
+    }
+
+    override suspend fun startKodexLogin(): KodexAuthLoginAttempt =
+        error("Browser sign-in is not expected in this test.")
+
+    override suspend fun logoutKodex() {
+        logoutCount += 1
+        logoutFailure?.let { throw it }
+        mutableState.value = OpenAiAuthState.Unavailable.CredentialsNotFound
+    }
+
+    override fun close(): Unit = Unit
 }
+
+private fun authenticatedState(): OpenAiAuthState =
+    OpenAiAuthState.Authenticated(
+        OpenAiSubscriptionAuthState(
+            accessToken = "test-access-token",
+            accountId = "account-id",
+            planType = OpenAiSubscriptionPlan.Pro,
+            email = "person@example.com",
+        ),
+    )
 
 private class TestDirectoryPickerViewModel(initialDirectory: Path) : DirectoryPickerViewModel {
     override val state: StateFlow<DirectoryPickerState> = MutableStateFlow(

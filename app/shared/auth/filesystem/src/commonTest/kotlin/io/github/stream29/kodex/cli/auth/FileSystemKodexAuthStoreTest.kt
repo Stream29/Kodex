@@ -200,6 +200,67 @@ val fileSystemKodexAuthStoreTest by testSuite(
         }
     }
 
+    test("logout deletes private credentials and publishes signed-out state") {
+        withAuthDirectories("logout-kodex") { codexHome, dataDirectory ->
+            writeAuthFile(dataDirectory, subscriptionAuth("local").toKodexAuthFile())
+            val settings = InMemoryKodexGlobalSettings(
+                KodexGlobalSettings(
+                    codexHome = codexHome,
+                    authSource = KodexAuthSource.Kodex,
+                ),
+            )
+
+            coroutineScope {
+                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                try {
+                    store.authenticated()
+
+                    store.logoutKodex()
+
+                    assertFalse(SystemCoroutineFileSystem.exists(Path(dataDirectory, "auth.yml")))
+                    assertEquals(
+                        OpenAiAuthState.Unavailable.CredentialsNotFound,
+                        store.state.value,
+                    )
+                    assertEquals(KodexAuthSource.Kodex, settings.settings.value.authSource)
+                } finally {
+                    store.close()
+                }
+            }
+        }
+    }
+
+    test("logout never modifies shared Codex credentials") {
+        withAuthDirectories("logout-codex-read-only") { codexHome, dataDirectory ->
+            val codex = subscriptionAuth("codex")
+            val codexAuthPath = Path(codexHome, "auth.json")
+            writeCodexAuth(codexHome, codex)
+            writeAuthFile(dataDirectory, subscriptionAuth("local").toKodexAuthFile())
+            val originalCodexAuth = SystemCoroutineFileSystem.readString(codexAuthPath)
+            val settings = InMemoryKodexGlobalSettings(
+                KodexGlobalSettings(codexHome = codexHome),
+            )
+
+            coroutineScope {
+                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                try {
+                    store.authenticated()
+
+                    store.logoutKodex()
+
+                    assertFalse(SystemCoroutineFileSystem.exists(Path(dataDirectory, "auth.yml")))
+                    assertEquals(
+                        originalCodexAuth,
+                        SystemCoroutineFileSystem.readString(codexAuthPath),
+                    )
+                    assertEquals(codex.tokens?.accessToken, store.authenticated().accessToken)
+                } finally {
+                    store.close()
+                }
+            }
+        }
+    }
+
     test("global settings switch sources without writing Codex auth json") {
         withAuthDirectories("switch-source") { codexHome, dataDirectory ->
             val codex = subscriptionAuth("codex")

@@ -6,11 +6,8 @@ import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsState
-import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
-import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.openai.OpenAiModelId
-import io.github.stream29.kodex.openai.OpenAiSubscriptionPlan
 import kotlinx.coroutines.test.runTest
 import kotlinx.io.files.Path
 import kotlin.test.Test
@@ -19,12 +16,12 @@ import kotlin.test.assertTrue
 
 class GlobalSettingsGroupingTest {
     @Test
-    fun authenticationDetailsRemainTogetherBeforeTitleGeneration() = runTest {
+    fun titleGenerationRendersAsItsOwnSection() = runTest {
         runMosaicTest {
             val titleModel = OpenAiModelId("title-model")
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(80)) {
-                    GlobalAuthenticationAndTitleSettingsContent(
+                    SessionTitleSettingsContent(
                         state = GlobalSettingsState(
                             settingsRevision = 0,
                             codexHome = Path("/codex-home"),
@@ -35,30 +32,21 @@ class GlobalSettingsGroupingTest {
                             effectiveSessionTitleModel = titleModel,
                             modelOptions = listOf(titleModel),
                         ),
-                        authentication = SettingsAuthenticationState.Authenticated(
-                            planType = OpenAiSubscriptionPlan.Pro,
-                            email = "person@example.com",
-                        ),
-                        accountUsage = SettingsAccountUsageState.Unavailable,
-                        authenticationDropdown = rememberTuiDropdownState(),
                         modelDropdown = rememberTuiDropdownState(),
                         reasoningDropdown = rememberTuiDropdownState(),
-                        onOpenLogin = {},
-                        onRefreshUsage = {},
-                        onUseReset = {},
-                        onUpdateSessionTitleEnabled = {},
+                        onUpdateEnabled = {},
                     )
                 }
             }
 
-            val authentication = snapshot.indexOf("Authentication [Codex]")
-            val account = snapshot.indexOf("OpenAI account")
-            val usage = snapshot.indexOf("Codex usage")
+            val section = snapshot.indexOf("Title generation")
             val titleGeneration = snapshot.indexOf("[x] Automatic session title")
-            assertTrue(authentication >= 0, snapshot)
-            assertTrue(authentication < account, snapshot)
-            assertTrue(account < usage, snapshot)
-            assertTrue(usage < titleGeneration, snapshot)
+            val model = snapshot.indexOf("Title model")
+            val reasoning = snapshot.indexOf("Title reasoning")
+            assertTrue(section >= 0, snapshot)
+            assertTrue(section < titleGeneration, snapshot)
+            assertTrue(titleGeneration < model, snapshot)
+            assertTrue(model < reasoning, snapshot)
         }
     }
 

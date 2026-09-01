@@ -105,6 +105,7 @@ private class FileSystemKodexAuthStoreImpl(
     private val maintenanceSignal = Channel<Unit>(Channel.CONFLATED)
     private val activeAuth = MutableStateFlow<ActiveSubscriptionAuth?>(null)
     private var activeLogin: LocalKodexLoginAttempt? = null
+    private var loginGeneration: Long = 0
 
     override val state: StateFlow<OpenAiAuthState>
         field = MutableStateFlow<OpenAiAuthState>(
@@ -149,10 +150,11 @@ private class FileSystemKodexAuthStoreImpl(
 
     override suspend fun startKodexLogin(): KodexAuthLoginAttempt = loginMutex.withLock {
         check(activeLogin == null) { "A Kodex browser sign-in is already in progress." }
+        val generation = nextLoginGeneration()
         val attempt = LocalKodexLoginAttempt.start(
             scope = this,
             loginClient = loginClient,
-            persistTokens = ::persistKodexLogin,
+            persistTokens = { tokens -> persistKodexLogin(generation, tokens) },
             onFinished = { completed ->
                 loginMutex.withLock {
                     if (activeLogin === completed) activeLogin = null
@@ -161,6 +163,20 @@ private class FileSystemKodexAuthStoreImpl(
         )
         activeLogin = attempt
         attempt
+    }
+
+    override suspend fun logoutKodex() {
+        loginMutex.withLock {
+            nextLoginGeneration()
+            activeLogin?.cancel()
+            activeLogin = null
+        }
+        updateMutex.withLock {
+            fileSystem.delete(authPath, mustExist = false)
+            if (globalSettings.settings.value.authSource == KodexAuthSource.Kodex) {
+                publishUnavailable(OpenAiAuthState.Unavailable.CredentialsNotFound)
+            }
+        }
     }
 
     private suspend fun runMaintenanceLoop() {
@@ -293,8 +309,12 @@ private class FileSystemKodexAuthStoreImpl(
         )
     }
 
-    private suspend fun persistKodexLogin(tokens: OpenAiSubscriptionTokens) {
+    private suspend fun persistKodexLogin(
+        generation: Long,
+        tokens: OpenAiSubscriptionTokens,
+    ) {
         updateMutex.withLock {
+            if (generation != loginGeneration) return
             val completed = ActiveSubscriptionAuth(
                 tokens = tokens,
                 lastRefresh = Clock.System.now(),
@@ -309,6 +329,14 @@ private class FileSystemKodexAuthStoreImpl(
             globalSettings.update { settings -> settings.copy(authSource = KodexAuthSource.Kodex) }
             publish(completed)
         }
+    }
+
+    private fun nextLoginGeneration(): Long {
+        check(loginGeneration < Long.MAX_VALUE) {
+            "Kodex login generations are exhausted."
+        }
+        loginGeneration += 1
+        return loginGeneration
     }
 
     @OptIn(ExperimentalUuidApi::class)

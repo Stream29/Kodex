@@ -42,6 +42,7 @@ public sealed interface ApplicationPopupState {
 
     public class Login(
         public val viewModel: OpenAiLoginViewModel,
+        public val returnTo: Settings,
     ) : Open
 
     public class WorkingDirectory(

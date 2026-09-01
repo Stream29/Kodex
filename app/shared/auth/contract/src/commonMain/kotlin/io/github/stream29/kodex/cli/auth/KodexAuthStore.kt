@@ -19,6 +19,9 @@ public interface KodexAuthStore : OpenAiAuthStore, AutoCloseable {
 
     /** Starts a browser sign-in flow that writes only Kodex-managed credentials. */
     public suspend fun startKodexLogin(): KodexAuthLoginAttempt
+
+    /** Deletes only Kodex-managed credentials without modifying a Codex auth source. */
+    public suspend fun logoutKodex()
 }
 
 /** One started browser sign-in flow for Kodex-managed subscription credentials. */
@@ -37,13 +40,19 @@ public interface KodexAuthLoginAttempt {
 public class InMemoryKodexAuthStore(
     initialAuth: OpenAiSubscriptionAuthState,
 ) : KodexAuthStore {
-    override val state: StateFlow<OpenAiAuthState>
-        field = MutableStateFlow(OpenAiAuthState.Authenticated(initialAuth))
+    private val mutableState = MutableStateFlow<OpenAiAuthState>(
+        OpenAiAuthState.Authenticated(initialAuth),
+    )
+    override val state: StateFlow<OpenAiAuthState> = mutableState
 
     override suspend fun reload(): Unit = Unit
 
     override suspend fun startKodexLogin(): KodexAuthLoginAttempt =
         error("In-memory authentication does not support browser sign-in.")
+
+    override suspend fun logoutKodex() {
+        mutableState.value = OpenAiAuthState.Unavailable.CredentialsNotFound
+    }
 
     override fun close(): Unit = Unit
 }

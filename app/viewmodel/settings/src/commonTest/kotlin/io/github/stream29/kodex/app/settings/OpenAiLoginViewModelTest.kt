@@ -90,6 +90,8 @@ private class TestKodexAuthStore(
 
     override suspend fun startKodexLogin(): KodexAuthLoginAttempt = attempt
 
+    override suspend fun logoutKodex(): Unit = Unit
+
     override fun close(): Unit = Unit
 }
 
