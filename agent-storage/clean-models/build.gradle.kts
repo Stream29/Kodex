@@ -16,5 +16,8 @@ kotlin {
             api(project(":tool-view-image-contract"))
             api(project(":utils-patch"))
         }
+        commonTest.dependencies {
+            implementation(project(":openai-json-codec"))
+        }
     }
 }

@@ -5,9 +5,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatch
 import io.github.stream29.kodex.utils.applypatch.AddFileHunk
 import io.github.stream29.kodex.utils.applypatch.DeleteFileHunk
 import io.github.stream29.kodex.utils.applypatch.Patch
-import io.github.stream29.kodex.utils.applypatch.PatchApplyResult
-import io.github.stream29.kodex.utils.applypatch.PatchChange
-import io.github.stream29.kodex.utils.applypatch.PatchFileChange
 import io.github.stream29.kodex.utils.applypatch.UpdateFileChunk
 import io.github.stream29.kodex.utils.applypatch.UpdateFileHunk
 
@@ -88,12 +85,12 @@ public fun StablePatchToolEvent.toStablePatchPresentation(): PatchPresentation =
         is StablePatchToolExecutionResult.Success ->
             diff.toPatchPresentation(
                 action = PatchPresentationAction.Edit,
-                target = result.applyResult.delta.changes
-                    .map { change -> change.path }
+                target = diff.hunks
+                    .map { hunk -> hunk.path }
                     .toPatchPresentationTarget(),
                 status = PatchPresentationStatus.Completed,
-                bodyLines = result.applyResult.toPresentationLines(),
-                emptyMessage = "No applied changes",
+                bodyLines = diff.toInputPresentationLines(),
+                emptyMessage = "No patch hunks",
             )
 
         is StablePatchToolExecutionResult.Failure ->
@@ -175,89 +172,6 @@ private fun Patch.toInputPresentationLines(): List<PatchPresentationLine> = buil
                 }
             }
         }
-    }
-}
-
-private fun PatchApplyResult.toPresentationLines(): List<PatchPresentationLine> = buildList {
-    if (!delta.exact) {
-        add(
-            PatchPresentationLine(
-                text = "Applied delta is approximate",
-                kind = PatchPresentationLineKind.Metadata,
-            ),
-        )
-    }
-    delta.changes.forEach { change ->
-        addAppliedChange(change)
-    }
-}
-
-private fun MutableList<PatchPresentationLine>.addAppliedChange(change: PatchChange) {
-    when (val fileChange = change.change) {
-        is PatchFileChange.Add -> {
-            val overwrittenContent = fileChange.overwrittenContent
-            if (overwrittenContent == null) {
-                add(PatchPresentationLine("A ${change.path}", PatchPresentationLineKind.File))
-                fileChange.content.toFileLines().forEach { line ->
-                    add(PatchPresentationLine("+ $line", PatchPresentationLineKind.Addition))
-                }
-            } else {
-                add(
-                    PatchPresentationLine(
-                        text = "M ${change.path} (replaced by add)",
-                        kind = PatchPresentationLineKind.File,
-                    ),
-                )
-                addAppliedContentDiff(
-                    oldContent = overwrittenContent,
-                    newContent = fileChange.content,
-                )
-            }
-        }
-
-        is PatchFileChange.Delete -> {
-            add(PatchPresentationLine("D ${change.path}", PatchPresentationLineKind.File))
-            fileChange.content.toFileLines().forEach { line ->
-                add(PatchPresentationLine("- $line", PatchPresentationLineKind.Removal))
-            }
-        }
-
-        is PatchFileChange.Update -> {
-            val destination = fileChange.movePath
-            val fileHeader = destination?.let { movePath ->
-                "R ${change.path} -> $movePath"
-            } ?: "M ${change.path}"
-            add(PatchPresentationLine(fileHeader, PatchPresentationLineKind.File))
-            if (fileChange.overwrittenMoveContent != null) {
-                add(
-                    PatchPresentationLine(
-                        text = "Overwrote existing destination: ${checkNotNull(destination)}",
-                        kind = PatchPresentationLineKind.Metadata,
-                    ),
-                )
-            }
-            addAppliedContentDiff(
-                oldContent = fileChange.oldContent,
-                newContent = fileChange.newContent,
-            )
-        }
-    }
-}
-
-private fun MutableList<PatchPresentationLine>.addAppliedContentDiff(
-    oldContent: String,
-    newContent: String,
-) {
-    val diffLines = diffPatchLines(
-        oldLines = oldContent.toFileLines(),
-        newLines = newContent.toFileLines(),
-    )
-    val compactedLines = diffLines.compactPatchContext()
-    if (compactedLines.isEmpty()) {
-        add(PatchPresentationLine("  No content changes", PatchPresentationLineKind.Context))
-    } else {
-        add(PatchPresentationLine("@@ applied", PatchPresentationLineKind.Context))
-        addAll(compactedLines)
     }
 }
 

@@ -93,18 +93,6 @@ val applyPatchBehaviorRustTest by testSuite {
 
             assertEquals("ab\ncd\n", read(root, "add.txt"))
             assertEquals(listOf("add.txt"), result.affectedPaths.added)
-            assertEquals(
-                listOf(
-                    PatchChange(
-                        path = "add.txt",
-                        change = PatchFileChange.Add(
-                            content = "ab\ncd\n",
-                            overwrittenContent = null,
-                        ),
-                    ),
-                ),
-                result.delta.changes,
-            )
         }
 
         test("applies relative and absolute paths") { root ->
@@ -154,13 +142,9 @@ val applyPatchBehaviorRustTest by testSuite {
         test("delete file hunk removes file") { root ->
             write(root, "del.txt", "x")
 
-            val result = apply(root, wrapPatch("*** Delete File: del.txt"))
+            apply(root, wrapPatch("*** Delete File: del.txt"))
 
             assertFalse(fileSystem.exists(Path(root, "del.txt")))
-            assertEquals(
-                PatchFileChange.Delete("x"),
-                result.delta.changes.single().change,
-            )
         }
 
         test("update file hunk modifies content") { root ->
@@ -199,15 +183,6 @@ val applyPatchBehaviorRustTest by testSuite {
             assertFalse(fileSystem.exists(Path(root, "src.txt")))
             assertEquals("line2\n", read(root, "dst.txt"))
             assertEquals(listOf("dst.txt"), result.affectedPaths.modified)
-            assertEquals(
-                PatchFileChange.Update(
-                    movePath = "dst.txt",
-                    oldContent = "line\n",
-                    overwrittenMoveContent = null,
-                    newContent = "line2\n",
-                ),
-                result.delta.changes.single().change,
-            )
         }
 
         test("multiple update chunks apply to single file") { root ->
@@ -322,7 +297,7 @@ val applyPatchBehaviorRustTest by testSuite {
             write(root, "old/name.txt", "from\n")
             write(root, "renamed/dir/name.txt", "existing\n")
 
-            val addResult = apply(root,
+            apply(root,
                 wrapPatch(
                     """
                     *** Add File: duplicate.txt
@@ -330,7 +305,7 @@ val applyPatchBehaviorRustTest by testSuite {
                     """.trimIndent(),
                 ),
             )
-            val moveResult = apply(root,
+            apply(root,
                 wrapPatch(
                     """
                     *** Update File: old/name.txt
@@ -345,11 +320,6 @@ val applyPatchBehaviorRustTest by testSuite {
             assertEquals("new content\n", read(root, "duplicate.txt"))
             assertEquals("new\n", read(root, "renamed/dir/name.txt"))
             assertFalse(fileSystem.exists(Path(root, "old/name.txt")))
-            assertEquals("old content\n", (addResult.delta.changes.single().change as PatchFileChange.Add).overwrittenContent)
-            assertEquals(
-                "existing\n",
-                (moveResult.delta.changes.single().change as PatchFileChange.Update).overwrittenMoveContent,
-            )
         }
 
         test("update appends trailing newline") { root ->

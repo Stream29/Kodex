@@ -97,7 +97,6 @@ val patchFileSystemTest by testSuite {
             assertEquals(listOf("added.txt"), result.affectedPaths.added)
             assertEquals(listOf("change.txt"), result.affectedPaths.modified)
             assertEquals(listOf("delete.txt"), result.affectedPaths.deleted)
-            assertEquals(3, result.delta.changes.size)
         }
 
         test("apply moves updated file") { root ->

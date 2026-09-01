@@ -10,6 +10,10 @@ import kotlinx.io.readByteArray
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import js.objects.unsafeJso
 import js.typedarrays.Uint8Array
 import js.typedarrays.toByteArray
@@ -155,30 +159,57 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
         }
     }
 
-    override suspend fun source(path: Path): CoroutineRawSource =
-        try {
-            NodeCoroutineRawSource(openFile(path.toString(), "r"))
-        } catch (error: ErrnoException) {
-            if (error.code == "ENOENT") {
-                throw FileNotFoundException("File does not exist: $path")
+    override suspend fun <R> useSource(
+        path: Path,
+        block: suspend (CoroutineRawSource) -> R,
+    ): R {
+        currentCoroutineContext().ensureActive()
+        // Node cannot cancel an in-flight fs.open Promise. Await it until the resulting handle
+        // can enter use/finally, then restore the caller's cancellation before running the block.
+        val source = withContext(NonCancellable) {
+            try {
+                NodeCoroutineRawSource(openFile(path.toString(), "r"))
+            } catch (error: ErrnoException) {
+                if (error.code == "ENOENT") {
+                    throw FileNotFoundException("File does not exist: $path")
+                }
+                throw IOException("Open source failed for $path", error)
+            } catch (error: Throwable) {
+                throw error.asFileSystemIOException("Open source failed for $path")
             }
-            throw IOException("Open source failed for $path", error)
-        } catch (error: Throwable) {
-            throw error.asFileSystemIOException("Open source failed for $path")
         }
+        return source.use {
+            currentCoroutineContext().ensureActive()
+            block(it)
+        }
+    }
 
-    override suspend fun sink(path: Path, append: Boolean, mustCreate: Boolean): CoroutineRawSink =
-        try {
-            val flags = when {
-                mustCreate && append -> "ax"
-                mustCreate -> "wx"
-                append -> "a"
-                else -> "w"
+    override suspend fun <R> useSink(
+        path: Path,
+        append: Boolean,
+        mustCreate: Boolean,
+        block: suspend (CoroutineRawSink) -> R,
+    ): R {
+        currentCoroutineContext().ensureActive()
+        // Keep ownership across the uncancellable fs.open handoff; normal writes remain cancellable.
+        val sink = withContext(NonCancellable) {
+            try {
+                val flags = when {
+                    mustCreate && append -> "ax"
+                    mustCreate -> "wx"
+                    append -> "a"
+                    else -> "w"
+                }
+                NodeCoroutineRawSink(openFile(path.toString(), flags))
+            } catch (error: Throwable) {
+                throw error.asFileSystemIOException("Open sink failed for $path")
             }
-            NodeCoroutineRawSink(openFile(path.toString(), flags))
-        } catch (error: Throwable) {
-            throw error.asFileSystemIOException("Open sink failed for $path")
         }
+        return sink.use {
+            currentCoroutineContext().ensureActive()
+            block(it)
+        }
+    }
 
     override suspend fun readString(path: Path): String =
         try {
@@ -199,7 +230,7 @@ private object NodeCoroutineFileSystem : CoroutineFileSystem {
         mustCreate: Boolean,
     ) {
         if (mustCreate) {
-            sink(path, append, mustCreate = true).use { sink ->
+            useSink(path, append, mustCreate = true) { sink ->
                 val bytes = content.encodeToByteArray()
                 val buffer = Buffer().apply { write(bytes) }
                 sink.write(buffer, bytes.size.toLong())
@@ -243,9 +274,9 @@ private class NodeCoroutineRawSource(
 
     override suspend fun close() {
         if (closed) return
-        closed = true
         try {
             handle.close()
+            closed = true
         } catch (error: Throwable) {
             throw error.asFileSystemIOException("Close source failed")
         }
@@ -292,9 +323,9 @@ private class NodeCoroutineRawSink(
 
     override suspend fun close() {
         if (closed) return
-        closed = true
         try {
             handle.close()
+            closed = true
         } catch (error: Throwable) {
             throw error.asFileSystemIOException("Close sink failed")
         }

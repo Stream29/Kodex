@@ -26,6 +26,7 @@ kotlin {
                 api(project(":app-migration-contract"))
                 implementation(project(":agent-storage-filesystem-layout"))
                 implementation(project(":utils-filesystem-lease-impl"))
+                implementation(libs.kotlinx.serialization.json)
             }
         }
         commonTest.dependencies {

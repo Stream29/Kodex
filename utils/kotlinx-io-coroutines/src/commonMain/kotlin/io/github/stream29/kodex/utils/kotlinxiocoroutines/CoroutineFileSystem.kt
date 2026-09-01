@@ -48,13 +48,23 @@ public interface CoroutineFileSystem {
 
     public suspend fun list(directory: Path): Collection<Path>
 
-    public suspend fun source(path: Path): CoroutineRawSource
+    /**
+     * Opens [path] for [block] and closes the source before this operation completes.
+     */
+    public suspend fun <R> useSource(
+        path: Path,
+        block: suspend (CoroutineRawSource) -> R,
+    ): R
 
-    public suspend fun sink(
+    /**
+     * Opens [path] for [block] and closes the sink before this operation completes.
+     */
+    public suspend fun <R> useSink(
         path: Path,
         append: Boolean = false,
         mustCreate: Boolean = false,
-    ): CoroutineRawSink
+        block: suspend (CoroutineRawSink) -> R,
+    ): R
 
     /**
      * Restricts an existing file to the current user where the platform
@@ -65,7 +75,7 @@ public interface CoroutineFileSystem {
     public suspend fun protectPrivateFile(path: Path): Unit = Unit
 
     public suspend fun readBytes(path: Path, maxByteCount: Long = Long.MAX_VALUE): ByteArray =
-        source(path).use { it.readBytes(maxByteCount) }
+        useSource(path) { it.readBytes(maxByteCount) }
 
     public suspend fun writeBytes(
         path: Path,
@@ -73,7 +83,7 @@ public interface CoroutineFileSystem {
         append: Boolean = false,
         mustCreate: Boolean = false,
     ) {
-        sink(path, append, mustCreate).use {
+        useSink(path, append, mustCreate) {
             it.writeBytes(content)
             it.flush()
         }
@@ -88,7 +98,7 @@ public interface CoroutineFileSystem {
         content: ByteArray,
         mustCreate: Boolean = false,
     ) {
-        sink(path, append = false, mustCreate = mustCreate).use {
+        useSink(path, append = false, mustCreate = mustCreate) {
             protectPrivateFile(path)
             it.writeBytes(content)
             it.flush()

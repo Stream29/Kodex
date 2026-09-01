@@ -289,9 +289,12 @@ private class CountingFileSystem(
     var skillSourceOpenCount: Int = 0
         private set
 
-    override suspend fun source(path: Path): CoroutineRawSource {
+    override suspend fun <R> useSource(
+        path: Path,
+        block: suspend (CoroutineRawSource) -> R,
+    ): R {
         if (path.name == "SKILL.md") skillSourceOpenCount += 1
-        return delegate.source(path)
+        return delegate.useSource(path, block)
     }
 }
 

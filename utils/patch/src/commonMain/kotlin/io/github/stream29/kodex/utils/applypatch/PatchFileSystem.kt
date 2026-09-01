@@ -22,7 +22,6 @@ private suspend fun applyHunksToFileSystem(
     val added = mutableListOf<String>()
     val modified = mutableListOf<String>()
     val deleted = mutableListOf<String>()
-    val changes = mutableListOf<PatchChange>()
 
     fun resolve(path: String): Path {
         val candidate = Path(path)
@@ -44,15 +43,6 @@ private suspend fun applyHunksToFileSystem(
         return fileSystem.readString(resolved)
     }
 
-    suspend fun readOptionalFile(path: String): String? {
-        val resolved = resolve(path)
-        return if (fileSystem.metadataOrNull(resolved)?.isRegularFile == true) {
-            readExistingFile(path)
-        } else {
-            null
-        }
-    }
-
     suspend fun writeFile(path: String, content: String) {
         val resolved = resolve(path)
         resolved.parent?.let { fileSystem.createDirectories(it) }
@@ -68,24 +58,11 @@ private suspend fun applyHunksToFileSystem(
     hunks.forEach { hunk ->
         when (hunk) {
             is AddFileHunk -> {
-                val overwrittenContent = readOptionalFile(hunk.path)
                 writeFile(hunk.path, hunk.contents)
-                changes += PatchChange(
-                    path = hunk.path,
-                    change = PatchFileChange.Add(
-                        content = hunk.contents,
-                        overwrittenContent = overwrittenContent,
-                    ),
-                )
                 added += hunk.path
             }
             is DeleteFileHunk -> {
-                val content = readExistingFile(hunk.path)
                 deleteFile(hunk.path)
-                changes += PatchChange(
-                    path = hunk.path,
-                    change = PatchFileChange.Delete(content),
-                )
                 deleted += hunk.path
             }
             is UpdateFileHunk -> {
@@ -94,29 +71,10 @@ private suspend fun applyHunksToFileSystem(
                 val movePath = hunk.movePath
                 if (movePath == null) {
                     writeFile(hunk.path, newContent)
-                    changes += PatchChange(
-                        path = hunk.path,
-                        change = PatchFileChange.Update(
-                            movePath = null,
-                            oldContent = originalContent,
-                            overwrittenMoveContent = null,
-                            newContent = newContent,
-                        ),
-                    )
                     modified += hunk.path
                 } else {
-                    val overwrittenMoveContent = readOptionalFile(movePath)
                     writeFile(movePath, newContent)
                     deleteFile(hunk.path)
-                    changes += PatchChange(
-                        path = hunk.path,
-                        change = PatchFileChange.Update(
-                            movePath = movePath,
-                            oldContent = originalContent,
-                            overwrittenMoveContent = overwrittenMoveContent,
-                            newContent = newContent,
-                        ),
-                    )
                     modified += movePath
                 }
             }
@@ -128,10 +86,6 @@ private suspend fun applyHunksToFileSystem(
             added = added,
             modified = modified,
             deleted = deleted,
-        ),
-        delta = PatchDelta(
-            changes = changes,
-            exact = true,
         ),
     )
 }

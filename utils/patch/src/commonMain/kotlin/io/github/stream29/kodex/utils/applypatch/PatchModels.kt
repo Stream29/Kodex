@@ -79,61 +79,7 @@ public data class PatchAffectedPaths(
 public data class PatchApplyResult(
     @SerialName("affected_paths")
     public val affectedPaths: PatchAffectedPaths,
-    public val delta: PatchDelta,
 )
-
-@Serializable
-public data class PatchDelta(
-    public val changes: List<PatchChange>,
-    public val exact: Boolean,
-)
-
-@Serializable
-public data class PatchChange(
-    public val path: String,
-    public val change: PatchFileChange,
-)
-
-@Serializable
-public sealed interface PatchFileChange {
-    /**
-     * @property overwrittenContent Nullable because an add normally creates a
-     * new file; `null` means no previous content was overwritten.
-     */
-    @Serializable
-    @SerialName("add")
-    public data class Add(
-        public val content: String,
-        @SerialName("overwritten_content")
-        public val overwrittenContent: String?,
-    ) : PatchFileChange
-
-    @Serializable
-    @SerialName("delete")
-    public data class Delete(
-        public val content: String,
-    ) : PatchFileChange
-
-    /**
-     * @property movePath Nullable because most updates are in-place; `null`
-     * means the original path remains the output path.
-     * @property overwrittenMoveContent Nullable because moves normally write to
-     * a new destination; `null` means no destination content was overwritten, or
-     * the update was not a move.
-     */
-    @Serializable
-    @SerialName("update")
-    public data class Update(
-        @SerialName("move_path")
-        public val movePath: String?,
-        @SerialName("old_content")
-        public val oldContent: String,
-        @SerialName("overwritten_move_content")
-        public val overwrittenMoveContent: String?,
-        @SerialName("new_content")
-        public val newContent: String,
-    ) : PatchFileChange
-}
 
 public class ApplyPatchException(
     message: String,

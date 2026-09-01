@@ -4,7 +4,6 @@ import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.copyTo
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.use
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.io.IOException
@@ -199,11 +198,11 @@ public class FileSystemIndexVersioned<T>(
             } == true
         indexes.asSequence()
             .forEach { index ->
-                fileSystem.source(directory.entryPath(index)).use { source ->
-                    target.fileSystem.sink(
+                fileSystem.useSource(directory.entryPath(index)) { source ->
+                    target.fileSystem.useSink(
                         target.directory.entryPath(index - from),
                         mustCreate = true,
-                    ).use { sink ->
+                    ) { sink ->
                         source.copyTo(sink)
                         sink.flush()
                     }

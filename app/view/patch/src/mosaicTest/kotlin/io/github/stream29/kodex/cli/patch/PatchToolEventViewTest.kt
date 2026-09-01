@@ -263,6 +263,8 @@ private suspend fun <T> TestMosaic<T>.click(
     x: Int = 0,
     y: Int = 0,
 ): T {
+    sendMouseEvent(MouseEvent(x, y, MouseEvent.Type.Motion))
+    awaitSnapshot()
     sendMouseEvent(MouseEvent(x, y, MouseEvent.Type.Press, MouseEvent.Button.Left))
     awaitSnapshot()
     sendMouseEvent(MouseEvent(x, y, MouseEvent.Type.Release))

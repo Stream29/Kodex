@@ -46,12 +46,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlin.time.Duration
 
 internal fun StablePatchToolEvent.toHistoryHeader(elapsed: Duration): PatchHistoryItemHeader {
-    val paths = when (val result = result) {
-        is StablePatchToolExecutionResult.Success ->
-            result.applyResult.delta.changes.map { change -> change.path }
-
-        is StablePatchToolExecutionResult.Failure -> diff.hunks.map { hunk -> hunk.path }
-    }
+    val paths = diff.hunks.map { hunk -> hunk.path }
     return PatchHistoryItemHeader(
         target = paths.toPatchHistoryTarget(),
         status = when (result) {

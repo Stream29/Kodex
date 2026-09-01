@@ -69,6 +69,8 @@ public val fileSystemLayoutTest by testSuite {
 
             writeRecord(timeline, 3, payload)
             assertContentEquals(payload, readRecord(timeline, 3))
+            assertContentEquals(byteArrayOf(1, 2), readRecordPrefix(timeline, 3, 2))
+            assertContentEquals(payload, readRecordPrefix(timeline, 3, 20))
 
             moveRecord(timeline, 3, 5)
             assertFalse(SystemCoroutineFileSystem.exists(recordPath(timeline, 3)))

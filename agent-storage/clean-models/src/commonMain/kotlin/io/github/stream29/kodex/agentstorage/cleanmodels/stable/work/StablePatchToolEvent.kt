@@ -54,7 +54,8 @@ public sealed interface StablePatchToolExecutionResult {
     /**
      * Patch application completed.
      *
-     * @property applyResult File-system changes produced by applying the patch.
+     * @property applyResult Paths affected by applying the patch. Full file
+     * snapshots remain transient and are never part of the stable event.
      */
     @Serializable
     @SerialName("success")
