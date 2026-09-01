@@ -38,14 +38,26 @@ internal class BlockingCoroutineFileSystem(
     override suspend fun list(directory: Path): Collection<Path> =
         withContext(IoDispatcher) { delegate.list(directory) }
 
-    override suspend fun source(path: Path): CoroutineRawSource =
-        withContext(IoDispatcher) { BlockingCoroutineRawSource(delegate.source(path)) }
+    override suspend fun <R> useSource(
+        path: Path,
+        block: suspend (CoroutineRawSource) -> R,
+    ): R = withContext(IoDispatcher) {
+        BlockingCoroutineRawSource(delegate.source(path)).use(block)
+    }
 
-    override suspend fun sink(path: Path, append: Boolean, mustCreate: Boolean): CoroutineRawSink =
-        withContext(IoDispatcher) {
-            if (mustCreate) exclusiveSink(path, append)
-            else BlockingCoroutineRawSink(delegate.sink(path, append))
+    override suspend fun <R> useSink(
+        path: Path,
+        append: Boolean,
+        mustCreate: Boolean,
+        block: suspend (CoroutineRawSink) -> R,
+    ): R = withContext(IoDispatcher) {
+        val sink = if (mustCreate) {
+            exclusiveSink(path, append)
+        } else {
+            BlockingCoroutineRawSink(delegate.sink(path, append))
         }
+        sink.use(block)
+    }
 
     override suspend fun protectPrivateFile(path: Path): Unit =
         withContext(IoDispatcher) { protectPrivateFile.invoke(path) }

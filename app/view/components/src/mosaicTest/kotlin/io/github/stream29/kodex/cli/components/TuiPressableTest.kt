@@ -13,6 +13,7 @@ import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
+import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
@@ -78,6 +79,34 @@ val tuiPressableTest by testSuite {
 
             sendMouseEvent(MouseEvent(20, 0, MouseEvent.Type.Motion))
             assertEquals("[Run]", awaitSnapshot())
+        }
+    }
+
+    test("newly composed button retains pointer capture across a frame") {
+        var showDetails by mutableStateOf(false)
+        var detailClicks by mutableStateOf(0)
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Column {
+                    TuiButton(label = "Show") { showDetails = true }
+                    if (showDetails) {
+                        TuiButton(label = "Details") { detailClicks++ }
+                    }
+                }
+            }
+
+            sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
+            awaitSnapshotAfter("show press")
+            sendMouseEvent(MouseEvent(1, 0, MouseEvent.Type.Release))
+            awaitSnapshotAfter("show release")
+
+            sendMouseEvent(MouseEvent(1, 1, MouseEvent.Type.Press, MouseEvent.Button.Left))
+            awaitSnapshotAfter("details press")
+            sendMouseEvent(MouseEvent(1, 1, MouseEvent.Type.Release))
+            awaitSnapshotAfter("details release")
+
+            assertEquals(1, detailClicks)
         }
     }
 

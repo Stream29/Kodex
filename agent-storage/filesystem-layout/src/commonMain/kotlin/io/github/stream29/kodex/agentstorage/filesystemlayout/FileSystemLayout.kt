@@ -2,7 +2,9 @@ package io.github.stream29.kodex.agentstorage.filesystemlayout
 
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import kotlinx.io.Buffer
 import kotlinx.io.IOException
+import kotlinx.io.readByteArray
 import kotlinx.io.files.Path
 
 public suspend fun requireStorageLayout(
@@ -50,6 +52,25 @@ public suspend fun readRecord(
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     maxByteCount: Long = Long.MAX_VALUE,
 ): ByteArray = fileSystem.readBytes(recordPath(timelineDirectory, index), maxByteCount)
+
+public suspend fun readRecordPrefix(
+    timelineDirectory: Path,
+    index: Int,
+    byteCount: Long,
+    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+): ByteArray {
+    require(byteCount >= 0L) { "byteCount: $byteCount" }
+    return fileSystem.useSource(recordPath(timelineDirectory, index)) { source ->
+        val buffer = Buffer()
+        var remaining = byteCount
+        while (remaining > 0L) {
+            val read = source.readAtMostTo(buffer, minOf(remaining, RecordPrefixSegmentByteCount))
+            if (read == -1L) break
+            remaining -= read
+        }
+        buffer.readByteArray()
+    }
+}
 
 public suspend fun writeRecord(
     timelineDirectory: Path,
@@ -139,6 +160,7 @@ private class IntArrayBuilder {
 }
 
 private const val EmptyIndex: Int = -1
+private const val RecordPrefixSegmentByteCount: Long = 8_192L
 private const val InitialIndexCapacity: Int = 16
 private const val JsonSuffix: String = ".json"
 private const val LatestIndexFile: String = "latest.json"

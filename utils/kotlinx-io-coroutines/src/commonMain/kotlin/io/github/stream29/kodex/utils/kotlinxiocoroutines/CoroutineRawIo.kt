@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.utils.kotlinxiocoroutines
 
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.io.Buffer
 import kotlinx.io.IOException
 import kotlinx.io.readByteArray
@@ -44,7 +46,7 @@ public suspend inline fun <T : CoroutineCloseable, R> T.use(block: suspend (T) -
         throw throwable
     } finally {
         try {
-            close()
+            withContext(NonCancellable) { close() }
         } catch (closeFailure: Throwable) {
             val originalFailure = failure
             if (originalFailure == null) {

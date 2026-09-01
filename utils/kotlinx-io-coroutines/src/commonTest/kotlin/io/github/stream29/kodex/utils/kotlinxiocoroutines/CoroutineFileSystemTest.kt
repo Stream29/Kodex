@@ -2,6 +2,12 @@ package io.github.stream29.kodex.utils.kotlinxiocoroutines
 
 import de.infix.testBalloon.framework.core.testSuite
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
@@ -9,6 +15,9 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFails
+import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 private suspend fun temporaryRoot(): Path =
@@ -54,8 +63,8 @@ val coroutineFileSystemTest by testSuite {
 
             assertContentEquals(bytes + bytes, SystemCoroutineFileSystem.readBytes(sourceFile))
 
-            val copied = SystemCoroutineFileSystem.source(sourceFile).use { source ->
-                SystemCoroutineFileSystem.sink(copyFile).use { sink ->
+            val copied = SystemCoroutineFileSystem.useSource(sourceFile) { source ->
+                SystemCoroutineFileSystem.useSink(copyFile) { sink ->
                     val copied = source.copyTo(sink)
                     sink.flush()
                     copied
@@ -98,5 +107,110 @@ val coroutineFileSystemTest by testSuite {
             }
             assertEquals("first", SystemCoroutineFileSystem.readString(file))
         }
+
+        test("source closes after cancellation at EOF") { root ->
+            val file = Path(root, "cancelled-source.txt")
+            SystemCoroutineFileSystem.writeString(file, "content")
+
+            coroutineScope {
+                val reachedEof = CompletableDeferred<Unit>()
+                val owner = launch {
+                    SystemCoroutineFileSystem.useSource(file) { source ->
+                        assertContentEquals("content".encodeToByteArray(), source.readBytes())
+                        reachedEof.complete(Unit)
+                        awaitCancellation()
+                    }
+                }
+
+                reachedEof.await()
+                owner.cancelAndJoin()
+            }
+
+            SystemCoroutineFileSystem.delete(file)
+            assertFalse(SystemCoroutineFileSystem.exists(file))
+        }
+
+        test("mustCreate sink closes after cancellation") { root ->
+            val file = Path(root, "cancelled-sink.txt")
+
+            coroutineScope {
+                val written = CompletableDeferred<Unit>()
+                val owner = launch {
+                    SystemCoroutineFileSystem.useSink(file, mustCreate = true) { sink ->
+                        sink.writeBytes("content".encodeToByteArray())
+                        sink.flush()
+                        written.complete(Unit)
+                        awaitCancellation()
+                    }
+                }
+
+                written.await()
+                owner.cancelAndJoin()
+            }
+
+            SystemCoroutineFileSystem.delete(file)
+            assertFalse(SystemCoroutineFileSystem.exists(file))
+        }
+    }
+}
+
+val coroutineCloseableTest by testSuite {
+    test("closes in a non-cancellable context") {
+        val closeable = TestCoroutineCloseable()
+
+        coroutineScope {
+            val entered = CompletableDeferred<Unit>()
+            val owner = launch {
+                closeable.use {
+                    entered.complete(Unit)
+                    awaitCancellation()
+                }
+            }
+
+            entered.await()
+            owner.cancelAndJoin()
+        }
+
+        assertTrue(closeable.closed)
+    }
+
+    test("suppresses close failure behind operation failure") {
+        val operationFailure = IllegalStateException("operation")
+        val closeFailure = IllegalArgumentException("close")
+        val closeable = TestCoroutineCloseable(closeFailure)
+
+        val failure = assertFailsWith<IllegalStateException> {
+            closeable.use {
+                throw operationFailure
+            }
+        }
+
+        assertSame(operationFailure, failure)
+        assertEquals(1, failure.suppressedExceptions.size)
+        assertEquals("close", assertIs<IllegalArgumentException>(failure.suppressedExceptions.single()).message)
+    }
+
+    test("propagates close failure without operation failure") {
+        val closeFailure = IllegalArgumentException("close")
+        val closeable = TestCoroutineCloseable(closeFailure)
+
+        val failure = assertFailsWith<IllegalArgumentException> {
+            closeable.use {}
+        }
+
+        assertEquals(closeFailure.message, failure.message)
+    }
+}
+
+private class TestCoroutineCloseable(
+    private val failure: Throwable? = null,
+) : CoroutineCloseable {
+    var closed: Boolean = false
+        private set
+
+    override suspend fun close() {
+        yield()
+        closed = true
+        failure?.let { throw it }
     }
 }

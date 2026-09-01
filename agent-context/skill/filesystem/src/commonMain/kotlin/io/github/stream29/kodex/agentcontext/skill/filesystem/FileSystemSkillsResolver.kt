@@ -12,7 +12,6 @@ import io.github.stream29.kodex.agentcontext.skill.contract.SkillsResolver
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.FileFingerprint
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.use
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.StateFlow
@@ -285,7 +284,7 @@ private class FileSystemResolvedSkills(
 }
 
 private suspend fun CoroutineFileSystem.readMetadataPrefix(path: Path): String =
-    source(path).use { input ->
+    useSource(path) { input ->
         val buffer = Buffer()
         var remaining = MaxMetadataByteCount
         while (remaining > 0L) {

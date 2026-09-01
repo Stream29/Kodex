@@ -149,35 +149,41 @@ private object MingwCoroutineFileSystem : CoroutineFileSystem {
     override suspend fun list(directory: Path): Collection<Path> =
         withContext(IoDispatcher) { listDirectory(directory) }
 
-    override suspend fun source(path: Path): CoroutineRawSource =
-        withContext(IoDispatcher) {
-            MingwCoroutineRawSource(
-                openHandle(
-                    path = path,
-                    desiredAccess = GENERIC_READ,
-                    creationDisposition = OPEN_EXISTING.toUInt(),
-                    flagsAndAttributes = FILE_ATTRIBUTE_NORMAL.toUInt(),
-                    operation = "Open source",
-                ),
-            )
-        }
+    override suspend fun <R> useSource(
+        path: Path,
+        block: suspend (CoroutineRawSource) -> R,
+    ): R = withContext(IoDispatcher) {
+        MingwCoroutineRawSource(
+            openHandle(
+                path = path,
+                desiredAccess = GENERIC_READ,
+                creationDisposition = OPEN_EXISTING.toUInt(),
+                flagsAndAttributes = FILE_ATTRIBUTE_NORMAL.toUInt(),
+                operation = "Open source",
+            ),
+        ).use(block)
+    }
 
-    override suspend fun sink(path: Path, append: Boolean, mustCreate: Boolean): CoroutineRawSink =
-        withContext(IoDispatcher) {
-            MingwCoroutineRawSink(
-                openHandle(
-                    path = path,
-                    desiredAccess = if (append) FILE_APPEND_DATA.toUInt() else GENERIC_WRITE.toUInt(),
-                    creationDisposition = when {
-                        mustCreate -> CREATE_NEW.toUInt()
-                        append -> OPEN_ALWAYS.toUInt()
-                        else -> CREATE_ALWAYS.toUInt()
-                    },
-                    flagsAndAttributes = FILE_ATTRIBUTE_NORMAL.toUInt(),
-                    operation = "Open sink",
-                ),
-            )
-        }
+    override suspend fun <R> useSink(
+        path: Path,
+        append: Boolean,
+        mustCreate: Boolean,
+        block: suspend (CoroutineRawSink) -> R,
+    ): R = withContext(IoDispatcher) {
+        MingwCoroutineRawSink(
+            openHandle(
+                path = path,
+                desiredAccess = if (append) FILE_APPEND_DATA.toUInt() else GENERIC_WRITE.toUInt(),
+                creationDisposition = when {
+                    mustCreate -> CREATE_NEW.toUInt()
+                    append -> OPEN_ALWAYS.toUInt()
+                    else -> CREATE_ALWAYS.toUInt()
+                },
+                flagsAndAttributes = FILE_ATTRIBUTE_NORMAL.toUInt(),
+                operation = "Open sink",
+            ),
+        ).use(block)
+    }
 }
 
 private typealias WindowsHandle = CPointer<out CPointed>
@@ -370,8 +376,8 @@ private class MingwCoroutineRawSource(
         if (closed) return
         withContext(IoDispatcher) {
             if (closed) return@withContext
-            closed = true
             closeHandle(handle, "Close source")
+            closed = true
         }
     }
 }
@@ -426,8 +432,8 @@ private class MingwCoroutineRawSink(
         if (closed) return
         withContext(IoDispatcher) {
             if (closed) return@withContext
-            closed = true
             closeHandle(handle, "Close sink")
+            closed = true
         }
     }
 }

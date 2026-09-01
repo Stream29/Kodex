@@ -6,7 +6,6 @@ import io.github.stream29.kodex.agentcontext.prefix.agentsmd.contract.AgentsMdSn
 import io.github.stream29.kodex.agentcontext.prefix.agentsmd.contract.AgentsMdWarning
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.use
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.io.Buffer
@@ -108,7 +107,7 @@ private suspend fun readBytes(
     val bytes = if (maxByteCount == Long.MAX_VALUE) {
         fileSystem.readBytes(source)
     } else {
-        fileSystem.source(source).use { input ->
+        fileSystem.useSource(source) { input ->
             val buffer = Buffer()
             var remaining = maxByteCount
             while (remaining > 0L) {

@@ -3,12 +3,11 @@ package io.github.stream29.kodex.cli.patch
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolExecutionResult
+import io.github.stream29.kodex.utils.applypatch.AddFileHunk
+import io.github.stream29.kodex.utils.applypatch.DeleteFileHunk
 import io.github.stream29.kodex.utils.applypatch.Patch
 import io.github.stream29.kodex.utils.applypatch.PatchAffectedPaths
 import io.github.stream29.kodex.utils.applypatch.PatchApplyResult
-import io.github.stream29.kodex.utils.applypatch.PatchChange
-import io.github.stream29.kodex.utils.applypatch.PatchDelta
-import io.github.stream29.kodex.utils.applypatch.PatchFileChange
 import io.github.stream29.kodex.utils.applypatch.UpdateFileChunk
 import io.github.stream29.kodex.utils.applypatch.UpdateFileHunk
 import kotlin.test.assertEquals
@@ -85,7 +84,7 @@ val patchPresentationTest by testSuite {
         assertTrue(presentation.lines.any { it.text == "M src/Main.kt" })
     }
 
-    test("completed success renders the exact applied delta instead of the input hunks") {
+    test("completed success renders the parsed input diff") {
         val presentation = StablePatchToolEvent(
             callId = "patch",
             diff = updatePatch(),
@@ -96,75 +95,45 @@ val patchPresentationTest by testSuite {
                         modified = listOf("applied.txt"),
                         deleted = emptyList(),
                     ),
-                    delta = PatchDelta(
-                        changes = listOf(
-                            PatchChange(
-                                path = "applied.txt",
-                                change = PatchFileChange.Update(
-                                    movePath = null,
-                                    oldContent = "before\nold\nmiddle\nold two\nafter\n",
-                                    overwrittenMoveContent = null,
-                                    newContent = "before\nnew\nmiddle\nnew two\nafter\n",
-                                ),
-                            ),
-                        ),
-                        exact = true,
-                    ),
                 ),
             ),
         ).toStablePatchPresentation()
 
-        assertEquals("Edit applied.txt", presentation.header)
+        assertEquals("Edit Main.kt", presentation.header)
         assertEquals(PatchPresentationStatus.Completed, presentation.status)
-        assertTrue(presentation.lines.any { it.text == "M applied.txt" })
+        assertTrue(presentation.lines.any { it.text == "M src/Main.kt" })
         assertTrue(presentation.lines.any { it.text == "- old" })
         assertTrue(presentation.lines.any { it.text == "+ new" })
-        assertTrue(presentation.lines.any { it.text == "  middle" })
-        assertFalse(presentation.lines.any { it.text == "M src/Main.kt" })
+        assertFalse(presentation.lines.any { it.text == "M applied.txt" })
     }
 
-    test("completed success renders add delete rename and overwritten destinations") {
+    test("completed success renders parsed add delete and rename hunks") {
         val presentation = StablePatchToolEvent(
             callId = "patch",
-            diff = Patch(patch = "", hunks = emptyList()),
+            diff = Patch(
+                patch = "",
+                hunks = listOf(
+                    AddFileHunk(path = "new.txt", contents = "new\n"),
+                    AddFileHunk(path = "replaced.txt", contents = "replacement\n"),
+                    DeleteFileHunk(path = "old.txt"),
+                    UpdateFileHunk(
+                        path = "source.txt",
+                        movePath = "moved.txt",
+                        chunks = listOf(
+                            UpdateFileChunk(
+                                oldLines = listOf("old"),
+                                newLines = listOf("new"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
             result = StablePatchToolExecutionResult.Success(
                 PatchApplyResult(
                     affectedPaths = PatchAffectedPaths(
                         added = listOf("new.txt", "replaced.txt"),
                         modified = listOf("moved.txt"),
                         deleted = listOf("old.txt"),
-                    ),
-                    delta = PatchDelta(
-                        changes = listOf(
-                            PatchChange(
-                                path = "new.txt",
-                                change = PatchFileChange.Add(
-                                    content = "new\n",
-                                    overwrittenContent = null,
-                                ),
-                            ),
-                            PatchChange(
-                                path = "replaced.txt",
-                                change = PatchFileChange.Add(
-                                    content = "replacement\n",
-                                    overwrittenContent = "original\n",
-                                ),
-                            ),
-                            PatchChange(
-                                path = "old.txt",
-                                change = PatchFileChange.Delete("deleted\n"),
-                            ),
-                            PatchChange(
-                                path = "source.txt",
-                                change = PatchFileChange.Update(
-                                    movePath = "moved.txt",
-                                    oldContent = "old\n",
-                                    overwrittenMoveContent = "destination\n",
-                                    newContent = "new\n",
-                                ),
-                            ),
-                        ),
-                        exact = true,
                     ),
                 ),
             ),
@@ -175,13 +144,12 @@ val patchPresentationTest by testSuite {
         val renderedLines = presentation.lines.map(PatchPresentationLine::text)
         assertTrue("A new.txt" in renderedLines)
         assertTrue("+ new" in renderedLines)
-        assertTrue("M replaced.txt (replaced by add)" in renderedLines)
-        assertTrue("- original" in renderedLines)
+        assertTrue("A replaced.txt" in renderedLines)
         assertTrue("+ replacement" in renderedLines)
         assertTrue("D old.txt" in renderedLines)
-        assertTrue("- deleted" in renderedLines)
         assertTrue("R source.txt -> moved.txt" in renderedLines)
-        assertTrue("Overwrote existing destination: moved.txt" in renderedLines)
+        assertTrue("- old" in renderedLines)
+        assertFalse(renderedLines.any { "Overwrote existing destination" in it })
     }
 }
 
