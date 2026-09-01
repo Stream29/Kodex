@@ -204,7 +204,8 @@ public class FileSystemKodexSessionRepository internal constructor(
             deleteDirectoryContents(directory, except = LockFile)
         } finally {
             withContext(NonCancellable) {
-                lease.closeAndJoin()
+                lease.close()
+                lease.coroutineContext[Job]?.join()
             }
         }
         fileSystem.delete(directory, mustExist = false)
@@ -394,7 +395,10 @@ private suspend fun <T> FileSystemLease.useAndRelease(block: suspend () -> T): T
     return try {
         async(start = CoroutineStart.UNDISPATCHED) { block() }.await()
     } finally {
-        withContext(NonCancellable) { closeAndJoin() }
+        withContext(NonCancellable) {
+            close()
+            coroutineContext[Job]?.join()
+        }
     }
 }
 

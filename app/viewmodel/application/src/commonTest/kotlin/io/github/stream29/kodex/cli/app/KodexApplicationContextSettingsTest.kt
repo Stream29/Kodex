@@ -3,13 +3,20 @@ package io.github.stream29.kodex.cli.app
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentsession.filesystem.FileSystemKodexSessionRepository
+import io.github.stream29.kodex.app.migration.CurrentKodexApplicationVersion
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 val kodexApplicationContextSettingsTest by testSuite {
     test("accepts a missing Agents Home and passes the actual context directories") {
@@ -47,8 +54,13 @@ val kodexApplicationContextSettingsTest by testSuite {
             )
             assertNull(SystemCoroutineFileSystem.metadataOrNull(agentsDirectory))
             assertEquals(dataDirectory, context.kodexHome)
+            assertEquals(
+                "\"$CurrentKodexApplicationVersion\"",
+                SystemCoroutineFileSystem.readString(Path(dataDirectory, "version.json")),
+            )
         } finally {
             application.close()
+            awaitReadLeaseRelease(dataDirectory)
             deleteRecursively(root)
         }
     }
@@ -56,6 +68,20 @@ val kodexApplicationContextSettingsTest by testSuite {
 
 private fun temporaryDirectory(name: String): Path =
     Path(SystemTemporaryDirectory, "kodex-$name-${Random.nextLong()}")
+
+private suspend fun awaitReadLeaseRelease(dataDirectory: Path) {
+    val lockDirectory = Path(dataDirectory, ".locks", "home")
+    withContext(Dispatchers.Default) {
+        withTimeout(5.seconds) {
+            while (
+                SystemCoroutineFileSystem.list(lockDirectory)
+                    .any { path -> path.name.endsWith(".read.lock") }
+            ) {
+                delay(1.milliseconds)
+            }
+        }
+    }
+}
 
 private suspend fun deleteRecursively(path: Path) {
     val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return

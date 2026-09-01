@@ -9,6 +9,8 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModelFactory
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.app.application.contract.SidebarSettingsViewModel
+import io.github.stream29.kodex.app.migration.KodexHomeHandle
+import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
@@ -55,6 +57,7 @@ import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliMcpImportCandidate
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
+import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.kodexhome.KodexHome
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.logging.global
@@ -62,12 +65,14 @@ import io.github.stream29.kodex.utils.osenvironment.environmentVariable
 import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
 import io.github.stream29.kodex.utils.shellclient.Shell
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import org.koin.core.KoinApplication
 import org.koin.core.annotation.Factory
@@ -90,6 +95,7 @@ public class KodexApplication private constructor(
     private val mcpManager: McpManager,
     private val hookManager: HookManager,
     private val applicationScope: CoroutineScope,
+    private val homeHandle: KodexHomeHandle,
     public val viewModel: ApplicationViewModel,
     public val newLineKey: StateFlow<NewLineKey>,
     public val sidebarSettings: SidebarSettingsViewModel,
@@ -99,36 +105,63 @@ public class KodexApplication private constructor(
     public suspend fun shutdown() {
         if (closed) return
         closed = true
-        viewModel.shutdown()
-        closeInfrastructure()
+        try {
+            viewModel.shutdown()
+        } finally {
+            try {
+                closeInfrastructure()
+            } finally {
+                withContext(NonCancellable) { homeHandle.closeAndJoin() }
+            }
+        }
     }
 
     override fun close() {
         if (closed) return
         closed = true
-        viewModel.close()
-        closeInfrastructure()
+        try {
+            viewModel.close()
+        } finally {
+            try {
+                closeInfrastructure()
+            } finally {
+                homeHandle.close()
+            }
+        }
     }
 
     private fun closeInfrastructure() {
-        accountUsageStore.close()
-        mcpManager.close()
-        hookManager.close()
-        dependencies.close()
-        authStore.close()
-        applicationScope.cancel()
-        dependencyGraph.close()
-        ApplicationLogger.info { "Application closed." }
+        var failure: Throwable? = null
+        fun closeResource(close: () -> Unit) {
+            try {
+                close()
+            } catch (resourceFailure: Throwable) {
+                failure?.addSuppressed(resourceFailure) ?: run {
+                    failure = resourceFailure
+                }
+            }
+        }
+        closeResource(accountUsageStore::close)
+        closeResource(mcpManager::close)
+        closeResource(hookManager::close)
+        closeResource(dependencies::close)
+        closeResource(authStore::close)
+        closeResource(applicationScope::cancel)
+        closeResource(dependencyGraph::close)
+        closeResource { ApplicationLogger.info { "Application closed." } }
+        failure?.let { throw it }
     }
 
     public companion object {
         public suspend fun openDefault(
             workingDirectory: Path = Path("."),
+            homeHandle: KodexHomeHandle? = null,
         ): KodexApplication = open(
             codexDirectory = configuredCodexSourceHome(),
             agentsDirectory = defaultAgentsHome(),
             workingDirectory = workingDirectory,
             dataDirectory = KodexHome,
+            homeHandle = homeHandle,
         )
 
         public suspend fun open(
@@ -136,6 +169,7 @@ public class KodexApplication private constructor(
             agentsDirectory: Path = defaultAgentsHome(),
             workingDirectory: Path = Path("."),
             dataDirectory: Path = KodexHome,
+            homeHandle: KodexHomeHandle? = null,
             sessionTitleGeneratorFactory: (OpenAiClientContract) -> SessionTitleGenerator =
                 ::OpenAiSessionTitleGenerator,
             sessionRepositoryFactory:
@@ -145,6 +179,56 @@ public class KodexApplication private constructor(
             },
         ): KodexApplication {
             val scope = CoroutineScope(currentCoroutineContext()).supervisorChildScope()
+            val preparedHome = try {
+                homeHandle ?: scope.prepareKodexHome(dataDirectory)
+            } catch (failure: Throwable) {
+                withContext(NonCancellable) { scope.cancelAndJoin() }
+                throw failure
+            }
+            return try {
+                require(preparedHome.home == dataDirectory) {
+                    "Prepared Kodex Home ${preparedHome.home} does not match " +
+                        "data directory $dataDirectory."
+                }
+                openPrepared(
+                    codexDirectory = codexDirectory,
+                    agentsDirectory = agentsDirectory,
+                    workingDirectory = workingDirectory,
+                    dataDirectory = dataDirectory,
+                    scope = scope,
+                    homeHandle = preparedHome,
+                    sessionTitleGeneratorFactory = sessionTitleGeneratorFactory,
+                    sessionRepositoryFactory = sessionRepositoryFactory,
+                )
+            } catch (failure: Throwable) {
+                withContext(NonCancellable) {
+                    try {
+                        preparedHome.closeAndJoin()
+                    } catch (cleanupFailure: Throwable) {
+                        failure.addSuppressed(cleanupFailure)
+                    }
+                    try {
+                        scope.cancelAndJoin()
+                    } catch (cleanupFailure: Throwable) {
+                        failure.addSuppressed(cleanupFailure)
+                    }
+                }
+                throw failure
+            }
+        }
+
+        private suspend fun openPrepared(
+            codexDirectory: Path,
+            agentsDirectory: Path,
+            workingDirectory: Path,
+            dataDirectory: Path,
+            scope: CoroutineScope,
+            homeHandle: KodexHomeHandle,
+            sessionTitleGeneratorFactory: (OpenAiClientContract) -> SessionTitleGenerator,
+            sessionRepositoryFactory:
+            suspend CoroutineScope.(Path, KodexAgentDependencies) ->
+            FileSystemKodexSessionRepository,
+        ): KodexApplication {
             val resolvedWorkingDirectory = SystemCoroutineFileSystem.resolve(workingDirectory)
             val resolvedAgentsDirectory = resolveAllowingMissing(agentsDirectory)
             val globalSettings = openGlobalSettings(
@@ -329,6 +413,7 @@ public class KodexApplication private constructor(
                     mcpManager = mcpManager,
                     hookManager = hookManager,
                     applicationScope = scope,
+                    homeHandle = homeHandle,
                     viewModel = applicationViewModel,
                     newLineKey = newLineKey,
                     sidebarSettings = sidebarSettings,
