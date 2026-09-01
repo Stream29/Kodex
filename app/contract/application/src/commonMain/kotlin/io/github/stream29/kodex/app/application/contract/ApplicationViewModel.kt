@@ -93,8 +93,15 @@ public interface ApplicationViewModel : AutoCloseable {
         sessionIndex: Int,
     ): ApplicationPopupState.DeleteSession
 
-    /** Creates and opens one independently disposable OpenAI login child. */
-    public suspend fun openLoginPopup(): ApplicationPopupState.Login
+    /**
+     * Creates and opens one independently disposable OpenAI login child.
+     *
+     * [returnTo] must still be the current popup. The Settings child remains
+     * owned while Login is visible and is restored when Login is dismissed.
+     */
+    public suspend fun openLoginPopup(
+        returnTo: ApplicationPopupState.Settings,
+    ): ApplicationPopupState.Login
 
     /** Opens a directory picker bound to the exact settings-owning [target]. */
     public suspend fun openWorkingDirectoryPopup(

@@ -36,7 +36,7 @@ val sidebarSettingsViewModelTest by testSuite {
             }
             assertEquals(
                 SidebarSettings(
-                    left = SidebarContent.TerminalSessions,
+                    left = SidebarContent.HistoryIndex,
                     right = SidebarContent.TerminalSessions,
                     leftWidth = 24,
                     rightWidth = 32,

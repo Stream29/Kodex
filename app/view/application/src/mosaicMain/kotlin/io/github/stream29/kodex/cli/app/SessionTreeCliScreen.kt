@@ -467,7 +467,10 @@ public fun SessionTreeCliScreen(
                                     },
                                     onOpenSettings = {
                                         scope.launch {
-                                            viewModel.openSettingsPopup(selected, SettingsPage.Session)
+                                            viewModel.openSettingsPopup(
+                                                selected,
+                                                SettingsPage.CurrentSession,
+                                            )
                                         }
                                     },
                                 )
@@ -504,7 +507,7 @@ public fun SessionTreeCliScreen(
                                                 scope.launch {
                                                     viewModel.openSettingsPopup(
                                                         selected,
-                                                        SettingsPage.Session,
+                                                        SettingsPage.CurrentSession,
                                                     )
                                                 }
                                             },
@@ -845,7 +848,7 @@ public fun SessionTreeCliScreen(
                         viewModel = open.viewModel,
                         onDismissRequest = { viewModel.dismissPopup(open) },
                         onOpenLogin = {
-                            scope.launch { viewModel.openLoginPopup() }
+                            scope.launch { viewModel.openLoginPopup(open) }
                         },
                     )
                 }

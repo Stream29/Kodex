@@ -10,6 +10,7 @@ import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import kotlinx.coroutines.CoroutineStart
@@ -148,6 +149,49 @@ val sessionTreeCliViewModelTest by testSuite {
                 assertSame(replacement, fixture.viewModel.popup.value)
                 assertTrue(fixture.viewModel.dismissPopup(replacement))
                 assertIs<ApplicationPopupState.Closed>(fixture.viewModel.popup.value)
+            } finally {
+                fixture.close()
+            }
+        }
+    }
+
+    test("login dismissal restores the exact settings popup") {
+        coroutineScope {
+            val fixture = applicationFixture()
+            try {
+                val target = fixture.viewModel.navigation.value.selected
+                val settings = fixture.viewModel.openSettingsPopup(
+                    target = target,
+                    initialPage = SettingsPage.OpenAi,
+                )
+                val login = fixture.viewModel.openLoginPopup(settings)
+
+                assertSame(settings, login.returnTo)
+                assertSame(login, fixture.viewModel.popup.value)
+                assertTrue(fixture.viewModel.dismissPopup(login))
+                assertSame(settings, fixture.viewModel.popup.value)
+                assertEquals(SettingsPage.OpenAi, settings.viewModel.selectedPage.value)
+            } finally {
+                fixture.close()
+            }
+        }
+    }
+
+    test("closing the settings target also closes its login child") {
+        coroutineScope {
+            val fixture = applicationFixture()
+            try {
+                val target = fixture.viewModel.navigation.value.selected
+                val settings = fixture.viewModel.openSettingsPopup(
+                    target = target,
+                    initialPage = SettingsPage.OpenAi,
+                )
+                val login = fixture.viewModel.openLoginPopup(settings)
+
+                assertTrue(fixture.viewModel.closeTab(target))
+
+                assertIs<ApplicationPopupState.Closed>(fixture.viewModel.popup.value)
+                assertFalse(fixture.viewModel.dismissPopup(login))
             } finally {
                 fixture.close()
             }

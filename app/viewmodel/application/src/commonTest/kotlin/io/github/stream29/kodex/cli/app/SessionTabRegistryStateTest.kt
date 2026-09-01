@@ -13,6 +13,14 @@ import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModelFactory
+import io.github.stream29.kodex.app.settings.contract.OpenAiLoginEffect
+import io.github.stream29.kodex.app.settings.contract.OpenAiLoginState
+import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
+import io.github.stream29.kodex.app.settings.contract.GlobalSettingsViewModel
+import io.github.stream29.kodex.app.settings.contract.NewSessionSettingsViewModel
+import io.github.stream29.kodex.app.settings.contract.SessionSettingsViewModel
+import io.github.stream29.kodex.app.settings.contract.SettingsPage
+import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModelFactory
 import io.github.stream29.kodex.cli.agent.DefaultComposerViewModelFactory
 import io.github.stream29.kodex.cli.newsession.DefaultNewSessionViewModelFactory
@@ -20,8 +28,10 @@ import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -97,12 +107,10 @@ internal suspend fun kotlinx.coroutines.CoroutineScope.applicationFixture(
         sessions = sessions,
         newSessionFactory = drafts,
         catalogFactory = SessionCatalogViewModelFactory { _, _ -> EmptySessionCatalogViewModel() },
-        settingsFactory = SettingsViewModelFactory {
-            error("Settings are not used by this fixture.")
+        settingsFactory = SettingsViewModelFactory { arguments ->
+            EmptySettingsViewModel(arguments.initialPage)
         },
-        loginFactory = OpenAiLoginViewModelFactory {
-            error("Login is not used by this fixture.")
-        },
+        loginFactory = OpenAiLoginViewModelFactory { EmptyOpenAiLoginViewModel() },
         createDirectoryPicker = createDirectoryPicker,
         newSessionArguments = { ordinal ->
             NewSessionViewModelArguments(
@@ -115,6 +123,36 @@ internal suspend fun kotlinx.coroutines.CoroutineScope.applicationFixture(
         },
     )
     return ApplicationTestFixture(repository, sessions, viewModel)
+}
+
+private class EmptySettingsViewModel(initialPage: SettingsPage) : SettingsViewModel {
+    private val mutableSelectedPage = MutableStateFlow(initialPage)
+    override val selectedPage: StateFlow<SettingsPage> = mutableSelectedPage
+    override val global: GlobalSettingsViewModel
+        get() = error("Global settings are not used by this fixture.")
+    override val session: SessionSettingsViewModel
+        get() = error("Session settings are not used by this fixture.")
+    override val newSession: NewSessionSettingsViewModel
+        get() = error("New-session settings are not used by this fixture.")
+
+    override fun selectPage(page: SettingsPage) {
+        mutableSelectedPage.value = page
+    }
+
+    override fun close(): Unit = Unit
+}
+
+private class EmptyOpenAiLoginViewModel : OpenAiLoginViewModel {
+    override val state: StateFlow<OpenAiLoginState> = MutableStateFlow(OpenAiLoginState.Ready)
+    override val effects: Flow<OpenAiLoginEffect> = emptyFlow()
+
+    override fun start(): Unit = Unit
+    override fun retryBrowser(attemptId: Long): Unit = Unit
+    override fun cancel(): Unit = Unit
+    override fun onBrowserOpened(attemptId: Long): Unit = Unit
+    override fun onBrowserOpenFailed(attemptId: Long): Unit = Unit
+    override fun isActive(attemptId: Long): Boolean = false
+    override fun close(): Unit = Unit
 }
 
 private class EmptySessionCatalogViewModel : SessionCatalogViewModel {

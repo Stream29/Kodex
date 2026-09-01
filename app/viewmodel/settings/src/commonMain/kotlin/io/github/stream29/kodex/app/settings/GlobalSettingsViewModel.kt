@@ -8,10 +8,13 @@ import io.github.stream29.kodex.app.settings.contract.GlobalSettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.McpServerSettingsState
 import io.github.stream29.kodex.app.settings.contract.McpServerSettingsStatus
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
+import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationOperation
+import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationOperationState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.app.settings.contract.UsageResetOption
 import io.github.stream29.kodex.app.settings.contract.UsageResetRequest
 import io.github.stream29.kodex.app.settings.contract.UsageResetState
+import io.github.stream29.kodex.cli.auth.KodexAuthStore
 import io.github.stream29.kodex.cli.sessiontitle.DefaultSessionTitleModel
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
@@ -36,8 +39,9 @@ import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageState
 import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageStore
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetAttempt
 import io.github.stream29.kodex.openai.accountusage.snapshotOrNull
-import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
+import io.github.stream29.kodex.utils.logging.global
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
@@ -53,7 +57,7 @@ import kotlinx.io.files.Path
 
 internal class GlobalSettingsViewModelImpl(
     private val globalSettings: KodexGlobalSettingsStore,
-    authentication: OpenAiAuthStore,
+    private val authenticationStore: KodexAuthStore,
     private val accountUsageStore: CodexAccountUsageStore,
     private val mcpManager: McpManager,
     private val hookManager: HookManager,
@@ -82,7 +86,12 @@ internal class GlobalSettingsViewModelImpl(
             models = models.value,
         ),
     )
-    private val mutableAuthentication = MutableStateFlow(authentication.state.value.toSettingsState())
+    private val mutableAuthentication =
+        MutableStateFlow(authenticationStore.state.value.toSettingsState())
+    private val mutableAuthenticationOperation =
+        MutableStateFlow<SettingsAuthenticationOperationState>(
+            SettingsAuthenticationOperationState.Idle,
+        )
     private val mutableAccountUsage = MutableStateFlow(
         accountUsageStore.state.value.toSettingsState(),
     )
@@ -94,6 +103,8 @@ internal class GlobalSettingsViewModelImpl(
     override val state: StateFlow<GlobalSettingsState> = mutableState.asStateFlow()
     override val authentication: StateFlow<SettingsAuthenticationState> =
         mutableAuthentication.asStateFlow()
+    override val authenticationOperation: StateFlow<SettingsAuthenticationOperationState> =
+        mutableAuthenticationOperation.asStateFlow()
     override val accountUsage: StateFlow<SettingsAccountUsageState> =
         mutableAccountUsage.asStateFlow()
     override val mcpServers: StateFlow<List<McpServerSettingsState>> =
@@ -125,7 +136,7 @@ internal class GlobalSettingsViewModelImpl(
             }
         }
         scope.launch {
-            authentication.state.collect { authState ->
+            authenticationStore.state.collect { authState ->
                 mutableAuthentication.value = authState.toSettingsState()
             }
         }
@@ -196,6 +207,7 @@ internal class GlobalSettingsViewModelImpl(
     }
 
     override fun updateAuthSource(authSource: KodexAuthSource) {
+        if (mutableAuthenticationOperation.value.isRunning()) return
         dismissUsageReset()
         enqueueSettingsUpdate {
             copy(authSource = authSource)
@@ -233,9 +245,44 @@ internal class GlobalSettingsViewModelImpl(
     }
 
     override fun requestLogin() {
-        if (!closed && mutableAuthentication.value is SettingsAuthenticationState.Unavailable) {
-            dismissUsageReset()
-            effectChannel.trySend(GlobalSettingsEffect.OpenLogin)
+        if (
+            closed ||
+            mutableState.value.authSource != KodexAuthSource.Kodex ||
+            mutableAuthenticationOperation.value.isRunning()
+        ) {
+            return
+        }
+        dismissUsageReset()
+        mutableAuthenticationOperation.value = SettingsAuthenticationOperationState.Idle
+        effectChannel.trySend(GlobalSettingsEffect.OpenLogin)
+    }
+
+    override fun reloadAuthentication() {
+        launchAuthenticationOperation(
+            running = SettingsAuthenticationOperationState.Reloading,
+            operation = SettingsAuthenticationOperation.Reload,
+            command = authenticationStore::reload,
+        )
+    }
+
+    override fun logoutKodex() {
+        if (
+            mutableState.value.authSource != KodexAuthSource.Kodex ||
+            mutableAuthentication.value !is SettingsAuthenticationState.Authenticated
+        ) {
+            return
+        }
+        dismissUsageReset()
+        launchAuthenticationOperation(
+            running = SettingsAuthenticationOperationState.SigningOut,
+            operation = SettingsAuthenticationOperation.Logout,
+            command = authenticationStore::logoutKodex,
+        )
+    }
+
+    override fun dismissAuthenticationOperationFailure() {
+        if (mutableAuthenticationOperation.value is SettingsAuthenticationOperationState.Failed) {
+            mutableAuthenticationOperation.value = SettingsAuthenticationOperationState.Idle
         }
     }
 
@@ -433,6 +480,34 @@ internal class GlobalSettingsViewModelImpl(
         }
     }
 
+    private fun launchAuthenticationOperation(
+        running: SettingsAuthenticationOperationState,
+        operation: SettingsAuthenticationOperation,
+        command: suspend () -> Unit,
+    ) {
+        if (closed || mutableAuthenticationOperation.value.isRunning()) return
+        mutableAuthenticationOperation.value = running
+        commandScope.launch {
+            try {
+                command()
+                if (!closed) {
+                    mutableAuthenticationOperation.value =
+                        SettingsAuthenticationOperationState.Idle
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Throwable) {
+                AuthenticationLogger.warn(failure) {
+                    "OpenAI authentication operation failed ($operation)."
+                }
+                if (!closed) {
+                    mutableAuthenticationOperation.value =
+                        SettingsAuthenticationOperationState.Failed(operation)
+                }
+            }
+        }
+    }
+
     private fun consumeReset(prepared: PreparedReset) {
         val generation = nextResetGeneration()
         mutableUsageReset.value = UsageResetState.Consuming(prepared.option)
@@ -504,6 +579,12 @@ private fun OpenAiAuthState.toSettingsState(): SettingsAuthenticationState =
 
         is OpenAiAuthState.Unavailable -> SettingsAuthenticationState.Unavailable(this)
     }
+
+private fun SettingsAuthenticationOperationState.isRunning(): Boolean =
+    this === SettingsAuthenticationOperationState.Reloading ||
+        this === SettingsAuthenticationOperationState.SigningOut
+
+private val AuthenticationLogger = KotlinLogging.logger {}.global()
 
 private fun CodexAccountUsageState.toSettingsState(): SettingsAccountUsageState =
     when (this) {
