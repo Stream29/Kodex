@@ -5,6 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":app-migration-impl"))
             implementation(project(":agent-session-contract"))
             implementation(project(":agent-session-filesystem"))
             implementation(project(":agent-state-contract"))

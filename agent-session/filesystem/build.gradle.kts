@@ -12,7 +12,7 @@ kotlin {
             implementation(project(":agent-state-impl"))
             implementation(project(":agent-storage-filesystem"))
             implementation(project(":utils-coroutines"))
-            implementation(project(":utils-filesystem-lease"))
+            implementation(project(":utils-filesystem-lease-impl"))
             implementation(project(":utils-read-write-mutex"))
             implementation(libs.cache4k)
         }

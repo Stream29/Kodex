@@ -10,6 +10,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
         }
         mosaicMain.dependencies {
+            implementation(project(":app-migration-impl"))
             implementation(project(":app-view-application"))
             implementation(project(":app-viewmodel-application"))
             implementation(project(":utils-kodex-home"))
