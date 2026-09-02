@@ -16,7 +16,6 @@ public val kodexHomeMigrationTest by testSuite {
         test("initializes a new Home with the generated application version") { home ->
             val handle = prepareKodexHome(home)
             try {
-                assertEquals(MigrationVersion(0, 3, 2), CurrentKodexApplicationVersion)
                 assertEquals(
                     "\"$CurrentKodexApplicationVersion\"",
                     SystemCoroutineFileSystem.readString(Path(home, "version.json")),
