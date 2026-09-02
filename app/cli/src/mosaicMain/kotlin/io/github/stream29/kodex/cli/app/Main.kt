@@ -11,7 +11,11 @@ import kotlinx.coroutines.runBlocking
 public fun main() {
     runBlocking(CliCoroutineExceptionLogger) {
         val homeHandle = try {
-            prepareKodexHome(KodexHome)
+            prepareKodexHome(KodexHome) { fromVersion, toVersion ->
+                println(
+                    "Migrating Kodex Home from $fromVersion to $toVersion. Please wait...",
+                )
+            }
         } catch (failure: Throwable) {
             println("Unable to prepare Kodex Home: ${failure.message ?: failure}")
             return@runBlocking
