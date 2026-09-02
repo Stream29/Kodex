@@ -40,11 +40,14 @@ public val CurrentKodexApplicationVersion: MigrationVersion by lazy {
 public suspend fun CoroutineScope.prepareKodexHome(
     home: Path,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    onMigrationStarted: (fromVersion: MigrationVersion, toVersion: MigrationVersion) -> Unit =
+        { _, _ -> },
 ): KodexHomeHandle = prepareKodexHome(
     home = home,
     currentVersion = CurrentKodexApplicationVersion,
     migrations = KodexHomeMigrations,
     fileSystem = fileSystem,
+    onMigrationStarted = onMigrationStarted,
 )
 
 internal suspend fun CoroutineScope.prepareKodexHome(
@@ -52,6 +55,8 @@ internal suspend fun CoroutineScope.prepareKodexHome(
     currentVersion: MigrationVersion,
     migrations: List<Migration>,
     fileSystem: CoroutineFileSystem,
+    onMigrationStarted: (fromVersion: MigrationVersion, toVersion: MigrationVersion) -> Unit =
+        { _, _ -> },
 ): KodexHomeHandle {
     validateRegistry(migrations)
     val lockDirectory = Path(home, LocksDirectory, HomeLockDirectory)
@@ -83,7 +88,13 @@ internal suspend fun CoroutineScope.prepareKodexHome(
 
     val writeLease = FileSystemWriteLease(lockDirectory, fileSystem)
     try {
-        prepareUnderWriteLease(home, currentVersion, migrations, fileSystem)
+        prepareUnderWriteLease(
+            home = home,
+            currentVersion = currentVersion,
+            migrations = migrations,
+            fileSystem = fileSystem,
+            onMigrationStarted = onMigrationStarted,
+        )
     } finally {
         withContext(NonCancellable) {
             writeLease.close()
@@ -115,6 +126,7 @@ private suspend fun prepareUnderWriteLease(
     currentVersion: MigrationVersion,
     migrations: List<Migration>,
     fileSystem: CoroutineFileSystem,
+    onMigrationStarted: (fromVersion: MigrationVersion, toVersion: MigrationVersion) -> Unit,
 ) {
     val existingVersion = readVersionOrNull(home, fileSystem)
     val wasUnversioned = existingVersion == null
@@ -129,6 +141,7 @@ private suspend fun prepareUnderWriteLease(
     }
     for (migration in migrations) {
         if (storedVersion >= migration.toVersion || migration.toVersion > currentVersion) continue
+        onMigrationStarted(storedVersion, migration.toVersion)
         migration.action(home, fileSystem)
         writeVersion(home, migration.toVersion, fileSystem)
         storedVersion = migration.toVersion

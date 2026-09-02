@@ -60,13 +60,19 @@ public val kodexHomeMigrationTest by testSuite {
                 "\"$CurrentKodexApplicationVersion\"",
             )
             SystemCoroutineFileSystem.writeString(Path(home, "sessions"), "not-a-directory")
+            var migrationStarted = false
 
-            prepareKodexHome(home).closeAndJoin()
+            prepareKodexHome(home) { _, _ ->
+                migrationStarted = true
+            }.closeAndJoin()
+
+            assertFalse(migrationStarted)
         }
 
         test("runs active migrations in order and ignores future entries") { home ->
             SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"1.1.0\"")
             val calls = mutableListOf<String>()
+            val migrationStarts = mutableListOf<String>()
             val migrations = listOf(
                 migration("1.0.0", calls),
                 migration("1.2.0", calls),
@@ -79,9 +85,13 @@ public val kodexHomeMigrationTest by testSuite {
                 currentVersion = MigrationVersion("3.0.0"),
                 migrations = migrations,
                 fileSystem = SystemCoroutineFileSystem,
+                onMigrationStarted = { fromVersion, toVersion ->
+                    migrationStarts += "$fromVersion -> $toVersion"
+                },
             ).closeAndJoin()
 
             assertEquals(listOf("1.2.0", "2.0.0"), calls)
+            assertEquals(listOf("1.1.0 -> 1.2.0", "1.2.0 -> 2.0.0"), migrationStarts)
             assertEquals("\"3.0.0\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
         }
 
