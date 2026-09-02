@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.cli.settings
 
+import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.hook.contract.HookConfiguration
 import io.github.stream29.kodex.hook.contract.HookSettings
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
@@ -13,18 +14,16 @@ import io.github.stream29.kodex.utils.shellclient.ShellSettings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.updateAndGet
-import kotlinx.io.files.Path
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
  * Application-wide settings that apply independently of any one agent session.
  *
- * @property codexHome External Codex data source used only for selected
- * authentication and explicit MCP imports.
  * @property authSource Persistent source of subscription credentials.
  * @property shell Default shell advertised to Agents and used by shell tools.
  * @property newLineKey Key chord that a multiline text input treats as a newline.
+ * @property contextSources Configurable roots for request context discovery.
  * @property newSession Defaults copied into each newly created thread.
  * @property sessionTitle Automatic session-title generation controls.
  * @property sidebars Application-wide content selected for each session sidebar.
@@ -32,10 +31,10 @@ import kotlinx.serialization.Serializable
  * @property hooks Complete Kodex-owned Hook configuration.
  */
 public data class KodexGlobalSettings(
-    public val codexHome: Path,
     public val authSource: KodexAuthSource = KodexAuthSource.Codex,
     public override val shell: Shell = Shell.default,
     public val newLineKey: NewLineKey = NewLineKey.ShiftEnter,
+    public val contextSources: AgentContextSourceSettings = AgentContextSourceSettings(),
     public val newSession: KodexNewSessionSettings = KodexNewSessionSettings(),
     public val sessionTitle: SessionTitleSettings = SessionTitleSettings(),
     public val sidebars: SidebarSettings = SidebarSettings(),
@@ -91,7 +90,7 @@ public enum class SidebarContent {
 /** Selects whether subscription credentials come from Codex or Kodex storage. */
 @Serializable
 public enum class KodexAuthSource {
-    /** Reads the selected Codex Home auth.json without modifying it. */
+    /** Reads the fixed user-home `.codex/auth.json` without modifying it. */
     @SerialName("codex")
     Codex,
 

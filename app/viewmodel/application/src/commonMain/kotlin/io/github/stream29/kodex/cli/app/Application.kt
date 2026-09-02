@@ -61,7 +61,6 @@ import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.kodexhome.KodexHome
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.logging.global
-import io.github.stream29.kodex.utils.osenvironment.environmentVariable
 import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
 import io.github.stream29.kodex.utils.shellclient.Shell
 import kotlinx.coroutines.CoroutineScope
@@ -157,7 +156,6 @@ public class KodexApplication private constructor(
             workingDirectory: Path = Path("."),
             homeHandle: KodexHomeHandle? = null,
         ): KodexApplication = open(
-            codexDirectory = configuredCodexSourceHome(),
             agentsDirectory = defaultAgentsHome(),
             workingDirectory = workingDirectory,
             dataDirectory = KodexHome,
@@ -165,6 +163,28 @@ public class KodexApplication private constructor(
         )
 
         public suspend fun open(
+            agentsDirectory: Path = defaultAgentsHome(),
+            workingDirectory: Path = Path("."),
+            dataDirectory: Path = KodexHome,
+            homeHandle: KodexHomeHandle? = null,
+            sessionTitleGeneratorFactory: (OpenAiClientContract) -> SessionTitleGenerator =
+                ::OpenAiSessionTitleGenerator,
+            sessionRepositoryFactory:
+            suspend CoroutineScope.(Path, KodexAgentDependencies) ->
+            FileSystemKodexSessionRepository = { root, dependencies ->
+                FileSystemKodexSessionRepository(root, dependencies)
+            },
+        ): KodexApplication = openWithCodexDirectory(
+            codexDirectory = defaultCodexHome(),
+            agentsDirectory = agentsDirectory,
+            workingDirectory = workingDirectory,
+            dataDirectory = dataDirectory,
+            homeHandle = homeHandle,
+            sessionTitleGeneratorFactory = sessionTitleGeneratorFactory,
+            sessionRepositoryFactory = sessionRepositoryFactory,
+        )
+
+        internal suspend fun openWithCodexDirectory(
             codexDirectory: Path,
             agentsDirectory: Path = defaultAgentsHome(),
             workingDirectory: Path = Path("."),
@@ -233,11 +253,13 @@ public class KodexApplication private constructor(
             val resolvedAgentsDirectory = resolveAllowingMissing(agentsDirectory)
             val globalSettings = openGlobalSettings(
                 settingsDirectory = dataDirectory,
-                defaults = KodexGlobalSettings(codexHome = codexDirectory),
+                defaults = KodexGlobalSettings(),
             )
             val authStore = scope.FileSystemKodexAuthStore(
                 dataDirectory = dataDirectory,
+                codexHome = codexDirectory,
                 globalSettings = globalSettings,
+                fileSystem = SystemCoroutineFileSystem,
             )
             val clientConfig = OpenAiClientConfig()
             val contextSettings = globalSettings.settings
@@ -245,6 +267,8 @@ public class KodexApplication private constructor(
                     ApplicationAgentContextSettings(
                         agentsHome = resolvedAgentsDirectory,
                         kodexHome = dataDirectory,
+                        codexHome = codexDirectory,
+                        sources = settings.contextSources,
                         shell = settings.shell,
                     )
                 }
@@ -254,6 +278,8 @@ public class KodexApplication private constructor(
                     initialValue = ApplicationAgentContextSettings(
                         agentsHome = resolvedAgentsDirectory,
                         kodexHome = dataDirectory,
+                        codexHome = codexDirectory,
+                        sources = globalSettings.settings.value.contextSources,
                         shell = globalSettings.settings.value.shell,
                     ),
                 )
@@ -268,7 +294,7 @@ public class KodexApplication private constructor(
                 store = mcpConfigurationStore,
                 service = mcpService,
                 codexImportSource = {
-                    CodexCliStorage(globalSettings.settings.value.codexHome)
+                    CodexCliStorage(codexDirectory)
                         .readMcpImportCandidates()
                         .map(CodexCliMcpImportCandidate::toKodexMcpImportCandidate)
                 },
@@ -498,14 +524,12 @@ private fun io.github.stream29.kodex.cli.settings.KodexNewSessionSettings.toAgen
 private data class ApplicationAgentContextSettings(
     override val agentsHome: Path,
     override val kodexHome: Path,
+    override val codexHome: Path,
+    override val sources: io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings,
     override val shell: Shell,
 ) : AgentContextSettings
 
-private fun configuredCodexSourceHome(): Path =
-    environmentVariable("CODEX_HOME")
-        ?.takeIf(String::isNotBlank)
-        ?.let(::Path)
-        ?: Path(requireUserHomeDirectory(), ".codex")
+private fun defaultCodexHome(): Path = Path(requireUserHomeDirectory(), ".codex")
 
 private fun defaultAgentsHome(): Path = Path(requireUserHomeDirectory(), ".agents")
 

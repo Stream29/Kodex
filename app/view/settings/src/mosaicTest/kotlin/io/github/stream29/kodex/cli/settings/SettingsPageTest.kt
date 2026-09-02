@@ -10,6 +10,7 @@ class SettingsPageTest {
         assertEquals(
             listOf(
                 "General",
+                "Context sources",
                 "OpenAI",
                 "MCP",
                 "Hooks",

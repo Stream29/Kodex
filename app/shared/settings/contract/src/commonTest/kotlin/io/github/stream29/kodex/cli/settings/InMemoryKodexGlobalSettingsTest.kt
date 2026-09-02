@@ -15,7 +15,7 @@ val inMemoryKodexGlobalSettingsTest by testSuite {
     }
 
     test("publishes a complete updated settings snapshot") {
-        val initial = KodexGlobalSettings(codexHome = Path("/home/test/.codex"))
+        val initial = KodexGlobalSettings()
         val settings = InMemoryKodexGlobalSettings(initial)
         val shell = Shell(ShellType.Zsh, Path("/bin/zsh"))
 
@@ -23,7 +23,6 @@ val inMemoryKodexGlobalSettingsTest by testSuite {
 
         val updated = settings.update {
             it.copy(
-                codexHome = Path("/workspace/.codex"),
                 authSource = KodexAuthSource.Kodex,
                 shell = shell,
                 newLineKey = NewLineKey.Enter,
@@ -31,7 +30,6 @@ val inMemoryKodexGlobalSettingsTest by testSuite {
         }
 
         assertEquals(updated, settings.settings.value)
-        assertEquals(Path("/workspace/.codex"), updated.codexHome)
         assertEquals(KodexAuthSource.Kodex, updated.authSource)
         assertEquals(shell, updated.shell)
         assertEquals(NewLineKey.Enter, updated.newLineKey)

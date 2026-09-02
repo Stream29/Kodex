@@ -2,6 +2,7 @@ package io.github.stream29.kodex.agentstate.impl
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
+import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.agentcontext.prefix.render.renderPlanningInstructions
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
@@ -317,6 +318,8 @@ private data class ProjectionContextSettings(
     override val agentsHome: Path,
     override val kodexHome: Path,
     override val shell: Shell,
+    override val codexHome: Path = Path(kodexHome, "codex-home"),
+    override val sources: AgentContextSourceSettings = AgentContextSourceSettings(),
 ) : AgentContextSettings
 
 private class ProjectionMcpService(

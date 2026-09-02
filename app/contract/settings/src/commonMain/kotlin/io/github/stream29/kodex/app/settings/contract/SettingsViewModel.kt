@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.StateFlow
 /** Stable Settings navigation destinations. */
 public enum class SettingsPage {
     General,
+    ContextSources,
     OpenAi,
     Mcp,
     Hooks,

@@ -2,6 +2,8 @@ package io.github.stream29.kodex.cli.settings
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentcontext.contract.AgentContextCustomSource
+import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.hook.contract.HookBody
 import io.github.stream29.kodex.hook.contract.HookType
 import io.github.stream29.kodex.mcp.contract.McpOAuthClient
@@ -30,7 +32,6 @@ val kodexSettingsStoreTest by testSuite(
     test("missing private settings preserve compiled defaults") {
         withSettingsDirectory("missing") { root ->
             val defaults = KodexGlobalSettings(
-                codexHome = Path(root, "codex"),
                 newSession = KodexNewSessionSettings(
                     model = OpenAiModelId("compiled-model"),
                 ),
@@ -61,7 +62,6 @@ val kodexSettingsStoreTest by testSuite(
                 """{"hooks":{"Stop":[{"hooks":[]}]}}""",
             )
             val defaults = KodexGlobalSettings(
-                codexHome = codexHome,
                 newSession = KodexNewSessionSettings(
                     model = OpenAiModelId("kodex-model"),
                 ),
@@ -84,7 +84,6 @@ val kodexSettingsStoreTest by testSuite(
         withSettingsDirectory("restart") { root ->
             val selectedShell = Shell(ShellType.Bash, Path("/custom/bin/bash"))
             val expected = KodexGlobalSettings(
-                codexHome = Path(root, "selected-codex"),
                 authSource = KodexAuthSource.Kodex,
                 shell = selectedShell,
                 newLineKey = NewLineKey.Enter,
@@ -114,14 +113,13 @@ val kodexSettingsStoreTest by testSuite(
             )
             val store = openStore(
                 root = root,
-                defaults = KodexGlobalSettings(codexHome = Path(root, "initial-codex")),
+                defaults = KodexGlobalSettings(),
             )
 
             store.update { expected }
 
             val yaml = SystemCoroutineFileSystem.readString(settingsPath(root))
             assertFalse("schema_version:" in yaml, yaml)
-            assertTrue(yaml.contains("codex_home: ${expected.codexHome}"), yaml)
             assertTrue(yaml.contains("auth_source: kodex"), yaml)
             assertTrue(yaml.contains("service_tier: flex"), yaml)
             assertTrue(yaml.contains("request_user_input_mode: no_question"), yaml)
@@ -139,7 +137,6 @@ val kodexSettingsStoreTest by testSuite(
     test("sparse sidebar settings use current defaults independently") {
         withSettingsDirectory("sidebar-defaults") { root ->
             val defaults = KodexGlobalSettings(
-                codexHome = Path(root, "codex"),
                 sidebars = SidebarSettings(
                     left = SidebarContent.None,
                     right = SidebarContent.TerminalSessions,
@@ -250,7 +247,6 @@ val kodexSettingsStoreTest by testSuite(
             val store = openStore(
                 root,
                 KodexGlobalSettings(
-                    codexHome = codexHome,
                     mcpServers = mapOf(
                         "compiled" to McpServerConfiguration.Stdio(command = "compiled-server"),
                     ),
@@ -337,7 +333,6 @@ val kodexSettingsStoreTest by testSuite(
             assertTrue("guard_tools:" in yaml, yaml)
             assertTrue("type: pre_tool_use" in yaml, yaml)
             assertTrue("command: check-command" in yaml, yaml)
-            assertFalse("sources:" in yaml, yaml)
             assertFalse("matcher:" in yaml, yaml)
         }
     }
@@ -346,7 +341,6 @@ val kodexSettingsStoreTest by testSuite(
         withSettingsDirectory("tolerant-read") { root ->
             val defaultShell = Shell(ShellType.Bash, Path("/default/bin/bash"))
             val defaults = KodexGlobalSettings(
-                codexHome = Path(root, "default-codex"),
                 authSource = KodexAuthSource.Kodex,
                 shell = defaultShell,
                 newSession = KodexNewSessionSettings(
@@ -394,7 +388,6 @@ val kodexSettingsStoreTest by testSuite(
 
             val loaded = openStore(root, defaults).settings.value
 
-            assertEquals(Path(root, "selected-codex"), loaded.codexHome)
             assertEquals(KodexAuthSource.Kodex, loaded.authSource)
             assertEquals(defaultShell, loaded.shell)
             assertEquals(NewLineKey.Enter, loaded.newLineKey)
@@ -479,28 +472,27 @@ val kodexSettingsStoreTest by testSuite(
         }
     }
 
-    test("persists selected Codex Home without applying its configuration") {
-        withSettingsDirectory("selected-home") { root ->
-            val selectedHome = Path(root, "selected-codex")
-            SystemCoroutineFileSystem.createDirectories(selectedHome)
-            SystemCoroutineFileSystem.writeString(
-                Path(selectedHome, "config.toml"),
-                "model = \"selected-model\"",
+    test("persists context sources without applying Codex configuration") {
+        withSettingsDirectory("context-sources") { root ->
+            val customSource = Path(root, "custom-source")
+            val expected = AgentContextSourceSettings(
+                agentsHomeEnabled = false,
+                codexHomeEnabled = false,
+                customSources = listOf(
+                    AgentContextCustomSource(customSource.toString()),
+                ),
             )
-            val store = openStore(
-                root,
-                KodexGlobalSettings(codexHome = Path(root, "initial-codex")),
-            )
+            val store = openStore(root)
 
-            store.update { current -> current.copy(codexHome = selectedHome) }
+            store.update { it.copy(contextSources = expected) }
 
             val reopened = openStore(root)
-            assertEquals(selectedHome, reopened.settings.value.codexHome)
+            assertEquals(expected, reopened.settings.value.contextSources)
             assertEquals(
                 KodexNewSessionSettings().model,
                 reopened.settings.value.newSession.model,
             )
-            assertFalse(SystemCoroutineFileSystem.exists(Path(selectedHome, "settings.yml")))
+            assertFalse(SystemCoroutineFileSystem.exists(Path(customSource, "settings.yml")))
         }
     }
 }
@@ -509,7 +501,7 @@ private fun settingsPath(root: Path): Path = Path(Path(root, "kodex"), "settings
 
 private suspend fun openStore(
     root: Path,
-    defaults: KodexGlobalSettings = KodexGlobalSettings(codexHome = Path(root, "codex")),
+    defaults: KodexGlobalSettings = KodexGlobalSettings(),
 ): KodexSettingsStore =
     openGlobalSettings(
         settingsDirectory = Path(root, "kodex"),

@@ -4,6 +4,8 @@ import com.charleskorn.kaml.PolymorphismStyle
 import com.charleskorn.kaml.SingleLineStringStyle
 import com.charleskorn.kaml.Yaml
 import com.charleskorn.kaml.YamlConfiguration
+import io.github.stream29.kodex.agentcontext.contract.AgentContextCustomSource
+import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.hook.contract.HookConfiguration
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -27,8 +29,7 @@ import kotlin.uuid.Uuid
  * Kodex-owned global settings persisted as one complete private snapshot.
  *
  * Regular loading never reads Codex `config.toml` or MCP declarations. The
- * selected Codex Home remains data used by authentication and explicit MCP
- * import commands only.
+ * External Codex data is read from the fixed user-home `.codex` directory.
  */
 public class KodexSettingsStore private constructor(
     private val fileSystem: CoroutineFileSystem,
@@ -124,13 +125,13 @@ public suspend fun openGlobalSettings(
 /** Tolerant settings file decoded over the current application defaults. */
 @Serializable
 private data class GlobalSettingsFile(
-    @SerialName("codex_home")
-    val codexHome: String? = null,
     @SerialName("auth_source")
     val authSource: KodexAuthSource? = null,
     val shell: Shell? = null,
     @SerialName("new_line_key")
     val newLineKey: NewLineKey? = null,
+    @SerialName("context_sources")
+    val contextSources: ContextSourceFile? = null,
     @SerialName("new_session")
     val newSession: NewSessionFile? = null,
     @SerialName("session_title")
@@ -142,10 +143,11 @@ private data class GlobalSettingsFile(
 ) {
     fun toSettings(defaults: KodexGlobalSettings): KodexGlobalSettings =
         defaults.copy(
-            codexHome = codexHome?.let(::Path) ?: defaults.codexHome,
             authSource = authSource ?: defaults.authSource,
             shell = shell ?: defaults.shell,
             newLineKey = newLineKey ?: defaults.newLineKey,
+            contextSources = contextSources?.applyTo(defaults.contextSources)
+                ?: defaults.contextSources,
             newSession = newSession?.applyTo(defaults.newSession) ?: defaults.newSession,
             sessionTitle = sessionTitle?.applyTo(defaults.sessionTitle) ?: defaults.sessionTitle,
             sidebars = sidebars?.applyTo(defaults.sidebars) ?: defaults.sidebars,
@@ -156,16 +158,67 @@ private data class GlobalSettingsFile(
     companion object {
         fun from(settings: KodexGlobalSettings): GlobalSettingsFile =
             GlobalSettingsFile(
-                codexHome = settings.codexHome.toString(),
                 authSource = settings.authSource,
                 shell = settings.shell,
                 newLineKey = settings.newLineKey,
+                contextSources = ContextSourceFile.from(settings.contextSources),
                 newSession = NewSessionFile.from(settings.newSession),
                 sessionTitle = SessionTitleFile.from(settings.sessionTitle),
                 sidebars = SidebarSettingsFile.from(settings.sidebars),
                 mcpServers = settings.mcpServers,
                 hooks = settings.hooks,
             )
+    }
+}
+
+@Serializable
+private data class ContextSourceFile(
+    @SerialName("agents_home")
+    val agentsHome: Boolean? = null,
+    @SerialName("kodex_home")
+    val kodexHome: Boolean? = null,
+    @SerialName("codex_home")
+    val codexHome: Boolean? = null,
+    @SerialName("git_root")
+    val gitRoot: Boolean? = null,
+    @SerialName("working_directory")
+    val workingDirectory: Boolean? = null,
+    @SerialName("custom_sources")
+    val customSources: List<CustomSourceFile>? = null,
+) {
+    fun applyTo(defaults: AgentContextSourceSettings): AgentContextSourceSettings =
+        defaults.copy(
+            agentsHomeEnabled = agentsHome ?: defaults.agentsHomeEnabled,
+            kodexHomeEnabled = kodexHome ?: defaults.kodexHomeEnabled,
+            codexHomeEnabled = codexHome ?: defaults.codexHomeEnabled,
+            gitRootEnabled = gitRoot ?: defaults.gitRootEnabled,
+            workingDirectoryEnabled = workingDirectory ?: defaults.workingDirectoryEnabled,
+            customSources = customSources
+                ?.map { source -> AgentContextCustomSource(source.path, source.enabled) }
+                ?: defaults.customSources,
+        )
+
+    companion object {
+        fun from(settings: AgentContextSourceSettings): ContextSourceFile =
+            ContextSourceFile(
+                agentsHome = settings.agentsHomeEnabled,
+                kodexHome = settings.kodexHomeEnabled,
+                codexHome = settings.codexHomeEnabled,
+                gitRoot = settings.gitRootEnabled,
+                workingDirectory = settings.workingDirectoryEnabled,
+                customSources = settings.customSources.map(CustomSourceFile::from),
+            )
+    }
+}
+
+@Serializable
+private data class CustomSourceFile(
+    val path: String,
+    val enabled: Boolean = true,
+) {
+    companion object {
+        fun from(source: AgentContextCustomSource): CustomSourceFile =
+            CustomSourceFile(path = source.path, enabled = source.enabled)
     }
 }
 

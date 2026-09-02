@@ -30,7 +30,7 @@ val kodexApplicationContextSettingsTest by testSuite {
         }
         var captured: AgentContextSettings? = null
         val application = try {
-            KodexApplication.open(
+            KodexApplication.openWithCodexDirectory(
                 codexDirectory = codexDirectory,
                 agentsDirectory = agentsDirectory,
                 workingDirectory = workingDirectory,
@@ -54,6 +54,7 @@ val kodexApplicationContextSettingsTest by testSuite {
             )
             assertNull(SystemCoroutineFileSystem.metadataOrNull(agentsDirectory))
             assertEquals(dataDirectory, context.kodexHome)
+            assertEquals(codexDirectory, context.codexHome)
             assertEquals(
                 "\"$CurrentKodexApplicationVersion\"",
                 SystemCoroutineFileSystem.readString(Path(dataDirectory, "version.json")),

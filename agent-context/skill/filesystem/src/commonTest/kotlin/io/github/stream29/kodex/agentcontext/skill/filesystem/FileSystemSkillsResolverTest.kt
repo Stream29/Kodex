@@ -2,6 +2,7 @@ package io.github.stream29.kodex.agentcontext.skill.filesystem
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
+import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.agentcontext.skill.contract.SkillResourceResult
 import io.github.stream29.kodex.agentcontext.prefix.skill.contract.SkillScope
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
@@ -73,11 +74,10 @@ val fileSystemSkillsResolverTest by testSuite {
                     SkillScope.Repo,
                     SkillScope.Repo,
                     SkillScope.User,
-                    SkillScope.User,
                 ),
                 resolved.skills.map { skill -> skill.source.scope },
             )
-            assertEquals(2, resolved.skills.count { skill -> skill.name == "duplicate" })
+            assertEquals(1, resolved.skills.count { skill -> skill.name == "duplicate" })
             assertTrue(
                 setOf(
                     "git-direct",
@@ -343,8 +343,10 @@ private fun testContextSettings(
 private data class TestAgentContextSettings(
     override val agentsHome: Path,
     override val kodexHome: Path,
+    override val codexHome: Path = Path(kodexHome, "codex-home"),
 ) : AgentContextSettings {
     override val shell: Shell = TestShell
+    override val sources: AgentContextSourceSettings = AgentContextSourceSettings()
 }
 
 private val TestShell: Shell = Shell(ShellType.Sh, Path("/bin/sh"))

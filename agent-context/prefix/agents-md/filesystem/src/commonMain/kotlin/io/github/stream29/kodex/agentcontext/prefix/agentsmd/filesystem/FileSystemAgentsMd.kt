@@ -4,6 +4,7 @@ import io.github.stream29.kodex.agentcontext.prefix.agentsmd.contract.AgentsMdIn
 import io.github.stream29.kodex.agentcontext.prefix.agentsmd.contract.AgentsMdInstructions
 import io.github.stream29.kodex.agentcontext.prefix.agentsmd.contract.AgentsMdSnapshot
 import io.github.stream29.kodex.agentcontext.prefix.agentsmd.contract.AgentsMdWarning
+import io.github.stream29.kodex.agentcontext.contract.AgentContextSourcePlan
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.currentCoroutineContext
@@ -21,7 +22,6 @@ public suspend fun loadAgentsMd(
     projectDocMaxBytes: Int = DefaultProjectDocMaxBytes,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ): AgentsMdSnapshot {
-    require(projectDocMaxBytes >= 0) { "Project document byte budget must be non-negative." }
     val roots = discoveryRoots(
         agentsHome = agentsHome,
         kodexHome = kodexHome,
@@ -29,15 +29,32 @@ public suspend fun loadAgentsMd(
         projectRootMarkers = projectRootMarkers,
         fileSystem = fileSystem,
     )
+    return loadAgentsMd(
+        plan = AgentContextSourcePlan(
+            globalRoots = roots.global,
+            projectRoots = roots.project,
+        ),
+        projectDocMaxBytes = projectDocMaxBytes,
+        fileSystem = fileSystem,
+    )
+}
+
+/** Loads a fresh snapshot from one shared, already deduplicated source plan. */
+public suspend fun loadAgentsMd(
+    plan: AgentContextSourcePlan,
+    projectDocMaxBytes: Int = DefaultProjectDocMaxBytes,
+    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+): AgentsMdSnapshot {
+    require(projectDocMaxBytes >= 0) { "Project document byte budget must be non-negative." }
     val discoveredSources = mutableSetOf<Path>()
     val global = loadInstructions(
-        roots = roots.global,
+        roots = plan.globalRoots,
         projectDocMaxBytes = null,
         discoveredSources = discoveredSources,
         fileSystem = fileSystem,
     )
     val project = loadInstructions(
-        roots = roots.project,
+        roots = plan.projectRoots,
         projectDocMaxBytes = projectDocMaxBytes,
         discoveredSources = discoveredSources,
         fileSystem = fileSystem,

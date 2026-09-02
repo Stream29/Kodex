@@ -101,6 +101,7 @@ public fun BoxScope.SettingsPopup(
         mutableStateOf<HookManagedState?>(null)
     }
     var hookDetailsName by remember(viewModel) { mutableStateOf<String?>(null) }
+    var contextSourceAddOpen by remember(viewModel) { mutableStateOf(false) }
     var logoutConfirmationOpen by remember(viewModel) { mutableStateOf(false) }
     val currentOpenLogin by rememberUpdatedState(onOpenLogin)
 
@@ -131,6 +132,7 @@ public fun BoxScope.SettingsPopup(
         hookEditorRequest = null
         hookDeleteRequest = null
         hookDetailsName = null
+        contextSourceAddOpen = false
         logoutConfirmationOpen = false
         if (selectedPage != SettingsPage.Mcp) {
             mcpImportOpen = false
@@ -191,6 +193,7 @@ public fun BoxScope.SettingsPopup(
                         },
                         onAddHook = { hookEditorRequest = HookEditorRequest() },
                         onOpenHook = { hook -> hookDetailsName = hook.name },
+                        onAddContextSource = { contextSourceAddOpen = true },
                         onRequestLogout = { logoutConfirmationOpen = true },
                     )
                 }
@@ -339,15 +342,11 @@ public fun BoxScope.SettingsPopup(
             },
         )
     }
-    val codexHomePicker by viewModel.global.codexHomePicker.collectAsState()
-    codexHomePicker?.let { picker ->
-        DirectoryPickerPopup(
-            viewModel = picker.viewModel,
-            onDismissRequest = {
-                viewModel.global.dismissCodexHomePicker(picker)
-            },
-            onDirectorySelected = { directory ->
-                viewModel.global.selectCodexHome(picker, directory)
+    if (contextSourceAddOpen) {
+        ContextSourceAddDialog(
+            onDismiss = { contextSourceAddOpen = false },
+            onAdd = { path ->
+                viewModel.global.addCustomContextSource(path)
             },
         )
     }
@@ -392,12 +391,18 @@ private fun SettingsPageContent(
     onImportMcp: () -> Unit,
     onAddHook: () -> Unit,
     onOpenHook: (HookManagedState) -> Unit,
+    onAddContextSource: () -> Unit,
     onRequestLogout: () -> Unit,
 ) {
     when (page) {
         SettingsPage.General -> GeneralSettingsContent(
             viewModel = viewModel.global,
             dropdowns = dropdowns,
+        )
+
+        SettingsPage.ContextSources -> ContextSourcesSettingsContent(
+            viewModel = viewModel.global,
+            onAddSource = onAddContextSource,
         )
 
         SettingsPage.OpenAi -> OpenAiSettingsContent(
@@ -435,13 +440,6 @@ private fun GeneralSettingsContent(
 ) {
     val state by viewModel.state.collectAsState()
 
-    SettingsSection(title = "General") {
-        SettingsPathField(
-            label = "Codex home",
-            value = state.codexHome.toString(),
-            onBrowse = viewModel::requestCodexHome,
-        )
-    }
     SettingsSection(title = "Sidebars") {
         SettingsSidebarWidthItem(
             label = "Left sidebar width",
@@ -886,6 +884,7 @@ private fun BoxScope.SettingsDropdownMenus(
 ) {
     when (page) {
         SettingsPage.General -> GeneralSettingsDropdownMenus(viewModel.global, dropdowns)
+        SettingsPage.ContextSources -> Unit
         SettingsPage.OpenAi -> OpenAiSettingsDropdownMenus(viewModel.global, dropdowns)
         SettingsPage.Mcp,
         SettingsPage.Hooks,
@@ -1174,6 +1173,7 @@ private class SettingsDropdownStates(
 
 internal fun SettingsPage.settingsLabel(): String = when (this) {
     SettingsPage.General -> "General"
+    SettingsPage.ContextSources -> "Context sources"
     SettingsPage.OpenAi -> "OpenAI"
     SettingsPage.Mcp -> "MCP"
     SettingsPage.Hooks -> "Hooks"
