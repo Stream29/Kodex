@@ -14,6 +14,7 @@ kotlin {
             implementation(project(":openai-client-contract"))
             implementation(project(":utils-coroutines"))
             implementation(project(":utils-logging"))
+            implementation(project(":utils-os-environment"))
             implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.coroutines.core)
         }

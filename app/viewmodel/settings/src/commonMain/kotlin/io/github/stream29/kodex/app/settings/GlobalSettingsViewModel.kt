@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.app.settings
 
-import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
-import io.github.stream29.kodex.app.settings.contract.GlobalCodexHomePicker
+import io.github.stream29.kodex.app.settings.contract.BuiltInContextSource
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsEffect
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsState
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsViewModel
@@ -14,6 +13,8 @@ import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationStat
 import io.github.stream29.kodex.app.settings.contract.UsageResetOption
 import io.github.stream29.kodex.app.settings.contract.UsageResetRequest
 import io.github.stream29.kodex.app.settings.contract.UsageResetState
+import io.github.stream29.kodex.agentcontext.contract.AgentContextCustomSource
+import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.cli.auth.KodexAuthStore
 import io.github.stream29.kodex.cli.sessiontitle.DefaultSessionTitleModel
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
@@ -41,6 +42,7 @@ import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetAttempt
 import io.github.stream29.kodex.openai.accountusage.snapshotOrNull
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.logging.global
+import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -63,7 +65,6 @@ internal class GlobalSettingsViewModelImpl(
     private val hookManager: HookManager,
     models: StateFlow<List<ModelInfo>>,
     private val commandScope: CoroutineScope,
-    private val createDirectoryPicker: (Path) -> DirectoryPickerViewModel?,
 ) : GlobalSettingsViewModel {
     private data class PreparedReset(
         val option: UsageResetOption,
@@ -98,8 +99,6 @@ internal class GlobalSettingsViewModelImpl(
     private val mutableMcpServers = MutableStateFlow<List<McpServerSettingsState>>(emptyList())
     private val mutableMcpImportPreview = MutableStateFlow<McpImportPreview?>(null)
     private val mutableUsageReset = MutableStateFlow<UsageResetState>(UsageResetState.Hidden)
-    private val mutableCodexHomePicker = MutableStateFlow<GlobalCodexHomePicker?>(null)
-
     override val state: StateFlow<GlobalSettingsState> = mutableState.asStateFlow()
     override val authentication: StateFlow<SettingsAuthenticationState> =
         mutableAuthentication.asStateFlow()
@@ -113,8 +112,6 @@ internal class GlobalSettingsViewModelImpl(
         mutableMcpImportPreview.asStateFlow()
     override val hooks: StateFlow<List<HookManagedState>> = hookManager.hooks
     override val usageReset: StateFlow<UsageResetState> = mutableUsageReset.asStateFlow()
-    override val codexHomePicker: StateFlow<GlobalCodexHomePicker?> =
-        mutableCodexHomePicker.asStateFlow()
     override val effects: Flow<GlobalSettingsEffect> = effectChannel.receiveAsFlow()
 
     init {
@@ -171,33 +168,73 @@ internal class GlobalSettingsViewModelImpl(
         }
     }
 
-    override fun requestCodexHome() {
-        if (closed) return
-        val child = createDirectoryPicker(mutableState.value.codexHome) ?: return
-        val created = GlobalCodexHomePicker(child)
-        val replaced = mutableCodexHomePicker.value
-        mutableCodexHomePicker.value = created
-        replaced?.viewModel?.close()
-    }
-
-    override fun selectCodexHome(
-        expected: GlobalCodexHomePicker,
-        codexHome: Path,
-    ): Boolean {
-        if (!removeCodexHomePicker(expected)) return false
+    override fun setBuiltInContextSourceEnabled(
+        source: BuiltInContextSource,
+        enabled: Boolean,
+    ) {
         enqueueSettingsUpdate {
-            copy(codexHome = codexHome)
+            copy(contextSources = contextSources.withBuiltIn(source, enabled))
         }
-        return true
     }
 
-    override fun dismissCodexHomePicker(expected: GlobalCodexHomePicker): Boolean =
-        removeCodexHomePicker(expected)
+    override fun addCustomContextSource(path: String): String? {
+        val input = path.trim()
+        val normalized = input.toContextPath()?.toString()
+            ?: return "Enter an absolute path, ~, or ~/path."
+        if (normalized in staticContextSourcePaths()) {
+            return "This path is already a built-in context source."
+        }
+        val current = latestSettings.contextSources
+        val duplicate = current.customSources.indexOfFirst { source ->
+            source.path.toContextPath()?.toString() == normalized
+        }
+        if (duplicate >= 0) {
+            if (!current.customSources[duplicate].enabled) {
+                enqueueSettingsUpdate {
+                    copy(
+                        contextSources = contextSources.copy(
+                            customSources = contextSources.customSources.mapIndexed { index, source ->
+                                if (index == duplicate) source.copy(enabled = true) else source
+                            },
+                        ),
+                    )
+                }
+            }
+            return null
+        }
+        enqueueSettingsUpdate {
+            copy(
+                contextSources = contextSources.copy(
+                    customSources = contextSources.customSources +
+                        AgentContextCustomSource(path = input),
+                ),
+            )
+        }
+        return null
+    }
 
-    private fun removeCodexHomePicker(expected: GlobalCodexHomePicker): Boolean {
-        if (!mutableCodexHomePicker.compareAndSet(expected, null)) return false
-        expected.viewModel.close()
-        return true
+    override fun setCustomContextSourceEnabled(path: String, enabled: Boolean) {
+        enqueueSettingsUpdate {
+            copy(
+                contextSources = contextSources.copy(
+                    customSources = contextSources.customSources.map { source ->
+                        if (source.path == path) source.copy(enabled = enabled) else source
+                    },
+                ),
+            )
+        }
+    }
+
+    override fun removeCustomContextSource(path: String) {
+        enqueueSettingsUpdate {
+            copy(
+                contextSources = contextSources.copy(
+                    customSources = contextSources.customSources.filterNot { source ->
+                        source.path == path
+                    },
+                ),
+            )
+        }
     }
 
     override fun updateNewLineKey(newLineKey: NewLineKey) {
@@ -447,8 +484,6 @@ internal class GlobalSettingsViewModelImpl(
         closed = true
         dismissUsageReset()
         dismissCodexMcpImport()
-        mutableCodexHomePicker.value?.viewModel?.close()
-        mutableCodexHomePicker.value = null
         updates.close()
         effectChannel.close()
         scope.cancel()
@@ -559,13 +594,44 @@ private fun KodexGlobalSettings.toGlobalSettingsState(
         ).distinct()
     return GlobalSettingsState(
         settingsRevision = revision,
-        codexHome = codexHome,
         authSource = authSource,
         newLineKey = newLineKey,
+        contextSources = contextSources,
         sessionTitle = sessionTitle,
         sidebars = sidebars,
         effectiveSessionTitleModel = effectiveTitleModel,
         modelOptions = modelOptions,
+    )
+}
+
+private fun AgentContextSourceSettings.withBuiltIn(
+    source: BuiltInContextSource,
+    enabled: Boolean,
+): AgentContextSourceSettings =
+    when (source) {
+        BuiltInContextSource.AgentsHome -> copy(agentsHomeEnabled = enabled)
+        BuiltInContextSource.KodexHome -> copy(kodexHomeEnabled = enabled)
+        BuiltInContextSource.CodexHome -> copy(codexHomeEnabled = enabled)
+        BuiltInContextSource.GitRoot -> copy(gitRootEnabled = enabled)
+        BuiltInContextSource.WorkingDirectory -> copy(workingDirectoryEnabled = enabled)
+    }
+
+private fun String.toContextPath(): Path? {
+    if (isBlank() || contains('$')) return null
+    val home = Path(requireUserHomeDirectory())
+    return when {
+        this == "~" -> home
+        startsWith("~/") -> Path(home, substring(2))
+        else -> Path(this).takeIf(Path::isAbsolute)
+    }
+}
+
+private fun staticContextSourcePaths(): Set<String> {
+    val home = Path(requireUserHomeDirectory())
+    return setOf(
+        Path(home, ".agents").toString(),
+        Path(home, ".kodex").toString(),
+        Path(home, ".codex").toString(),
     )
 }
 

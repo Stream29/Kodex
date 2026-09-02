@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.app.settings.contract
 
-import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
+import io.github.stream29.kodex.agentcontext.contract.AgentContextCustomSource
+import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
@@ -28,9 +29,9 @@ import kotlin.time.Instant
 /** Frontend-safe persistent fields rendered by Settings > Global. */
 public data class GlobalSettingsState(
     public val settingsRevision: Long,
-    public val codexHome: Path,
     public val authSource: KodexAuthSource,
     public val newLineKey: NewLineKey,
+    public val contextSources: AgentContextSourceSettings,
     public val sessionTitle: SessionTitleSettings,
     public val sidebars: SidebarSettings,
     public val effectiveSessionTitleModel: OpenAiModelId,
@@ -47,10 +48,14 @@ public data class GlobalSettingsState(
     }
 }
 
-/** One exact Codex-home directory-picker child owned by Global Settings. */
-public class GlobalCodexHomePicker(
-    public val viewModel: DirectoryPickerViewModel,
-)
+/** Built-in context roots that can be disabled but not edited or removed. */
+public enum class BuiltInContextSource {
+    AgentsHome,
+    KodexHome,
+    CodexHome,
+    GitRoot,
+    WorkingDirectory,
+}
 
 /** Authentication projection that never contains request credentials. */
 public sealed interface SettingsAuthenticationState {
@@ -263,19 +268,18 @@ public interface GlobalSettingsViewModel : AutoCloseable {
     public val mcpImportPreview: StateFlow<McpImportPreview?>
     public val hooks: StateFlow<List<HookManagedState>>
     public val usageReset: StateFlow<UsageResetState>
-    public val codexHomePicker: StateFlow<GlobalCodexHomePicker?>
     public val effects: Flow<GlobalSettingsEffect>
 
-    public fun requestCodexHome(): Unit
+    public fun setBuiltInContextSourceEnabled(
+        source: BuiltInContextSource,
+        enabled: Boolean,
+    ): Unit
 
-    /** Applies a directory only while [expected] is the current owned child. */
-    public fun selectCodexHome(
-        expected: GlobalCodexHomePicker,
-        codexHome: Path,
-    ): Boolean
+    /** Returns a validation error, or null after queuing the new source. */
+    public fun addCustomContextSource(path: String): String?
 
-    /** Closes [expected] only while it is the current owned child. */
-    public fun dismissCodexHomePicker(expected: GlobalCodexHomePicker): Boolean
+    public fun setCustomContextSourceEnabled(path: String, enabled: Boolean): Unit
+    public fun removeCustomContextSource(path: String): Unit
 
     public fun updateNewLineKey(newLineKey: NewLineKey): Unit
     public fun updateAuthSource(authSource: KodexAuthSource): Unit

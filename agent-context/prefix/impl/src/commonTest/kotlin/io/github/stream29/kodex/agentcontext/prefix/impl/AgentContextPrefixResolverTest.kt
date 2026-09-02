@@ -3,6 +3,7 @@ package io.github.stream29.kodex.agentcontext.prefix.impl
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.prefix.agentsmd.contract.AgentsMdInstruction
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
+import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -206,12 +207,15 @@ private fun testContextSettings(
     agentsHome: Path,
     kodexHome: Path,
     shell: Shell,
-): AgentContextSettings = TestAgentContextSettings(agentsHome, kodexHome, shell)
+    codexHome: Path = Path(kodexHome, "codex-home"),
+): AgentContextSettings = TestAgentContextSettings(agentsHome, kodexHome, codexHome, shell)
 
 private data class TestAgentContextSettings(
     override val agentsHome: Path,
     override val kodexHome: Path,
+    override val codexHome: Path,
     override val shell: Shell,
+    override val sources: AgentContextSourceSettings = AgentContextSourceSettings(),
 ) : AgentContextSettings
 
 private val testShell: Shell = Shell(ShellType.Bash, Path("/bin/bash"))

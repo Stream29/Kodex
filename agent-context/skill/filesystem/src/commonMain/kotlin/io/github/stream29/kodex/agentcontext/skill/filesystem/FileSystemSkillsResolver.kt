@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.agentcontext.skill.filesystem
 
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
+import io.github.stream29.kodex.agentcontext.contract.AgentContextSourcePlan
 import io.github.stream29.kodex.agentcontext.prefix.skill.contract.AvailableSkill
 import io.github.stream29.kodex.agentcontext.prefix.skill.contract.SkillScope
 import io.github.stream29.kodex.agentcontext.prefix.skill.contract.SkillSource
@@ -56,15 +57,30 @@ public class FileSystemSkillsResolver(
         cwd: Path,
         context: AgentContextSettings,
     ): ResolvedSkills {
+        return resolveRoots(discoverRoots(cwd, context.agentsHome, context.kodexHome))
+    }
+
+    /** Resolves skills from one shared, already deduplicated source plan. */
+    public suspend fun resolve(plan: AgentContextSourcePlan): ResolvedSkills =
+        resolveRoots(buildList {
+            plan.globalRoots.forEach { root ->
+                globalSkillRoots(root).forEach { source -> addRootIfDirectory(source) }
+            }
+            plan.projectRoots.forEach { root ->
+                projectSkillRoots(root).forEach { source -> addRootIfDirectory(source) }
+            }
+        })
+
+    private suspend fun resolveRoots(roots: List<SkillRoot>): ResolvedSkills {
         val warnings = mutableListOf<SkillWarning>()
         val discovered = mutableListOf<DiscoveredSkill>()
-        discoverRoots(cwd, context.agentsHome, context.kodexHome).forEach { root ->
+        roots.forEach { root ->
             scanRoot(root, discovered, warnings)
         }
 
-        val unique = linkedMapOf<Path, DiscoveredSkill>()
+        val unique = linkedMapOf<String, DiscoveredSkill>()
         discovered.forEach { skill ->
-            if (skill.available.path !in unique) unique[skill.available.path] = skill
+            unique[skill.available.name] = skill
         }
         val sorted = unique.values.sortedWith(
             compareBy<DiscoveredSkill> { skill -> skill.available.source.scope.rank }

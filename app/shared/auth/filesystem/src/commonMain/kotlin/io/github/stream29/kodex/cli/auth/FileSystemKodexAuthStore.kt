@@ -96,6 +96,7 @@ private sealed interface AuthLoadResult {
 private class FileSystemKodexAuthStoreImpl(
     scope: CoroutineScope,
     private val dataDirectory: Path,
+    private val codexHome: Path,
     private val globalSettings: KodexGlobalSettingsStore,
     private val fileSystem: CoroutineFileSystem,
     private val loginClient: OpenAiLoginClientContract,
@@ -114,8 +115,8 @@ private class FileSystemKodexAuthStoreImpl(
 
     init {
         launch(start = CoroutineStart.UNDISPATCHED) {
-            globalSettings.settings
-                .map { snapshot -> snapshot.authSource to snapshot.codexHome }
+        globalSettings.settings
+                .map { snapshot -> snapshot.authSource }
                 .distinctUntilChanged()
                 .drop(1)
                 .collect { reload() }
@@ -248,7 +249,7 @@ private class FileSystemKodexAuthStoreImpl(
         loadAuthCatching {
             when (settings.authSource) {
                 KodexAuthSource.Codex ->
-                    CodexCliStorage(settings.codexHome, fileSystem)
+                    CodexCliStorage(codexHome, fileSystem)
                         .readAuthOrNull()
                         ?.toAuthLoadResult()
                         ?: AuthLoadResult.Unavailable(
@@ -389,30 +390,35 @@ private class FileSystemKodexAuthStoreImpl(
  * Opens the private Kodex credential store.
  *
  * Global settings select whether credentials are read from this store or from
- * the selected Codex Home.
+ * the injected fixed Codex Home.
  */
 public suspend fun CoroutineScope.FileSystemKodexAuthStore(
     dataDirectory: Path,
+    codexHome: Path,
     globalSettings: KodexGlobalSettingsStore,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ): KodexAuthStore =
-    FileSystemKodexAuthStore(
+    FileSystemKodexAuthStoreImpl(
+        scope = supervisorChildScope(),
         dataDirectory = dataDirectory,
+        codexHome = codexHome,
         globalSettings = globalSettings,
         fileSystem = fileSystem,
         loginClient = OpenAiLoginClient(),
-    )
+    ).also { store -> store.reload() }
 
 internal suspend fun CoroutineScope.FileSystemKodexAuthStore(
     dataDirectory: Path,
+    codexHome: Path,
     globalSettings: KodexGlobalSettingsStore,
     fileSystem: CoroutineFileSystem,
-    loginClient: OpenAiLoginClientContract,
+    loginClient: OpenAiLoginClientContract = OpenAiLoginClient(),
 ): KodexAuthStore {
     val scope = supervisorChildScope()
     return FileSystemKodexAuthStoreImpl(
         scope = scope,
         dataDirectory = dataDirectory,
+        codexHome = codexHome,
         globalSettings = globalSettings,
         fileSystem = fileSystem,
         loginClient = loginClient,

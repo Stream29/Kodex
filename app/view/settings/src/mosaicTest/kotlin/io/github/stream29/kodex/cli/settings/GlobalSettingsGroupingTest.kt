@@ -5,6 +5,7 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
+import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsState
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -24,9 +25,9 @@ class GlobalSettingsGroupingTest {
                     SessionTitleSettingsContent(
                         state = GlobalSettingsState(
                             settingsRevision = 0,
-                            codexHome = Path("/codex-home"),
                             authSource = KodexAuthSource.Codex,
                             newLineKey = NewLineKey.ShiftEnter,
+                            contextSources = AgentContextSourceSettings(),
                             sessionTitle = SessionTitleSettings(),
                             sidebars = SidebarSettings(),
                             effectiveSessionTitleModel = titleModel,

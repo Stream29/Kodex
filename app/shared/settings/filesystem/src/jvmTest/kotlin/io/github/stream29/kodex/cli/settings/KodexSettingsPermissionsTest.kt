@@ -13,10 +13,9 @@ class KodexSettingsPermissionsTest {
         val root = Files.createTempDirectory("kodex-settings-permissions")
         try {
             val settingsDirectory = root.resolve("kodex")
-            val codexDirectory = root.resolve("codex")
             val store = openGlobalSettings(
                 settingsDirectory = Path(settingsDirectory.toString()),
-                defaults = KodexGlobalSettings(codexHome = Path(codexDirectory.toString())),
+                defaults = KodexGlobalSettings(),
             )
 
             store.update { it }

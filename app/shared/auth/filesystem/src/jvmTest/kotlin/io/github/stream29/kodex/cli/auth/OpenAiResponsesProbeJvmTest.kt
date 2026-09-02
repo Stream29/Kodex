@@ -38,12 +38,12 @@ val openAiResponsesProbeJvmTest by testSuite(
         val codexHome = Path(home, ".codex")
         val settings = InMemoryKodexGlobalSettings(
             KodexGlobalSettings(
-                codexHome = codexHome,
                 authSource = KodexAuthSource.Kodex,
             ),
         )
         val loader = CoroutineScope(currentCoroutineContext()).FileSystemKodexAuthStore(
             dataDirectory = dataDirectory,
+            codexHome = codexHome,
             globalSettings = settings,
         )
         val auth = try {

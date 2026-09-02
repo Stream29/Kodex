@@ -39,10 +39,10 @@ val fileSystemKodexAuthStoreTest by testSuite(
         withAuthDirectories("default-codex") { codexHome, dataDirectory ->
             val source = subscriptionAuth("initial")
             writeCodexAuth(codexHome, source)
-            val settings = InMemoryKodexGlobalSettings(KodexGlobalSettings(codexHome = codexHome))
+            val settings = InMemoryKodexGlobalSettings(KodexGlobalSettings())
 
             coroutineScope {
-                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                val store = FileSystemKodexAuthStore(dataDirectory, codexHome, settings)
                 try {
                     val auth = store.authenticated()
                     assertEquals(source.tokens?.accessToken, auth.accessToken)
@@ -60,11 +60,11 @@ val fileSystemKodexAuthStoreTest by testSuite(
     test("missing Codex credentials publish the credentials-not-found state") {
         withAuthDirectories("missing-codex") { codexHome, dataDirectory ->
             val settings = InMemoryKodexGlobalSettings(
-                KodexGlobalSettings(codexHome = codexHome),
+                KodexGlobalSettings(),
             )
 
             coroutineScope {
-                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                val store = FileSystemKodexAuthStore(dataDirectory, codexHome, settings)
                 try {
                     assertEquals(
                         OpenAiAuthState.Unavailable.CredentialsNotFound,
@@ -87,11 +87,11 @@ val fileSystemKodexAuthStoreTest by testSuite(
                 ),
             )
             val settings = InMemoryKodexGlobalSettings(
-                KodexGlobalSettings(codexHome = codexHome),
+                KodexGlobalSettings(),
             )
 
             coroutineScope {
-                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                val store = FileSystemKodexAuthStore(dataDirectory, codexHome, settings)
                 try {
                     assertEquals(
                         OpenAiAuthState.Unavailable.UnsupportedAuthMode,
@@ -111,11 +111,11 @@ val fileSystemKodexAuthStoreTest by testSuite(
                 CodexAuthJson(authMode = CodexAuthMode.Chatgpt),
             )
             val settings = InMemoryKodexGlobalSettings(
-                KodexGlobalSettings(codexHome = codexHome),
+                KodexGlobalSettings(),
             )
 
             coroutineScope {
-                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                val store = FileSystemKodexAuthStore(dataDirectory, codexHome, settings)
                 try {
                     assertEquals(
                         OpenAiAuthState.Unavailable.InvalidCredentials,
@@ -132,11 +132,11 @@ val fileSystemKodexAuthStoreTest by testSuite(
         withAuthDirectories("malformed-codex") { codexHome, dataDirectory ->
             SystemCoroutineFileSystem.writeString(Path(codexHome, "auth.json"), "{")
             val settings = InMemoryKodexGlobalSettings(
-                KodexGlobalSettings(codexHome = codexHome),
+                KodexGlobalSettings(),
             )
 
             coroutineScope {
-                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                val store = FileSystemKodexAuthStore(dataDirectory, codexHome, settings)
                 try {
                     assertEquals(
                         OpenAiAuthState.Unavailable.InvalidCredentials,
@@ -152,10 +152,10 @@ val fileSystemKodexAuthStoreTest by testSuite(
     test("reload follows changes to the shared Codex auth file") {
         withAuthDirectories("reload-codex") { codexHome, dataDirectory ->
             writeCodexAuth(codexHome, subscriptionAuth("first"))
-            val settings = InMemoryKodexGlobalSettings(KodexGlobalSettings(codexHome = codexHome))
+            val settings = InMemoryKodexGlobalSettings(KodexGlobalSettings())
 
             coroutineScope {
-                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                val store = FileSystemKodexAuthStore(dataDirectory, codexHome, settings)
                 try {
                     val updated = subscriptionAuth("second")
                     writeCodexAuth(codexHome, updated)
@@ -177,13 +177,12 @@ val fileSystemKodexAuthStoreTest by testSuite(
             writeAuthFile(dataDirectory, local.toKodexAuthFile())
             val settings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(
-                    codexHome = codexHome,
                     authSource = KodexAuthSource.Kodex,
                 ),
             )
 
             coroutineScope {
-                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                val store = FileSystemKodexAuthStore(dataDirectory, codexHome, settings)
                 try {
                     val authFile = readAuthFile(dataDirectory)
                     assertEquals(local.tokens, authFile.tokens)
@@ -205,13 +204,12 @@ val fileSystemKodexAuthStoreTest by testSuite(
             writeAuthFile(dataDirectory, subscriptionAuth("local").toKodexAuthFile())
             val settings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(
-                    codexHome = codexHome,
                     authSource = KodexAuthSource.Kodex,
                 ),
             )
 
             coroutineScope {
-                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                val store = FileSystemKodexAuthStore(dataDirectory, codexHome, settings)
                 try {
                     store.authenticated()
 
@@ -238,11 +236,11 @@ val fileSystemKodexAuthStoreTest by testSuite(
             writeAuthFile(dataDirectory, subscriptionAuth("local").toKodexAuthFile())
             val originalCodexAuth = SystemCoroutineFileSystem.readString(codexAuthPath)
             val settings = InMemoryKodexGlobalSettings(
-                KodexGlobalSettings(codexHome = codexHome),
+                KodexGlobalSettings(),
             )
 
             coroutineScope {
-                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                val store = FileSystemKodexAuthStore(dataDirectory, codexHome, settings)
                 try {
                     store.authenticated()
 
@@ -267,10 +265,10 @@ val fileSystemKodexAuthStoreTest by testSuite(
             val local = subscriptionAuth("local")
             writeCodexAuth(codexHome, codex)
             writeAuthFile(dataDirectory, local.toKodexAuthFile())
-            val settings = InMemoryKodexGlobalSettings(KodexGlobalSettings(codexHome = codexHome))
+            val settings = InMemoryKodexGlobalSettings(KodexGlobalSettings())
 
             coroutineScope {
-                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                val store = FileSystemKodexAuthStore(dataDirectory, codexHome, settings)
                 try {
                     val initialAuth = store.authenticated()
                     assertEquals(codex.tokens?.accessToken, initialAuth.accessToken)
@@ -303,13 +301,12 @@ val fileSystemKodexAuthStoreTest by testSuite(
         withAuthDirectories("missing-local") { codexHome, dataDirectory ->
             val settings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(
-                    codexHome = codexHome,
                     authSource = KodexAuthSource.Kodex,
                 ),
             )
 
             coroutineScope {
-                val store = FileSystemKodexAuthStore(dataDirectory, settings)
+                val store = FileSystemKodexAuthStore(dataDirectory, codexHome, settings)
                 try {
                     assertEquals(
                         OpenAiAuthState.Unavailable.CredentialsNotFound,
@@ -337,7 +334,6 @@ val fileSystemKodexAuthStoreTest by testSuite(
             )
             val settings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(
-                    codexHome = codexHome,
                     authSource = KodexAuthSource.Kodex,
                 ),
             )
@@ -351,6 +347,7 @@ val fileSystemKodexAuthStoreTest by testSuite(
             coroutineScope {
                 val store = FileSystemKodexAuthStore(
                     dataDirectory = dataDirectory,
+                    codexHome = codexHome,
                     globalSettings = settings,
                     fileSystem = SystemCoroutineFileSystem,
                     loginClient = loginClient,

@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.agentstate.test
 
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
+import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
@@ -18,7 +19,9 @@ public val TestAgentContextSettings: StateFlow<AgentContextSettings> =
         object : AgentContextSettings {
             override val agentsHome: Path = Path(".")
             override val kodexHome: Path = Path(".")
+            override val codexHome: Path = Path(".")
             override val shell: Shell = Shell(ShellType.Sh, Path("sh"))
+            override val sources: AgentContextSourceSettings = AgentContextSourceSettings()
         },
     )
 

@@ -17,6 +17,7 @@ import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationOper
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.UsageResetState
+import io.github.stream29.kodex.app.settings.contract.BuiltInContextSource
 import io.github.stream29.kodex.cli.auth.KodexAuthLoginAttempt
 import io.github.stream29.kodex.cli.auth.KodexAuthStore
 import io.github.stream29.kodex.cli.settings.InMemoryKodexGlobalSettings
@@ -121,7 +122,7 @@ class SettingsViewModelTest {
     @Test
     fun rootSharesGlobalSettingsAuthority() = runTest {
         val settings = InMemoryKodexGlobalSettings(
-            KodexGlobalSettings(codexHome = Path("codex-home")),
+            KodexGlobalSettings(),
         )
         val source = TestSessionSettingsDataSource()
         val viewModel = createSettingsViewModel(
@@ -171,11 +172,6 @@ class SettingsViewModelTest {
             RequestUserInputMode.NoQuestion,
             newSession.state.value.settings.requestUserInputMode,
         )
-        assertEquals(
-            settings.settings.value.codexHome,
-            global.state.value.codexHome,
-        )
-
         global.updateLeftSidebarWidth(36)
         global.updateRightSidebarWidth(19)
         runCurrent()
@@ -188,6 +184,45 @@ class SettingsViewModelTest {
         viewModel.close()
         runCurrent()
         assertTrue(source.closed)
+    }
+
+    @Test
+    fun contextSourcesSupportBuiltInTogglesAndCustomSourceLifecycle() = runTest {
+        val settings = InMemoryKodexGlobalSettings(KodexGlobalSettings())
+        val viewModel = createSettingsViewModel(
+            initialPage = SettingsPage.ContextSources,
+            globalSettings = settings,
+            authentication = TestAuthStore(),
+            accountUsage = TestAccountUsageStore(),
+            mcpManager = TestMcpManager(),
+            hookManager = TestHookManager(),
+            models = MutableStateFlow(emptyList()),
+            ownerScope = backgroundScope,
+        )
+
+        viewModel.global.setBuiltInContextSourceEnabled(BuiltInContextSource.CodexHome, false)
+        assertEquals(
+            "Enter an absolute path, ~, or ~/path.",
+            viewModel.global.addCustomContextSource("relative/path"),
+        )
+        assertEquals(null, viewModel.global.addCustomContextSource("/tmp/kodex-context-source"))
+        runCurrent()
+
+        assertFalse(settings.settings.value.contextSources.codexHomeEnabled)
+        assertEquals(
+            listOf("/tmp/kodex-context-source"),
+            settings.settings.value.contextSources.customSources.map { source -> source.path },
+        )
+
+        viewModel.global.setCustomContextSourceEnabled("/tmp/kodex-context-source", false)
+        runCurrent()
+        assertFalse(settings.settings.value.contextSources.customSources.single().enabled)
+
+        viewModel.global.removeCustomContextSource("/tmp/kodex-context-source")
+        runCurrent()
+        assertTrue(settings.settings.value.contextSources.customSources.isEmpty())
+
+        viewModel.close()
     }
 
     @Test
@@ -205,7 +240,7 @@ class SettingsViewModelTest {
         val viewModel = createSettingsViewModel(
             initialPage = SettingsPage.OpenAi,
             globalSettings = InMemoryKodexGlobalSettings(
-                KodexGlobalSettings(codexHome = Path("codex-home")),
+                KodexGlobalSettings(),
             ),
             authentication = auth,
             accountUsage = TestAccountUsageStore(),
@@ -234,7 +269,6 @@ class SettingsViewModelTest {
             initialPage = SettingsPage.OpenAi,
             globalSettings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(
-                    codexHome = Path("codex-home"),
                     authSource = KodexAuthSource.Kodex,
                 ),
             ),
@@ -279,7 +313,6 @@ class SettingsViewModelTest {
             initialPage = SettingsPage.OpenAi,
             globalSettings = InMemoryKodexGlobalSettings(
                 KodexGlobalSettings(
-                    codexHome = Path("codex-home"),
                     authSource = KodexAuthSource.Kodex,
                 ),
             ),
@@ -324,7 +357,7 @@ class SettingsViewModelTest {
         val viewModel = createSettingsViewModel(
             initialPage = SettingsPage.OpenAi,
             globalSettings = InMemoryKodexGlobalSettings(
-                KodexGlobalSettings(codexHome = Path("codex-home")),
+                KodexGlobalSettings(),
             ),
             authentication = TestAuthStore(),
             accountUsage = accountUsage,
@@ -351,7 +384,7 @@ class SettingsViewModelTest {
         val viewModel = createSettingsViewModel(
             initialPage = SettingsPage.OpenAi,
             globalSettings = InMemoryKodexGlobalSettings(
-                KodexGlobalSettings(codexHome = Path("codex-home")),
+                KodexGlobalSettings(),
             ),
             authentication = TestAuthStore(),
             accountUsage = accountUsage,
@@ -373,47 +406,6 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun globalCodexHomeUsesAnOwnedDirectoryPickerAndPersistsItsSelection() = runTest {
-        val initialCodexHome = Path("codex-home")
-        val selectedCodexHome = Path("selected-codex-home")
-        val settings = InMemoryKodexGlobalSettings(
-            KodexGlobalSettings(codexHome = initialCodexHome),
-        )
-        var pickerInitialDirectory: Path? = null
-        lateinit var picker: TestDirectoryPickerViewModel
-        val viewModel = createSettingsViewModel(
-            initialPage = SettingsPage.General,
-            globalSettings = settings,
-            authentication = TestAuthStore(),
-            accountUsage = TestAccountUsageStore(),
-            mcpManager = TestMcpManager(),
-            hookManager = TestHookManager(),
-            models = MutableStateFlow(emptyList()),
-            createDirectoryPicker = { initialDirectory ->
-                pickerInitialDirectory = initialDirectory
-                TestDirectoryPickerViewModel(initialDirectory).also { picker = it }
-            },
-            ownerScope = backgroundScope,
-        )
-
-        viewModel.global.requestCodexHome()
-        val request = assertNotNull(viewModel.global.codexHomePicker.value)
-        assertEquals(initialCodexHome, pickerInitialDirectory)
-        assertSame(picker, request.viewModel)
-
-        assertTrue(viewModel.global.selectCodexHome(request, selectedCodexHome))
-        assertNull(viewModel.global.codexHomePicker.value)
-        assertTrue(picker.closed)
-        runCurrent()
-
-        assertEquals(selectedCodexHome, settings.settings.value.codexHome)
-        assertEquals(selectedCodexHome, viewModel.global.state.value.codexHome)
-        assertFalse(viewModel.global.dismissCodexHomePicker(request))
-
-        viewModel.close()
-    }
-
-    @Test
     fun sessionWorkingDirectoryUsesAnOwnedDirectoryPicker() = runTest {
         val source = TestSessionSettingsDataSource()
         val selectedDirectory = Path("selected-workspace")
@@ -422,7 +414,7 @@ class SettingsViewModelTest {
         val viewModel = createSettingsViewModel(
             initialPage = SettingsPage.CurrentSession,
             globalSettings = InMemoryKodexGlobalSettings(
-                KodexGlobalSettings(codexHome = Path("codex-home")),
+                KodexGlobalSettings(),
             ),
             authentication = TestAuthStore(),
             accountUsage = TestAccountUsageStore(),
@@ -460,7 +452,7 @@ class SettingsViewModelTest {
         val viewModel = createSettingsViewModel(
             initialPage = SettingsPage.CurrentSession,
             globalSettings = InMemoryKodexGlobalSettings(
-                KodexGlobalSettings(codexHome = Path("codex-home")),
+                KodexGlobalSettings(),
             ),
             authentication = TestAuthStore(),
             accountUsage = TestAccountUsageStore(),
@@ -512,7 +504,7 @@ class SettingsViewModelTest {
         val viewModel = createSettingsViewModel(
             initialPage = SettingsPage.OpenAi,
             globalSettings = InMemoryKodexGlobalSettings(
-                KodexGlobalSettings(codexHome = Path("codex-home")),
+                KodexGlobalSettings(),
             ),
             authentication = TestAuthStore(),
             accountUsage = accountUsage,
@@ -558,7 +550,7 @@ class SettingsViewModelTest {
         val viewModel = createSettingsViewModel(
             initialPage = SettingsPage.Mcp,
             globalSettings = InMemoryKodexGlobalSettings(
-                KodexGlobalSettings(codexHome = Path("codex-home")),
+                KodexGlobalSettings(),
             ),
             authentication = TestAuthStore(),
             accountUsage = TestAccountUsageStore(),

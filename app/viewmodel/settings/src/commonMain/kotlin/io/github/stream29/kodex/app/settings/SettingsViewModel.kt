@@ -76,7 +76,6 @@ public fun createSettingsViewModel(
         hookManager = hookManager,
         models = models,
         commandScope = ownerScope,
-        createDirectoryPicker = createDirectoryPicker,
     )
     val session = SessionSettingsViewModelImpl(
         source = sessionSettings ?: UnavailableSessionSettingsDataSource(),

@@ -18,7 +18,6 @@ val sidebarSettingsViewModelTest by testSuite {
     test("updates each sidebar independently without replacing other settings") {
         val store = InMemoryKodexGlobalSettings(
             KodexGlobalSettings(
-                codexHome = Path("/codex"),
                 newLineKey = NewLineKey.Enter,
                 sidebars = SidebarSettings(
                     leftWidth = 24,
