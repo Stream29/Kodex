@@ -2,9 +2,16 @@ package io.github.stream29.kodex.cli.components
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.jakewharton.mosaic.focus.FocusRequester
+import com.jakewharton.mosaic.focus.focusRequester
+import com.jakewharton.mosaic.focus.focusable
+import com.jakewharton.mosaic.focus.onFocusChanged
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.modifier.Modifier
+import com.jakewharton.mosaic.terminal.AnsiLevel
+import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
@@ -12,6 +19,7 @@ import com.jakewharton.mosaic.ui.Text
 import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 val verticalScrollTest by testSuite {
     test("eager content is clipped and placed from the current row offset") {
@@ -51,6 +59,99 @@ val verticalScrollTest by testSuite {
             assertEquals(0, state.value)
             assertEquals(0, state.maxValue)
             assertEquals(2, state.viewportSize)
+        }
+    }
+
+    test("focus requests scroll clipped content into view") {
+        val state = ScrollState()
+        val targetRequester = FocusRequester()
+        var focused by mutableStateOf(false)
+
+        runMosaicTest {
+            assertEquals(
+                "A\nB",
+                setContentAndSnapshot {
+                    Column(
+                        modifier = Modifier
+                            .height(2)
+                            .verticalScroll(state),
+                    ) {
+                        Text(
+                            value = "A",
+                            modifier = Modifier.focusable(),
+                        )
+                        Text("B", modifier = Modifier.focusable())
+                        Text("C", modifier = Modifier.focusable())
+                        Text(
+                            value = "D",
+                            modifier = Modifier.focusable(),
+                        )
+                        Text(
+                            value = "E",
+                            modifier = Modifier
+                                .focusRequester(targetRequester)
+                                .onFocusChanged { state -> focused = state.isFocused }
+                                .focusable(),
+                        )
+                    }
+                },
+            )
+
+            assertTrue(targetRequester.requestFocus(), "target focus")
+            assertTrue(focused, "focused")
+            assertEquals(3, state.value)
+            assertEquals("D\nE", awaitSnapshot())
+            assertEquals(
+                "D\nE",
+                draw().render(AnsiLevel.NONE, supportsKittyUnderlines = false),
+            )
+        }
+    }
+
+    test("focus can leave a scroll container after reaching its end") {
+        val state = ScrollState()
+        val targetRequester = FocusRequester()
+        var outsideFocused by mutableStateOf(false)
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Column(Modifier.height(4)) {
+                    Text("Before", modifier = Modifier.focusable())
+                    Column(
+                        modifier = Modifier
+                            .height(2)
+                            .verticalScroll(state),
+                    ) {
+                        Text("A", modifier = Modifier.focusable())
+                        Text("B", modifier = Modifier.focusable())
+                        Text("C", modifier = Modifier.focusable())
+                        Text(
+                            value = "D",
+                            modifier = Modifier.focusable(),
+                        )
+                        Text(
+                            value = "E",
+                            modifier = Modifier
+                                .focusRequester(targetRequester)
+                                .focusable(),
+                        )
+                    }
+                    Text(
+                        value = "After",
+                        modifier = Modifier
+                            .onFocusChanged { focusState -> outsideFocused = focusState.isFocused }
+                            .focusable(),
+                    )
+                }
+            }
+
+            assertTrue(targetRequester.requestFocus(), "target focus")
+            assertEquals(3, state.value)
+            awaitSnapshot()
+
+            sendKeyEvent(KeyboardEvent(codepoint = 9))
+            awaitSnapshot()
+            assertTrue(outsideFocused, "outside focus")
         }
     }
 

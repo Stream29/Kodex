@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.agentstorage.inmemory
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
@@ -18,8 +17,8 @@ import kotlin.uuid.Uuid
  * Process-local mutable storage for tests and transient agent sessions.
  *
  * This implementation keeps all published values in memory. Construction
- * publishes the required snapshot-zero settings and compaction point, so it can
- * always back a legal empty agent state.
+ * publishes the required snapshot-zero settings, so it can always back a legal
+ * empty agent state without a synthetic compaction point.
  */
 @OptIn(ExperimentalUuidApi::class)
 public class InMemoryKodexAgentStorage private constructor(
@@ -73,7 +72,7 @@ private fun initialStorageState(
 ): InitialStorageState {
     val windowId = Uuid.generateV7().toString()
     return InitialStorageState(
-        index = mutableListOf(IndexedValue(0, CleanCompactionPoint)),
+        index = mutableListOf(),
         settings = mutableListOf(
             IndexedValue(
                 0,

@@ -92,18 +92,18 @@ val agentStorageContractExtTest by testSuite {
         mutable.index[3] = assistant("three")
         val counted = CountingTimeline(mutable.index)
 
-        assertEquals(listOf(0, 1, 3), counted.indexes().toList())
-        assertEquals(listOf(3, 1, 0), counted.indexesDescending(3).toList())
+        assertEquals(listOf(1, 3), counted.indexes().toList())
+        assertEquals(listOf(3, 1), counted.indexesDescending(3).toList())
         assertEquals(
-            listOf(0, 1, 3),
+            listOf(1, 3),
             counted.values().toList().map { (index, _) -> index },
         )
         assertEquals(
-            listOf(3, 1, 0),
+            listOf(3, 1),
             counted.valuesDescending(3).toList().map { (index, _) -> index },
         )
         assertEquals(
-            listOf(0, 1, 3),
+            listOf(1, 3),
             counted.valuesIn(0..3).map { (index, _) -> index },
         )
         assertTrue(counted.ranges.any { it == 1..2 })

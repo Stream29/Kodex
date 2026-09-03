@@ -56,7 +56,7 @@ private fun pendingTool(callId: String): PendingToolEvent =
     )
 
 val inMemoryKodexAgentStorageTest by testSuite {
-    test("construction publishes a clean initial snapshot with stable identity") {
+    test("construction publishes an initial snapshot without a compaction point") {
         val first = storage()
         val second = storage()
 
@@ -65,9 +65,9 @@ val inMemoryKodexAgentStorageTest by testSuite {
         assertEquals(0, first.latestIndex())
         assertEquals(OpenAiModelId("initial-model"), first.settings.latestValue().model)
         assertTrue(first.settings.latestValue().turnId.isNotEmpty())
-        assertIs<CleanCompactionPoint>(first.index[0])
+        assertEquals(-1, first.index.latestIndex())
+        assertEquals(null, first.index.getExact(0))
         assertEquals(0L, first.settings[0].windowNumber)
-        assertEquals(0, first.index.indexesIn(0..Int.MAX_VALUE).last())
         assertEquals(-1, first.work.latestIndex())
         assertEquals(-1, first.unstable.latestIndex())
     }
@@ -138,7 +138,7 @@ val inMemoryKodexAgentStorageTest by testSuite {
 
         storage.revert(3)
 
-        assertEquals(listOf(0, 2), storage.index.indexesIn(0..Int.MAX_VALUE))
+        assertEquals(listOf(2), storage.index.indexesIn(0..Int.MAX_VALUE))
         assertEquals(listOf(2), storage.work.indexesIn(0..Int.MAX_VALUE))
         assertEquals(-1, storage.unstable.latestIndex())
         assertEquals(0, storage.timestamp.latestIndex())
@@ -160,7 +160,6 @@ val inMemoryKodexAgentStorageTest by testSuite {
 
     test("append compaction stores consecutive point and output indexes") {
         val storage = storage()
-        assertIs<CleanCompactionPoint>(storage.index[0])
         val previousSettings = storage.settings[0]
         val output = StableContextCompaction(encryptedContent = "encrypted")
         storage.tokenCount[1] = 99L

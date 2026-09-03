@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.agentstorage.filesystem
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
@@ -15,7 +14,6 @@ import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 
 val fileSystemAgentStorageTest by testSuite {
     test("persists index and work timelines and raw-copies a prefix") {
@@ -44,7 +42,7 @@ val fileSystemAgentStorageTest by testSuite {
             source.work[2] = work
 
             val reopened = FileSystemAgentStorage(sourceDirectory)
-            assertIs<CleanCompactionPoint>(reopened.index[0])
+            assertEquals(null, reopened.index.getExact(0))
             assertEquals(message, reopened.index[2])
             assertEquals(work, reopened.work[2])
 

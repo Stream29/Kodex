@@ -84,7 +84,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
 
             assertEquals(-1, session.storage.latestIndex())
             session.runtime.modify { storage -> storage.initialize(settings("root")) }
-            assertEquals(1, session.storage.latestIndex())
+            assertEquals(0, session.storage.latestIndex())
             assertEquals(0L, session.storage.tokenCount[0])
         }
 
@@ -189,9 +189,9 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
                 target.storage.settings[latest].copy(threadName = "[fork] Source"),
             )
 
-            assertEquals(listOf(0, 1, 2), target.storage.index.indexesIn(0..latest))
-            assertEquals(userMessage(), target.storage.index[2])
-            assertEquals("[fork] Source", target.storage.settings[3].threadName)
+            assertEquals(listOf(1), target.storage.index.indexesIn(0..latest))
+            assertEquals(userMessage(), target.storage.index[1])
+            assertEquals("[fork] Source", target.storage.settings[2].threadName)
         }
 
         test("owns each runtime for the complete Agent session lifecycle") {

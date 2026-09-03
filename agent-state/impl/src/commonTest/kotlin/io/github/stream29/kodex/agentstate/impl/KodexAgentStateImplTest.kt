@@ -164,7 +164,7 @@ val kodexAgentStateImplTest by testSuite {
 
             assertTrue(cancelled.isCancelled)
             assertEquals(listOf("first", "last"), executionOrder)
-            assertEquals(0, storage.index.latestIndex())
+            assertEquals(-1, storage.index.latestIndex())
             assertEquals(0, agent.latestIndex.value)
             assertEquals(KodexAgentStateValue.Empty, agent.state.value)
         }
@@ -180,7 +180,7 @@ val kodexAgentStateImplTest by testSuite {
             )
 
             assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
-            assertEquals(listOf(0, 2, 3), source.index.indexesIn(0..3))
+            assertEquals(listOf(2, 3), source.index.indexesIn(0..3))
             assertEquals(userEvent("Question"), source.index[2])
             assertEquals(assistantEvent("Answer"), source.index[3])
         }
@@ -584,7 +584,7 @@ val kodexAgentStateImplTest by testSuite {
             assertFailsWith<IllegalStateException> {
                 agent.requestResponseApi()
             }
-            assertEquals(listOf(0, 1), storage.index.indexesIn(0..storage.latestIndex()))
+            assertEquals(listOf(1), storage.index.indexesIn(0..storage.latestIndex()))
             assertEquals(listOf(PendingServerToolSearch(call)), storage.unstable[2])
         }
 
@@ -619,7 +619,6 @@ val kodexAgentStateImplTest by testSuite {
 
         test("forced compaction stores a point and work output and resets reported usage to zero") {
             val storage = storage()
-            assertIs<CleanCompactionPoint>(storage.index[0])
             val compaction = ResponseItem.Compaction(encryptedContent = "compact")
             val compactRequests = mutableListOf<ResponsesApiRequest>()
             val agent = KodexAgentState(
