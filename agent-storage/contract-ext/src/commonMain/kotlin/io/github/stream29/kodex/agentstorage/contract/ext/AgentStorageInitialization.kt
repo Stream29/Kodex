@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.agentstorage.contract.ext
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -15,7 +14,6 @@ public suspend fun MutableKodexAgentStorage.initialize(initialSettings: KodexAge
     val windowId = Uuid.generateV7().toString()
     val turnId = Uuid.generateV7().toString()
     val initialTimestamp = Clock.System.now()
-    index[0] = CleanCompactionPoint
     timestamp[0] = initialTimestamp
     settings[0] = initialSettings.copy(
         turnId = turnId,

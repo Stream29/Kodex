@@ -8,7 +8,6 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
@@ -273,7 +272,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
                 autoCompactionTokenLimit = 90,
             ),
         )
-        val initialCheckpoint = storage.index[0] as CleanCompactionPoint
+        val initialWindowNumber = storage.settings[0].windowNumber
         val compactRequests = mutableListOf<RecordedRemoteCompactionV2Request>()
         val responseRequests = mutableListOf<ResponsesApiRequest>()
         val compaction = ResponseItem.Compaction(encryptedContent = "pre-turn-compact")
@@ -337,7 +336,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             storage.work[4],
         )
         assertEquals(StableAssistantMessage(final.content), storage.index[5])
-        assertEquals(initialCheckpoint.windowNumber + 1, (storage.index[3] as CleanCompactionPoint).windowNumber)
+        assertEquals(initialWindowNumber + 1, storage.settings[storage.latestIndex()].windowNumber)
         assertEquals(listOf(persistedTurnId, persistedTurnId), hookRequests.map { it.context.turnId })
         assertEquals(persistedTurnId, storage.settings[storage.latestIndex()].turnId)
     }

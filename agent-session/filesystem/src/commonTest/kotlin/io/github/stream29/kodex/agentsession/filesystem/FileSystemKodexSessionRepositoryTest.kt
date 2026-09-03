@@ -84,7 +84,7 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
 
             assertEquals(-1, session.storage.latestIndex())
             session.runtime.modify { storage -> storage.initialize(settings("root")) }
-            assertEquals(1, session.storage.latestIndex())
+            assertEquals(0, session.storage.latestIndex())
             assertEquals(0L, session.storage.tokenCount[0])
             repository.closeAndJoin()
         }
@@ -473,10 +473,10 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
                 target.storage.settings[latest].copy(threadName = "[fork] Source"),
             )
 
-            assertEquals(listOf(0, 1, 2), target.storage.index.indexesIn(0..latest))
-            assertEquals(userMessage("copied"), target.storage.index[2])
-            assertEquals("[fork] Source", target.storage.settings[3].threadName)
-            assertEquals(sourceCwd, target.storage.settings[3].cwd)
+            assertEquals(listOf(0, 1), target.storage.index.indexesIn(0..latest))
+            assertEquals(userMessage("copied"), target.storage.index[1])
+            assertEquals("[fork] Source", target.storage.settings[2].threadName)
+            assertEquals(sourceCwd, target.storage.settings[2].cwd)
             repository.closeAndJoin()
         }
 

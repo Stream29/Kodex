@@ -34,7 +34,9 @@ public fun Modifier.verticalScroll(
     enabled = enabled,
     reverseDirection = reverseScrolling,
     interactionSource = interactionSource,
-).clipToBounds() then VerticalScrollLayoutModifier(state, reverseScrolling)
+).then(VerticalScrollBeyondBoundsLayoutElement())
+    .then(VerticalScrollBringIntoViewElement(state, reverseScrolling, interactionSource))
+    .clipToBounds() then VerticalScrollLayoutModifier(state, reverseScrolling)
 
 private class VerticalScrollLayoutModifier(
     private val state: ScrollState,
