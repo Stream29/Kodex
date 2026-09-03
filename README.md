@@ -11,12 +11,12 @@ Go to releases.
 ### Storage
 
 Six timelines are persisted in the file system in flat JSON:
-- compaction checkpoint;
-- completed history;
-- pending tool calls;
+- stable index events and compaction points;
+- completed provider and tool work;
 - request settings;
 - timestamps;
-- context-token counts.
+- context-token counts;
+- unfinished interactions.
 
 All the timelines are simply indexed with integers.
 For each timeline, there is a directory contains `1.json`, `3.json`, etc.
@@ -30,10 +30,9 @@ Parsing the whole timeline is avoided.
 ### Agent State Atomic Transition
 
 `AgentState` provides a set of atomic transitions that can be applied to the state of an agent:
-- `requestResponseApi()`
+- `requestResponseApi(): RequestFinish`
 - `compact(CompactionTrigger, CompactionReason, CompactionPhase)`
-- `injectHistory(List<StableEvent>)`
-- `markNewTurn()`
+- `injectHistory(List<StableIndexEvent.Steerable>)`
 - `appendUserMessage(List<ContentItem>)`
 - `completeToolCall(StableEvent.CompletedTool)`
 - `updateSettings(AgentSettings)`
@@ -54,7 +53,7 @@ sealed interface AgentStateValue {
         data class AgentMessage(val events: SharedFlow<ResponsesStreamEvent>) : RequestResponse
         data class Reasoning(val events: SharedFlow<ResponsesStreamEvent>) : RequestResponse
         data class ToolCall(val events: SharedFlow<ResponsesStreamEvent>) : RequestResponse
-        data class Other(val events: SharedFlow<ResponsesStreamEvent>) : RequestResponse
+        data class Unknown(val events: SharedFlow<ResponsesStreamEvent>) : RequestResponse
     }
     data object Compacting : AgentStateValue
 }
@@ -77,7 +76,7 @@ Each layer is a decorator of its inner layer and wraps `resume()` and owns one k
 For example, the Tool Dispatch layer handles tool calls:
 
 ```kotlin
-override fun resume() {
+override suspend fun resume() {
     innerLayer.resume()
     while (stateValue is ToolPending) {
         completePendingTools()
