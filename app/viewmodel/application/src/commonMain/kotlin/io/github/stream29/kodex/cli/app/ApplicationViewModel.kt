@@ -2,6 +2,7 @@ package io.github.stream29.kodex.cli.app
 
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
+import io.github.stream29.kodex.app.agent.contract.SuggestedSessionConfiguration
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
@@ -20,6 +21,14 @@ import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModelArguments
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModelFactory
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModelFactory
+import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.openai.Reasoning
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
+import io.github.stream29.kodex.tool.multiagent.SuggestedSessionMeta
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,6 +51,7 @@ internal class ApplicationViewModelImpl(
     private val loginFactory: OpenAiLoginViewModelFactory,
     private val createDirectoryPicker: (Path) -> DirectoryPickerViewModel,
     private val newSessionArguments: (ordinal: Int) -> NewSessionViewModelArguments,
+    private val ownerScope: CoroutineScope,
 ) : ApplicationViewModel {
     private val commandMutex = Mutex()
     private var nextDraftOrdinal = 1
@@ -129,6 +139,56 @@ internal class ApplicationViewModelImpl(
     override suspend fun forkSession(sessionIndex: Int): Int = commandMutex.withLock {
         ensureOpen()
         sessions.fork(sessionIndex)
+    }
+
+    override suspend fun createSuggestedSessions(
+        arguments: SuggestSubagentTaskArgs,
+        configuration: SuggestedSessionConfiguration,
+    ): List<SuggestedSessionMeta> = commandMutex.withLock {
+        ensureOpen()
+        val created = mutableListOf<PersistedSessionViewModel>()
+        try {
+            arguments.tasks.forEach { task ->
+                created += sessions.create {
+                    KodexAgentSettings(
+                        model = configuration.model,
+                        cwd = configuration.cwd,
+                        requestUserInputMode = configuration.requestUserInputMode,
+                        reasoning = Reasoning(effort = configuration.reasoningEffort),
+                        serviceTier = configuration.serviceTier,
+                        threadName = task.name,
+                    )
+                }
+            }
+            val current = mutableNavigation.value
+            mutableNavigation.value = current.copy(
+                tabs = current.tabs + created,
+                selectedIndex = current.selectedIndex,
+            )
+            created.forEachIndexed { index, session ->
+                ownerScope.launch {
+                    try {
+                        session.rootAgent.suppressAutomaticTitle()
+                        session.rootAgent.submit(
+                            listOf(ContentItem.InputText(arguments.tasks[index].prompt)),
+                        )
+                    } catch (failure: CancellationException) {
+                        throw failure
+                    } catch (_: Throwable) {
+                        // The child Agent owns the failure notification.
+                    }
+                }
+            }
+            created.map { session ->
+                SuggestedSessionMeta(
+                    uri = session.rootAgent.storageUri,
+                    name = session.name.value,
+                )
+            }
+        } catch (failure: Throwable) {
+            created.forEach { session -> sessions.rollbackCreated(session.sessionIndex) }
+            throw failure
+        }
     }
 
     override suspend fun materializeNewSession(
@@ -322,7 +382,7 @@ internal class ApplicationViewModelImpl(
     private fun AgentSettingsViewModel.belongsTo(target: SessionViewModel): Boolean = when {
         this === target -> true
         this is AgentViewModel && target is PersistedSessionViewModel ->
-            address.sessionIndex == target.sessionIndex
+            target.rootAgent === this
 
         else -> false
     }

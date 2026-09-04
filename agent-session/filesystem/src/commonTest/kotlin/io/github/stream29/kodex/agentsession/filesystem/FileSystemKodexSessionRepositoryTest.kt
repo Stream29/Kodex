@@ -94,7 +94,7 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             val cwd = Path(root, "workspace")
             val index = repository.createInitialized(settings(cwd = cwd))
             val session = repository.open(index)
-            val storageId = session.storage.id
+            val uri = session.storage.uri
             val timestamp = Instant.parse("2026-07-22T00:00:00Z")
             val stableEvent = StableAssistantMessage(
                 listOf(ContentItem.OutputText("persisted clean event")),
@@ -136,7 +136,7 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             val reopened = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
             val reopenedSession = reopened.open(index)
             assertEquals(listOf(index), reopened.entries.value)
-            assertEquals(storageId, reopenedSession.storage.id)
+            assertEquals(uri, reopenedSession.storage.uri)
             assertEquals(cwd, reopenedSession.storage.settings[0].cwd)
             assertEquals(stableEvent, reopenedSession.storage.index[2])
             assertEquals(pendingEvents, reopenedSession.storage.unstable[2])

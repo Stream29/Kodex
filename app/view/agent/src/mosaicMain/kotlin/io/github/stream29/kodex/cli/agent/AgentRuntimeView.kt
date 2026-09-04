@@ -14,7 +14,9 @@ import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.onPlaced
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
+import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Column
+import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.app.agent.contract.AgentExecutionState
@@ -22,7 +24,12 @@ import io.github.stream29.kodex.app.agent.contract.RequestUserInputDraftAnswer
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
+import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
+import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskViewModel
 import io.github.stream29.kodex.app.agent.contract.allowsOtherAnswer
+import io.github.stream29.kodex.cli.components.TuiDropdownMenu
+import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
+import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.ScrollState
 import io.github.stream29.kodex.cli.components.TextInput
 import io.github.stream29.kodex.cli.components.TextInputLayout
@@ -32,6 +39,12 @@ import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.verticalScroll
 import io.github.stream29.kodex.cli.components.wrapToTerminalWidth
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
+import io.github.stream29.kodex.openai.ModelInfo
+import io.github.stream29.kodex.openai.RequestUserInputMode
+import io.github.stream29.kodex.openai.ServiceTier
+import io.github.stream29.kodex.openai.availableServiceTiers
+import io.github.stream29.kodex.openai.ReasoningEffort
+import kotlinx.io.files.Path
 import kotlinx.coroutines.launch
 
 @Composable
@@ -174,6 +187,206 @@ public fun RequestUserInputPanel(
             }
         }
     }
+}
+
+@Composable
+public fun SuggestSubagentTaskPanel(
+    viewModel: SuggestSubagentTaskViewModel,
+    state: SuggestSubagentTaskState.Pending,
+    models: List<ModelInfo>,
+    columns: Int,
+    rows: Int,
+) {
+    if (rows <= 0) return
+    val scope = rememberCoroutineScope()
+    val configurationDropdown = rememberTuiDropdownState()
+    val requestUserInputModeDropdown = rememberTuiDropdownState()
+    val feedback = remember(state.callId) {
+        TextInputState(TextInputValue(state.feedback, state.feedback.length))
+    }
+    val cwd = remember(state.callId) {
+        TextInputState(
+            TextInputValue(
+                state.configuration.cwd.toString(),
+                state.configuration.cwd.toString().length,
+            ),
+        )
+    }
+    LaunchedEffect(state.feedback) {
+        if (feedback.value.text != state.feedback) {
+            feedback.reset(TextInputValue(state.feedback, state.feedback.length))
+        }
+    }
+    val configurationOptions = remember(models, state.configuration) {
+        suggestedConfigurationOptions(models, state.configuration)
+    }
+    Box(modifier = Modifier.width(columns.coerceAtLeast(1)).height(rows)) {
+        Column {
+            Text("Suggested Sessions", textStyle = TextStyle.Bold)
+            state.arguments.tasks.forEach { task ->
+                Text(
+                    "${task.name}: ${task.prompt}"
+                        .wrapToTerminalWidth(columns)
+                        .joinToString("\n"),
+                )
+            }
+            Row {
+                TuiDropdownTrigger(
+                    dropdownState = configurationDropdown,
+                    label = "Config: ${state.configuration.model.value} " +
+                        "${state.configuration.reasoningEffort.suggestedDisplayName()} " +
+                        state.configuration.serviceTier.suggestedDisplayName(),
+                    enabled = !state.submitting,
+                )
+                TuiDropdownTrigger(
+                    dropdownState = requestUserInputModeDropdown,
+                    label = "Ask: ${state.configuration.requestUserInputMode.suggestedDisplayName()}",
+                    enabled = !state.submitting,
+                )
+            }
+            TextInput(
+                state = cwd,
+                layout = TextInputLayout.create(
+                    value = cwd.value,
+                    width = columns,
+                    firstLinePrefix = "  cwd: ",
+                    continuationLinePrefix = "       ",
+                ),
+                enabled = !state.submitting,
+                onValueChanged = { value ->
+                    cwd.reset(TextInputValue(value.text, value.cursorOffset))
+                    viewModel.updateConfiguration(
+                        state.callId,
+                        state.configuration.copy(cwd = Path(value.text)),
+                    )
+                },
+            )
+            TextInput(
+                state = feedback,
+                layout = TextInputLayout.create(
+                    value = feedback.value,
+                    width = columns,
+                    firstLinePrefix = "  Note: ",
+                    continuationLinePrefix = "        ",
+                ),
+                enabled = !state.submitting,
+                onValueChanged = { value ->
+                    viewModel.updateFeedback(state.callId, value.text)
+                },
+            )
+            Row {
+                TuiButton(
+                    label = if (state.submitting) "Submitting…" else "Accept",
+                    enabled = !state.submitting,
+                    onClick = {
+                        scope.launch {
+                            viewModel.submit(state.callId, state.revision, accepted = true)
+                        }
+                    },
+                )
+                TuiButton(
+                    label = "Reject",
+                    enabled = !state.submitting,
+                    onClick = {
+                        scope.launch {
+                            viewModel.submit(state.callId, state.revision, accepted = false)
+                        }
+                    },
+                )
+            }
+        }
+        TuiDropdownMenu(
+            dropdownState = configurationDropdown,
+            options = configurationOptions,
+            selected = state.configuration.toMenuOption(),
+            optionLabel = SuggestedConfigurationOption::label,
+            onSelect = { option ->
+                configurationDropdown.dismiss()
+                viewModel.updateConfiguration(state.callId, option.configuration)
+            },
+        )
+        TuiDropdownMenu(
+            dropdownState = requestUserInputModeDropdown,
+            options = RequestUserInputMode.entries.toList(),
+            selected = state.configuration.requestUserInputMode,
+            optionLabel = RequestUserInputMode::suggestedDisplayName,
+            onSelect = { mode ->
+                requestUserInputModeDropdown.dismiss()
+                viewModel.updateConfiguration(
+                    state.callId,
+                    state.configuration.copy(requestUserInputMode = mode),
+                )
+            },
+        )
+    }
+}
+
+private data class SuggestedConfigurationOption(
+    val configuration: io.github.stream29.kodex.app.agent.contract.SuggestedSessionConfiguration,
+) {
+    val label: String
+        get() = buildString {
+            append(configuration.model)
+            append(' ')
+            append(configuration.reasoningEffort.suggestedDisplayName())
+            if (configuration.serviceTier != ServiceTier.Default) {
+                append(' ')
+                append(configuration.serviceTier.suggestedDisplayName())
+            }
+        }
+}
+
+private fun suggestedConfigurationOptions(
+    models: List<ModelInfo>,
+    current: io.github.stream29.kodex.app.agent.contract.SuggestedSessionConfiguration,
+): List<SuggestedConfigurationOption> {
+    val modelOptions = (models.map(ModelInfo::slug) + current.model).distinct()
+    return modelOptions.flatMap { model ->
+        val info = models.firstOrNull { it.slug == model }
+        val efforts = info?.supportedReasoningLevels
+            ?.map { it.effort }
+            .orEmpty()
+            .ifEmpty { listOf(current.reasoningEffort) }
+        val tiers = info?.availableServiceTiers()
+            .orEmpty()
+            .ifEmpty { listOf(ServiceTier.Default) }
+        efforts.flatMap { effort ->
+            tiers.map { tier ->
+                SuggestedConfigurationOption(
+                    current.copy(
+                        model = model,
+                        reasoningEffort = effort,
+                        serviceTier = tier,
+                    ),
+                )
+            }
+        }
+    }
+}
+
+private fun io.github.stream29.kodex.app.agent.contract.SuggestedSessionConfiguration.toMenuOption():
+    SuggestedConfigurationOption = SuggestedConfigurationOption(this)
+
+private fun ReasoningEffort.suggestedDisplayName(): String = when (this) {
+    ReasoningEffort.None -> "none"
+    ReasoningEffort.Minimal -> "minimal"
+    ReasoningEffort.Low -> "low"
+    ReasoningEffort.Medium -> "medium"
+    ReasoningEffort.High -> "high"
+    ReasoningEffort.XHigh -> "xhigh"
+    ReasoningEffort.Max -> "max"
+    is ReasoningEffort.Custom -> wireName
+}
+
+private fun ServiceTier.suggestedDisplayName(): String = when (this) {
+    ServiceTier.Default -> "default"
+    ServiceTier.Fast -> "fast"
+    ServiceTier.Flex -> "flex"
+}
+
+private fun RequestUserInputMode.suggestedDisplayName(): String = when (this) {
+    RequestUserInputMode.AskUser -> "ask user"
+    RequestUserInputMode.NoQuestion -> "no question"
 }
 
 @Composable

@@ -14,7 +14,8 @@ import kotlin.time.Instant
  * `agent-storage-contract-ext`.
  */
 public interface KodexAgentStorage {
-    public val id: String
+    /** Stable identity locator for this storage backend. */
+    public val uri: String
     public val index: IndexVersioned<CleanIndexEntry>
     public val work: IndexVersioned<StableWorkEvent>
     public val settings: IndexVersioned<KodexAgentSettings>

@@ -109,7 +109,7 @@ private suspend fun runFreshSessionHookIntegration() {
         assertEquals(0, session.storage.tokenCount.latestIndex())
         assertEquals(0L, session.storage.tokenCount[0])
 
-        val hookSessionId = session.storage.id
+        val hookUri = session.storage.uri
         val runtime = session.runtime
 
         val prompt = "Reply with exactly $HookIntegrationMarker and no other text."
@@ -123,8 +123,8 @@ private suspend fun runFreshSessionHookIntegration() {
             requests.map { request -> request.getValue("type").jsonPrimitive.content },
         )
         assertEquals(
-            setOf(hookSessionId),
-            requests.map { request -> request.getValue("session_id").jsonPrimitive.content }.toSet(),
+            setOf(hookUri),
+            requests.map { request -> request.getValue("uri").jsonPrimitive.content }.toSet(),
         )
         assertEquals(
             prompt,

@@ -70,7 +70,7 @@ internal fun KodexAgentState.fixedTools(
                     WebRunTools.createTool(
                         WebRunToolClient(
                             client = dependencies.client,
-                            sessionId = storage.id,
+                            sessionId = storage.uri,
                             modelProvider = modelProvider,
                         ),
                     ),
@@ -88,7 +88,7 @@ internal fun KodexAgentState.fixedTools(
                             client = dependencies.client,
                             workingDirectoryProvider = workingDirectoryProvider,
                         ),
-                        outputDirectory = ImageGenerationTools.outputDirectory(KodexHome, storage.id),
+                        outputDirectory = ImageGenerationTools.outputDirectory(KodexHome, storage.uri),
                     ),
                 )
             },

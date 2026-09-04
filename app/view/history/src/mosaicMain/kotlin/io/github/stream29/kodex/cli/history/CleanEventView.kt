@@ -61,6 +61,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
@@ -87,6 +88,7 @@ import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.WebSearchAction
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
 import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
@@ -221,6 +223,15 @@ public fun UnstableCleanEvent.render(
         is PendingRequestUserInputToolEvent -> ToolEvent(
             summary = arguments.ongoingToolSummary(),
             rawName = "request_user_input",
+            status = "running",
+            expansionKey = callId,
+        ) {
+            section("Arguments") { arguments.renderDetails() }
+        }
+
+        is PendingSuggestSubagentTaskToolEvent -> ToolEvent(
+            summary = "Waiting for approval to create ${arguments.tasks.size} Session(s)",
+            rawName = "suggest_subagent_task",
             status = "running",
             expansionKey = callId,
         ) {
@@ -1003,6 +1014,15 @@ private fun RequestUserInputArgs.renderDetails(
                 if (option.description.isBlank()) option.label else "${option.label} (${option.description})"
             }
             ?.let { Detail("Options", it, textStyle) }
+    }
+}
+
+@Composable
+private fun SuggestSubagentTaskArgs.renderDetails(
+    textStyle: TextStyle = TextStyle.Unspecified,
+) {
+    tasks.forEach { task ->
+        Detail(task.name, task.prompt, textStyle)
     }
 }
 

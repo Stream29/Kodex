@@ -4,6 +4,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolJson
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableSuggestSubagentTaskResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionResult
@@ -33,6 +35,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
@@ -125,6 +128,14 @@ public fun PendingToolEvent.toFailedToolEvent(message: String): StableCleanEvent
                 itemId = itemId,
                 arguments = arguments,
                 result = StableRequestUserInputResult.Failure(message),
+            )
+
+        is PendingSuggestSubagentTaskToolEvent ->
+            StableSuggestSubagentTaskToolEvent(
+                callId = callId,
+                itemId = itemId,
+                arguments = arguments,
+                result = StableSuggestSubagentTaskResult.Failure(message),
             )
 
         is PendingPlanUpdate ->

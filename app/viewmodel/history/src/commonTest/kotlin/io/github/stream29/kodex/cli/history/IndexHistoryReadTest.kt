@@ -238,7 +238,7 @@ private class CountingHistoryStorage(
     val indexTimeline = CountingHistoryTimeline(delegate.index)
     val workTimeline = CountingHistoryTimeline(delegate.work)
 
-    override val id: String = delegate.id
+    override val uri: String = delegate.uri
     override val index: IndexVersioned<CleanIndexEntry> = indexTimeline
     override val work: IndexVersioned<StableWorkEvent> = workTimeline
     override val settings: IndexVersioned<KodexAgentSettings> = delegate.settings

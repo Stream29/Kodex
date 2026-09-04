@@ -176,8 +176,8 @@ private class KodexAgentStateImpl(
                 role = MessageRole.Developer,
                 content = listOf(ContentItem.InputText(renderPlanningInstructions())),
             )
-            val contextPrefix = contextPrefixResolver.resolve(settings).render()
-            val threadId = storage.id.toCodexThreadId()
+            val contextPrefix = contextPrefixResolver.resolve(settings, storage.uri).render()
+            val threadId = storage.uri.toCodexThreadId()
             val windowId = settings.codexRequestWindowId(threadId)
             val metadata = CodexResponsesMetadata(
                 installationId = settings.installationId,
@@ -258,7 +258,7 @@ private class KodexAgentStateImpl(
         return try {
             val messageWindow = storage.activeMessageWindowAt(snapshot.index)
             val input = messageWindow.flatMap(StableCleanEvent::toResponseHistoryItems)
-            val threadId = storage.id.toCodexThreadId()
+            val threadId = storage.uri.toCodexThreadId()
             val windowId = snapshot.settings.codexRequestWindowId(threadId)
             val metadata = CodexResponsesMetadata(
                 installationId = snapshot.settings.installationId,

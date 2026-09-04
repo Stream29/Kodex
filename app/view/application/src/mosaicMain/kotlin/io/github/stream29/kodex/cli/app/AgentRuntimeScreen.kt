@@ -24,8 +24,10 @@ import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
+import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.cli.agent.RequestUserInputPanel
+import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskPanel
 import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
@@ -55,6 +57,7 @@ internal fun AgentRuntimeScreen(
     val execution by viewModel.execution.collectAsState()
     val pendingSteer by viewModel.pendingSteer.collectAsState()
     val requestUserInput by viewModel.requestUserInput.state.collectAsState()
+    val suggestSubagentTask by viewModel.suggestSubagentTask.state.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val tokenCount by viewModel.tokenCount.collectAsState()
     val composerState by viewModel.composer.state.collectAsState()
@@ -69,6 +72,8 @@ internal fun AgentRuntimeScreen(
     )
     val submitHint = submitToSteerHint(execution.running, composer.value.text)
     val pendingRequest = requestUserInput as? RequestUserInputState.Pending
+    val pendingSuggestion = suggestSubagentTask as? SuggestSubagentTaskState.Pending
+    val hostInteractionPending = pendingRequest != null || pendingSuggestion != null
     val submitHintRows = if (submitHint == null) 0 else 1
     val statusBarRows = agentRuntimeStatusBarRows(
         columns = columns,
@@ -79,7 +84,7 @@ internal fun AgentRuntimeScreen(
     val flexibleRows =
         (rows - HistoryComposerSeparatorRows - statusBarRows - submitHintRows).coerceAtLeast(0)
     val minimumComposerRows = minOf(1, flexibleRows)
-    val requestUserInputRows = if (pendingRequest == null) {
+    val requestUserInputRows = if (!hostInteractionPending) {
         0
     } else {
         minOf(
@@ -136,6 +141,17 @@ internal fun AgentRuntimeScreen(
                 )
             }
         }
+        pendingSuggestion?.let { pending ->
+            if (requestUserInputRows > 0) {
+                SuggestSubagentTaskPanel(
+                    viewModel = viewModel.suggestSubagentTask,
+                    state = pending,
+                    models = viewModel.models.collectAsState().value,
+                    columns = columns,
+                    rows = requestUserInputRows,
+                )
+            }
+        }
         if (pendingSteerLines.isNotEmpty()) {
             PendingSteerPreview(pendingSteerLines, columns)
         }
@@ -149,8 +165,8 @@ internal fun AgentRuntimeScreen(
             state = composer,
             layout = composerLayout,
             newLineKey = newLineKey,
-            autoFocus = pendingRequest == null,
-            enabled = pendingRequest == null,
+            autoFocus = !hostInteractionPending,
+            enabled = !hostInteractionPending,
             submitHint = submitHint,
             onSubmit = {
                 scope.launch { viewModel.submitComposer(composerState.revision) }

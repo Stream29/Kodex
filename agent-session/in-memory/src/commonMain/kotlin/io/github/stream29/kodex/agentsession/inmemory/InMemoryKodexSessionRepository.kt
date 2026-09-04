@@ -245,7 +245,7 @@ private class SessionAgentStorage(
     parentScope: CoroutineScope,
     delegate: InMemoryKodexAgentStorage,
 ) : MutableKodexAgentStorage {
-    override val id: String = delegate.id
+    override val uri: String = delegate.uri
     override val index = SessionIndexVersioned(parentScope, delegate.index)
     override val work = SessionIndexVersioned(parentScope, delegate.work)
     override val settings = SessionIndexVersioned(parentScope, delegate.settings)

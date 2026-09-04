@@ -42,6 +42,7 @@ import kotlinx.coroutines.flow.toList
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 
 val turnHookRuntimeTest by testSuite {
     testFixture {
@@ -461,8 +462,8 @@ val turnHookRuntimeTest by testSuite {
         )
     }
 
-    test("mixed pending tools do not run the stop hook") {
-        var stopCalls = 0
+    test("mixed host-owned pending tools run the stop hook and remain pending on finish") {
+        val stopRequests = mutableListOf<StopRequest>()
         val storage = InMemoryKodexAgentStorage(testSettings())
         val state = KodexAgentState(
             client = mockOpenAiClient {
@@ -472,9 +473,9 @@ val turnHookRuntimeTest by testSuite {
                         ResponsesStreamEvent.OutputItemDone(
                             1,
                             ResponseItem.FunctionCall(
-                                name = "host_only",
-                                arguments = "{}",
-                                callId = "call_host_only",
+                                name = "suggest_subagent_task",
+                                arguments = """{"tasks":[{"name":"inspect","prompt":"Inspect the issue."}]}""",
+                                callId = "call_suggest_subagent_task",
                             ),
                         ),
                         ResponsesStreamEvent.Completed(Response(id = "response_1", endTurn = false)),
@@ -493,8 +494,8 @@ val turnHookRuntimeTest by testSuite {
             .turnHookRuntime(
                 logger = TestLogger,
                 hooks = RecordingTurnHooks(
-                    stop = {
-                        stopCalls += 1
+                    stop = { request ->
+                        stopRequests += request
                         StopResult.Finish
                     },
                 ),
@@ -503,9 +504,12 @@ val turnHookRuntimeTest by testSuite {
         runtime.appendUserMessage(listOf(ContentItem.InputText("run both")))
         runtime.resume()
 
-        assertEquals(0, stopCalls)
+        assertEquals(1, stopRequests.size)
+        assertEquals("Which scope?", stopRequests.single().lastAssistantMessage)
         val pending = assertIs<KodexAgentStateValue.ToolPending>(state.state.value)
         assertEquals(2, pending.events.size)
+        assertTrue(pending.events.any { it.toolName == "request_user_input" })
+        assertTrue(pending.events.any { it.toolName == "suggest_subagent_task" })
     }
 
     test("stop hook continuation stays in one turn and persists its wire message") {

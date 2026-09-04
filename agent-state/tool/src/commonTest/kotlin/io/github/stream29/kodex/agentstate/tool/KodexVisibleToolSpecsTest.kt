@@ -17,6 +17,7 @@ import io.github.stream29.kodex.tool.applypatch.ApplyPatchTools
 import io.github.stream29.kodex.tool.currenttime.CurrentTimeTools
 import io.github.stream29.kodex.tool.getcontextremaining.GetContextRemainingTools
 import io.github.stream29.kodex.tool.plan.PlanTools
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskTools
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputTools
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools
 import io.github.stream29.kodex.tool.webrun.WebRunTools
@@ -44,7 +45,7 @@ val kodexVisibleToolSpecsTest by testSuite {
         )
 
         assertEquals(
-            fixedSpecs + PlanTools.spec + RequestUserInputTools.spec,
+            fixedSpecs + PlanTools.spec + RequestUserInputTools.spec + SuggestSubagentTaskTools.spec,
             specs.dropLast(1),
         )
         val toolSearch = assertIs<ToolSpec.ToolSearch>(specs.last())

@@ -6,12 +6,12 @@ import kotlinx.io.files.Path
 /**
  * Session data projected from the state snapshot visible at one Hook boundary.
  *
- * @property sessionId Identity of the backing Agent storage.
+ * @property uri URI of the backing Agent storage.
  * @property cwd Working directory active at the Hook boundary.
  * @property model Model active at the Hook boundary.
  */
 public data class HookSessionContext(
-    public val sessionId: String,
+    public val uri: String,
     public val cwd: Path,
     public val model: String,
 )
@@ -30,11 +30,11 @@ public data class HookTurnContext(
 /**
  * Projects one persisted Agent settings snapshot into Hook session data.
  *
- * @param sessionId Identity of the Agent storage that owns [this].
+ * @param uri URI of the Agent storage that owns [this].
  */
-public fun KodexAgentSettings.toHookSessionContext(sessionId: String): HookSessionContext =
+public fun KodexAgentSettings.toHookSessionContext(uri: String): HookSessionContext =
     HookSessionContext(
-        sessionId = sessionId,
+        uri = uri,
         cwd = cwd,
         model = model.value,
     )
@@ -42,14 +42,14 @@ public fun KodexAgentSettings.toHookSessionContext(sessionId: String): HookSessi
 /**
  * Projects one persisted Agent settings snapshot into Hook turn data.
  *
- * @param sessionId Identity of the Agent storage that owns [this].
+ * @param uri URI of the Agent storage that owns [this].
  * @param turnId Persisted identity of the active logical user turn.
  */
 public fun KodexAgentSettings.toHookTurnContext(
-    sessionId: String,
+    uri: String,
     turnId: String,
 ): HookTurnContext =
     HookTurnContext(
-        session = toHookSessionContext(sessionId),
+        session = toHookSessionContext(uri),
         turnId = turnId,
     )

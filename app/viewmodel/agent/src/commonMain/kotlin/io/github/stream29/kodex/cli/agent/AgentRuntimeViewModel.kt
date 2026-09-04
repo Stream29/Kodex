@@ -4,12 +4,12 @@ import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
-import io.github.stream29.kodex.app.agent.contract.AgentAddress
 import io.github.stream29.kodex.app.agent.contract.AgentComposerSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.AgentExecutionCapabilities
 import io.github.stream29.kodex.app.agent.contract.AgentExecutionPhase
@@ -26,6 +26,8 @@ import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModelFactory
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
+import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskViewModel
+import io.github.stream29.kodex.app.agent.contract.SuggestedSessionConfiguration
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.cli.sessiontitle.AgentTitleGeneration
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
@@ -37,6 +39,8 @@ import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecProcessSession
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
+import io.github.stream29.kodex.tool.multiagent.SuggestedSessionMeta
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -77,14 +81,18 @@ public class AgentAutomaticTitleConfiguration(
 /** Contract implementation for one exact open Agent session. */
 internal class AgentRuntimeViewModel(
     private val session: KodexAgentSession,
-    override val address: AgentAddress,
     private val scope: CoroutineScope,
     initialSettings: KodexAgentSettings,
     override val models: StateFlow<List<ModelInfo>>,
     override val composer: ComposerViewModel,
     override val history: AgentHistoryViewModel,
     private val automaticTitleConfiguration: AgentAutomaticTitleConfiguration? = null,
+    private val createSuggestedSessions: (suspend (
+        SuggestSubagentTaskArgs,
+        SuggestedSessionConfiguration,
+    ) -> List<SuggestedSessionMeta>)? = null,
 ) : AgentViewModel {
+    override val storageUri: String = session.storage.uri
     private val requestUserInputImpl = RequestUserInputViewModelImpl(
         runtime = session.runtime,
         ownerScope = scope,
@@ -92,6 +100,26 @@ internal class AgentRuntimeViewModel(
             launchRuntimeOperation("Unable to resume Agent.") {
                 session.runtime.resume()
             }
+        },
+    )
+    private val suggestSubagentTaskImpl = SuggestSubagentTaskViewModelImpl(
+        runtime = session.runtime,
+        ownerScope = scope,
+        createSessions = createSuggestedSessions,
+        resumeRuntime = {
+            launchRuntimeOperation("Unable to resume Agent.") {
+                session.runtime.resume()
+            }
+        },
+        defaultConfiguration = {
+            val settings = mutableSettings.value
+            SuggestedSessionConfiguration(
+                model = settings.model,
+                reasoningEffort = settings.reasoning.effort,
+                serviceTier = settings.serviceTier,
+                cwd = settings.cwd,
+                requestUserInputMode = settings.requestUserInputMode,
+            )
         },
     )
     private val automaticTitle = AgentTitleGeneration(scope)
@@ -110,6 +138,7 @@ internal class AgentRuntimeViewModel(
     private var closed: Boolean = false
 
     override val requestUserInput: RequestUserInputViewModel = requestUserInputImpl
+    override val suggestSubagentTask: SuggestSubagentTaskViewModel = suggestSubagentTaskImpl
     override val historyIndex: HistoryIndexViewModel = HistoryIndexViewModelImpl(
         timeline = session.storage.index,
         latestIndex = session.runtime.latestIndex,
@@ -137,7 +166,9 @@ internal class AgentRuntimeViewModel(
         }
         scope.launch {
             session.runtime.state.collect { value ->
-                requestUserInputImpl.synchronize(value.singleRequestUserInputOrNull())
+                val pending = value.pendingHostInteractions()
+                requestUserInputImpl.synchronize(pending.first)
+                suggestSubagentTaskImpl.synchronize(pending.second)
                 publishExecution()
             }
         }
@@ -157,6 +188,10 @@ internal class AgentRuntimeViewModel(
             publishFailure("Unable to submit Agent content.", failure)
             throw failure
         }
+    }
+
+    override suspend fun suppressAutomaticTitle() = runInOwnerScope {
+        automaticTitle.suppress()
     }
 
     override suspend fun submitComposer(
@@ -366,6 +401,7 @@ internal class AgentRuntimeViewModel(
         closed = true
         mutableLifecycle.value = AgentLifecycleState.Closing
         requestUserInputImpl.close()
+        suggestSubagentTaskImpl.close()
         composer.close()
         history.close()
         automaticTitle.close()
@@ -532,12 +568,15 @@ internal class AgentRuntimeViewModel(
 
 public suspend fun createAgentRuntimeViewModel(
     session: KodexAgentSession,
-    address: AgentAddress,
     ownerScope: CoroutineScope,
     composerFactory: ComposerViewModelFactory,
     historyFactory: AgentRuntimeHistoryViewModelFactory,
     models: StateFlow<List<ModelInfo>> = MutableStateFlow(emptyList()),
     automaticTitleConfiguration: AgentAutomaticTitleConfiguration? = null,
+    createSuggestedSessions: (suspend (
+        SuggestSubagentTaskArgs,
+        SuggestedSessionConfiguration,
+    ) -> List<SuggestedSessionMeta>)? = null,
 ): AgentViewModel {
     val latestIndex = session.runtime.latestIndex.value
     require(latestIndex >= 0) { "An Agent ViewModel requires an initialized Agent." }
@@ -552,13 +591,13 @@ public suspend fun createAgentRuntimeViewModel(
     }
     return AgentRuntimeViewModel(
         session = session,
-        address = address,
         scope = childScope,
         initialSettings = session.storage.settings[latestIndex],
         models = models,
         composer = composer,
         history = history,
         automaticTitleConfiguration = automaticTitleConfiguration,
+        createSuggestedSessions = createSuggestedSessions,
     )
 }
 
@@ -573,10 +612,13 @@ public fun interface AgentRuntimeHistoryViewModelFactory {
 /** Exact runtime values for one materialized Agent definition. */
 public data class AgentRuntimeViewModelArguments(
     public val session: KodexAgentSession,
-    public val address: AgentAddress,
     public val ownerScope: CoroutineScope,
     public val models: StateFlow<List<ModelInfo>>,
     public val automaticTitleConfiguration: AgentAutomaticTitleConfiguration?,
+    public val createSuggestedSessions: (suspend (
+        SuggestSubagentTaskArgs,
+        SuggestedSessionConfiguration,
+    ) -> List<SuggestedSessionMeta>)?,
 )
 
 /** Koin-resolved creator for one materialized Agent contract. */
@@ -589,12 +631,12 @@ public class DefaultAgentRuntimeViewModelFactory(
     public suspend fun create(): AgentViewModel =
         createAgentRuntimeViewModel(
             session = arguments.session,
-            address = arguments.address,
             ownerScope = arguments.ownerScope,
             composerFactory = composerFactory,
             historyFactory = historyFactory,
             models = arguments.models,
             automaticTitleConfiguration = arguments.automaticTitleConfiguration,
+            createSuggestedSessions = arguments.createSuggestedSessions,
         )
 }
 
@@ -669,10 +711,17 @@ private val KodexAgentStateValue.canReplaceHistory: Boolean
             -> false
     }
 
-private fun KodexAgentStateValue.singleRequestUserInputOrNull(): PendingRequestUserInputToolEvent? =
-    (this as? KodexAgentStateValue.ToolPending)
+private fun KodexAgentStateValue.pendingHostInteractions():
+    Pair<PendingRequestUserInputToolEvent?, PendingSuggestSubagentTaskToolEvent?> {
+    val event = (this as? KodexAgentStateValue.ToolPending)
         ?.events
-        ?.singleOrNull() as? PendingRequestUserInputToolEvent
+        ?.firstOrNull {
+            it is PendingRequestUserInputToolEvent ||
+                it is PendingSuggestSubagentTaskToolEvent
+        }
+    return event as? PendingRequestUserInputToolEvent to
+        (event as? PendingSuggestSubagentTaskToolEvent)
+}
 
 private suspend fun MutableKodexAgentStorage.hasNonblankUserTextBefore(
     untilExclusive: Int,

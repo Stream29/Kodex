@@ -70,7 +70,7 @@ private class CountingStorage(
     val countedIndex = CountingTimeline(delegate.index)
     val countedWork = CountingTimeline(delegate.work)
 
-    override val id: String = delegate.id
+    override val uri: String = delegate.uri
     override val index: IndexVersioned<io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanIndexEntry>
         get() = countedIndex
     override val work: IndexVersioned<io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWorkEvent>

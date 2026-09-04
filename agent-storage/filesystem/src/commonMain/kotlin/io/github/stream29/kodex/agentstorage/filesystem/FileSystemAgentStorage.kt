@@ -21,7 +21,7 @@ public class FileSystemAgentStorage internal constructor(
     fileSystem: CoroutineFileSystem,
     @Suppress("UNUSED_PARAMETER") construction: Unit,
 ) : MutableKodexAgentStorage {
-    override val id: String = "filesystem:$directory"
+    override val uri: String = directory.toStorageUri()
 
     override val index: FileSystemIndexVersioned<CleanIndexEntry> =
         FileSystemIndexVersioned(
@@ -112,10 +112,11 @@ public suspend fun FileSystemAgentStorage.Companion.ofEmpty(
     mustCreateDirectory: Boolean = true,
 ): FileSystemAgentStorage {
     fileSystem.createDirectories(directory, mustCreate = mustCreateDirectory)
+    val resolved = fileSystem.resolve(directory)
     TimelineDirectories.forEach { name ->
-        fileSystem.createDirectories(Path(directory, name), mustCreate = true)
+        fileSystem.createDirectories(Path(resolved, name), mustCreate = true)
     }
-    return FileSystemAgentStorage(directory, fileSystem).also { storage ->
+    return FileSystemAgentStorage(resolved, fileSystem).also { storage ->
         storage.index.reconcileLatestIndexUnsafe(-1)
         storage.work.reconcileLatestIndexUnsafe(-1)
         storage.settings.reconcileLatestIndexUnsafe(-1)

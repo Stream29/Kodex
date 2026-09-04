@@ -107,7 +107,7 @@ public class KodexAgentCompactionRuntime(
             } else {
                 val settings = storage.settings[latestIndex.value]
                 val context = settings.toHookTurnContext(
-                    sessionId = storage.id,
+                    uri = storage.uri,
                     turnId = settings.turnId,
                 )
                 val request = CompactionHookRequest(

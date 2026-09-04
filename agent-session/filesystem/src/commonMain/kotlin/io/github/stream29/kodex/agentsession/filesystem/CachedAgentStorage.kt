@@ -32,7 +32,7 @@ internal suspend fun FileSystemAgentStorage.cached(
     return CachedAgentStorage(
         ownerScope = ownerScope,
         backing = this,
-        storageId = id,
+        backingUri = uri,
         cachedIndex = index.cached(ownerScope, valueCacheSize),
         cachedWork = work.cached(ownerScope, valueCacheSize),
         cachedSettings = settings.cached(ownerScope, valueCacheSize),
@@ -46,7 +46,7 @@ internal suspend fun FileSystemAgentStorage.cached(
 internal class CachedAgentStorage internal constructor(
     private val ownerScope: CoroutineScope,
     internal val backing: FileSystemAgentStorage,
-    private val storageId: String,
+    private val backingUri: String,
     private val cachedIndex: MutableIndexVersioned<CleanIndexEntry>,
     private val cachedWork: MutableIndexVersioned<StableWorkEvent>,
     private val cachedSettings: MutableIndexVersioned<KodexAgentSettings>,
@@ -54,10 +54,10 @@ internal class CachedAgentStorage internal constructor(
     private val cachedTokenCount: MutableIndexVersioned<Long>,
     private val cachedUnstable: MutableIndexVersioned<List<UnstableCleanEvent>>,
 ) : MutableKodexAgentStorage {
-    override val id: String
+    override val uri: String
         get() {
             requireActive()
-            return storageId
+            return backingUri
         }
     override val index: MutableIndexVersioned<CleanIndexEntry>
         get() {

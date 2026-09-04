@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.app.migration
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.app.migration.v0_3_5.KodexHomeSkill
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
@@ -8,6 +9,7 @@ import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 public val kodexHomeMigrationTest by testSuite {
     testFixture { temporaryDirectory() } closeWith {
@@ -92,6 +94,26 @@ public val kodexHomeMigrationTest by testSuite {
             assertEquals(listOf("1.2.0", "2.0.0"), calls)
             assertEquals(listOf("1.1.0 -> 1.2.0", "1.2.0 -> 2.0.0"), migrationStarts)
             assertEquals("\"3.0.0\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
+        }
+
+        test("activates the bundled Home skill when upgrading to 0.3.5") { home ->
+            SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"0.3.4\"")
+
+            prepareKodexHome(
+                home = home,
+                currentVersion = MigrationVersion("0.3.5"),
+                migrations = KodexHomeMigrations,
+                fileSystem = SystemCoroutineFileSystem,
+            ).closeAndJoin()
+
+            assertEquals(
+                KodexHomeSkill,
+                SystemCoroutineFileSystem.readString(
+                    Path(home, "skills", "kodex-home", "SKILL.md"),
+                ),
+            )
+            assertEquals("\"0.3.5\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
+            assertTrue(SystemCoroutineFileSystem.exists(Path(home, "skills", "kodex-home")))
         }
 
         test("keeps the last completed version when a migration fails") { home ->

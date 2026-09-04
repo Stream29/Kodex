@@ -11,6 +11,7 @@ import io.github.stream29.kodex.tool.currenttime.CurrentTimeTools
 import io.github.stream29.kodex.tool.getcontextremaining.GetContextRemainingTools
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenerationTools
 import io.github.stream29.kodex.tool.plan.PlanTools
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskTools
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputTools
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchDocument
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchSourceInfo
@@ -50,6 +51,7 @@ public fun McpService.visibleToolSpecs(
         add(PlanTools.spec)
         if (settings.requestUserInputMode == RequestUserInputMode.AskUser) {
             add(RequestUserInputTools.spec)
+            add(SuggestSubagentTaskTools.spec)
         }
         if (deferredDocuments.isNotEmpty()) {
             add(

@@ -88,6 +88,7 @@ private fun AgentContextPrefix.renderEnvironmentContext(): String = promptXml {
         render(cwd)
         render(shell)
         render(TimeZone.currentSystemDefault())
+        render(sessionMeta)
     }
 }
 
@@ -111,4 +112,11 @@ private fun PromptXmlBuilder.render(timeZone: TimeZone) {
         text(Clock.System.now().toLocalDateTime(timeZone).date.toString())
     }
     tag("timezone") { text(timeZone.toString()) }
+}
+
+private fun PromptXmlBuilder.render(sessionMeta: io.github.stream29.kodex.agentcontext.prefix.contract.AgentSessionMeta) {
+    tag("current_session") {
+        tag("storage_uri") { text(sessionMeta.uri) }
+        tag("name") { text(sessionMeta.name) }
+    }
 }

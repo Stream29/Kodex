@@ -39,7 +39,7 @@ import kotlinx.coroutines.withContext
 public fun KodexAgentState.buildMasterAgentRuntime(
     dependencies: KodexAgentDependencies,
 ): AgentRuntime {
-    val sessionLogger = RuntimeLogger.session(storage.id)
+    val sessionLogger = RuntimeLogger.session(storage.uri)
     return try {
         buildAgentRuntime(sessionLogger) { pendingSteer, agentLogger ->
             masterRuntimeLayer(
@@ -109,7 +109,7 @@ private fun KodexAgentState.buildAgentRuntime(
         KLogger,
     ) -> AgentRuntimeLayer,
 ): AgentRuntime {
-    val logger = sessionLogger.agent(storage.id)
+    val logger = sessionLogger.agent()
     val pendingSteer = MutableStateFlow(emptyList<StableIndexEvent.Steerable>())
     return try {
         val layer = buildLayer(pendingSteer, logger)
