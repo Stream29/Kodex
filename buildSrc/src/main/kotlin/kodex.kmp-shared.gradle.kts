@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "io.github.stream29"
-version = "0.3.4"
+version = "0.4.0"
 
 kotlin {
     explicitApi()
