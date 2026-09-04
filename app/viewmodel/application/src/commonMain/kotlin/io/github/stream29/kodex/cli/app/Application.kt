@@ -347,19 +347,24 @@ public class KodexApplication private constructor(
                         parametersOf(agentState, ownerScope, agentSession.runtime.runningTurn)
                     }.create()
                 }
+                lateinit var applicationForSuggestedSessions: ApplicationViewModel
                 val sessionAgentFactory = PersistedSessionAgentViewModelFactory {
                         agentSession,
-                        address,
                         ownerScope,
                     ->
                     graph.koin.get<DefaultAgentRuntimeViewModelFactory> {
                         parametersOf(
                             AgentRuntimeViewModelArguments(
                                 session = agentSession,
-                                address = address,
                                 ownerScope = ownerScope,
                                 models = modelCatalog.models,
                                 automaticTitleConfiguration = automaticTitles,
+                                createSuggestedSessions = { arguments, configuration ->
+                                    applicationForSuggestedSessions.createSuggestedSessions(
+                                        arguments,
+                                        configuration,
+                                    )
+                                },
                             ),
                             agentHistoryFactory,
                         )
@@ -418,8 +423,10 @@ public class KodexApplication private constructor(
                             globalSettings = globalSettings,
                             workingDirectory = resolvedWorkingDirectory,
                         ),
+                        scope,
                     )
                 }
+                applicationForSuggestedSessions = applicationViewModel
                 val newLineKey = globalSettings.settings
                     .map { settings -> settings.newLineKey }
                     .stateIn(
@@ -501,6 +508,7 @@ internal fun createApplicationViewModel(
     @InjectedParam loginFactory: OpenAiLoginViewModelFactory,
     @InjectedParam createDirectoryPicker: (Path) -> DirectoryPickerViewModel,
     @InjectedParam newSessionArguments: NewSessionViewModelArgumentsProvider,
+    @InjectedParam ownerScope: CoroutineScope,
 ): ApplicationViewModel = ApplicationViewModelImpl(
     sessions = sessions,
     newSessionFactory = newSessionFactory,
@@ -509,6 +517,7 @@ internal fun createApplicationViewModel(
     loginFactory = loginFactory,
     createDirectoryPicker = createDirectoryPicker,
     newSessionArguments = newSessionArguments::create,
+    ownerScope = ownerScope,
 )
 
 private fun io.github.stream29.kodex.cli.settings.KodexNewSessionSettings.toAgentSettings(

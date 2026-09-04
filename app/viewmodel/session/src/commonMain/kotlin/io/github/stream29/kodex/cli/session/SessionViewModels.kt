@@ -6,7 +6,6 @@ import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.revert
-import io.github.stream29.kodex.app.agent.contract.AgentAddress
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
@@ -219,7 +218,6 @@ public class DefaultPersistedSessionViewModelRegistry(
 public fun interface PersistedSessionAgentViewModelFactory {
     public suspend fun create(
         session: KodexAgentSession,
-        address: AgentAddress,
         ownerScope: CoroutineScope,
     ): AgentViewModel
 }
@@ -262,10 +260,8 @@ private class PersistedSessionViewModelImpl(
     }
 
     suspend fun initialize() {
-        val rootAddress = AgentAddress(sessionIndex, rootSession.storage.id)
         rootAgent = agentFactory.create(
             session = rootSession,
-            address = rootAddress,
             ownerScope = ownerScope,
         )
         ownerScope.launch {
@@ -286,7 +282,7 @@ private class PersistedSessionViewModelImpl(
         target: AgentHistoryTarget,
     ): Int = mutex.withLock {
         ensureOpen()
-        require(source === rootAgent && source.address == rootAgent.address) {
+        require(source === rootAgent) {
             "Fork source is not owned by this persisted Session."
         }
         require(source.history.contains(target.generation, target.storageIndex)) {
@@ -310,7 +306,7 @@ private class PersistedSessionViewModelImpl(
             "Fork history entry $sourceIndex is no longer committed."
         }
         val targetIndex = repository.createFork(
-            sourceEntryIndex = source.address.sessionIndex,
+            sourceEntryIndex = sessionIndex,
         )
         try {
             val targetSession = repository.open(targetIndex)
@@ -349,7 +345,7 @@ private class PersistedSessionViewModelImpl(
         val sourceIndex = sourceStorage.latestIndex()
         require(sourceIndex >= 0) { "Cannot fork an uninitialized Session." }
         val targetIndex = repository.createFork(
-            sourceEntryIndex = rootAgent.address.sessionIndex,
+            sourceEntryIndex = sessionIndex,
         )
         try {
             val targetSession = repository.open(targetIndex)

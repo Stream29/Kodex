@@ -60,8 +60,10 @@ val inMemoryKodexAgentStorageTest by testSuite {
         val first = storage()
         val second = storage()
 
-        assertEquals(first.id, first.id)
-        assertNotEquals(first.id, second.id)
+        assertTrue(first.uri.startsWith("memory:"))
+        assertTrue(second.uri.startsWith("memory:"))
+        assertEquals(first.uri, first.uri)
+        assertNotEquals(first.uri, second.uri)
         assertEquals(0, first.latestIndex())
         assertEquals(OpenAiModelId("initial-model"), first.settings.latestValue().model)
         assertTrue(first.settings.latestValue().turnId.isNotEmpty())

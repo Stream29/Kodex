@@ -1,10 +1,13 @@
 package io.github.stream29.kodex.app.application.contract
 
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
+import io.github.stream29.kodex.app.agent.contract.SuggestedSessionConfiguration
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
+import io.github.stream29.kodex.tool.multiagent.SuggestedSessionMeta
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -57,6 +60,12 @@ public interface ApplicationViewModel : AutoCloseable {
 
     /** Forks one complete persisted root Session without changing navigation. */
     public suspend fun forkSession(sessionIndex: Int): Int
+
+    /** Creates and opens one accepted batch of ordinary new Sessions. */
+    public suspend fun createSuggestedSessions(
+        arguments: SuggestSubagentTaskArgs,
+        configuration: SuggestedSessionConfiguration,
+    ): List<SuggestedSessionMeta>
 
     /**
      * Materializes the New Session currently at [tabIndex], then replaces that

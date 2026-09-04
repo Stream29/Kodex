@@ -15,6 +15,7 @@ kotlin {
             implementation(project(":tool-get-context-remaining"))
             implementation(project(":tool-plan"))
             implementation(project(":tool-request-user-input-impl"))
+            implementation(project(":tool-multi-agent-impl"))
             implementation(project(":tool-unified-exec-impl"))
             implementation(project(":tool-web-run"))
             implementation(project(":openai-json-codec"))

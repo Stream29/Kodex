@@ -11,6 +11,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableDeve
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.latestValue
 import io.github.stream29.kodex.hook.contract.turn.HookPromptFragment
 import io.github.stream29.kodex.hook.contract.toHookTurnContext
@@ -38,7 +40,7 @@ public class TurnHookRuntime internal constructor(
     override suspend fun resume() {
         val settings = storage.settings.latestValue()
         val context = settings.toHookTurnContext(
-            sessionId = storage.id,
+            uri = storage.uri,
             turnId = settings.turnId,
         )
         currentUserPromptTextOrNull()?.let { prompt ->
@@ -78,8 +80,10 @@ public class TurnHookRuntime internal constructor(
             delegate.resume()
 
             val currentState = state.value
-            val pendingRequestUserInput = currentState.singleRequestUserInputOrNull()
-            if (currentState != KodexAgentStateValue.AssistantMessage && pendingRequestUserInput == null) {
+            val pendingHostInteractions = currentState.pendingHostInteractions()
+            if (currentState != KodexAgentStateValue.AssistantMessage &&
+                pendingHostInteractions.isEmpty()
+            ) {
                 return
             }
             latestAssistantMessageSince(historyStartIndex)?.let { text ->
@@ -93,7 +97,8 @@ public class TurnHookRuntime internal constructor(
                             context = context,
                             stopHookActive = stopHookActive,
                             lastAssistantMessage =
-                                lastAssistantMessage ?: pendingRequestUserInput?.questionTextOrNull(),
+                                lastAssistantMessage
+                                    ?: pendingHostInteractions.firstOrNull()?.stopHookMessage(),
                         ),
                     )
                 }
@@ -103,8 +108,8 @@ public class TurnHookRuntime internal constructor(
                 StopResult.Finish -> return
 
                 is StopResult.Stop -> {
-                    pendingRequestUserInput?.let { pending ->
-                        completeToolCall(pending.toFailedToolEvent(RequestUserInputCancelledByStopHook))
+                    pendingHostInteractions.forEach { pending ->
+                        completeToolCall(pending.toFailedToolEvent(pending.stopHookFailureMessage()))
                     }
                     logger.info { "Agent turn stopped by Stop hook." }
                     return
@@ -112,8 +117,8 @@ public class TurnHookRuntime internal constructor(
 
                 is StopResult.Continue -> {
                     if (result.fragments.isEmpty()) return
-                    pendingRequestUserInput?.let { pending ->
-                        completeToolCall(pending.toFailedToolEvent(RequestUserInputCancelledByStopHook))
+                    pendingHostInteractions.forEach { pending ->
+                        completeToolCall(pending.toFailedToolEvent(pending.stopHookFailureMessage()))
                     }
                     logger.info {
                         "Stop hook requested Agent continuation with " +
@@ -207,10 +212,14 @@ private fun StableAssistantMessage.assistantOutputText(): String? {
         .takeIf(String::isNotBlank)
 }
 
-private fun KodexAgentStateValue.singleRequestUserInputOrNull(): PendingRequestUserInputToolEvent? =
+private fun KodexAgentStateValue.pendingHostInteractions(): List<PendingToolEvent> =
     (this as? KodexAgentStateValue.ToolPending)
         ?.events
-        ?.singleOrNull() as? PendingRequestUserInputToolEvent
+        ?.filter { event ->
+            event is PendingRequestUserInputToolEvent ||
+                event is PendingSuggestSubagentTaskToolEvent
+        }
+        .orEmpty()
 
 private fun PendingRequestUserInputToolEvent.questionTextOrNull(): String? =
     arguments.questions
@@ -219,8 +228,30 @@ private fun PendingRequestUserInputToolEvent.questionTextOrNull(): String? =
         .joinToString(separator = "\n")
         .takeIf(String::isNotEmpty)
 
+private fun PendingSuggestSubagentTaskToolEvent.taskTextOrNull(): String? =
+    arguments.tasks
+        .joinToString(separator = "\n") { task -> "${task.name}: ${task.prompt}" }
+        .takeIf(String::isNotEmpty)
+
+private fun PendingToolEvent.stopHookMessage(): String? =
+    when (this) {
+        is PendingRequestUserInputToolEvent -> questionTextOrNull()
+        is PendingSuggestSubagentTaskToolEvent -> taskTextOrNull()
+        else -> null
+    }
+
+private fun PendingToolEvent.stopHookFailureMessage(): String =
+    when (this) {
+        is PendingRequestUserInputToolEvent -> RequestUserInputCancelledByStopHook
+        is PendingSuggestSubagentTaskToolEvent -> SuggestSubagentTaskCancelledByStopHook
+        else -> error("Unsupported host-owned pending tool: $toolName")
+    }
+
 private const val RequestUserInputCancelledByStopHook: String =
     "request_user_input cancelled by Stop hook"
+
+private const val SuggestSubagentTaskCancelledByStopHook: String =
+    "suggest_subagent_task cancelled by Stop hook"
 
 private fun List<HookPromptFragment>.toHookPromptEvent(): StableUserMessage =
     StableUserMessage(

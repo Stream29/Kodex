@@ -15,7 +15,7 @@ val scopedLoggingTest by testSuite {
         val factory = RecordingLoggerFactory()
         val global = factory.logger("runtime").global()
         val session = global.session("session-1")
-        val agent = session.agent("agent-2")
+        val agent = session.agent()
         val tool = agent.tool("unified_exec", "call-3")
 
         global.info { "global event" }
@@ -35,7 +35,7 @@ val scopedLoggingTest by testSuite {
                     message = "session event",
                     payload = mapOf(
                         "scope" to "session",
-                        "session_id" to "session-1",
+                        "uri" to "session-1",
                     ),
                 ),
                 RecordedEvent(
@@ -43,8 +43,7 @@ val scopedLoggingTest by testSuite {
                     message = "agent event",
                     payload = mapOf(
                         "scope" to "agent",
-                        "session_id" to "session-1",
-                        "agent_id" to "agent-2",
+                        "uri" to "session-1",
                     ),
                 ),
                 RecordedEvent(
@@ -52,8 +51,7 @@ val scopedLoggingTest by testSuite {
                     message = "tool event",
                     payload = mapOf(
                         "scope" to "tool",
-                        "session_id" to "session-1",
-                        "agent_id" to "agent-2",
+                        "uri" to "session-1",
                         "tool_name" to "unified_exec",
                         "call_id" to "call-3",
                     ),
@@ -68,7 +66,7 @@ val scopedLoggingTest by testSuite {
         val tool = factory.logger("runtime")
             .global()
             .session("session-1")
-            .agent("agent-2")
+            .agent()
             .tool("apply_patch", "call-3")
 
         tool.info { "first tool event" }

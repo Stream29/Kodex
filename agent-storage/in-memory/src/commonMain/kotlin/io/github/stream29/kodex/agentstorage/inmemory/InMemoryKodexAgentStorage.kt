@@ -40,7 +40,7 @@ public class InMemoryKodexAgentStorage private constructor(
         initialStorageState(initialSettings),
     )
 
-    public override val id: String = "memory:${identity.hashCode().toUInt().toString(16)}"
+    public override val uri: String = "memory:${identity.hashCode().toUInt().toString(16)}"
     public override val index: MutableIndexVersioned<CleanIndexEntry> =
         InMemoryIndexVersioned(initialIndex)
     public override val work: MutableIndexVersioned<StableWorkEvent> =

@@ -9,6 +9,8 @@ import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
+import io.github.stream29.kodex.tool.multiagent.SuggestedSessionMeta
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
 
@@ -57,12 +59,13 @@ public interface AgentSettingsViewModel {
 public interface AgentViewModel :
     AgentSettingsViewModel,
     AutoCloseable {
-    public val address: AgentAddress
-
+    /** Stable Storage URI of this root Session. */
+    public val storageUri: String
     public val composer: ComposerViewModel
     public val history: AgentHistoryViewModel
     public val historyIndex: HistoryIndexViewModel
     public val requestUserInput: RequestUserInputViewModel
+    public val suggestSubagentTask: SuggestSubagentTaskViewModel
     public val shellSessions: AgentShellSessionRegistry
 
     public val execution: StateFlow<AgentExecutionState>
@@ -74,6 +77,9 @@ public interface AgentViewModel :
 
     /** Submits content to this exact Agent address. */
     public suspend fun submit(content: List<ContentItem>): Unit
+
+    /** Prevents automatic title generation for the next submitted turn. */
+    public suspend fun suppressAutomaticTitle(): Unit
 
     /**
      * Consumes and submits only [expectedRevision] from this Agent's composer.
@@ -112,6 +118,55 @@ public interface AgentViewModel :
     public fun confirmHistoryRevert(requestId: Long): Unit
 
     public fun dismissNotification(notificationId: Long): Unit
+
+    override fun close(): Unit
+}
+
+/** Batch configuration selected by the user for suggested Sessions. */
+public data class SuggestedSessionConfiguration(
+    public val model: OpenAiModelId,
+    public val reasoningEffort: ReasoningEffort,
+    public val serviceTier: ServiceTier,
+    public val cwd: Path,
+    public val requestUserInputMode: RequestUserInputMode,
+)
+
+public sealed interface SuggestSubagentTaskState {
+    public data object Idle : SuggestSubagentTaskState
+
+    public data class Pending(
+        public val callId: String,
+        public val arguments: SuggestSubagentTaskArgs,
+        public val configuration: SuggestedSessionConfiguration,
+        public val feedback: String = "",
+        public val revision: Long = 0,
+        public val submitting: Boolean = false,
+    ) : SuggestSubagentTaskState
+}
+
+public sealed interface SuggestSubagentTaskSubmissionResult {
+    public data object Submitted : SuggestSubagentTaskSubmissionResult
+    public data object Stale : SuggestSubagentTaskSubmissionResult
+    public data object Busy : SuggestSubagentTaskSubmissionResult
+    public data class Failed(public val message: String) : SuggestSubagentTaskSubmissionResult
+}
+
+/** Host-owned confirmation surface for `suggest_subagent_task`. */
+public interface SuggestSubagentTaskViewModel : AutoCloseable {
+    public val state: StateFlow<SuggestSubagentTaskState>
+
+    public fun updateFeedback(callId: String, text: String): Boolean
+
+    public fun updateConfiguration(
+        callId: String,
+        configuration: SuggestedSessionConfiguration,
+    ): Boolean
+
+    public suspend fun submit(
+        callId: String,
+        expectedRevision: Long,
+        accepted: Boolean,
+    ): SuggestSubagentTaskSubmissionResult
 
     override fun close(): Unit
 }

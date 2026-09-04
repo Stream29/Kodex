@@ -46,7 +46,7 @@ val agentContextPrefixResolverTest by testSuite {
                 contextSettings = MutableStateFlow(testContextSettings(agentsHome, kodexHome, testShell)),
             )
             val settings = settings(cwd)
-            val prefix = resolver.resolve(settings)
+            val prefix = resolver.resolve(settings, "memory:test")
 
             assertEquals(
                 listOf("user rules", "Kodex rules"),
@@ -82,7 +82,7 @@ val agentContextPrefixResolverTest by testSuite {
             SystemCoroutineFileSystem.writeString(Path(cwd, "AGENTS.md"), "updated module rules")
             assertEquals(
                 "updated module rules",
-                resolver.resolve(settings).agentMd.projectInstructions.last().text,
+                resolver.resolve(settings, "memory:test").agentMd.projectInstructions.last().text,
             )
         } finally {
             deleteRecursively(root)
@@ -101,7 +101,7 @@ val agentContextPrefixResolverTest by testSuite {
                     testContextSettings(Path(home, ".agents"), Path(home, ".kodex"), testShell),
                 ),
             )
-            val prefix = resolver.resolve(settings(cwd))
+            val prefix = resolver.resolve(settings(cwd), "memory:test")
 
             assertTrue(prefix.agentMd.globalInstructions.isEmpty())
             assertTrue(prefix.agentMd.projectInstructions.isEmpty())
@@ -152,7 +152,7 @@ val agentContextPrefixResolverTest by testSuite {
                 contextSettings = contextSettings,
             )
 
-            val initial = resolver.resolve(settings(first))
+            val initial = resolver.resolve(settings(first), "memory:first")
             assertEquals(
                 listOf("first Agents rules", "first Kodex rules"),
                 initial.agentMd.globalInstructions.map(AgentsMdInstruction::text),
@@ -173,7 +173,7 @@ val agentContextPrefixResolverTest by testSuite {
             assertEquals(testShell, initial.shell)
 
             contextSettings.value = testContextSettings(secondAgentsHome, secondKodexHome, testZsh)
-            val updated = resolver.resolve(settings(second))
+            val updated = resolver.resolve(settings(second), "memory:second")
 
             assertEquals(
                 listOf("second Agents rules", "second Kodex rules"),

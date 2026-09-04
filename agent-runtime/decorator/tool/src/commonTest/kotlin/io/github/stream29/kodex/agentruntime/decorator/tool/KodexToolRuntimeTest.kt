@@ -745,8 +745,8 @@ private class ToolRuntimeTestContext(
             toolHooks = hooks,
             logger = TestLogger
                 .global()
-                .session(storage.id)
-                .agent(storage.id),
+                .session(storage.uri)
+                .agent(),
         )
     }
 }

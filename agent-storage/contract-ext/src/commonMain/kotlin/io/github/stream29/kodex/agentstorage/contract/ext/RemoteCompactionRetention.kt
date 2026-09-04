@@ -4,6 +4,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.Compaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableSuggestSubagentTaskResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.valuesDescending
@@ -16,6 +18,9 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestionOption
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputResponse
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
+import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskResponse
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.takeWhile
@@ -64,6 +69,34 @@ private fun CompactionRetainedItem.approximateTokenCount(): Int =
         is StableRequestUserInputToolEvent ->
             arguments.approximateTokenCount() +
                 result.approximateTokenCount()
+        is StableSuggestSubagentTaskToolEvent ->
+            arguments.approximateTokenCount() +
+                result.approximateTokenCount()
+    }
+
+private fun SuggestSubagentTaskArgs.approximateTokenCount(): Int =
+    (24L + tasks.sumOf(SuggestedSubagentTask::approximateTokenCount)).toApproximateTokenCount()
+
+private fun SuggestedSubagentTask.approximateTokenCount(): Long =
+    24L + name.approximateTokenCount() + prompt.approximateTokenCount()
+
+private fun StableSuggestSubagentTaskResult.approximateTokenCount(): Int =
+    when (this) {
+        is StableSuggestSubagentTaskResult.Completed ->
+            response.approximateTokenCount()
+        is StableSuggestSubagentTaskResult.Failure ->
+            16 + message.approximateTokenCount()
+    }
+
+private fun SuggestSubagentTaskResponse.approximateTokenCount(): Int =
+    when (this) {
+        is SuggestSubagentTaskResponse.Accepted ->
+            24 + (feedback?.approximateTokenCount() ?: 0) +
+                sessions.sumOf { session ->
+                    16 + session.uri.approximateTokenCount() + session.name.approximateTokenCount()
+                }
+        is SuggestSubagentTaskResponse.Rejected ->
+            16 + (feedback?.approximateTokenCount() ?: 0)
     }
 
 private fun UpdatePlanArgs.approximateTokenCount(): Int =

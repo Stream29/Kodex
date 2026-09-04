@@ -121,6 +121,7 @@ internal suspend fun kotlinx.coroutines.CoroutineScope.applicationFixture(
                 ),
             )
         },
+        ownerScope = this,
     )
     return ApplicationTestFixture(repository, sessions, viewModel)
 }

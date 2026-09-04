@@ -17,7 +17,7 @@ import kotlinx.serialization.json.encodeToJsonElement
 internal data class HookCommandInput(
     val name: String,
     val type: HookType,
-    @SerialName("session_id") val sessionId: String,
+    val uri: String,
     @SerialName("turn_id") val turnId: String,
     val cwd: String,
     val model: String,
@@ -35,7 +35,7 @@ internal inline fun <reified Payload> encodeHookInput(
         HookCommandInput(
             name = hook.name,
             type = type,
-            sessionId = session.sessionId,
+            uri = session.uri,
             turnId = context.turnId,
             cwd = session.cwd.toString(),
             model = session.model,

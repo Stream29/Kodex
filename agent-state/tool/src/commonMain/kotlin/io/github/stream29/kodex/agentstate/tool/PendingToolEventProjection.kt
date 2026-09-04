@@ -12,6 +12,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpTool
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingWebSearchToolEvent
@@ -25,6 +26,8 @@ import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolName
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputTools
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskTools
 import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools
@@ -103,6 +106,15 @@ private fun ResponseItem.FunctionCall.toPendingToolEvent(): PendingToolEvent {
         namespace == null && name == RequestUserInputTools.Name ->
             typed(RequestUserInputArgs.serializer()) { arguments ->
                 PendingRequestUserInputToolEvent(
+                    callId = callId,
+                    itemId = id,
+                    arguments = arguments,
+                )
+            }
+
+        namespace == null && name == SuggestSubagentTaskTools.Name ->
+            typed(SuggestSubagentTaskArgs.serializer()) { arguments ->
+                PendingSuggestSubagentTaskToolEvent(
                     callId = callId,
                     itemId = id,
                     arguments = arguments,

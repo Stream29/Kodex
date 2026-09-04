@@ -53,7 +53,7 @@ val applicationLoggingTest by testSuite {
             logger
                 .global()
                 .session("session-1")
-                .agent("agent-2")
+                .agent()
                 .tool("mcp__local.echo", "call-3")
                 .info { "scoped-event" }
             logger.at(
@@ -94,7 +94,7 @@ val applicationLoggingTest by testSuite {
             assertTrue(
                 text.contains(
                     "scoped-event " +
-                        "{scope=tool, session_id=session-1, agent_id=agent-2, " +
+                        "{scope=tool, uri=session-1, " +
                         "tool_name=mcp__local.echo, call_id=call-3}",
                 ),
             )

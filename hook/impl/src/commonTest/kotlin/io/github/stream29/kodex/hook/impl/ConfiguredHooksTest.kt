@@ -60,11 +60,11 @@ private suspend fun kodexHooks(configuration: HookConfiguration): KodexHooksImpl
 
 private fun hookContext(
     cwd: Path,
-    sessionId: String = "019c-session",
+    uri: String = "019c-session",
 ): HookTurnContext =
     HookTurnContext(
         session = HookSessionContext(
-            sessionId = sessionId,
+            uri = uri,
             cwd = cwd,
             model = "gpt-test",
         ),
@@ -133,7 +133,7 @@ val configuredHooksTest by testSuite(
 
         assertEquals("guard tools", input.getValue("name").jsonPrimitive.content)
         assertEquals("pre_tool_use", input.getValue("type").jsonPrimitive.content)
-        assertEquals("019c-session", input.getValue("session_id").jsonPrimitive.content)
+        assertEquals("019c-session", input.getValue("uri").jsonPrimitive.content)
         assertEquals("turn-1", input.getValue("turn_id").jsonPrimitive.content)
         assertEquals("gpt-test", input.getValue("model").jsonPrimitive.content)
         val payload = input.getValue("payload").jsonObject

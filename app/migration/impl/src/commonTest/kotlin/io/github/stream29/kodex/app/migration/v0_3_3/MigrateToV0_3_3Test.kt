@@ -21,9 +21,9 @@ public val migrateToV0_3_3Test by testSuite {
     testFixture { temporaryDirectory() } closeWith {
         deleteRecursively(this)
     } asParameterForEach {
-        test("registers an inactive 0.3.3 future migration") {
+        test("registers the versioned Home migrations") {
             assertEquals(
-                listOf(MigrationVersion("0.3.3")),
+                listOf(MigrationVersion("0.3.3"), MigrationVersion("0.3.5")),
                 KodexHomeMigrations.map { migration -> migration.toVersion },
             )
         }

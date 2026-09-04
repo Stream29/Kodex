@@ -626,7 +626,7 @@ val kodexAgentStateImplTest by testSuite {
                     createRemoteCompactionV2Response { request, _, _, windowId ->
                         compactRequests += request
                         assertEquals(
-                            storage.settings[0].codexRequestWindowId(storage.id.toCodexThreadId()),
+                            storage.settings[0].codexRequestWindowId(storage.uri.toCodexThreadId()),
                             windowId,
                         )
                         RemoteCompactionV2Response(

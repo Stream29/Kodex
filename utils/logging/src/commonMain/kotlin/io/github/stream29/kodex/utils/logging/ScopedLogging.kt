@@ -21,11 +21,11 @@ public fun KLogger.global(): KLogger {
  * Returns a Session-scoped logger. Any previous scope is replaced by this
  * Session identity.
  */
-public fun KLogger.session(sessionId: String): KLogger {
+public fun KLogger.session(uri: String): KLogger {
     return scoped(
         mapOf(
             ScopeField to SessionScope,
-            SessionIdField to sessionId
+            UriField to uri
         )
     )
 }
@@ -34,11 +34,10 @@ public fun KLogger.session(sessionId: String): KLogger {
  * Returns an Agent-scoped logger, inheriting the Session identity already
  * attached to this logger when present.
  */
-public fun KLogger.agent(agentId: String): KLogger {
+public fun KLogger.agent(): KLogger {
     return scoped(
         mapOf(
             ScopeField to AgentScope,
-            AgentIdField to agentId
         )
     )
 }
@@ -98,7 +97,6 @@ private const val SessionScope: String = "session"
 private const val AgentScope: String = "agent"
 private const val ToolScope: String = "tool"
 private const val ScopeField: String = "scope"
-private const val SessionIdField: String = "session_id"
-private const val AgentIdField: String = "agent_id"
+private const val UriField: String = "uri"
 private const val ToolNameField: String = "tool_name"
 private const val CallIdField: String = "call_id"

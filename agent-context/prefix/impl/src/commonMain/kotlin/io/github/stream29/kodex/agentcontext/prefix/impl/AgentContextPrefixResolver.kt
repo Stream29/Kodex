@@ -5,6 +5,7 @@ import io.github.stream29.kodex.agentcontext.contract.AgentContextCustomSource
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourcePlan
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.agentcontext.prefix.contract.AgentContextPrefix
+import io.github.stream29.kodex.agentcontext.prefix.contract.AgentSessionMeta
 import io.github.stream29.kodex.agentcontext.skill.filesystem.FileSystemSkillsResolver
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -27,7 +28,7 @@ public class AgentContextPrefixResolver(
     )
 
     /** Captures global state and resolves Agent-specific context for [settings]. */
-    public suspend fun resolve(settings: KodexAgentSettings): AgentContextPrefix {
+    public suspend fun resolve(settings: KodexAgentSettings, uri: String): AgentContextPrefix {
         val context = contextSettings.value
         val cwd = settings.cwd
         val plan = resolveSourcePlan(context, cwd)
@@ -38,6 +39,7 @@ public class AgentContextPrefixResolver(
             shell = context.shell,
             agentMd = agentsMd.instructions,
             availableSkills = skills.skills,
+            sessionMeta = AgentSessionMeta(uri = uri, name = settings.threadName),
         )
     }
 }

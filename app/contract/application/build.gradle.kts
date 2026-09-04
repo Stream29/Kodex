@@ -6,6 +6,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":app-contract-agent"))
+            api(project(":tool-multi-agent-contract"))
             api(project(":app-contract-path-picker"))
             api(project(":app-contract-session-catalog"))
             api(project(":app-contract-session"))

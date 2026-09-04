@@ -4,6 +4,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentcontext.prefix.agentsmd.contract.AgentsMdInstruction
 import io.github.stream29.kodex.agentcontext.prefix.agentsmd.contract.AgentsMdInstructions
 import io.github.stream29.kodex.agentcontext.prefix.contract.AgentContextPrefix
+import io.github.stream29.kodex.agentcontext.prefix.contract.AgentSessionMeta
 import io.github.stream29.kodex.agentcontext.prefix.skill.contract.AvailableSkill
 import io.github.stream29.kodex.agentcontext.prefix.skill.contract.SkillScope
 import io.github.stream29.kodex.agentcontext.prefix.skill.contract.SkillSource
@@ -124,11 +125,16 @@ private fun testSkill(revision: Int): AvailableSkill = AvailableSkill(
 private fun contextPrefix(
     agentMd: AgentsMdInstructions = AgentsMdInstructions(),
     availableSkills: List<AvailableSkill> = emptyList(),
+    sessionMeta: AgentSessionMeta = AgentSessionMeta(
+        uri = "memory:test",
+        name = "Test session",
+    ),
 ): AgentContextPrefix = AgentContextPrefix(
     cwd = Path("/workspace"),
     shell = Shell(ShellType.Bash, Path("/bin/bash")),
     agentMd = agentMd,
     availableSkills = availableSkills,
+    sessionMeta = sessionMeta,
 )
 
 private fun message(role: MessageRole, vararg sections: String): ResponseItem.Message =
@@ -162,6 +168,10 @@ private fun environmentContext(): String {
       <shell>bash</shell>
       <current_date>$currentDate</current_date>
       <timezone>$timeZone</timezone>
+      <current_session>
+        <storage_uri>memory:test</storage_uri>
+        <name>Test session</name>
+      </current_session>
     </environment_context>
     """.trimIndent()
 }
