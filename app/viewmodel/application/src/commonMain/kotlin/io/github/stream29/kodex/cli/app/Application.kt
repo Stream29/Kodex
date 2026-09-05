@@ -63,6 +63,7 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSys
 import io.github.stream29.kodex.utils.logging.global
 import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
 import io.github.stream29.kodex.utils.shellclient.Shell
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
@@ -71,6 +72,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import org.koin.core.KoinApplication
@@ -247,7 +249,9 @@ public class KodexApplication private constructor(
             sessionTitleGeneratorFactory: (OpenAiClientContract) -> SessionTitleGenerator,
             sessionRepositoryFactory:
             suspend CoroutineScope.(Path, KodexAgentDependencies) ->
-            FileSystemKodexSessionRepository,
+            FileSystemKodexSessionRepository = { root, dependencies ->
+                FileSystemKodexSessionRepository(root, dependencies)
+            },
         ): KodexApplication {
             val resolvedWorkingDirectory = SystemCoroutineFileSystem.resolve(workingDirectory)
             val resolvedAgentsDirectory = resolveAllowingMissing(agentsDirectory)
@@ -315,6 +319,15 @@ public class KodexApplication private constructor(
                 val modelCatalog = openAiServices.modelCatalog
                 val accountUsage = openAiServices.accountUsage
                 val hooks = scope.KodexHooksImpl(globalSettings.settings)
+                val reportUnhandledError: (Throwable, Path) -> Unit = { failure, cwd ->
+                    if (failure !is CancellationException) {
+                        ApplicationLogger.error(failure) { "Application operation failed (cwd=$cwd)." }
+                        val message = failure.message
+                        scope.launch {
+                            hooks.onUnhandledError(message, cwd)
+                        }
+                    }
+                }
                 val dependencies = KodexAgentDependencies(
                     client = client,
                     modelCatalog = modelCatalog,
@@ -365,16 +378,27 @@ public class KodexApplication private constructor(
                                         configuration,
                                     )
                                 },
+                                reportUnhandledError = reportUnhandledError,
                             ),
                             agentHistoryFactory,
                         )
                     }.create()
                 }
                 val store = graph.koin.get<PersistedSessionViewModelRegistry> {
-                    parametersOf(repositoryFactory, scope, sessionAgentFactory)
+                    parametersOf(
+                        repositoryFactory,
+                        scope,
+                        sessionAgentFactory,
+                        reportUnhandledError,
+                        resolvedWorkingDirectory,
+                    )
                 }
                 val catalogFactory = graph.koin.get<SessionCatalogViewModelFactory> {
-                    parametersOf(repositoryFactory, scope)
+                    parametersOf(
+                        repositoryFactory,
+                        scope,
+                        { failure: Throwable -> reportUnhandledError(failure, resolvedWorkingDirectory) },
+                    )
                 }
                 val composerFactory = graph.koin.get<ComposerViewModelFactory>()
                 val newSessionFactory = graph.koin.get<NewSessionViewModelFactory> {
@@ -400,6 +424,8 @@ public class KodexApplication private constructor(
                                 ),
                                 createDirectoryPicker = pickerFactory,
                                 ownerScope = scope,
+                                reportUnhandledError = reportUnhandledError,
+                                startupWorkingDirectory = resolvedWorkingDirectory,
                             ),
                         )
                     }.create()

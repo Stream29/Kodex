@@ -2,6 +2,8 @@ package io.github.stream29.kodex.hook.contract
 
 import io.github.stream29.kodex.hook.contract.compaction.CompactionHooks
 import io.github.stream29.kodex.hook.contract.compaction.NoOpCompactionHooks
+import io.github.stream29.kodex.hook.contract.error.ErrorHooks
+import io.github.stream29.kodex.hook.contract.error.NoOpErrorHooks
 import io.github.stream29.kodex.hook.contract.tool.NoOpToolHooks
 import io.github.stream29.kodex.hook.contract.tool.ToolHooks
 import io.github.stream29.kodex.hook.contract.turn.NoOpTurnHooks
@@ -15,13 +17,15 @@ public interface KodexHooks :
     CoroutineScope,
     TurnHooks,
     ToolHooks,
-    CompactionHooks
+    CompactionHooks,
+    ErrorHooks
 
 /** Complete hook capability with no configured behavior. */
 public data object NoOpKodexHooks :
     KodexHooks,
     TurnHooks by NoOpTurnHooks,
     ToolHooks by NoOpToolHooks,
-    CompactionHooks by NoOpCompactionHooks {
+    CompactionHooks by NoOpCompactionHooks,
+    ErrorHooks by NoOpErrorHooks {
     override val coroutineContext: CoroutineContext = EmptyCoroutineContext
 }

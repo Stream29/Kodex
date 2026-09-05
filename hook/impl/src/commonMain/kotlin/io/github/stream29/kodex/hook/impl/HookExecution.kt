@@ -8,12 +8,12 @@ import kotlinx.io.files.Path
 
 internal suspend fun ShellClient.runHook(
     hook: ExecutableHook,
-    inputJson: String,
+    input: String,
     cwd: Path,
 ): HookRawResult {
     return runHookCommand(
         command = hook.command,
-        inputJson = inputJson,
+        input = input,
         cwd = cwd,
     )
 }
@@ -21,14 +21,14 @@ internal suspend fun ShellClient.runHook(
 internal suspend fun ShellClient.runHooks(
     hooks: List<ExecutableHook>,
     cwd: Path,
-    inputJson: (ExecutableHook) -> String,
+    input: (ExecutableHook) -> String,
 ): List<HookRawResult> = coroutineScope {
     hooks
         .map { hook ->
             async {
                 runHook(
                     hook = hook,
-                    inputJson = inputJson(hook),
+                    input = input(hook),
                     cwd = cwd,
                 )
             }

@@ -59,4 +59,5 @@ internal fun HookType.settingsLabel(): String =
         HookType.Stop -> "Stop"
         HookType.PreCompact -> "Pre compact"
         HookType.PostCompact -> "Post compact"
+        HookType.UnhandledError -> "Unhandled error"
     }

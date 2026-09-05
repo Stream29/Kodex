@@ -26,6 +26,7 @@ import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,17 +51,27 @@ public class DefaultPersistedSessionViewModelRegistry(
     @InjectedParam private val repositoryFactory: KodexSessionRepositoryFactory,
     @InjectedParam private val scope: CoroutineScope,
     @InjectedParam private val agentFactory: PersistedSessionAgentViewModelFactory,
+    @InjectedParam private val reportUnhandledError: ((Throwable, Path) -> Unit)? = null,
+    @InjectedParam private val startupWorkingDirectory: Path = Path("."),
 ) : PersistedSessionViewModelRegistry {
     private val mutex = Mutex()
     private val opened = linkedMapOf<Int, PersistedSessionViewModelImpl>()
 
     override suspend fun open(sessionIndex: Int): PersistedSessionViewModel = mutex.withLock {
-        opened[sessionIndex]?.let { existing ->
-            existing.unarchive()
-            return@withLock existing
-        }
-        createOpened(sessionIndex).also { created ->
-            opened[sessionIndex] = created
+        val cwd = opened[sessionIndex]?.rootAgent?.settings?.value?.cwd ?: startupWorkingDirectory
+        try {
+            opened[sessionIndex]?.let { existing ->
+                existing.unarchive()
+                return@withLock existing
+            }
+            createOpened(sessionIndex).also { created ->
+                opened[sessionIndex] = created
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Throwable) {
+            reportUnhandledError?.invoke(failure, cwd)
+            throw failure
         }
     }
 
@@ -121,12 +132,20 @@ public class DefaultPersistedSessionViewModelRegistry(
         val ownerScope = scope.supervisorChildScope()
         var temporary: PersistedSessionViewModelImpl? = null
         try {
-            val repository = repositoryFactory.create(ownerScope)
-            require(sessionIndex in repository.list()) {
-                "No persisted Session at index $sessionIndex."
+            val created = try {
+                val repository = repositoryFactory.create(ownerScope)
+                require(sessionIndex in repository.list()) {
+                    "No persisted Session at index $sessionIndex."
+                }
+                buildOpened(sessionIndex, repository, ownerScope)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Throwable) {
+                reportUnhandledError?.invoke(failure, startupWorkingDirectory)
+                throw failure
             }
-            temporary = buildOpened(sessionIndex, repository, ownerScope)
-            temporary.fork()
+            temporary = created
+            created.fork()
         } finally {
             withContext(NonCancellable) {
                 temporary?.shutdown() ?: ownerScope.cancelAndJoin()
@@ -199,6 +218,7 @@ public class DefaultPersistedSessionViewModelRegistry(
             repository = repository,
             ownerScope = ownerScope,
             agentFactory = agentFactory,
+            reportUnhandledError = reportUnhandledError,
         ).also { it.initialize() }
     }
 
@@ -228,6 +248,7 @@ private class PersistedSessionViewModelImpl(
     private val repository: KodexRootSessionRepository,
     private val ownerScope: CoroutineScope,
     private val agentFactory: PersistedSessionAgentViewModelFactory,
+    private val reportUnhandledError: ((Throwable, Path) -> Unit)? = null,
 ) : PersistedSessionViewModel {
     private val mutex = Mutex()
     private val mutableName = MutableStateFlow("Session $sessionIndex")
@@ -280,6 +301,13 @@ private class PersistedSessionViewModelImpl(
     override suspend fun fork(
         source: AgentViewModel,
         target: AgentHistoryTarget,
+    ): Int = reportForkFailure {
+        forkHistory(source, target)
+    }
+
+    private suspend fun forkHistory(
+        source: AgentViewModel,
+        target: AgentHistoryTarget,
     ): Int = mutex.withLock {
         ensureOpen()
         require(source === rootAgent) {
@@ -327,13 +355,16 @@ private class PersistedSessionViewModelImpl(
             }
             targetIndex
         } catch (failure: Throwable) {
-            repository.delete(targetIndex)
-            publishFailure("Unable to fork Session.", failure)
+            withContext(NonCancellable) {
+                runCatching { repository.delete(targetIndex) }.onFailure(failure::addSuppressed)
+            }
             throw failure
         }
     }
 
-    override suspend fun fork(): Int = mutex.withLock {
+    override suspend fun fork(): Int = reportForkFailure { forkRoot() }
+
+    private suspend fun forkRoot(): Int = mutex.withLock {
         ensureOpen()
         require(
             !rootAgent.execution.value.running &&
@@ -365,8 +396,21 @@ private class PersistedSessionViewModelImpl(
             }
             targetIndex
         } catch (failure: Throwable) {
-            repository.delete(targetIndex)
-            publishFailure("Unable to fork Session.", failure)
+            withContext(NonCancellable) {
+                runCatching { repository.delete(targetIndex) }.onFailure(failure::addSuppressed)
+            }
+            throw failure
+        }
+    }
+
+    private suspend fun <T> reportForkFailure(block: suspend () -> T): T {
+        val cwd = rootAgent.settings.value.cwd
+        return try {
+            block()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Throwable) {
+            publishFailure("Unable to fork Session.", failure, cwd)
             throw failure
         }
     }
@@ -432,7 +476,7 @@ private class PersistedSessionViewModelImpl(
         mutableName.value = threadName ?: "Session $sessionIndex"
     }
 
-    private fun publishFailure(message: String, failure: Throwable) {
+    private fun publishFailure(message: String, failure: Throwable, cwd: Path) {
         val id = nextNotificationId
         check(id < Long.MAX_VALUE) { "Session notification ids are exhausted." }
         nextNotificationId += 1
@@ -442,6 +486,7 @@ private class PersistedSessionViewModelImpl(
             message = message,
             detail = failure.stackTraceToString(),
         )
+        reportUnhandledError?.invoke(failure, cwd)
     }
 
     private fun ensureOpen() {
@@ -454,6 +499,7 @@ private class SessionCatalogViewModelImpl(
     private val scope: CoroutineScope,
     private val forkSession: suspend (sessionIndex: Int) -> Int,
     private val deleteSession: suspend (sessionIndex: Int) -> Boolean,
+    private val reportUnhandledError: ((Throwable) -> Unit)? = null,
 ) : SessionCatalogViewModel {
     private val commandMutex = Mutex()
     private val mutableState = MutableStateFlow<SessionCatalogState>(SessionCatalogState.Unloaded)
@@ -484,7 +530,14 @@ private class SessionCatalogViewModelImpl(
 
     override suspend fun fork(sessionIndex: Int): Int = commandMutex.withLock {
         val targetIndex = forkSession(sessionIndex)
-        reloadRepository(mutableState.value.showArchived)
+        try {
+            reloadRepository(mutableState.value.showArchived)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Throwable) {
+            reportUnhandledError?.invoke(failure)
+            throw failure
+        }
         targetIndex
     }
 
@@ -594,6 +647,7 @@ private class SessionCatalogViewModelImpl(
 internal fun createSessionCatalogViewModelFactory(
     @InjectedParam repositoryFactory: KodexSessionRepositoryFactory,
     @InjectedParam scope: CoroutineScope,
+    @InjectedParam reportUnhandledError: ((Throwable) -> Unit)? = null,
 ): SessionCatalogViewModelFactory =
     SessionCatalogViewModelFactory { forkSession, deleteSession ->
         SessionCatalogViewModelImpl(
@@ -601,5 +655,6 @@ internal fun createSessionCatalogViewModelFactory(
             scope = scope.supervisorChildScope(),
             forkSession = forkSession,
             deleteSession = deleteSession,
+            reportUnhandledError = reportUnhandledError,
         )
     }

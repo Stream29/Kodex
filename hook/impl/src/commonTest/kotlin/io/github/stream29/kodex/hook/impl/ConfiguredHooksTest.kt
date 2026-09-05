@@ -23,9 +23,15 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSys
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellType
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.serialization.json.JsonObject
@@ -35,11 +41,17 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 private suspend fun temporaryRoot(): Path =
     Path(SystemTemporaryDirectory, "kodex-hooks-${Random.nextLong()}").also {
         SystemCoroutineFileSystem.createDirectories(it)
+    }.let {
+        SystemCoroutineFileSystem.resolve(it)
     }
 
 private suspend fun deleteRecursively(path: Path) {
@@ -111,6 +123,44 @@ private fun recordAndEmitCommand(
             "[Console]::Out.Write('${stdout.replace("'", "''")}')"
 
     ShellType.Cmd -> "more > nul & echo $marker>>\"$path\" & <nul set /p \"=$stdout\""
+}
+
+private fun recordStdinCommand(path: Path): String = when (Shell.default.type) {
+    ShellType.Sh,
+    ShellType.Bash,
+    ShellType.Zsh,
+        -> "cat > '${path.toString().replace("'", "'\"'\"'")}'"
+
+    ShellType.PowerShell ->
+        "\$null = [IO.File]::WriteAllText('${path.toString().replace("'", "''")}', [Console]::In.ReadToEnd())"
+
+    ShellType.Cmd ->
+        "powershell -NoProfile -NonInteractive -Command " +
+            "\"[IO.File]::WriteAllText('${path.toString().replace("'", "''")}', [Console]::In.ReadToEnd())\""
+}
+
+private fun gatedHookCommand(started: Path, release: Path, completed: Path): String {
+    fun Path.sh(): String = toString().replace("'", "'\"'\"'")
+    fun Path.ps(): String = toString().replace("'", "''")
+    val powershell = "\$null = [Console]::In.ReadToEnd(); " +
+        "[IO.File]::WriteAllText('${started.ps()}', 'started'); " +
+        "while (!(Test-Path '${release.ps()}')) { Start-Sleep -Milliseconds 10 }; " +
+        "[IO.File]::WriteAllText('${completed.ps()}', 'completed')"
+    return when (Shell.default.type) {
+        ShellType.Sh, ShellType.Bash, ShellType.Zsh ->
+            "cat >/dev/null; printf started > '${started.sh()}'; " +
+                "while [ ! -f '${release.sh()}' ]; do sleep 0.01; done; " +
+                "printf completed > '${completed.sh()}'"
+
+        ShellType.PowerShell -> powershell
+        ShellType.Cmd -> "powershell -NoProfile -NonInteractive -Command \"$powershell\""
+    }
+}
+
+private suspend fun awaitHookFile(path: Path) {
+    withTimeout(5.seconds) {
+        while (!SystemCoroutineFileSystem.exists(path)) delay(10.milliseconds)
+    }
 }
 
 val configuredHooksTest by testSuite(
@@ -297,6 +347,149 @@ val configuredHooksTest by testSuite(
 
             assertEquals("review again", result.fragments.single().text)
             assertEquals("continue-review", result.fragments.single().hookRunId)
+        } finally {
+            hooks.cancel()
+            deleteRecursively(root)
+        }
+    }
+
+    test("UnhandledError receives plaintext stdin without JSON envelope, trailing newline, and closes stdin") {
+        val root = temporaryRoot()
+        val receivedFile = Path(root, "received.txt")
+        val hooks = kodexHooks(
+            hookConfiguration(
+                Triple(
+                    "error-recorder",
+                    HookType.UnhandledError,
+                    recordStdinCommand(receivedFile),
+                ),
+            ),
+        )
+        try {
+            val message = "Something failed: 错误信息\nline 2 ' \" \$HOME \$(exit 7)"
+            hooks.onUnhandledError(message, root)
+            val readContent = SystemCoroutineFileSystem.readString(receivedFile)
+            assertEquals(message, readContent)
+        } finally {
+            hooks.cancel()
+            deleteRecursively(root)
+        }
+    }
+
+    test("UnhandledError maps null message to empty string") {
+        val root = temporaryRoot()
+        val receivedFile = Path(root, "empty.txt")
+        val hooks = kodexHooks(
+            hookConfiguration(
+                Triple(
+                    "empty-recorder",
+                    HookType.UnhandledError,
+                    recordStdinCommand(receivedFile),
+                ),
+            ),
+        )
+        try {
+            hooks.onUnhandledError(null, root)
+            val readContent = SystemCoroutineFileSystem.readString(receivedFile)
+            assertEquals("", readContent)
+        } finally {
+            hooks.cancel()
+            deleteRecursively(root)
+        }
+    }
+
+    test("UnhandledError swallows hook failure without throwing") {
+        val root = temporaryRoot()
+        val hooks = kodexHooks(
+            hookConfiguration(
+                Triple(
+                    "failing-hook",
+                    HookType.UnhandledError,
+                    "exit 1",
+                ),
+            ),
+        )
+        try {
+            hooks.onUnhandledError("error", root)
+        } finally {
+            hooks.cancel()
+            deleteRecursively(root)
+        }
+    }
+
+    test("UnhandledError keeps its configuration snapshot and isolates a failed parallel command") {
+        val root = temporaryRoot()
+        val started = Path(root, "started")
+        val release = Path(root, "release")
+        val completed = Path(root, "completed")
+        val fresh = Path(root, "fresh")
+        val settings = MutableStateFlow(
+            TestHookSettings(
+                hookConfiguration(
+                    Triple("old", HookType.UnhandledError, gatedHookCommand(started, release, completed)),
+                    Triple("failed-peer", HookType.UnhandledError, "exit 7"),
+                ),
+            ),
+        )
+        val hooks = CoroutineScope(currentCoroutineContext()).KodexHooksImpl(settings)
+        val running = CoroutineScope(currentCoroutineContext()).async {
+            hooks.onUnhandledError("old message", root)
+        }
+        try {
+            awaitHookFile(started)
+            settings.value = TestHookSettings(
+                hookConfiguration(Triple("fresh", HookType.UnhandledError, recordStdinCommand(fresh))),
+            )
+            withTimeout(5.seconds) {
+                hooks.resolvedHooks.first { it[HookType.UnhandledError].map { hook -> hook.name } == listOf("fresh") }
+            }
+            SystemCoroutineFileSystem.writeString(release, "")
+            withTimeout(5.seconds) { running.await() }
+            assertTrue(SystemCoroutineFileSystem.exists(completed))
+            assertFalse(SystemCoroutineFileSystem.exists(fresh))
+            hooks.onUnhandledError("new message", root)
+            assertEquals("new message", SystemCoroutineFileSystem.readString(fresh))
+        } finally {
+            running.cancelAndJoin()
+            hooks.cancel()
+            deleteRecursively(root)
+        }
+    }
+
+    test("UnhandledError propagates caller cancellation and stops its command") {
+        val root = temporaryRoot()
+        val started = Path(root, "started")
+        val release = Path(root, "release")
+        val completed = Path(root, "completed")
+        val hooks = kodexHooks(
+            hookConfiguration(
+                Triple("cancelled", HookType.UnhandledError, gatedHookCommand(started, release, completed)),
+            ),
+        )
+        val running = CoroutineScope(currentCoroutineContext()).async {
+            hooks.onUnhandledError("cancel me", root)
+        }
+        try {
+            awaitHookFile(started)
+            withTimeout(5.seconds) { running.cancelAndJoin() }
+            assertFailsWith<CancellationException> { running.await() }
+            SystemCoroutineFileSystem.writeString(release, "")
+            delay(100.milliseconds)
+            assertFalse(SystemCoroutineFileSystem.exists(completed))
+        } finally {
+            running.cancelAndJoin()
+            hooks.cancel()
+            deleteRecursively(root)
+        }
+    }
+
+    test("UnhandledError records a command startup failure without throwing") {
+        val root = temporaryRoot()
+        val hooks = kodexHooks(
+            hookConfiguration(Triple("missing-cwd", HookType.UnhandledError, "exit 0")),
+        )
+        try {
+            hooks.onUnhandledError("message", Path(root, "missing"))
         } finally {
             hooks.cancel()
             deleteRecursively(root)

@@ -91,6 +91,7 @@ internal class AgentRuntimeViewModel(
         SuggestSubagentTaskArgs,
         SuggestedSessionConfiguration,
     ) -> List<SuggestedSessionMeta>)? = null,
+    private val reportUnhandledError: ((Throwable, Path) -> Unit)? = null,
 ) : AgentViewModel {
     override val storageUri: String = session.storage.uri
     private val requestUserInputImpl = RequestUserInputViewModelImpl(
@@ -180,12 +181,13 @@ internal class AgentRuntimeViewModel(
     }
 
     override suspend fun submit(content: List<ContentItem>) = runInOwnerScope {
+        val cwd = mutableSettings.value.cwd
         try {
             acceptNewTurn(content, "Unable to submit Agent content.")
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            publishFailure("Unable to submit Agent content.", failure)
+            publishFailure("Unable to submit Agent content.", failure, cwd)
             throw failure
         }
     }
@@ -197,6 +199,7 @@ internal class AgentRuntimeViewModel(
     override suspend fun submitComposer(
         expectedRevision: Long,
     ): AgentComposerSubmissionResult = runInOwnerScope {
+        val cwd = mutableSettings.value.cwd
         ensureOpen()
         val current = composer.state.value
         if (current.revision != expectedRevision) {
@@ -221,7 +224,7 @@ internal class AgentRuntimeViewModel(
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            publishFailure("Unable to submit Agent composer.", failure)
+            publishFailure("Unable to submit Agent composer.", failure, cwd)
             throw failure
         }
     }
@@ -299,7 +302,10 @@ internal class AgentRuntimeViewModel(
         }
     }
 
-    override fun requestHistoryRevert(target: AgentHistoryTarget): Long {
+    override fun requestHistoryRevert(target: AgentHistoryTarget): Long =
+        reportHistoryFailure { prepareHistoryRevert(target) }
+
+    private fun prepareHistoryRevert(target: AgentHistoryTarget): Long {
         ensureOpen()
         val state = projectExecution(execution.value.activityVersion)
         require(!state.running && state.capabilities.canReplaceHistory) {
@@ -323,6 +329,22 @@ internal class AgentRuntimeViewModel(
     }
 
     override fun confirmHistoryRevert(requestId: Long) {
+        reportHistoryFailure { cwd -> startHistoryRevert(requestId, cwd) }
+    }
+
+    private inline fun <T> reportHistoryFailure(block: (Path) -> T): T {
+        val cwd = mutableSettings.value.cwd
+        return try {
+            block(cwd)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Throwable) {
+            publishFailure("Unable to revert Agent history.", failure, cwd)
+            throw failure
+        }
+    }
+
+    private fun startHistoryRevert(requestId: Long, cwd: Path) {
         ensureOpen()
         val request = mutableHistoryAction.value as? AgentHistoryActionState.ConfirmRevert
             ?: return
@@ -340,7 +362,7 @@ internal class AgentRuntimeViewModel(
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Throwable) {
-                publishFailure("Unable to revert Agent history.", failure)
+                publishFailure("Unable to revert Agent history.", failure, cwd)
             }
         }
         if (!mutableHistoryOperation.compareAndSet(null, operation)) {
@@ -518,6 +540,7 @@ internal class AgentRuntimeViewModel(
         runtimeOperation: Boolean = false,
         block: suspend () -> Unit,
     ) {
+        val cwd = mutableSettings.value.cwd
         clearNotification()
         val operation = scope.launch(start = CoroutineStart.LAZY) {
             try {
@@ -525,7 +548,7 @@ internal class AgentRuntimeViewModel(
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Throwable) {
-                publishFailure(failureMessage, failure)
+                publishFailure(failureMessage, failure, cwd)
             }
         }
         if (runtimeOperation && !mutableRuntimeOperation.compareAndSet(null, operation)) {
@@ -549,7 +572,7 @@ internal class AgentRuntimeViewModel(
         mutableNotification.value = null
     }
 
-    private fun publishFailure(message: String, failure: Throwable) {
+    private fun publishFailure(message: String, failure: Throwable, cwd: Path) {
         val id = nextNotificationId
         check(id < Long.MAX_VALUE) { "Agent notification ids are exhausted." }
         nextNotificationId += 1
@@ -559,6 +582,7 @@ internal class AgentRuntimeViewModel(
             message = message,
             detail = failure.stackTraceToString(),
         )
+        reportUnhandledError?.invoke(failure, cwd)
     }
 
     private fun ensureOpen() {
@@ -577,6 +601,7 @@ public suspend fun createAgentRuntimeViewModel(
         SuggestSubagentTaskArgs,
         SuggestedSessionConfiguration,
     ) -> List<SuggestedSessionMeta>)? = null,
+    reportUnhandledError: ((Throwable, Path) -> Unit)? = null,
 ): AgentViewModel {
     val latestIndex = session.runtime.latestIndex.value
     require(latestIndex >= 0) { "An Agent ViewModel requires an initialized Agent." }
@@ -598,6 +623,7 @@ public suspend fun createAgentRuntimeViewModel(
         history = history,
         automaticTitleConfiguration = automaticTitleConfiguration,
         createSuggestedSessions = createSuggestedSessions,
+        reportUnhandledError = reportUnhandledError,
     )
 }
 
@@ -619,6 +645,7 @@ public data class AgentRuntimeViewModelArguments(
         SuggestSubagentTaskArgs,
         SuggestedSessionConfiguration,
     ) -> List<SuggestedSessionMeta>)?,
+    public val reportUnhandledError: ((Throwable, Path) -> Unit)? = null,
 )
 
 /** Koin-resolved creator for one materialized Agent contract. */
@@ -637,6 +664,7 @@ public class DefaultAgentRuntimeViewModelFactory(
             models = arguments.models,
             automaticTitleConfiguration = arguments.automaticTitleConfiguration,
             createSuggestedSessions = arguments.createSuggestedSessions,
+            reportUnhandledError = arguments.reportUnhandledError,
         )
 }
 

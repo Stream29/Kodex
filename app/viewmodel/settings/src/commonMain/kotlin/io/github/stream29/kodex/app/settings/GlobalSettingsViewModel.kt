@@ -65,6 +65,7 @@ internal class GlobalSettingsViewModelImpl(
     private val hookManager: HookManager,
     models: StateFlow<List<ModelInfo>>,
     private val commandScope: CoroutineScope,
+    private val reportUnhandledError: ((Throwable) -> Unit)? = null,
 ) : GlobalSettingsViewModel {
     private data class PreparedReset(
         val option: UsageResetOption,
@@ -72,7 +73,7 @@ internal class GlobalSettingsViewModelImpl(
     )
 
     private val scope = commandScope.supervisorChildScope()
-    private val updates = SettingsUpdateQueue(commandScope)
+    private val updates = SettingsUpdateQueue(commandScope, defaultReportError = reportUnhandledError)
     private val effectChannel = Channel<GlobalSettingsEffect>(Channel.BUFFERED)
     private var closed: Boolean = false
     private var latestSettings: KodexGlobalSettings = globalSettings.settings.value
@@ -509,8 +510,9 @@ internal class GlobalSettingsViewModelImpl(
                 command()
             } catch (cancellation: CancellationException) {
                 throw cancellation
-            } catch (_: Throwable) {
+            } catch (failure: Throwable) {
                 // Manager commands validate before any atomic settings update.
+                reportUnhandledError?.invoke(failure)
             }
         }
     }
