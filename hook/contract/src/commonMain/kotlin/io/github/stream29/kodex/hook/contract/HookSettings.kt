@@ -43,4 +43,7 @@ public enum class HookType {
 
     @SerialName("post_compact")
     PostCompact,
+
+    @SerialName("unhandled_error")
+    UnhandledError,
 }

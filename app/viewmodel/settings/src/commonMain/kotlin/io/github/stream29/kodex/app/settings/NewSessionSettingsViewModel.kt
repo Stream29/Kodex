@@ -23,9 +23,10 @@ internal class NewSessionSettingsViewModelImpl(
     private val globalSettings: KodexGlobalSettingsStore,
     models: StateFlow<List<ModelInfo>>,
     parentScope: CoroutineScope,
+    reportUnhandledError: ((Throwable) -> Unit)? = null,
 ) : NewSessionSettingsViewModel {
     private val scope = parentScope.supervisorChildScope()
-    private val updates = SettingsUpdateQueue(parentScope)
+    private val updates = SettingsUpdateQueue(parentScope, defaultReportError = reportUnhandledError)
     private var closed: Boolean = false
     private var latestSettings: KodexNewSessionSettings = globalSettings.settings.value.newSession
     private var revision: Long = 0

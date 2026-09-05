@@ -67,7 +67,13 @@ public fun createSettingsViewModel(
     sessionSettings: SessionSettingsDataSource? = null,
     createDirectoryPicker: (Path) -> DirectoryPickerViewModel? = { null },
     ownerScope: CoroutineScope,
+    reportUnhandledError: ((Throwable, Path) -> Unit)? = null,
+    startupWorkingDirectory: Path? = null,
 ): SettingsViewModel {
+    val defaultErrorCwd = startupWorkingDirectory ?: Path(".")
+    val reportDefaultError: ((Throwable) -> Unit)? = reportUnhandledError?.let { reporter ->
+        { failure -> reporter(failure, defaultErrorCwd) }
+    }
     val global = GlobalSettingsViewModelImpl(
         globalSettings = globalSettings,
         authenticationStore = authentication,
@@ -76,17 +82,20 @@ public fun createSettingsViewModel(
         hookManager = hookManager,
         models = models,
         commandScope = ownerScope,
+        reportUnhandledError = reportDefaultError,
     )
     val session = SessionSettingsViewModelImpl(
         source = sessionSettings ?: UnavailableSessionSettingsDataSource(),
         models = models,
         parentScope = ownerScope,
         createDirectoryPicker = createDirectoryPicker,
+        reportUnhandledError = reportUnhandledError,
     )
     val newSession = NewSessionSettingsViewModelImpl(
         globalSettings = globalSettings,
         models = models,
         parentScope = ownerScope,
+        reportUnhandledError = reportDefaultError,
     )
     return SettingsViewModelImpl(
         initialPage = initialPage,
@@ -108,6 +117,8 @@ public data class SettingsViewModelDependencies(
     public val sessionSettings: SessionSettingsDataSource?,
     public val createDirectoryPicker: (Path) -> DirectoryPickerViewModel?,
     public val ownerScope: CoroutineScope,
+    public val reportUnhandledError: ((Throwable, Path) -> Unit)? = null,
+    public val startupWorkingDirectory: Path? = null,
 )
 
 /** Koin-resolved creator for one exact Settings popup hierarchy. */
@@ -127,5 +138,7 @@ public class DefaultSettingsViewModelFactory(
             sessionSettings = dependencies.sessionSettings,
             createDirectoryPicker = dependencies.createDirectoryPicker,
             ownerScope = dependencies.ownerScope,
+            reportUnhandledError = dependencies.reportUnhandledError,
+            startupWorkingDirectory = dependencies.startupWorkingDirectory,
         )
 }

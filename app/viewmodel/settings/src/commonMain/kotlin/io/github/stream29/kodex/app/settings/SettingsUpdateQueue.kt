@@ -14,30 +14,45 @@ import kotlinx.coroutines.launch
  */
 internal class SettingsUpdateQueue(
     commandScope: CoroutineScope,
+    private val defaultReportError: ((Throwable) -> Unit)? = null,
 ) {
-    private val commands = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+    private class SettingsCommand(
+        val block: suspend () -> Unit,
+        val reportError: ((Throwable) -> Unit)?,
+    )
+
+    private val commands = Channel<SettingsCommand>(Channel.UNLIMITED)
     private var closed: Boolean = false
 
     private val worker = commandScope.launch {
         for (command in commands) {
             try {
-                command()
+                command.block()
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (failure: Throwable) {
-                logger.error(failure) {
-                    "Failed to persist a Settings update."
-                }
+                reportFailure(failure, command.reportError, "Failed to persist a Settings update.")
             }
         }
     }
 
-    fun submit(block: suspend () -> Unit) {
+    fun submit(
+        reportError: ((Throwable) -> Unit)? = null,
+        block: suspend () -> Unit,
+    ) {
         if (closed) return
-        commands.trySend(block).exceptionOrNull()?.let { failure ->
-            logger.error(failure) {
-                "Failed to enqueue a Settings update."
-            }
+        val command = SettingsCommand(block, reportError)
+        commands.trySend(command).exceptionOrNull()?.let { failure ->
+            reportFailure(failure, reportError, "Failed to enqueue a Settings update.")
+        }
+    }
+
+    private fun reportFailure(failure: Throwable, reportError: ((Throwable) -> Unit)?, message: String) {
+        val reporter = reportError ?: defaultReportError
+        if (reporter == null) {
+            logger.error(failure) { message }
+        } else {
+            reporter(failure)
         }
     }
 

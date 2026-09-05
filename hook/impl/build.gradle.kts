@@ -14,6 +14,7 @@ kotlin {
             api(libs.kotlinx.coroutines.core)
             implementation(project(":utils-coroutines"))
             implementation(project(":utils-shell-client"))
+            implementation(project(":utils-logging"))
         }
         commonTest.dependencies {
             implementation(project(":utils-kotlinx-io-coroutines"))

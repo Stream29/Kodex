@@ -32,6 +32,7 @@ internal class SessionSettingsViewModelImpl(
     models: StateFlow<List<ModelInfo>>,
     parentScope: CoroutineScope,
     private val createDirectoryPicker: (Path) -> DirectoryPickerViewModel?,
+    private val reportUnhandledError: ((Throwable, Path) -> Unit)? = null,
 ) : SessionSettingsViewModel {
     private val scope = parentScope.supervisorChildScope()
     private val updates = SettingsUpdateQueue(parentScope)
@@ -130,8 +131,12 @@ internal class SessionSettingsViewModelImpl(
     override fun renameSession(expectedRevision: Long, sessionName: String) {
         if (closed) return
         val normalized = sessionName.trim()
-        if (normalized.isEmpty() || currentExpected(expectedRevision) == null) return
-        updates.submit {
+        val available = currentExpected(expectedRevision) ?: return
+        if (normalized.isEmpty()) return
+        val cwd = available.snapshot.configuration.workingDirectory
+        updates.submit(
+            reportError = reportUnhandledError?.let { reporter -> { failure -> reporter(failure, cwd) } },
+        ) {
             source.tryRenameSession(expectedRevision, normalized)
         }
     }
@@ -152,8 +157,11 @@ internal class SessionSettingsViewModelImpl(
     ) {
         if (closed) return
         val available = currentWritable(expectedRevision) ?: return
+        val cwd = available.snapshot.configuration.workingDirectory
         val configuration = available.snapshot.configuration.transform()
-        updates.submit {
+        updates.submit(
+            reportError = reportUnhandledError?.let { reporter -> { failure -> reporter(failure, cwd) } },
+        ) {
             source.tryUpdateConfiguration(expectedRevision, configuration)
         }
     }

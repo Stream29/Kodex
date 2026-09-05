@@ -808,8 +808,12 @@ public fun SessionTreeCliScreen(
                 onDismiss = { historyMenu = null },
                 onRevert = { request ->
                     historyMenu = null
-                    runCatching {
+                    try {
                         request.agent.requestHistoryRevert(request.target)
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (_: Throwable) {
+                        // The Agent reports rejected history operations.
                     }
                 },
                 onFork = { request ->
@@ -821,7 +825,7 @@ public fun SessionTreeCliScreen(
                         } catch (failure: CancellationException) {
                             throw failure
                         } catch (_: Throwable) {
-                            // The owning Session publishes the operation failure.
+                            // Fork and open each report at their owning boundary.
                         }
                     }
                 },
@@ -946,8 +950,14 @@ private fun BoxScope.SessionCatalogPopup(
                                 onClick = {
                                     contextMenu = null
                                     scope.launch {
-                                        application.openSession(entry.sessionIndex)
-                                        application.dismissPopup(open)
+                                        try {
+                                            application.openSession(entry.sessionIndex)
+                                            application.dismissPopup(open)
+                                        } catch (cancellation: CancellationException) {
+                                            throw cancellation
+                                        } catch (_: Throwable) {
+                                            // The Session registry reports open failures.
+                                        }
                                     }
                                 },
                                 onOpenContextMenu = { anchor, clickPosition ->
@@ -984,7 +994,13 @@ private fun BoxScope.SessionCatalogPopup(
             onFork = {
                 contextMenu = null
                 scope.launch {
-                    open.viewModel.fork(request.entry.sessionIndex)
+                    try {
+                        open.viewModel.fork(request.entry.sessionIndex)
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (_: Throwable) {
+                        // The registry or catalog reports the failed operation.
+                    }
                 }
             },
             onArchive = {
@@ -1433,8 +1449,12 @@ private fun BoxScope.AgentHistoryRevertDialog(agent: AgentViewModel?) {
                     label = "Revert",
                     color = TuiTheme.colorScheme.error,
                     onClick = {
-                        runCatching {
+                        try {
                             agent.confirmHistoryRevert(confirm.requestId)
+                        } catch (cancellation: CancellationException) {
+                            throw cancellation
+                        } catch (_: Throwable) {
+                            // The Agent reports both rejected and failed reverts.
                         }
                     },
                 )

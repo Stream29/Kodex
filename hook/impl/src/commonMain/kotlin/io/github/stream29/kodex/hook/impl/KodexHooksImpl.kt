@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.hook.impl
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.hook.contract.HookSettings
 import io.github.stream29.kodex.hook.contract.HookType
 import io.github.stream29.kodex.hook.contract.KodexHooks
@@ -21,15 +22,21 @@ import io.github.stream29.kodex.hook.impl.projection.toPreToolUseResult
 import io.github.stream29.kodex.hook.impl.projection.toStopResult
 import io.github.stream29.kodex.hook.impl.projection.toUserPromptSubmitResult
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
+import io.github.stream29.kodex.utils.logging.global
 import io.github.stream29.kodex.utils.shellclient.ShellClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.io.files.Path
 
 /**
  * [KodexHooks] implementation using a resolved view of global settings.
@@ -63,7 +70,7 @@ public class KodexHooksImpl internal constructor(
         for (hook in hooks) {
             val result = shellClient.runHook(
                 hook = hook,
-                inputJson = encodeHookInput(
+                input = encodeHookInput(
                     hook = hook,
                     type = HookType.UserPromptSubmit,
                     context = request.context,
@@ -88,7 +95,7 @@ public class KodexHooksImpl internal constructor(
         for (hook in hooks) {
             val result = shellClient.runHook(
                 hook = hook,
-                inputJson = encodeHookInput(
+                input = encodeHookInput(
                     hook = hook,
                     type = HookType.Stop,
                     context = request.context,
@@ -111,7 +118,7 @@ public class KodexHooksImpl internal constructor(
         for (hook in hooks) {
             val result = shellClient.runHook(
                 hook = hook,
-                inputJson = encodeHookInput(
+                input = encodeHookInput(
                     hook = hook,
                     type = HookType.PreToolUse,
                     context = invocation.context,
@@ -153,6 +160,31 @@ public class KodexHooksImpl internal constructor(
         runCompactionHooks(HookType.PostCompact, request)
     }
 
+    override suspend fun onUnhandledError(message: String?, cwd: Path) {
+        val hooks = currentHooks()[HookType.UnhandledError]
+        if (hooks.isEmpty()) return
+        val input = message.orEmpty()
+        coroutineScope {
+            hooks.map { hook ->
+                async {
+                    try {
+                        val result = shellClient.runHook(hook, input, cwd)
+                        if (result.exitCode != 0) {
+                            logger.error {
+                                "Unhandled error hook '${hook.name}' failed " +
+                                    "(exitCode=${result.exitCode ?: "unavailable"})."
+                            }
+                        }
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (failure: Throwable) {
+                        logger.error(failure) { "Unhandled error hook '${hook.name}' failed." }
+                    }
+                }
+            }.awaitAll()
+        }
+    }
+
     private suspend fun runCompactionHooks(
         type: HookType,
         request: CompactionHookRequest,
@@ -191,4 +223,8 @@ public fun CoroutineScope.KodexHooksImpl(
         hooksScope.cancel()
         throw failure
     }
+}
+
+private val logger by lazy {
+    KotlinLogging.logger {}.global()
 }

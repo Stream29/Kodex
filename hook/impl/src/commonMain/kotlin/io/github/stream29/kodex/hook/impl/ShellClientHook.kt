@@ -24,7 +24,7 @@ internal data class HookRawResult(
 
 internal suspend fun ShellClient.runHookCommand(
     command: String,
-    inputJson: String,
+    input: String,
     cwd: Path,
 ): HookRawResult =
     try {
@@ -37,7 +37,7 @@ internal suspend fun ShellClient.runHookCommand(
                     environment = emptyMap(),
                 ),
             ).use { process ->
-                process.stdin.send(inputJson)
+                process.stdin.send(input)
                 process.stdin.close()
                 val exitCode = process.exitCode.await()
                 process.toRawResult(exitCode)

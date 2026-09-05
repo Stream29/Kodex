@@ -101,9 +101,10 @@ class SettingsViewModelTest {
     fun updateQueueContinuesAfterAFailedWrite() = runTest {
         val releaseFirstWrite = CompletableDeferred<Unit>()
         var secondWriteCompleted = false
+        var reportedError: Throwable? = null
         val queue = SettingsUpdateQueue(backgroundScope)
 
-        queue.submit {
+        queue.submit(reportError = { reportedError = it }) {
             releaseFirstWrite.await()
             error("Failed write")
         }
@@ -115,8 +116,57 @@ class SettingsViewModelTest {
         runCurrent()
 
         assertTrue(secondWriteCompleted)
+        assertEquals("Failed write", reportedError?.message)
 
         queue.close()
+    }
+
+    @Test
+    fun settingsViewModelRoutesUnhandledErrorWithCwd() = runTest {
+        val failingSource = object : SessionSettingsDataSource {
+            override val state: StateFlow<SessionSettingsDataState> = MutableStateFlow(
+                SessionSettingsDataState.Available(initialSnapshot()),
+            )
+            override suspend fun tryUpdateConfiguration(
+                expectedRevision: Long,
+                configuration: SessionSettingsConfiguration,
+            ): Boolean {
+                throw IllegalStateException("source boom")
+            }
+            override suspend fun tryRenameSession(
+                expectedRevision: Long,
+                sessionName: String,
+            ): Boolean = false
+            override fun close(): Unit = Unit
+        }
+
+        var capturedError: Throwable? = null
+        var capturedCwd: Path? = null
+
+        val viewModel = createSettingsViewModel(
+            initialPage = SettingsPage.CurrentSession,
+            globalSettings = InMemoryKodexGlobalSettings(KodexGlobalSettings()),
+            authentication = TestAuthStore(),
+            accountUsage = TestAccountUsageStore(),
+            mcpManager = TestMcpManager(),
+            hookManager = TestHookManager(),
+            models = MutableStateFlow(emptyList()),
+            sessionSettings = failingSource,
+            ownerScope = backgroundScope,
+            reportUnhandledError = { failure, cwd ->
+                capturedError = failure
+                capturedCwd = cwd
+            },
+        )
+        runCurrent()
+
+        viewModel.session.updateModel(0, OpenAiModelId("fail-model"))
+        runCurrent()
+
+        assertEquals("source boom", capturedError?.message)
+        assertEquals(Path("workspace"), capturedCwd)
+
+        viewModel.close()
     }
 
     @Test
