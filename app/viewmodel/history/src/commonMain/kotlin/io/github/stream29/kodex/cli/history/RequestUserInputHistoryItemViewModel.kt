@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.cli.history
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistoryItemViewModel
 import kotlinx.coroutines.CancellationException
@@ -30,7 +30,8 @@ internal class RequestUserInputHistoryItemViewModelImpl(
                 }
             } catch (failure: CancellationException) {
                 throw failure
-            } catch (_: Throwable) {
+            } catch (failure: Throwable) {
+                context.logFailure(descriptor, failure)
                 if (context.isCurrent()) mutableState.value =
                     RequestUserInputHistoryItemState.Failed
             }

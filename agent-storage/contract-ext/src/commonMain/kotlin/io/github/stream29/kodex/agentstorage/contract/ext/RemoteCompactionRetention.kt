@@ -1,12 +1,12 @@
 package io.github.stream29.kodex.agentstorage.contract.ext
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CompactionRetainedItem
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableSuggestSubagentTaskResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableSuggestSubagentTaskToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.valuesDescending
 import io.github.stream29.kodex.openai.ContentItem

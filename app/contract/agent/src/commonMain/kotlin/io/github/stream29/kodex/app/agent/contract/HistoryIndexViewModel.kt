@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.app.agent.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import kotlinx.coroutines.flow.StateFlow
 
 /** Oldest-first snapshot of one Agent's sparse index timeline. */
@@ -19,6 +19,7 @@ public enum class HistoryIndexEntryKind {
     DeveloperMessage,
     AgentMessage,
     RequestUserInput,
+    SuggestSubagents,
     PlanUpdate,
 }
 

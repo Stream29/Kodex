@@ -3,6 +3,7 @@ package io.github.stream29.kodex.cli.app
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.SuggestedSessionConfiguration
+import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
@@ -301,6 +302,34 @@ internal class ApplicationViewModelImpl(
         )
     }
 
+    override suspend fun openSuggestedWorkingDirectoryPopup(
+        target: AgentViewModel,
+        callId: String,
+    ): ApplicationPopupState.WorkingDirectory? = commandMutex.withLock {
+        ensureOpen()
+        requireOwned(target)
+        val suggestion = target.suggestSubagentTask
+        val pending = (suggestion.state.value as? SuggestSubagentTaskState.Pending)
+            ?.takeIf { it.callId == callId && !it.submitting }
+            ?: return@withLock null
+        installPopup(
+            ApplicationPopupState.WorkingDirectory(
+                WorkingDirectoryPopupViewModelImpl(
+                    target = target,
+                    picker = createDirectoryPicker(pending.configuration.cwd),
+                    onSelectDirectory = { directory ->
+                        val current = suggestion.state.value as? SuggestSubagentTaskState.Pending
+                        if (current != null && current.callId == callId && !current.submitting) {
+                            suggestion.updateConfiguration(
+                                callId, current.configuration.copy(cwd = directory),
+                            )
+                        }
+                    },
+                ),
+            ),
+        )
+    }
+
     override fun dismissPopup(expected: ApplicationPopupState.Open): Boolean {
         val current = mutablePopup.value
         if (current !== expected) return false
@@ -490,12 +519,13 @@ private class DeleteSessionPopupViewModelImpl(
 private class WorkingDirectoryPopupViewModelImpl(
     override val target: AgentSettingsViewModel,
     override val picker: DirectoryPickerViewModel,
+    private val onSelectDirectory: suspend (Path) -> Unit = target::updateWorkingDirectory,
 ) : WorkingDirectoryPopupViewModel {
     private var closed = false
 
     override suspend fun select(directory: Path) {
         check(!closed) { "Working-directory popup is closed." }
-        target.updateWorkingDirectory(directory)
+        onSelectDirectory(directory)
         close()
     }
 

@@ -1,4 +1,4 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable.work
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload

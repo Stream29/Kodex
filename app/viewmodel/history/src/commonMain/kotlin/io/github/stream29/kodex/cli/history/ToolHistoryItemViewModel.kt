@@ -1,9 +1,7 @@
 package io.github.stream29.kodex.cli.history
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
+import io.github.stream29.kodex.app.history.contract.item.isOrdinaryHistoryToolEvent
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewModel
 import kotlinx.coroutines.CancellationException
@@ -37,7 +35,8 @@ internal class ToolHistoryItemViewModelImpl(
                 }
             } catch (failure: CancellationException) {
                 throw failure
-            } catch (_: Throwable) {
+            } catch (failure: Throwable) {
+                context.logFailure(descriptor, failure)
                 if (context.isCurrent()) mutableState.value = ToolHistoryItemState.Failed
             }
         }
@@ -69,7 +68,8 @@ internal class ToolHistoryItemViewModelImpl(
                 }
             } catch (failure: CancellationException) {
                 throw failure
-            } catch (_: Throwable) {
+            } catch (failure: Throwable) {
+                context.logFailure(descriptor, failure)
                 if (context.isCurrent() && mutableState.value.isExpanding(loadingJob)) {
                     mutableState.value = ToolHistoryItemState.Failed
                 }
@@ -102,11 +102,4 @@ internal class ToolHistoryItemViewModelImpl(
         this is ToolHistoryItemState.Expanding && loadingJob === job
 }
 
-internal fun StableCleanEvent.CompletedTool.isOrdinaryHistoryTool(): Boolean = when (this) {
-    is StablePatchToolEvent,
-    is StablePlanUpdate,
-    is StableRequestUserInputToolEvent,
-        -> false
-
-    else -> true
-}
+internal fun StableCleanEvent.CompletedTool.isOrdinaryHistoryTool(): Boolean = isOrdinaryHistoryToolEvent

@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.history
 
+import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemState
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -463,6 +466,15 @@ private fun StoredHistoryContent(
             }
         }
 
+        is SuggestSubagentTaskHistoryItemViewModel -> {
+            val state by item.state.collectAsState()
+            when (val current = state) {
+                is SuggestSubagentTaskHistoryItemState.Loading -> Text("")
+                SuggestSubagentTaskHistoryItemState.Failed -> HistoryErrorRow()
+                is SuggestSubagentTaskHistoryItemState.Ready -> current.event.renderSuggestion(current.elapsed)
+            }
+        }
+
         is PlanUpdateHistoryItemViewModel -> {
             val state by item.state.collectAsState()
             when (val currentState = state) {
@@ -713,6 +725,7 @@ private fun HistoryItemViewModel.storageIndex(): Int = when (this) {
     is ReasoningHistoryItemViewModel -> index
     is ToolHistoryItemViewModel -> index
     is RequestUserInputHistoryItemViewModel -> index
+    is SuggestSubagentTaskHistoryItemViewModel -> index
     is PatchHistoryItemViewModel -> index
     is PlanUpdateHistoryItemViewModel -> index
     is ContextCompactionHistoryItemViewModel -> index
@@ -725,6 +738,7 @@ private fun HistoryItemViewModel.historyContentType(): HistoryContentType = when
     is ReasoningHistoryItemViewModel -> HistoryContentType.Reasoning
     is ToolHistoryItemViewModel,
     is RequestUserInputHistoryItemViewModel,
+    is SuggestSubagentTaskHistoryItemViewModel,
     is PlanUpdateHistoryItemViewModel,
         -> HistoryContentType.CompletedTool
 

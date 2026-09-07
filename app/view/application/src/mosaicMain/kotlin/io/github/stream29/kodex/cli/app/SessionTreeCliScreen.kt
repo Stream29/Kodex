@@ -177,6 +177,12 @@ public fun SessionTreeCliScreen(
     val settingsOwner: AgentSettingsViewModel? =
         selectedAgent ?: (selected as? NewSessionViewModel)
     val runtimeDropdowns = RuntimeConfigurationDropdowns.remember(settingsOwner)
+    val pendingSuggestion = selectedAgent?.let { agent ->
+        key(agent) { agent.suggestSubagentTask.state.collectAsState().value }
+    } as? io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState.Pending
+    val suggestionDropdowns = RuntimeConfigurationDropdowns.remember(
+        settingsOwner to pendingSuggestion?.callId,
+    )
     val runtimeSettings = collectRuntimeSettings(settingsOwner)
     val runtimeModels = collectRuntimeModels(settingsOwner)
 
@@ -483,6 +489,7 @@ public fun SessionTreeCliScreen(
                                             rows = contentRows,
                                             newLineKey = currentNewLineKey,
                                             dropdowns = runtimeDropdowns,
+                                            suggestionDropdowns = suggestionDropdowns,
                                             onOpenHistoryEntryContextMenu = { target, anchor, position ->
                                                 tabMenu = null
                                                 shellSessionMenu = null
@@ -501,6 +508,11 @@ public fun SessionTreeCliScreen(
                                             onBrowseWorkingDirectory = {
                                                 scope.launch {
                                                     viewModel.openWorkingDirectoryPopup(agent)
+                                                }
+                                            },
+                                            onBrowseSuggestedWorkingDirectory = { callId ->
+                                                scope.launch {
+                                                    viewModel.openSuggestedWorkingDirectoryPopup(agent, callId)
                                                 }
                                             },
                                             onOpenSettings = {
@@ -831,6 +843,28 @@ public fun SessionTreeCliScreen(
                 },
             )
             AgentHistoryRevertDialog(selectedAgent)
+            if (selectedAgent != null && pendingSuggestion != null) {
+                val batch = pendingSuggestion.configuration
+                RuntimeConfigurationMenus(
+                    configuration = RuntimeConfiguration(
+                        batch.model, batch.reasoningEffort, batch.serviceTier, batch.requestUserInputMode,
+                    ),
+                    models = runtimeModels,
+                    modelOptions = (runtimeModels.map { it.slug } + batch.model).distinct(),
+                    dropdowns = suggestionDropdowns,
+                    onConfigurationSelected = { model, effort, tier ->
+                        selectedAgent.suggestSubagentTask.updateConfiguration(
+                            pendingSuggestion.callId,
+                            batch.copy(model = model, reasoningEffort = effort, serviceTier = tier),
+                        )
+                    },
+                    onRequestUserInputModeSelected = { mode ->
+                        selectedAgent.suggestSubagentTask.updateConfiguration(
+                            pendingSuggestion.callId, batch.copy(requestUserInputMode = mode),
+                        )
+                    },
+                )
+            }
             if (settingsOwner != null && runtimeSettings != null) {
                 RuntimeConfigurationMenus(
                     viewModel = settingsOwner,

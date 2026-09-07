@@ -1,21 +1,6 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWorkEvent
 import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
@@ -238,7 +223,6 @@ private fun assertStableToolEventRoundTrip(event: StableCleanEvent.CompletedTool
         is StableWorkEvent.CompletedTool ->
             specializedToolJson.encodeToString<StableWorkEvent>(event)
 
-        else -> error("Completed tool is not assigned to a stable timeline.")
     }
     val element = specializedToolJson.parseToJsonElement(encoded).jsonObject
     val items = event.toResponseHistoryItems()
@@ -252,7 +236,6 @@ private fun assertStableToolEventRoundTrip(event: StableCleanEvent.CompletedTool
         is StableWorkEvent.CompletedTool ->
             specializedToolJson.decodeFromString<StableWorkEvent>(encoded)
 
-        else -> error("Completed tool is not assigned to a stable timeline.")
     }
     assertEquals(event, decoded)
     assertEquals(2, items.size)

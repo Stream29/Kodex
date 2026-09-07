@@ -1,11 +1,11 @@
 package io.github.stream29.kodex.agentstorage.inmemory
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.ext.appendCompaction

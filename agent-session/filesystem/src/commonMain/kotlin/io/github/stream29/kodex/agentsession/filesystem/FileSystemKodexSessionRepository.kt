@@ -397,7 +397,7 @@ private suspend fun <T> FileSystemLease.useAndRelease(block: suspend () -> T): T
     } finally {
         withContext(NonCancellable) {
             close()
-            coroutineContext[Job]?.join()
+            this@useAndRelease.coroutineContext[Job]?.join()
         }
     }
 }

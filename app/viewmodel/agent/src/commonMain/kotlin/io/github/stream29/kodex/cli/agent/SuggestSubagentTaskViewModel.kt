@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.cli.agent
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableSuggestSubagentTaskResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
@@ -64,7 +64,7 @@ internal class SuggestSubagentTaskViewModelImpl(
             return@async SuggestSubagentTaskSubmissionResult.Stale
         }
         try {
-            val feedback = submitting.feedback.takeIf { it.isNotBlank() }
+            val feedback = submitting.feedback.takeIf { !accepted && it.isNotBlank() }
             val response = if (!accepted) {
                 SuggestSubagentTaskResponse.Rejected(feedback = feedback)
             } else {

@@ -8,11 +8,11 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState as createKodexAgentState
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.latestIndex

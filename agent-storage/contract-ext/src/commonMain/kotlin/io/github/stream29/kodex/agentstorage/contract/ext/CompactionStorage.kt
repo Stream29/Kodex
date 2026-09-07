@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.agentstorage.contract.ext
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.KodexAgentSettings

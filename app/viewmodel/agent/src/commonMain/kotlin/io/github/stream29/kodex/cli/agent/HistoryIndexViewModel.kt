@@ -1,15 +1,15 @@
 package io.github.stream29.kodex.cli.agent
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableSuggestSubagentTaskToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.IndexVersioned
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
@@ -179,7 +179,7 @@ private fun CleanIndexEntry.toHistoryIndexEntryKind(): HistoryIndexEntryKind = w
     is StableDeveloperMessage -> HistoryIndexEntryKind.DeveloperMessage
     is StableAgentMessage -> HistoryIndexEntryKind.AgentMessage
     is StableRequestUserInputToolEvent -> HistoryIndexEntryKind.RequestUserInput
-    is StableSuggestSubagentTaskToolEvent -> HistoryIndexEntryKind.RequestUserInput
+    is StableSuggestSubagentTaskToolEvent -> HistoryIndexEntryKind.SuggestSubagents
     is StablePlanUpdate -> HistoryIndexEntryKind.PlanUpdate
 }
 
@@ -191,8 +191,7 @@ private fun CleanIndexEntry.toHistoryIndexSummary(): String = when (this) {
     is StableAgentMessage -> content.toAgentDisplayContent().toSummary()
     is StableRequestUserInputToolEvent ->
         arguments.questions.joinToString(separator = " ") { question -> question.question }.toSummary()
-    is StableSuggestSubagentTaskToolEvent ->
-        arguments.tasks.joinToString(separator = " ") { task -> task.name }.toSummary()
+    is StableSuggestSubagentTaskToolEvent -> "suggest subagents"
 
     is StablePlanUpdate -> {
         val selected = arguments.plan.lastOrNull { item -> item.status != StepStatus.Pending }
@@ -214,10 +213,7 @@ private fun CleanIndexEntry.toHistoryIndexDetail(): String = when (this) {
     }.joinToString(separator = "\n")
 
     is StableRequestUserInputToolEvent -> toRequestUserInputDetail()
-    is StableSuggestSubagentTaskToolEvent ->
-        arguments.tasks.joinToString(separator = "\n") { task ->
-            "${task.name}: ${task.prompt}"
-        }
+    is StableSuggestSubagentTaskToolEvent -> "suggest subagents"
     is StablePlanUpdate -> toPlanDetail()
 }
 

@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.agentruntime.decorator.steer
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 
 /** Provides clean input waiting to steer the active logical turn. */
 public fun interface SteerProvider {

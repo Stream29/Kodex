@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.cli.history
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemViewModel
 import kotlinx.coroutines.CancellationException

@@ -2,6 +2,11 @@ package io.github.stream29.kodex.cli.app
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
+import io.github.stream29.kodex.app.agent.contract.AgentViewModel
+import io.github.stream29.kodex.app.agent.contract.SuggestedSessionConfiguration
+import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
+import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskViewModel
+import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskSubmissionResult
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerEffect
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerLoadState
@@ -13,6 +18,11 @@ import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
+import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
+import io.github.stream29.kodex.openai.ServiceTier
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
+import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -30,8 +40,76 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.test.assertNull
+import kotlin.test.assertNotNull
 
 val sessionTreeCliViewModelTest by testSuite {
+    test("suggested cwd picker edits only the live batch and respects dismissal") {
+        coroutineScope {
+            val suggestion = TestSuggestionViewModel()
+            lateinit var picker: TestDirectoryPickerViewModel
+            val fixture = applicationFixture(
+                decorateAgent = { original ->
+                    object : AgentViewModel by original {
+                        override val suggestSubagentTask = suggestion
+                    }
+                },
+                createDirectoryPicker = { directory ->
+                    TestDirectoryPickerViewModel(directory).also { picker = it }
+                },
+            )
+            try {
+                val session = fixture.viewModel.materializeNewSession(tabIndex = 0)
+                val agent = session.rootAgent
+                val sourceCwd = agent.settings.value.cwd
+                val initial = assertIs<SuggestSubagentTaskState.Pending>(suggestion.state.value)
+                assertNull(fixture.viewModel.openSuggestedWorkingDirectoryPopup(agent, "stale"))
+                val cancelled = assertNotNull(
+                    fixture.viewModel.openSuggestedWorkingDirectoryPopup(agent, initial.callId),
+                )
+                assertEquals(
+                    initial.configuration.cwd,
+                    assertIs<DirectoryPickerLoadState.Ready>(picker.state.value.loadState).directory,
+                )
+                assertTrue(fixture.viewModel.dismissPopup(cancelled))
+                assertTrue(picker.closed)
+                assertEquals(initial, suggestion.state.value)
+
+                val open = assertNotNull(
+                    fixture.viewModel.openSuggestedWorkingDirectoryPopup(agent, initial.callId),
+                )
+                val selected = Path("selected-batch-directory")
+                open.viewModel.select(selected)
+                assertEquals(
+                    selected,
+                    assertIs<SuggestSubagentTaskState.Pending>(suggestion.state.value).configuration.cwd,
+                )
+                assertEquals(sourceCwd, agent.settings.value.cwd)
+                assertTrue(picker.closed)
+                fixture.viewModel.dismissPopup(open)
+
+                val stale = assertNotNull(
+                    fixture.viewModel.openSuggestedWorkingDirectoryPopup(agent, initial.callId),
+                )
+                suggestion.state.value = initial.copy(callId = "replacement")
+                stale.viewModel.select(Path("must-not-apply"))
+                assertEquals(initial.copy(callId = "replacement"), suggestion.state.value)
+                assertEquals(sourceCwd, agent.settings.value.cwd)
+                fixture.viewModel.dismissPopup(stale)
+
+                val owned = assertNotNull(
+                    fixture.viewModel.openSuggestedWorkingDirectoryPopup(agent, "replacement"),
+                )
+                assertTrue(fixture.viewModel.closeTab(session))
+                assertTrue(picker.closed)
+                assertIs<ApplicationPopupState.Closed>(fixture.viewModel.popup.value)
+                assertFalse(fixture.viewModel.dismissPopup(owned))
+            } finally {
+                fixture.close()
+            }
+        }
+    }
+
     test("materialization replaces the exact draft index atomically") {
         coroutineScope {
             val fixture = applicationFixture()
@@ -277,6 +355,30 @@ val sessionTreeCliViewModelTest by testSuite {
             }
         }
     }
+}
+
+private class TestSuggestionViewModel : SuggestSubagentTaskViewModel {
+    override val state = MutableStateFlow<SuggestSubagentTaskState>(
+        SuggestSubagentTaskState.Pending(
+            callId = "suggestion",
+            arguments = SuggestSubagentTaskArgs(listOf(SuggestedSubagentTask("Task", "Work"))),
+            configuration = SuggestedSessionConfiguration(
+                OpenAiModelId("test"), ReasoningEffort.Low, ServiceTier.Default,
+                Path("batch-directory"), RequestUserInputMode.AskUser,
+            ),
+        ),
+    )
+    override fun updateFeedback(callId: String, text: String): Boolean = false
+    override fun updateConfiguration(callId: String, configuration: SuggestedSessionConfiguration): Boolean {
+        val pending = state.value as? SuggestSubagentTaskState.Pending ?: return false
+        if (pending.callId != callId || pending.submitting) return false
+        state.value = pending.copy(configuration = configuration)
+        return true
+    }
+    override suspend fun submit(
+        callId: String, expectedRevision: Long, accepted: Boolean,
+    ): SuggestSubagentTaskSubmissionResult = error("Submission is not used by this test.")
+    override fun close(): Unit = Unit
 }
 
 private class TestDirectoryPickerViewModel(

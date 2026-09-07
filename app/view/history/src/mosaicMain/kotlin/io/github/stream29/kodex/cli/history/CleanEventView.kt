@@ -20,35 +20,36 @@ import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.InvalidToolInvocation
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableInvalidToolCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableJsonToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableReasoning
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionAction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
@@ -150,6 +151,7 @@ internal fun StableCleanEvent.render(
             is StableMcpToolEvent -> renderMcpTool()
             is StablePlanUpdate -> renderPlanUpdate()
             is StableRequestUserInputToolEvent -> renderRequestUserInput(elapsed)
+            is StableSuggestSubagentTaskToolEvent -> renderSuggestion(elapsed)
             is StableToolSearchEvent -> renderToolSearch()
             is StableWebSearchToolEvent -> renderWebSearch()
         }

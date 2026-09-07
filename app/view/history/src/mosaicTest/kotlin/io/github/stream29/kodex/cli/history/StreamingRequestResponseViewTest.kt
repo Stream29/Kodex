@@ -327,9 +327,14 @@ private fun replayingEvents(
         initial.forEach { event -> check(events.tryEmit(event)) }
     }
 
-private suspend fun TestMosaic<String>.clickRow(y: Int = 0): String {
+private suspend fun TestMosaic<String>.clickRow(y: Int = 0): String = kotlinx.coroutines.withTimeout(5_000) {
     sendMouseEvent(MouseEvent(0, y, MouseEvent.Type.Press, MouseEvent.Button.Left))
     awaitSnapshot()
     sendMouseEvent(MouseEvent(0, y, MouseEvent.Type.Release, MouseEvent.Button.Left))
-    return awaitSnapshot()
+    // A draw can still reflect the press; wait for the clicked row to actually expand.
+    var snapshot: String
+    do {
+        snapshot = awaitSnapshot()
+    } while (snapshot.lineSequence().elementAtOrNull(y)?.trimStart()?.startsWith("v ") != true)
+    snapshot
 }

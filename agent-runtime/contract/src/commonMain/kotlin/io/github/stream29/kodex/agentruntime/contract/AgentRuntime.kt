@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.agentruntime.contract
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecToolClient
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow

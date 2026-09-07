@@ -165,6 +165,8 @@ private class ReplaceableHistoryModel(
 
     override fun requestScrollToLatest() = Unit
 
+    override fun requestScrollToStorageIndex(storageIndex: Int) = Unit
+
     override fun close() = Unit
 }
 

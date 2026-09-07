@@ -92,12 +92,14 @@ internal data class ApplicationTestFixture(
 
 internal suspend fun kotlinx.coroutines.CoroutineScope.applicationFixture(
     newSessionFactory: NewSessionViewModelFactory? = null,
+    decorateAgent: (io.github.stream29.kodex.app.agent.contract.AgentViewModel) ->
+        io.github.stream29.kodex.app.agent.contract.AgentViewModel = { it },
     createDirectoryPicker: (Path) -> DirectoryPickerViewModel = {
         error("Directory picker is not used by this fixture.")
     },
 ): ApplicationTestFixture {
     val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-    val sessions = testSessionViewModelRegistry(repository, this)
+    val sessions = testSessionViewModelRegistry(repository, this, decorateAgent)
     val drafts = newSessionFactory ?: DefaultNewSessionViewModelFactory(
         sessions,
         DefaultComposerViewModelFactory,

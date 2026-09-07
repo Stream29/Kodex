@@ -4,8 +4,8 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.contract.KodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
@@ -38,6 +38,12 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.test.assertNotEquals
+import io.github.stream29.kodex.openai.ResponsesApiRequest
+import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.github.stream29.kodex.openai.Response
+import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
+import kotlinx.coroutines.flow.flowOf
 import kotlin.time.Instant
 
 private suspend fun temporaryRepositoryRoot(): Path =
@@ -77,6 +83,46 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
     testFixture { temporaryRepositoryRoot() } closeWith {
         deleteRecursively(this)
     } asParameterForEach {
+        test("cache key survives reopen and default fork uses its own thread") { root ->
+            for (override in listOf(null, "explicit")) {
+                val requests = mutableListOf<ResponsesApiRequest>()
+                val dependencies = testKodexAgentDependencies(mockOpenAiClient {
+                    createResponse { request ->
+                        requests += request
+                        flowOf(ResponsesStreamEvent.Completed(Response(id = "test", endTurn = true)))
+                    }
+                })
+                val repository = FileSystemKodexSessionRepository(root, dependencies)
+                val index: Int
+                try {
+                    index = repository.createInitialized(settings("Cache").copy(promptCacheKey = override))
+                    val session = repository.open(index)
+                    session.runtime.appendUserMessage(listOf(ContentItem.InputText("First.")))
+                    session.runtime.requestResponseApi()
+                } finally {
+                    repository.closeAndJoin()
+                }
+                val reopened = FileSystemKodexSessionRepository(root, dependencies)
+                try {
+                    val source = reopened.open(index)
+                    source.runtime.appendUserMessage(listOf(ContentItem.InputText("Again.")))
+                    source.runtime.requestResponseApi()
+                    val fork = reopened.open(reopened.createFork(index))
+                    fork.runtime.appendUserMessage(listOf(ContentItem.InputText("Fork.")))
+                    fork.runtime.requestResponseApi()
+                    assertEquals(3, requests.size)
+                    assertEquals(requests[0].promptCacheKey, requests[1].promptCacheKey)
+                    for (request in requests) {
+                        assertEquals(override ?: request.clientMetadata!!.threadId, request.promptCacheKey)
+                    }
+                    if (override == null) assertNotEquals(requests[0].promptCacheKey, requests[2].promptCacheKey)
+                    assertEquals(override, fork.storage.settings[fork.storage.latestIndex()].promptCacheKey)
+                } finally {
+                    reopened.closeAndJoin()
+                }
+            }
+        }
+
         test("creates an uninitialized root storage") { root ->
             val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
             val index = repository.create()
@@ -462,22 +508,30 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
         test("fork is a downstream operation and does not copy descendants") { root ->
             val sourceCwd = Path(root, "source-workspace")
             val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
-            val sourceIndex = repository.createInitialized(settings("Source", sourceCwd))
-            val source = repository.open(sourceIndex)
-            source.runtime.injectHistory(listOf(userMessage("copied")))
+            try {
+                val sourceIndex = repository.createInitialized(settings("Source", sourceCwd))
+                val source = repository.open(sourceIndex)
+                source.runtime.injectHistory(listOf(userMessage("copied")))
 
-            val targetIndex = repository.createFork(sourceIndex)
-            val target = repository.open(targetIndex)
-            val latest = target.storage.latestIndex()
-            target.runtime.updateSettings(
-                target.storage.settings[latest].copy(threadName = "[fork] Source"),
-            )
+                val targetIndex = repository.createFork(sourceIndex)
+                val target = repository.open(targetIndex)
+                val latest = target.storage.latestIndex()
+                target.runtime.updateSettings(
+                    target.storage.settings[latest].copy(threadName = "[fork] Source"),
+                )
 
-            assertEquals(listOf(0, 1), target.storage.index.indexesIn(0..latest))
-            assertEquals(userMessage("copied"), target.storage.index[1])
-            assertEquals("[fork] Source", target.storage.settings[2].threadName)
-            assertEquals(sourceCwd, target.storage.settings[2].cwd)
-            repository.closeAndJoin()
+                // Snapshot zero initializes settings, not an index event.
+                assertEquals(listOf(1), source.storage.index.indexesIn(0..latest))
+                assertEquals(
+                    source.storage.index.indexesIn(0..latest),
+                    target.storage.index.indexesIn(0..latest),
+                )
+                assertEquals(userMessage("copied"), target.storage.index[1])
+                assertEquals("[fork] Source", target.storage.settings[2].threadName)
+                assertEquals(sourceCwd, target.storage.settings[2].cwd)
+            } finally {
+                repository.closeAndJoin()
+            }
         }
 
         test("failed fork removes its reserved session") { root ->

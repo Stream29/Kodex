@@ -14,8 +14,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * @property reasoning Reasoning controls. The default value is omitted from
- * the wire.
+ * @property reasoning Reasoning controls, including an explicit default effort.
  * @property input Nullable because callers may send commands without explicit
  * conversation input; `null` means no input payload is sent.
  * @property commands Nullable because callers may use settings-only requests;
@@ -29,7 +28,7 @@ import kotlinx.serialization.json.jsonPrimitive
 public data class SearchRequest(
     public val id: String,
     public val model: OpenAiModelId,
-    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val reasoning: Reasoning = Reasoning(),
     public val input: SearchInput? = null,
     public val commands: SearchCommands? = null,

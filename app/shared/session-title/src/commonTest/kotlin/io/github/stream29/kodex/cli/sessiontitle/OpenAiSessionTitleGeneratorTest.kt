@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.sessiontitle
 
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.JsonPrimitive
+
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
@@ -18,6 +21,25 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 val openAiSessionTitleGeneratorTest by testSuite {
+    test("title requests explicitly encode medium and low effort") {
+        for (effort in listOf(ReasoningEffort.Medium, ReasoningEffort.Low)) {
+            lateinit var captured: ResponsesApiRequest
+            val client = mockOpenAiClient {
+                createResponse { request ->
+                    captured = request
+                    flowOf(ResponsesStreamEvent.Completed(Response(id = "title")))
+                }
+            }
+            OpenAiSessionTitleGenerator(client).generateTitle("Title this.", OpenAiModelId("test"), effort)
+            val encoded = io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
+                .encodeToJsonElement(ResponsesApiRequest.serializer(), captured)
+            assertEquals(
+                JsonPrimitive(if (effort == ReasoningEffort.Medium) "medium" else "low"),
+                encoded.jsonObject["reasoning"]!!.jsonObject["effort"],
+            )
+        }
+    }
+
     test("projects the isolated title request and decodes structured output") {
         lateinit var captured: ResponsesApiRequest
         val client = mockOpenAiClient {

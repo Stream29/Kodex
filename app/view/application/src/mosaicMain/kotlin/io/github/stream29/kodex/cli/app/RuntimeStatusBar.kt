@@ -139,20 +139,17 @@ internal fun NewSessionStatusBar(
 private fun StatusBarLayout(
     columns: Int,
     regularContent: @Composable () -> Unit,
-    settingsContent: @Composable () -> Unit,
+    settingsContent: (@Composable () -> Unit)? = null,
 ) {
     val width = statusBarWidth(columns)
     Layout(
         content = {
             regularContent()
-            settingsContent()
+            settingsContent?.invoke()
         },
         modifier = Modifier.width(width),
         debugInfo = { "StatusBarLayout(columns=$width)" },
     ) { measurables, constraints ->
-        check(measurables.isNotEmpty()) {
-            "StatusBarLayout requires a trailing Settings item."
-        }
         val childConstraints = Constraints(
             minWidth = 0,
             maxWidth = Constraints.Infinity,
@@ -160,20 +157,35 @@ private fun StatusBarLayout(
             maxHeight = 1,
         )
         val placeables = measurables.map { measurable -> measurable.measure(childConstraints) }
-        val settings = placeables.last()
-        val regular = placeables.dropLast(1)
+        val settings = if (settingsContent != null) placeables.last() else null
+        val regular = if (settings != null) placeables.dropLast(1) else placeables
         val plan = statusBarLayoutPlan(
             width = width,
             itemWidths = regular.map { placeable -> placeable.width },
-            settingsWidth = settings.width,
+            settingsWidth = settings?.width ?: 0,
         )
         layout(width = width, height = plan.rowCount) {
             regular.zip(plan.itemPositions).forEach { (placeable, position) ->
                 placeable.place(position.x, position.y)
             }
-            settings.place(plan.settingsPosition.x, plan.settingsPosition.y)
+            settings?.place(plan.settingsPosition.x, plan.settingsPosition.y)
         }
     }
+}
+
+@Composable
+internal fun SuggestedConfigurationTriggers(
+    columns: Int,
+    configuration: RuntimeConfiguration,
+    cwd: Path,
+    dropdowns: RuntimeConfigurationDropdowns,
+    enabled: Boolean,
+    onBrowse: () -> Unit,
+) {
+    StatusBarLayout(columns = columns, regularContent = {
+        RuntimeConfigurationStatusItemsWithoutSpacing(configuration, dropdowns, enabled)
+        WorkingDirectoryStatusButton(columns, cwd, enabled, onBrowse)
+    })
 }
 
 @Composable
@@ -329,12 +341,13 @@ internal fun statusBarLayoutPlan(
     settingsWidth: Int,
 ): StatusBarLayoutPlan {
     require(width > 0) { "Status bar width must be positive." }
-    require(settingsWidth > 0) { "Settings width must be positive." }
+    require(settingsWidth >= 0) { "Settings width must be nonnegative." }
     require(itemWidths.all { itemWidth -> itemWidth > 0 }) {
         "Status bar item widths must be positive."
     }
     val settingsX = (width - settingsWidth).coerceAtLeast(0)
-    val firstRowLimit = (settingsX - StatusBarItemSpacing).coerceAtLeast(0)
+    val firstRowLimit = if (settingsWidth == 0) width else
+        (settingsX - StatusBarItemSpacing).coerceAtLeast(0)
     var row = 0
     var rowWidth = 0
     val positions = buildList(itemWidths.size) {

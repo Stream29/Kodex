@@ -27,9 +27,6 @@ import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskViewModel
 import io.github.stream29.kodex.app.agent.contract.allowsOtherAnswer
-import io.github.stream29.kodex.cli.components.TuiDropdownMenu
-import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
-import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.ScrollState
 import io.github.stream29.kodex.cli.components.TextInput
 import io.github.stream29.kodex.cli.components.TextInputLayout
@@ -39,12 +36,6 @@ import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.verticalScroll
 import io.github.stream29.kodex.cli.components.wrapToTerminalWidth
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
-import io.github.stream29.kodex.openai.ModelInfo
-import io.github.stream29.kodex.openai.RequestUserInputMode
-import io.github.stream29.kodex.openai.ServiceTier
-import io.github.stream29.kodex.openai.availableServiceTiers
-import io.github.stream29.kodex.openai.ReasoningEffort
-import kotlinx.io.files.Path
 import kotlinx.coroutines.launch
 
 @Composable
@@ -193,200 +184,92 @@ public fun RequestUserInputPanel(
 public fun SuggestSubagentTaskPanel(
     viewModel: SuggestSubagentTaskViewModel,
     state: SuggestSubagentTaskState.Pending,
-    models: List<ModelInfo>,
     columns: Int,
     rows: Int,
+    configurationContent: @Composable () -> Unit,
 ) {
     if (rows <= 0) return
     val scope = rememberCoroutineScope()
-    val configurationDropdown = rememberTuiDropdownState()
-    val requestUserInputModeDropdown = rememberTuiDropdownState()
-    val feedback = remember(state.callId) {
-        TextInputState(TextInputValue(state.feedback, state.feedback.length))
+    val scrollState = remember(state.callId) { ScrollState() }
+    var rejecting by remember(state.callId) { mutableStateOf(false) }
+    var focusFeedback by remember(state.callId) { mutableStateOf(false) }
+    val feedbackFocusRequester = remember(state.callId) { FocusRequester() }
+    SideEffect {
+        if (focusFeedback && feedbackFocusRequester.requestFocus()) focusFeedback = false
     }
-    val cwd = remember(state.callId) {
-        TextInputState(
-            TextInputValue(
-                state.configuration.cwd.toString(),
-                state.configuration.cwd.toString().length,
-            ),
-        )
-    }
-    LaunchedEffect(state.feedback) {
-        if (feedback.value.text != state.feedback) {
-            feedback.reset(TextInputValue(state.feedback, state.feedback.length))
+    LaunchedEffect(focusFeedback) {
+        if (!focusFeedback) return@LaunchedEffect
+        repeat(3) {
+            withFrameNanos { }
+            if (feedbackFocusRequester.requestFocus()) {
+                focusFeedback = false
+                return@LaunchedEffect
+            }
         }
     }
-    val configurationOptions = remember(models, state.configuration) {
-        suggestedConfigurationOptions(models, state.configuration)
+    fun submit(accepted: Boolean) {
+        scope.launch { viewModel.submit(state.callId, state.revision, accepted) }
     }
     Box(modifier = Modifier.width(columns.coerceAtLeast(1)).height(rows)) {
-        Column {
+        Column(
+            modifier = Modifier
+                .width(columns.coerceAtLeast(1))
+                .height(rows)
+                .verticalScroll(scrollState),
+        ) {
             Text("Suggested Sessions", textStyle = TextStyle.Bold)
             state.arguments.tasks.forEach { task ->
                 Text(
-                    "${task.name}: ${task.prompt}"
-                        .wrapToTerminalWidth(columns)
-                        .joinToString("\n"),
+                    task.name.wrapToTerminalWidth(columns).joinToString("\n"),
+                    textStyle = TextStyle.Bold,
                 )
+                Text(task.prompt.wrapToTerminalWidth(columns).joinToString("\n"))
             }
-            Row {
-                TuiDropdownTrigger(
-                    dropdownState = configurationDropdown,
-                    label = "Config: ${state.configuration.model.value} " +
-                        "${state.configuration.reasoningEffort.suggestedDisplayName()} " +
-                        state.configuration.serviceTier.suggestedDisplayName(),
-                    enabled = !state.submitting,
-                )
-                TuiDropdownTrigger(
-                    dropdownState = requestUserInputModeDropdown,
-                    label = "Ask: ${state.configuration.requestUserInputMode.suggestedDisplayName()}",
-                    enabled = !state.submitting,
-                )
-            }
-            TextInput(
-                state = cwd,
-                layout = TextInputLayout.create(
-                    value = cwd.value,
-                    width = columns,
-                    firstLinePrefix = "  cwd: ",
-                    continuationLinePrefix = "       ",
-                ),
-                enabled = !state.submitting,
-                onValueChanged = { value ->
-                    cwd.reset(TextInputValue(value.text, value.cursorOffset))
-                    viewModel.updateConfiguration(
-                        state.callId,
-                        state.configuration.copy(cwd = Path(value.text)),
-                    )
-                },
-            )
-            TextInput(
-                state = feedback,
-                layout = TextInputLayout.create(
-                    value = feedback.value,
-                    width = columns,
-                    firstLinePrefix = "  Note: ",
-                    continuationLinePrefix = "        ",
-                ),
-                enabled = !state.submitting,
-                onValueChanged = { value ->
-                    viewModel.updateFeedback(state.callId, value.text)
-                },
-            )
-            Row {
-                TuiButton(
-                    label = if (state.submitting) "Submitting…" else "Accept",
-                    enabled = !state.submitting,
-                    onClick = {
-                        scope.launch {
-                            viewModel.submit(state.callId, state.revision, accepted = true)
-                        }
+            configurationContent()
+            listOf(true, false).forEach { accepted ->
+                RequestUserInputOption(
+                    label = if (accepted) "Accept" else "Reject",
+                    description = if (accepted) {
+                        "Create the suggested Sessions."
+                    } else {
+                        "Decline, optionally with a message."
                     },
-                )
-                TuiButton(
-                    label = "Reject",
+                    columns = columns,
+                    selected = !accepted && rejecting,
                     enabled = !state.submitting,
                     onClick = {
-                        scope.launch {
-                            viewModel.submit(state.callId, state.revision, accepted = false)
+                        if (accepted) {
+                            submit(true)
+                        } else {
+                            rejecting = true
+                            focusFeedback = true
                         }
                     },
                 )
             }
-        }
-        TuiDropdownMenu(
-            dropdownState = configurationDropdown,
-            options = configurationOptions,
-            selected = state.configuration.toMenuOption(),
-            optionLabel = SuggestedConfigurationOption::label,
-            onSelect = { option ->
-                configurationDropdown.dismiss()
-                viewModel.updateConfiguration(state.callId, option.configuration)
-            },
-        )
-        TuiDropdownMenu(
-            dropdownState = requestUserInputModeDropdown,
-            options = RequestUserInputMode.entries.toList(),
-            selected = state.configuration.requestUserInputMode,
-            optionLabel = RequestUserInputMode::suggestedDisplayName,
-            onSelect = { mode ->
-                requestUserInputModeDropdown.dismiss()
-                viewModel.updateConfiguration(
-                    state.callId,
-                    state.configuration.copy(requestUserInputMode = mode),
+            if (rejecting) {
+                RequestUserInputFreeForm(
+                    callId = state.callId,
+                    inputId = "rejection",
+                    text = state.feedback,
+                    columns = columns,
+                    autoFocus = false,
+                    focusRequester = feedbackFocusRequester,
+                    focusOnPlacement = focusFeedback,
+                    enabled = !state.submitting,
+                    allowEmpty = true,
+                    onValueChanged = { viewModel.updateFeedback(state.callId, it) },
+                    onSubmitted = { submit(false) },
+                    onFocusRequested = { focusFeedback = false },
                 )
-            },
-        )
-    }
-}
-
-private data class SuggestedConfigurationOption(
-    val configuration: io.github.stream29.kodex.app.agent.contract.SuggestedSessionConfiguration,
-) {
-    val label: String
-        get() = buildString {
-            append(configuration.model)
-            append(' ')
-            append(configuration.reasoningEffort.suggestedDisplayName())
-            if (configuration.serviceTier != ServiceTier.Default) {
-                append(' ')
-                append(configuration.serviceTier.suggestedDisplayName())
-            }
-        }
-}
-
-private fun suggestedConfigurationOptions(
-    models: List<ModelInfo>,
-    current: io.github.stream29.kodex.app.agent.contract.SuggestedSessionConfiguration,
-): List<SuggestedConfigurationOption> {
-    val modelOptions = (models.map(ModelInfo::slug) + current.model).distinct()
-    return modelOptions.flatMap { model ->
-        val info = models.firstOrNull { it.slug == model }
-        val efforts = info?.supportedReasoningLevels
-            ?.map { it.effort }
-            .orEmpty()
-            .ifEmpty { listOf(current.reasoningEffort) }
-        val tiers = info?.availableServiceTiers()
-            .orEmpty()
-            .ifEmpty { listOf(ServiceTier.Default) }
-        efforts.flatMap { effort ->
-            tiers.map { tier ->
-                SuggestedConfigurationOption(
-                    current.copy(
-                        model = model,
-                        reasoningEffort = effort,
-                        serviceTier = tier,
-                    ),
+                TuiButton(
+                    label = "Submit rejection",
+                    enabled = !state.submitting,
+                    onClick = { submit(false) },
                 )
             }
         }
     }
-}
-
-private fun io.github.stream29.kodex.app.agent.contract.SuggestedSessionConfiguration.toMenuOption():
-    SuggestedConfigurationOption = SuggestedConfigurationOption(this)
-
-private fun ReasoningEffort.suggestedDisplayName(): String = when (this) {
-    ReasoningEffort.None -> "none"
-    ReasoningEffort.Minimal -> "minimal"
-    ReasoningEffort.Low -> "low"
-    ReasoningEffort.Medium -> "medium"
-    ReasoningEffort.High -> "high"
-    ReasoningEffort.XHigh -> "xhigh"
-    ReasoningEffort.Max -> "max"
-    is ReasoningEffort.Custom -> wireName
-}
-
-private fun ServiceTier.suggestedDisplayName(): String = when (this) {
-    ServiceTier.Default -> "default"
-    ServiceTier.Fast -> "fast"
-    ServiceTier.Flex -> "flex"
-}
-
-private fun RequestUserInputMode.suggestedDisplayName(): String = when (this) {
-    RequestUserInputMode.AskUser -> "ask user"
-    RequestUserInputMode.NoQuestion -> "no question"
 }
 
 @Composable
@@ -415,17 +298,17 @@ internal fun RequestUserInputQuestionView(
     )
     options.forEachIndexed { index, option ->
         val selected = (draft as? RequestUserInputDraftAnswer.Option)?.label == option.label
-        TuiButton(
-            label = "${if (selected) "●" else "○"} ${option.label}",
+        RequestUserInputOption(
+            label = option.label,
+            description = option.description,
+            columns = columns,
+            selected = selected,
             enabled = enabled,
             autoFocus = autoFocus && index == 0 &&
                 draft !is RequestUserInputDraftAnswer.FreeForm,
             focusRequester = optionFocusRequester.takeIf { index == 0 },
             onClick = { onSelectOption(callId, question.id, option.label) },
         )
-        option.description.takeIf(String::isNotBlank)?.let { description ->
-            RequestUserInputText("  $description", columns, TextStyle.Dim)
-        }
     }
     if (options.isNotEmpty() && question.allowsOtherAnswer) {
         val selected = draft is RequestUserInputDraftAnswer.FreeForm
@@ -438,7 +321,7 @@ internal fun RequestUserInputQuestionView(
     if (options.isEmpty() || draft is RequestUserInputDraftAnswer.FreeForm) {
         RequestUserInputFreeForm(
             callId = callId,
-            question = question,
+            inputId = question.id,
             text = (draft as? RequestUserInputDraftAnswer.FreeForm)?.text.orEmpty(),
             columns = columns,
             autoFocus = autoFocus,
@@ -449,6 +332,29 @@ internal fun RequestUserInputQuestionView(
             onSubmitted = onFreeFormSubmitted,
             onFocusRequested = onFreeFormFocusRequested,
         )
+    }
+}
+
+@Composable
+private fun RequestUserInputOption(
+    label: String,
+    description: String,
+    columns: Int,
+    selected: Boolean,
+    enabled: Boolean,
+    autoFocus: Boolean = false,
+    focusRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+) {
+    TuiButton(
+        label = "${if (selected) "●" else "○"} $label",
+        enabled = enabled,
+        autoFocus = autoFocus,
+        focusRequester = focusRequester,
+        onClick = onClick,
+    )
+    description.takeIf(String::isNotBlank)?.let {
+        RequestUserInputText("  $it", columns, TextStyle.Dim)
     }
 }
 
@@ -474,18 +380,19 @@ private fun nextFocusTarget(
 @Composable
 private fun RequestUserInputFreeForm(
     callId: String,
-    question: RequestUserInputQuestion,
+    inputId: String,
     text: String,
     columns: Int,
     autoFocus: Boolean,
     focusRequester: FocusRequester,
     focusOnPlacement: Boolean,
     enabled: Boolean,
+    allowEmpty: Boolean = false,
     onValueChanged: (String) -> Unit,
     onSubmitted: () -> Unit,
     onFocusRequested: () -> Unit,
 ) {
-    val input = remember(callId, question.id) {
+    val input = remember(callId, inputId) {
         TextInputState(TextInputValue(text = text, cursorOffset = text.length))
     }
     LaunchedEffect(input, text) {
@@ -514,7 +421,7 @@ private fun RequestUserInputFreeForm(
                 !event.alt &&
                 !event.ctrl &&
                 !event.shift &&
-                input.value.text.trim().isNotEmpty()
+                (allowEmpty || input.value.text.trim().isNotEmpty())
             ) {
                 onSubmitted()
                 true

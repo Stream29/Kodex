@@ -1,8 +1,8 @@
 package io.github.stream29.kodex.cli.agent
 
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage

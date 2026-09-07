@@ -1,18 +1,6 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWorkEvent
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessagePhase

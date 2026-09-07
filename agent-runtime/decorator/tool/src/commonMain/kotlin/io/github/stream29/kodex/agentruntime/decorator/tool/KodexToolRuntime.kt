@@ -3,10 +3,10 @@ package io.github.stream29.kodex.agentruntime.decorator.tool
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentstorage.cleanmodels.toFailedToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.InvalidToolInvocation
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.InvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableInvalidToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingInvalidToolInvocation
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent

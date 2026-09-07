@@ -1,4 +1,4 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable.index
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import kotlinx.serialization.Serializable
@@ -10,7 +10,7 @@ public sealed interface StableIndexEvent : StableCleanEvent, CleanIndexEntry {
     @Serializable
     public sealed interface CompletedTool :
         StableIndexEvent,
-        StableCleanEvent.CompletedTool.Index
+        StableCleanEvent.CompletedTool
 
     /** Clean input that may be delivered into an active logical turn. */
     @Serializable

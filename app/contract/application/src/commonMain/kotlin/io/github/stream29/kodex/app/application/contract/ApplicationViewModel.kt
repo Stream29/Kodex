@@ -117,6 +117,12 @@ public interface ApplicationViewModel : AutoCloseable {
         target: AgentSettingsViewModel,
     ): ApplicationPopupState.WorkingDirectory
 
+    /** Edits only the pending suggestion's batch cwd, not the source Session. */
+    public suspend fun openSuggestedWorkingDirectoryPopup(
+        target: io.github.stream29.kodex.app.agent.contract.AgentViewModel,
+        callId: String,
+    ): ApplicationPopupState.WorkingDirectory?
+
     /**
      * Dismisses and closes [expected] only while it is still the current popup.
      *

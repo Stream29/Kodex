@@ -6,19 +6,19 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.RequestFinish
 import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CompactionRetainedItem
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableReasoning
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CompactionRetainedItem
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
@@ -64,6 +64,10 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.job
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import io.github.stream29.kodex.openai.Reasoning
+import io.github.stream29.kodex.openai.ReasoningEffort
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -77,6 +81,48 @@ val kodexAgentStateImplTest by testSuite {
     } closeWith {
         cancelAndJoin()
     } asContextForEach {
+        test("ordinary retry compaction and continuation preserve request controls") {
+            for (effort in listOf(ReasoningEffort.Medium, ReasoningEffort.Low)) {
+                for (override in listOf(null, "explicit-key")) {
+                    val storage = storage()
+                    val requests = mutableListOf<ResponsesApiRequest>()
+                    val agent = KodexAgentState(
+                        storage = storage,
+                        client = mockOpenAiClient {
+                            createResponse { request ->
+                                requests += request
+                                if (requests.size == 1) flowOf()
+                                else flowOf(ResponsesStreamEvent.Completed(Response(id = "response", endTurn = false)))
+                            }
+                            createRemoteCompactionV2Response { request, _, _, _ ->
+                                requests += request
+                                RemoteCompactionV2Response(ResponseItem.Compaction(encryptedContent = "compact"), null)
+                            }
+                        },
+                    )
+                    agent.updateSettings(settings().copy(reasoning = Reasoning(effort), promptCacheKey = override))
+                    agent.appendUserMessage(userMessage("Request controls.").content)
+                    assertEquals(RequestFinish.Retryable, agent.requestResponseApi())
+                    assertEquals(RequestFinish.Continue, agent.requestResponseApi())
+                    agent.forcedCompact()
+                    agent.requestResponseApi()
+                    assertEquals(4, requests.size)
+                    for (request in requests) {
+                        val expected = override ?: storage.uri.toCodexThreadId()
+                        assertEquals(expected, request.promptCacheKey)
+                        val json = OpenAiJsonCodec.encodeToJsonElement(ResponsesApiRequest.serializer(), request).jsonObject
+                        assertEquals(JsonPrimitive(expected), json["prompt_cache_key"])
+                        assertEquals(
+                            JsonPrimitive(if (effort == ReasoningEffort.Medium) "medium" else "low"),
+                            json["reasoning"]!!.jsonObject["effort"],
+                        )
+                    }
+                    assertNotEquals(requests.first().clientMetadata?.windowId, requests.last().clientMetadata?.windowId)
+                    agent.cancelAndJoin()
+                }
+            }
+        }
+
         test("state owns a cancellable child scope") {
             val owner = supervisorChildScope()
             val agent = owner.KodexAgentState(

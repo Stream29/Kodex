@@ -1,29 +1,31 @@
 package io.github.stream29.kodex.cli.history
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageViewToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableInvalidToolCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableJsonToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StablePatchToolExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableToolSearchEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableInvalidToolCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableJsonToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryAction
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryResult
 import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemHeader
@@ -84,7 +86,22 @@ internal fun StableCleanEvent.CompletedTool.toHistoryHeader(
         elapsed = elapsed,
     )
 
-    else -> {
+    is StableInvalidToolCall,
+    is StableServerToolSearch,
+    is StableWebSearchCall,
+    is StableImageGenerationCall,
+    is StablePatchToolEvent,
+    is StableJsonToolEvent,
+    is StableTextToolEvent,
+    is StableCustomToolEvent,
+    is StableImageGenerationToolEvent,
+    is StableImageViewToolEvent,
+    is StableMcpToolEvent,
+    is StablePlanUpdate,
+    is StableRequestUserInputToolEvent,
+    is StableSuggestSubagentTaskToolEvent,
+    is StableToolSearchEvent,
+    is StableWebSearchToolEvent -> {
         val status = historyToolStatus()
         ToolHistoryItemHeader.Summary(
             summary = historyToolSummary(failed = status == "failed"),
@@ -118,7 +135,7 @@ private fun StableCleanEvent.CompletedTool.historyToolSummary(failed: Boolean): 
     is StableRequestUserInputToolEvent -> arguments.historySummary(failed)
     is StableToolSearchEvent -> arguments.historySummary(failed)
     is StableWebSearchToolEvent -> commands.historySummary(failed)
-    else -> error("Unknown completed tool event: ${this::class.simpleName}")
+    is StableSuggestSubagentTaskToolEvent -> "Suggested Sessions"
 }
 
 private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (this) {
@@ -152,7 +169,10 @@ private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (t
     }
 
     is StableWebSearchToolEvent -> result.historyStatus()
-    else -> error("Unknown completed tool event: ${this::class.simpleName}")
+    is StableSuggestSubagentTaskToolEvent -> when (result) {
+        is StableSuggestSubagentTaskResult.Completed -> "completed"
+        is StableSuggestSubagentTaskResult.Failure -> "failed"
+    }
 }
 
 private fun JsonElement.serverToolSearchSummary(failed: Boolean): String {

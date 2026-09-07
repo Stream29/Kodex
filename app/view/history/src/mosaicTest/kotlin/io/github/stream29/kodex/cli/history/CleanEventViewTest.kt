@@ -11,20 +11,20 @@ import com.jakewharton.mosaic.testing.MosaicSnapshots
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableCustomToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableMcpToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableReasoning
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
@@ -103,7 +103,7 @@ class CleanEventViewTest {
             result = "done",
             success = true,
         )
-        val plan = io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate(
+        val plan = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate(
             callId = "plan",
             arguments = UpdatePlanArgs(plan = emptyList()),
         )
@@ -455,7 +455,7 @@ class CleanEventViewTest {
 
     @Test
     fun planRendersAsAnInlineChecklist() = runTest {
-        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate(
+        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate(
             callId = "plan",
             arguments = UpdatePlanArgs(
                 explanation = "Current plan",
@@ -518,7 +518,7 @@ class CleanEventViewTest {
                 ),
             ),
         )
-        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent(
+        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent(
             callId = "input",
             arguments = arguments,
             result = StableRequestUserInputResult.Answered(
@@ -542,7 +542,7 @@ class CleanEventViewTest {
 
     @Test
     fun completedRequestUserInputRendersOtherAsReadOnlyFreeForm() = runTest {
-        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent(
+        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent(
             callId = "input",
             arguments = RequestUserInputArgs(
                 questions = listOf(
@@ -578,7 +578,7 @@ class CleanEventViewTest {
 
     @Test
     fun failedRequestUserInputRendersItsQuestionAndErrorDirectly() = runTest {
-        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent(
+        val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent(
             callId = "input",
             arguments = RequestUserInputArgs(
                 questions = listOf(
@@ -775,9 +775,14 @@ private suspend fun TestMosaic<String>.clickFirstRow(): String {
     return clickRow(0)
 }
 
-private suspend fun TestMosaic<String>.clickRow(row: Int): String {
+private suspend fun TestMosaic<String>.clickRow(row: Int): String = kotlinx.coroutines.withTimeout(5_000) {
     sendMouseEvent(MouseEvent(0, row, MouseEvent.Type.Press, MouseEvent.Button.Left))
     awaitSnapshot()
     sendMouseEvent(MouseEvent(0, row, MouseEvent.Type.Release, MouseEvent.Button.Left))
-    return awaitSnapshot()
+    // A draw can still reflect the press; wait for the clicked row to actually expand.
+    var snapshot: String
+    do {
+        snapshot = awaitSnapshot()
+    } while (snapshot.lineSequence().elementAtOrNull(row)?.trimStart()?.startsWith("v ") != true)
+    snapshot
 }

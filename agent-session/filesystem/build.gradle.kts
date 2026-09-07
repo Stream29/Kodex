@@ -17,6 +17,7 @@ kotlin {
             implementation(libs.cache4k)
         }
         commonTest.dependencies {
+            implementation(project(":openai-client-test"))
             implementation(project(":agent-storage-contract-ext"))
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))

@@ -118,7 +118,7 @@ val openAiSubscriptionSerializationTest by testSuite {
         val encoded = json.parseToJsonElement(json.encodeToString(request)).jsonObject
 
         assertFalse("instructions" in encoded)
-        assertFalse("reasoning" in encoded)
+        assertEquals(JsonPrimitive("medium"), encoded["reasoning"]!!.jsonObject["effort"])
         assertFalse("service_tier" in encoded)
         assertFalse("text" in encoded)
         assertFalse("client_metadata" in encoded)

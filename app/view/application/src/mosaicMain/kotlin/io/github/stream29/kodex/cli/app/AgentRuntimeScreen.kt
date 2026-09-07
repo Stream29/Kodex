@@ -15,11 +15,11 @@ import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
@@ -46,12 +46,14 @@ internal fun AgentRuntimeScreen(
     rows: Int,
     newLineKey: NewLineKey,
     dropdowns: RuntimeConfigurationDropdowns,
+    suggestionDropdowns: RuntimeConfigurationDropdowns,
     onOpenHistoryEntryContextMenu: (
         target: AgentHistoryTarget,
         anchor: TuiPopupAnchor,
         clickPosition: IntOffset?,
     ) -> Unit,
     onBrowseWorkingDirectory: () -> Unit,
+    onBrowseSuggestedWorkingDirectory: (String) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val execution by viewModel.execution.collectAsState()
@@ -143,12 +145,27 @@ internal fun AgentRuntimeScreen(
         }
         pendingSuggestion?.let { pending ->
             if (requestUserInputRows > 0) {
+                val configuration = RuntimeConfiguration(
+                    pending.configuration.model,
+                    pending.configuration.reasoningEffort,
+                    pending.configuration.serviceTier,
+                    pending.configuration.requestUserInputMode,
+                )
                 SuggestSubagentTaskPanel(
                     viewModel = viewModel.suggestSubagentTask,
                     state = pending,
-                    models = viewModel.models.collectAsState().value,
                     columns = columns,
                     rows = requestUserInputRows,
+                    configurationContent = {
+                        SuggestedConfigurationTriggers(
+                            columns = columns,
+                            configuration = configuration,
+                            cwd = pending.configuration.cwd,
+                            dropdowns = suggestionDropdowns,
+                            enabled = !pending.submitting,
+                            onBrowse = { onBrowseSuggestedWorkingDirectory(pending.callId) },
+                        )
+                    },
                 )
             }
         }

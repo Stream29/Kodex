@@ -55,6 +55,7 @@ val webSearchSerializationTest by testSuite {
                     {
                       "id": "search-session",
                       "model": "gpt-test",
+                      "reasoning": {"effort": "medium"},
                       "input": [{
                         "type": "message",
                         "role": "user",

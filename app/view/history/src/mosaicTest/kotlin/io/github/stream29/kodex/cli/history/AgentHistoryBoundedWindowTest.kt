@@ -9,10 +9,13 @@ import com.jakewharton.mosaic.ui.Column
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
+import io.github.stream29.kodex.cli.components.ScrollInputSource
+import io.github.stream29.kodex.cli.components.ScrollInteraction
+import io.github.stream29.kodex.cli.components.ScrollOrientation
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
@@ -72,9 +75,19 @@ val agentHistoryBoundedWindowTest by testSuite {
                     )
 
                     var peakWindowSize = initialWindowSize
-                    repeat(200) {
+                    // Programmatic positioning alone does not express leaving follow-latest.
+                    model.scrollInteractionSource.tryEmit(
+                        ScrollInteraction(
+                            source = ScrollInputSource.Pointer,
+                            orientation = ScrollOrientation.Vertical,
+                            requestedDelta = -1,
+                            consumedDelta = -1,
+                        ),
+                    )
+                    assertFalse(model.followsLatest)
+                    while (model.historyItems.value.hasOlder) {
+                        assertTrue(started.elapsedNow() < 15.seconds, "Navigation did not reach the oldest item.")
                         val window = model.historyItems.value
-                        if (!window.hasOlder) return@repeat
                         val newerMarkerCount = if (window.hasNewer) 1 else 0
                         model.listState.scrollToItem(newerMarkerCount + window.size)
                         settleHistory()
@@ -82,10 +95,11 @@ val agentHistoryBoundedWindowTest by testSuite {
                         peakWindowSize = maxOf(peakWindowSize, model.historyItems.value.size)
                     }
 
+                    assertFalse(model.historyItems.value.hasOlder)
                     assertTrue(model.historyItems.value.hasNewer)
-                    repeat(200) {
+                    while (model.historyItems.value.hasNewer) {
+                        assertTrue(started.elapsedNow() < 15.seconds, "Navigation did not return to the latest item.")
                         val window = model.historyItems.value
-                        if (!window.hasNewer) return@repeat
                         model.listState.scrollToItem(0)
                         settleHistory()
                         model.awaitWindowChange(window, HistoryItemWindow::requestNewer)

@@ -35,7 +35,7 @@ public data class ResponsesApiRequest(
     public val toolChoice: ToolChoice = ToolChoice.Auto,
     @SerialName("parallel_tool_calls")
     public val parallelToolCalls: Boolean = false,
-    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val reasoning: Reasoning = Reasoning(),
     public val include: Set<ResponseInclude> = emptySet(),
     @SerialName("service_tier")
@@ -380,8 +380,7 @@ public enum class ResponseInclude(public val wireName: String) {
 }
 
 /**
- * @property effort Reasoning effort. The default value is omitted from the
- * wire.
+ * @property effort Reasoning effort, always sent explicitly, including Medium.
  * @property summary Reasoning summary policy. The default value is omitted
  * from the wire.
  * @property context Reasoning context policy. The default value is omitted
@@ -389,7 +388,7 @@ public enum class ResponseInclude(public val wireName: String) {
  */
 @Serializable
 public data class Reasoning(
-    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     public val effort: ReasoningEffort = ReasoningEffort.Medium,
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     public val summary: ReasoningSummary = ReasoningSummary.Auto,

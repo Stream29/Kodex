@@ -1,4 +1,4 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable.index
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableFunctionCall
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.stableTextOutput

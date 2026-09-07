@@ -13,17 +13,17 @@ import io.github.stream29.kodex.agentstate.contract.canRequestResponseApi
 import io.github.stream29.kodex.agentstate.tool.toPendingToolEvent
 import io.github.stream29.kodex.agentstate.tool.visibleToolSpecs
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableImageGenerationCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableReasoning
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableServerToolSearch
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchCall
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWorkEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableReasoning
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableServerToolSearch
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
@@ -388,7 +388,6 @@ private class KodexAgentStateImpl(
                     storage.timestamp[index] = now()
                 }
 
-                else -> error("Unsupported completed tool event: ${completed::class.simpleName}.")
             }
             latestIndex.value = index
             state.value = nextState
@@ -441,7 +440,6 @@ private class KodexAgentStateImpl(
                 storage.timestamp[index] = timestamp
             }
 
-            else -> error("Unsupported stable event: ${event::class.simpleName}.")
         }
         latestIndex.value = index
         return index

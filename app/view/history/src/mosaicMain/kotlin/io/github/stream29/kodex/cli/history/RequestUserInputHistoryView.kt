@@ -7,8 +7,8 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.TextStyle
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputAnswer
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
@@ -146,13 +146,13 @@ private fun RequestUserInputAnswer.readOnlyRows(
     }
 }
 
-private fun selectedOptionRow(label: String): RequestUserInputHistoryRowModel =
+internal fun selectedOptionRow(label: String): RequestUserInputHistoryRowModel =
     RequestUserInputHistoryRowModel(
         value = "[● $label]",
         role = RequestUserInputHistoryRowRole.Body,
     )
 
-private fun freeFormRows(value: String): List<RequestUserInputHistoryRowModel> =
+internal fun freeFormRows(value: String): List<RequestUserInputHistoryRowModel> =
     value.lines().mapIndexed { index, line ->
         RequestUserInputHistoryRowModel(
             value = "${if (index == 0) "  > " else "    "}$line",
@@ -160,7 +160,7 @@ private fun freeFormRows(value: String): List<RequestUserInputHistoryRowModel> =
         )
     }
 
-private fun Duration?.historySuffix(): String =
+internal fun Duration?.historySuffix(): String =
     this?.let { duration -> " +${duration.roundToMilliseconds()}" }.orEmpty()
 
 private const val UserNotePrefix: String = "user_note: "

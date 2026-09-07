@@ -1,5 +1,11 @@
 package io.github.stream29.kodex.cli.history
 
+import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemState
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
+
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.testing.runMosaicTest
@@ -8,10 +14,10 @@ import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.testing.SnapshotStrategy
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableTextToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryAction
@@ -48,6 +54,42 @@ private val ansiSnapshots = SnapshotStrategy { mosaic ->
 }
 
 val agentHistoryEntryInteractionTest by testSuite {
+    test("suggestion rows preserve the original storage context action") {
+        var selected: Int? = null
+        val item = object : SuggestSubagentTaskHistoryItemViewModel {
+            override val index = 31
+            override val state = MutableStateFlow<SuggestSubagentTaskHistoryItemState>(
+                SuggestSubagentTaskHistoryItemState.Ready(
+                    StableSuggestSubagentTaskToolEvent(
+                        "suggest", arguments = SuggestSubagentTaskArgs(emptyList()),
+                        result = StableSuggestSubagentTaskResult.Failure("Stopped"),
+                    ), Duration.ZERO,
+                ),
+            )
+        }
+        runMosaicTest {
+            val rendered = setContentAndSnapshot {
+                Column(Modifier.width(40)) {
+                    StoredHistoryEntry(
+                        item = item, generation = 4, shellSessions = EmptyHistoryShellSessions,
+                        onOpenContextMenu = { _, index, _, _ -> selected = index },
+                    )
+                }
+            }
+            assertTrue("Suggested Sessions" in rendered)
+            assertTrue("Failed to submit: Stopped" in rendered)
+            sendMouseEvent(com.jakewharton.mosaic.terminal.MouseEvent(
+                6, 0, com.jakewharton.mosaic.terminal.MouseEvent.Type.Press,
+                com.jakewharton.mosaic.terminal.MouseEvent.Button.Right,
+            ))
+            sendMouseEvent(com.jakewharton.mosaic.terminal.MouseEvent(
+                6, 0, com.jakewharton.mosaic.terminal.MouseEvent.Type.Release,
+            ))
+            awaitSnapshot()
+            assertEquals(31, selected)
+        }
+    }
+
     test("renders a loaded message and preserves the row context action") {
         var callbackCount = 0
         var capturedIndex: Int? = null

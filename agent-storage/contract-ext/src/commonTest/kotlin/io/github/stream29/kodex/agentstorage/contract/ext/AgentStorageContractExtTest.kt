@@ -1,11 +1,11 @@
 package io.github.stream29.kodex.agentstorage.contract.ext
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableContextCompaction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
 import io.github.stream29.kodex.agentstorage.contract.IndexVersioned
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.indexes
@@ -71,9 +71,9 @@ private class CountingStorage(
     val countedWork = CountingTimeline(delegate.work)
 
     override val uri: String = delegate.uri
-    override val index: IndexVersioned<io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanIndexEntry>
+    override val index: IndexVersioned<io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry>
         get() = countedIndex
-    override val work: IndexVersioned<io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWorkEvent>
+    override val work: IndexVersioned<io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent>
         get() = countedWork
     override val settings: IndexVersioned<io.github.stream29.kodex.openai.KodexAgentSettings>
         get() = delegate.settings

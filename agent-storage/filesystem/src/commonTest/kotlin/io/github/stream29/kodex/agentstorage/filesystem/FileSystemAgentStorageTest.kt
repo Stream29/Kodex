@@ -1,8 +1,11 @@
 package io.github.stream29.kodex.agentstorage.filesystem
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWebSearchCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchCall
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskResponse
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.ContentItem
@@ -14,8 +17,32 @@ import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 
 val fileSystemAgentStorageTest by testSuite {
+    test("reads an accepted suggestion written before the stable package migration") {
+        val root = Path(SystemTemporaryDirectory, "kodex-legacy-suggestion-${Random.nextLong()}")
+        try {
+            val storage = FileSystemAgentStorage.ofEmpty(root)
+            storage.initialize(KodexAgentSettings(OpenAiModelId("test")))
+            SystemCoroutineFileSystem.createDirectories(Path(root, IndexDirectory))
+            SystemCoroutineFileSystem.writeString(
+                Path(root, IndexDirectory, "1.json"),
+                """{"type":"suggest_subagent_task_tool_event","call_id":"suggest","arguments":{"tasks":[{"name":"Worker","prompt":"Inspect tests."}]},"result":{"type":"completed","response":{"type":"accepted","sessions":[{"uri":"file:///tmp/synthetic/1","name":"Worker"}],"decision":"accepted"}}}""",
+            )
+            val reopened = FileSystemAgentStorage(root)
+            val event = assertIs<StableSuggestSubagentTaskToolEvent>(reopened.index.getExact(1))
+            val response = assertIs<SuggestSubagentTaskResponse.Accepted>(
+                assertIs<StableSuggestSubagentTaskResult.Completed>(event.result).response,
+            )
+            assertEquals("file:///tmp/synthetic/1", response.sessions.single().uri)
+            assertEquals("Inspect tests.", event.arguments.tasks.single().prompt)
+            assertEquals(null, reopened.work.getExact(1))
+        } finally {
+            deleteRecursively(SystemCoroutineFileSystem, root)
+        }
+    }
+
     test("persists index and work timelines and raw-copies a prefix") {
         assertEquals(
             listOf("index", "work", "settings", "timestamp", "token-count", "unstable"),

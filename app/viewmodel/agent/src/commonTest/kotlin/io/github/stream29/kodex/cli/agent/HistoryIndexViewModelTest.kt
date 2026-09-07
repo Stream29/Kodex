@@ -1,14 +1,18 @@
 package io.github.stream29.kodex.cli.agent
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanCompactionPoint
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAgentMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputResult
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableRequestUserInputToolEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
+import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
+import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -41,6 +45,32 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Duration.Companion.milliseconds
 
 val historyIndexViewModelTest by testSuite {
+    test("suggestions use only the simple sidebar label") {
+        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test")))
+        storage.index[1] = StableSuggestSubagentTaskToolEvent(
+            "suggest",
+            arguments = SuggestSubagentTaskArgs(listOf(SuggestedSubagentTask("Hidden name", "Hidden prompt"))),
+            result = StableSuggestSubagentTaskResult.Failure("Hidden reason"),
+        )
+        val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        val model = HistoryIndexViewModelImpl(
+            timeline = storage.index,
+            latestIndex = MutableStateFlow(1),
+            agentState = MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.Empty),
+            scope = scope,
+        )
+        try {
+            val window = model.awaitIndexes(listOf(1))
+            assertEquals(HistoryIndexEntryKind.SuggestSubagents, model.load(window.generation, 1).kind)
+            assertEquals("suggest subagents", model.load(window.generation, 1).summary)
+            val detail = model.loadDetail(window.generation, 1)
+            assertEquals("suggest subagents", detail.content)
+            assertEquals(null, detail.requestUserInput)
+        } finally {
+            scope.cancelAndJoin()
+        }
+    }
+
     test("tracks sparse index entries incrementally and invalidates on revert") {
         coroutineScope {
             val storage = InMemoryKodexAgentStorage(

@@ -1,4 +1,4 @@
-package io.github.stream29.kodex.agentstorage.cleanmodels.stable.work
+package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import kotlinx.serialization.Serializable
@@ -10,5 +10,5 @@ public sealed interface StableWorkEvent : StableCleanEvent {
     @Serializable
     public sealed interface CompletedTool :
         StableWorkEvent,
-        StableCleanEvent.CompletedTool.Work
+        StableCleanEvent.CompletedTool
 }

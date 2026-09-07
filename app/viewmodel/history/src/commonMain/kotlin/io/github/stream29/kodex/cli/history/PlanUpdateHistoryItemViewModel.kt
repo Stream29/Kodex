@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.cli.history
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.app.history.contract.item.PlanUpdateHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.PlanUpdateHistoryItemViewModel
 import kotlinx.coroutines.CancellationException

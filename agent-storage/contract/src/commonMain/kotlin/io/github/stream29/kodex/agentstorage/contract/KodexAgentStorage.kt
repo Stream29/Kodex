@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.agentstorage.contract
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.index.CleanIndexEntry
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.work.StableWorkEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import kotlin.time.Instant

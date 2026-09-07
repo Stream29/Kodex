@@ -26,7 +26,7 @@ internal fun KodexAgentSettings.toResponsesApiRequest(
         reasoning = reasoning,
         include = include,
         serviceTier = serviceTier,
-        promptCacheKey = promptCacheKey,
+        promptCacheKey = promptCacheKey ?: clientMetadata.threadId,
         text = text,
         clientMetadata = clientMetadata,
     )

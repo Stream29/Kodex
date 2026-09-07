@@ -37,8 +37,8 @@ import kotlinx.serialization.Serializable
  * @property previousResponseId Nullable because a request may be built from
  * full local history instead of a provider-side response chain; `null` means no
  * provider response id is referenced.
- * @property promptCacheKey Nullable because prompt-cache affinity is optional;
- * `null` means no explicit prompt cache key is stored.
+ * @property promptCacheKey Nullable because the override is optional; `null`
+ * stores no override and AgentState requests use their threadId as the cache key.
  */
 @Serializable
 public data class KodexAgentSettings(
