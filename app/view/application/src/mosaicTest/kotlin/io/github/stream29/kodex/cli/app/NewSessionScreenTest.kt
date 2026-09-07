@@ -9,14 +9,12 @@ import com.jakewharton.mosaic.terminal.PasteEvent
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.cli.settings.NewLineKey
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 
-class NewSessionScreenTest {
-    @Test
-    fun emptySessionDoesNotRenderCreationInstructions() = runTest {
+val newSessionScreenTest by testSuite {
+    test("emptySessionDoesNotRenderCreationInstructions") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val composer = fixture.newSession("New Session").composer
@@ -39,8 +37,7 @@ class NewSessionScreenTest {
         }
     }
 
-    @Test
-    fun longComposerUsesItsBoundedRowsAndKeepsTheCursorTailVisible() = runTest {
+    test("longComposerUsesItsBoundedRowsAndKeepsTheCursorTailVisible") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val composer = fixture.newSession("New Session").composer
@@ -68,8 +65,7 @@ class NewSessionScreenTest {
         }
     }
 
-    @Test
-    fun submitCallbackRetainsTheExactComposerRevision() = runTest {
+    test("submitCallbackRetainsTheExactComposerRevision") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val prompt = "Keep this first prompt."
@@ -108,8 +104,7 @@ class NewSessionScreenTest {
         }
     }
 
-    @Test
-    fun composerStateEchoPreservesTheFrontendCursorAndHistory() = runTest {
+    test("composerStateEchoPreservesTheFrontendCursorAndHistory") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val composer = fixture.newSession("New Session").composer

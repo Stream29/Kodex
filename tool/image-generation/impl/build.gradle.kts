@@ -17,11 +17,8 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.coroutines.test)
-            implementation(project(":openai-client"))
             implementation(project(":openai-client-test"))
-            implementation(project(":openai-codex-cli-storage"))
             implementation(project(":openai-json-codec"))
-            implementation(project(":utils-os-environment"))
         }
     }
 }

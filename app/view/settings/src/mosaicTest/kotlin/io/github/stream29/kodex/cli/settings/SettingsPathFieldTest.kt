@@ -4,13 +4,11 @@ import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 
-class SettingsPathFieldTest {
-    @Test
-    fun titleAndBrowseActionShareTheHeaderRow() = runTest {
+val settingsPathFieldTest by testSuite {
+    test("titleAndBrowseActionShareTheHeaderRow") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(40)) {

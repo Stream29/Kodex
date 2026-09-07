@@ -8,16 +8,15 @@ import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 
 private val checkboxAnsiSnapshots = SnapshotStrategy { mosaic ->
     mosaic.draw().render(AnsiLevel.TRUECOLOR, supportsKittyUnderlines = false)
 }
 
-class TuiCheckboxTest {
-    @Test
-    fun keyboardActivationTogglesTheCheckboxAndKeepsLabelTogether() = kotlinx.coroutines.test.runTest {
+val tuiCheckboxTest by testSuite {
+    test("keyboardActivationTogglesTheCheckboxAndKeepsLabelTogether") {
         var checked by mutableStateOf(false)
 
         runMosaicTest(snapshotStrategy = checkboxAnsiSnapshots) {
@@ -44,8 +43,7 @@ class TuiCheckboxTest {
         }
     }
 
-    @Test
-    fun disabledCheckboxIsDimAndDoesNotToggle() = kotlinx.coroutines.test.runTest {
+    test("disabledCheckboxIsDimAndDoesNotToggle") {
         var checked by mutableStateOf(false)
 
         runMosaicTest(snapshotStrategy = checkboxAnsiSnapshots) {

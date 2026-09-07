@@ -26,22 +26,19 @@ import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.test.runTest
 import kotlinx.io.files.Path
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class RuntimeStatusBarTest {
-    @Test
-    fun requestUserInputModesUseExplicitLabels() {
+val runtimeStatusBarTest by testSuite {
+    test("requestUserInputModesUseExplicitLabels") {
         assertEquals("ask user", RequestUserInputMode.AskUser.displayName())
         assertEquals("no question", RequestUserInputMode.NoQuestion.displayName())
     }
 
-    @Test
-    fun combinedConfigurationLabelOmitsOnlyTheDefaultTier() {
+    test("combinedConfigurationLabelOmitsOnlyTheDefaultTier") {
         val model = OpenAiModelId("gpt-5.6-sol")
 
         assertEquals(
@@ -54,8 +51,7 @@ class RuntimeStatusBarTest {
         )
     }
 
-    @Test
-    fun workingDirectoryLabelPreservesThePathTailAndCollapsesOnNarrowSurfaces() {
+    test("workingDirectoryLabelPreservesThePathTailAndCollapsesOnNarrowSurfaces") {
         val workingDirectory = Path("root", "projects", "very-long-project-directory", "workspace")
 
         assertEquals("cwd", workingDirectoryStatusLabel(workingDirectory, columns = 60))
@@ -71,14 +67,12 @@ class RuntimeStatusBarTest {
         assertTrue(wide.terminalCellWidth() <= 28, wide)
     }
 
-    @Test
-    fun runningAgentHidesOnlyCompact() {
+    test("runningAgentHidesOnlyCompact") {
         assertTrue(compactVisible(AgentExecutionState(running = false)))
         assertFalse(compactVisible(AgentExecutionState(running = true)))
     }
 
-    @Test
-    fun modelMenuSelectsModelReasoningAndTierAcrossThreeLevels() = runTest {
+    test("modelMenuSelectsModelReasoningAndTierAcrossThreeLevels") {
         val model = OpenAiModelId("gpt-5.6-sol")
         val modelInfo = ModelInfo(
             slug = model,
@@ -149,8 +143,7 @@ class RuntimeStatusBarTest {
         assertEquals(ServiceTier.Fast, configuration.tier)
     }
 
-    @Test
-    fun questionModeTriggerOpensAndSelectsNoQuestion() = runTest {
+    test("questionModeTriggerOpensAndSelectsNoQuestion") {
         val model = OpenAiModelId("test-model")
         var configuration by mutableStateOf(
             RuntimeConfiguration(
@@ -200,8 +193,7 @@ class RuntimeStatusBarTest {
         assertEquals(RequestUserInputMode.NoQuestion, configuration.requestUserInputMode)
     }
 
-    @Test
-    fun newSessionSettingsButtonIsSeparatedAtRightEdge() = runTest {
+    test("newSessionSettingsButtonIsSeparatedAtRightEdge") {
         val columns = 80
 
         runMosaicTest {
@@ -221,8 +213,7 @@ class RuntimeStatusBarTest {
         }
     }
 
-    @Test
-    fun statusBarPlanPinsSettingsAndWrapsWholeControls() {
+    test("statusBarPlanPinsSettingsAndWrapsWholeControls") {
         val width = 39
         val itemWidths = listOf(17, 10, 14, 5)
 
@@ -252,8 +243,7 @@ class RuntimeStatusBarTest {
         }
     }
 
-    @Test
-    fun newSessionControlsStayCompleteAcrossSupportedWidths() = runTest {
+    test("newSessionControlsStayCompleteAcrossSupportedWidths") {
         listOf(40, 60, 80, 120).forEach { columns ->
             runMosaicTest {
                 val settings = testSettings(Path("."))
@@ -277,8 +267,7 @@ class RuntimeStatusBarTest {
         }
     }
 
-    @Test
-    fun newSessionWorkingDirectoryButtonUsesTheDraft() = runTest {
+    test("newSessionWorkingDirectoryButtonUsesTheDraft") {
         val columns = 80
         val workingDirectory = Path("workspace")
         var browseCount = 0

@@ -12,15 +12,13 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import io.github.stream29.kodex.cli.components.DefaultTuiColorScheme
 import io.github.stream29.kodex.cli.components.TuiTheme
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.math.roundToInt
 
-class SettingsButtonStyleTest {
-    @Test
-    fun buttonsUsePairedSemanticColorsWithoutInverseVideo() = runTest {
+val settingsButtonStyleTest by testSuite {
+    test("buttonsUsePairedSemanticColorsWithoutInverseVideo") {
         val scheme = DefaultTuiColorScheme.copy(
             primary = Color(101, 102, 103),
             onPrimary = Color(111, 112, 113),

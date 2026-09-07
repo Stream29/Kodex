@@ -4,16 +4,15 @@ import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.websocket.WebSocketCapability
 import io.ktor.client.request.get
-import kotlinx.coroutines.runBlocking
 import kotlinx.io.IOException
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.TestCompartment
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-public class KodexCurlDefaultEngineTest {
-    @Test
-    public fun defaultHttpClientUsesKodexCurl() {
+val kodexCurlDefaultEngineTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("defaultHttpClientUsesKodexCurl") {
         val client = HttpClient()
         try {
             assertIs<KodexCurlClientEngine>(client.engine)
@@ -23,8 +22,7 @@ public class KodexCurlDefaultEngineTest {
         }
     }
 
-    @Test
-    public fun connectionFailureIsAnIoException(): Unit = runBlocking {
+    test("connectionFailureIsAnIoException") {
         val client = HttpClient(KodexCurl) {
             install(HttpTimeout) {
                 connectTimeoutMillis = 1_000

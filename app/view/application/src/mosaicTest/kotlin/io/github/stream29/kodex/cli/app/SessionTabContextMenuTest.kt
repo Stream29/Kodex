@@ -16,16 +16,14 @@ import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-class SessionTabContextMenuTest {
-    @Test
-    fun persistedTabOffersAndRoutesCloseAndArchive() = runTest {
+val sessionTabContextMenuTest by testSuite {
+    test("persistedTabOffersAndRoutesCloseAndArchive") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val target = fixture.persistedSession("Persisted")
@@ -76,8 +74,7 @@ class SessionTabContextMenuTest {
         }
     }
 
-    @Test
-    fun draftTabDoesNotOfferPersistedActions() = runTest {
+    test("draftTabDoesNotOfferPersistedActions") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val target = fixture.newSession("Draft")

@@ -2,15 +2,14 @@ package io.github.stream29.kodex.app.history.contract.item
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
 import io.github.stream29.kodex.openai.UpdatePlanArgs
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
-public class ExpandableHistoryItemContractTest {
-    @Test
-    public fun loadedHeadersRetainOnlyValidatedOneLinePresentation() {
+val expandableHistoryItemContractTest by testSuite {
+    test("loadedHeadersRetainOnlyValidatedOneLinePresentation") {
         val tool = ToolHistoryItemHeader.Summary(
             summary = "Run tests",
             status = "completed",
@@ -32,8 +31,7 @@ public class ExpandableHistoryItemContractTest {
         }
     }
 
-    @Test
-    public fun ordinaryToolStateRejectsSpecializedBreakerEvents() {
+    test("ordinaryToolStateRejectsSpecializedBreakerEvents") {
         val header = ToolHistoryItemHeader.Summary(
             summary = "Update the plan",
             status = "completed",
@@ -51,8 +49,7 @@ public class ExpandableHistoryItemContractTest {
         }
     }
 
-    @Test
-    public fun immutableItemsAndReadyStatesRejectInvalidDurations() {
+    test("immutableItemsAndReadyStatesRejectInvalidDurations") {
         assertFailsWith<IllegalArgumentException> {
             ReasoningHistoryItemViewModel(
                 index = 1,

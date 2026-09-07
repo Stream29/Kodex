@@ -1,13 +1,11 @@
 package io.github.stream29.kodex.cli.app
 
 import com.jakewharton.mosaic.testing.runMosaicTest
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 
-class SessionCatalogLoadingIndicatorTest {
-    @Test
-    fun loadingIndicatorAnimatesWhileCatalogLoads() = runTest {
+val sessionCatalogLoadingIndicatorTest by testSuite {
+    test("loadingIndicatorAnimatesWhileCatalogLoads") {
         runMosaicTest {
             val initial = setContentAndSnapshot {
                 SessionCatalogLoadingIndicator()

@@ -7,14 +7,12 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.cli.components.ScrollState
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class SettingsPageViewportTest {
-    @Test
-    fun showsScrolledContentInsideBoundedSettingsViewport() = runTest {
+val settingsPageViewportTest by testSuite {
+    test("showsScrolledContentInsideBoundedSettingsViewport") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(20).height(3)) {

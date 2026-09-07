@@ -18,33 +18,21 @@ import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.runTest
 import kotlinx.io.files.Path
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class SuggestSubagentTaskPanelTest {
-    @Test
-    fun longTasksCanBeScrolledToAcceptAndClicked() = verifyDecision(accepted = true)
-
-    @Test
-    fun longTasksCanBeScrolledToRejectAndClicked() = verifyDecision(accepted = false)
-
-    @Test
-    fun rejectionAllowsEmptyMessage() = verifyDecision(accepted = false, feedback = "")
-
-    @Test
-    fun rejectionInputAcceptsTyping() = verifyDecision(accepted = false, feedback = "", typeMessage = true)
-
-    private fun verifyDecision(
+val suggestSubagentTaskPanelTest by testSuite {
+    suspend fun Test.ExecutionScope.verifyDecision(
         accepted: Boolean,
         feedback: String = "Optional user message",
         typeMessage: Boolean = false,
-    ) = runTest {
+    ) {
         val pending = SuggestSubagentTaskState.Pending(
             callId = "long-tasks",
             arguments = SuggestSubagentTaskArgs(
@@ -93,7 +81,7 @@ class SuggestSubagentTaskPanelTest {
             repeat(100) {
                 sendMouseEvent(MouseEvent(1, 1, MouseEvent.Type.Press, MouseEvent.Button.WheelDown))
             }
-            advanceUntilIdle()
+            testScope.advanceUntilIdle()
             val rendered = awaitSnapshot()
             val lines = rendered.lines()
             val label = if (accepted) "[○ Accept]" else "[○ Reject]"
@@ -112,7 +100,7 @@ class SuggestSubagentTaskPanelTest {
             awaitSnapshot()
             sendMouseEvent(MouseEvent(column, row, MouseEvent.Type.Release))
             awaitSnapshot()
-            advanceUntilIdle()
+            testScope.advanceUntilIdle()
             if (!accepted) {
                 var expanded = awaitSnapshot()
                 repeat(3) {
@@ -124,14 +112,30 @@ class SuggestSubagentTaskPanelTest {
                 if (typeMessage) {
                     sendKeyEvent(KeyboardEvent(codepoint = 'x'.code))
                     awaitSnapshot()
-                    advanceUntilIdle()
+                    testScope.advanceUntilIdle()
                     assertEquals("x", (model.state.value as SuggestSubagentTaskState.Pending).feedback)
                 }
                 sendKeyEvent(KeyboardEvent(codepoint = 13))
                 awaitSnapshot()
-                advanceUntilIdle()
+                testScope.advanceUntilIdle()
             }
             assertEquals(accepted, submittedDecision)
         }
+    }
+
+    test("longTasksCanBeScrolledToAcceptAndClicked") {
+        verifyDecision(accepted = true)
+    }
+
+    test("longTasksCanBeScrolledToRejectAndClicked") {
+        verifyDecision(accepted = false)
+    }
+
+    test("rejectionAllowsEmptyMessage") {
+        verifyDecision(accepted = false, feedback = "")
+    }
+
+    test("rejectionInputAcceptsTyping") {
+        verifyDecision(accepted = false, feedback = "", typeMessage = true)
     }
 }

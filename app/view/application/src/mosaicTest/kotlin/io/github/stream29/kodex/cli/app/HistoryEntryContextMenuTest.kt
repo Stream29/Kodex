@@ -16,15 +16,13 @@ import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class HistoryEntryContextMenuTest {
-    @Test
-    fun menuUsesDirectionalNamesAndRoutesRevert() = runTest {
+val historyEntryContextMenuTest by testSuite {
+    test("menuUsesDirectionalNamesAndRoutesRevert") {
         val result = selectHistoryEntryMenuItem(moveDown = false)
 
         assertTrue("[Revert to here]" in result.snapshot, result.snapshot)
@@ -33,8 +31,7 @@ class HistoryEntryContextMenuTest {
         assertEquals("revert", result.selection)
     }
 
-    @Test
-    fun menuRoutesForkFromTheSelectedEntry() = runTest {
+    test("menuRoutesForkFromTheSelectedEntry") {
         val result = selectHistoryEntryMenuItem(moveDown = true)
 
         assertEquals("fork", result.selection)

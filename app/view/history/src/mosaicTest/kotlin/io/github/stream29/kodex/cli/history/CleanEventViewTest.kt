@@ -53,19 +53,17 @@ import io.github.stream29.kodex.utils.applypatch.Patch
 import io.github.stream29.kodex.utils.applypatch.UpdateFileChunk
 import io.github.stream29.kodex.utils.applypatch.UpdateFileHunk
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.nanoseconds
 
-class CleanEventViewTest {
-    @Test
-    fun stableMessagesRenderTheirOwnCleanModelContent() = runTest {
+val cleanEventViewTest by testSuite {
+    test("stableMessagesRenderTheirOwnCleanModelContent") {
         runMosaicTest {
             assertEquals(
                 "Assistant\nhello",
@@ -93,8 +91,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun stableHeadersRenderElapsedWithoutAllowingLongTitlesToDisplaceIt() = runTest {
+    test("stableHeadersRenderElapsedWithoutAllowingLongTitlesToDisplaceIt") {
         val elapsed = 1_500.milliseconds
         val tool = StableTextToolEvent(
             callId = "call",
@@ -180,8 +177,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun elapsedRoundsToMillisecondsBeforeUsingDefaultDurationFormatting() = runTest {
+    test("elapsedRoundsToMillisecondsBeforeUsingDefaultDurationFormatting") {
         runMosaicTest {
             assertEquals(
                 "Assistant +1.501s\nhello",
@@ -200,8 +196,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun assistantPhaseDoesNotChangeTheAssistantHeader() = runTest {
+    test("assistantPhaseDoesNotChangeTheAssistantHeader") {
         runMosaicTest {
             assertEquals(
                 "Assistant\nhello",
@@ -217,8 +212,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun unknownToolUsesItsRawNameAndDefersPayloadDetails() = runTest {
+    test("unknownToolUsesItsRawNameAndDefersPayloadDetails") {
         val event = StableTextToolEvent(
             callId = "call",
             name = "demo",
@@ -247,8 +241,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun customWebToolKeepsItsQuerySummaryBeforeAndAfterCompletion() = runTest {
+    test("customWebToolKeepsItsQuerySummaryBeforeAndAfterCompletion") {
         val input = """{"search_query":[{"q":"Kotlin Duration"}]}"""
         val stable = StableCustomToolEvent(
             callId = "stable-web",
@@ -281,8 +274,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun commandToolSummarizesItsCommandAndDefersTheFunctionName() = runTest {
+    test("commandToolSummarizesItsCommandAndDefersTheFunctionName") {
         val event = StableCommandExecutionToolEvent(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
@@ -316,8 +308,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun commandToolSummaryEllipsizesToAvailableHistoryWidth() = runTest {
+    test("commandToolSummaryEllipsizesToAvailableHistoryWidth") {
         val event = StableCommandExecutionToolEvent(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
@@ -346,8 +337,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun runningCommandReflectsItsLiveProcessCompletion() = runTest {
+    test("runningCommandReflectsItsLiveProcessCompletion") {
         val session = TestUnifiedExecProcessSession(
             sessionId = 7,
             arguments = ExecCommandArguments(command = "sleep 5"),
@@ -386,8 +376,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun commandWithoutAnObservableSessionDoesNotClaimToBeRunning() = runTest {
+    test("commandWithoutAnObservableSessionDoesNotClaimToBeRunning") {
         val event = StableCommandExecutionToolEvent(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
@@ -414,8 +403,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun writeStdinNamesTheCommandBehindItsActiveSession() = runTest {
+    test("writeStdinNamesTheCommandBehindItsActiveSession") {
         val session = TestUnifiedExecProcessSession(
             sessionId = 7,
             arguments = ExecCommandArguments(command = "tail -f build.log"),
@@ -453,8 +441,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun planRendersAsAnInlineChecklist() = runTest {
+    test("planRendersAsAnInlineChecklist") {
         val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate(
             callId = "plan",
             arguments = UpdatePlanArgs(
@@ -487,8 +474,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun pendingPlanRendersAsAnInlineChecklist() = runTest {
+    test("pendingPlanRendersAsAnInlineChecklist") {
         val event = PendingPlanUpdate(
             callId = "plan",
             arguments = UpdatePlanArgs(
@@ -506,8 +492,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun requestUserInputRedactsSecretAnswers() = runTest {
+    test("requestUserInputRedactsSecretAnswers") {
         val arguments = RequestUserInputArgs(
             questions = listOf(
                 RequestUserInputQuestion(
@@ -540,8 +525,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun completedRequestUserInputRendersOtherAsReadOnlyFreeForm() = runTest {
+    test("completedRequestUserInputRendersOtherAsReadOnlyFreeForm") {
         val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent(
             callId = "input",
             arguments = RequestUserInputArgs(
@@ -576,8 +560,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun failedRequestUserInputRendersItsQuestionAndErrorDirectly() = runTest {
+    test("failedRequestUserInputRendersItsQuestionAndErrorDirectly") {
         val event = io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent(
             callId = "input",
             arguments = RequestUserInputArgs(
@@ -602,8 +585,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun reasoningUsesOnlyTheDisplaySummary() = runTest {
+    test("reasoningUsesOnlyTheDisplaySummary") {
         val event = StableReasoning(
             ResponseItem.Reasoning(
                 summary = listOf(ReasoningItemReasoningSummary.SummaryText("short summary")),
@@ -621,8 +603,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun mcpImageContentDoesNotDumpInlineData() = runTest {
+    test("mcpImageContentDoesNotDumpInlineData") {
         val event = StableMcpToolEvent(
             callId = "mcp",
             name = "inspect",
@@ -655,8 +636,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun unstableEventsRenderFromTheirOwnRoot() = runTest {
+    test("unstableEventsRenderFromTheirOwnRoot") {
         val event = PendingFunctionToolEvent(
             callId = "call",
             name = "demo",
@@ -671,8 +651,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun patchEventsKeepTheDedicatedPatchRenderer() = runTest {
+    test("patchEventsKeepTheDedicatedPatchRenderer") {
         val diff = Patch(
             patch = "",
             hunks = listOf(
@@ -708,8 +687,7 @@ class CleanEventViewTest {
         }
     }
 
-    @Test
-    fun toolHeadersUseColorInsteadOfTextualStatus() = runTest {
+    test("toolHeadersUseColorInsteadOfTextualStatus") {
         val running = PendingFunctionToolEvent(
             callId = "running",
             name = "demo",

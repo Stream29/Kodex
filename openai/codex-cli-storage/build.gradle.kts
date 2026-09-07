@@ -13,7 +13,6 @@ kotlin {
             implementation(project(":openai-json-codec"))
         }
         commonTest.dependencies {
-            implementation(project(":utils-os-environment"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

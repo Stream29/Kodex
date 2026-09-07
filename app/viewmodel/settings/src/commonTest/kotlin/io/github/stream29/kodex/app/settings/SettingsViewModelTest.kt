@@ -59,9 +59,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runCurrent
-import kotlinx.coroutines.test.runTest
 import kotlinx.io.files.Path
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
@@ -72,37 +71,35 @@ import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class SettingsViewModelTest {
-    @Test
-    fun updateQueueDrainsAcceptedWritesBeforeClosingItsTarget() = runTest {
+val settingsViewModelTest by testSuite {
+    test("updateQueueDrainsAcceptedWritesBeforeClosingItsTarget") {
         val releaseWrite = CompletableDeferred<Unit>()
         var writeCompleted = false
         var targetClosed = false
-        val queue = SettingsUpdateQueue(backgroundScope)
+        val queue = SettingsUpdateQueue(testScope.backgroundScope)
 
         queue.submit {
             releaseWrite.await()
             writeCompleted = true
         }
-        runCurrent()
+        testScope.runCurrent()
         queue.close { targetClosed = true }
 
         assertFalse(writeCompleted)
         assertFalse(targetClosed)
 
         releaseWrite.complete(Unit)
-        runCurrent()
+        testScope.runCurrent()
 
         assertTrue(writeCompleted)
         assertTrue(targetClosed)
     }
 
-    @Test
-    fun updateQueueContinuesAfterAFailedWrite() = runTest {
+    test("updateQueueContinuesAfterAFailedWrite") {
         val releaseFirstWrite = CompletableDeferred<Unit>()
         var secondWriteCompleted = false
         var reportedError: Throwable? = null
-        val queue = SettingsUpdateQueue(backgroundScope)
+        val queue = SettingsUpdateQueue(testScope.backgroundScope)
 
         queue.submit(reportError = { reportedError = it }) {
             releaseFirstWrite.await()
@@ -111,9 +108,9 @@ class SettingsViewModelTest {
         queue.submit {
             secondWriteCompleted = true
         }
-        runCurrent()
+        testScope.runCurrent()
         releaseFirstWrite.complete(Unit)
-        runCurrent()
+        testScope.runCurrent()
 
         assertTrue(secondWriteCompleted)
         assertEquals("Failed write", reportedError?.message)
@@ -121,8 +118,7 @@ class SettingsViewModelTest {
         queue.close()
     }
 
-    @Test
-    fun settingsViewModelRoutesUnhandledErrorWithCwd() = runTest {
+    test("settingsViewModelRoutesUnhandledErrorWithCwd") {
         val failingSource = object : SessionSettingsDataSource {
             override val state: StateFlow<SessionSettingsDataState> = MutableStateFlow(
                 SessionSettingsDataState.Available(initialSnapshot()),
@@ -152,16 +148,16 @@ class SettingsViewModelTest {
             hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
             sessionSettings = failingSource,
-            ownerScope = backgroundScope,
+            ownerScope = testScope.backgroundScope,
             reportUnhandledError = { failure, cwd ->
                 capturedError = failure
                 capturedCwd = cwd
             },
         )
-        runCurrent()
+        testScope.runCurrent()
 
         viewModel.session.updateModel(0, OpenAiModelId("fail-model"))
-        runCurrent()
+        testScope.runCurrent()
 
         assertEquals("source boom", capturedError?.message)
         assertEquals(Path("workspace"), capturedCwd)
@@ -169,8 +165,7 @@ class SettingsViewModelTest {
         viewModel.close()
     }
 
-    @Test
-    fun rootSharesGlobalSettingsAuthority() = runTest {
+    test("rootSharesGlobalSettingsAuthority") {
         val settings = InMemoryKodexGlobalSettings(
             KodexGlobalSettings(),
         )
@@ -184,7 +179,7 @@ class SettingsViewModelTest {
             hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList<ModelInfo>()),
             sessionSettings = source,
-            ownerScope = backgroundScope,
+            ownerScope = testScope.backgroundScope,
         )
         val global = viewModel.global
         val session = viewModel.session
@@ -198,13 +193,13 @@ class SettingsViewModelTest {
         viewModel.selectPage(SettingsPage.NewSession)
         val defaults = newSession.state.value
         newSession.updateModel(defaults.revision, OpenAiModelId("new-default"))
-        runCurrent()
+        testScope.runCurrent()
         val withUpdatedModel = newSession.state.value
         newSession.updateRequestUserInputMode(
             withUpdatedModel.revision,
             RequestUserInputMode.NoQuestion,
         )
-        runCurrent()
+        testScope.runCurrent()
 
         assertEquals(
             OpenAiModelId("new-default"),
@@ -224,7 +219,7 @@ class SettingsViewModelTest {
         )
         global.updateLeftSidebarWidth(36)
         global.updateRightSidebarWidth(19)
-        runCurrent()
+        testScope.runCurrent()
         assertEquals(
             SidebarSettings(leftWidth = 36, rightWidth = 19),
             settings.settings.value.sidebars,
@@ -232,12 +227,11 @@ class SettingsViewModelTest {
         assertEquals(settings.settings.value.sidebars, global.state.value.sidebars)
 
         viewModel.close()
-        runCurrent()
+        testScope.runCurrent()
         assertTrue(source.closed)
     }
 
-    @Test
-    fun contextSourcesSupportBuiltInTogglesAndCustomSourceLifecycle() = runTest {
+    test("contextSourcesSupportBuiltInTogglesAndCustomSourceLifecycle") {
         val settings = InMemoryKodexGlobalSettings(KodexGlobalSettings())
         val viewModel = createSettingsViewModel(
             initialPage = SettingsPage.ContextSources,
@@ -247,7 +241,7 @@ class SettingsViewModelTest {
             mcpManager = TestMcpManager(),
             hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
-            ownerScope = backgroundScope,
+            ownerScope = testScope.backgroundScope,
         )
 
         viewModel.global.setBuiltInContextSourceEnabled(BuiltInContextSource.CodexHome, false)
@@ -256,7 +250,7 @@ class SettingsViewModelTest {
             viewModel.global.addCustomContextSource("relative/path"),
         )
         assertEquals(null, viewModel.global.addCustomContextSource("/tmp/kodex-context-source"))
-        runCurrent()
+        testScope.runCurrent()
 
         assertFalse(settings.settings.value.contextSources.codexHomeEnabled)
         assertEquals(
@@ -265,18 +259,17 @@ class SettingsViewModelTest {
         )
 
         viewModel.global.setCustomContextSourceEnabled("/tmp/kodex-context-source", false)
-        runCurrent()
+        testScope.runCurrent()
         assertFalse(settings.settings.value.contextSources.customSources.single().enabled)
 
         viewModel.global.removeCustomContextSource("/tmp/kodex-context-source")
-        runCurrent()
+        testScope.runCurrent()
         assertTrue(settings.settings.value.contextSources.customSources.isEmpty())
 
         viewModel.close()
     }
 
-    @Test
-    fun authenticationProjectionNeverPublishesAccessToken() = runTest {
+    test("authenticationProjectionNeverPublishesAccessToken") {
         val auth = TestAuthStore(
             OpenAiAuthState.Authenticated(
                 OpenAiSubscriptionAuthState(
@@ -297,9 +290,9 @@ class SettingsViewModelTest {
             mcpManager = TestMcpManager(),
             hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
-            ownerScope = backgroundScope,
+            ownerScope = testScope.backgroundScope,
         )
-        runCurrent()
+        testScope.runCurrent()
 
         val projected = assertIs<SettingsAuthenticationState.Authenticated>(
             viewModel.global.authentication.value,
@@ -312,8 +305,7 @@ class SettingsViewModelTest {
         viewModel.close()
     }
 
-    @Test
-    fun kodexAuthenticationSupportsReloadAndLogout() = runTest {
+    test("kodexAuthenticationSupportsReloadAndLogout") {
         val auth = TestAuthStore(authenticatedState())
         val viewModel = createSettingsViewModel(
             initialPage = SettingsPage.OpenAi,
@@ -327,12 +319,12 @@ class SettingsViewModelTest {
             mcpManager = TestMcpManager(),
             hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
-            ownerScope = backgroundScope,
+            ownerScope = testScope.backgroundScope,
         )
-        runCurrent()
+        testScope.runCurrent()
 
         viewModel.global.reloadAuthentication()
-        runCurrent()
+        testScope.runCurrent()
         assertEquals(1, auth.reloadCount)
         assertEquals(
             SettingsAuthenticationOperationState.Idle,
@@ -340,7 +332,7 @@ class SettingsViewModelTest {
         )
 
         viewModel.global.logoutKodex()
-        runCurrent()
+        testScope.runCurrent()
         assertEquals(1, auth.logoutCount)
         assertEquals(
             OpenAiAuthState.Unavailable.CredentialsNotFound,
@@ -353,8 +345,7 @@ class SettingsViewModelTest {
         viewModel.close()
     }
 
-    @Test
-    fun authenticationOperationFailureIsTypedAndDismissible() = runTest {
+    test("authenticationOperationFailureIsTypedAndDismissible") {
         val auth = TestAuthStore(
             initialState = authenticatedState(),
             reloadFailure = IllegalStateException("reload failed"),
@@ -371,11 +362,11 @@ class SettingsViewModelTest {
             mcpManager = TestMcpManager(),
             hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
-            ownerScope = backgroundScope,
+            ownerScope = testScope.backgroundScope,
         )
 
         viewModel.global.reloadAuthentication()
-        runCurrent()
+        testScope.runCurrent()
 
         assertEquals(
             SettingsAuthenticationOperationState.Failed(
@@ -392,8 +383,7 @@ class SettingsViewModelTest {
         viewModel.close()
     }
 
-    @Test
-    fun accountUsageProjectionNeverPublishesResetAttemptCredentials() = runTest {
+    test("accountUsageProjectionNeverPublishesResetAttemptCredentials") {
         val snapshot = usageSnapshot()
         val accountUsage = TestAccountUsageStore(
             initialState = CodexAccountUsageState.Redeeming(
@@ -414,9 +404,9 @@ class SettingsViewModelTest {
             mcpManager = TestMcpManager(),
             hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
-            ownerScope = backgroundScope,
+            ownerScope = testScope.backgroundScope,
         )
-        runCurrent()
+        testScope.runCurrent()
 
         val projected = assertIs<SettingsAccountUsageState.Redeeming>(
             viewModel.global.accountUsage.value,
@@ -427,8 +417,7 @@ class SettingsViewModelTest {
         viewModel.close()
     }
 
-    @Test
-    fun sharedUsageRefreshSurvivesPopupDisposal() = runTest {
+    test("sharedUsageRefreshSurvivesPopupDisposal") {
         val releaseRefresh = CompletableDeferred<Unit>()
         val accountUsage = TestAccountUsageStore(refreshGate = releaseRefresh)
         val viewModel = createSettingsViewModel(
@@ -441,22 +430,21 @@ class SettingsViewModelTest {
             mcpManager = TestMcpManager(),
             hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
-            ownerScope = backgroundScope,
+            ownerScope = testScope.backgroundScope,
         )
-        runCurrent()
+        testScope.runCurrent()
 
         assertEquals(1, accountUsage.refreshCount)
         assertEquals(0, accountUsage.completedRefreshCount)
 
         viewModel.close()
         releaseRefresh.complete(Unit)
-        runCurrent()
+        testScope.runCurrent()
 
         assertEquals(1, accountUsage.completedRefreshCount)
     }
 
-    @Test
-    fun sessionWorkingDirectoryUsesAnOwnedDirectoryPicker() = runTest {
+    test("sessionWorkingDirectoryUsesAnOwnedDirectoryPicker") {
         val source = TestSessionSettingsDataSource()
         val selectedDirectory = Path("selected-workspace")
         var pickerInitialDirectory: Path? = null
@@ -476,9 +464,9 @@ class SettingsViewModelTest {
                 pickerInitialDirectory = initialDirectory
                 TestDirectoryPickerViewModel(initialDirectory).also { picker = it }
             },
-            ownerScope = backgroundScope,
+            ownerScope = testScope.backgroundScope,
         )
-        runCurrent()
+        testScope.runCurrent()
         val session = assertIs<SessionSettingsState.Available>(viewModel.session.state.value)
 
         viewModel.session.requestWorkingDirectory(session.snapshot.revision)
@@ -489,15 +477,14 @@ class SettingsViewModelTest {
         assertTrue(viewModel.session.selectWorkingDirectory(request, selectedDirectory))
         assertNull(viewModel.session.directoryPicker.value)
         assertTrue(picker.closed)
-        runCurrent()
+        testScope.runCurrent()
 
         assertEquals(selectedDirectory, source.current.configuration.workingDirectory)
 
         viewModel.close()
     }
 
-    @Test
-    fun sessionChildRejectsStaleRevisionAndNeverResolvesAnotherTarget() = runTest {
+    test("sessionChildRejectsStaleRevisionAndNeverResolvesAnotherTarget") {
         val source = TestSessionSettingsDataSource()
         val viewModel = createSettingsViewModel(
             initialPage = SettingsPage.CurrentSession,
@@ -510,13 +497,13 @@ class SettingsViewModelTest {
             hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
             sessionSettings = source,
-            ownerScope = backgroundScope,
+            ownerScope = testScope.backgroundScope,
         )
-        runCurrent()
+        testScope.runCurrent()
         val first = assertIs<SessionSettingsState.Available>(viewModel.session.state.value)
 
         viewModel.session.updateModel(first.snapshot.revision, OpenAiModelId("session-model"))
-        runCurrent()
+        testScope.runCurrent()
         assertEquals(OpenAiModelId("session-model"), source.current.configuration.model)
         assertEquals(1, source.updateCount)
 
@@ -527,7 +514,7 @@ class SettingsViewModelTest {
             afterModelUpdate.snapshot.revision,
             RequestUserInputMode.NoQuestion,
         )
-        runCurrent()
+        testScope.runCurrent()
         assertEquals(
             RequestUserInputMode.NoQuestion,
             source.current.configuration.requestUserInputMode,
@@ -537,11 +524,10 @@ class SettingsViewModelTest {
         viewModel.session.requestWorkingDirectory(first.snapshot.revision)
 
         viewModel.close()
-        runCurrent()
+        testScope.runCurrent()
     }
 
-    @Test
-    fun resetRetryReusesThePreparedIdempotencyAttempt() = runTest {
+    test("resetRetryReusesThePreparedIdempotencyAttempt") {
         val accountUsage = TestAccountUsageStore(
             initialState = CodexAccountUsageState.Available(usageSnapshot()),
             consumeResults = ArrayDeque(
@@ -561,21 +547,21 @@ class SettingsViewModelTest {
             mcpManager = TestMcpManager(),
             hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
-            ownerScope = backgroundScope,
+            ownerScope = testScope.backgroundScope,
         )
-        runCurrent()
+        testScope.runCurrent()
 
         viewModel.global.requestUsageReset()
         val choosing = assertIs<UsageResetState.Choosing>(viewModel.global.usageReset.value)
         viewModel.global.selectUsageReset(choosing.request.options.single())
-        runCurrent()
+        testScope.runCurrent()
         assertIs<UsageResetState.Confirming>(viewModel.global.usageReset.value)
 
         viewModel.global.confirmUsageReset()
-        runCurrent()
+        testScope.runCurrent()
         assertIs<UsageResetState.ConsumeFailed>(viewModel.global.usageReset.value)
         viewModel.global.retryUsageReset()
-        runCurrent()
+        testScope.runCurrent()
         assertIs<UsageResetState.Completed>(viewModel.global.usageReset.value)
 
         assertEquals(2, accountUsage.consumedAttempts.size)
@@ -585,8 +571,7 @@ class SettingsViewModelTest {
         viewModel.close()
     }
 
-    @Test
-    fun mcpProjectionContainsOnlySanitizedLifecycleData() = runTest {
+    test("mcpProjectionContainsOnlySanitizedLifecycleData") {
         val initialServer = McpManagedServerState(
             serverName = "private-server",
             transport = McpTransportKind.StreamableHttp,
@@ -607,9 +592,9 @@ class SettingsViewModelTest {
             mcpManager = manager,
             hookManager = TestHookManager(),
             models = MutableStateFlow(emptyList()),
-            ownerScope = backgroundScope,
+            ownerScope = testScope.backgroundScope,
         )
-        runCurrent()
+        testScope.runCurrent()
 
         val row = viewModel.global.mcpServers.value.single()
         assertEquals("private-server", row.serverName)
@@ -617,7 +602,7 @@ class SettingsViewModelTest {
         assertFalse("secret" in row.toString())
 
         viewModel.global.reconnectMcpServer("private-server")
-        runCurrent()
+        testScope.runCurrent()
         assertEquals(listOf("private-server"), manager.reconnects)
 
         manager.servers.value = listOf(
@@ -626,13 +611,13 @@ class SettingsViewModelTest {
                 toolCount = 3,
             ),
         )
-        runCurrent()
+        testScope.runCurrent()
         val healthy = assertIs<McpServerSettingsStatus.Healthy>(
             viewModel.global.mcpServers.value.single().status,
         )
         assertEquals(3, healthy.toolCount)
         viewModel.global.reconnectMcpServer("private-server")
-        runCurrent()
+        testScope.runCurrent()
         assertEquals(listOf("private-server"), manager.reconnects)
 
         viewModel.close()

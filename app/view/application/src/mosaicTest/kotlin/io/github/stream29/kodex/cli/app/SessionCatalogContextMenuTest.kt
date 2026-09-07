@@ -18,14 +18,12 @@ import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class SessionCatalogContextMenuTest {
-    @Test
-    fun secondaryClickOpensArchiveMenuAndRoutesArchive() = runTest {
+val sessionCatalogContextMenuTest by testSuite {
+    test("secondaryClickOpensArchiveMenuAndRoutesArchive") {
         val result = selectSessionCatalogMenu(
             entry = SessionCatalogEntry(sessionIndex = 4, threadName = "Active"),
             moveDown = false,
@@ -40,8 +38,7 @@ class SessionCatalogContextMenuTest {
         assertTrue("selection=archive" in result.selectionSnapshot, result.selectionSnapshot)
     }
 
-    @Test
-    fun shiftF10OpensUnarchiveMenuAndRoutesUnarchive() = runTest {
+    test("shiftF10OpensUnarchiveMenuAndRoutesUnarchive") {
         val result = selectSessionCatalogMenu(
             entry = SessionCatalogEntry(
                 sessionIndex = 5,
@@ -64,8 +61,7 @@ class SessionCatalogContextMenuTest {
         assertTrue("selection=unarchive" in result.selectionSnapshot, result.selectionSnapshot)
     }
 
-    @Test
-    fun menuKeyRoutesDeleteThroughContextMenu() = runTest {
+    test("menuKeyRoutesDeleteThroughContextMenu") {
         val result = selectSessionCatalogMenu(
             entry = SessionCatalogEntry(sessionIndex = 6, threadName = "Delete target"),
             moveDown = true,

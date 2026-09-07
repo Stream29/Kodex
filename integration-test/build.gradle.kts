@@ -43,8 +43,13 @@ kotlin {
             implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.ktor.client.core)
+        }
+        nativeTest.dependencies {
+            implementation(libs.mosaic.runtime)
         }
         jvmTest.dependencies {
+            implementation(project(":app-shared-auth-filesystem"))
             implementation(project(":app-view-patch"))
             implementation(project(":mcp-impl"))
             implementation(project(":utils-patch"))

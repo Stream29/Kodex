@@ -1,12 +1,11 @@
 package io.github.stream29.kodex.cli.settings
 
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 
-class SettingsPageTest {
-    @Test
-    fun navigationOrderAndLabelsAreStable() {
+val settingsPageTest by testSuite {
+    test("navigationOrderAndLabelsAreStable") {
         assertEquals(
             listOf(
                 "General",

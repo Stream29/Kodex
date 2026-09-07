@@ -10,15 +10,13 @@ import com.jakewharton.mosaic.ui.Column
 import io.github.stream29.kodex.cli.components.DefaultTuiColorScheme
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class SettingsDropdownFieldTest {
-    @Test
-    fun titlesAndCurrentValuesShareOneRow() = runTest {
+val settingsDropdownFieldTest by testSuite {
+    test("titlesAndCurrentValuesShareOneRow") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(40)) {
@@ -42,8 +40,7 @@ class SettingsDropdownFieldTest {
         }
     }
 
-    @Test
-    fun ordinaryFieldsShareTheNeutralSurfaceRole() = runTest {
+    test("ordinaryFieldsShareTheNeutralSurfaceRole") {
         val ansiSnapshots = SnapshotStrategy { mosaic ->
             mosaic.draw().render(AnsiLevel.TRUECOLOR, supportsKittyUnderlines = false)
         }

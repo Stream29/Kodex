@@ -11,18 +11,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.runCurrent
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class HookManagerImplTest {
-    @Test
-    fun addPublishesHooksInPersistedOrder() = runTest {
+val hookManagerImplTest by testSuite {
+    test("addPublishesHooksInPersistedOrder") {
         val store = TestHookConfigurationStore()
-        val manager = backgroundScope.HookManagerImpl(store)
+        val manager = testScope.backgroundScope.HookManagerImpl(store)
 
         val firstName = manager.add(
             HookDraft(
@@ -38,7 +36,7 @@ class HookManagerImplTest {
                 command = "stop-command",
             ),
         )
-        runCurrent()
+        testScope.runCurrent()
 
         assertEquals("guard tools", firstName)
         assertEquals(
@@ -57,15 +55,14 @@ class HookManagerImplTest {
         assertNull(manager.editorDraft("guard tools"))
     }
 
-    @Test
-    fun editRenamesHookWithoutChangingItsPosition() = runTest {
+    test("editRenamesHookWithoutChangingItsPosition") {
         val store = TestHookConfigurationStore(
             linkedMapOf(
                 "first" to HookBody(HookType.PreToolUse, "first-command"),
                 "second" to HookBody(HookType.Stop, "second-command"),
             ),
         )
-        val manager = backgroundScope.HookManagerImpl(store)
+        val manager = testScope.backgroundScope.HookManagerImpl(store)
 
         manager.edit(
             name = "first",
@@ -75,7 +72,7 @@ class HookManagerImplTest {
                 command = "updated-command",
             ),
         )
-        runCurrent()
+        testScope.runCurrent()
 
         assertEquals(listOf("renamed", "second"), store.configuration.value.keys.toList())
         assertEquals(
@@ -83,20 +80,19 @@ class HookManagerImplTest {
             store.configuration.value.getValue("renamed"),
         )
         manager.delete("renamed")
-        runCurrent()
+        testScope.runCurrent()
         assertEquals(listOf("second"), manager.hooks.value.map(HookManagedState::name))
         manager.close()
     }
 
-    @Test
-    fun invalidOrConflictingDraftDoesNotWriteSettings() = runTest {
+    test("invalidOrConflictingDraftDoesNotWriteSettings") {
         val store = TestHookConfigurationStore(
             linkedMapOf(
                 "first" to HookBody(HookType.PreToolUse, "first-command"),
                 "second" to HookBody(HookType.Stop, "second-command"),
             ),
         )
-        val manager = backgroundScope.HookManagerImpl(store)
+        val manager = testScope.backgroundScope.HookManagerImpl(store)
         val initial = store.configuration.value
 
         assertFailsWith<IllegalArgumentException> {

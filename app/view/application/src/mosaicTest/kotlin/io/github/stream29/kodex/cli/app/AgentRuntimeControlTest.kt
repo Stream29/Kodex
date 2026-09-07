@@ -5,28 +5,25 @@ import io.github.stream29.kodex.app.agent.contract.AgentExecutionPhase
 import io.github.stream29.kodex.app.agent.contract.AgentExecutionState
 import io.github.stream29.kodex.cli.agent.AgentRuntimeControl
 import io.github.stream29.kodex.cli.agent.runtimeControl
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 
-class AgentRuntimeControlTest {
-    @Test
-    fun activeTurnIsStoppable() {
+val agentRuntimeControlTest by testSuite {
+    test("activeTurnIsStoppable") {
         assertEquals(
             AgentRuntimeControl.Stop,
             execution(canCancel = true).runtimeControl(),
         )
     }
 
-    @Test
-    fun idleToolPendingStateCanBeCleared() {
+    test("idleToolPendingStateCanBeCleared") {
         assertEquals(
             AgentRuntimeControl.ClearPending,
             execution(canClearPending = true).runtimeControl(),
         )
     }
 
-    @Test
-    fun otherIdleStatesCanBeResumed() {
+    test("otherIdleStatesCanBeResumed") {
         assertEquals(
             AgentRuntimeControl.Resume,
             execution(canResume = true).runtimeControl(),

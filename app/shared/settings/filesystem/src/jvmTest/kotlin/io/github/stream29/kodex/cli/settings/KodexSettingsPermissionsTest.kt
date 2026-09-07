@@ -1,15 +1,14 @@
 package io.github.stream29.kodex.cli.settings
 
-import kotlinx.coroutines.runBlocking
 import kotlinx.io.files.Path
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermission
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.TestCompartment
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 
-class KodexSettingsPermissionsTest {
-    @Test
-    fun settingsSnapshotUsesOwnerOnlyPosixPermissions(): Unit = runBlocking {
+val kodexSettingsPermissionsTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("settingsSnapshotUsesOwnerOnlyPosixPermissions") {
         val root = Files.createTempDirectory("kodex-settings-permissions")
         try {
             val settingsDirectory = root.resolve("kodex")
@@ -21,7 +20,7 @@ class KodexSettingsPermissionsTest {
             store.update { it }
 
             if (!Files.getFileStore(settingsDirectory).supportsFileAttributeView("posix")) {
-                return@runBlocking
+                return@test
             }
             assertEquals(
                 setOf(

@@ -16,15 +16,13 @@ import io.github.stream29.kodex.mcp.contract.McpImportItem
 import io.github.stream29.kodex.mcp.contract.McpImportItemKind
 import io.github.stream29.kodex.mcp.contract.McpImportPreview
 import io.github.stream29.kodex.mcp.contract.McpTransportKind
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class McpSettingsContentTest {
-    @Test
-    fun rendersCompactServerButtonsWithoutFlattenedDetailsOrActions() = runTest {
+val mcpSettingsContentTest by testSuite {
+    test("rendersCompactServerButtonsWithoutFlattenedDetailsOrActions") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(80)) {
@@ -79,8 +77,7 @@ class McpSettingsContentTest {
         }
     }
 
-    @Test
-    fun rendersServerDetailsAndActionsInsideDialog() = runTest {
+    test("rendersServerDetailsAndActionsInsideDialog") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Box {
@@ -120,8 +117,7 @@ class McpSettingsContentTest {
         }
     }
 
-    @Test
-    fun importDefaultsSelectEverySupportedServerAndReplaceConflicts() {
+    test("importDefaultsSelectEverySupportedServerAndReplaceConflicts") {
         val preview = importPreview()
 
         assertEquals(
@@ -134,8 +130,7 @@ class McpSettingsContentTest {
         )
     }
 
-    @Test
-    fun importDialogShowsLoadedSelectionWithoutPreviewStep() = runTest {
+    test("importDialogShowsLoadedSelectionWithoutPreviewStep") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Box {
@@ -158,33 +153,34 @@ class McpSettingsContentTest {
         }
     }
 
-    private fun importPreview(): McpImportPreview =
-        McpImportPreview(
-            id = 1,
-            filter = "",
-            items = listOf(
-                McpImportItem(
-                    serverName = "new",
-                    transport = McpTransportKind.StreamableHttp,
-                    kind = McpImportItemKind.New,
-                    enabled = true,
-                    selectable = true,
-                ),
-                McpImportItem(
-                    serverName = "conflict",
-                    transport = McpTransportKind.Stdio,
-                    kind = McpImportItemKind.Conflict,
-                    enabled = true,
-                    selectable = true,
-                ),
-                McpImportItem(
-                    serverName = "unsupported",
-                    transport = null,
-                    kind = McpImportItemKind.Unsupported,
-                    enabled = null,
-                    selectable = false,
-                    detail = "Unsupported Codex configuration.",
-                ),
-            ),
-        )
 }
+
+private fun importPreview(): McpImportPreview =
+    McpImportPreview(
+        id = 1,
+        filter = "",
+        items = listOf(
+            McpImportItem(
+                serverName = "new",
+                transport = McpTransportKind.StreamableHttp,
+                kind = McpImportItemKind.New,
+                enabled = true,
+                selectable = true,
+            ),
+            McpImportItem(
+                serverName = "conflict",
+                transport = McpTransportKind.Stdio,
+                kind = McpImportItemKind.Conflict,
+                enabled = true,
+                selectable = true,
+            ),
+            McpImportItem(
+                serverName = "unsupported",
+                transport = null,
+                kind = McpImportItemKind.Unsupported,
+                enabled = null,
+                selectable = false,
+                detail = "Unsupported Codex configuration.",
+            ),
+        ),
+    )

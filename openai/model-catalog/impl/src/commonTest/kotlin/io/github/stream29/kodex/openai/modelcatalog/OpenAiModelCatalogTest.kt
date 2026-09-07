@@ -5,27 +5,16 @@ import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ModelsResponse
-import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ReasoningEffortPreset
 import io.github.stream29.kodex.openai.contextWindowTokenStatus
-import io.github.stream29.kodex.openai.client.OpenAiClient
-import io.github.stream29.kodex.openai.client.test.InMemoryOpenAiAuthStore
-import io.github.stream29.kodex.openai.client.OpenAiClientConfig
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
-import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
-import io.github.stream29.kodex.openai.codexclistorage.CodexAuthJson
-import io.github.stream29.kodex.utils.osenvironment.environmentVariable
-import io.github.stream29.kodex.utils.osenvironment.userHomeDirectory
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlinx.io.files.Path
 import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.seconds
 
@@ -44,40 +33,6 @@ private fun model(
         autoCompactionTokenLimit = autoCompactionTokenLimit,
         effectiveContextWindowPercent = effectiveContextWindowPercent,
     )
-
-private fun testCodexDirectory(): Path =
-    environmentVariable("CODEX_HOME")
-        ?.takeIf(String::isNotBlank)
-        ?.let(::Path)
-        ?: userHomeDirectory()?.let { home -> Path(home, ".codex") }
-        ?: error("CODEX_HOME or a readable user home directory must be set for model-catalog tests.")
-
-private suspend fun liveCatalog(): LiveCatalogFixture {
-    val storage = CodexCliStorage(testCodexDirectory())
-    val client = OpenAiClient(
-        authStore = InMemoryOpenAiAuthStore(storage.readAuthOrNull().toSubscriptionAuthStateOrThrow()),
-        config = OpenAiClientConfig(),
-    )
-    return LiveCatalogFixture(client, OpenAiModelCatalog(client))
-}
-
-private fun CodexAuthJson?.toSubscriptionAuthStateOrThrow(): OpenAiSubscriptionAuthState {
-    val tokens = this?.tokens ?: error("Codex CLI auth tokens are required.")
-    return OpenAiSubscriptionAuthState(
-        accessToken = tokens.accessToken,
-        accountId = tokens.accountId?.takeIf(String::isNotBlank),
-    )
-}
-
-private class LiveCatalogFixture(
-    private val client: OpenAiClient,
-    val catalog: OpenAiModelCatalog,
-) : AutoCloseable {
-    override fun close() {
-        catalog.close()
-        client.close()
-    }
-}
 
 val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
     test("starts with the bundled Codex model catalog") {
@@ -261,16 +216,4 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
         assertEquals(50L, status.tokensUntilCompaction)
     }
 
-    testFixture { liveCatalog() } closeWith { close() } asParameterForEach {
-        test(
-            "refreshes model metadata from the real Codex endpoint",
-            testConfig = TestConfig.testScope(isEnabled = true, timeout = 120.seconds),
-        ) { fixture ->
-            val models = withContext(Dispatchers.Default) {
-                fixture.catalog.refresh()
-            }
-
-            assertEquals(models, fixture.catalog.models.value)
-        }
-    }
 }

@@ -21,42 +21,21 @@ import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.test.runTest
 import kotlinx.io.files.Path
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class SuggestedConfigurationTest {
-    private val configuration = RuntimeConfiguration(
-        OpenAiModelId("test"), ReasoningEffort.Low, ServiceTier.Default, RequestUserInputMode.AskUser,
-    )
-
-    @Test
-    fun cwdSharesTheConfigurationRowWhenItFits() = verifyWidth(80, sameRow = true)
-
-    @Test
-    fun cwdWrapsOnlyWhenTheRowIsFull() = verifyWidth(22, sameRow = false)
-
-    private fun verifyWidth(columns: Int, sameRow: Boolean) = runTest {
-        runMosaicTest {
-            val snapshot = setContentAndSnapshot {
-                SuggestedConfigurationTriggers(
-                    columns, configuration, Path("."), RuntimeConfigurationDropdowns.remember(Unit),
-                    enabled = true, onBrowse = {},
-                )
-            }
-            val lines = snapshot.lines()
-            val modelRow = lines.indexOfFirst { "[test low]" in it }
-            val cwdLabel = "[${workingDirectoryStatusLabel(Path("."), columns)}]"
-            val cwdRow = lines.indexOfFirst { cwdLabel in it }
-            assertTrue(modelRow >= 0 && cwdRow >= 0, snapshot)
-            assertEquals(sameRow, modelRow == cwdRow, snapshot)
-        }
+val suggestedConfigurationTest by testSuite {
+    test("cwdSharesTheConfigurationRowWhenItFits") {
+        verifyWidth(80, sameRow = true)
     }
 
-    @Test
-    fun scrolledPanelMenuUsesTheTriggerSurfaceCoordinates() = runTest {
+    test("cwdWrapsOnlyWhenTheRowIsFull") {
+        verifyWidth(22, sameRow = false)
+    }
+
+    test("scrolledPanelMenuUsesTheTriggerSurfaceCoordinates") {
         val pending = SuggestSubagentTaskState.Pending(
             callId = "offset-panel",
             arguments = SuggestSubagentTaskArgs(
@@ -119,5 +98,26 @@ class SuggestedConfigurationTest {
             assertEquals(triggerY - 1, menuY, menu)
             assertEquals(triggerX, menuLines[menuY].indexOf("[no question]"), menu)
         }
+    }
+}
+
+private val configuration = RuntimeConfiguration(
+    OpenAiModelId("test"), ReasoningEffort.Low, ServiceTier.Default, RequestUserInputMode.AskUser,
+)
+
+private suspend fun verifyWidth(columns: Int, sameRow: Boolean) {
+    runMosaicTest {
+        val snapshot = setContentAndSnapshot {
+            SuggestedConfigurationTriggers(
+                columns, configuration, Path("."), RuntimeConfigurationDropdowns.remember(Unit),
+                enabled = true, onBrowse = {},
+            )
+        }
+        val lines = snapshot.lines()
+        val modelRow = lines.indexOfFirst { "[test low]" in it }
+        val cwdLabel = "[${workingDirectoryStatusLabel(Path("."), columns)}]"
+        val cwdRow = lines.indexOfFirst { cwdLabel in it }
+        assertTrue(modelRow >= 0 && cwdRow >= 0, snapshot)
+        assertEquals(sameRow, modelRow == cwdRow, snapshot)
     }
 }

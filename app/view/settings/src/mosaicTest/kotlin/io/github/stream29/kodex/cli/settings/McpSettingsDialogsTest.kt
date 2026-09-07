@@ -9,14 +9,12 @@ import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class McpSettingsDialogsTest {
-    @Test
-    fun editorUsesDropdownForTransportAndCheckboxForOAuth() = runTest {
+val mcpSettingsDialogsTest by testSuite {
+    test("editorUsesDropdownForTransportAndCheckboxForOAuth") {
         runMosaicTest {
             val initial = setContentAndSnapshot {
                 TuiPopupHost(modifier = Modifier.width(100).height(30)) {

@@ -15,17 +15,15 @@ import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.openai.ReasoningItemReasoningSummary
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class StreamingRequestResponseViewTest {
-    @Test
-    fun messageReplaysTextAndContinuesIncrementally() = runTest {
+val streamingRequestResponseViewTest by testSuite {
+    test("messageReplaysTextAndContinuesIncrementally") {
         val events = replayingEvents(
             ResponsesStreamEvent.OutputItemAdded(
                 outputIndex = 0,
@@ -63,8 +61,7 @@ class StreamingRequestResponseViewTest {
         }
     }
 
-    @Test
-    fun messageItemPrefixUsesContentIndexWhenDeltaArrives() = runTest {
+    test("messageItemPrefixUsesContentIndexWhenDeltaArrives") {
         val events = replayingEvents(
             ResponsesStreamEvent.OutputItemAdded(
                 outputIndex = 0,
@@ -98,8 +95,7 @@ class StreamingRequestResponseViewTest {
         }
     }
 
-    @Test
-    fun reasoningShowsOnlySummaryReplay() = runTest {
+    test("reasoningShowsOnlySummaryReplay") {
         val events = replayingEvents(
             ResponsesStreamEvent.ReasoningSummaryTextDelta(
                 itemId = "reasoning",
@@ -130,8 +126,7 @@ class StreamingRequestResponseViewTest {
         }
     }
 
-    @Test
-    fun reasoningItemPrefixUsesSummaryIndexWhenDeltaArrives() = runTest {
+    test("reasoningItemPrefixUsesSummaryIndexWhenDeltaArrives") {
         val events = replayingEvents(
             ResponsesStreamEvent.OutputItemAdded(
                 outputIndex = 0,
@@ -164,8 +159,7 @@ class StreamingRequestResponseViewTest {
         }
     }
 
-    @Test
-    fun messageNeverRendersInlineImageData() = runTest {
+    test("messageNeverRendersInlineImageData") {
         val events = replayingEvents(
             ResponsesStreamEvent.OutputItemAdded(
                 outputIndex = 0,
@@ -189,8 +183,7 @@ class StreamingRequestResponseViewTest {
         }
     }
 
-    @Test
-    fun functionCallMergesItsArgumentsAndInputDeltas() = runTest {
+    test("functionCallMergesItsArgumentsAndInputDeltas") {
         val events = replayingEvents(
             ResponsesStreamEvent.OutputItemAdded(
                 outputIndex = 0,
@@ -233,8 +226,7 @@ class StreamingRequestResponseViewTest {
         }
     }
 
-    @Test
-    fun customToolCallMergesItsInputAndDeltas() = runTest {
+    test("customToolCallMergesItsInputAndDeltas") {
         val events = replayingEvents(
             ResponsesStreamEvent.OutputItemAdded(
                 outputIndex = 0,
@@ -263,8 +255,7 @@ class StreamingRequestResponseViewTest {
         }
     }
 
-    @Test
-    fun startedRequestHasAStandaloneTail() = runTest {
+    test("startedRequestHasAStandaloneTail") {
         runMosaicTest {
             assertEquals(
                 "Starting response…",
@@ -277,8 +268,7 @@ class StreamingRequestResponseViewTest {
         }
     }
 
-    @Test
-    fun compactingContextHasAStandaloneTail() = runTest {
+    test("compactingContextHasAStandaloneTail") {
         runMosaicTest {
             assertEquals(
                 "Compacting context…",
@@ -291,8 +281,7 @@ class StreamingRequestResponseViewTest {
         }
     }
 
-    @Test
-    fun unknownEventNamesTheFallbackAndRevealsItsRawJsonOnDemand() = runTest {
+    test("unknownEventNamesTheFallbackAndRevealsItsRawJsonOnDemand") {
         val payload = JsonObject(
             mapOf(
                 "type" to JsonPrimitive("future.event"),

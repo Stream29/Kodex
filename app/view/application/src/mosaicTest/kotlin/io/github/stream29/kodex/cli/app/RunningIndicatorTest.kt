@@ -7,13 +7,11 @@ import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 
-class RunningIndicatorTest {
-    @Test
-    fun framesUseTheClassicSingleCellBrailleSequence() {
+val runningIndicatorTest by testSuite {
+    test("framesUseTheClassicSingleCellBrailleSequence") {
         assertEquals(
             listOf("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"),
             RunningIndicatorFrames,
@@ -25,8 +23,7 @@ class RunningIndicatorTest {
         assertEquals(100, RunningIndicatorFrameDurationMillis)
     }
 
-    @Test
-    fun runningLabelDirectlyPrefixesTheFrame() {
+    test("runningLabelDirectlyPrefixesTheFrame") {
         assertEquals(
             "⠋Session name",
             runningIndicatorLabel(name = "Session name", running = true, frame = "⠋"),
@@ -37,8 +34,7 @@ class RunningIndicatorTest {
         )
     }
 
-    @Test
-    fun composeInfiniteAnimationAdvancesAndResetsWhenInactive() = runTest {
+    test("composeInfiniteAnimationAdvancesAndResetsWhenInactive") {
         var active by mutableStateOf(true)
 
         runMosaicTest {

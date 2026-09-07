@@ -9,15 +9,13 @@ import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.app.settings.contract.GlobalSettingsState
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.openai.OpenAiModelId
-import kotlinx.coroutines.test.runTest
 import kotlinx.io.files.Path
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class GlobalSettingsGroupingTest {
-    @Test
-    fun titleGenerationRendersAsItsOwnSection() = runTest {
+val globalSettingsGroupingTest by testSuite {
+    test("titleGenerationRendersAsItsOwnSection") {
         runMosaicTest {
             val titleModel = OpenAiModelId("title-model")
             val snapshot = setContentAndSnapshot {
@@ -51,8 +49,7 @@ class GlobalSettingsGroupingTest {
         }
     }
 
-    @Test
-    fun sidebarWidthSettingShowsColumnsAndUpdatesImmediately() = runTest {
+    test("sidebarWidthSettingShowsColumnsAndUpdatesImmediately") {
         val updates = mutableListOf<Int>()
         runMosaicTest {
             val snapshot = setContentAndSnapshot {

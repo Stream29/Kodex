@@ -9,14 +9,12 @@ import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationStat
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiSubscriptionPlan
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class AuthenticationSettingsTest {
-    @Test
-    fun authenticatedAccountRendersSafeSummary() = runTest {
+val authenticationSettingsTest by testSuite {
+    test("authenticatedAccountRendersSafeSummary") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(80)) {
@@ -45,8 +43,7 @@ class AuthenticationSettingsTest {
         }
     }
 
-    @Test
-    fun unavailableAuthenticationRendersTypedReason() = runTest {
+    test("unavailableAuthenticationRendersTypedReason") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(80)) {
@@ -72,8 +69,7 @@ class AuthenticationSettingsTest {
         }
     }
 
-    @Test
-    fun codexCredentialsRemainReadOnly() = runTest {
+    test("codexCredentialsRemainReadOnly") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(80)) {

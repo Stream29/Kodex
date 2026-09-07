@@ -26,17 +26,15 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class RequestUserInputOptionsTest {
-    @Test
-    fun panelStartsWithTheQuestionWithoutARedundantTitle() = runTest {
+val requestUserInputOptionsTest by testSuite {
+    test("panelStartsWithTheQuestionWithoutARedundantTitle") {
         val state = RequestUserInputState.Pending(
             callId = "call_scope",
             arguments = RequestUserInputArgs(
@@ -74,8 +72,7 @@ class RequestUserInputOptionsTest {
         }
     }
 
-    @Test
-    fun optionsRemainButtonsAndOtherStillEnablesFreeFormInput() = runTest {
+    test("optionsRemainButtonsAndOtherStillEnablesFreeFormInput") {
         val question = RequestUserInputQuestion(
             id = "scope",
             header = "Scope",
@@ -150,8 +147,7 @@ class RequestUserInputOptionsTest {
         }
     }
 
-    @Test
-    fun selectingAnOptionMovesFocusToTheNextQuestion() = runTest {
+    test("selectingAnOptionMovesFocusToTheNextQuestion") {
         val questions = listOf(
             requestQuestion(id = "first", header = "First", option = "Alpha"),
             requestQuestion(id = "second", header = "Second", option = "Beta"),
@@ -170,26 +166,25 @@ class RequestUserInputOptionsTest {
             }
 
             sendKeyEvent(KeyboardEvent(codepoint = 13))
-            advanceUntilIdle()
+            testScope.advanceUntilIdle()
             awaitSnapshotContaining("[● Alpha]")
             assertFalse(viewModel.submitted)
 
             sendKeyEvent(KeyboardEvent(codepoint = 13))
-            advanceUntilIdle()
+            testScope.advanceUntilIdle()
             awaitSnapshotContaining("[● Beta]")
             awaitSnapshotContaining("[● Beta]")
             assertTrue((viewModel.state.value as RequestUserInputState.Pending).canSubmit)
             assertFalse(viewModel.submitted)
 
             sendKeyEvent(KeyboardEvent(codepoint = 13))
-            advanceUntilIdle()
+            testScope.advanceUntilIdle()
             awaitSnapshotContaining("[● Beta]")
             assertTrue(viewModel.submitted)
         }
     }
 
-    @Test
-    fun otherGetsFocusAndEnterMovesToTheNextQuestionOnlyWithText() = runTest {
+    test("otherGetsFocusAndEnterMovesToTheNextQuestionOnlyWithText") {
         val questions = listOf(
             RequestUserInputQuestion(
                 id = "first",
@@ -216,11 +211,11 @@ class RequestUserInputOptionsTest {
 
             sendKeyEvent(KeyboardEvent(codepoint = KeyboardEvent.Down))
             sendKeyEvent(KeyboardEvent(codepoint = 13))
-            advanceUntilIdle()
+            testScope.advanceUntilIdle()
             awaitSnapshotContaining("[● Other]")
 
             sendKeyEvent(KeyboardEvent(codepoint = 13))
-            advanceUntilIdle()
+            testScope.advanceUntilIdle()
             assertEquals(null, (viewModel.pendingAnswer("second")))
 
             "custom".forEach { character ->
@@ -229,7 +224,7 @@ class RequestUserInputOptionsTest {
             awaitSnapshotContaining("custom")
 
             sendKeyEvent(KeyboardEvent(codepoint = 13))
-            advanceUntilIdle()
+            testScope.advanceUntilIdle()
             sendKeyEvent(KeyboardEvent(codepoint = 13))
             awaitSnapshotContaining("[● Beta]")
             assertEquals(

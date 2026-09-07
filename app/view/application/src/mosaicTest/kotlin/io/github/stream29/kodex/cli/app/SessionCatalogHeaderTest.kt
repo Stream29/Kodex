@@ -7,14 +7,12 @@ import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.testing.runMosaicTest
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class SessionCatalogHeaderTest {
-    @Test
-    fun showArchivedIsTheTrailingTitleBarAction() = runTest {
+val sessionCatalogHeaderTest by testSuite {
+    test("showArchivedIsTheTrailingTitleBarAction") {
         var showArchived by mutableStateOf(false)
 
         runMosaicTest {

@@ -44,16 +44,14 @@ import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.math.roundToInt
 
-class SessionSidebarTest {
-    @Test
-    fun noneSidebarShowsAnEmptyBody() = runTest {
+val sessionSidebarTest by testSuite {
+    test("noneSidebarShowsAnEmptyBody") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 SessionSidebar(
@@ -75,8 +73,7 @@ class SessionSidebarTest {
         }
     }
 
-    @Test
-    fun expandedSidebarsUseMirroredDirectionButtons() = runTest {
+    test("expandedSidebarsUseMirroredDirectionButtons") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Row {
@@ -111,8 +108,7 @@ class SessionSidebarTest {
         }
     }
 
-    @Test
-    fun collapsedSidebarsUseMirroredDirectionButtons() = runTest {
+    test("collapsedSidebarsUseMirroredDirectionButtons") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Row {
@@ -138,8 +134,7 @@ class SessionSidebarTest {
         }
     }
 
-    @Test
-    fun terminalSessionsCanRenderOnBothSides() = runTest {
+    test("terminalSessionsCanRenderOnBothSides") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Row {
@@ -172,8 +167,7 @@ class SessionSidebarTest {
         }
     }
 
-    @Test
-    fun titleMenuSelectsTerminalSessions() = runTest {
+    test("titleMenuSelectsTerminalSessions") {
         var selected by mutableStateOf(SidebarContent.None)
         var dropdownState: TuiDropdownState? = null
         runMosaicTest {
@@ -211,8 +205,7 @@ class SessionSidebarTest {
         assertFalse(dropdownState?.expanded ?: true)
     }
 
-    @Test
-    fun terminalSessionMenuClosesItsSession() = runTest {
+    test("terminalSessionMenuClosesItsSession") {
         val session = TestAgentShellSession()
         runMosaicTest {
             setContentAndSnapshot {
@@ -238,8 +231,7 @@ class SessionSidebarTest {
         assertEquals(1, session.closeCount)
     }
 
-    @Test
-    fun terminalSessionRowsUseDistinctSingleLineBulletsWithoutIds() = runTest {
+    test("terminalSessionRowsUseDistinctSingleLineBulletsWithoutIds") {
         runMosaicTest {
             setContentAndSnapshot {
                 Column(modifier = Modifier.width(12)) {
@@ -275,8 +267,7 @@ class SessionSidebarTest {
         }
     }
 
-    @Test
-    fun terminalSessionHoverShowsIdAndCompleteCommand() = runTest {
+    test("terminalSessionHoverShowsIdAndCompleteCommand") {
         val session = TestAgentShellSession(
             sessionId = 42,
             command = "echo first\necho second",
@@ -309,8 +300,7 @@ class SessionSidebarTest {
         }
     }
 
-    @Test
-    fun historyIndexRendersAConnectedOldestFirstTimeline() = runTest {
+    test("historyIndexRendersAConnectedOldestFirstTimeline") {
         val viewModel = TestHistoryIndexViewModel(
             entries = listOf(
                 HistoryIndexEntry(0, HistoryIndexEntryKind.CompactionPoint, "Context compacted"),
@@ -339,8 +329,7 @@ class SessionSidebarTest {
         }
     }
 
-    @Test
-    fun historyIndexContextMenuShowsIndexAndChecksOut() = runTest {
+    test("historyIndexContextMenuShowsIndexAndChecksOut") {
         var checkOutCount = 0
         runMosaicTest {
             setContentAndSnapshot {
@@ -366,8 +355,7 @@ class SessionSidebarTest {
         assertEquals(1, checkOutCount)
     }
 
-    @Test
-    fun historyIndexHoverIsOpaqueAndFollowsThePointer() = runTest {
+    test("historyIndexHoverIsOpaqueAndFollowsThePointer") {
         val viewModel = TestHistoryIndexViewModel(
             entries = listOf(
                 HistoryIndexEntry(
@@ -420,8 +408,7 @@ class SessionSidebarTest {
         }
     }
 
-    @Test
-    fun historyIndexRowTracksTheLastPointerPosition() = runTest {
+    test("historyIndexRowTracksTheLastPointerPosition") {
         val viewModel = TestHistoryIndexViewModel(
             entries = listOf(
                 HistoryIndexEntry(
@@ -454,8 +441,7 @@ class SessionSidebarTest {
         }
     }
 
-    @Test
-    fun requestUserInputHoverReusesTheHistoryReadOnlyForm() = runTest {
+    test("requestUserInputHoverReusesTheHistoryReadOnlyForm") {
         val event = StableRequestUserInputToolEvent(
             callId = "request",
             arguments = RequestUserInputArgs(
@@ -533,8 +519,7 @@ class SessionSidebarTest {
         }
     }
 
-    @Test
-    fun historyIndexInitiallyFollowsTheLatestEntry() = runTest {
+    test("historyIndexInitiallyFollowsTheLatestEntry") {
         val viewModel = TestHistoryIndexViewModel(
             entries = listOf(
                 HistoryIndexEntry(0, HistoryIndexEntryKind.CompactionPoint, "Context compacted"),
@@ -563,8 +548,7 @@ class SessionSidebarTest {
         }
     }
 
-    @Test
-    fun historyIndexStopsFollowingWhileReadingOlderEntries() = runTest {
+    test("historyIndexStopsFollowingWhileReadingOlderEntries") {
         val viewModel = TestHistoryIndexViewModel(
             entries = listOf(
                 HistoryIndexEntry(0, HistoryIndexEntryKind.CompactionPoint, "Context compacted"),
@@ -605,8 +589,7 @@ class SessionSidebarTest {
         }
     }
 
-    @Test
-    fun splitterUsesBackgroundStateColorsWithoutAGlyph() = runTest {
+    test("splitterUsesBackgroundStateColorsWithoutAGlyph") {
         val scheme = DefaultTuiColorScheme
         val ansiSnapshots = SnapshotStrategy { mosaic ->
             mosaic.draw().render(AnsiLevel.TRUECOLOR, supportsKittyUnderlines = false)
@@ -647,8 +630,7 @@ class SessionSidebarTest {
         }
     }
 
-    @Test
-    fun splitterTracksCapturedPointerWhileItsBoundaryMoves() = runTest {
+    test("splitterTracksCapturedPointerWhileItsBoundaryMoves") {
         var columns by mutableStateOf(8)
         val started = mutableListOf<Int>()
         val resized = mutableListOf<Int>()
@@ -691,8 +673,7 @@ class SessionSidebarTest {
         assertEquals(14, columns)
     }
 
-    @Test
-    fun shiftDragIsNotConsumedByTheSplitter() = runTest {
+    test("shiftDragIsNotConsumedByTheSplitter") {
         val events = mutableListOf<Int>()
         runMosaicTest {
             setContentAndSnapshot {
@@ -737,8 +718,7 @@ class SessionSidebarTest {
         assertTrue(events.isEmpty())
     }
 
-    @Test
-    fun expansionRequiresRoomForSidebarsAndContent() {
+    test("expansionRequiresRoomForSidebarsAndContent") {
         assertFalse(
             canExpandSessionSidebar(
                 columns = 28,
@@ -769,8 +749,7 @@ class SessionSidebarTest {
         )
     }
 
-    @Test
-    fun layoutAndResizeKeepOneMainContentColumn() {
+    test("layoutAndResizeKeepOneMainContentColumn") {
         assertEquals(
             SessionSidebarColumns(left = 25, content = 1, right = 25),
             resolveSessionSidebarColumns(
@@ -805,8 +784,7 @@ class SessionSidebarTest {
         )
     }
 
-    @Test
-    fun shellSessionSummaryFlattensAndTruncatesCommands() {
+    test("shellSessionSummaryFlattensAndTruncatesCommands") {
         assertEquals(
             "● abc...",
             shellSessionSidebarSummary(command = "abcdefghijkl\nnext", columns = 8),

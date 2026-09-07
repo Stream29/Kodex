@@ -7,7 +7,6 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import java.lang.management.ManagementFactory
@@ -18,7 +17,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 import kotlin.system.measureNanoTime
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.TestCompartment
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -44,14 +44,13 @@ private const val BytesPerMebibyte: Double = 1024.0 * 1024.0
  *
  * `KODEX_PATCH_MIGRATION_PERFORMANCE_PROBE=1 ./gradlew
  * :app-migration-impl:jvmTest --rerun-tasks --tests
- * io.github.stream29.kodex.app.migration.v0_3_3.MigrateToV0_3_3PerformanceProbeTest`
+ * '*migrateToV0_3_3PerformanceProbeTest*'`
  */
-class MigrateToV0_3_3PerformanceProbeTest {
-    @Test
-    fun measureScanRewriteAndPeakHeap() = runBlocking {
+val migrateToV0_3_3PerformanceProbeTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("measureScanRewriteAndPeakHeap") {
         if (System.getenv(ProbeEnabledEnvironmentVariable) != "1") {
             println("Set $ProbeEnabledEnvironmentVariable=1 to run the patch migration probe.")
-            return@runBlocking
+            return@test
         }
 
         val scanRecordCount = positiveEnvironmentInt(

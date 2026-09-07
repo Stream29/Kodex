@@ -24,15 +24,14 @@ import io.github.stream29.kodex.utils.applypatch.UpdateFileHunk
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 
-class HistoryItemHeaderFactoryTest {
-    @Test
-    fun commandHeaderRetainsOnlyBoundedPresentationAndOutcomeDiscriminators() {
+val historyItemHeaderFactoryTest by testSuite {
+    test("commandHeaderRetainsOnlyBoundedPresentationAndOutcomeDiscriminators") {
         val event = StableCommandExecutionToolEvent(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
@@ -66,8 +65,7 @@ class HistoryItemHeaderFactoryTest {
         assertEquals(12.milliseconds, header.elapsed)
     }
 
-    @Test
-    fun serverToolSearchHeaderUsesItsStructuredPaths() {
+    test("serverToolSearchHeaderUsesItsStructuredPaths") {
         val event = StableServerToolSearch(
             call = ResponseItem.ServerToolSearchCall(
                 status = "completed",
@@ -91,8 +89,7 @@ class HistoryItemHeaderFactoryTest {
         assertEquals("Search cloud tools: crm, billing", header.summary)
     }
 
-    @Test
-    fun customWebHeaderIncludesTheSearchQuery() {
+    test("customWebHeaderIncludesTheSearchQuery") {
         val event = StableCustomToolEvent(
             callId = "web",
             name = "run",
@@ -108,8 +105,7 @@ class HistoryItemHeaderFactoryTest {
         assertEquals("Search the web: Kotlin Duration", header.summary)
     }
 
-    @Test
-    fun mcpHeaderMapsIsErrorInsteadOfTreatingItAsSuccess() {
+    test("mcpHeaderMapsIsErrorInsteadOfTreatingItAsSuccess") {
         fun header(isError: Boolean?) = assertIs<ToolHistoryItemHeader.Summary>(
             StableMcpToolEvent(
                 callId = "mcp",
@@ -127,8 +123,7 @@ class HistoryItemHeaderFactoryTest {
         assertEquals("Failed to run filesystem.inspect", header(isError = true).summary)
     }
 
-    @Test
-    fun patchHeaderUsesBasenameForOneFileAndCountForMultipleFiles() {
+    test("patchHeaderUsesBasenameForOneFileAndCountForMultipleFiles") {
         val single = StablePatchToolEvent(
             callId = "single",
             diff = Patch(

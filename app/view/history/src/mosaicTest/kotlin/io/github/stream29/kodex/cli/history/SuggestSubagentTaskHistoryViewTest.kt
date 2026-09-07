@@ -10,15 +10,13 @@ import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
 import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskResponse
 import io.github.stream29.kodex.tool.multiagent.SuggestedSessionMeta
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class SuggestSubagentTaskHistoryViewTest {
-    @Test
-    fun acceptedShowsBoldNamesThenUrisThenFullPrompts() = runTest {
+val suggestSubagentTaskHistoryViewTest by testSuite {
+    test("acceptedShowsBoldNamesThenUrisThenFullPrompts") {
         val event = event(StableSuggestSubagentTaskResult.Completed(
             SuggestSubagentTaskResponse.Accepted(null, listOf(
                 SuggestedSessionMeta("file:///tmp/1", "Worker"),
@@ -41,8 +39,7 @@ class SuggestSubagentTaskHistoryViewTest {
         }
     }
 
-    @Test
-    fun rejectionAndFailureAreReadonlyAndDoNotInventSuccess() {
+    test("rejectionAndFailureAreReadonlyAndDoNotInventSuccess") {
         for (feedback in listOf(null, "Narrow scope\nUse tests only")) {
             val rows = event(StableSuggestSubagentTaskResult.Completed(
                 SuggestSubagentTaskResponse.Rejected(feedback),
@@ -58,12 +55,13 @@ class SuggestSubagentTaskHistoryViewTest {
         assertTrue(rows.any { it.value == "Inspect all tests." })
     }
 
-    private fun event(result: StableSuggestSubagentTaskResult) = StableSuggestSubagentTaskToolEvent(
-        callId = "suggest",
-        arguments = SuggestSubagentTaskArgs(listOf(
-            SuggestedSubagentTask("Worker", "Inspect all tests."),
-            SuggestedSubagentTask("Worker", "Review the full implementation."),
-        )),
-        result = result,
-    )
 }
+
+private fun event(result: StableSuggestSubagentTaskResult) = StableSuggestSubagentTaskToolEvent(
+    callId = "suggest",
+    arguments = SuggestSubagentTaskArgs(listOf(
+        SuggestedSubagentTask("Worker", "Inspect all tests."),
+        SuggestedSubagentTask("Worker", "Review the full implementation."),
+    )),
+    result = result,
+)

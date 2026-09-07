@@ -13,6 +13,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessag
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
+import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
 import io.github.stream29.kodex.cli.components.ScrollInputSource
 import io.github.stream29.kodex.cli.components.ScrollInteraction
 import io.github.stream29.kodex.cli.components.ScrollOrientation
@@ -23,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
@@ -91,7 +93,9 @@ val agentHistoryBoundedWindowTest by testSuite {
                         val newerMarkerCount = if (window.hasNewer) 1 else 0
                         model.listState.scrollToItem(newerMarkerCount + window.size)
                         settleHistory()
-                        model.awaitWindowChange(window, HistoryItemWindow::requestOlder)
+                        awaitWindowProgress(model) { current ->
+                            !current.hasOlder || current.oldestMessageIndex < window.oldestMessageIndex
+                        }
                         peakWindowSize = maxOf(peakWindowSize, model.historyItems.value.size)
                     }
 
@@ -102,7 +106,9 @@ val agentHistoryBoundedWindowTest by testSuite {
                         val window = model.historyItems.value
                         model.listState.scrollToItem(0)
                         settleHistory()
-                        model.awaitWindowChange(window, HistoryItemWindow::requestNewer)
+                        awaitWindowProgress(model) { current ->
+                            !current.hasNewer || current.newestMessageIndex > window.newestMessageIndex
+                        }
                         peakWindowSize = maxOf(peakWindowSize, model.historyItems.value.size)
                     }
                     assertFalse(model.historyItems.value.hasNewer)
@@ -130,15 +136,29 @@ val agentHistoryBoundedWindowTest by testSuite {
     }
 }
 
-private suspend fun AgentHistoryViewModel.awaitWindowChange(
-    previous: HistoryItemWindow,
-    request: (HistoryItemWindow) -> Unit,
-) {
-    if (historyItems.value === previous) request(previous)
-    withContext(Dispatchers.Default) {
-        withTimeout(5.seconds) {
-            historyItems.first { current -> current !== previous }
+private val HistoryItemWindow.oldestMessageIndex: Int
+    get() = (peek(size - 1) as MessageHistoryItemViewModel).index
+
+private val HistoryItemWindow.newestMessageIndex: Int
+    get() = (peek(0) as MessageHistoryItemViewModel).index
+
+private suspend fun TestMosaic<String>.awaitWindowProgress(
+    model: AgentHistoryViewModel,
+    predicate: (HistoryItemWindow) -> Boolean,
+) = coroutineScope {
+    // Edge demands are driven by rendered frames, not by direct ViewModel calls from the test.
+    val frames = launch {
+        while (true) settleHistory()
+    }
+    try {
+        withContext(Dispatchers.Default) {
+            withTimeout(5.seconds) {
+                model.historyItems.first(predicate)
+            }
         }
+    } finally {
+        frames.cancel()
+        frames.join()
     }
 }
 

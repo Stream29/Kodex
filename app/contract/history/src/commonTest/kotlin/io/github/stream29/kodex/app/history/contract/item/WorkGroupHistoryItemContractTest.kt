@@ -3,15 +3,14 @@ package io.github.stream29.kodex.app.history.contract.item
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
-public class WorkGroupHistoryItemContractTest {
-    @Test
-    public fun expandedStateAcceptsAnyNonEmptyNewestFirstChildren() {
+val workGroupHistoryItemContractTest by testSuite {
+    test("expandedStateAcceptsAnyNonEmptyNewestFirstChildren") {
         val children = listOf<WorkGroupChildHistoryItemViewModel>(
             ReasoningHistoryItemViewModel(index = 10, elapsed = Duration.ZERO),
             TestToolHistoryItemViewModel(index = 7),

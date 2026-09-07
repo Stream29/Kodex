@@ -9,15 +9,13 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class SessionRenameEditorTest {
-    @Test
-    fun plainEnterSubmitsWithoutAnActionButton() = runTest {
+val sessionRenameEditorTest by testSuite {
+    test("plainEnterSubmitsWithoutAnActionButton") {
         var submissions by mutableStateOf(0)
         val input = TextInputState(TextInputValue("Session title", "Session title".length))
 

@@ -16,14 +16,13 @@ import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.test.runTest
 
-class ComposerInputTest {
-    @Test fun configuredNewLineAndSubmitKeysRemainComposerPolicy() = runTest {
+val composerInputTest by testSuite {
+    test("configuredNewLineAndSubmitKeysRemainComposerPolicy") {
         val state = TextInputState()
         var submissions by mutableStateOf(0)
         var observedDraft: TextInputValue? = null
@@ -59,7 +58,7 @@ class ComposerInputTest {
         }
     }
 
-    @Test fun runningComposerWithDraftRendersSubmitToSteerHint() = runTest {
+    test("runningComposerWithDraftRendersSubmitToSteerHint") {
         val text = "Adjust the active turn"
         val state = TextInputState(TextInputValue(text = text, cursorOffset = text.length))
 
@@ -87,7 +86,7 @@ class ComposerInputTest {
         }
     }
 
-    @Test fun composerNewlineIsAnAtomicUndoAndRedoTransaction() = runTest {
+    test("composerNewlineIsAnAtomicUndoAndRedoTransaction") {
         val state = TextInputState()
 
         runMosaicTest {
@@ -128,13 +127,13 @@ class ComposerInputTest {
         }
     }
 
-    @Test fun composerViewportUsesOnlyItsAvailableRows() {
+    test("composerViewportUsesOnlyItsAvailableRows") {
         assertEquals(2, boundedComposerRows(availableRows = 10, desiredRows = 2))
         assertEquals(3, boundedComposerRows(availableRows = 3, desiredRows = 20))
         assertEquals(1, boundedComposerRows(availableRows = 0, desiredRows = 20))
     }
 
-    @Test fun pendingSteerPreviewShowsUserAndAgentMessages() {
+    test("pendingSteerPreviewShowsUserAndAgentMessages") {
         val pending = listOf(
             StableUserMessage(
                 listOf(ContentItem.InputText("Adjust the active turn")),

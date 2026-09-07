@@ -1,12 +1,11 @@
 package io.github.stream29.kodex.app.sessioncatalog.contract
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
-public class SessionCatalogContractTest {
-    @Test
-    public fun entryKeepsPersistedIdentityAndValidatesDisplayName() {
+val sessionCatalogContractTest by testSuite {
+    test("entryKeepsPersistedIdentityAndValidatesDisplayName") {
         val entry = SessionCatalogEntry(
             sessionIndex = 3,
             threadName = "Thread",

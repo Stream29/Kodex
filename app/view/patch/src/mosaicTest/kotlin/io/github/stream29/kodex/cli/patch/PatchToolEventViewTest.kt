@@ -14,14 +14,12 @@ import io.github.stream29.kodex.utils.applypatch.AddFileHunk
 import io.github.stream29.kodex.utils.applypatch.Patch
 import io.github.stream29.kodex.utils.applypatch.UpdateFileChunk
 import io.github.stream29.kodex.utils.applypatch.UpdateFileHunk
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class PatchToolEventViewTest {
-    @Test
-    fun pendingPatchCanExpandItsStructuredDiff() = runTest {
+val patchToolEventViewTest by testSuite {
+    test("pendingPatchCanExpandItsStructuredDiff") {
         val patch = Patch(
             patch = "",
             hunks = listOf(
@@ -57,8 +55,7 @@ class PatchToolEventViewTest {
         }
     }
 
-    @Test
-    fun narrowPatchIndentsWrappedContinuationLines() = runTest {
+    test("narrowPatchIndentsWrappedContinuationLines") {
         val patch = Patch(
             patch = "",
             hunks = listOf(
@@ -92,13 +89,11 @@ class PatchToolEventViewTest {
         }
     }
 
-    @Test
-    fun oneCellPatchUsesAPlaceholderForAnUnrepresentableWideGrapheme() {
+    test("oneCellPatchUsesAPlaceholderForAnUnrepresentableWideGrapheme") {
         assertEquals(listOf("?"), "界".wrapPatchHardLine(width = 1, continuationPrefix = "  "))
     }
 
-    @Test
-    fun diffBodyKeepsSemanticAnsiColors() = runTest {
+    test("diffBodyKeepsSemanticAnsiColors") {
         val patch = Patch(
             patch = "",
             hunks = listOf(
@@ -133,8 +128,7 @@ class PatchToolEventViewTest {
         }
     }
 
-    @Test
-    fun failedPatchUsesARedToolHeaderWithoutStatusText() = runTest {
+    test("failedPatchUsesARedToolHeaderWithoutStatusText") {
         val event = StablePatchToolEvent(
             callId = "patch",
             diff = Patch(
@@ -164,8 +158,7 @@ class PatchToolEventViewTest {
         }
     }
 
-    @Test
-    fun stablePatchKeepsElapsedAtTheEndOfItsHeader() = runTest {
+    test("stablePatchKeepsElapsedAtTheEndOfItsHeader") {
         val event = StablePatchToolEvent(
             callId = "patch",
             diff = Patch(
@@ -207,8 +200,7 @@ class PatchToolEventViewTest {
         }
     }
 
-    @Test
-    fun largePatchUsesABoundedNumberOfComposedTextNodes() = runTest {
+    test("largePatchUsesABoundedNumberOfComposedTextNodes") {
         val patch = Patch(
             patch = "",
             hunks = listOf(

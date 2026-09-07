@@ -5,13 +5,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Text
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 
-class TerminalTitleTest {
-    @Test
-    fun summaryCountsOnlyOpenedPersistedSessionTabs() = runTest {
+val terminalTitleTest by testSuite {
+    test("summaryCountsOnlyOpenedPersistedSessionTabs") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val first = fixture.persistedSession("First")
@@ -48,8 +46,7 @@ class TerminalTitleTest {
         }
     }
 
-    @Test
-    fun titleUsesTheFixedCountFormatAndOscZero() {
+    test("titleUsesTheFixedCountFormatAndOscZero") {
         assertEquals("1 sessions (1 running)", terminalTitleText(sessionCount = 1, runningCount = 1))
         assertEquals(
             "\u001B]0;2 sessions (1 running)\u0007",
@@ -58,8 +55,7 @@ class TerminalTitleTest {
         assertEquals("\u001B]0;\u0007", terminalTitleControlSequence(""))
     }
 
-    @Test
-    fun effectWritesOnlyChangedCountsAndExplicitCleanupClears() = runTest {
+    test("effectWritesOnlyChangedCountsAndExplicitCleanupClears") {
         val writes = mutableListOf<String>()
         var sessionCount by mutableStateOf(2)
         var runningCount by mutableStateOf(1)

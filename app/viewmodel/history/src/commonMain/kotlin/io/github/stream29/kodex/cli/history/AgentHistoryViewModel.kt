@@ -366,20 +366,6 @@ internal class AgentHistoryViewModelImpl(
         }
     }
 
-    private fun captureViewportAnchor(
-        chunks: List<HistoryWindowChunk>,
-    ): HistoryViewportAnchor? {
-        val anchorInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
-            item.index == listState.firstVisibleItemIndex
-        } ?: return null
-        val anchorItem = anchorInfo.key as? HistoryItemViewModel ?: return null
-        if (chunks.none { chunk -> chunk.items.any { item -> item === anchorItem } }) return null
-        return HistoryViewportAnchor(
-            item = anchorItem,
-            scrollOffset = listState.firstVisibleItemScrollOffset,
-        )
-    }
-
     private fun releaseAllCachedItems() {
         itemCache.values.forEach(HistoryItemViewModel::release)
         itemCache.clear()
@@ -566,7 +552,6 @@ internal class AgentHistoryViewModelImpl(
                     return
                 }
                 mutableLoadState.value = AgentHistoryLoadState.LoadingOlder
-                val viewportAnchor = captureViewportAnchor(chunks)
                 val visibleChunks = visibleChunks(chunks)
                 val batch = withContext(Dispatchers.Default) {
                     agentState.storage.readHistoryChunk(
@@ -593,13 +578,12 @@ internal class AgentHistoryViewModelImpl(
                     chunks = chunks,
                     hasOlder = nextOlderIndex != null,
                     hasNewer = hasNewer,
-                    viewportAnchor = viewportAnchor,
                 )
-                mutableLoadState.value = AgentHistoryLoadState.Ready
-                olderDemandPending.value = false
             } finally {
                 olderDemandPending.value = false
             }
+            // Ready observers may synchronously request the next page.
+            mutableLoadState.value = AgentHistoryLoadState.Ready
         }
 
         suspend fun loadNewer() {
@@ -610,7 +594,6 @@ internal class AgentHistoryViewModelImpl(
                     return
                 }
                 mutableLoadState.value = AgentHistoryLoadState.LoadingNewer
-                val viewportAnchor = captureViewportAnchor(chunks)
                 val visibleChunks = visibleChunks(chunks)
                 val batch = withContext(Dispatchers.Default) {
                     agentState.storage.readNewerHistoryChunk(
@@ -646,12 +629,11 @@ internal class AgentHistoryViewModelImpl(
                     chunks = chunks,
                     hasOlder = nextOlderIndex != null,
                     hasNewer = hasNewer,
-                    viewportAnchor = viewportAnchor,
                 )
-                mutableLoadState.value = AgentHistoryLoadState.Ready
             } finally {
                 newerDemandPending.value = false
             }
+            mutableLoadState.value = AgentHistoryLoadState.Ready
         }
 
         suspend fun seekToStorageIndex(storageIndex: Int) {
@@ -773,7 +755,6 @@ internal class AgentHistoryViewModelImpl(
         generation: Long = mutableHistoryItems.value.generation,
         hasOlder: Boolean,
         hasNewer: Boolean,
-        viewportAnchor: HistoryViewportAnchor? = null,
     ) {
         val items = chunks.flatMap { chunk -> chunk.items }
         val current = mutableHistoryItems.value
@@ -796,19 +777,8 @@ internal class AgentHistoryViewModelImpl(
         )
         if (mutableFollowsLatest) {
             listState.requestScrollToStart()
-        } else if (viewportAnchor != null) {
-            val localIndex = items.indexOfFirst { item -> item === viewportAnchor.item }
-            if (localIndex >= 0) {
-                val transientPrefix =
-                    (if (mutableStreamingItem.value == null) 0 else 1) +
-                        mutablePendingTools.value.size +
-                        (if (hasNewer) 1 else 0)
-                listState.scrollToItem(
-                    index = transientPrefix + localIndex,
-                    scrollOffset = viewportAnchor.scrollOffset,
-                )
-            }
         }
+        // Otherwise LazyListState restores the stable key against the provider it actually measures.
     }
 
     private fun publishPendingTools(pending: List<UnstableCleanEvent>) {
@@ -980,11 +950,6 @@ private data class HistoryWindowChunk(
     val newestStorageIndex: Int = projections.first().newestStorageIndex
     val oldestStorageIndex: Int = projections.last().oldestStorageIndex
 }
-
-private data class HistoryViewportAnchor(
-    val item: HistoryItemViewModel,
-    val scrollOffset: Int,
-)
 
 private fun List<HistoryItemViewModel>.sameIdentities(
     other: List<HistoryItemViewModel>,

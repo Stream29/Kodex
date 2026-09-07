@@ -424,7 +424,7 @@ val minimalAgentConversationTest by testSuite {
             runtime.resume()
 
             assertEquals("Hello from the storage-backed loop.", storage.lastAssistantMessage())
-            assertEquals(4, storage.latestIndex())
+            assertEquals(3, storage.latestIndex())
             assertEquals(user, requests[0].input.last())
             assertEquals(
                 listOf(
@@ -433,9 +433,9 @@ val minimalAgentConversationTest by testSuite {
                 ),
                 requests[1].input.takeLast(2),
             )
-            assertIs<StableUserMessage>(storage.index[2])
+            assertIs<StableUserMessage>(storage.index[1])
+            assertIs<StableAssistantMessage>(storage.index[2])
             assertIs<StableAssistantMessage>(storage.index[3])
-            assertIs<StableAssistantMessage>(storage.index[4])
             assertEquals(OpenAiModelId("test-model"), storage.settings[2].model)
             assertTrue(storage.timestamp[3] > Instant.fromEpochSeconds(0))
             assertEquals(0, storage.tokenCount.latestIndex())

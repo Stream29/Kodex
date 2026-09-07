@@ -21,12 +21,13 @@ import io.github.stream29.kodex.utils.applypatch.parsePatch
 import io.github.stream29.kodex.utils.terminaltext.TerminalCellSegment
 import io.github.stream29.kodex.utils.terminaltext.terminalCellSegments
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
-import kotlinx.coroutines.test.runTest
 import java.lang.management.ManagementFactory
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Locale
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.TestConfig
+import de.infix.testBalloon.framework.core.testScope
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
@@ -43,14 +44,16 @@ private const val BytesPerMebibyte: Double = 1024.0 * 1024.0
  * Run only this probe with:
  *
  * `KODEX_PATCH_RENDERER_PERFORMANCE_PROBE=1 ./gradlew :integration-test:jvmTest
- * --tests io.github.stream29.kodex.integrationtest.PatchRendererPerformanceProbeTest`
+ * --tests '*patchRendererPerformanceProbeTest*'`
  */
-class PatchRendererPerformanceProbeTest {
-    @Test
-    fun comparePatchParsingProjectionAndRenderingScaling() = runTest(timeout = 10.minutes) {
+val patchRendererPerformanceProbeTest by testSuite {
+    test(
+        "comparePatchParsingProjectionAndRenderingScaling",
+        testConfig = TestConfig.testScope(isEnabled = true, timeout = 10.minutes),
+    ) {
         if (System.getenv(ProbeEnabledEnvironmentVariable) != "1") {
             println("Set $ProbeEnabledEnvironmentVariable=1 to run the patch renderer performance probe.")
-            return@runTest
+            return@test
         }
 
         val repetitions = System.getenv(ProbeRepetitionsEnvironmentVariable)

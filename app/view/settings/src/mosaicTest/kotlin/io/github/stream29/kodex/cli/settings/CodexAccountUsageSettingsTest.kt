@@ -10,15 +10,13 @@ import io.github.stream29.kodex.openai.accountusage.CodexAccountRateLimitWindow
 import io.github.stream29.kodex.openai.accountusage.CodexAccountTokenUsage
 import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageSnapshot
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetCredits
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
-class CodexAccountUsageSettingsTest {
-    @Test
-    fun availableUsageRendersWindowsTokensAndActions() = runTest {
+val codexAccountUsageSettingsTest by testSuite {
+    test("availableUsageRendersWindowsTokensAndActions") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(100)) {
@@ -40,8 +38,7 @@ class CodexAccountUsageSettingsTest {
         }
     }
 
-    @Test
-    fun unavailableUsageRequiresSignInAndHidesActions() = runTest {
+    test("unavailableUsageRequiresSignInAndHidesActions") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(80)) {

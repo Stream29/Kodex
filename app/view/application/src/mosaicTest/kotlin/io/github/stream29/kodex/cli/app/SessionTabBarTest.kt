@@ -18,8 +18,7 @@ import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
@@ -32,9 +31,8 @@ private val ansi16Snapshots = SnapshotStrategy { mosaic ->
 
 private val fixedRunningIndicatorFrame = mutableStateOf("⠋")
 
-class SessionTabBarTest {
-    @Test
-    fun sessionBrowserUsesTheCatalogTitleAndLastActivityWithANumericFallback() {
+val sessionTabBarTest by testSuite {
+    test("sessionBrowserUsesTheCatalogTitleAndLastActivityWithANumericFallback") {
         val now = Instant.parse("2026-07-31T10:30:00Z")
         val fullLabel = SessionCatalogEntry(
             sessionIndex = 7,
@@ -63,8 +61,7 @@ class SessionTabBarTest {
         )
     }
 
-    @Test
-    fun renamedNewSessionDisplaysItsDraftTitle() = runTest {
+    test("renamedNewSessionDisplaysItsDraftTitle") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val target = fixture.newSession("New Session")
@@ -93,8 +90,7 @@ class SessionTabBarTest {
         }
     }
 
-    @Test
-    fun selectedSessionTabUsesReverseVideo() = runTest {
+    test("selectedSessionTabUsesReverseVideo") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val selected = fixture.newSession("First")
@@ -134,8 +130,7 @@ class SessionTabBarTest {
         }
     }
 
-    @Test
-    fun runningSessionTabPrefixesTheSpinnerBeforeTruncatingTheName() = runTest {
+    test("runningSessionTabPrefixesTheSpinnerBeforeTruncatingTheName") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val target = fixture.persistedSession("Long session")
@@ -171,8 +166,7 @@ class SessionTabBarTest {
         }
     }
 
-    @Test
-    fun overflowingTabsRemainReachableWithHorizontalPageKeys() = runTest {
+    test("overflowingTabsRemainReachableWithHorizontalPageKeys") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val targets = (0 until 10).map { index ->
@@ -226,8 +220,7 @@ class SessionTabBarTest {
         }
     }
 
-    @Test
-    fun overflowingTabsRespondToNativeHorizontalWheelInput() = runTest {
+    test("overflowingTabsRespondToNativeHorizontalWheelInput") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val targets = (0 until 10).map { index ->
@@ -274,8 +267,7 @@ class SessionTabBarTest {
         }
     }
 
-    @Test
-    fun selectedOverflowingTabAutomaticallyEntersTheViewport() = runTest {
+    test("selectedOverflowingTabAutomaticallyEntersTheViewport") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val targets = (0 until 10).map { index ->
@@ -312,8 +304,7 @@ class SessionTabBarTest {
         }
     }
 
-    @Test
-    fun tabBoundsIncludeBracketsAndInterTabSpacing() {
+    test("tabBoundsIncludeBracketsAndInterTabSpacing") {
         assertEquals(SessionTabBounds(start = 0, endExclusive = 5), sessionTabBounds(listOf("one"), 0))
         assertEquals(
             SessionTabBounds(start = 6, endExclusive = 11),
@@ -322,8 +313,7 @@ class SessionTabBarTest {
         assertEquals(null, sessionTabBounds(listOf("one"), 2))
     }
 
-    @Test
-    fun secondaryClickTargetsAnInactiveTabWithoutSelectingIt() = runTest {
+    test("secondaryClickTargetsAnInactiveTabWithoutSelectingIt") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val activeTarget = fixture.newSession("First")
@@ -378,8 +368,7 @@ class SessionTabBarTest {
         }
     }
 
-    @Test
-    fun primaryClickSelectsATabWithoutOpeningItsMenu() = runTest {
+    test("primaryClickSelectsATabWithoutOpeningItsMenu") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val target = fixture.newSession("First")

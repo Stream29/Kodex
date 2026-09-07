@@ -10,14 +10,12 @@ import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.hook.contract.HookDraft
 import io.github.stream29.kodex.hook.contract.HookManagedState
 import io.github.stream29.kodex.hook.contract.HookType
-import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class HookSettingsContentTest {
-    @Test
-    fun rendersNativeHookNamesAndTypesUnderTheManagementHeader() = runTest {
+val hookSettingsContentTest by testSuite {
+    test("rendersNativeHookNamesAndTypesUnderTheManagementHeader") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(96)) {
@@ -39,8 +37,7 @@ class HookSettingsContentTest {
         }
     }
 
-    @Test
-    fun rendersHookDetailsAndActionsInsideDialog() = runTest {
+    test("rendersHookDetailsAndActionsInsideDialog") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Box {
@@ -62,8 +59,7 @@ class HookSettingsContentTest {
         }
     }
 
-    @Test
-    fun editorContainsOnlyNameTypeAndCommand() = runTest {
+    test("editorContainsOnlyNameTypeAndCommand") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Box {
@@ -95,9 +91,10 @@ class HookSettingsContentTest {
         }
     }
 
-    private fun managedHook(): HookManagedState =
-        HookManagedState(
-            name = "guard tools",
-            type = HookType.PreToolUse,
-        )
 }
+
+private fun managedHook(): HookManagedState =
+    HookManagedState(
+        name = "guard tools",
+        type = HookType.PreToolUse,
+    )

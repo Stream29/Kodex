@@ -20,10 +20,8 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
             implementation(project(":openai-client-test"))
-            implementation(project(":openai-codex-cli-storage"))
             implementation(project(":openai-json-codec"))
             implementation(project(":utils-host-test-support"))
-            implementation(project(":utils-os-environment"))
         }
     }
 }
