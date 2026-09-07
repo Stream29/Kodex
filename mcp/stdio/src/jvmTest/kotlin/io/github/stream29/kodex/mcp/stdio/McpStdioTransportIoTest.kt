@@ -102,9 +102,12 @@ private fun javaExecutable(): String =
     ).absolutePathString()
 
 private fun fixtureClasspath(): String =
-    java.nio.file.Path.of(
-        McpStdioServerFixture::class.java.protectionDomain.codeSource.location.toURI(),
-    ).absolutePathString()
+    listOf(
+        McpStdioServerFixture::class.java,
+        Unit::class.java,
+    ).map { type ->
+        java.nio.file.Path.of(type.protectionDomain.codeSource.location.toURI()).absolutePathString()
+    }.distinct().joinToString(java.io.File.pathSeparator)
 
 private const val TestEnvironmentName: String = "KODEX_MCP_STDIO_TEST"
 private const val TestEnvironmentValue: String = "stdio-environment"
