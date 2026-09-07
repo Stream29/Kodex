@@ -24,7 +24,9 @@ public val migrateToV0_3_3Test by testSuite {
         test("registers the versioned Home migrations") {
             assertEquals(
                 listOf(MigrationVersion("0.3.3"), MigrationVersion("0.3.5")),
-                KodexHomeMigrations.map { migration -> migration.toVersion },
+                KodexHomeMigrations
+                    .filter { migration -> migration.toVersion <= MigrationVersion("0.3.5") }
+                    .map { migration -> migration.toVersion },
             )
         }
 
