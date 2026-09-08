@@ -29,6 +29,7 @@ import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
+import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.app.application.contract.SidebarSettingsViewModel
@@ -490,7 +491,7 @@ public fun SessionTreeCliScreen(
                                             newLineKey = currentNewLineKey,
                                             dropdowns = runtimeDropdowns,
                                             suggestionDropdowns = suggestionDropdowns,
-                                            onOpenHistoryEntryContextMenu = { target, anchor, position ->
+                                            onOpenHistoryEntryContextMenu = { target, item, anchor, position ->
                                                 tabMenu = null
                                                 shellSessionMenu = null
                                                 shellSessionHoverCloseJob?.cancel()
@@ -501,6 +502,7 @@ public fun SessionTreeCliScreen(
                                                     session = selected,
                                                     agent = agent,
                                                     target = target,
+                                                    item = item,
                                                     anchor = anchor,
                                                     clickPosition = position,
                                                 )
@@ -793,6 +795,7 @@ public fun SessionTreeCliScreen(
             )
             SessionTabContextMenu(
                 request = tabMenu,
+                targetIsOpen = navigation.tabs.any { it === tabMenu?.target },
                 onDismiss = { tabMenu = null },
                 onClose = { target ->
                     tabMenu = null
@@ -1020,8 +1023,22 @@ private fun BoxScope.SessionCatalogPopup(
         }
     }
     contextMenu?.let { request ->
+        val valid = state.sessions.any { it.sessionIndex == request.entry.sessionIndex } &&
+            request.anchor.isPlaced
+        LaunchedEffect(request, valid) {
+            if (!valid) contextMenu = null
+        }
+        if (!valid) return@let
+        val createdAt = rememberMenuTimestamp(request) {
+            open.viewModel.readCreatedAt(request.entry.sessionIndex)
+        }
+        val updatedAt = rememberMenuTimestamp(request) {
+            open.viewModel.readUpdatedAt(request.entry.sessionIndex)
+        }
         SessionCatalogContextMenuPopup(
             entry = request.entry,
+            createdAt = createdAt,
+            updatedAt = updatedAt,
             anchor = request.anchor,
             clickPosition = request.clickPosition,
             onDismissRequest = { contextMenu = null },
@@ -1118,6 +1135,11 @@ internal fun SessionCatalogRow(
     )
 }
 
+/**
+ * @param clickPosition null uses the keyboard anchor position.
+ * @param createdAt null hides the creation field.
+ * @param updatedAt null hides the updated field.
+ */
 @Composable
 internal fun BoxScope.SessionCatalogContextMenuPopup(
     entry: SessionCatalogEntry,
@@ -1128,6 +1150,8 @@ internal fun BoxScope.SessionCatalogContextMenuPopup(
     onArchive: () -> Unit,
     onUnarchive: () -> Unit,
     onDelete: () -> Unit,
+    createdAt: String? = null,
+    updatedAt: String? = null,
 ) {
     TuiContextMenu(
         expanded = true,
@@ -1141,7 +1165,11 @@ internal fun BoxScope.SessionCatalogContextMenuPopup(
             onClick = {},
             enabled = false,
         ) {
-            Text("Index: ${entry.sessionIndex}")
+            Column {
+                Text("Index: ${entry.sessionIndex}")
+                TimestampInformation("Created at", createdAt)
+                TimestampInformation("Updated at", updatedAt)
+            }
         }
         TuiPopupMenuItem(
             key = if (entry.archived) "unarchive" else "archive",
@@ -1300,9 +1328,11 @@ private fun BoxScope.DeleteSessionPopup(
     }
 }
 
+/** @param request null means no tab menu is open. */
 @Composable
 private fun BoxScope.SessionTabContextMenu(
     request: SessionTabMenuRequest?,
+    targetIsOpen: Boolean,
     onDismiss: () -> Unit,
     onClose: (SessionViewModel) -> Unit,
     onCloseAndArchive: (PersistedSessionViewModel) -> Unit,
@@ -1310,8 +1340,21 @@ private fun BoxScope.SessionTabContextMenu(
     onDelete: (SessionViewModel) -> Unit,
 ) {
     val current = request ?: return
+    val valid = targetIsOpen && current.anchor.isPlaced
+    LaunchedEffect(current, valid) {
+        if (!valid) onDismiss()
+    }
+    if (!valid) return
+    val createdAt = rememberMenuTimestamp(current) {
+        (current.target as? PersistedSessionViewModel)?.readCreatedAt()
+    }
+    val updatedAt = rememberMenuTimestamp(current) {
+        (current.target as? PersistedSessionViewModel)?.readUpdatedAt()
+    }
     SessionTabContextMenuPopup(
         target = current.target,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
         anchor = current.anchor,
         clickPosition = current.clickPosition,
         onDismiss = onDismiss,
@@ -1322,6 +1365,11 @@ private fun BoxScope.SessionTabContextMenu(
     )
 }
 
+/**
+ * @param clickPosition null uses the keyboard anchor position.
+ * @param createdAt null hides the creation field.
+ * @param updatedAt null hides the updated field.
+ */
 @Composable
 internal fun BoxScope.SessionTabContextMenuPopup(
     target: SessionViewModel,
@@ -1332,6 +1380,8 @@ internal fun BoxScope.SessionTabContextMenuPopup(
     onCloseAndArchive: (PersistedSessionViewModel) -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    createdAt: String? = null,
+    updatedAt: String? = null,
 ) {
     TuiContextMenu(
         expanded = true,
@@ -1346,7 +1396,11 @@ internal fun BoxScope.SessionTabContextMenuPopup(
                 onClick = {},
                 enabled = false,
             ) {
-                Text("Index: ${target.sessionIndex}")
+                Column {
+                    Text("Index: ${target.sessionIndex}")
+                    TimestampInformation("Created at", createdAt)
+                    TimestampInformation("Updated at", updatedAt)
+                }
             }
         }
         TuiPopupMenuItem(key = "rename", onClick = onRename) {
@@ -1399,15 +1453,24 @@ private fun BoxScope.HistoryEntryContextMenu(
     }
     if (!targetMatches || !anchorPlaced) return
 
+    val message = current.item as? MessageHistoryItemViewModel
+    val timestamp = rememberMenuTimestamp(current) { message?.readTimestamp() }
     HistoryEntryContextMenuPopup(
         anchor = current.anchor,
         clickPosition = current.clickPosition,
         onDismiss = onDismiss,
         onRevert = { onRevert(current) },
         onFork = { onFork(current) },
+        messageIndex = message?.index,
+        timestamp = timestamp,
     )
 }
 
+/**
+ * @param clickPosition null uses the keyboard anchor position.
+ * @param messageIndex null denotes a non-Message menu, without new information items.
+ * @param timestamp null hides the timestamp field.
+ */
 @Composable
 internal fun BoxScope.HistoryEntryContextMenuPopup(
     anchor: TuiPopupAnchor,
@@ -1415,6 +1478,8 @@ internal fun BoxScope.HistoryEntryContextMenuPopup(
     onDismiss: () -> Unit,
     onRevert: () -> Unit,
     onFork: () -> Unit,
+    messageIndex: Int? = null,
+    timestamp: String? = null,
 ) {
     TuiContextMenu(
         expanded = true,
@@ -1423,6 +1488,14 @@ internal fun BoxScope.HistoryEntryContextMenuPopup(
         onDismissRequest = onDismiss,
         backgroundColor = PopupMenuBackground,
     ) {
+        if (messageIndex != null) {
+            TuiPopupMenuItem(key = "history-index-information", onClick = {}, enabled = false) {
+                Column {
+                    Text("Index: $messageIndex")
+                    TimestampInformation("Timestamp", timestamp)
+                }
+            }
+        }
         TuiPopupMenuItem(key = "revert-to-here", onClick = onRevert) {
             Text("Revert to here")
         }
@@ -1497,23 +1570,27 @@ internal fun BoxScope.AgentHistoryRevertDialog(agent: AgentViewModel?) {
     }
 }
 
-private data class SessionTabMenuRequest(
+/** Each instance identifies a fresh opening, even for the same target and anchor. */
+private class SessionTabMenuRequest(
     val target: SessionViewModel,
     val name: String,
     val anchor: TuiPopupAnchor,
     val clickPosition: IntOffset?,
 )
 
-private data class SessionCatalogMenuRequest(
+/** Each instance identifies a fresh opening, even for the same target and anchor. */
+private class SessionCatalogMenuRequest(
     val entry: SessionCatalogEntry,
     val anchor: TuiPopupAnchor,
     val clickPosition: IntOffset?,
 )
 
-private data class HistoryEntryMenuRequest(
+/** Each instance identifies a fresh opening, even for the same target and anchor. */
+private class HistoryEntryMenuRequest(
     val session: PersistedSessionViewModel,
     val agent: AgentViewModel,
     val target: AgentHistoryTarget,
+    val item: io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel,
     val anchor: TuiPopupAnchor,
     val clickPosition: IntOffset?,
 )

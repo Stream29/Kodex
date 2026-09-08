@@ -34,6 +34,40 @@ val fileSystemSessionViewModelOwnershipTest by testSuite {
     testFixture { temporaryViewModelRepositoryRoot() } closeWith {
         deleteViewModelRepositoryRecursively(this)
     } asParameterForEach {
+        test("opened Session uses cached first index while Catalog requires zero") { root ->
+            coroutineScope {
+                val dependencies = testKodexAgentDependencies()
+                val setup = FileSystemKodexSessionRepository(root, dependencies)
+                val index = setup.create()
+                val session = setup.open(index)
+                session.runtime.modify { it.initialize(KodexAgentSettings(OpenAiModelId("test-model"))) }
+                val first = Instant.parse("2026-09-01T12:00:00Z")
+                val latest = Instant.parse("2020-01-01T00:00:00Z")
+                session.storage.timestamp[2] = first
+                session.storage.timestamp[3] = latest
+                setup.cancelAndJoin()
+                SystemCoroutineFileSystem.delete(Path(root, "sessions/$index/timestamp/0.json"))
+                val factory = KodexSessionRepositoryFactory { owner ->
+                    owner.FileSystemKodexSessionRepository(root, dependencies)
+                }
+                val registry = testSessionViewModelRegistry(factory, this)
+                try {
+                    val model = registry.open(index)
+                    assertEquals(first, model.readCreatedAt())
+                    assertEquals(latest, model.readUpdatedAt())
+                    val catalogRepository = FileSystemKodexSessionRepository(root, dependencies)
+                    try {
+                        assertEquals(null, catalogRepository.readCreatedAt(index))
+                        assertEquals(latest, catalogRepository.readUpdatedAt(index))
+                    } finally {
+                        catalogRepository.cancelAndJoin()
+                    }
+                } finally {
+                    registry.shutdown()
+                }
+            }
+        }
+
         test("releasing a Session ViewModel closes its repository and root lease") { root ->
             coroutineScope {
                 val repositories = mutableListOf<FileSystemKodexSessionRepository>()

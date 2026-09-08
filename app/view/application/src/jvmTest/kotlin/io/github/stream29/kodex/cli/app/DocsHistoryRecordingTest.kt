@@ -83,7 +83,7 @@ val docsHistoryRecordingTest by testSuite {
                                 agent, 64, 28, io.github.stream29.kodex.cli.settings.NewLineKey.ShiftEnter,
                                 RuntimeConfigurationDropdowns.remember(agent),
                                 RuntimeConfigurationDropdowns.remember("suggestions"),
-                                { _, _, _ -> }, {}, {}, {},
+                                { _, _, _, _ -> }, {}, {}, {},
                             )
                         }
                         HistoryIndexHoverPopup(hover, 64, 28, {})
@@ -188,7 +188,7 @@ val docsHistoryRecordingTest by testSuite {
                                 selected.rootAgent, 80, 17, io.github.stream29.kodex.cli.settings.NewLineKey.ShiftEnter,
                                 RuntimeConfigurationDropdowns.remember(selected.rootAgent),
                                 RuntimeConfigurationDropdowns.remember("suggestions"),
-                                { target, anchor, position -> menu = Triple(target, anchor, position) }, {}, {}, {},
+                                { target, _, anchor, position -> menu = Triple(target, anchor, position) }, {}, {}, {},
                             )
                         }
                         menu?.let { (target, anchor, position) ->

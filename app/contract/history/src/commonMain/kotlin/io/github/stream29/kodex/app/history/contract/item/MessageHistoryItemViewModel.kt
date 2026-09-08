@@ -4,11 +4,18 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Duration
+import kotlin.time.Instant
 
 /** A stored user, assistant, developer, or inter-Agent message. */
 public interface MessageHistoryItemViewModel : HistoryItemViewModel {
     public val index: Int
     public val state: StateFlow<MessageHistoryItemState>
+
+    /**
+     * Reads this message's exact timestamp without changing its content state.
+     * @return null when no timestamp exists at this message's index.
+     */
+    public suspend fun readTimestamp(): Instant?
 }
 
 /**

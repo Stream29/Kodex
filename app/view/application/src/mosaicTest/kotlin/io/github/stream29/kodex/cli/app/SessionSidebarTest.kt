@@ -817,6 +817,8 @@ private class TestHistoryIndexViewModel(
     entries: List<HistoryIndexEntry>,
     private val details: Map<Int, HistoryIndexEntryDetail> = emptyMap(),
 ) : HistoryIndexViewModel {
+    override suspend fun readMessageTimestamp(generation: Long, index: Int): kotlin.time.Instant? = null
+
     private val mutableEntries = entries.associateByTo(linkedMapOf()) { entry -> entry.index }
     override val window = MutableStateFlow(
         HistoryIndexWindow(

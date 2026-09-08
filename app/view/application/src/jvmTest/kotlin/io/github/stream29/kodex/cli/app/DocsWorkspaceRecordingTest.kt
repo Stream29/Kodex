@@ -63,7 +63,7 @@ val docsWorkspaceRecordingTest by testSuite {
                                 model, 52, 18, NewLineKey.ShiftEnter,
                                 RuntimeConfigurationDropdowns.remember(model),
                                 RuntimeConfigurationDropdowns.remember("suggestions"),
-                                { _, _, _ -> }, {}, {}, {},
+                                { _, _, _, _ -> }, {}, {}, {},
                             )
                         }
                         ShellSessionHoverPopup(hover, 52, 18, {}, { hover = null })

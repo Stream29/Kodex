@@ -10,6 +10,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUse
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.contract.IndexVersioned
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexEntry
@@ -31,9 +32,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.time.Instant
 
 internal class HistoryIndexViewModelImpl(
     private val timeline: IndexVersioned<CleanIndexEntry>,
+    private val timestamp: IndexVersioned<Instant>,
     latestIndex: StateFlow<Int>,
     agentState: StateFlow<KodexAgentStateValue>,
     scope: CoroutineScope,
@@ -100,6 +103,14 @@ internal class HistoryIndexViewModelImpl(
             requestUserInput = entry as? StableRequestUserInputToolEvent,
         )
     }
+
+    override suspend fun readMessageTimestamp(generation: Long, index: Int): Instant? =
+        withContext(Dispatchers.Default) {
+            val isMessage = loadExact(generation, index) { it is StableIndexEvent.Steerable }
+            val value = if (isMessage) timestamp.getExact(index) else null
+            ensureCurrent(generation, index)
+            value
+        }
 
     private suspend fun sync(latest: Int, forceInvalidate: Boolean) {
         scanMutex.withLock {

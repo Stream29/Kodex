@@ -27,6 +27,7 @@ import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +40,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import org.koin.core.annotation.Factory
 import org.koin.core.annotation.InjectedParam
+import kotlin.time.Instant
 
 /** Creates one repository as a child of [ownerScope]. */
 public fun interface KodexSessionRepositoryFactory {
@@ -470,6 +472,22 @@ private class PersistedSessionViewModelImpl(
         ownerScope.cancel()
     }
 
+    override suspend fun readCreatedAt(): Instant? = withContext(Dispatchers.Default) {
+        mutex.withLock {
+            ensureOpen()
+            val timestamp = rootSession.storage.timestamp
+            timestamp.ceilToIndex(0)?.let { timestamp.getExact(it) }
+        }
+    }
+
+    override suspend fun readUpdatedAt(): Instant? = withContext(Dispatchers.Default) {
+        mutex.withLock {
+            ensureOpen()
+            val timestamp = rootSession.storage.timestamp
+            timestamp.latestIndex().takeIf { it >= 0 }?.let { timestamp.getExact(it) }
+        }
+    }
+
     private fun refreshName() {
         val threadName = rootAgent.settings.value.threadName
             .takeIf(String::isNotBlank)
@@ -509,6 +527,20 @@ private class SessionCatalogViewModelImpl(
 
     override suspend fun refresh(): Unit = commandMutex.withLock {
         reload(showArchived = mutableState.value.showArchived)
+    }
+
+    override suspend fun readCreatedAt(sessionIndex: Int): Instant? = withContext(Dispatchers.Default) {
+        commandMutex.withLock {
+            check(mutableState.value.sessions.any { it.sessionIndex == sessionIndex })
+            getOrCreateRepository().readCreatedAt(sessionIndex)
+        }
+    }
+
+    override suspend fun readUpdatedAt(sessionIndex: Int): Instant? = withContext(Dispatchers.Default) {
+        commandMutex.withLock {
+            check(mutableState.value.sessions.any { it.sessionIndex == sessionIndex })
+            getOrCreateRepository().readUpdatedAt(sessionIndex)
+        }
     }
 
     override suspend fun setShowArchived(showArchived: Boolean): Unit = commandMutex.withLock {

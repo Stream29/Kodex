@@ -105,6 +105,8 @@ private suspend fun selectSessionCatalogMenu(
                     SessionCatalogContextMenuPopup(
                         entry = entry,
                         anchor = anchor,
+                        createdAt = "2026-09-08 09:02:03 UTC+08:00",
+                        updatedAt = "2026-09-08 10:02:03 UTC+08:00",
                         clickPosition = menuClickPosition,
                         onDismissRequest = { menuAnchor = null },
                         onFork = {
@@ -131,6 +133,8 @@ private suspend fun selectSessionCatalogMenu(
         openMenu()
         menuSnapshot = awaitSnapshotContaining(if (entry.archived) "Unarchive" else "Archive")
         assertTrue("Index: ${entry.sessionIndex}" in menuSnapshot, menuSnapshot)
+        assertTrue("Created at:" in menuSnapshot, menuSnapshot)
+        assertTrue("Updated at:" in menuSnapshot, menuSnapshot)
         if (moveDown) {
             sendKeyEvent(KeyboardEvent(KeyboardEvent.Down))
             awaitSnapshot()

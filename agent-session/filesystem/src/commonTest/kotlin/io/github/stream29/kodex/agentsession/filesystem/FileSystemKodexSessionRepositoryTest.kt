@@ -235,6 +235,42 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             repository.closeAndJoin()
         }
 
+        test("menu timestamps are independent exact reads without timeline enumeration") { root ->
+            val fileSystem = CountingListFileSystem()
+            val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies(), fileSystem)
+            try {
+                val empty = repository.create()
+                assertEquals(null, repository.readCreatedAt(empty))
+                assertEquals(null, repository.readUpdatedAt(empty))
+                val index = repository.createInitialized(settings("timestamps"))
+                val storage = repository.open(index).storage
+                val created = storage.timestamp.getExact(0)
+                val updated = Instant.parse("2020-01-02T03:04:05Z")
+                storage.timestamp[2] = updated
+                fileSystem.reset()
+                assertEquals(created, repository.readCreatedAt(index))
+                assertEquals(updated, repository.readUpdatedAt(index))
+                assertEquals(0, fileSystem.listCalls)
+
+                val zero = Path(root, "sessions/$index/timestamp/0.json")
+                SystemCoroutineFileSystem.delete(zero)
+                assertEquals(null, repository.readCreatedAt(index))
+                assertEquals(updated, repository.readUpdatedAt(index))
+                assertEquals(0, fileSystem.listCalls)
+
+                SystemCoroutineFileSystem.writeString(zero, "invalid timestamp")
+                assertFailsWith<Exception> { repository.readCreatedAt(index) }
+                assertEquals(updated, repository.readUpdatedAt(index))
+                SystemCoroutineFileSystem.delete(zero)
+                SystemCoroutineFileSystem.writeString(Path(root, "sessions/$index/timestamp/2.json"), "broken")
+                assertEquals(null, repository.readCreatedAt(index))
+                assertFailsWith<Exception> { repository.readUpdatedAt(index) }
+                assertEquals(0, fileSystem.listCalls)
+            } finally {
+                repository.closeAndJoin()
+            }
+        }
+
         test("persists an idempotent root archive marker without changing inventory") { root ->
             val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
             val archivedIndex = repository.createInitialized(settings("archived"))

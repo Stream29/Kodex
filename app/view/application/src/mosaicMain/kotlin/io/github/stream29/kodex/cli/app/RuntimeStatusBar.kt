@@ -6,6 +6,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import com.jakewharton.mosaic.layout.background
+import com.jakewharton.mosaic.layout.clipToBounds
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.BoxScope
@@ -147,7 +148,9 @@ private fun StatusBarLayout(
             regularContent()
             settingsContent?.invoke()
         },
-        modifier = Modifier.width(width),
+        // Sidebars can leave less space than one natural-width control. Keep both drawing and
+        // hit testing inside this status bar instead of overflowing the terminal or adjacent pane.
+        modifier = Modifier.width(width).clipToBounds(),
         debugInfo = { "StatusBarLayout(columns=$width)" },
     ) { measurables, constraints ->
         val childConstraints = Constraints(

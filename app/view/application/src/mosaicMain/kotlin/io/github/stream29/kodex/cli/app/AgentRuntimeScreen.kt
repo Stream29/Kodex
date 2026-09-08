@@ -49,6 +49,7 @@ internal fun AgentRuntimeScreen(
     suggestionDropdowns: RuntimeConfigurationDropdowns,
     onOpenHistoryEntryContextMenu: (
         target: AgentHistoryTarget,
+        item: io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel,
         anchor: TuiPopupAnchor,
         clickPosition: IntOffset?,
     ) -> Unit,
@@ -121,9 +122,10 @@ internal fun AgentRuntimeScreen(
                     execution.capabilities.canReplaceHistory &&
                     execution.capabilities.canForkHistory
                 ) {
-                    { generation, storageIndex, anchor, position ->
+                    { generation, storageIndex, item, anchor, position ->
                         onOpenHistoryEntryContextMenu(
                             AgentHistoryTarget(generation, storageIndex),
+                            item,
                             anchor,
                             position,
                         )

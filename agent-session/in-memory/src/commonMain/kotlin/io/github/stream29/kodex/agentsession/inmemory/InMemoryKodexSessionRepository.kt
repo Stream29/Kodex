@@ -80,6 +80,17 @@ public class InMemoryKodexSessionRepository internal constructor(
             )
         }
 
+    override suspend fun readCreatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
+        requireOpen()
+        requireSession(entryIndex).storage.timestamp.getExact(0)
+    }
+
+    override suspend fun readUpdatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
+        requireOpen()
+        val timestamp = requireSession(entryIndex).storage.timestamp
+        timestamp.latestIndex().takeIf { it >= 0 }?.let { timestamp.getExact(it) }
+    }
+
     private suspend fun updateArchived(
         entryIndex: Int,
         archived: Boolean,

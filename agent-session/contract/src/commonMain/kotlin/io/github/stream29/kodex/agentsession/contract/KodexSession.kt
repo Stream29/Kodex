@@ -117,6 +117,18 @@ public interface KodexRootSessionRepository : KodexSessionRepository {
     public suspend fun getEntry(entryIndex: Int): KodexRootSessionEntry
 
     /**
+     * Reads exact timestamp zero without opening a runtime or searching later records.
+     * @return null when timestamp zero is absent.
+     */
+    public suspend fun readCreatedAt(entryIndex: Int): Instant?
+
+    /**
+     * Reads the latest timestamp independently of the catalog snapshot.
+     * @return null when no timestamp has been persisted.
+     */
+    public suspend fun readUpdatedAt(entryIndex: Int): Instant?
+
+    /**
      * Lists root Session catalog metadata.
      *
      * The complete [entries] and [list] inventory remains unaffected by

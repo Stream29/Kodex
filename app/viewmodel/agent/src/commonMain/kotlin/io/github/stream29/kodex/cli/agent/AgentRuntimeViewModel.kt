@@ -142,6 +142,7 @@ internal class AgentRuntimeViewModel(
     override val suggestSubagentTask: SuggestSubagentTaskViewModel = suggestSubagentTaskImpl
     override val historyIndex: HistoryIndexViewModel = HistoryIndexViewModelImpl(
         timeline = session.storage.index,
+        timestamp = session.storage.timestamp,
         latestIndex = session.runtime.latestIndex,
         agentState = session.runtime.state,
         scope = scope,

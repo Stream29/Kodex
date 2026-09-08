@@ -72,7 +72,7 @@ val agentHistoryEntryInteractionTest by testSuite {
                 Column(Modifier.width(40)) {
                     StoredHistoryEntry(
                         item = item, generation = 4, shellSessions = EmptyHistoryShellSessions,
-                        onOpenContextMenu = { _, index, _, _ -> selected = index },
+                        onOpenContextMenu = { _, index, _, _, _ -> selected = index },
                     )
                 }
             }
@@ -110,7 +110,7 @@ val agentHistoryEntryInteractionTest by testSuite {
                         item = item,
                         generation = 4,
                         shellSessions = EmptyHistoryShellSessions,
-                        onOpenContextMenu = { _, index, _, _ ->
+                        onOpenContextMenu = { _, index, _, _, _ ->
                             capturedIndex = index
                             callbackCount++
                         },
@@ -326,6 +326,7 @@ private class FakeMessage(
     initialState: MessageHistoryItemState,
 ) : MessageHistoryItemViewModel {
     override val state = MutableStateFlow(initialState)
+    override suspend fun readTimestamp(): kotlin.time.Instant? = null
 }
 
 private class FakeTool(

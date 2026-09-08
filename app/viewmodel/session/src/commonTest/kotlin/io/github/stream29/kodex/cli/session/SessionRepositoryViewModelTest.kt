@@ -49,6 +49,12 @@ val sessionRepositoryViewModelTest by testSuite {
                 stateCollector.join()
 
                 val loaded = assertIs<SessionCatalogState.Loaded>(catalog.state.value)
+                assertEquals(repository.open(newest).storage.timestamp.getExact(0), catalog.readCreatedAt(newest))
+                assertEquals(Instant.parse("2026-07-31T10:05:00Z"), catalog.readUpdatedAt(newest))
+                val newer = Instant.parse("2026-07-31T10:06:00Z")
+                repository.open(newest).storage.timestamp[3] = newer
+                assertEquals(newer, catalog.readUpdatedAt(newest))
+                kotlin.test.assertSame(loaded, catalog.state.value)
                 assertEquals(
                     listOf(newest, oldest),
                     loaded.sessions.map { entry -> entry.sessionIndex },

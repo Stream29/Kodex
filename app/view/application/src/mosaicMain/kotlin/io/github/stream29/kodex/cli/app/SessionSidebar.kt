@@ -885,15 +885,23 @@ internal fun BoxScope.HistoryIndexContextMenu(
         if (!targetMatches || !anchorPlaced) onDismissRequest()
     }
     if (!targetMatches || !anchorPlaced) return
+    val timestamp = rememberMenuTimestamp(current) {
+        target.viewModel.readMessageTimestamp(target.generation, target.index)
+    }
     HistoryIndexContextMenuPopup(
         anchor = target.anchor,
         clickPosition = current.clickPosition,
         index = target.index,
+        timestamp = timestamp,
         onDismissRequest = onDismissRequest,
         onCheckOut = { onCheckOut(target) },
     )
 }
 
+/**
+ * @param clickPosition null uses the keyboard anchor position.
+ * @param timestamp null hides the timestamp field, including for non-Message entries.
+ */
 @Composable
 internal fun BoxScope.HistoryIndexContextMenuPopup(
     anchor: TuiPopupAnchor,
@@ -901,6 +909,7 @@ internal fun BoxScope.HistoryIndexContextMenuPopup(
     index: Int,
     onDismissRequest: () -> Unit,
     onCheckOut: () -> Unit,
+    timestamp: String? = null,
 ) {
     TuiContextMenu(
         expanded = true,
@@ -914,7 +923,10 @@ internal fun BoxScope.HistoryIndexContextMenuPopup(
             onClick = {},
             enabled = false,
         ) {
-            Text("Index: $index")
+            Column {
+                Text("Index: $index")
+                TimestampInformation("Timestamp", timestamp)
+            }
         }
         TuiPopupMenuItem(
             key = "history-index-check-out",
@@ -967,7 +979,8 @@ internal class HistoryIndexInteractionRequest(
     var pointerPosition: IntOffset? by mutableStateOf(null)
 }
 
-internal data class HistoryIndexMenuRequest(
+/** Each instance identifies a fresh opening, even for the same target and anchor. */
+internal class HistoryIndexMenuRequest(
     val target: HistoryIndexInteractionRequest,
     val clickPosition: IntOffset?,
 )

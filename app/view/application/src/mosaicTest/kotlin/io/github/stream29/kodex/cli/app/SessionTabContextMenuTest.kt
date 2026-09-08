@@ -40,6 +40,8 @@ val sessionTabContextMenuTest by testSuite {
                         }
                         SessionTabContextMenuPopup(
                             target = target,
+                            createdAt = "2026-09-08 09:02:03 UTC+08:00",
+                            updatedAt = "2026-09-08 10:02:03 UTC+08:00",
                             anchor = anchor,
                             clickPosition = null,
                             onDismiss = {},
@@ -65,6 +67,8 @@ val sessionTabContextMenuTest by testSuite {
 
             assertEquals("close-and-archive", selection)
             assertTrue("Index: ${target.sessionIndex}" in menuSnapshot, menuSnapshot)
+            assertTrue("Created at: 2026-09-08 09:02:03 UTC+08:00" in menuSnapshot, menuSnapshot)
+            assertTrue("Updated at: 2026-09-08 10:02:03 UTC+08:00" in menuSnapshot, menuSnapshot)
             assertTrue("Rename" in menuSnapshot, menuSnapshot)
             assertTrue("Close" in menuSnapshot, menuSnapshot)
             assertTrue("Close and archive" in menuSnapshot, menuSnapshot)

@@ -137,6 +137,14 @@ internal class HistoryItemLoadContext(
             )
         }
 
+    /** @return null when this exact index has no timestamp. */
+    suspend fun readTimestamp(index: Int): kotlin.time.Instant? = withContext(Dispatchers.Default) {
+        check(isCurrent()) { "History generation is no longer current." }
+        val timestamp = agentState.storage.timestamp.getExact(index)
+        check(isCurrent()) { "History generation is no longer current." }
+        timestamp
+    }
+
     suspend fun finalTurnDuration(index: Int): Duration? =
         withContext(Dispatchers.Default) {
             turnDurationResolver.finalDuration(index)

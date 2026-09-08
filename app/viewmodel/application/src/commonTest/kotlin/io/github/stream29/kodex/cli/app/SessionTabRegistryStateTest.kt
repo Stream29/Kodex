@@ -159,6 +159,9 @@ private class EmptyOpenAiLoginViewModel : OpenAiLoginViewModel {
 }
 
 private class EmptySessionCatalogViewModel : SessionCatalogViewModel {
+    override suspend fun readCreatedAt(sessionIndex: Int): kotlin.time.Instant? = null
+    override suspend fun readUpdatedAt(sessionIndex: Int): kotlin.time.Instant? = null
+
     override val state: StateFlow<SessionCatalogState> =
         MutableStateFlow(SessionCatalogState.Loaded(false, emptyList()))
 

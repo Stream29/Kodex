@@ -80,6 +80,7 @@ public fun AgentHistoryView(
     onOpenEntryContextMenu: ((
         generation: Long,
         storageIndex: Int,
+        item: HistoryItemViewModel,
         anchor: TuiPopupAnchor,
         clickPosition: IntOffset?,
     ) -> Unit)? = null,
@@ -321,6 +322,7 @@ internal fun StoredHistoryWorkGroup(
     onOpenContextMenu: ((
         generation: Long,
         storageIndex: Int,
+        item: HistoryItemViewModel,
         anchor: TuiPopupAnchor,
         clickPosition: IntOffset?,
     ) -> Unit)?,
@@ -391,6 +393,7 @@ internal fun StoredHistoryEntry(
     onOpenContextMenu: ((
         generation: Long,
         storageIndex: Int,
+        item: HistoryItemViewModel,
         anchor: TuiPopupAnchor,
         clickPosition: IntOffset?,
     ) -> Unit)?,
@@ -402,7 +405,7 @@ internal fun StoredHistoryEntry(
         focusRequester = focusRequester,
         onSecondaryClick = onOpenContextMenu?.let { openMenu ->
             { clickPosition ->
-                openMenu(generation, storageIndex, menuAnchor, clickPosition)
+                openMenu(generation, storageIndex, item, menuAnchor, clickPosition)
             }
         },
         modifier = Modifier

@@ -83,6 +83,25 @@ public class FileSystemKodexSessionRepository internal constructor(
             rootEntry(entryIndex, archived = isArchived(entryIndex))
         }
 
+    override suspend fun readCreatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
+        requireOpen()
+        requireEntry(entryIndex)
+        FileSystemAgentStorage(sessionDirectory(entryIndex), fileSystem).timestamp.getExact(0)
+    }
+
+    override suspend fun readUpdatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
+        requireOpen()
+        requireEntry(entryIndex)
+        val storage = FileSystemAgentStorage(sessionDirectory(entryIndex), fileSystem)
+        val index = storage.timestamp.latestIndexFromPointerOrNull()
+        if (index != null) {
+            index.takeIf { it >= 0 }?.let { storage.timestamp.getExact(it) }
+        } else {
+            // Preserve the existing lease-protected recovery for an invalid latest pointer.
+            fileSystemRootSessionEntry(entryIndex, sessionDirectory(entryIndex), fileSystem).lastActivityAt
+        }
+    }
+
     private suspend fun rootEntry(
         entryIndex: Int,
         archived: Boolean,

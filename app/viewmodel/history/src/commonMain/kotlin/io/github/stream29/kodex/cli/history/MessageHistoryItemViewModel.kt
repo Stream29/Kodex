@@ -45,6 +45,8 @@ internal class MessageHistoryItemViewModelImpl(
 
     override val state: StateFlow<MessageHistoryItemState> = mutableState.asStateFlow()
 
+    override suspend fun readTimestamp(): kotlin.time.Instant? = context.readTimestamp(index)
+
     override fun ensureLoaded() {
         loadingJob.start()
     }

@@ -3,6 +3,7 @@ package io.github.stream29.kodex.app.session.contract
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.time.Instant
 
 /**
  * Frontend contract for one persisted root Session surface.
@@ -20,6 +21,18 @@ public interface PersistedSessionViewModel : SessionViewModel {
 
     /** Refreshes the lightweight name projection from root settings. */
     public suspend fun refresh(): Unit
+
+    /**
+     * Reads the first stored timestamp in index order, on demand.
+     * @return null when the timestamp timeline is empty.
+     */
+    public suspend fun readCreatedAt(): Instant?
+
+    /**
+     * Reads the current timeline's latest timestamp, on demand.
+     * @return null when the timestamp timeline is empty.
+     */
+    public suspend fun readUpdatedAt(): Instant?
 
     /**
      * Forks the exact owned [source] through committed [target] into a new

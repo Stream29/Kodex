@@ -2,6 +2,7 @@ package io.github.stream29.kodex.app.agent.contract
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.time.Instant
 
 /** Oldest-first snapshot of one Agent's sparse index timeline. */
 public data class HistoryIndexWindow(
@@ -50,4 +51,10 @@ public interface HistoryIndexViewModel {
 
     /** Loads full hover content for the exact entry at [index]. */
     public suspend fun loadDetail(generation: Long, index: Int): HistoryIndexEntryDetail
+
+    /**
+     * Reads an exact Message timestamp without loading its displayed content.
+     * @return null for a non-Message entry or when its exact timestamp is absent.
+     */
+    public suspend fun readMessageTimestamp(generation: Long, index: Int): Instant?
 }

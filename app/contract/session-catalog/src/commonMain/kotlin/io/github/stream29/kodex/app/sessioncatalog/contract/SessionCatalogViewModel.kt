@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.app.sessioncatalog.contract
 
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.time.Instant
 
 /** Atomic load state for one persisted Session catalog. */
 public sealed interface SessionCatalogState {
@@ -40,6 +41,18 @@ public interface SessionCatalogViewModel : AutoCloseable {
 
     /** Loads or reloads the lightweight persisted Session catalog. */
     public suspend fun refresh(): Unit
+
+    /**
+     * Reads timestamp zero for this catalog target without opening its runtime.
+     * @return null when exact timestamp zero is absent; later records are not searched.
+     */
+    public suspend fun readCreatedAt(sessionIndex: Int): Instant?
+
+    /**
+     * Reads the target's latest timestamp independently of the list snapshot.
+     * @return null when no timestamp has been persisted.
+     */
+    public suspend fun readUpdatedAt(sessionIndex: Int): Instant?
 
     /** Changes the filter and reloads the catalog when it changes. */
     public suspend fun setShowArchived(showArchived: Boolean): Unit

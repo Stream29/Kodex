@@ -59,6 +59,37 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 val agentHistoryModelsTest by testSuite {
+    test("message timestamp reads are exact and reject stale generations without changing content") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            try {
+                val session = repository.open(repository.create())
+                val time = Instant.parse("2026-09-08T01:02:03Z")
+                session.storage.timestamp[0] = time
+                session.storage.index[1] = StableUserMessage(listOf(ContentItem.InputText("readable")))
+                var current = true
+                val context = HistoryItemLoadContext(
+                    session.runtime, this, { current }, HistoryTurnDurationResolver(session.storage),
+                )
+                val item = MessageHistoryItemViewModelImpl(
+                    1, HistoryItemDescriptor(1, HistoryItemSource.Index, HistoryItemKind.Message, Duration.ZERO),
+                    context,
+                )
+                item.ensureLoaded()
+                val ready = awaitState(item.state) { it !is MessageHistoryItemState.Loading }
+                assertIs<MessageHistoryItemState.Ready>(ready)
+                assertEquals(null, item.readTimestamp())
+                session.storage.timestamp[1] = time + 1.seconds
+                assertEquals(time + 1.seconds, item.readTimestamp())
+                current = false
+                kotlin.test.assertFailsWith<IllegalStateException> { item.readTimestamp() }
+                assertSame(ready, item.state.value)
+            } finally {
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
     test("missing suggestion history becomes a load failure rather than a rejected decision") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())

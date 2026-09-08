@@ -45,6 +45,33 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Duration.Companion.milliseconds
 
 val historyIndexViewModelTest by testSuite {
+    test("only exact Message timestamps are exposed and replacement invalidates requests") {
+        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test")))
+        val time = kotlin.time.Instant.parse("2026-09-08T01:02:03Z")
+        storage.index[1] = StableUserMessage(listOf(ContentItem.InputText("message")))
+        storage.index[2] = CleanCompactionPoint
+        val latest = MutableStateFlow(2)
+        val state = MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.Empty)
+        val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        val model = HistoryIndexViewModelImpl(storage.index, storage.timestamp, latest, state, scope)
+        try {
+            val generation = model.awaitIndexes(listOf(1, 2)).generation
+            assertEquals(null, model.readMessageTimestamp(generation, 1))
+            storage.timestamp[1] = time + 1.seconds
+            storage.timestamp[2] = time + 2.seconds
+            assertEquals(time + 1.seconds, model.readMessageTimestamp(generation, 1))
+            assertEquals(null, model.readMessageTimestamp(generation, 2))
+            storage.index.revert(1)
+            latest.value = 0
+            model.awaitIndexes(emptyList())
+            kotlin.test.assertFailsWith<HistoryIndexLoadException> {
+                model.readMessageTimestamp(generation, 1)
+            }
+        } finally {
+            scope.cancelAndJoin()
+        }
+    }
+
     test("suggestions use only the simple sidebar label") {
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test")))
         storage.index[1] = StableSuggestSubagentTaskToolEvent(
@@ -55,6 +82,7 @@ val historyIndexViewModelTest by testSuite {
         val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
         val model = HistoryIndexViewModelImpl(
             timeline = storage.index,
+            timestamp = storage.timestamp,
             latestIndex = MutableStateFlow(1),
             agentState = MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.Empty),
             scope = scope,
@@ -81,6 +109,7 @@ val historyIndexViewModelTest by testSuite {
             val childScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
             val viewModel = HistoryIndexViewModelImpl(
                 timeline = storage.index,
+                timestamp = storage.timestamp,
                 latestIndex = latestIndex,
                 agentState = agentState,
                 scope = childScope,
@@ -212,6 +241,7 @@ val historyIndexViewModelTest by testSuite {
             val childScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
             val viewModel = HistoryIndexViewModelImpl(
                 timeline = storage.index,
+                timestamp = storage.timestamp,
                 latestIndex = latestIndex,
                 agentState = agentState,
                 scope = childScope,
