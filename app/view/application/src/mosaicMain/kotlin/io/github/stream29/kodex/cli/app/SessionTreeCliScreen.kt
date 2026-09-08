@@ -1433,7 +1433,7 @@ internal fun BoxScope.HistoryEntryContextMenuPopup(
 }
 
 @Composable
-private fun BoxScope.AgentHistoryRevertDialog(agent: AgentViewModel?) {
+internal fun BoxScope.AgentHistoryRevertDialog(agent: AgentViewModel?) {
     if (agent == null) return
     val action by agent.historyAction.collectAsState()
     val confirm =
