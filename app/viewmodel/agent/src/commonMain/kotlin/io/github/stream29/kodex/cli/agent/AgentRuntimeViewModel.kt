@@ -15,7 +15,6 @@ import io.github.stream29.kodex.app.agent.contract.AgentExecutionCapabilities
 import io.github.stream29.kodex.app.agent.contract.AgentExecutionPhase
 import io.github.stream29.kodex.app.agent.contract.AgentExecutionState
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
-import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentLifecycleState
 import io.github.stream29.kodex.app.agent.contract.AgentNotification
 import io.github.stream29.kodex.app.agent.contract.AgentNotificationLevel
@@ -45,6 +44,7 @@ import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
@@ -303,22 +303,30 @@ internal class AgentRuntimeViewModel(
         }
     }
 
-    override fun requestHistoryRevert(target: AgentHistoryTarget): Long =
-        reportHistoryFailure { prepareHistoryRevert(target) }
+    override fun requestHistoryRevert(untilExclusive: Int, expectedGeneration: Long): Long =
+        reportHistoryFailure { prepareHistoryRevert(untilExclusive, expectedGeneration) }
 
-    private fun prepareHistoryRevert(target: AgentHistoryTarget): Long {
+    private fun validateHistoryBoundary(untilExclusive: Int, expectedGeneration: Long) {
+        require(expectedGeneration == history.historyItems.value.generation) {
+            "History revert generation is stale."
+        }
+        require(untilExclusive > 0 && untilExclusive.toLong() <= session.runtime.latestIndex.value.toLong() + 1) {
+            "History revert boundary must preserve initialization and be within the current storage."
+        }
+    }
+
+    private fun prepareHistoryRevert(untilExclusive: Int, expectedGeneration: Long): Long {
         ensureOpen()
         val state = projectExecution(execution.value.activityVersion)
         require(!state.running && state.capabilities.canReplaceHistory) {
             "Cannot request a history revert in Agent phase ${state.phase}."
         }
-        require(history.contains(target.generation, target.storageIndex)) {
-            "History revert target is no longer present in the current window."
-        }
+        validateHistoryBoundary(untilExclusive, expectedGeneration)
         val requestId = nextHistoryRequestId
         check(requestId < Long.MAX_VALUE) { "Agent history request ids are exhausted." }
         nextHistoryRequestId += 1
-        mutableHistoryAction.value = AgentHistoryActionState.ConfirmRevert(requestId, target)
+        mutableHistoryAction.value =
+            AgentHistoryActionState.ConfirmRevert(requestId, untilExclusive, expectedGeneration)
         return requestId
     }
 
@@ -330,7 +338,19 @@ internal class AgentRuntimeViewModel(
     }
 
     override fun confirmHistoryRevert(requestId: Long) {
-        reportHistoryFailure { cwd -> startHistoryRevert(requestId, cwd) }
+        reportHistoryFailure { cwd ->
+            val request = mutableHistoryAction.value as? AgentHistoryActionState.ConfirmRevert
+                ?: return@reportHistoryFailure
+            require(request.requestId == requestId) { "History revert request is stale." }
+            startHistoryRevert(request.untilExclusive, request.expectedGeneration, cwd, request)
+        }
+    }
+
+    override suspend fun revertHistory(untilExclusive: Int, expectedGeneration: Long) {
+        val operation = reportHistoryFailure { cwd ->
+            startHistoryRevert(untilExclusive, expectedGeneration, cwd)
+        }
+        operation.await()
     }
 
     private inline fun <T> reportHistoryFailure(block: (Path) -> T): T {
@@ -345,35 +365,40 @@ internal class AgentRuntimeViewModel(
         }
     }
 
-    private fun startHistoryRevert(requestId: Long, cwd: Path) {
+    private fun startHistoryRevert(
+        untilExclusive: Int,
+        expectedGeneration: Long,
+        cwd: Path,
+        confirmation: AgentHistoryActionState.ConfirmRevert? = null,
+    ): Deferred<Unit> {
         ensureOpen()
-        val request = mutableHistoryAction.value as? AgentHistoryActionState.ConfirmRevert
-            ?: return
-        require(request.requestId == requestId) { "History revert request is stale." }
         val state = projectExecution(execution.value.activityVersion)
         require(!state.running && state.capabilities.canReplaceHistory) {
             "Cannot revert history in Agent phase ${state.phase}."
         }
-        require(history.contains(request.target.generation, request.target.storageIndex)) {
-            "History revert target is no longer present in the current window."
-        }
-        val operation = scope.launch(start = CoroutineStart.LAZY) {
+        validateHistoryBoundary(untilExclusive, expectedGeneration)
+        val operation = scope.async(start = CoroutineStart.LAZY) {
             try {
-                executeHistoryRevert(request.target)
+                executeHistoryRevert(untilExclusive, expectedGeneration)
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Throwable) {
                 publishFailure("Unable to revert Agent history.", failure, cwd)
+                throw failure
             }
         }
         if (!mutableHistoryOperation.compareAndSet(null, operation)) {
             operation.cancel()
             throw IllegalStateException("This Agent already has a history operation.")
         }
-        if (!mutableHistoryAction.compareAndSet(request, AgentHistoryActionState.None)) {
+        if (!mutableHistoryAction.compareAndSet(
+                confirmation ?: AgentHistoryActionState.None,
+                AgentHistoryActionState.None,
+            )
+        ) {
             mutableHistoryOperation.compareAndSet(operation, null)
             operation.cancel()
-            return
+            throw IllegalStateException("History revert confirmation has changed.")
         }
         clearNotification()
         operation.invokeOnCompletion {
@@ -382,14 +407,13 @@ internal class AgentRuntimeViewModel(
         }
         publishExecution()
         operation.start()
+        return operation
     }
 
-    private suspend fun executeHistoryRevert(target: AgentHistoryTarget) {
+    private suspend fun executeHistoryRevert(untilExclusive: Int, expectedGeneration: Long) {
         commandMutex.withLock {
             ensureOpen()
-            require(history.contains(target.generation, target.storageIndex)) {
-                "History revert target is stale."
-            }
+            validateHistoryBoundary(untilExclusive, expectedGeneration)
             val value = session.runtime.state.value
             val runtimeRunning =
                 session.runtime.runningTurn.value != null || mutableRuntimeOperation.value != null
@@ -398,15 +422,10 @@ internal class AgentRuntimeViewModel(
             }
             automaticTitle.replaceHistory {
                 session.runtime.modify { storage ->
-                    require(
-                        storage.index.getExact(target.storageIndex) != null ||
-                            storage.work.getExact(target.storageIndex) != null,
-                    ) {
-                        "History entry ${target.storageIndex} is no longer committed."
-                    }
+                    validateHistoryBoundary(untilExclusive, expectedGeneration)
                     val retainsAcceptedUserText =
-                        storage.hasNonblankUserTextBefore(target.untilExclusive)
-                    storage.revert(target.untilExclusive)
+                        storage.hasNonblankUserTextBefore(untilExclusive)
+                    storage.revert(untilExclusive)
                     retainsAcceptedUserText
                 }
             }

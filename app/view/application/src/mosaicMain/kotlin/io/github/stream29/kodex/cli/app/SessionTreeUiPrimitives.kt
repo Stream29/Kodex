@@ -2,6 +2,7 @@ package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
+import com.jakewharton.mosaic.focus.FocusRequester
 import com.jakewharton.mosaic.layout.KeyEvent
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
@@ -37,6 +38,7 @@ internal fun ComposerInput(
     submitHint: String? = null,
     onSubmit: () -> Unit,
     onValueChanged: ((TextInputValue) -> Unit)? = null,
+    focusRequester: FocusRequester? = null,
 ) {
     Column {
         TextInput(
@@ -46,6 +48,7 @@ internal fun ComposerInput(
                 .fillMaxWidth(),
             autoFocus = autoFocus,
             enabled = enabled,
+            focusRequester = focusRequester,
             onValueChanged = onValueChanged,
             onKeyEvent = { event ->
                 when {

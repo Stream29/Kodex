@@ -6,6 +6,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import com.jakewharton.mosaic.focus.FocusRequester
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
@@ -20,7 +21,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantM
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
@@ -48,7 +48,8 @@ internal fun AgentRuntimeScreen(
     dropdowns: RuntimeConfigurationDropdowns,
     suggestionDropdowns: RuntimeConfigurationDropdowns,
     onOpenHistoryEntryContextMenu: (
-        target: AgentHistoryTarget,
+        generation: Long,
+        storageIndex: Int,
         item: io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel,
         anchor: TuiPopupAnchor,
         clickPosition: IntOffset?,
@@ -56,6 +57,7 @@ internal fun AgentRuntimeScreen(
     onBrowseWorkingDirectory: () -> Unit,
     onBrowseSuggestedWorkingDirectory: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    composerFocusRequester: FocusRequester? = null,
 ) {
     val execution by viewModel.execution.collectAsState()
     val pendingSteer by viewModel.pendingSteer.collectAsState()
@@ -124,7 +126,8 @@ internal fun AgentRuntimeScreen(
                 ) {
                     { generation, storageIndex, item, anchor, position ->
                         onOpenHistoryEntryContextMenu(
-                            AgentHistoryTarget(generation, storageIndex),
+                            generation,
+                            storageIndex,
                             item,
                             anchor,
                             position,
@@ -186,6 +189,7 @@ internal fun AgentRuntimeScreen(
             newLineKey = newLineKey,
             autoFocus = !hostInteractionPending,
             enabled = !hostInteractionPending,
+            focusRequester = composerFocusRequester,
             submitHint = submitHint,
             onSubmit = {
                 scope.launch { viewModel.submitComposer(composerState.revision) }

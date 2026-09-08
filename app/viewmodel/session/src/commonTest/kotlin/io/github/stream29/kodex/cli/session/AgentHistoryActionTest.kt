@@ -9,7 +9,6 @@ import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
-import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -27,9 +26,111 @@ import kotlinx.coroutines.withTimeout
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
 val agentHistoryActionTest by testSuite {
+    test("direct revert uses an exclusive sparse boundary and can remove the first message") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val index = repository.create()
+            val root = repository.open(index)
+            root.runtime.modify { storage ->
+                storage.initialize(KodexAgentSettings(model = OpenAiModelId("test-model")))
+                storage.index[2] = userMessage("first")
+                storage.settings[4] = storage.settings[0].copy(threadName = "Between messages")
+                storage.index[8] = userMessage("edit me")
+                storage.index[12] = StableAssistantMessage(listOf(ContentItem.OutputText("discard")))
+            }
+            val store = testSessionViewModelRegistry(repository, this)
+            val agent = store.open(index).rootAgent
+            try {
+                val generation = agent.history.awaitStorageIndex(12)
+                agent.revertHistory(untilExclusive = 8, expectedGeneration = generation)
+                assertEquals(4, root.storage.latestIndex())
+                assertEquals(listOf(2), root.storage.index.indexesIn(0..20))
+                assertEquals("Between messages", root.storage.settings[4].threadName)
+                assertIs<AgentHistoryActionState.None>(agent.historyAction.value)
+
+                val nextGeneration = withTimeout(5.seconds) {
+                    agent.history.historyItems.first { it.generation > generation }.generation
+                }
+                assertFailsWith<IllegalArgumentException> {
+                    agent.revertHistory(2, generation)
+                }
+                assertFailsWith<IllegalArgumentException> {
+                    agent.revertHistory(0, nextGeneration)
+                }
+                assertFailsWith<IllegalArgumentException> {
+                    agent.revertHistory(6, nextGeneration)
+                }
+                // Index 1 has no history row: a boundary is not a selected history item.
+                agent.revertHistory(untilExclusive = 1, expectedGeneration = nextGeneration)
+                assertTrue(root.storage.index.indexesIn(0..20).isEmpty())
+                assertEquals(0, root.storage.latestIndex())
+                assertEquals(OpenAiModelId("test-model"), root.storage.settings[0].model)
+                assertEquals(0L, root.storage.tokenCount[0])
+            } finally {
+                store.shutdown()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("fork accepts a sparse boundary but rejects a foreign owner and stale generation") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val store = testSessionViewModelRegistry(repository, this)
+            val session = store.create { KodexAgentSettings(model = OpenAiModelId("test-model")) }
+            val root = repository.open(session.sessionIndex)
+            root.runtime.modify { storage ->
+                storage.index[2] = userMessage("keep")
+                storage.index[8] = userMessage("discard")
+            }
+            val other = store.create { KodexAgentSettings(model = OpenAiModelId("test-model")) }
+            val agent = session.rootAgent
+            try {
+                val generation = agent.history.awaitStorageIndex(8)
+                assertFailsWith<IllegalArgumentException> { session.fork(other.rootAgent, 5, generation) }
+                assertFailsWith<IllegalArgumentException> { session.fork(agent, 5, generation + 1) }
+                assertFailsWith<IllegalArgumentException> { session.fork(agent, 0, generation) }
+                assertFailsWith<IllegalArgumentException> { session.fork(agent, 10, generation) }
+                val fork = repository.open(session.fork(agent, 5, generation))
+                assertEquals(listOf(2), fork.storage.index.indexesIn(0..20))
+                assertEquals(listOf(2, 8), root.storage.index.indexesIn(0..20))
+            } finally {
+                store.shutdown()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("direct revert survives cancellation of its frontend waiter") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val store = testSessionViewModelRegistry(repository, this)
+            val session = store.create { KodexAgentSettings(model = OpenAiModelId("test-model")) }
+            val root = repository.open(session.sessionIndex)
+            root.runtime.modify { storage ->
+                storage.index[2] = userMessage("remove")
+            }
+            val agent = session.rootAgent
+            try {
+                val generation = agent.history.awaitStorageIndex(2)
+                val waiter = launch(start = CoroutineStart.UNDISPATCHED) {
+                    agent.revertHistory(2, generation)
+                    awaitCancellation()
+                }
+                waiter.cancelAndJoin()
+                withTimeout(5.seconds) { root.runtime.latestIndex.first { it == 0 } }
+                assertTrue(root.storage.index.indexesIn(0..20).isEmpty())
+            } finally {
+                store.shutdown()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
     test("revert is bound to the current history generation") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
@@ -48,7 +149,7 @@ val agentHistoryActionTest by testSuite {
             try {
                 val initialGeneration = agent.history.awaitStorageIndex(2)
                 val requestId = agent.requestHistoryRevert(
-                    AgentHistoryTarget(initialGeneration, storageIndex = 2),
+                    untilExclusive = 3, expectedGeneration = initialGeneration,
                 )
 
                 agent.confirmHistoryRevert(requestId)
@@ -76,7 +177,7 @@ val agentHistoryActionTest by testSuite {
                 assertEquals(currentGeneration, changedGeneration)
                 agent.history.awaitStorageIndex(2)
                 val staleRequest = agent.requestHistoryRevert(
-                    AgentHistoryTarget(currentGeneration, storageIndex = 2),
+                    untilExclusive = 3, expectedGeneration = currentGeneration,
                 )
                 root.runtime.modify { storage ->
                     storage.revert(2)
@@ -118,7 +219,7 @@ val agentHistoryActionTest by testSuite {
                 val generation = session.rootAgent.history.awaitStorageIndex(2)
                 val forkIndex = session.fork(
                     session.rootAgent,
-                    AgentHistoryTarget(generation, storageIndex = 2),
+                    untilExclusive = 3, expectedGeneration = generation,
                 )
 
                 assertEquals(listOf(index, forkIndex), repository.list())
@@ -147,7 +248,7 @@ val agentHistoryActionTest by testSuite {
             try {
                 val generation = agent.history.awaitStorageIndex(2)
                 val requestId = agent.requestHistoryRevert(
-                    AgentHistoryTarget(generation, storageIndex = 2),
+                    untilExclusive = 3, expectedGeneration = generation,
                 )
                 val frontendCaller = launch(start = CoroutineStart.UNDISPATCHED) {
                     agent.confirmHistoryRevert(requestId)

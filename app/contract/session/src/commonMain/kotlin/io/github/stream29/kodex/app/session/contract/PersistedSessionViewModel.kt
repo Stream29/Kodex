@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.app.session.contract
 
-import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Instant
@@ -35,16 +34,18 @@ public interface PersistedSessionViewModel : SessionViewModel {
     public suspend fun readUpdatedAt(): Instant?
 
     /**
-     * Forks the exact owned [source] through committed [target] into a new
+     * Forks the exact owned [source] before [untilExclusive] into a new
      * persisted root Session and returns its index.
      *
-     * A foreign child handle, stale target, or running source fails without
+     * The boundary preserves initialization and need not correspond to a materialized row.
+     * A foreign child handle, stale generation, invalid boundary, or running source fails without
      * modifying this Session. Forking does not change application navigation or
      * open the returned Session.
      */
     public suspend fun fork(
         source: AgentViewModel,
-        target: AgentHistoryTarget,
+        untilExclusive: Int,
+        expectedGeneration: Long,
     ): Int
 
     /** Forks the complete current root storage into a new root Session. */

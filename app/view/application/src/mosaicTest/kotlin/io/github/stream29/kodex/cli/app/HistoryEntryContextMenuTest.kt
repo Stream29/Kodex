@@ -23,24 +23,33 @@ import kotlin.test.assertTrue
 
 val historyEntryContextMenuTest by testSuite {
     test("menuUsesDirectionalNamesAndRoutesRevert") {
-        val result = selectHistoryEntryMenuItem(moveDown = false)
+        val result = selectHistoryEntryMenuItem(moveDown = 0)
 
         assertTrue("[Revert to here]" in result.snapshot, result.snapshot)
         assertTrue("[Fork from here]" in result.snapshot, result.snapshot)
         assertFalse("through here" in result.snapshot, result.snapshot)
+        assertFalse("Revert and edit" in result.snapshot, result.snapshot)
         assertEquals("revert", result.selection)
     }
 
     test("menuRoutesForkFromTheSelectedEntry") {
-        val result = selectHistoryEntryMenuItem(moveDown = true)
+        val result = selectHistoryEntryMenuItem(moveDown = 1)
 
         assertEquals("fork", result.selection)
+    }
+
+    test("editableUserMenuAddsThirdActionWithoutMovingRevertOrFork") {
+        val result = selectHistoryEntryMenuItem(moveDown = 2, editable = true)
+        assertEquals("edit", result.selection)
+        assertTrue(result.snapshot.indexOf("Revert to here") < result.snapshot.indexOf("Fork from here"))
+        assertTrue(result.snapshot.indexOf("Fork from here") < result.snapshot.indexOf("Revert and edit"))
     }
 
 }
 
 private suspend fun selectHistoryEntryMenuItem(
-    moveDown: Boolean,
+    moveDown: Int,
+    editable: Boolean = false,
 ): HistoryEntryMenuSelection {
     var selection by mutableStateOf("none")
     var menuSnapshot = ""
@@ -62,16 +71,17 @@ private suspend fun selectHistoryEntryMenuItem(
                     onDismiss = {},
                     onRevert = { selection = "revert" },
                     onFork = { selection = "fork" },
+                    onRevertAndEdit = if (editable) ({ selection = "edit" }) else null,
                 )
             }
         }
         menuSnapshot = awaitSnapshotContaining("Fork from here")
-        if (moveDown) {
+        repeat(moveDown) {
             sendKeyEvent(KeyboardEvent(KeyboardEvent.Down))
             awaitSnapshot()
         }
         sendKeyEvent(KeyboardEvent(codepoint = 13))
-        awaitSnapshotContaining("selection=${if (moveDown) "fork" else "revert"}")
+        awaitSnapshotContaining("selection=${listOf("revert", "fork", "edit")[moveDown]}")
     }
 
     return HistoryEntryMenuSelection(menuSnapshot, selection)

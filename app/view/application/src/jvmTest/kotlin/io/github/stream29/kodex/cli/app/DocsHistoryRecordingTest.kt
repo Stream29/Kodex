@@ -19,7 +19,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessag
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
-import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
@@ -83,7 +82,7 @@ val docsHistoryRecordingTest by testSuite {
                                 agent, 64, 28, io.github.stream29.kodex.cli.settings.NewLineKey.ShiftEnter,
                                 RuntimeConfigurationDropdowns.remember(agent),
                                 RuntimeConfigurationDropdowns.remember("suggestions"),
-                                { _, _, _, _ -> }, {}, {}, {},
+                                { _, _, _, _, _ -> }, {}, {}, {},
                             )
                         }
                         HistoryIndexHoverPopup(hover, 64, 28, {})
@@ -172,7 +171,8 @@ val docsHistoryRecordingTest by testSuite {
             val clip = DocsClip("history-actions")
             var selected by mutableStateOf<PersistedSessionViewModel>(session)
             var tabs by mutableStateOf(listOf(session))
-            var menu by mutableStateOf<Triple<AgentHistoryTarget, TuiPopupAnchor, IntOffset?>?>(null)
+            var menu by mutableStateOf<Triple<Int, TuiPopupAnchor, IntOffset?>?>(null)
+            var menuGeneration by mutableStateOf(0L)
             runMosaicTest(MosaicSnapshots) {
                 setContentAndSnapshot {
                     val scope = rememberCoroutineScope()
@@ -188,17 +188,25 @@ val docsHistoryRecordingTest by testSuite {
                                 selected.rootAgent, 80, 17, io.github.stream29.kodex.cli.settings.NewLineKey.ShiftEnter,
                                 RuntimeConfigurationDropdowns.remember(selected.rootAgent),
                                 RuntimeConfigurationDropdowns.remember("suggestions"),
-                                { target, _, anchor, position -> menu = Triple(target, anchor, position) }, {}, {}, {},
+                                { generation, index, _, anchor, position ->
+                                    menuGeneration = generation
+                                    menu = Triple(index, anchor, position)
+                                }, {}, {}, {},
                             )
                         }
                         menu?.let { (target, anchor, position) ->
                             HistoryEntryContextMenuPopup(
                                 anchor, position, { menu = null },
-                                { selected.rootAgent.requestHistoryRevert(target); menu = null },
+                                {
+                                    selected.rootAgent.requestHistoryRevert(target + 1, menuGeneration)
+                                    menu = null
+                                },
                                 {
                                     menu = null
                                     scope.launch {
-                                        val fork = store.open(selected.fork(selected.rootAgent, target))
+                                        val fork = store.open(
+                                            selected.fork(selected.rootAgent, target + 1, menuGeneration),
+                                        )
                                         tabs = tabs + fork
                                         selected = fork
                                     }

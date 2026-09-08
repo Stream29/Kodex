@@ -6,7 +6,6 @@ import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.revert
-import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
 import io.github.stream29.kodex.app.session.contract.PersistedSessionNotification
@@ -302,21 +301,23 @@ private class PersistedSessionViewModelImpl(
 
     override suspend fun fork(
         source: AgentViewModel,
-        target: AgentHistoryTarget,
+        untilExclusive: Int,
+        expectedGeneration: Long,
     ): Int = reportForkFailure {
-        forkHistory(source, target)
+        forkHistory(source, untilExclusive, expectedGeneration)
     }
 
     private suspend fun forkHistory(
         source: AgentViewModel,
-        target: AgentHistoryTarget,
+        untilExclusive: Int,
+        expectedGeneration: Long,
     ): Int = mutex.withLock {
         ensureOpen()
         require(source === rootAgent) {
             "Fork source is not owned by this persisted Session."
         }
-        require(source.history.contains(target.generation, target.storageIndex)) {
-            "Fork target is stale."
+        require(source.history.historyItems.value.generation == expectedGeneration) {
+            "Fork generation is stale."
         }
         require(
             !source.execution.value.running &&
@@ -324,16 +325,10 @@ private class PersistedSessionViewModelImpl(
         ) {
             "Cannot fork a running or unavailable Agent."
         }
-        val sourceIndex = target.untilExclusive - 1
+        val sourceIndex = untilExclusive - 1
         val sourceStorage = rootSession.runtime.storage
-        require(sourceStorage.latestIndex() >= sourceIndex) {
-            "Fork boundary is outside the source storage."
-        }
-        require(
-            sourceStorage.index.getExact(sourceIndex) != null ||
-                sourceStorage.work.getExact(sourceIndex) != null,
-        ) {
-            "Fork history entry $sourceIndex is no longer committed."
+        require(untilExclusive > 0 && sourceStorage.latestIndex() >= sourceIndex) {
+            "Fork boundary must preserve initialization and be within the source storage."
         }
         val targetIndex = repository.createFork(
             sourceEntryIndex = sessionIndex,
@@ -343,7 +338,7 @@ private class PersistedSessionViewModelImpl(
             try {
                 targetSession.runtime.modify { storage ->
                     val boundary = storage.settings[sourceIndex]
-                    storage.revert(target.untilExclusive)
+                    storage.revert(untilExclusive)
                     val latest = storage.latestIndex()
                     val baseTitle = boundary.threadName.trim().ifEmpty {
                         "Session $targetIndex"

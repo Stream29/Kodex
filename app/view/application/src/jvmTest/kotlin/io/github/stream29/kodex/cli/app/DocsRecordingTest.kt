@@ -273,7 +273,7 @@ val docsRecordingTest by testSuite {
                             model, 80, 18, NewLineKey.ShiftEnter,
                             RuntimeConfigurationDropdowns.remember(model),
                             RuntimeConfigurationDropdowns.remember("suggestions"),
-                            { _, _, _, _ -> }, {}, {}, {},
+                            { _, _, _, _, _ -> }, {}, {}, {},
                         )
                     }
                 }

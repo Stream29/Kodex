@@ -2,7 +2,6 @@ package io.github.stream29.kodex.cli.app
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
 import io.github.stream29.kodex.cli.settings.openGlobalSettings
 import io.github.stream29.kodex.hook.contract.HookBody
@@ -95,7 +94,7 @@ val unhandledErrorReportingTest by testSuite(
             val session = app.viewModel.materializeNewSession(0)
             session.updateWorkingDirectory(sourceCwd)
             val revertFailure = assertFailsWith<IllegalArgumentException> {
-                session.rootAgent.requestHistoryRevert(AgentHistoryTarget(999, 999))
+                session.rootAgent.requestHistoryRevert(untilExclusive = 1000, expectedGeneration = 999)
             }
             assertReported(revertFailure, sourceCwd, 3)
 

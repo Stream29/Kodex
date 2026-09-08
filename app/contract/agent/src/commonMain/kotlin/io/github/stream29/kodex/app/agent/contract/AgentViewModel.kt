@@ -104,8 +104,18 @@ public interface AgentViewModel :
     /** Updates only the thread name on the latest persisted settings snapshot. */
     public suspend fun renameThread(threadName: String): Unit
 
-    /** Opens an Agent-owned confirmation and returns its request id. */
-    public fun requestHistoryRevert(target: AgentHistoryTarget): Long
+    /** Opens an Agent-owned confirmation for an exclusive storage boundary. */
+    public fun requestHistoryRevert(untilExclusive: Int, expectedGeneration: Long): Long
+
+    /**
+     * Removes records at or after [untilExclusive], without requesting confirmation.
+     * The boundary must preserve initialization (index zero), but need not name a history row.
+     * Rejects a stale [expectedGeneration], an unavailable Agent, or an out-of-range boundary.
+     *
+     * Returns on success and throws on failure. An accepted operation belongs to this Agent's
+     * lifetime, so cancelling the caller stops waiting without cancelling the owned revert.
+     */
+    public suspend fun revertHistory(untilExclusive: Int, expectedGeneration: Long): Unit
 
     public fun dismissHistoryRevert(requestId: Long): Unit
 

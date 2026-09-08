@@ -9,9 +9,12 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import com.jakewharton.mosaic.LocalTerminalState
 import com.jakewharton.mosaic.animation.animateIntAsState
+import com.jakewharton.mosaic.focus.FocusRequester
 import com.jakewharton.mosaic.layout.background
 import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.layout.height
@@ -26,10 +29,12 @@ import com.jakewharton.mosaic.ui.Spacer
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
-import io.github.stream29.kodex.app.agent.contract.AgentHistoryTarget
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
+import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.app.application.contract.SidebarSettingsViewModel
@@ -175,6 +180,9 @@ public fun SessionTreeCliScreen(
     val selected = navigation.selected
     val selectedPersisted = selected as? PersistedSessionViewModel
     val selectedAgent = selectedPersisted?.rootAgent
+    val currentSelectedAgent by rememberUpdatedState(selectedAgent)
+    val composerFocusRequester = remember(selectedAgent) { FocusRequester() }
+    val currentComposerFocusRequester by rememberUpdatedState(composerFocusRequester)
     val settingsOwner: AgentSettingsViewModel? =
         selectedAgent ?: (selected as? NewSessionViewModel)
     val runtimeDropdowns = RuntimeConfigurationDropdowns.remember(settingsOwner)
@@ -491,7 +499,8 @@ public fun SessionTreeCliScreen(
                                             newLineKey = currentNewLineKey,
                                             dropdowns = runtimeDropdowns,
                                             suggestionDropdowns = suggestionDropdowns,
-                                            onOpenHistoryEntryContextMenu = { target, item, anchor, position ->
+                                            composerFocusRequester = composerFocusRequester,
+                                            onOpenHistoryEntryContextMenu = { generation, storageIndex, item, anchor, position ->
                                                 tabMenu = null
                                                 shellSessionMenu = null
                                                 shellSessionHoverCloseJob?.cancel()
@@ -501,7 +510,8 @@ public fun SessionTreeCliScreen(
                                                 historyMenu = HistoryEntryMenuRequest(
                                                     session = selected,
                                                     agent = agent,
-                                                    target = target,
+                                                    generation = generation,
+                                                    storageIndex = storageIndex,
                                                     item = item,
                                                     anchor = anchor,
                                                     clickPosition = position,
@@ -824,18 +834,37 @@ public fun SessionTreeCliScreen(
                 onRevert = { request ->
                     historyMenu = null
                     try {
-                        request.agent.requestHistoryRevert(request.target)
+                        request.agent.requestHistoryRevert(request.storageIndex + 1, request.generation)
                     } catch (cancellation: CancellationException) {
                         throw cancellation
                     } catch (_: Throwable) {
                         // The Agent reports rejected history operations.
                     }
                 },
+                onRevertAndEdit = { request, text ->
+                    historyMenu = null
+                    scope.launch {
+                        try {
+                            revertAndEdit(request.agent, request.storageIndex, request.generation, text)
+                            // Let the closed menu dispose before moving focus out of its restore target.
+                            withFrameNanos { }
+                            if (currentSelectedAgent === request.agent) {
+                                currentComposerFocusRequester.requestFocus()
+                            }
+                        } catch (failure: CancellationException) {
+                            throw failure
+                        } catch (_: Throwable) {
+                            // Revert failures are reported by the Agent; the draft is left unchanged.
+                        }
+                    }
+                },
                 onFork = { request ->
                     historyMenu = null
                     scope.launch {
                         try {
-                            val index = request.session.fork(request.agent, request.target)
+                            val index = request.session.fork(
+                                request.agent, request.storageIndex + 1, request.generation,
+                            )
                             viewModel.openSession(index)
                         } catch (failure: CancellationException) {
                             throw failure
@@ -1430,6 +1459,7 @@ private fun BoxScope.HistoryEntryContextMenu(
     selectedAgent: AgentViewModel?,
     onDismiss: () -> Unit,
     onRevert: (HistoryEntryMenuRequest) -> Unit,
+    onRevertAndEdit: (HistoryEntryMenuRequest, String) -> Unit,
     onFork: (HistoryEntryMenuRequest) -> Unit,
 ) {
     val current = request ?: return
@@ -1442,10 +1472,10 @@ private fun BoxScope.HistoryEntryContextMenu(
             execution.capabilities.canReplaceHistory &&
             execution.capabilities.canForkHistory &&
             historyItems.size > 0 &&
-            current.target.generation == historyItems.generation &&
+            current.generation == historyItems.generation &&
             current.agent.history.contains(
-                current.target.generation,
-                current.target.storageIndex,
+                current.generation,
+                current.storageIndex,
             )
     val anchorPlaced = current.anchor.isPlaced
     LaunchedEffect(current, targetMatches, anchorPlaced) {
@@ -1454,6 +1484,8 @@ private fun BoxScope.HistoryEntryContextMenu(
     if (!targetMatches || !anchorPlaced) return
 
     val message = current.item as? MessageHistoryItemViewModel
+    val messageState = message?.state?.collectAsState()?.value
+    val editText = messageState.revertAndEditText()
     val timestamp = rememberMenuTimestamp(current) { message?.readTimestamp() }
     HistoryEntryContextMenuPopup(
         anchor = current.anchor,
@@ -1461,6 +1493,7 @@ private fun BoxScope.HistoryEntryContextMenu(
         onDismiss = onDismiss,
         onRevert = { onRevert(current) },
         onFork = { onFork(current) },
+        onRevertAndEdit = editText?.let { text -> { onRevertAndEdit(current, text) } },
         messageIndex = message?.index,
         timestamp = timestamp,
     )
@@ -1480,6 +1513,7 @@ internal fun BoxScope.HistoryEntryContextMenuPopup(
     onFork: () -> Unit,
     messageIndex: Int? = null,
     timestamp: String? = null,
+    onRevertAndEdit: (() -> Unit)? = null,
 ) {
     TuiContextMenu(
         expanded = true,
@@ -1502,6 +1536,11 @@ internal fun BoxScope.HistoryEntryContextMenuPopup(
         TuiPopupMenuItem(key = "fork-from-here", onClick = onFork) {
             Text("Fork from here")
         }
+        if (onRevertAndEdit != null) {
+            TuiPopupMenuItem(key = "revert-and-edit", onClick = onRevertAndEdit) {
+                Text("Revert and edit")
+            }
+        }
     }
 }
 
@@ -1517,12 +1556,7 @@ internal fun BoxScope.AgentHistoryRevertDialog(agent: AgentViewModel?) {
     val targetMatches =
         !execution.running &&
             execution.capabilities.canReplaceHistory &&
-            historyItems.size > 0 &&
-            confirm.target.generation == historyItems.generation &&
-            agent.history.contains(
-                confirm.target.generation,
-                confirm.target.storageIndex,
-            )
+            confirm.expectedGeneration == historyItems.generation
     LaunchedEffect(agent, confirm.requestId, targetMatches) {
         if (!targetMatches) agent.dismissHistoryRevert(confirm.requestId)
     }
@@ -1589,11 +1623,36 @@ private class SessionCatalogMenuRequest(
 private class HistoryEntryMenuRequest(
     val session: PersistedSessionViewModel,
     val agent: AgentViewModel,
-    val target: AgentHistoryTarget,
+    val generation: Long,
+    val storageIndex: Int,
     val item: io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel,
     val anchor: TuiPopupAnchor,
     val clickPosition: IntOffset?,
 )
+
+/** Only original, entirely textual user content can round-trip through the main composer. */
+internal fun MessageHistoryItemState?.revertAndEditText(): String? {
+    val message = (this as? MessageHistoryItemState.Ready)?.event as? StableUserMessage ?: return null
+    if (message.content.any { it is ContentItem.InputImage }) return null
+    return message.content.joinToString("") { part ->
+        when (part) {
+            is ContentItem.InputText -> part.text
+            is ContentItem.OutputText -> part.text
+            is ContentItem.InputImage -> error("Image content cannot be edited in the text composer.")
+        }
+    }
+}
+
+/** Frontend composition of the existing history and composer capabilities, never an auto-submit. */
+internal suspend fun revertAndEdit(
+    agent: AgentViewModel,
+    storageIndex: Int,
+    generation: Long,
+    text: String,
+) {
+    agent.revertHistory(storageIndex, generation)
+    agent.composer.update(text, text.length)
+}
 
 private const val SessionTabBarRows: Int = 1
 private val SidebarHoverCloseGrace = 180.milliseconds

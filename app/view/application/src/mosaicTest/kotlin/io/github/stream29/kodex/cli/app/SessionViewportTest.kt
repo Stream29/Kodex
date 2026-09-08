@@ -77,7 +77,7 @@ val sessionViewportTest by testSuite {
                                 newLineKey = NewLineKey.ShiftEnter,
                                 dropdowns = RuntimeConfigurationDropdowns.remember(agent),
                                 suggestionDropdowns = RuntimeConfigurationDropdowns.remember("suggestions"),
-                                onOpenHistoryEntryContextMenu = { _, _, _, _ -> },
+                                onOpenHistoryEntryContextMenu = { _, _, _, _, _ -> },
                                 onBrowseWorkingDirectory = {},
                                 onBrowseSuggestedWorkingDirectory = {},
                                 onOpenSettings = {},

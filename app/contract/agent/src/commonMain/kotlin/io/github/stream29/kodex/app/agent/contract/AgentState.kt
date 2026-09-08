@@ -69,28 +69,14 @@ public interface AgentShellSessionRegistry {
     public val activeSessions: StateFlow<Map<Int, AgentShellSession>>
 }
 
-/** One committed history boundary selected for revert or fork. */
-public data class AgentHistoryTarget(
-    public val generation: Long,
-    public val storageIndex: Int,
-) {
-    init {
-        require(generation >= 0) { "A history target generation must not be negative." }
-        require(storageIndex in 0 until Int.MAX_VALUE) {
-            "A history target must have a non-negative finite successor."
-        }
-    }
-
-    public val untilExclusive: Int = storageIndex + 1
-}
-
 /** Agent-owned confirmation state for a destructive history revert. */
 public sealed interface AgentHistoryActionState {
     public data object None : AgentHistoryActionState
 
     public data class ConfirmRevert(
         public val requestId: Long,
-        public val target: AgentHistoryTarget,
+        public val untilExclusive: Int,
+        public val expectedGeneration: Long,
     ) : AgentHistoryActionState {
         init {
             require(requestId > 0) { "An Agent history request id must be positive." }
