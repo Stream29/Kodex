@@ -46,7 +46,7 @@ val agentHistoryActionTest by testSuite {
             val session = store.open(index)
             val agent = session.rootAgent
             try {
-                val initialGeneration = agent.history.awaitStorageIndex(4)
+                val initialGeneration = agent.history.awaitStorageIndex(2)
                 val requestId = agent.requestHistoryRevert(
                     AgentHistoryTarget(initialGeneration, storageIndex = 2),
                 )
@@ -74,6 +74,7 @@ val agentHistoryActionTest by testSuite {
                 }
                 val changedGeneration = agent.history.awaitStorageIndex(3)
                 assertEquals(currentGeneration, changedGeneration)
+                agent.history.awaitStorageIndex(2)
                 val staleRequest = agent.requestHistoryRevert(
                     AgentHistoryTarget(currentGeneration, storageIndex = 2),
                 )
@@ -144,7 +145,7 @@ val agentHistoryActionTest by testSuite {
             val store = testSessionViewModelRegistry(repository, this)
             val agent = store.open(index).rootAgent
             try {
-                val generation = agent.history.awaitStorageIndex(4)
+                val generation = agent.history.awaitStorageIndex(2)
                 val requestId = agent.requestHistoryRevert(
                     AgentHistoryTarget(generation, storageIndex = 2),
                 )
@@ -174,6 +175,8 @@ private fun userMessage(text: String): StableUserMessage =
 
 private suspend fun AgentHistoryViewModel.awaitStorageIndex(storageIndex: Int): Long =
     withContext(Dispatchers.Default) {
+        // A context action targets a materialized row, not an arbitrary stored index.
+        requestScrollToStorageIndex(storageIndex)
         withTimeout(5.seconds) {
             historyItems.first { window ->
                 contains(window.generation, storageIndex)

@@ -115,7 +115,7 @@ val fileSystemSessionViewModelOwnershipTest by testSuite {
                         assertFalse(entries.single { it.entryIndex == targetIndex }.archived)
                         val target = inspection.open(targetIndex)
                         assertEquals("fork-cwd", target.storage.settings[2].cwd.toString())
-                        assertEquals("Source", target.storage.settings[2].threadName)
+                        assertEquals("[fork] Source", target.storage.settings[2].threadName)
                     } finally {
                         inspection.cancelAndJoin()
                     }
