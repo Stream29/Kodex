@@ -96,7 +96,7 @@ public class OpenAiClient(
             }
             retryOnExceptionIf { request, cause ->
                 val state = request.attributes.getOrNull(RemoteCompactionRetryBudgetKey)
-                val retryable = cause.isRetryableOpenAiTransportException(config.retry)
+                val retryable = cause.isRetryableOpenAiException(config.retry)
                 if (retryable && state != null) {
                     state.reserveRetry(
                         termination = "transport_exception",
@@ -339,7 +339,7 @@ private fun HttpClient.streamResponseEvents(
         .mapNotNull { event -> event.data?.takeIf { it != "[DONE]" } }
         .map { data -> OpenAiJsonCodec.decodeFromString<ResponsesStreamEvent>(data) }
         .catch { cause ->
-            if (!cause.isRetryableOpenAiTransportException(retry)) {
+            if (!cause.isRetryableOpenAiException(retry)) {
                 throw cause
             }
         }
@@ -613,7 +613,7 @@ internal suspend fun <T> retryOpenAiStreamingTransportWithBudget(
                 if (cause is CancellationException) {
                     throw cause
                 }
-                val retryable = cause.isRetryableOpenAiStreamingException(retry)
+                val retryable = cause.isRetryableOpenAiException(retry)
                 val termination = cause.remoteCompactionTermination()
                 if (!retryable) {
                     budget.logFinalFailure(termination, retryable = false)
@@ -650,7 +650,7 @@ private fun Throwable.remoteCompactionTermination(): String = when (this) {
     else -> "transport_error"
 }
 
-private fun Throwable.isRetryableOpenAiStreamingException(
+internal fun Throwable.isRetryableOpenAiException(
     retry: OpenAiClientRetryConfig,
 ): Boolean {
     val cause = openAiRootCause()
