@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.files.Path
 import kotlin.random.Random
 import kotlin.time.Duration
@@ -253,8 +254,10 @@ private data class ProcessSessionOutput(
 )
 
 private suspend fun ProcessSession.readOutput(yieldTime: Duration): ProcessSessionOutput {
-    val output = stdout.read(yieldTime).renderedBytes().decodeToString()
-    val completedExitCode = if (this.exitCode.isCompleted) this.exitCode.await() else null
+    // ShellClient keeps collecting bounded output and flushes it before completing
+    // exitCode. Output arrival alone must not end the tool's yield window.
+    val completedExitCode = withTimeoutOrNull(yieldTime) { exitCode.await() }
+    val output = stdout.drain().renderedBytes().decodeToString()
     return ProcessSessionOutput(output = output, exitCode = completedExitCode)
 }
 

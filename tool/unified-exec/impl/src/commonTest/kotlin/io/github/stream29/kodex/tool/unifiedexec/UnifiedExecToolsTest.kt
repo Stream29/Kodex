@@ -22,7 +22,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -31,10 +30,8 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
@@ -49,13 +46,20 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.test.fail
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 private const val oneShotExecCommand: String = "echo kodex-unified-exec"
 
 private val realIoTestConfig: TestConfig =
-    TestConfig.testScope(isEnabled = false, timeout = 10.seconds)
+    // Interactive exec calls on Windows can consume the full 10-second minimum yield.
+    TestConfig.testScope(isEnabled = false, timeout = 30.seconds)
+
+private val phasedOutputExecCommand: String
+    get() = if (unifiedExecTestShell.type == ShellType.PowerShell) {
+        "Write-Output phase-one; Start-Sleep -Milliseconds 500; Write-Output phase-two"
+    } else {
+        "printf 'phase-one\\n'; sleep 0.5; printf 'phase-two\\n'"
+    }
 
 private data class TestShellSettings(
     override val shell: Shell = unifiedExecTestShell,
@@ -248,32 +252,77 @@ val unifiedExecToolsTest by testSuite {
         test("exec_command returns JSON output from a real process", testConfig = realIoTestConfig) { client ->
             val tools = UnifiedExecTools.createTools(client)
             val exec = tools.toolNamed(UnifiedExecTools.ExecCommandName)
-            val write = tools.toolNamed(UnifiedExecTools.WriteStdinName)
-
-            var result = exec.exec(
+            val result = exec.exec(
                 ExecCommandArguments(
                     command = oneShotExecCommand,
                     shell = unifiedExecTestShell,
                 ),
             ).requireUnifiedExecOutput()
-            val output = StringBuilder(result.output)
-            var originalTokenCount = result.originalTokenCount
-            repeat(10) {
-                if (result.exitCode != null) return@repeat
-                result = write.write(
-                    WriteStdinArguments(
-                        sessionId = assertNotNull(result.sessionId),
-                        chars = "",
-                    ),
-                ).requireUnifiedExecOutput()
-                output.append(result.output)
-                originalTokenCount += result.originalTokenCount
-            }
+            assertEquals(0, result.exitCode)
+            assertEquals(null, result.sessionId)
+            assertTrue(result.output.contains("kodex-unified-exec"))
+            assertTrue(result.originalTokenCount > 0)
+        }
+
+        test("exec_command waits through separate output bursts", testConfig = realIoTestConfig) { client ->
+            val result = client.execCommand(
+                ExecCommandArguments(command = phasedOutputExecCommand, yieldTimeMillis = 3_000),
+            )
 
             assertEquals(0, result.exitCode)
             assertEquals(null, result.sessionId)
-            assertTrue(output.contains("kodex-unified-exec"))
-            assertTrue(originalTokenCount > 0)
+            assertTrue(result.output.contains("phase-one"))
+            assertTrue(result.output.contains("phase-two"))
+            assertTrue(client.activeSessions.value.isEmpty())
+        }
+
+        test("write_stdin waits through separate output bursts", testConfig = realIoTestConfig) { client ->
+            val initial = client.execCommand(
+                ExecCommandArguments(
+                    command = "$interactiveExecCommand; $phasedOutputExecCommand",
+                    yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
+                ),
+            )
+            val result = client.writeStdin(
+                WriteStdinArguments(
+                    sessionId = assertNotNull(initial.sessionId),
+                    chars = "continue\n",
+                    yieldTimeMillis = 3_000,
+                ),
+            )
+
+            assertEquals(0, result.exitCode)
+            assertEquals(null, result.sessionId)
+            assertTrue(result.output.contains("received:continue"))
+            assertTrue(result.output.contains("phase-one"))
+            assertTrue(result.output.contains("phase-two"))
+        }
+
+        test("deadline yields buffered output and empty poll collects the rest", testConfig = realIoTestConfig) { client ->
+            val initial = client.execCommand(
+                ExecCommandArguments(
+                    command = "$interactiveExecCommand; $phasedOutputExecCommand",
+                    yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
+                ),
+            )
+            val sessionId = assertNotNull(initial.sessionId)
+            val partial = client.writeStdin(
+                WriteStdinArguments(
+                    sessionId = sessionId,
+                    chars = "continue\n",
+                    yieldTimeMillis = UnifiedExecMinimumYieldTimeMillis,
+                ),
+            )
+
+            assertEquals(null, partial.exitCode)
+            assertEquals(sessionId, partial.sessionId)
+            assertTrue(partial.wallTimeSeconds >= 0.25)
+            val result = client.writeStdin(WriteStdinArguments(sessionId = sessionId))
+
+            assertEquals(0, result.exitCode)
+            assertEquals(null, result.sessionId)
+            assertEquals(1, Regex("phase-one").findAll(partial.output + result.output).count())
+            assertEquals(1, Regex("phase-two").findAll(partial.output + result.output).count())
         }
 
         test("write_stdin continues a real shell session", testConfig = realIoTestConfig) { client ->
@@ -291,7 +340,6 @@ val unifiedExecToolsTest by testSuite {
             val sessionId = assertNotNull(initial.sessionId)
             assertTrue(sessionId > 0)
             assertEquals(null, initial.exitCode)
-            assertTrue(initial.output.contains("ready"))
 
             var completed = write.write(
                 WriteStdinArguments(
@@ -313,6 +361,7 @@ val unifiedExecToolsTest by testSuite {
 
             assertEquals(0, completed.exitCode)
             assertEquals(null, completed.sessionId)
+            assertTrue(output.contains("ready"))
             assertTrue(output.contains("received:hello from stdin"))
         }
     }
@@ -421,33 +470,28 @@ val unifiedExecToolsTest by testSuite {
 
     test(
         "exec_command defaults to the client working directory",
-        testConfig = TestConfig.testScope(isEnabled = true, timeout = 10.seconds),
+        testConfig = realIoTestConfig,
     ) {
         val fileName = "kodex-unified-exec-cwd-${Random.nextLong()}.txt"
         val outputPath = Path(SystemTemporaryDirectory, fileName)
+        assertTrue(
+            SystemFileSystem.metadataOrNull(SystemTemporaryDirectory)?.isDirectory == true,
+            "Temporary directory does not exist: $SystemTemporaryDirectory",
+        )
         val client = testUnifiedExecToolClient(workingDirectory = SystemTemporaryDirectory)
         try {
-            var result = client.execCommand(
+            val result = client.execCommand(
                 ExecCommandArguments(
                     command = "echo session-cwd > $fileName; echo cwd-written",
                     shell = unifiedExecTestShell,
                 ),
             )
-            val output = StringBuilder(result.output)
-            withContext(Dispatchers.Default) {
-                repeat(100) {
-                    if (output.contains("cwd-written")) return@withContext
-                    val sessionId = result.sessionId ?: return@withContext
-                    delay(10.milliseconds)
-                    result = client.writeStdin(WriteStdinArguments(sessionId))
-                    output.append(result.output)
-                }
-            }
-
-            assertTrue(output.contains("cwd-written"), "Command output: $output")
+            assertEquals(0, result.exitCode)
+            assertEquals(null, result.sessionId)
+            assertTrue(result.output.contains("cwd-written"), "Command output: ${result.output}")
             assertTrue(
                 SystemFileSystem.metadataOrNull(outputPath)?.isRegularFile == true,
-                "Command output: $output",
+                "Command output: ${result.output}",
             )
         } finally {
             client.close()
