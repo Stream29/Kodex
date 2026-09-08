@@ -2,9 +2,13 @@
 
 Kotlin Multiplatform implementation for Codex.
 
+[UI showcase](https://stream29.github.io/KodexDocs/)
+
 ## Try It
 
-Go to releases.
+Give your coding agent this prompt:
+
+> Install and configure Kodex from https://github.com/Stream29/Kodex for this machine: inspect the latest release, choose the matching native CLI.
 
 ## Reimplementation and Abstraction
 
