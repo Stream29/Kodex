@@ -3,11 +3,13 @@ package io.github.stream29.kodex.agentsession.filesystem
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.reactivecircus.cache4k.CacheEvent
 import io.github.reactivecircus.cache4k.FakeTimeSource
+import io.github.stream29.kodex.agentstorage.contract.CachedIndexVersioned
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemIndexVersioned
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
@@ -15,9 +17,11 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.io.IOException
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.serialization.builtins.serializer
@@ -26,6 +30,8 @@ import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -33,8 +39,152 @@ import kotlin.time.Duration.Companion.seconds
 private const val FirstIndex: Int = 0
 
 val cachedAgentStorageTest by testSuite {
+    test("read-only view shares metadata and all original timeline queries") {
+        withCachedTimeline(initialEntries = listOf(0 to "first", 5 to "fifth")) { fixture ->
+            val view: CachedIndexVersioned<String> = fixture.cached
+            assertSame(fixture.cached.cacheNonce, view.cacheNonce)
+            assertSame(fixture.cached.latestIndex, view.latestIndex)
+            assertEquals(5, view.latestIndex())
+            assertEquals("first", view[3])
+            assertEquals(null, view.getExact(3))
+            assertEquals("fifth", view.getExact(5))
+            assertEquals(0, view.floorToIndex(3))
+            assertEquals(5, view.ceilToIndex(3))
+            assertEquals(listOf(0, 5), view.indexesIn(0..9))
+            assertEquals(listOf(0 to "first", 5 to "fifth"), view.valuesIn(0..9))
+
+            val nonce = view.cacheNonce.value
+            fixture.cached[9] = "ninth"
+            assertEquals(9, view.latestIndex.value)
+            assertEquals("ninth", view.getExact(9))
+            assertEquals(nonce, view.cacheNonce.value)
+            fixture.cached.revert(9)
+            assertEquals(5, view.latestIndex.value)
+            assertNotEquals(nonce, view.cacheNonce.value)
+            assertEquals(null, view.getExact(9))
+
+            fixture.ownerJob.cancelAndJoin()
+            assertFailsWith<IllegalStateException> { view.latestIndex() }
+            assertFailsWith<IllegalStateException> { view.getExact(0) }
+        }
+    }
+
+    for (entries in listOf(emptyList(), listOf(0 to "first", 5 to "fifth"))) {
+        test("metadata initializes from stored indexes ${entries.map { it.first }}") {
+            withCachedTimeline(initialEntries = entries) { fixture ->
+                val expected = entries.lastOrNull()?.first ?: -1
+                assertEquals(expected, fixture.cached.latestIndex.value)
+                assertEquals(expected, fixture.cached.latestIndex.first())
+                assertEquals(expected, fixture.cached.latestIndex())
+                assertEquals(fixture.cached.cacheNonce.value, fixture.cached.cacheNonce.first())
+            }
+        }
+    }
+
+    test("append publishes the sparse tail without replacing cache identity") {
+        withCachedTimeline { fixture ->
+            val nonce = fixture.cached.cacheNonce.value
+            withContext(Dispatchers.Default.limitedParallelism(1)) {
+                withTimeout(2.seconds) {
+                    val published = async(start = CoroutineStart.UNDISPATCHED) {
+                        fixture.cached.latestIndex.first { it == 5 }
+                    }
+                    fixture.cached[5] = "fifth"
+                    assertEquals(5, published.await())
+                }
+            }
+            assertEquals(5, fixture.cached.latestIndex())
+            assertEquals("fifth", fixture.cached.getExact(5))
+            assertEquals(nonce, fixture.cached.cacheNonce.value)
+        }
+    }
+
+    test("destructive revert publishes a different nonce and the remaining tail") {
+        withCachedTimeline(initialEntries = listOf(0 to "first", 5 to "fifth", 9 to "ninth")) { fixture ->
+            val originalNonce = fixture.cached.cacheNonce.value
+            withContext(Dispatchers.Default.limitedParallelism(1)) {
+                withTimeout(2.seconds) {
+                    val changedNonce = async(start = CoroutineStart.UNDISPATCHED) {
+                        fixture.cached.cacheNonce.first { it != originalNonce }
+                    }
+                    val changedTail = async(start = CoroutineStart.UNDISPATCHED) {
+                        fixture.cached.latestIndex.first { it == 5 }
+                    }
+                    fixture.cached.revert(9)
+                    assertNotEquals(originalNonce, changedNonce.await())
+                    assertEquals(5, changedTail.await())
+                }
+            }
+            assertEquals(5, fixture.cached.latestIndex())
+            assertEquals(null, fixture.cached.getExact(9))
+            val previousNonce = fixture.cached.cacheNonce.value
+            fixture.cached.revert(0)
+            assertEquals(-1, fixture.cached.latestIndex.value)
+            assertEquals(-1, fixture.cached.latestIndex())
+            assertNotEquals(previousNonce, fixture.cached.cacheNonce.value)
+        }
+    }
+
+    test("a no-op or rejected revert preserves published metadata") {
+        withCachedTimeline { fixture ->
+            val nonce = fixture.cached.cacheNonce.value
+            fixture.cached.revert(1)
+            fixture.cached.revert(Int.MAX_VALUE)
+            assertFailsWith<IllegalArgumentException> { fixture.cached.revert(-1) }
+            assertEquals(0, fixture.cached.latestIndex.value)
+            assertEquals(nonce, fixture.cached.cacheNonce.value)
+        }
+    }
+
+    test("rebuilding a cache reads the same persisted tail but creates a new in-memory identity") {
+        withCachedTimeline { fixture ->
+            fixture.cached[5] = "fifth"
+            val previousNonce = fixture.cached.cacheNonce.value
+            fixture.ownerJob.cancelAndJoin()
+            val nextOwner = SupervisorJob()
+            try {
+                val rebuilt = CachedIndexVersionedImpl(
+                    ownerScope = CoroutineScope(nextOwner),
+                    delegate = fixture.delegate,
+                    valueCacheSize = 1_024,
+                    indexes = fixture.delegate.storedIndexes(),
+                )
+                assertEquals(5, rebuilt.latestIndex.value)
+                assertNotEquals(previousNonce, rebuilt.cacheNonce.value)
+                assertEquals("fifth", rebuilt.getExact(5))
+            } finally {
+                withContext(NonCancellable) {
+                    nextOwner.cancelAndJoin()
+                }
+            }
+        }
+    }
+
+    test("failed backing append does not publish a new tail or cache identity") {
+        withCachedTimeline { fixture ->
+            val nonce = fixture.cached.cacheNonce.value
+            fixture.fileSystem.failNextMove = true
+            assertFailsWith<IOException> { fixture.cached[5] = "fifth" }
+            assertEquals(0, fixture.cached.latestIndex.value)
+            assertEquals(0, fixture.cached.latestIndex())
+            assertEquals(nonce, fixture.cached.cacheNonce.value)
+        }
+    }
+
+    test("failed backing revert does not publish replacement metadata") {
+        withCachedTimeline(initialEntries = listOf(0 to "first", 5 to "fifth")) { fixture ->
+            val nonce = fixture.cached.cacheNonce.value
+            fixture.fileSystem.failNextMove = true
+            assertFailsWith<IOException> { fixture.cached.revert(5) }
+            assertEquals(5, fixture.cached.latestIndex.value)
+            assertEquals(5, fixture.cached.latestIndex())
+            assertEquals(nonce, fixture.cached.cacheNonce.value)
+        }
+    }
+
     test("actively removes an idle value without a cache access") {
         withCachedTimeline { fixture ->
+            val nonce = fixture.cached.cacheNonce.value
             assertEquals("first", fixture.cached[FirstIndex])
             assertEquals(1, fixture.fileSystem.contentReadCount)
 
@@ -45,6 +195,8 @@ val cachedAgentStorageTest by testSuite {
 
             assertEquals("first", fixture.cached[FirstIndex])
             assertEquals(2, fixture.fileSystem.contentReadCount)
+            assertEquals(nonce, fixture.cached.cacheNonce.value)
+            assertEquals(FirstIndex, fixture.cached.latestIndex.value)
         }
     }
 
@@ -75,6 +227,7 @@ val cachedAgentStorageTest by testSuite {
 
     test("capacity eviction and value expiration work together") {
         withCachedTimeline(valueCacheSize = 1) { fixture ->
+            val nonce = fixture.cached.cacheNonce.value
             assertEquals("first", fixture.cached[FirstIndex])
 
             fixture.cached[1] = "second"
@@ -93,6 +246,8 @@ val cachedAgentStorageTest by testSuite {
             }
             assertEquals("first", fixture.cached[FirstIndex])
             assertEquals(3, fixture.fileSystem.contentReadCount)
+            assertEquals(nonce, fixture.cached.cacheNonce.value)
+            assertEquals(1, fixture.cached.latestIndex.value)
         }
     }
 
@@ -142,7 +297,8 @@ val cachedAgentStorageTest by testSuite {
 }
 
 private class CachedTimelineFixture(
-    val cached: CachedIndexVersioned<String>,
+    val cached: CachedIndexVersionedImpl<String>,
+    val delegate: FileSystemIndexVersioned<String>,
     val timeSource: FakeTimeSource,
     val fileSystem: TrackingFileSystem,
     val ownerJob: kotlinx.coroutines.Job,
@@ -151,6 +307,7 @@ private class CachedTimelineFixture(
 
 private suspend inline fun <R> withCachedTimeline(
     valueCacheSize: Int = 1_024,
+    initialEntries: List<Pair<Int, String>> = listOf(FirstIndex to "first"),
     crossinline block: suspend (CachedTimelineFixture) -> R,
 ): R {
     val root = Path(
@@ -164,17 +321,17 @@ private suspend inline fun <R> withCachedTimeline(
         json = Json,
         fileSystem = fileSystem,
     )
-    delegate.setUnsafe(FirstIndex, "first")
+    initialEntries.forEach { (index, value) -> delegate.setUnsafe(index, value) }
 
     val ownerJob = SupervisorJob()
     val ownerScope = CoroutineScope(ownerJob)
     val timeSource = FakeTimeSource()
     val events = Channel<CacheEvent<Int, String>>(Channel.UNLIMITED)
-    val cached = CachedIndexVersioned(
+    val cached = CachedIndexVersionedImpl(
         ownerScope = ownerScope,
         delegate = delegate,
         valueCacheSize = valueCacheSize,
-        indexes = listOf(FirstIndex),
+        indexes = initialEntries.map { it.first },
         timeSource = timeSource,
         cleanupInterval = 1.milliseconds,
         cacheEventListener = { event ->
@@ -183,6 +340,7 @@ private suspend inline fun <R> withCachedTimeline(
     )
     val fixture = CachedTimelineFixture(
         cached = cached,
+        delegate = delegate,
         timeSource = timeSource,
         fileSystem = fileSystem,
         ownerJob = ownerJob,
@@ -206,8 +364,17 @@ private class TrackingFileSystem(
     var contentReadCount: Int = 0
         private set
     var suspendContentReads: Boolean = false
+    var failNextMove: Boolean = false
     val contentReadStarted = CompletableDeferred<Unit>()
     val allowContentRead = CompletableDeferred<Unit>()
+
+    override suspend fun atomicMove(source: Path, destination: Path) {
+        if (failNextMove) {
+            failNextMove = false
+            throw IOException("Injected metadata test failure before move")
+        }
+        delegate.atomicMove(source, destination)
+    }
 
     override suspend fun readString(path: Path): String {
         if (path.name != "latest.json") {

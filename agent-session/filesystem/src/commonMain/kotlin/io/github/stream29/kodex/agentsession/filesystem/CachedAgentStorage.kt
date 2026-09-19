@@ -3,8 +3,10 @@ package io.github.stream29.kodex.agentsession.filesystem
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.contract.CachedIndexVersioned
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
+import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemIndexVersioned
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -16,9 +18,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.random.Random
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
@@ -47,44 +53,44 @@ internal class CachedAgentStorage internal constructor(
     private val ownerScope: CoroutineScope,
     internal val backing: FileSystemAgentStorage,
     private val backingUri: String,
-    private val cachedIndex: MutableIndexVersioned<CleanIndexEntry>,
-    private val cachedWork: MutableIndexVersioned<StableWorkEvent>,
-    private val cachedSettings: MutableIndexVersioned<KodexAgentSettings>,
-    private val cachedTimestamp: MutableIndexVersioned<kotlin.time.Instant>,
-    private val cachedTokenCount: MutableIndexVersioned<Long>,
-    private val cachedUnstable: MutableIndexVersioned<List<UnstableCleanEvent>>,
-) : MutableKodexAgentStorage {
+    private val cachedIndex: CachedIndexVersionedImpl<CleanIndexEntry>,
+    private val cachedWork: CachedIndexVersionedImpl<StableWorkEvent>,
+    private val cachedSettings: CachedIndexVersionedImpl<KodexAgentSettings>,
+    private val cachedTimestamp: CachedIndexVersionedImpl<kotlin.time.Instant>,
+    private val cachedTokenCount: CachedIndexVersionedImpl<Long>,
+    private val cachedUnstable: CachedIndexVersionedImpl<List<UnstableCleanEvent>>,
+) : MutableKodexAgentStorage, ObservableKodexAgentStorage {
     override val uri: String
         get() {
             requireActive()
             return backingUri
         }
-    override val index: MutableIndexVersioned<CleanIndexEntry>
+    override val index: CachedIndexVersionedImpl<CleanIndexEntry>
         get() {
             requireActive()
             return cachedIndex
         }
-    override val work: MutableIndexVersioned<StableWorkEvent>
+    override val work: CachedIndexVersionedImpl<StableWorkEvent>
         get() {
             requireActive()
             return cachedWork
         }
-    override val settings: MutableIndexVersioned<KodexAgentSettings>
+    override val settings: CachedIndexVersionedImpl<KodexAgentSettings>
         get() {
             requireActive()
             return cachedSettings
         }
-    override val timestamp: MutableIndexVersioned<kotlin.time.Instant>
+    override val timestamp: CachedIndexVersionedImpl<kotlin.time.Instant>
         get() {
             requireActive()
             return cachedTimestamp
         }
-    override val tokenCount: MutableIndexVersioned<Long>
+    override val tokenCount: CachedIndexVersionedImpl<Long>
         get() {
             requireActive()
             return cachedTokenCount
         }
-    override val unstable: MutableIndexVersioned<List<UnstableCleanEvent>>
+    override val unstable: CachedIndexVersionedImpl<List<UnstableCleanEvent>>
         get() {
             requireActive()
             return cachedUnstable
@@ -98,10 +104,10 @@ internal class CachedAgentStorage internal constructor(
 private suspend fun <T : Any> FileSystemIndexVersioned<T>.cached(
     ownerScope: CoroutineScope,
     valueCacheSize: Int,
-): CachedIndexVersioned<T> {
+): CachedIndexVersionedImpl<T> {
     val indexes = storedIndexes()
     reconcileLatestIndexUnsafe(indexes.lastOrNull() ?: -1)
-    return CachedIndexVersioned(
+    return CachedIndexVersionedImpl(
         ownerScope = ownerScope,
         delegate = this,
         valueCacheSize = valueCacheSize,
@@ -109,7 +115,7 @@ private suspend fun <T : Any> FileSystemIndexVersioned<T>.cached(
     )
 }
 
-internal class CachedIndexVersioned<T : Any>(
+internal class CachedIndexVersionedImpl<T : Any>(
     ownerScope: CoroutineScope,
     private val delegate: FileSystemIndexVersioned<T>,
     private val valueCacheSize: Int,
@@ -117,7 +123,16 @@ internal class CachedIndexVersioned<T : Any>(
     timeSource: TimeSource = TimeSource.Monotonic,
     cleanupInterval: Duration = CachedValueTtl,
     cacheEventListener: CacheEventListener<Int, T>? = null,
-) : MutableIndexVersioned<T>, CoroutineScope by ownerScope.supervisorChildScope() {
+) : MutableIndexVersioned<T>, CachedIndexVersioned<T>, CoroutineScope by ownerScope.supervisorChildScope() {
+    private val mutableCacheNonce = MutableStateFlow(Random.nextLong())
+    private val mutableLatestIndex = MutableStateFlow(indexes.lastOrNull() ?: -1)
+
+    /** In-memory cache identity; value eviction is not a timeline replacement. */
+    override val cacheNonce: StateFlow<Long> = mutableCacheNonce.asStateFlow()
+
+    /** Published tail of this timeline, independent of the Agent's global storage index. */
+    override val latestIndex: StateFlow<Int> = mutableLatestIndex.asStateFlow()
+
     private val indexes = SafeRw<List<Int>, MutableList<Int>>(
         indexes.toMutableList(),
     )
@@ -259,6 +274,7 @@ internal class CachedIndexVersioned<T : Any>(
                     }
                 }
                 cache += index
+                mutableLatestIndex.value = index
             }
         }
     }
@@ -273,6 +289,13 @@ internal class CachedIndexVersioned<T : Any>(
                 if (suffixStart < cache.size) {
                     values.invalidateAll()
                     cache.subList(suffixStart, cache.size).clear()
+                    val previousNonce = mutableCacheNonce.value
+                    var nextNonce: Long
+                    do {
+                        nextNonce = Random.nextLong()
+                    } while (nextNonce == previousNonce)
+                    mutableCacheNonce.value = nextNonce
+                    mutableLatestIndex.value = cache.lastOrNull() ?: -1
                 }
             }
         }
