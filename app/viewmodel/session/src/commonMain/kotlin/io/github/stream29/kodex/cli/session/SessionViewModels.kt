@@ -616,8 +616,10 @@ private class SessionCatalogViewModelImpl(
                 SessionCatalogEntry(
                     sessionIndex = entry.entryIndex,
                     threadName = entry.threadName,
-                    lastActivityAt = entry.lastActivityAt,
+                    updatedAt = entry.lastActivityAt,
                     archived = entry.archived,
+                    running = entry.running,
+                    isActive = entry.isActive,
                 )
             }
             rootEntries = entries.associateBy { entry -> entry.entryIndex }

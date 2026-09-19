@@ -37,7 +37,8 @@ val sessionTabBarTest by testSuite {
         val fullLabel = SessionCatalogEntry(
             sessionIndex = 7,
             threadName = "Review session title catalog",
-            lastActivityAt = Instant.parse("2026-07-31T10:25:00Z"),
+            createdAt = Instant.parse("2026-07-01T00:00:00Z"),
+            updatedAt = Instant.parse("2026-07-31T10:25:00Z"),
         ).sessionBrowserLabel(80, now)
         assertEquals(
             "Review session title catalog 5m ago",
@@ -52,7 +53,8 @@ val sessionTabBarTest by testSuite {
             SessionCatalogEntry(
                 sessionIndex = 7,
                 threadName = "Review session title catalog",
-                lastActivityAt = Instant.parse("2026-07-31T10:25:00Z"),
+                createdAt = Instant.parse("2026-07-01T00:00:00Z"),
+                updatedAt = Instant.parse("2026-07-31T10:25:00Z"),
             ).sessionBrowserLabel(18, now).text,
         )
         assertEquals(

@@ -10,6 +10,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomT
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -25,6 +26,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
@@ -36,6 +38,7 @@ import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.test.assertNotEquals
@@ -83,6 +86,67 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
     testFixture { temporaryRepositoryRoot() } closeWith {
         deleteRecursively(this)
     } asParameterForEach {
+        test("catalog samples residency and running without activating entries") { root ->
+            val entered = CompletableDeferred<Unit>()
+            val client = mockOpenAiClient {
+                createResponse { _, _, _, _ ->
+                    flow {
+                        entered.complete(Unit)
+                        awaitCancellation()
+                    }
+                }
+            }
+            val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies(client))
+            try {
+                val index = repository.create()
+                val unopened = repository.listEntries().single()
+                assertFalse(unopened.isActive)
+                assertFalse(unopened.running)
+                assertFalse(repository.getEntry(index).isActive)
+
+                val session = repository.open(index)
+                session.runtime.modify { it.initialize(settings("root")) }
+                assertSame(session, repository.open(index))
+                val idle = repository.getEntry(index)
+                assertTrue(idle.isActive)
+                assertFalse(idle.running)
+                assertFalse(unopened.isActive)
+
+                idle.archive()
+                session.runtime.appendUserMessage(listOf(ContentItem.InputText("Start a turn.")))
+                val turn = async { session.runtime.resume() }
+                try {
+                    entered.await()
+                    assertEquals(emptyList(), repository.listEntries(includeArchived = false))
+                    val running = repository.listEntries(includeArchived = true).single()
+                    assertTrue(running.archived)
+                    assertTrue(running.isActive)
+                    assertTrue(running.running)
+                    assertTrue(repository.getEntry(index).running)
+                    assertFalse(idle.running)
+                    turn.cancelAndJoin()
+                    assertTrue(running.running)
+                    assertFalse(repository.getEntry(index).running)
+                    assertTrue(repository.getEntry(index).isActive)
+                } finally {
+                    turn.cancelAndJoin()
+                }
+
+                session.coroutineContext[Job]!!.cancelAndJoin()
+                val closed = repository.listEntries(includeArchived = true).single()
+                assertFalse(closed.isActive)
+                assertFalse(closed.running)
+                assertFalse(repository.getEntry(index).isActive)
+                val reopened = repository.open(index)
+                assertTrue(reopened !== session)
+                assertSame(reopened, repository.open(index))
+                assertTrue(repository.getEntry(index).isActive)
+                assertFalse(repository.getEntry(index).running)
+            } finally {
+                repository.closeAndJoin()
+            }
+        }
+
         test("cache key survives reopen and default fork uses its own thread") { root ->
             for (override in listOf(null, "explicit")) {
                 val requests = mutableListOf<ResponsesApiRequest>()
@@ -133,6 +197,49 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             assertEquals(0, session.storage.latestIndex())
             assertEquals(0L, session.storage.tokenCount[0])
             repository.closeAndJoin()
+        }
+
+        test("session storage exposes the same six cached timelines through its read-only view") { root ->
+            val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            try {
+                val session = repository.open(repository.create())
+                val writable = session.storage
+                val view = assertIs<ObservableKodexAgentStorage>(writable)
+                assertSame(writable, view)
+                assertEquals(writable.uri, view.uri)
+                val timelines = listOf(
+                    view.index to writable.index,
+                    view.work to writable.work,
+                    view.settings to writable.settings,
+                    view.timestamp to writable.timestamp,
+                    view.tokenCount to writable.tokenCount,
+                    view.unstable to writable.unstable,
+                )
+                for ((observed, original) in timelines) {
+                    assertSame(original, observed)
+                    assertEquals(-1, observed.latestIndex.value)
+                }
+
+                session.runtime.modify { it.initialize(settings("Observed")) }
+                for ((observed, original) in timelines) {
+                    assertEquals(original.latestIndex(), observed.latestIndex.value)
+                    assertEquals(original.getExact(0), observed.getExact(0))
+                }
+                assertEquals("Observed", view.settings[0].threadName)
+                val timestamp = Instant.parse("2026-09-18T00:00:00Z")
+                writable.timestamp[2] = timestamp
+                assertEquals(2, view.timestamp.latestIndex.value)
+                assertEquals(timestamp, view.timestamp.getExact(2))
+                val nonce = view.timestamp.cacheNonce.value
+                writable.timestamp.revert(2)
+                assertEquals(0, view.timestamp.latestIndex.value)
+                assertNotEquals(nonce, view.timestamp.cacheNonce.value)
+
+                session.coroutineContext[Job]?.cancelAndJoin()
+                assertFailsWith<IllegalStateException> { view.timestamp }
+            } finally {
+                repository.closeAndJoin()
+            }
         }
 
         test("persists canonical root layout and lightweight entries") { root ->

@@ -111,9 +111,12 @@ public class FileSystemKodexSessionRepository internal constructor(
             directory = sessionDirectory(entryIndex),
             fileSystem = fileSystem,
         )
+        val owner = openRoots[entryIndex]?.takeIf { it.coroutineContext[Job]?.isActive == true }
         return FileSystemRootSessionEntry(
             delegate = entry,
             archived = archived,
+            isActive = owner != null,
+            running = owner?.runtime?.runningTurn?.value != null,
             updateArchived = { updated ->
                 updateArchiveMarker(entryIndex, updated)
             },
@@ -339,6 +342,8 @@ private data class FileSystemSessionEntry(
 private class FileSystemRootSessionEntry(
     private val delegate: KodexSessionEntry,
     override val archived: Boolean,
+    override val isActive: Boolean,
+    override val running: Boolean,
     private val updateArchived: suspend (Boolean) -> Unit,
 ) :
     KodexRootSessionEntry,

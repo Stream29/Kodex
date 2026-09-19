@@ -47,6 +47,12 @@ public interface KodexRootSessionEntry : KodexSessionEntry {
     /** Whether this root Session was archived when the snapshot was listed. */
     public val archived: Boolean
 
+    /** Whether this repository had a live owner for the entry when this snapshot was read. */
+    public val isActive: Boolean
+
+    /** Root runtime runningTurn presence sampled from that owner, not a live subscription. */
+    public val running: Boolean
+
     /** Creates the idempotent archive marker for this root Session. */
     public suspend fun archive()
 

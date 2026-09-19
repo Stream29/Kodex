@@ -77,6 +77,67 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
     } closeWith {
         cancelAndJoin()
     } asContextForEach {
+        test("catalog samples residency and running without activating entries") {
+            val entered = CompletableDeferred<Unit>()
+            val client = mockOpenAiClient {
+                createResponse { _, _, _, _ ->
+                    flow {
+                        entered.complete(Unit)
+                        awaitCancellation()
+                    }
+                }
+            }
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies(client))
+            try {
+                val index = repository.create()
+                val unopened = repository.listEntries().single()
+                assertFalse(unopened.isActive)
+                assertFalse(unopened.running)
+                assertFalse(repository.getEntry(index).isActive)
+
+                val session = repository.open(index)
+                session.runtime.modify { it.initialize(settings("root")) }
+                assertSame(session, repository.open(index))
+                val idle = repository.getEntry(index)
+                assertTrue(idle.isActive)
+                assertFalse(idle.running)
+                assertFalse(unopened.isActive)
+
+                idle.archive()
+                session.runtime.appendUserMessage(listOf(ContentItem.InputText("Start a turn.")))
+                val turn = async { session.runtime.resume() }
+                try {
+                    entered.await()
+                    assertEquals(emptyList(), repository.listEntries(includeArchived = false))
+                    val running = repository.listEntries(includeArchived = true).single()
+                    assertTrue(running.archived)
+                    assertTrue(running.isActive)
+                    assertTrue(running.running)
+                    assertTrue(repository.getEntry(index).running)
+                    assertFalse(idle.running)
+                    turn.cancelJobAndJoin()
+                    assertTrue(running.running)
+                    assertFalse(repository.getEntry(index).running)
+                    assertTrue(repository.getEntry(index).isActive)
+                } finally {
+                    turn.cancelJobAndJoin()
+                }
+
+                session.cancelAndJoin()
+                val closed = repository.listEntries(includeArchived = true).single()
+                assertFalse(closed.isActive)
+                assertFalse(closed.running)
+                assertFalse(repository.getEntry(index).isActive)
+                val reopened = repository.open(index)
+                assertTrue(reopened !== session)
+                assertSame(reopened, repository.open(index))
+                assertTrue(repository.getEntry(index).isActive)
+                assertFalse(repository.getEntry(index).running)
+            } finally {
+                repository.cancelAndJoin()
+            }
+        }
+
         test("creates an uninitialized root storage") {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val index = repository.create()

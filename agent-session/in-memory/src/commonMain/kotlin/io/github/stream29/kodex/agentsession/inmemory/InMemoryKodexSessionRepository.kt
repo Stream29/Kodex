@@ -62,6 +62,7 @@ public class InMemoryKodexSessionRepository internal constructor(
             if (session.archived && !includeArchived) return@mapNotNull null
             session.rootEntry(
                 entryIndex = entryIndex,
+                owner = openRoots[entryIndex],
                 updateArchived = { updated ->
                     updateArchived(entryIndex, updated)
                 },
@@ -74,6 +75,7 @@ public class InMemoryKodexSessionRepository internal constructor(
             requireOpen()
             requireSession(entryIndex).rootEntry(
                 entryIndex = entryIndex,
+                owner = openRoots[entryIndex],
                 updateArchived = { updated ->
                     updateArchived(entryIndex, updated)
                 },
@@ -217,6 +219,8 @@ private data class InMemorySessionEntry(
 private class InMemoryRootSessionEntry(
     private val delegate: KodexSessionEntry,
     override val archived: Boolean,
+    override val isActive: Boolean,
+    override val running: Boolean,
     private val updateArchived: suspend (Boolean) -> Unit,
 ) :
     KodexRootSessionEntry,
@@ -238,13 +242,19 @@ private suspend fun SessionNode.entry(entryIndex: Int): KodexSessionEntry {
 
 private suspend fun SessionNode.rootEntry(
     entryIndex: Int,
+    owner: KodexAgentSession?,
     updateArchived: suspend (Boolean) -> Unit,
-): KodexRootSessionEntry =
-    InMemoryRootSessionEntry(
-        delegate = entry(entryIndex),
+): KodexRootSessionEntry {
+    val entry = entry(entryIndex)
+    val activeOwner = owner?.takeIf { it.coroutineContext[Job]?.isActive == true }
+    return InMemoryRootSessionEntry(
+        delegate = entry,
         archived = archived,
+        isActive = activeOwner != null,
+        running = activeOwner?.runtime?.runningTurn?.value != null,
         updateArchived = updateArchived,
     )
+}
 
 private fun smallestMissing(values: Iterable<Int>): Int {
     var candidate = 0

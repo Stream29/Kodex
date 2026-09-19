@@ -6,10 +6,17 @@ import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
+import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin as cancelJobAndJoin
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
@@ -19,6 +26,64 @@ import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 val sessionRepositoryViewModelTest by testSuite {
+    test("catalog forwards backend activity snapshots without opening or pinning sessions") {
+        coroutineScope {
+            val entered = CompletableDeferred<Unit>()
+            val client = mockOpenAiClient {
+                createResponse { _, _, _, _ ->
+                    flow {
+                        entered.complete(Unit)
+                        awaitCancellation()
+                    }
+                }
+            }
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies(client))
+            val catalog = createSessionCatalogViewModelFactory(
+                KodexSessionRepositoryFactory { repository },
+                this,
+            ).create(forkSession = { -1 }, deleteSession = { false })
+            try {
+                val index = repository.create()
+                catalog.refresh()
+                val unopened = catalog.state.value.sessions.single()
+                assertEquals(false, unopened.isActive)
+                assertEquals(false, unopened.running)
+                initialize(repository, index, "Root")
+                catalog.refresh()
+                val idle = catalog.state.value.sessions.single()
+                assertEquals(true, idle.isActive)
+                assertEquals(false, idle.running)
+                assertEquals(false, unopened.isActive)
+
+                val session = repository.open(index)
+                session.runtime.appendUserMessage(listOf(ContentItem.InputText("Start a turn.")))
+                val turn = async { session.runtime.resume() }
+                try {
+                    entered.await()
+                    catalog.refresh()
+                    val running = catalog.state.value.sessions.single()
+                    assertEquals(true, running.isActive)
+                    assertEquals(true, running.running)
+                    turn.cancelJobAndJoin()
+                    assertEquals(running, catalog.state.value.sessions.single())
+                } finally {
+                    turn.cancelJobAndJoin()
+                }
+                catalog.refresh()
+                assertEquals(true, catalog.state.value.sessions.single().isActive)
+                assertEquals(false, catalog.state.value.sessions.single().running)
+
+                session.cancelAndJoin()
+                catalog.refresh()
+                assertEquals(false, catalog.state.value.sessions.single().isActive)
+                assertEquals(false, catalog.state.value.sessions.single().running)
+            } finally {
+                catalog.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
     test("catalog publishes loading and orders lightweight entries by activity") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
