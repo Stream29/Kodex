@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.openai
 
+import kotlinx.serialization.Serializable
+
 /**
  * Current credentials available to OpenAI API consumers.
  *
@@ -12,6 +14,7 @@ public sealed interface OpenAiAuthState {
     ) : OpenAiAuthState
 
     /** Stable reason that request credentials are not currently available. */
+    @Serializable
     public enum class Unavailable : OpenAiAuthState {
         /** The owning store has not completed its first credential load. */
         NotLoaded,

@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.openai.accountusage
 
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.Serializable
 import kotlin.time.Instant
 
 /** Observable, non-persistent account usage for the currently authenticated Codex account. */
@@ -62,7 +63,11 @@ public fun CodexAccountUsageState.snapshotOrNull(): CodexAccountUsageSnapshot? =
         is CodexAccountUsageState.Unavailable -> null
     }
 
-/** One atomically published account-usage aggregate. */
+/**
+ * One atomically published account-usage aggregate.
+ * @property tokenUsage Null when token activity is unavailable in this snapshot.
+ */
+@Serializable
 public data class CodexAccountUsageSnapshot(
     public val rateLimits: List<CodexAccountRateLimit>,
     public val resetCredits: CodexRateLimitResetCredits,
@@ -72,12 +77,18 @@ public data class CodexAccountUsageSnapshot(
 )
 
 /** Optional usage sections whose failure does not invalidate the rate-limit snapshot. */
+@Serializable
 public enum class CodexAccountUsageSection {
     ResetCreditDetails,
     TokenUsage,
 }
 
-/** Current status and windows for one backend-defined rate limit. */
+/**
+ * Current status and windows for one backend-defined rate limit.
+ * @property primaryWindow Null when the backend did not supply a primary window.
+ * @property secondaryWindow Null when the backend did not supply a secondary window.
+ */
+@Serializable
 public data class CodexAccountRateLimit(
     public val name: String,
     public val meteredFeature: String,
@@ -88,6 +99,7 @@ public data class CodexAccountRateLimit(
 )
 
 /** Usage and reset timing for one rate-limit window. */
+@Serializable
 public data class CodexAccountRateLimitWindow(
     public val usedPercent: Long,
     public val durationSeconds: Long,
@@ -95,13 +107,25 @@ public data class CodexAccountRateLimitWindow(
     public val resetsAt: Instant,
 )
 
-/** Available reset count and optional backend-provided detail rows. */
+/**
+ * Available reset count and optional backend-provided detail rows.
+ * @property availableCount Null when the available reset count is unknown, not zero.
+ * @property credits Null when detail rows are unavailable, distinct from a known empty list.
+ */
+@Serializable
 public data class CodexRateLimitResetCredits(
     public val availableCount: Long?,
     public val credits: List<CodexRateLimitResetCredit>? = null,
 )
 
-/** One currently available Codex rate-limit reset credit. */
+/**
+ * One currently available Codex rate-limit reset credit.
+ * @property grantedAt Null when no usable grant timestamp was provided.
+ * @property expiresAt Null when no usable expiry timestamp was provided.
+ * @property title Null when no title was provided.
+ * @property description Null when no description was provided.
+ */
+@Serializable
 public data class CodexRateLimitResetCredit(
     public val id: String,
     public val grantedAt: Instant?,
@@ -110,7 +134,16 @@ public data class CodexRateLimitResetCredit(
     public val description: String? = null,
 )
 
-/** Account-wide token activity and optional daily buckets. */
+/**
+ * Account-wide token activity and optional daily buckets.
+ * @property lifetimeTokens Null when the lifetime token count is unavailable.
+ * @property peakDailyTokens Null when the peak daily token count is unavailable.
+ * @property longestRunningTurnSeconds Null when the longest turn duration is unavailable.
+ * @property currentStreakDays Null when the current streak length is unavailable.
+ * @property longestStreakDays Null when the longest streak length is unavailable.
+ * @property dailyUsageBuckets Null when daily buckets are unavailable, not a known empty list.
+ */
+@Serializable
 public data class CodexAccountTokenUsage(
     public val lifetimeTokens: Long? = null,
     public val peakDailyTokens: Long? = null,
@@ -121,6 +154,7 @@ public data class CodexAccountTokenUsage(
 )
 
 /** Tokens used in one backend-defined calendar-day bucket. */
+@Serializable
 public data class CodexAccountTokenUsageDailyBucket(
     public val startDate: String,
     public val tokens: Long,
@@ -133,6 +167,7 @@ public data class CodexRateLimitResetAttempt(
 )
 
 /** Definitive business outcome from consuming a reset credit. */
+@Serializable
 public enum class CodexRateLimitResetOutcome {
     Reset,
     NothingToReset,

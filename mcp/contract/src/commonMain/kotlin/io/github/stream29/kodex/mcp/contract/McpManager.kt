@@ -1,24 +1,36 @@
 package io.github.stream29.kodex.mcp.contract
 
+import io.github.stream29.kodex.utils.kotlinxioserialization.PathAsStringSerializer
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /** Transport kind safe to render without exposing a configured endpoint. */
+@Serializable
 public enum class McpTransportKind {
     StreamableHttp,
     Stdio,
 }
 
 /** Persisted and transient authentication state safe for presentation. */
+@Serializable
 public sealed interface McpAuthenticationState {
+    @Serializable
     public data object NotConfigured : McpAuthenticationState
+    @Serializable
     public data object LoginRequired : McpAuthenticationState
+    @Serializable
     public data object ReauthorizationRequired : McpAuthenticationState
+    @Serializable
     public data object Authorizing : McpAuthenticationState
+    @Serializable
     public data object Authorized : McpAuthenticationState
+    @Serializable
     public data object Refreshing : McpAuthenticationState
 
+    @Serializable
     public data class Failed(
         public val message: String,
     ) : McpAuthenticationState {
@@ -29,6 +41,7 @@ public sealed interface McpAuthenticationState {
 }
 
 /** Complete sanitized state for one Kodex-owned MCP server. */
+@Serializable
 public data class McpManagedServerState(
     public val serverName: String,
     public val transport: McpTransportKind,
@@ -42,6 +55,7 @@ public data class McpManagedServerState(
     public val streamableHttpUrl: String? = null,
     public val stdioCommand: String? = null,
     public val stdioArguments: List<String> = emptyList(),
+    @Serializable(with = PathAsStringSerializer::class)
     public val stdioWorkingDirectory: Path? = null,
 ) {
     init {
@@ -57,6 +71,7 @@ public data class McpManagedServerState(
 }
 
 /** Credential-free OAuth identity used by Settings editors and status rows. */
+@Serializable
 public data class McpOAuthSummary(
     public val clientId: String?,
     public val hasClientSecret: Boolean,
@@ -176,15 +191,18 @@ public interface McpConfigurationStore {
 }
 
 /** One server declaration read by an explicit Codex import operation. */
+@Serializable
 public sealed interface McpCodexImportCandidate {
     public val serverName: String
     public val transport: McpTransportKind?
 
     /** A declaration Kodex can persist without silently dropping behavior. */
+    @Serializable
     public data class Supported(
         override val serverName: String,
         public val configuration: McpServerConfiguration,
     ) : McpCodexImportCandidate {
+        @Transient
         override val transport: McpTransportKind =
             when (configuration) {
                 is McpServerConfiguration.StreamableHttp -> McpTransportKind.StreamableHttp
@@ -193,6 +211,7 @@ public sealed interface McpCodexImportCandidate {
     }
 
     /** A credential-free explanation of a declaration Kodex cannot import. */
+    @Serializable
     public data class Unsupported(
         override val serverName: String,
         override val transport: McpTransportKind?,

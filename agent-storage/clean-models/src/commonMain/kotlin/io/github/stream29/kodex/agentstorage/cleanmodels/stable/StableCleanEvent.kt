@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.agentstorage.cleanmodels.stable
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.CleanOpenAiEvent
+import kotlinx.serialization.Serializable
 
 /**
  * Completed clean event persisted in either the index or work timeline.
@@ -14,6 +15,8 @@ public sealed interface StableCleanEvent : CleanOpenAiEvent {
      *
      * This cross-timeline contract prevents tool execution from publishing
      * messages, reasoning, or other non-tool stable events.
+     * RPC completion serializes this union; persistence keeps its timeline-specific unions.
      */
+    @Serializable
     public sealed interface CompletedTool : StableCleanEvent
 }

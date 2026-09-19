@@ -24,6 +24,7 @@ import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
+import kotlinx.serialization.Serializable
 import kotlin.time.Instant
 
 /** Frontend-safe persistent fields rendered by Settings > Global. */
@@ -58,7 +59,9 @@ public enum class BuiltInContextSource {
 }
 
 /** Authentication projection that never contains request credentials. */
+@Serializable
 public sealed interface SettingsAuthenticationState {
+    @Serializable
     public data class Authenticated(
         public val accountId: String? = null,
         public val planType: OpenAiSubscriptionPlan? = null,
@@ -74,6 +77,7 @@ public sealed interface SettingsAuthenticationState {
         }
     }
 
+    @Serializable
     public data class Unavailable(
         public val reason: OpenAiAuthState.Unavailable,
     ) : SettingsAuthenticationState
@@ -97,17 +101,24 @@ public sealed interface SettingsAuthenticationOperationState {
 }
 
 /** Account-usage projection that keeps reset-attempt idempotency data private. */
+@Serializable
 public sealed interface SettingsAccountUsageState {
+    @Serializable
     public data object Unavailable : SettingsAccountUsageState
 
+    /** @property previous Null when no same-account fallback snapshot is available. */
+    @Serializable
     public data class Loading(
         public val previous: CodexAccountUsageSnapshot? = null,
     ) : SettingsAccountUsageState
 
+    @Serializable
     public data class Available(
         public val snapshot: CodexAccountUsageSnapshot,
     ) : SettingsAccountUsageState
 
+    /** @property previous Null when no same-account fallback snapshot is available. */
+    @Serializable
     public data class Failed(
         public val message: String,
         public val previous: CodexAccountUsageSnapshot? = null,
@@ -119,6 +130,7 @@ public sealed interface SettingsAccountUsageState {
         }
     }
 
+    @Serializable
     public data class Redeeming(
         public val snapshot: CodexAccountUsageSnapshot,
     ) : SettingsAccountUsageState

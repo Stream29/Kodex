@@ -100,6 +100,7 @@ public enum class KodexAuthSource {
 }
 
 /** Defaults used to construct a new thread's first settings snapshot. */
+@Serializable
 public data class KodexNewSessionSettings(
     public val model: OpenAiModelId = OpenAiModelId("gpt-5.6-sol"),
     public val reasoningEffort: ReasoningEffort = ReasoningEffort.Medium,
@@ -115,6 +116,7 @@ public data class KodexNewSessionSettings(
  * compiled default; `null` selects that default model.
  * @property reasoningEffort Reasoning effort sent with the title request.
  */
+@Serializable
 public data class SessionTitleSettings(
     public val enabled: Boolean = true,
     public val model: OpenAiModelId? = null,

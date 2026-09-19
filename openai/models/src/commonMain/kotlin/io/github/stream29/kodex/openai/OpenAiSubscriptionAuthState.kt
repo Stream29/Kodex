@@ -40,6 +40,7 @@ public data class OpenAiSubscriptionAuthState(
     public val email: String? = null,
 )
 
+@Serializable
 public enum class OpenAiSubscriptionPlan(public val rawValue: String) {
     Free("free"),
     Go("go"),

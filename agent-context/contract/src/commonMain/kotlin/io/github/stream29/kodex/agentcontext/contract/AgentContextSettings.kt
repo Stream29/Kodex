@@ -2,6 +2,7 @@ package io.github.stream29.kodex.agentcontext.contract
 
 import io.github.stream29.kodex.utils.shellclient.ShellSettings
 import kotlinx.io.files.Path
+import kotlinx.serialization.Serializable
 
 /**
  * Minimal application-wide settings required to resolve Agent context.
@@ -25,6 +26,7 @@ public interface AgentContextSettings : ShellSettings {
 }
 
 /** Enablement and user-defined roots used by one context resolution snapshot. */
+@Serializable
 public data class AgentContextSourceSettings(
     public val agentsHomeEnabled: Boolean = true,
     public val kodexHomeEnabled: Boolean = true,
@@ -35,6 +37,7 @@ public data class AgentContextSourceSettings(
 )
 
 /** One user-defined context root retained in settings order. */
+@Serializable
 public data class AgentContextCustomSource(
     public val path: String,
     public val enabled: Boolean = true,

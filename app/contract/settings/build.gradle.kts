@@ -1,5 +1,6 @@
 plugins {
     id("kodex.kmp-cli")
+    alias(libs.plugins.kotlin.serialization)
 }
 
 kotlin {
@@ -14,6 +15,7 @@ kotlin {
             api(project(":openai-models"))
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
+            api(libs.kotlinx.serialization.core)
         }
     }
 }

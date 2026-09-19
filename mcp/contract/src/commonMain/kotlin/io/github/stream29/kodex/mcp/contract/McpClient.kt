@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.mcp.contract
 
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.Serializable
 
 /**
  * Application-managed client for one configured MCP server.
@@ -39,26 +40,33 @@ public interface McpClient {
 }
 
 /** Observable connection lifecycle for one [McpClient]. */
+@Serializable
 public sealed interface McpClientState {
     /** The server is configured, but a required browser authorization is absent. */
+    @Serializable
     public data object AuthenticationBlocked : McpClientState
 
     /** The first connection or a replacement connection is being established. */
+    @Serializable
     public data object Connecting : McpClientState
 
     /** The connection is available for tool calls. */
+    @Serializable
     public data object Healthy : McpClientState
 
     /** No connection is currently available for tool calls. */
+    @Serializable
     public data class Failed(
         public val reason: McpClientFailureReason,
     ) : McpClientState
 
     /** The owning service has permanently released this client. */
+    @Serializable
     public data object Closed : McpClientState
 }
 
 /** Stable failure category for rendering and agent-facing unavailable results. */
+@Serializable
 public enum class McpClientFailureReason {
     /** The configured transport could not be opened. */
     Transport,
