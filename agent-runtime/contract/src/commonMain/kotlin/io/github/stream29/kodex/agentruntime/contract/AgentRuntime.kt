@@ -7,9 +7,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-/** Thrown when a second caller attempts to resume an already running AgentRuntime. */
+/** Thrown when resume or explicit compaction attempts to enter an occupied runtime turn. */
 public class ConcurrentAgentRuntimeResumeException : IllegalStateException(
-    "Concurrent AgentRuntime.resume() is not allowed.",
+    "Concurrent AgentRuntime execution is not allowed.",
 )
 
 /**
@@ -17,9 +17,11 @@ public class ConcurrentAgentRuntimeResumeException : IllegalStateException(
  *
  * @property pendingSteer Pending clean input for the current logical turn. An
  * empty list means that no steer is waiting.
- * @property runningTurn The Job currently executing [resume], or `null` when
- * this runtime has no active turn. This is distinct from the owning Session's
- * lifecycle Job.
+ * @property runningTurn The calling Job currently executing [resume] or explicit
+ * [compact], or `null` when this runtime has no active turn. Automatic compaction
+ * stays inside its existing resume turn. The slot remains occupied through cleanup
+ * and is distinct from the owning Session's lifecycle Job. Recording the calling
+ * Job does not itself detach execution from the caller's lifetime.
  * @property unifiedExecToolClient The session-scoped client shared by this
  * runtime's `exec_command` and `write_stdin` tools.
  */

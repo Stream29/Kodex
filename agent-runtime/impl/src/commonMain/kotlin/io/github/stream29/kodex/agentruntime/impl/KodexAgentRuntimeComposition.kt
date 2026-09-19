@@ -16,6 +16,9 @@ import io.github.stream29.kodex.agentstate.contract.clearPending
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.openai.CompactionPhase
+import io.github.stream29.kodex.openai.CompactionReason
+import io.github.stream29.kodex.openai.CompactionTrigger
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecToolClient
@@ -148,12 +151,7 @@ private class AgentRuntimeImpl(
 
     override val runningTurn: StateFlow<Job?> = runningTurnSlot.asStateFlow()
 
-    override suspend fun resume() {
-        val turn = currentCoroutineContext().job
-        if (!runningTurnSlot.compareAndSet(null, turn)) {
-            logger.warn { "Rejected concurrent Agent turn." }
-            throw ConcurrentAgentRuntimeResumeException()
-        }
+    override suspend fun resume(): Unit = withRunningTurn {
         logger.info { "Agent turn started." }
         try {
             delegate.resume()
@@ -168,6 +166,25 @@ private class AgentRuntimeImpl(
         } catch (failure: Throwable) {
             logger.error(failure) { "Agent turn failed." }
             throw failure
+        }
+    }
+
+    override suspend fun compact(
+        trigger: CompactionTrigger,
+        reason: CompactionReason,
+        phase: CompactionPhase,
+    ): Int = withRunningTurn {
+        delegate.compact(trigger, reason, phase)
+    }
+
+    private suspend fun <T> withRunningTurn(block: suspend () -> T): T {
+        val turn = currentCoroutineContext().job
+        if (!runningTurnSlot.compareAndSet(null, turn)) {
+            logger.warn { "Rejected concurrent Agent execution." }
+            throw ConcurrentAgentRuntimeResumeException()
+        }
+        try {
+            return block()
         } finally {
             runningTurnSlot.compareAndSet(turn, null)
         }
