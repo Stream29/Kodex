@@ -21,7 +21,7 @@ public suspend fun KodexAgentState.contextWindowTokenStatus(
         return null
     }
     val settings = storage.settings[snapshotIndex]
-    val activeContextTokens = storage.tokenCount[snapshotIndex]
+    val activeContextTokens = storage.tokenCount[snapshotIndex].totalTokens
     return modelCatalog.resolve(settings.model).contextWindowTokenStatus(
         activeContextTokens = activeContextTokens,
         configuredAutoCompactionTokenLimit = settings.autoCompactionTokenLimit,

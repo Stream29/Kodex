@@ -29,6 +29,9 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEve
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.TokenCountDiagnostics
+import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
+import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.contract.ext.appendCompaction
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.revert
@@ -51,8 +54,10 @@ import io.github.stream29.kodex.openai.CompactionTrigger
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
+import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -188,6 +193,7 @@ private class KodexAgentStateImpl(
                 requestKind = CodexResponsesRequestKind.Turn,
             )
             val clientMetadata = metadata.toCodexClientMetadata()
+            var responseHeaders: OpenAiResponseHeaders? = null
 
             client.createResponse(
                 request = settings.toResponsesApiRequest(
@@ -198,6 +204,22 @@ private class KodexAgentStateImpl(
                 installationId = clientMetadata.installationId,
                 turnMetadata = clientMetadata.turnMetadata,
                 windowId = clientMetadata.windowId,
+                turnState = settings.turnState,
+                onResponseHeaders = { headers ->
+                    responseHeaders = headers
+                    try {
+                        headers.turnState?.let { value ->
+                            appendTurnStateIfAbsent(settings.turnId, value)
+                        }
+                    } catch (failure: CancellationException) {
+                        throw failure
+                    } catch (failure: Throwable) {
+                        throw IllegalStateException(
+                            "Unable to persist the Responses turn state.",
+                            failure,
+                        )
+                    }
+                },
             ).collect { event ->
                 if (event !is ResponsesStreamEvent.OutputItemDone) {
                     acceptResponseEvent(event)
@@ -215,8 +237,15 @@ private class KodexAgentStateImpl(
                     is ResponsesStreamEvent.Completed -> {
                         writeResponseResult {
                             storage.requireNoPendingServerToolSearch()
-                            event.response.usage?.totalTokens?.let { tokenCount ->
-                                appendTimestampAndTokenCount(tokenCount)
+                            event.response.usage?.let { usage ->
+                                appendTimestampAndTokenCount(
+                                    usage = usage,
+                                    response = event.response,
+                                    responseHeaders = responseHeaders,
+                                    turnStateSent = settings.turnState != null,
+                                    settings = settings,
+                                    requestWindowId = windowId,
+                                )
                             }
                         }
                         terminalReason = if (event.response.endTurn == false) {
@@ -494,9 +523,50 @@ private class KodexAgentStateImpl(
         return index
     }
 
-    private suspend fun appendTimestampAndTokenCount(tokenCount: Long) {
+    private suspend fun appendTurnStateIfAbsent(
+        turnId: String,
+        turnState: String,
+    ) {
+        writeResponseResult {
+            val latestSettings = storage.settings[storage.latestIndex()]
+            if (latestSettings.turnId != turnId || latestSettings.turnState != null) {
+                return@writeResponseResult
+            }
+            val index = storage.latestIndex() + 1
+            storage.settings[index] = latestSettings.copy(turnState = turnState)
+            storage.timestamp[index] = now()
+            latestIndex.value = index
+        }
+    }
+
+    private suspend fun appendTimestampAndTokenCount(
+        usage: io.github.stream29.kodex.openai.TokenUsage,
+        response: io.github.stream29.kodex.openai.Response,
+        responseHeaders: OpenAiResponseHeaders?,
+        turnStateSent: Boolean,
+        settings: io.github.stream29.kodex.openai.KodexAgentSettings,
+        requestWindowId: String,
+    ) {
         val index = storage.latestIndex() + 1
-        storage.tokenCount[index] = tokenCount
+        storage.tokenCount[index] = TokenCountSnapshot(
+            kind = TokenCountKind.Response,
+            totalTokens = usage.totalTokens,
+            usage = usage,
+            diagnostics = TokenCountDiagnostics(
+                turnId = settings.turnId,
+                windowId = requestWindowId,
+                requestedModel = settings.model.value,
+                requestedReasoningEffort = settings.reasoning.effort.wireName,
+                requestedServiceTier = settings.serviceTier.requestValue,
+                responseId = response.id,
+                requestId = responseHeaders?.requestId,
+                model = response.model,
+                serviceTier = response.serviceTier,
+                turnStateSent = turnStateSent,
+                turnStateReceived = responseHeaders?.turnState != null,
+                turnStateAdopted = responseHeaders?.turnState != null && settings.turnState == null,
+            ),
+        )
         storage.timestamp[index] = now()
         latestIndex.value = index
     }

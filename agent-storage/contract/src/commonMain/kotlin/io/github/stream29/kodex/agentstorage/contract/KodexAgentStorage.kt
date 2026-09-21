@@ -20,7 +20,7 @@ public interface KodexAgentStorage {
     public val work: IndexVersioned<StableWorkEvent>
     public val settings: IndexVersioned<KodexAgentSettings>
     public val timestamp: IndexVersioned<Instant>
-    public val tokenCount: IndexVersioned<Long>
+    public val tokenCount: IndexVersioned<TokenCountSnapshot>
     public val unstable: IndexVersioned<List<UnstableCleanEvent>>
 }
 
@@ -30,7 +30,7 @@ public interface MutableKodexAgentStorage : KodexAgentStorage {
     public override val work: MutableIndexVersioned<StableWorkEvent>
     public override val settings: MutableIndexVersioned<KodexAgentSettings>
     public override val timestamp: MutableIndexVersioned<Instant>
-    public override val tokenCount: MutableIndexVersioned<Long>
+    public override val tokenCount: MutableIndexVersioned<TokenCountSnapshot>
     public override val unstable: MutableIndexVersioned<List<UnstableCleanEvent>>
 }
 

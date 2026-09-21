@@ -79,7 +79,7 @@ private class CountingStorage(
         get() = delegate.settings
     override val timestamp: IndexVersioned<Instant>
         get() = delegate.timestamp
-    override val tokenCount: IndexVersioned<Long>
+    override val tokenCount: IndexVersioned<io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot>
         get() = delegate.tokenCount
     override val unstable: IndexVersioned<List<io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent>>
         get() = delegate.unstable
