@@ -43,6 +43,8 @@ public interface OpenAiClient : AutoCloseable {
         installationId: String?,
         turnMetadata: String,
         windowId: String,
+        turnState: String? = null,
+        onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit = {},
     ): Flow<ResponsesStreamEvent>
 
     public suspend fun createRemoteCompactionV2Response(

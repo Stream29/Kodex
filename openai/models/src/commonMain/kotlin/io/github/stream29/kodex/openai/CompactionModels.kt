@@ -50,6 +50,13 @@ public data class KodexAgentSettings(
      * storage initialization supplies a generated identity.
      */
     public val turnId: String = "",
+    /**
+     * Opaque provider routing state for the current turn.
+     *
+     * `null` means no routing state has been received for this settings
+     * snapshot; the value is never part of model input.
+     */
+    public val turnState: String? = null,
     /** Monotonic provider context-window number for this settings snapshot. */
     public val windowNumber: Long = 0,
     /** First provider context-window id in this thread's lineage. */
