@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalUuidApi::class)
+
 package io.github.stream29.kodex.cli.session
 
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession

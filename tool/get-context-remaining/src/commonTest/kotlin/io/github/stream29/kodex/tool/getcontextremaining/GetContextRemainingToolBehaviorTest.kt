@@ -6,6 +6,8 @@ import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingFunctionToolEvent
+import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
+import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -39,7 +41,7 @@ val getContextRemainingToolTest by testSuite {
                 autoCompactionTokenLimit = 800L,
             ),
         )
-        storage.tokenCount[0] = 760L
+        storage.tokenCount[1] = TokenCountSnapshot(TokenCountKind.Response, 760L)
         val state = KodexAgentState(
             client = mockOpenAiClient(),
             storage = storage,

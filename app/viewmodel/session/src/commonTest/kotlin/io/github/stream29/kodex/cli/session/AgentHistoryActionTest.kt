@@ -69,7 +69,7 @@ val agentHistoryActionTest by testSuite {
                 assertTrue(root.storage.index.indexesIn(0..20).isEmpty())
                 assertEquals(0, root.storage.latestIndex())
                 assertEquals(OpenAiModelId("test-model"), root.storage.settings[0].model)
-                assertEquals(0L, root.storage.tokenCount[0])
+                assertEquals(0L, root.storage.tokenCount[0].totalTokens)
             } finally {
                 store.shutdown()
                 repository.cancelAndJoin()

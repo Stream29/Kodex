@@ -23,6 +23,7 @@ import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
+import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.ktor.server.cio.CIO
@@ -180,9 +181,18 @@ private class McpRecordingOpenAiClient(
         installationId: String?,
         turnMetadata: String,
         windowId: String,
+        turnState: String?,
+        onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit,
     ): Flow<ResponsesStreamEvent> {
         requests += request
-        return delegate.createResponse(request, installationId, turnMetadata, windowId)
+        return delegate.createResponse(
+            request,
+            installationId,
+            turnMetadata,
+            windowId,
+            turnState,
+            onResponseHeaders,
+        )
     }
 }
 

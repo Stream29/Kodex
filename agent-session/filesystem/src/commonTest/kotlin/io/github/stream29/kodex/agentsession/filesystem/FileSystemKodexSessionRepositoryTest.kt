@@ -131,7 +131,7 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             assertEquals(-1, session.storage.latestIndex())
             session.runtime.modify { storage -> storage.initialize(settings("root")) }
             assertEquals(0, session.storage.latestIndex())
-            assertEquals(0L, session.storage.tokenCount[0])
+            assertEquals(0L, session.storage.tokenCount[0].totalTokens)
             repository.closeAndJoin()
         }
 
