@@ -27,7 +27,6 @@ public object ImageGenerationTools {
             "- The user wants to modify an attached or previously generated image with specific changes, including adding or removing elements, altering colors, improving quality/resolution, or transforming the style (e.g., cartoon, oil painting).\n" +
             "\n" +
             "Guidelines:\n" +
-            "- In code mode, pass the result to `generatedImage(result)`.\n" +
             "- Omit both `referenced_image_paths` and `num_last_images_to_include` when generating a brand new image.\n" +
             "- For edits, use `referenced_image_paths` when every target image has a local file path.\n" +
             "- If you have not seen a local image yet, use `view_image` to inspect it before editing.\n" +
@@ -36,7 +35,6 @@ public object ImageGenerationTools {
             "- Never provide both `referenced_image_paths` and `num_last_images_to_include`.\n" +
             "- If neither mechanism can include every target image, ask the user to attach the missing images again.\n" +
             "- Directly generate the image without reconfirmation or clarification unless required images must be attached again.\n" +
-            "- After each image generation, do not mention anything related to download. Do not summarize the image. Do not ask followup question. Do not say ANYTHING after you generate an image.\n" +
             "- Always use this tool for image editing unless the user explicitly requests otherwise. Do not use the `python` tool for image editing unless specifically instructed.\n"
 
     public val spec: ToolSpec =
