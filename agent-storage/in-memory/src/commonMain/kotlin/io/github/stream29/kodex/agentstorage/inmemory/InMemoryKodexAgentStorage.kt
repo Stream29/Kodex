@@ -6,6 +6,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanE
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
+import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
+import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.utils.ReadWriteMutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.time.Clock
@@ -25,7 +27,7 @@ public class InMemoryKodexAgentStorage private constructor(
     initialIndex: MutableList<IndexedValue<CleanIndexEntry>>,
     initialSettings: MutableList<IndexedValue<KodexAgentSettings>>,
     initialTimestamp: MutableList<IndexedValue<Instant>>,
-    initialTokenCount: MutableList<IndexedValue<Long>>,
+    initialTokenCount: MutableList<IndexedValue<TokenCountSnapshot>>,
 ) : MutableKodexAgentStorage {
     private val identity: Any = Any()
 
@@ -49,7 +51,7 @@ public class InMemoryKodexAgentStorage private constructor(
         InMemoryIndexVersioned(initialSettings)
     public override val timestamp: MutableIndexVersioned<Instant> =
         InMemoryIndexVersioned(initialTimestamp)
-    public override val tokenCount: MutableIndexVersioned<Long> =
+    public override val tokenCount: MutableIndexVersioned<TokenCountSnapshot> =
         InMemoryIndexVersioned(initialTokenCount)
     public override val unstable: MutableIndexVersioned<List<UnstableCleanEvent>> =
         InMemoryIndexVersioned()
@@ -85,7 +87,9 @@ private fun initialStorageState(
             ),
         ),
         timestamp = initializedTimestamps(),
-        tokenCount = mutableListOf(IndexedValue(0, 0L)),
+        tokenCount = mutableListOf(
+            IndexedValue(0, TokenCountSnapshot(TokenCountKind.Initialization, 0L)),
+        ),
     )
 }
 
@@ -93,7 +97,7 @@ private data class InitialStorageState(
     val index: MutableList<IndexedValue<CleanIndexEntry>>,
     val settings: MutableList<IndexedValue<KodexAgentSettings>>,
     val timestamp: MutableList<IndexedValue<Instant>>,
-    val tokenCount: MutableList<IndexedValue<Long>>,
+    val tokenCount: MutableList<IndexedValue<TokenCountSnapshot>>,
 )
 
 @OptIn(ExperimentalUuidApi::class)

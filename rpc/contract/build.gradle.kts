@@ -12,6 +12,7 @@ kotlin {
             api(project(":app-contract-session-catalog"))
             api(project(":mcp-contract"))
             api(project(":agent-storage-clean-models"))
+            api(project(":agent-storage-contract"))
             api(project(":openai-models"))
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.rpc.core)

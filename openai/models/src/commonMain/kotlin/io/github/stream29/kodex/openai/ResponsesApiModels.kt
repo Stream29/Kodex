@@ -64,6 +64,9 @@ public data class Response(
     public val id: String,
     public val output: List<ResponseItem> = emptyList(),
     public val usage: TokenUsage? = null,
+    public val model: String? = null,
+    @SerialName("service_tier")
+    public val serviceTier: String? = null,
     @SerialName("output_text")
     public val outputText: String? = null,
     @SerialName("end_turn")
@@ -515,4 +518,22 @@ public data class TokenUsage(
     public val outputTokens: Long,
     @SerialName("total_tokens")
     public val totalTokens: Long,
+    @SerialName("input_tokens_details")
+    public val inputTokensDetails: TokenUsageInputDetails? = null,
+    @SerialName("output_tokens_details")
+    public val outputTokensDetails: TokenUsageOutputDetails? = null,
+)
+
+@Serializable
+public data class TokenUsageInputDetails(
+    @SerialName("cached_tokens")
+    public val cachedTokens: Long? = null,
+    @SerialName("cache_write_tokens")
+    public val cacheWriteTokens: Long? = null,
+)
+
+@Serializable
+public data class TokenUsageOutputDetails(
+    @SerialName("reasoning_tokens")
+    public val reasoningTokens: Long? = null,
 )

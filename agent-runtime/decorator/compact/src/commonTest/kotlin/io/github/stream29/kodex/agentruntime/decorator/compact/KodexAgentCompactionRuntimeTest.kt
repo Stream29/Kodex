@@ -14,6 +14,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommand
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
+import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.hook.contract.compaction.CompactionHookRequest
 import io.github.stream29.kodex.hook.contract.compaction.CompactionHooks
@@ -190,7 +192,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             StableAssistantMessage(assistantMessage("Done.").content),
             storage.index[4],
         )
-        assertEquals(13, storage.tokenCount[5])
+        assertEquals(13L, storage.tokenCount[5].totalTokens)
         assertEquals(5, storage.latestIndex())
         assertEquals(KodexAgentStateValue.AssistantMessage, state.state.value)
     }
@@ -438,7 +440,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         )
         runtime.resume()
 
-        assertEquals(0L, storage.tokenCount[compactIndex])
+        assertEquals(0L, storage.tokenCount[compactIndex].totalTokens)
         assertEquals(1, compactRequests.size)
         assertEquals(1, responseRequests.size)
     }
@@ -614,7 +616,8 @@ private suspend fun KodexAgentStateContract.appendUserMessage(
     require(message.role == MessageRole.User)
     return appendUserMessage(message.content).also { index ->
         if (tokenCount != null) {
-            (storage as MutableKodexAgentStorage).tokenCount[index] = tokenCount
+            (storage as MutableKodexAgentStorage).tokenCount[index] =
+                TokenCountSnapshot(TokenCountKind.Response, tokenCount)
         }
     }
 }

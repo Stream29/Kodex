@@ -1,6 +1,8 @@
 package io.github.stream29.kodex.agentsession.inmemory
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
+import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
@@ -77,7 +79,7 @@ val agentRuntimeRunningTurnTest by testSuite {
                 assertEquals(index, runtime.latestIndex.value)
                 assertEquals(index, root.storage.latestIndex())
                 assertEquals(StableContextCompaction(encryptedContent = "compacted"), root.storage.work[index])
-                assertEquals(0L, root.storage.tokenCount[index])
+                assertEquals(0L, root.storage.tokenCount[index].totalTokens)
                 val after = root.storage.settings[index]
                 assertEquals(before.turnId, after.turnId)
                 assertEquals(before.windowNumber + 1, after.windowNumber)
@@ -249,7 +251,12 @@ val agentRuntimeRunningTurnTest by testSuite {
                 )
                 val runtime = root.runtime
                 val index = runtime.appendUserMessage(listOf(ContentItem.InputText("Continue.")))
-                runtime.modify { it.tokenCount[index] = if (preTurn) 90L else 1L }
+                runtime.modify {
+                    it.tokenCount[index] = TokenCountSnapshot(
+                        kind = TokenCountKind.Response,
+                        totalTokens = if (preTurn) 90L else 1L,
+                    )
+                }
                 val turn = async(start = CoroutineStart.UNDISPATCHED) { runtime.resume() }
                 try {
                     entered.await()

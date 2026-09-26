@@ -11,6 +11,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.IndexVersioned
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -243,7 +244,7 @@ private class CountingHistoryStorage(
     override val work: IndexVersioned<StableWorkEvent> = workTimeline
     override val settings: IndexVersioned<KodexAgentSettings> = delegate.settings
     override val timestamp: IndexVersioned<Instant> = delegate.timestamp
-    override val tokenCount: IndexVersioned<Long> = delegate.tokenCount
+    override val tokenCount: IndexVersioned<TokenCountSnapshot> = delegate.tokenCount
     override val unstable: IndexVersioned<List<UnstableCleanEvent>> = delegate.unstable
 }
 

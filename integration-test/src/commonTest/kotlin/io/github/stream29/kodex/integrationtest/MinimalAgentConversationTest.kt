@@ -49,6 +49,7 @@ import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.openai.ToolChoice
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
+import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiClient as RealOpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiClientConfig
@@ -101,9 +102,18 @@ private class RecordingOpenAiClient(
         installationId: String?,
         turnMetadata: String,
         windowId: String,
+        turnState: String?,
+        onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit,
     ): Flow<ResponsesStreamEvent> {
         requests += RecordedCodexResponse(request, installationId, turnMetadata, windowId)
-        return delegate.createResponse(request, installationId, turnMetadata, windowId)
+        return delegate.createResponse(
+            request,
+            installationId,
+            turnMetadata,
+            windowId,
+            turnState,
+            onResponseHeaders,
+        )
     }
 
     override suspend fun createRemoteCompactionV2Response(

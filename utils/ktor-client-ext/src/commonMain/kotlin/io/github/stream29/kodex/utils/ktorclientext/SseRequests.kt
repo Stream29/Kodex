@@ -7,6 +7,7 @@ import io.ktor.client.plugins.expectSuccess
 import io.ktor.client.plugins.pluginOrNull
 import io.ktor.client.plugins.sse.SSE
 import io.ktor.client.plugins.sse.sse
+import io.ktor.http.Headers
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.http.HttpMethod
 import io.ktor.sse.ServerSentEvent
@@ -22,7 +23,10 @@ import kotlinx.coroutines.flow.channelFlow
  */
 public fun HttpClient.postSseEvents(
     configureRequest: HttpRequestBuilder.() -> Unit,
-): Flow<ServerSentEvent> = postSseEventsInternal(socketTimeoutMillis = null, configureRequest)
+): Flow<ServerSentEvent> = postSseEventsInternal(
+    socketTimeoutMillis = null,
+    configureRequest = configureRequest,
+)
 
 /**
  * Opens an SSE response to a POST request with a per-request socket timeout.
@@ -33,10 +37,21 @@ public fun HttpClient.postSseEvents(
 public fun HttpClient.postSseEvents(
     socketTimeoutMillis: Long,
     configureRequest: HttpRequestBuilder.() -> Unit,
-): Flow<ServerSentEvent> = postSseEventsInternal(socketTimeoutMillis, configureRequest)
+): Flow<ServerSentEvent> = postSseEventsInternal(
+    socketTimeoutMillis = socketTimeoutMillis,
+    configureRequest = configureRequest,
+)
+
+public fun HttpClient.postSseEventsWithHeaders(
+    socketTimeoutMillis: Long,
+    onResponseHeaders: suspend (Headers) -> Unit,
+    configureRequest: HttpRequestBuilder.() -> Unit,
+): Flow<ServerSentEvent> =
+    postSseEventsInternal(socketTimeoutMillis, onResponseHeaders, configureRequest)
 
 private fun HttpClient.postSseEventsInternal(
     socketTimeoutMillis: Long?,
+    onResponseHeaders: suspend (Headers) -> Unit = {},
     configureRequest: HttpRequestBuilder.() -> Unit,
 ): Flow<ServerSentEvent> =
     channelFlow {
@@ -60,6 +75,7 @@ private fun HttpClient.postSseEventsInternal(
                 attributes.put(SseCompatibilityRequestAttribute, Unit)
             },
         ) {
+            onResponseHeaders(call.response.headers)
             incoming.collect(::send)
         }
     }

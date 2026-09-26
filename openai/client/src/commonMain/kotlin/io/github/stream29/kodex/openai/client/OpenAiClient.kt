@@ -24,6 +24,7 @@ import io.github.stream29.kodex.openai.SearchRequest
 import io.github.stream29.kodex.openai.SearchResponse
 import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient as OpenAiClientContract
+import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.ktorclientext.ChatGptAccountId
 import io.github.stream29.kodex.utils.ktorclientext.CodexOriginator
@@ -31,6 +32,7 @@ import io.github.stream29.kodex.utils.ktorclientext.OpenAiSearchVersion
 import io.github.stream29.kodex.utils.ktorclientext.SseCompatibility
 import io.github.stream29.kodex.utils.ktorclientext.addAll
 import io.github.stream29.kodex.utils.ktorclientext.postSseEvents
+import io.github.stream29.kodex.utils.ktorclientext.postSseEventsWithHeaders
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.HttpRequestRetry
@@ -200,10 +202,13 @@ public class OpenAiClient(
         installationId: String?,
         turnMetadata: String,
         windowId: String,
+        turnState: String?,
+        onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit,
     ): Flow<ResponsesStreamEvent> {
         return httpClient.streamResponseEvents(
             socketTimeoutMillis = config.sseSocketTimeoutMillis,
             retry = config.retry,
+            onResponseHeaders = onResponseHeaders,
         ) {
             authenticate()
             url {
@@ -213,6 +218,7 @@ public class OpenAiClient(
             installationId?.let { headers[HeaderCodexInstallationId] = it }
             headers[HeaderCodexTurnMetadata] = turnMetadata
             headers[HeaderCodexWindowId] = windowId
+            turnState?.let { headers[HeaderCodexTurnState] = it }
             setBody(request)
         }
     }
@@ -329,13 +335,26 @@ private const val HeaderCodexBetaFeatures: String = "x-codex-beta-features"
 private const val HeaderCodexInstallationId: String = "x-codex-installation-id"
 private const val HeaderCodexTurnMetadata: String = "x-codex-turn-metadata"
 private const val HeaderCodexWindowId: String = "x-codex-window-id"
+private const val HeaderCodexTurnState: String = "x-codex-turn-state"
 
 private fun HttpClient.streamResponseEvents(
     socketTimeoutMillis: Long,
     retry: OpenAiClientRetryConfig,
+    onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit = {},
     configureRequest: HttpRequestBuilder.() -> Unit,
 ): Flow<ResponsesStreamEvent> =
-    postSseEvents(socketTimeoutMillis, configureRequest)
+    postSseEventsWithHeaders(
+        socketTimeoutMillis = socketTimeoutMillis,
+        onResponseHeaders = { headers ->
+            onResponseHeaders(
+                OpenAiResponseHeaders(
+                    turnState = headers[HeaderCodexTurnState],
+                    requestId = headers["x-oai-request-id"] ?: headers["x-request-id"],
+                ),
+            )
+        },
+        configureRequest = configureRequest,
+    )
         .mapNotNull { event -> event.data?.takeIf { it != "[DONE]" } }
         .map { data -> OpenAiJsonCodec.decodeFromString<ResponsesStreamEvent>(data) }
         .catch { cause ->

@@ -3,6 +3,8 @@ package io.github.stream29.kodex.agentstorage.contract.ext
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
+import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import kotlin.time.Instant
@@ -24,7 +26,7 @@ public suspend fun MutableKodexAgentStorage.appendCompaction(
     )
     index[pointIndex] = CleanCompactionPoint
     settings[pointIndex] = nextSettings
-    tokenCount[pointIndex] = 0L
+    tokenCount[pointIndex] = TokenCountSnapshot(TokenCountKind.Compaction, 0L)
     this.timestamp[outputIndex] = timestamp
     work[outputIndex] = output
     return outputIndex

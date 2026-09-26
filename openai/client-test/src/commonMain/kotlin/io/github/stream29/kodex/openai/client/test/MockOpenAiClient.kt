@@ -17,6 +17,7 @@ import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.SearchRequest
 import io.github.stream29.kodex.openai.SearchResponse
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
+import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
 import kotlinx.coroutines.flow.Flow
 
 public fun mockOpenAiClient(
@@ -46,8 +47,15 @@ public class MockOpenAiClientBuilder {
     private var createResponseHandler: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent> = {
         missingHandler("createResponse")
     }
-    private var codexResponseHandler: suspend (ResponsesApiRequest, String?, String, String) -> Flow<ResponsesStreamEvent> = {
-            request, _, _, _ ->
+    private var codexResponseHandler: suspend (
+        ResponsesApiRequest,
+        String?,
+        String,
+        String,
+        String?,
+        suspend (OpenAiResponseHeaders) -> Unit,
+    ) -> Flow<ResponsesStreamEvent> = {
+            request, _, _, _, _, _ ->
         createResponseHandler(request)
     }
     private var createRemoteCompactionV2ResponseHandler:
@@ -104,7 +112,9 @@ public class MockOpenAiClientBuilder {
     public fun createResponse(
         handler: suspend (ResponsesApiRequest, String?, String, String) -> Flow<ResponsesStreamEvent>,
     ): Unit {
-        codexResponseHandler = handler
+        codexResponseHandler = { request, installationId, turnMetadata, windowId, _, _ ->
+            handler(request, installationId, turnMetadata, windowId)
+        }
     }
 
     public fun createRemoteCompactionV2Response(
@@ -153,7 +163,15 @@ private class MockOpenAiClient(
         ) -> OpenAiResponseResult<CodexRateLimitResetConsumeResponse>,
     private val getCodexTokenUsageProfileHandler: suspend () -> OpenAiResponseResult<CodexTokenUsageProfile>,
     private val createResponseHandler: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent>,
-    private val codexResponseHandler: suspend (ResponsesApiRequest, String?, String, String) -> Flow<ResponsesStreamEvent>,
+    private val codexResponseHandler:
+        suspend (
+            ResponsesApiRequest,
+            String?,
+            String,
+            String,
+            String?,
+            suspend (OpenAiResponseHeaders) -> Unit,
+        ) -> Flow<ResponsesStreamEvent>,
     private val createRemoteCompactionV2ResponseHandler:
         suspend (ResponsesApiRequest, String?, String, String) -> RemoteCompactionV2Response,
     private val generateImageHandler: suspend (ImageGenerationRequest) -> OpenAiResponseResult<ImageResponse>,
@@ -187,8 +205,17 @@ private class MockOpenAiClient(
         installationId: String?,
         turnMetadata: String,
         windowId: String,
+        turnState: String?,
+        onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit,
     ): Flow<ResponsesStreamEvent> =
-        codexResponseHandler(request, installationId, turnMetadata, windowId)
+        codexResponseHandler(
+            request,
+            installationId,
+            turnMetadata,
+            windowId,
+            turnState,
+            onResponseHeaders,
+        )
 
     override suspend fun createRemoteCompactionV2Response(
         request: ResponsesApiRequest,

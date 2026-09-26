@@ -471,7 +471,7 @@ internal class AgentRuntimeViewModel(
     private suspend fun refreshDurableState(index: Int) {
         if (index < 0) return
         mutableSettings.value = session.storage.settings[index]
-        mutableTokenCount.value = session.storage.tokenCount[index]
+        mutableTokenCount.value = session.storage.tokenCount[index].totalTokens
     }
 
     private fun publishExecution() {

@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalUuidApi::class)
+
 package io.github.stream29.kodex.cli.session
 
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
@@ -40,6 +42,8 @@ import kotlinx.io.files.Path
 import org.koin.core.annotation.Factory
 import org.koin.core.annotation.InjectedParam
 import kotlin.time.Instant
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /** Creates one repository as a child of [ownerScope]. */
 public fun interface KodexSessionRepositoryFactory {
@@ -47,6 +51,7 @@ public fun interface KodexSessionRepositoryFactory {
 }
 
 /** Repository operations shared by persisted Session, catalog, and draft factories. */
+@OptIn(ExperimentalUuidApi::class)
 @Factory(binds = [PersistedSessionViewModelRegistry::class])
 public class DefaultPersistedSessionViewModelRegistry(
     @InjectedParam private val repositoryFactory: KodexSessionRepositoryFactory,
@@ -344,6 +349,8 @@ private class PersistedSessionViewModelImpl(
                         "Session $targetIndex"
                     }
                     storage.settings[latest + 1] = boundary.copy(
+                        turnId = Uuid.generateV7().toString(),
+                        turnState = null,
                         threadName = "[fork] $baseTitle",
                     )
                 }
@@ -385,6 +392,8 @@ private class PersistedSessionViewModelImpl(
                         "Session $targetIndex"
                     }
                     storage.settings[latest + 1] = boundary.copy(
+                        turnId = Uuid.generateV7().toString(),
+                        turnState = null,
                         threadName = "[fork] $baseTitle",
                     )
                 }

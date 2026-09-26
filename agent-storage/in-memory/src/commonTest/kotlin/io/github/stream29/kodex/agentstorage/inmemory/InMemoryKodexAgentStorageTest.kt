@@ -14,6 +14,8 @@ import io.github.stream29.kodex.agentstorage.contract.floorToIndex
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.latestValue
 import io.github.stream29.kodex.agentstorage.contract.revert
+import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
+import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -135,7 +137,7 @@ val inMemoryKodexAgentStorageTest by testSuite {
         storage.work[2] = workEvent("work")
         storage.unstable[3] = listOf(pendingTool("call"))
         storage.timestamp[4] = timestamp(3)
-        storage.tokenCount[5] = 40L
+        storage.tokenCount[5] = TokenCountSnapshot(TokenCountKind.Response, 40L)
         storage.settings[6] = settings("later")
 
         storage.revert(3)
@@ -164,7 +166,7 @@ val inMemoryKodexAgentStorageTest by testSuite {
         val storage = storage()
         val previousSettings = storage.settings[0]
         val output = StableContextCompaction(encryptedContent = "encrypted")
-        storage.tokenCount[1] = 99L
+        storage.tokenCount[1] = TokenCountSnapshot(TokenCountKind.Response, 99L)
 
         val outputIndex = storage.appendCompaction(
             output = output,
@@ -185,7 +187,7 @@ val inMemoryKodexAgentStorageTest by testSuite {
             ),
             storage.settings[pointIndex],
         )
-        assertEquals(0L, storage.tokenCount[pointIndex])
+        assertEquals(0L, storage.tokenCount[pointIndex].totalTokens)
         assertEquals(pointIndex, storage.tokenCount.latestIndex())
         assertEquals(timestamp(10), storage.timestamp[outputIndex])
         assertEquals(outputIndex, storage.latestIndex())

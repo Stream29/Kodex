@@ -7,6 +7,7 @@ import io.github.stream29.kodex.agentstorage.contract.CachedIndexVersioned
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemIndexVersioned
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -57,7 +58,7 @@ internal class CachedAgentStorage internal constructor(
     private val cachedWork: CachedIndexVersionedImpl<StableWorkEvent>,
     private val cachedSettings: CachedIndexVersionedImpl<KodexAgentSettings>,
     private val cachedTimestamp: CachedIndexVersionedImpl<kotlin.time.Instant>,
-    private val cachedTokenCount: CachedIndexVersionedImpl<Long>,
+    private val cachedTokenCount: CachedIndexVersionedImpl<TokenCountSnapshot>,
     private val cachedUnstable: CachedIndexVersionedImpl<List<UnstableCleanEvent>>,
 ) : MutableKodexAgentStorage, ObservableKodexAgentStorage {
     override val uri: String
@@ -85,7 +86,7 @@ internal class CachedAgentStorage internal constructor(
             requireActive()
             return cachedTimestamp
         }
-    override val tokenCount: CachedIndexVersionedImpl<Long>
+    override val tokenCount: CachedIndexVersionedImpl<TokenCountSnapshot>
         get() {
             requireActive()
             return cachedTokenCount

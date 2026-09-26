@@ -1,10 +1,12 @@
 package io.github.stream29.kodex.rpc.contract
 
+import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import kotlinx.coroutines.flow.Flow
 import kotlinx.rpc.annotations.Rpc
 
 /**
  * Read-only RPC contract for the token-count timeline of a persisted root Agent.
+ * Values preserve the original snapshot, including optional usage and diagnostics.
  *
  * Follows [TimelineRpc]'s initialization-only metadata getters, current-value flows,
  * cache-nonce-checked data queries, and inclusive range semantics. The cache nonce and
@@ -12,7 +14,7 @@ import kotlinx.rpc.annotations.Rpc
  * close the Session. This contract has no implementation and exposes no storage writes.
  */
 @Rpc
-public interface TokenCountTimelineRpc : TimelineRpc<Long> {
+public interface TokenCountTimelineRpc : TimelineRpc<TokenCountSnapshot> {
     public override suspend fun getCacheNonce(sessionIndex: Int): Long
 
     public override fun getCacheNonceFlow(sessionIndex: Int): Flow<Long>
@@ -25,7 +27,7 @@ public interface TokenCountTimelineRpc : TimelineRpc<Long> {
         sessionIndex: Int,
         cacheNonce: Long,
         index: Int,
-    ): Long
+    ): TokenCountSnapshot
 
     public override suspend fun floorToIndex(
         sessionIndex: Int,
@@ -50,12 +52,12 @@ public interface TokenCountTimelineRpc : TimelineRpc<Long> {
         sessionIndex: Int,
         cacheNonce: Long,
         index: Int,
-    ): Long?
+    ): TokenCountSnapshot?
 
     public override suspend fun valuesIn(
         sessionIndex: Int,
         cacheNonce: Long,
         fromInclusive: Int,
         toInclusive: Int,
-    ): List<Pair<Int, Long>>
+    ): List<Pair<Int, TokenCountSnapshot>>
 }

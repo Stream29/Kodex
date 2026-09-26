@@ -1,5 +1,6 @@
 plugins {
     id("kodex.kmp-host")
+    alias(libs.plugins.kotlin.serialization)
 }
 
 kotlin {

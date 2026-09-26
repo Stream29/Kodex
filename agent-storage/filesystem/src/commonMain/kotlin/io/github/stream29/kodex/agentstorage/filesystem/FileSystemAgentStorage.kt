@@ -4,6 +4,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWorkEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
@@ -11,7 +12,6 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
 import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.serializer
 import kotlin.time.Instant
 
@@ -51,10 +51,10 @@ public class FileSystemAgentStorage internal constructor(
             OpenAiJsonCodec,
             fileSystem,
         )
-    override val tokenCount: FileSystemIndexVersioned<Long> =
+    override val tokenCount: FileSystemIndexVersioned<TokenCountSnapshot> =
         FileSystemIndexVersioned(
             Path(directory, TokenCountDirectory),
-            Long.serializer(),
+            serializer<TokenCountSnapshot>(),
             OpenAiJsonCodec,
             fileSystem,
         )

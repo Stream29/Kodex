@@ -107,7 +107,7 @@ private suspend fun runFreshSessionHookIntegration() {
         )
         session.runtime.modify { storage -> storage.initialize(settings) }
         assertEquals(0, session.storage.tokenCount.latestIndex())
-        assertEquals(0L, session.storage.tokenCount[0])
+        assertEquals(0L, session.storage.tokenCount[0].totalTokens)
 
         val hookUri = session.storage.uri
         val runtime = session.runtime

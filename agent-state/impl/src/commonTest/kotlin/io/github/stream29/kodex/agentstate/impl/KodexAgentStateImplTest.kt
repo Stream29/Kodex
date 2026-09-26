@@ -25,6 +25,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEve
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.ext.activeMessageWindowAt
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
+import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
+import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -319,7 +321,7 @@ val kodexAgentStateImplTest by testSuite {
                 ),
                 storage.index[4],
             )
-            assertEquals(12L, storage.tokenCount[5])
+            assertEquals(12L, storage.tokenCount[5].totalTokens)
             assertEquals(KodexAgentStateValue.AssistantMessage, agent.state.value)
         }
 
@@ -703,7 +705,7 @@ val kodexAgentStateImplTest by testSuite {
             )
             assertIs<CleanCompactionPoint>(storage.index[compactIndex - 1])
             assertEquals(stableCompaction, storage.work[compactIndex])
-            assertEquals(0L, storage.tokenCount[compactIndex - 1])
+            assertEquals(0L, storage.tokenCount[compactIndex - 1].totalTokens)
             assertEquals(compactIndex - 1, storage.tokenCount.latestIndex())
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
             assertEquals(
@@ -787,11 +789,11 @@ val kodexAgentStateImplTest by testSuite {
                 storage = storage,
             )
             agent.appendUserMessage(userMessage("Compact without usage.").content)
-            storage.tokenCount[2] = 90L
+            storage.tokenCount[2] = TokenCountSnapshot(TokenCountKind.Response, 90L)
 
             val compactIndex = agent.forcedCompact()
 
-            assertEquals(0L, storage.tokenCount[compactIndex])
+            assertEquals(0L, storage.tokenCount[compactIndex].totalTokens)
             assertEquals(compactIndex - 1, storage.tokenCount.latestIndex())
         }
 

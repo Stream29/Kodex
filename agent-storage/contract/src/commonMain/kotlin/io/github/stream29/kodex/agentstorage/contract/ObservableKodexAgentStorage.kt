@@ -12,6 +12,6 @@ public interface ObservableKodexAgentStorage : KodexAgentStorage {
     public override val work: CachedIndexVersioned<StableWorkEvent>
     public override val settings: CachedIndexVersioned<KodexAgentSettings>
     public override val timestamp: CachedIndexVersioned<Instant>
-    public override val tokenCount: CachedIndexVersioned<Long>
+    public override val tokenCount: CachedIndexVersioned<TokenCountSnapshot>
     public override val unstable: CachedIndexVersioned<List<UnstableCleanEvent>>
 }

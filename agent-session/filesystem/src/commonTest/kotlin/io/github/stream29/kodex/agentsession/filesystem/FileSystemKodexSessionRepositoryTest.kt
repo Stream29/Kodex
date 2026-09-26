@@ -11,6 +11,8 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerT
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
+import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -195,7 +197,7 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             assertEquals(-1, session.storage.latestIndex())
             session.runtime.modify { storage -> storage.initialize(settings("root")) }
             assertEquals(0, session.storage.latestIndex())
-            assertEquals(0L, session.storage.tokenCount[0])
+            assertEquals(0L, session.storage.tokenCount[0].totalTokens)
             repository.closeAndJoin()
         }
 
@@ -226,6 +228,16 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
                     assertEquals(original.getExact(0), observed.getExact(0))
                 }
                 assertEquals("Observed", view.settings[0].threadName)
+                val snapshot = TokenCountSnapshot(TokenCountKind.Response, 120)
+                val tokenNonce = view.tokenCount.cacheNonce.value
+                writable.tokenCount[2] = snapshot
+                assertEquals(snapshot, view.tokenCount.getExact(2))
+                assertEquals(2, view.tokenCount.latestIndex.value)
+                assertEquals(tokenNonce, view.tokenCount.cacheNonce.value)
+                writable.tokenCount.revert(2)
+                assertEquals(null, view.tokenCount.getExact(2))
+                assertEquals(0, view.tokenCount.latestIndex.value)
+                assertNotEquals(tokenNonce, view.tokenCount.cacheNonce.value)
                 val timestamp = Instant.parse("2026-09-18T00:00:00Z")
                 writable.timestamp[2] = timestamp
                 assertEquals(2, view.timestamp.latestIndex.value)

@@ -19,12 +19,25 @@ import kotlin.test.assertNotNull
 
 val explicitReasoningHttpTest by testSuite {
     test("real client sends explicit effort to responses compaction and search on loopback") {
-        data class Captured(val path: String, val body: String, val beta: String?)
+        data class Captured(
+            val path: String,
+            val body: String,
+            val beta: String?,
+            val turnState: String?,
+        )
         val captured = LinkedBlockingQueue<Captured>()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/") { exchange ->
             val beta = exchange.requestHeaders.getFirst("x-codex-beta-features")
-            captured.add(Captured(exchange.requestURI.path, exchange.requestBody.bufferedReader().use { it.readText() }, beta))
+            val turnState = exchange.requestHeaders.getFirst("x-codex-turn-state")
+            captured.add(
+                Captured(
+                    exchange.requestURI.path,
+                    exchange.requestBody.bufferedReader().use { it.readText() },
+                    beta,
+                    turnState,
+                ),
+            )
             val search = exchange.requestURI.path.endsWith("/search")
             val body = if (search) {
                 """{"output":"loopback"}"""
@@ -44,6 +57,8 @@ val explicitReasoningHttpTest by testSuite {
                 }
             }.toByteArray()
             exchange.responseHeaders.set("Content-Type", if (search) "application/json" else "text/event-stream")
+            exchange.responseHeaders.set("x-codex-turn-state", "server-turn-state")
+            exchange.responseHeaders.set("x-oai-request-id", "request-id")
             exchange.sendResponseHeaders(200, body.size.toLong())
             exchange.responseBody.use { it.write(body) }
             exchange.close()
@@ -61,12 +76,29 @@ val explicitReasoningHttpTest by testSuite {
             ).use { client ->
                 for (effort in listOf(ReasoningEffort.Medium, ReasoningEffort.Low)) {
                     val request = ResponsesApiRequest(OpenAiModelId("test"), emptyList(), reasoning = Reasoning(effort))
-                    client.createResponse(request).collect()
+                    var receivedTurnState: String? = null
+                    var receivedRequestId: String? = null
+                    client.createResponse(
+                        request = request,
+                        installationId = null,
+                        turnMetadata = "{}",
+                        windowId = "window",
+                        turnState = "client-turn-state",
+                        onResponseHeaders = { headers ->
+                            receivedTurnState = headers.turnState
+                            receivedRequestId = headers.requestId
+                        },
+                    ).collect()
                     client.createRemoteCompactionV2Response(request, null, "{}", "window")
                     client.search(SearchRequest("test", request.model, request.reasoning))
                     for ((position, path) in listOf("/responses", "/responses", "/alpha/search").withIndex()) {
                         val actual = assertNotNull(captured.poll(5, TimeUnit.SECONDS))
                         assertEquals(path, actual.path)
+                        assertEquals(if (position == 0) "client-turn-state" else null, actual.turnState)
+                        if (position == 0) {
+                            assertEquals("server-turn-state", receivedTurnState)
+                            assertEquals("request-id", receivedRequestId)
+                        }
                         assertEquals(if (position == 1) "remote_compaction_v2" else null, actual.beta)
                         val reasoning = OpenAiJsonCodec.parseToJsonElement(actual.body).jsonObject["reasoning"]!!.jsonObject
                         assertEquals(JsonPrimitive(if (effort == ReasoningEffort.Medium) "medium" else "low"), reasoning["effort"])

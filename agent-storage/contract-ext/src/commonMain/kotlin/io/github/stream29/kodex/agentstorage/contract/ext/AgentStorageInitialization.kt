@@ -1,6 +1,8 @@
 package io.github.stream29.kodex.agentstorage.contract.ext
 
 import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
+import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
+import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import kotlin.time.Clock
@@ -22,5 +24,5 @@ public suspend fun MutableKodexAgentStorage.initialize(initialSettings: KodexAge
         previousWindowId = null,
         windowId = windowId,
     )
-    tokenCount[0] = 0L
+    tokenCount[0] = TokenCountSnapshot(TokenCountKind.Initialization, 0L)
 }
