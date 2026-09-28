@@ -34,6 +34,7 @@ internal class DirectoryPickerViewModelImpl(
         ),
     )
     private val effectChannel = Channel<DirectoryPickerEffect>(Channel.BUFFERED)
+    private val confirmingRequestId = MutableStateFlow<Long?>(null)
 
     override val state: StateFlow<DirectoryPickerState> = mutableState.asStateFlow()
     override val effects: Flow<DirectoryPickerEffect> = effectChannel.receiveAsFlow()
@@ -83,8 +84,39 @@ internal class DirectoryPickerViewModelImpl(
 
     override fun confirm() {
         if (!scope.isActive) return
-        val ready = mutableState.value.loadState as? DirectoryPickerLoadState.Ready ?: return
-        effectChannel.trySend(DirectoryPickerEffect.DirectorySelected(ready.directory))
+        val current = mutableState.value.loadState
+        while (scope.isActive) {
+            val confirming = confirmingRequestId.value
+            if (confirming == current.requestId) return
+            if (confirmingRequestId.compareAndSet(confirming, current.requestId)) break
+        }
+        if (!scope.isActive) return
+        scope.launch {
+            try {
+                when (val validated = browser.validate(current.requestedDirectory)) {
+                    is DirectoryPickerValidationResult.Success -> {
+                        if (mutableState.value.loadState.requestId == current.requestId) {
+                            effectChannel.trySend(
+                                DirectoryPickerEffect.DirectorySelected(validated.directory),
+                            )
+                        }
+                    }
+
+                    is DirectoryPickerValidationResult.Failure -> mutableState.update { latest ->
+                        if (latest.loadState.requestId != current.requestId) latest
+                        else latest.copy(
+                            loadState = DirectoryPickerLoadState.Failed(
+                                requestId = current.requestId,
+                                requestedDirectory = current.requestedDirectory,
+                                failure = validated.failure,
+                            ),
+                        )
+                    }
+                }
+            } finally {
+                confirmingRequestId.compareAndSet(current.requestId, null)
+            }
+        }
     }
 
     override fun close() {

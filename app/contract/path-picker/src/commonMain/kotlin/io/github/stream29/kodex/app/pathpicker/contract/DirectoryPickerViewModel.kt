@@ -19,7 +19,7 @@ public interface DirectoryPickerViewModel : AutoCloseable {
 
     public fun retry(): Unit
 
-    /** Emits a selection effect only while the current request is ready. */
+    /** Validates the current request and emits its resolved directory without waiting for children. */
     public fun confirm(): Unit
 
     override fun close(): Unit

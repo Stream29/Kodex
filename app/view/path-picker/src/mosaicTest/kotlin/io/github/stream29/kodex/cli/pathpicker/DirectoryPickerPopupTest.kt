@@ -12,6 +12,9 @@ import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerEffect
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerLoadState
+import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerState
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.pathpicker.createDirectoryPickerViewModel
 import io.github.stream29.kodex.cli.components.TuiPopupHost
@@ -21,6 +24,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
@@ -29,6 +35,34 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 val directoryPickerPopupTest by testSuite {
+    test("select has initial focus even while directory contents load") {
+        val directory = Path("/tmp/directory-picker-default-focus")
+        val viewModel = ControlledDirectoryPickerViewModel(directory)
+        var dismissed = false
+        var selected: Path? = null
+
+        runMosaicTest {
+            setContentAndSnapshot {
+                Box {
+                    TuiPopupHost(modifier = Modifier.width(80).height(24)) {
+                        DirectoryPickerPopup(
+                            viewModel = viewModel,
+                            onDismissRequest = { dismissed = true },
+                            onDirectorySelected = { selected = it },
+                        )
+                    }
+                }
+            }
+
+            awaitSnapshotContaining("Loading directories")
+            sendKeyEvent(KeyboardEvent(codepoint = 13))
+            awaitSnapshotUntil { selected != null || dismissed }
+        }
+
+        assertEquals(directory, selected)
+        assertFalse(dismissed)
+    }
+
     test("renders child directories and confirms the current resolved directory") {
         val unresolvedRoot = temporaryDirectory("directory-picker-popup")
         SystemCoroutineFileSystem.createDirectories(unresolvedRoot)
@@ -241,6 +275,33 @@ private class DirectoryPickerViewModels {
 
     fun close() {
         scope.cancel()
+    }
+}
+
+private class ControlledDirectoryPickerViewModel(
+    private val directory: Path,
+) : DirectoryPickerViewModel {
+    override val state = MutableStateFlow(
+        DirectoryPickerState(
+            loadState = DirectoryPickerLoadState.Loading(
+                requestId = 1,
+                requestedDirectory = directory,
+            ),
+        ),
+    )
+    private val effectChannel = Channel<DirectoryPickerEffect>(Channel.BUFFERED)
+    override val effects = effectChannel.receiveAsFlow()
+
+    override fun navigateTo(directory: Path) {}
+    override fun navigateUp() {}
+    override fun updateFilter(query: String) {}
+    override fun clearFilter() {}
+    override fun retry() {}
+    override fun confirm() {
+        effectChannel.trySend(DirectoryPickerEffect.DirectorySelected(directory))
+    }
+    override fun close() {
+        effectChannel.close()
     }
 }
 

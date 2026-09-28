@@ -30,7 +30,6 @@ import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerEffect
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerFailure
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerLoadState
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
-import io.github.stream29.kodex.app.pathpicker.contract.canConfirm
 import io.github.stream29.kodex.app.pathpicker.contract.canNavigateUp
 import io.github.stream29.kodex.app.pathpicker.contract.currentDirectory
 import io.github.stream29.kodex.app.pathpicker.contract.visibleChildren
@@ -155,7 +154,7 @@ public fun BoxScope.DirectoryPickerPopup(
                 TuiButton(
                     label = "Select",
                     color = DirectoryPickerPrimaryForeground,
-                    enabled = state.canConfirm,
+                    autoFocus = true,
                     onClick = viewModel::confirm,
                 )
             }

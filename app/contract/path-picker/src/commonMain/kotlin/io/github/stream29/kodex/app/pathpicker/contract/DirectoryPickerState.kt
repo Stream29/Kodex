@@ -86,8 +86,4 @@ public val DirectoryPickerState.visibleChildren: List<Path>
 public val DirectoryPickerState.canNavigateUp: Boolean
     get() = loadState !is DirectoryPickerLoadState.Loading && currentDirectory.parent != null
 
-/** Whether confirmation can emit a resolved directory. */
-public val DirectoryPickerState.canConfirm: Boolean
-    get() = loadState is DirectoryPickerLoadState.Ready
-
 private fun Path.directoryPickerName(): String = name.ifEmpty { this.toString() }

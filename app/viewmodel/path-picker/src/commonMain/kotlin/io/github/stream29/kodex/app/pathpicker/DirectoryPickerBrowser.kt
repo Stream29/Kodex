@@ -23,24 +23,47 @@ internal sealed interface DirectoryPickerBrowserResult {
     ) : DirectoryPickerBrowserResult
 }
 
+internal sealed interface DirectoryPickerValidationResult {
+    data class Success(val directory: Path) : DirectoryPickerValidationResult
+    data class Failure(val failure: DirectoryPickerFailure) : DirectoryPickerValidationResult
+}
+
 /** Resolves and lists directory choices without depending on a frontend renderer. */
 internal class DirectoryPickerBrowser(
     private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     private val userHome: Path? = userHomeDirectory(),
 ) {
-    suspend fun load(directory: Path): DirectoryPickerBrowserResult {
+    suspend fun validate(directory: Path): DirectoryPickerValidationResult {
         val expanded = directory.expandUserHome()
-            ?: return DirectoryPickerBrowserResult.Failure(
+            ?: return DirectoryPickerValidationResult.Failure(
                 DirectoryPickerFailure.HomeDirectoryUnavailable,
             )
         return try {
             val resolved = fileSystem.resolve(expanded)
             if (fileSystem.metadataOrNull(resolved)?.isDirectory != true) {
-                return DirectoryPickerBrowserResult.Failure(
+                return DirectoryPickerValidationResult.Failure(
                     DirectoryPickerFailure.NotDirectory(resolved),
                 )
             }
+            DirectoryPickerValidationResult.Success(resolved)
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            DirectoryPickerValidationResult.Failure(
+                DirectoryPickerFailure.FileSystem(
+                    detail = failure.toString().ifBlank { "Unknown filesystem failure" },
+                ),
+            )
+        }
+    }
 
+    suspend fun load(directory: Path): DirectoryPickerBrowserResult {
+        val resolved = when (val validation = validate(directory)) {
+            is DirectoryPickerValidationResult.Success -> validation.directory
+            is DirectoryPickerValidationResult.Failure ->
+                return DirectoryPickerBrowserResult.Failure(validation.failure)
+        }
+        return try {
             val children = mutableListOf<Path>()
             for (child in fileSystem.list(resolved)) {
                 if (fileSystem.metadataOrNull(child)?.isDirectory == true) children += child
