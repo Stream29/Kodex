@@ -88,6 +88,47 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
     testFixture { temporaryRepositoryRoot() } closeWith {
         deleteRecursively(this)
     } asParameterForEach {
+        test("settings CAS appends through cached file timelines and survives reopen") { root ->
+            val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+            try {
+                val index = repository.createInitialized(settings("original"))
+                val session = repository.open(index)
+                val view = assertIs<ObservableKodexAgentStorage>(session.runtime.storage)
+                val initialIndex = session.runtime.latestIndex.value
+                val initial = view.settings.getExact(initialIndex)!!
+                val initialTimestamp = view.timestamp.getExact(initialIndex)
+                val settingsNonce = view.settings.cacheNonce.value
+                val timestampNonce = view.timestamp.cacheNonce.value
+                val update = initial.copy(threadName = "updated")
+
+                assertFalse(session.runtime.compareAndSetSettings(initial.copy(threadName = "old"), update))
+                assertTrue(session.runtime.compareAndSetSettings(initial.copy(), initial.copy()))
+                assertEquals(initialIndex, view.settings.latestIndex.value)
+                assertEquals(initialIndex, view.timestamp.latestIndex.value)
+                assertEquals(listOf(initialIndex), view.settings.indexesIn(0..initialIndex + 1))
+                assertTrue(session.runtime.compareAndSetSettings(initial, update))
+
+                val committed = initialIndex + 1
+                assertEquals(committed, session.runtime.latestIndex.value)
+                assertEquals(committed, view.settings.latestIndex.value)
+                assertEquals(committed, view.timestamp.latestIndex.value)
+                assertEquals(settingsNonce, view.settings.cacheNonce.value)
+                assertEquals(timestampNonce, view.timestamp.cacheNonce.value)
+                assertEquals(initial, view.settings.getExact(initialIndex))
+                assertEquals(initialTimestamp, view.timestamp.getExact(initialIndex))
+                assertEquals(update, view.settings.getExact(committed))
+                session.coroutineContext[Job]!!.cancelAndJoin()
+
+                val reopened = repository.open(index)
+                assertEquals(committed, reopened.runtime.latestIndex.value)
+                assertEquals(initial, reopened.runtime.storage.settings.getExact(initialIndex))
+                assertEquals(update, reopened.runtime.storage.settings.getExact(committed))
+                assertEquals(listOf(initialIndex, committed), reopened.runtime.storage.timestamp.indexesIn(0..committed))
+            } finally {
+                repository.closeAndJoin()
+            }
+        }
+
         test("catalog samples residency and running without activating entries") { root ->
             val entered = CompletableDeferred<Unit>()
             val client = mockOpenAiClient {

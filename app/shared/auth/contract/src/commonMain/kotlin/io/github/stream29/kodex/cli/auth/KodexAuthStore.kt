@@ -24,12 +24,12 @@ public interface KodexAuthStore : OpenAiAuthStore, AutoCloseable {
     public suspend fun logoutKodex()
 }
 
-/** One started browser sign-in flow for Kodex-managed subscription credentials. */
+/** Frontend-local browser attempt; the creator fixes its credential destination. */
 public interface KodexAuthLoginAttempt {
     /** One-time browser authorization URL. It must not be persisted. */
     public val authorizationUrl: String
 
-    /** Waits until credentials are exchanged, durably stored, and selected in global settings. */
+    /** Waits until the attempt completes. Source selection is not implied by this handle. */
     public suspend fun awaitCompletion()
 
     /** Stops the local callback listener without changing existing credentials. */

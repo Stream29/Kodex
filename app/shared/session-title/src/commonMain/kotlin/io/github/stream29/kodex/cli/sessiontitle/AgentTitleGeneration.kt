@@ -10,6 +10,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -21,6 +22,7 @@ import kotlinx.coroutines.sync.withLock
  */
 public class AgentTitleGeneration(
     private val scope: CoroutineScope,
+    private val useSettingsCas: Boolean = false,
 ) : AutoCloseable {
     private val mutex = Mutex()
     private var consumed: Boolean = false
@@ -143,6 +145,16 @@ public class AgentTitleGeneration(
     ) {
         mutex.withLock {
             if (activeAttemptId != attemptId) return
+            if (useSettingsCas) {
+                while (true) {
+                    val current = agentState.storage.settings[agentState.latestIndex.value]
+                    if (current.threadName != expectedThreadName) return
+                    if (agentState.compareAndSetSettings(current, current.copy(threadName = title))) return
+                    // Another field may have changed. Retain this generated title,
+                    // re-read the actual backend value and do not call the model again.
+                    yield()
+                }
+            }
             val currentIndex = agentState.latestIndex.value
             if (agentState.storage.settings[currentIndex].threadName != expectedThreadName) return
             agentState.updateThreadName(title)

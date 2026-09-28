@@ -24,8 +24,8 @@ import kotlinx.coroutines.launch
  */
 internal class OpenAiModelCatalogImpl(
     private val client: OpenAiClient,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) : OpenAiModelCatalog {
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /**
      * Latest catalog snapshot in source model order, retaining the first
@@ -85,6 +85,13 @@ internal class OpenAiModelCatalogImpl(
 /** Creates a live model catalog backed by built-in metadata and OpenAI `/models`. */
 public fun OpenAiModelCatalog(client: OpenAiClient): OpenAiModelCatalog =
     OpenAiModelCatalogImpl(client = client)
+
+/** Backend-owned variant: background refresh is joined by the supplied owner. */
+public fun CoroutineScope.ownedOpenAiModelCatalog(client: OpenAiClient): OpenAiModelCatalog =
+    OpenAiModelCatalogImpl(
+        client = client,
+        scope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[kotlinx.coroutines.Job])),
+    )
 
 private fun List<ModelInfo>.normalizeReasoningPresets(): List<ModelInfo> =
     map { model ->

@@ -66,6 +66,17 @@ public class DefaultMcpOAuthClient internal constructor(
     override suspend fun create(
         configuration: McpServerConfiguration.StreamableHttp,
     ): McpOAuthLoginAttempt {
+        val prepared = prepare(configuration)
+        val callback = McpOAuthCallback.start(
+            scope, prepared.preparedConfiguration.client.redirectUri, prepared.state,
+        )
+        return DefaultMcpOAuthLoginAttempt(callback, prepared)
+    }
+
+    /** Discovers/registers and prepares PKCE without opening a callback listener. */
+    public suspend fun prepare(
+        configuration: McpServerConfiguration.StreamableHttp,
+    ): PreparedMcpOAuthLogin {
         val configuredOAuth = configuration.oauth as? McpOAuthConfiguration.Uninitialized
             ?: throw IllegalArgumentException(
                 "An MCP OAuth login requires an uninitialized configuration.",
@@ -87,30 +98,17 @@ public class DefaultMcpOAuthClient internal constructor(
         )
         val verifier = generateNonceBlocking(CodeVerifierLength)
         val state = generateNonceBlocking(StateLength)
-        val callback = McpOAuthCallback.start(
-            scope = scope,
-            redirectUri = oauth.client.redirectUri,
-            expectedState = state,
-        )
-        return try {
-            DefaultMcpOAuthLoginAttempt(
-                callback = callback,
-                httpClient = httpClient,
+        return PreparedMcpOAuthLogin(
+            preparedConfiguration = oauth,
+            state = state,
+            authorizationUrl = authorizationUrl(
+                endpoint = resolvedMetadata.authorizationEndpoint,
                 oauth = oauth,
-                metadata = resolvedMetadata,
                 verifier = verifier,
-                preparedConfiguration = oauth,
-                authorizationUrl = authorizationUrl(
-                    endpoint = resolvedMetadata.authorizationEndpoint,
-                    oauth = oauth,
-                    verifier = verifier,
-                    state = state,
-                ),
-            )
-        } catch (failure: Throwable) {
-            callback.close()
-            throw failure
-        }
+                state = state,
+            ),
+            exchange = { code -> exchangeMcpAuthorizationCode(httpClient, oauth, resolvedMetadata, verifier, code) },
+        )
     }
 
     override suspend fun refresh(
@@ -403,49 +401,25 @@ public fun CoroutineScope.DefaultMcpOAuthClient(): DefaultMcpOAuthClient =
         httpClient = McpStreamableHttpClient(),
     )
 
+/** Backend-private PKCE material remains in the exchange closure, never in RPC models. */
+public class PreparedMcpOAuthLogin(
+    public val preparedConfiguration: McpOAuthConfiguration.Uninitialized,
+    public val state: String,
+    public val authorizationUrl: String,
+    private val exchange: suspend (String) -> McpOAuthConfiguration.Initialized,
+) {
+    public suspend fun exchangeCode(code: String): McpOAuthConfiguration.Initialized = exchange(code)
+}
+
 private class DefaultMcpOAuthLoginAttempt(
     private val callback: McpOAuthCallback,
-    private val httpClient: HttpClient,
-    private val oauth: McpOAuthConfiguration.Uninitialized,
-    private val metadata: ResolvedOAuthMetadata,
-    private val verifier: String,
-    override val preparedConfiguration: McpOAuthConfiguration.Uninitialized,
-    override val authorizationUrl: String,
+    private val prepared: PreparedMcpOAuthLogin,
 ) : McpOAuthLoginAttempt {
+    override val preparedConfiguration get() = prepared.preparedConfiguration
+    override val authorizationUrl get() = prepared.authorizationUrl
     override suspend fun awaitInitialized(): McpOAuthConfiguration.Initialized {
         try {
-            val code = callback.awaitCode()
-            val response = httpClient.submitTokenRequest(
-                endpoint = metadata.tokenEndpoint,
-                method = metadata.tokenEndpointAuthMethod,
-                clientId = requireNotNull(oauth.client.clientId) {
-                    "The prepared MCP OAuth client has no client id."
-                },
-                clientSecret = oauth.client.clientSecret,
-            ) {
-                append("grant_type", "authorization_code")
-                append("code", code)
-                append("redirect_uri", oauth.client.redirectUri)
-                append("code_verifier", verifier)
-                append("resource", requireNotNull(oauth.resource))
-            }
-            val tokens = response.requireTokenResponse()
-            val tokenType = tokens.tokenType ?: "Bearer"
-            tokenType.requireBearerTokenType()
-            return McpOAuthConfiguration.Initialized(
-                client = oauth.client,
-                resource = oauth.resource,
-                scopes = oauth.scopes,
-                resolvedAuthorizationEndpoint = metadata.authorizationEndpoint,
-                resolvedTokenEndpoint = metadata.tokenEndpoint,
-                tokenEndpointAuthMethod = metadata.tokenEndpointAuthMethod,
-                accessToken = McpSecret(tokens.accessToken),
-                refreshToken = tokens.refreshToken?.let(::McpSecret),
-                tokenType = tokenType,
-                expiresAtEpochSeconds = tokens.expiresInSeconds?.let { expiresIn ->
-                    (Clock.System.now() + expiresIn.seconds).epochSeconds
-                },
-            )
+            return prepared.exchangeCode(callback.awaitCode())
         } finally {
             callback.close()
         }
@@ -454,6 +428,46 @@ private class DefaultMcpOAuthLoginAttempt(
     override fun close() {
         callback.close()
     }
+}
+
+private suspend fun exchangeMcpAuthorizationCode(
+    httpClient: HttpClient,
+    oauth: McpOAuthConfiguration.Uninitialized,
+    metadata: ResolvedOAuthMetadata,
+    verifier: String,
+    code: String,
+): McpOAuthConfiguration.Initialized {
+    val response = httpClient.submitTokenRequest(
+        endpoint = metadata.tokenEndpoint,
+        method = metadata.tokenEndpointAuthMethod,
+        clientId = requireNotNull(oauth.client.clientId) {
+            "The prepared MCP OAuth client has no client id."
+        },
+        clientSecret = oauth.client.clientSecret,
+    ) {
+        append("grant_type", "authorization_code")
+        append("code", code)
+        append("redirect_uri", oauth.client.redirectUri)
+        append("code_verifier", verifier)
+        append("resource", requireNotNull(oauth.resource))
+    }
+    val tokens = response.requireTokenResponse()
+    val tokenType = tokens.tokenType ?: "Bearer"
+    tokenType.requireBearerTokenType()
+    return McpOAuthConfiguration.Initialized(
+        client = oauth.client,
+        resource = oauth.resource,
+        scopes = oauth.scopes,
+        resolvedAuthorizationEndpoint = metadata.authorizationEndpoint,
+        resolvedTokenEndpoint = metadata.tokenEndpoint,
+        tokenEndpointAuthMethod = metadata.tokenEndpointAuthMethod,
+        accessToken = McpSecret(tokens.accessToken),
+        refreshToken = tokens.refreshToken?.let(::McpSecret),
+        tokenType = tokenType,
+        expiresAtEpochSeconds = tokens.expiresInSeconds?.let { expiresIn ->
+            (Clock.System.now() + expiresIn.seconds).epochSeconds
+        },
+    )
 }
 
 private class McpOAuthCallback private constructor(

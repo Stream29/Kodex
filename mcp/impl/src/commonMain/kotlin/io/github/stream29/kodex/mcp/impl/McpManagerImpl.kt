@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.mcp.impl
 
+import io.github.stream29.kodex.mcp.contract.toConfiguration
+import io.github.stream29.kodex.mcp.contract.validatedName
+
 import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpClient
 import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
@@ -28,6 +31,12 @@ import io.github.stream29.kodex.mcp.contract.McpTransportKind
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
@@ -59,7 +68,7 @@ public class McpManagerImpl internal constructor(
     private val mutableServers = MutableStateFlow<List<McpManagedServerState>>(emptyList())
     private var nextPreviewId: Long = 1
     private var activePreview: RawImportPreview? = null
-    private val activeLoginAttempts = mutableMapOf<String, McpOAuthLoginAttempt>()
+    private val activeLoginAttempts = mutableMapOf<String, ActiveLogin>()
     private var closed = false
 
     override val servers: StateFlow<List<McpManagedServerState>> = mutableServers.asStateFlow()
@@ -149,7 +158,7 @@ public class McpManagerImpl internal constructor(
 
     override suspend fun delete(serverName: String) {
         command {
-            activeLoginAttempts[serverName]?.close()
+            activeLoginAttempts[serverName]?.cancel()
             store.update { current ->
                 require(serverName in current) { "MCP server '$serverName' does not exist." }
                 current - serverName
@@ -169,6 +178,17 @@ public class McpManagerImpl internal constructor(
     }
 
     override suspend fun login(serverName: String) {
+        loginWithPreparedCallback(serverName) { attempt ->
+            effectChannel.send(McpManagerEffect.OpenAuthorizationUrl(serverName, attempt.authorizationUrl))
+        }
+    }
+
+    /** Backend callback instead of broadcasting an authorization URL as a UI effect. */
+    public suspend fun loginWithPreparedCallback(
+        serverName: String,
+        expectedRedirectUri: String? = null,
+        onPrepared: suspend (McpOAuthLoginAttempt) -> Unit,
+    ) {
         val operation = command {
             require(serverName !in activeLoginAttempts) {
                 "MCP server '$serverName' is already authorizing."
@@ -182,6 +202,9 @@ public class McpManagerImpl internal constructor(
                 ?: throw IllegalArgumentException(
                     "MCP server '$serverName' has no OAuth configuration.",
                 )
+            require(expectedRedirectUri == null || oauth.client.redirectUri == expectedRedirectUri) {
+                "The callback address does not match the MCP configuration."
+            }
             val uninitialized = oauth.toUninitialized()
             val loginConfiguration = configuration.copy(oauth = uninitialized)
             authenticationOverrides.value +=
@@ -202,7 +225,8 @@ public class McpManagerImpl internal constructor(
                             ?: throw IllegalStateException(
                                 "MCP server '$serverName' changed during authorization.",
                             )
-                        require(latest.oauth?.loginIdentity() == uninitialized.loginIdentity()) {
+                        require(latest.url == configuration.url &&
+                            latest.oauth?.loginIdentity() == uninitialized.loginIdentity()) {
                             "MCP server '$serverName' changed during authorization."
                         }
                         current + (serverName to latest.copy(oauth = prepared))
@@ -214,17 +238,13 @@ public class McpManagerImpl internal constructor(
                     serverName to McpAuthenticationState.Failed("Authorization could not start.")
                 throw failure
             }
-            activeLoginAttempts[serverName] = attempt
-            LoginOperation(prepared, attempt)
+            activeLoginAttempts[serverName] = ActiveLogin(attempt, currentCoroutineContext().job)
+            LoginOperation(configuration.url, prepared, attempt)
         }
         try {
-            effectChannel.send(
-                McpManagerEffect.OpenAuthorizationUrl(
-                    serverName = serverName,
-                    url = operation.attempt.authorizationUrl,
-                ),
-            )
+            onPrepared(operation.attempt)
             val initialized = operation.attempt.awaitInitialized()
+            currentCoroutineContext().ensureActive()
             command {
                 store.update { current ->
                     val latest = current[serverName]
@@ -233,7 +253,7 @@ public class McpManagerImpl internal constructor(
                             "MCP server '$serverName' changed during authorization.",
                         )
                     require(
-                        latest.oauth?.loginIdentity() ==
+                        latest.url == operation.serverUrl && latest.oauth?.loginIdentity() ==
                             operation.uninitialized.loginIdentity(),
                     ) {
                         "MCP server '$serverName' changed during authorization."
@@ -250,10 +270,12 @@ public class McpManagerImpl internal constructor(
                 serverName to McpAuthenticationState.Failed("Authorization failed.")
             throw failure
         } finally {
-            operation.attempt.close()
-            commandMutex.withLock {
-                if (activeLoginAttempts[serverName] === operation.attempt) {
-                    activeLoginAttempts.remove(serverName)
+            withContext(NonCancellable) {
+                operation.attempt.close()
+                commandMutex.withLock {
+                    if (activeLoginAttempts[serverName]?.attempt === operation.attempt) {
+                        activeLoginAttempts.remove(serverName)
+                    }
                 }
             }
         }
@@ -264,7 +286,7 @@ public class McpManagerImpl internal constructor(
             activeLoginAttempts[serverName]
                 ?: return@command null
         }
-        attempt?.close()
+        attempt?.cancel()
     }
 
     /*
@@ -296,6 +318,24 @@ public class McpManagerImpl internal constructor(
         val client = service.clients.value[serverName]
             ?: throw IllegalArgumentException("MCP server '$serverName' is not connected.")
         client.reconnect()
+    }
+
+    /**
+     * Coordinates a full-value settings commit with manager commands.
+     * [commit] must compare/persist at the actual store's write boundary; this
+     * command lock is not a replacement for file CAS or token-refresh locking.
+     * No Replace intent, invalidate or reconnect is inferred from equal values.
+     */
+    public suspend fun commitConfigurationChange(
+        expect: Map<String, McpServerConfiguration>,
+        update: Map<String, McpServerConfiguration>,
+        commit: suspend () -> Boolean,
+    ): Boolean = command {
+        if (!commit()) return@command false
+        val changedNames = (expect.keys + update.keys).filter { expect[it] != update[it] }
+        changedNames.filter { it !in update }.forEach { activeLoginAttempts[it]?.cancel() }
+        authenticationOverrides.value -= changedNames.toSet()
+        true
     }
 
     override suspend fun previewCodexImport(filter: String): McpImportPreview =
@@ -422,7 +462,7 @@ public class McpManagerImpl internal constructor(
     override fun close() {
         if (closed) return
         closed = true
-        activeLoginAttempts.values.forEach { attempt -> attempt.close() }
+        activeLoginAttempts.values.forEach { attempt -> attempt.cancel() }
         activeLoginAttempts.clear()
         effectChannel.close()
         scope.cancel()
@@ -500,140 +540,17 @@ private data class RawImportPreview(
 )
 
 private data class LoginOperation(
+    val serverUrl: String,
     val uninitialized: McpOAuthConfiguration.Uninitialized,
     val attempt: McpOAuthLoginAttempt,
 )
 
-private fun McpServerDraft.validatedName(): String =
-    serverName.trim().also { name ->
-        require(name.isNotEmpty()) { "An MCP server name must not be blank." }
-    }
-
-private fun McpServerDraft.toConfiguration(
-    existing: McpServerConfiguration?,
-    preserveOAuth: Boolean,
-): McpServerConfiguration =
-    when (this) {
-        is McpServerDraft.StreamableHttp -> {
-            val previous = existing as? McpServerConfiguration.StreamableHttp
-            configuration.toConfiguration(
-                enabled = enabled,
-                existing = previous,
-                preserveOAuth = preserveOAuth,
-            )
-        }
-
-        is McpServerDraft.Stdio -> {
-            val previous = existing as? McpServerConfiguration.Stdio
-            configuration.toConfiguration(enabled, previous)
-        }
-    }
-
-private fun McpStreamableHttpDraft.toConfiguration(
-    enabled: Boolean,
-    existing: McpServerConfiguration.StreamableHttp?,
-    preserveOAuth: Boolean,
-): McpServerConfiguration.StreamableHttp {
-    val normalizedUrl = url.trim()
-    require(normalizedUrl.isNotEmpty()) { "An MCP Streamable HTTP URL must not be blank." }
-    val nextOauth = oauth?.toConfiguration(
-        existing = existing?.oauth,
-        preserveOAuth = preserveOAuth && existing?.url == normalizedUrl,
-    )
-    return McpServerConfiguration.StreamableHttp(
-        url = normalizedUrl,
-        headers = headers.resolveSecrets(existing?.headers.orEmpty(), "header"),
-        oauth = nextOauth,
-        enabled = enabled,
-    )
-}
-
-private fun McpStdioDraft.toConfiguration(
-    enabled: Boolean,
-    existing: McpServerConfiguration.Stdio?,
-): McpServerConfiguration.Stdio {
-    val normalizedCommand = command.trim()
-    require(normalizedCommand.isNotEmpty()) { "An MCP stdio command must not be blank." }
-    return McpServerConfiguration.Stdio(
-        command = normalizedCommand,
-        args = args,
-        environment = environment.resolveSecrets(existing?.environment.orEmpty(), "environment"),
-        workingDirectory = workingDirectory,
-        enabled = enabled,
-    )
-}
-
-private fun McpOAuthDraft.toConfiguration(
-    existing: McpOAuthConfiguration?,
-    preserveOAuth: Boolean,
-): McpOAuthConfiguration {
-    val normalizedClientId = clientId.normalizedOptional()
-    val existingClientSecret = existing?.client?.clientSecret
-    val client = io.github.stream29.kodex.mcp.contract.McpOAuthClient(
-        clientId = normalizedClientId,
-        clientSecret = clientSecret.resolveOptionalSecret(existingClientSecret, "client secret"),
-        redirectUri = redirectUri.trim(),
-        authorizationEndpoint = authorizationEndpoint.normalizedOptional(),
-        tokenEndpoint = tokenEndpoint.normalizedOptional(),
-    )
-    val uninitialized = McpOAuthConfiguration.Uninitialized(
-        client = client,
-        resource = resource.normalizedOptional(),
-        scopes = scopes.map(String::trim).filter(String::isNotEmpty).distinct(),
-    )
-    val initialized = existing as? McpOAuthConfiguration.Initialized
-    return if (
-        preserveOAuth &&
-        initialized != null &&
-        initialized.loginIdentity() == uninitialized.loginIdentity()
-    ) {
-        initialized.copy(
-            client = client,
-            resource = uninitialized.resource,
-            scopes = uninitialized.scopes,
-        )
-    } else {
-        uninitialized
+private class ActiveLogin(val attempt: McpOAuthLoginAttempt, val job: Job) {
+    fun cancel() {
+        job.cancel()
+        attempt.close()
     }
 }
-
-private fun Map<String, McpSecretDraft>.resolveSecrets(
-    existing: Map<String, McpSecret>,
-    kind: String,
-): Map<String, McpSecret> {
-    val drafts = this
-    return buildMap {
-        drafts.forEach { (rawName, draft) ->
-            val name = rawName.trim()
-            require(name.isNotEmpty()) { "An MCP $kind name must not be blank." }
-            require(name !in this) { "MCP $kind names must be unique." }
-            val secret = when (draft) {
-                McpSecretDraft.Keep -> existing[name]
-                    ?: throw IllegalArgumentException(
-                        "MCP $kind '$name' has no existing value to retain.",
-                    )
-
-                is McpSecretDraft.Replace -> McpSecret(draft.value)
-            }
-            put(name, secret)
-        }
-    }
-}
-
-private fun McpSecretDraft?.resolveOptionalSecret(
-    existing: McpSecret?,
-    kind: String,
-): McpSecret? =
-    when (this) {
-        null -> null
-        McpSecretDraft.Keep -> existing
-            ?: throw IllegalArgumentException("The MCP $kind has no existing value to retain.")
-
-        is McpSecretDraft.Replace -> McpSecret(value)
-    }
-
-private fun String?.normalizedOptional(): String? =
-    this?.trim()?.takeIf(String::isNotEmpty)
 
 private fun McpOAuthConfiguration.toUninitialized(): McpOAuthConfiguration.Uninitialized =
     McpOAuthConfiguration.Uninitialized(

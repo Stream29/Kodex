@@ -51,7 +51,7 @@ private val logger by lazy {
     KotlinLogging.logger {}.global()
 }
 
-private data class ActiveSubscriptionAuth(
+internal data class ActiveSubscriptionAuth(
     val tokens: OpenAiSubscriptionTokens,
     val lastRefresh: Instant,
 ) {
@@ -81,7 +81,7 @@ private data class ActiveSubscriptionAuth(
     )
 }
 
-private sealed interface AuthLoadResult {
+internal sealed interface AuthLoadResult {
     data class Loaded(
         val auth: ActiveSubscriptionAuth,
     ) : AuthLoadResult
@@ -425,7 +425,7 @@ internal suspend fun CoroutineScope.FileSystemKodexAuthStore(
     ).also { store -> store.reload() }
 }
 
-private fun CodexAuthJson.toAuthLoadResult(): AuthLoadResult {
+internal fun CodexAuthJson.toAuthLoadResult(): AuthLoadResult {
     val mode = authMode ?: CodexAuthMode.Chatgpt
     if (mode != CodexAuthMode.Chatgpt && mode != CodexAuthMode.ChatgptAuthTokens) {
         return AuthLoadResult.Unavailable(
@@ -443,7 +443,7 @@ private fun CodexAuthJson.toAuthLoadResult(): AuthLoadResult {
     )
 }
 
-private fun KodexAuthFile.toAuthLoadResult(): AuthLoadResult {
+internal fun KodexAuthFile.toAuthLoadResult(): AuthLoadResult {
     if (authMode != CodexAuthMode.Chatgpt) {
         return AuthLoadResult.Unavailable(
             OpenAiAuthState.Unavailable.UnsupportedAuthMode,

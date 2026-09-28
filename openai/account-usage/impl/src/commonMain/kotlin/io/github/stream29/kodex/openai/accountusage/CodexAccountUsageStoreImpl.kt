@@ -32,8 +32,9 @@ import kotlin.uuid.Uuid
 internal class CodexAccountUsageStoreImpl(
     private val client: OpenAiClient,
     private val authStore: OpenAiAuthStore,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    private val retainDefinitiveOutcome: Boolean = false,
 ) : CodexAccountUsageStore {
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val operationMutex = Mutex()
     private val attemptAccountKeys = linkedMapOf<String, AccountKey>()
     private var snapshotAccountKey: AccountKey? = null
@@ -150,6 +151,7 @@ internal class CodexAccountUsageStoreImpl(
             val outcome = response.code.toOutcome()
             if (currentAccountKey() != accountKey) {
                 transitionToCurrentAuth()
+                if (retainDefinitiveOutcome) return@withLock outcome
                 throw IllegalStateException(
                     "The authenticated Codex account changed while the reset was being used.",
                 )
@@ -284,6 +286,16 @@ public fun CodexAccountUsageStore(
         client = client,
         authStore = authStore,
     )
+
+/** Backend ownership and result semantics, without changing the legacy CLI factory. */
+public fun CoroutineScope.ownedCodexAccountUsageStore(
+    client: OpenAiClient,
+    authStore: OpenAiAuthStore,
+): CodexAccountUsageStore = CodexAccountUsageStoreImpl(
+    client, authStore,
+    CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[kotlinx.coroutines.Job])),
+    retainDefinitiveOutcome = true,
+)
 
 internal fun buildAccountUsageSnapshot(
     usage: CodexAccountUsageResponse,
