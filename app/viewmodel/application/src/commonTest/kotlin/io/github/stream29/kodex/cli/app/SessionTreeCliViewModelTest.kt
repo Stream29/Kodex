@@ -1,416 +1,126 @@
 package io.github.stream29.kodex.cli.app
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentstorage.contract.ext.initialize
-import io.github.stream29.kodex.app.agent.contract.AgentViewModel
-import io.github.stream29.kodex.app.agent.contract.SuggestedSessionConfiguration
-import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
-import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskViewModel
-import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskSubmissionResult
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
-import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerEffect
-import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerLoadState
-import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerState
-import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
-import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
-import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.app.session.contract.*
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
-import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.OpenAiModelId
-import io.github.stream29.kodex.openai.ReasoningEffort
-import io.github.stream29.kodex.openai.RequestUserInputMode
-import io.github.stream29.kodex.openai.ServiceTier
-import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
-import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.joinAll
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.yield
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 import kotlinx.io.files.Path
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertIs
-import kotlin.test.assertSame
-import kotlin.test.assertTrue
-import kotlin.test.assertNull
-import kotlin.test.assertNotNull
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem as Fs
+import kotlin.test.*
 
 val sessionTreeCliViewModelTest by testSuite {
-    test("suggested cwd picker edits only the live batch and respects dismissal") {
-        coroutineScope {
-            val suggestion = TestSuggestionViewModel()
-            lateinit var picker: TestDirectoryPickerViewModel
-            val fixture = applicationFixture(
-                decorateAgent = { original ->
-                    object : AgentViewModel by original {
-                        override val suggestSubagentTask = suggestion
-                    }
-                },
-                createDirectoryPicker = { directory ->
-                    TestDirectoryPickerViewModel(directory).also { picker = it }
-                },
-            )
-            try {
-                val session = fixture.viewModel.materializeNewSession(tabIndex = 0)
-                val agent = session.rootAgent
-                val sourceCwd = agent.settings.value.cwd
-                val initial = assertIs<SuggestSubagentTaskState.Pending>(suggestion.state.value)
-                assertNull(fixture.viewModel.openSuggestedWorkingDirectoryPopup(agent, "stale"))
-                val cancelled = assertNotNull(
-                    fixture.viewModel.openSuggestedWorkingDirectoryPopup(agent, initial.callId),
-                )
-                assertEquals(
-                    initial.configuration.cwd,
-                    assertIs<DirectoryPickerLoadState.Ready>(picker.state.value.loadState).directory,
-                )
-                assertTrue(fixture.viewModel.dismissPopup(cancelled))
-                assertTrue(picker.closed)
-                assertEquals(initial, suggestion.state.value)
-
-                val open = assertNotNull(
-                    fixture.viewModel.openSuggestedWorkingDirectoryPopup(agent, initial.callId),
-                )
-                val selected = Path("selected-batch-directory")
-                open.viewModel.select(selected)
-                assertEquals(
-                    selected,
-                    assertIs<SuggestSubagentTaskState.Pending>(suggestion.state.value).configuration.cwd,
-                )
-                assertEquals(sourceCwd, agent.settings.value.cwd)
-                assertTrue(picker.closed)
-                fixture.viewModel.dismissPopup(open)
-
-                val stale = assertNotNull(
-                    fixture.viewModel.openSuggestedWorkingDirectoryPopup(agent, initial.callId),
-                )
-                suggestion.state.value = initial.copy(callId = "replacement")
-                stale.viewModel.select(Path("must-not-apply"))
-                assertEquals(initial.copy(callId = "replacement"), suggestion.state.value)
-                assertEquals(sourceCwd, agent.settings.value.cwd)
-                fixture.viewModel.dismissPopup(stale)
-
-                val owned = assertNotNull(
-                    fixture.viewModel.openSuggestedWorkingDirectoryPopup(agent, "replacement"),
-                )
-                assertTrue(fixture.viewModel.closeTab(session))
-                assertTrue(picker.closed)
-                assertIs<ApplicationPopupState.Closed>(fixture.viewModel.popup.value)
-                assertFalse(fixture.viewModel.dismissPopup(owned))
-            } finally {
-                fixture.close()
-            }
+    test("materialization replaces only the exact draft slot") {
+        applicationFixture { app, _ ->
+            val vm = app.viewModel
+            val first = vm.navigation.value.selected
+            vm.createNewSessionTab()
+            val before = vm.navigation.value
+            val persisted = vm.materializeNewSession(1)
+            assertEquals(before.tabs.size, vm.navigation.value.tabs.size)
+            assertSame(first, vm.navigation.value.tabs[0])
+            assertSame(persisted, vm.navigation.value.tabs[1])
+            assertEquals(before.selectedIndex, vm.navigation.value.selectedIndex)
         }
     }
-
-    test("materialization replaces the exact draft index atomically") {
-        coroutineScope {
-            val fixture = applicationFixture()
-            try {
-                val first = assertIs<NewSessionViewModel>(fixture.viewModel.navigation.value.selected)
-                fixture.viewModel.createNewSessionTab()
-                val before = fixture.viewModel.navigation.value
-
-                val persisted = fixture.viewModel.materializeNewSession(tabIndex = 1)
-
-                val after = fixture.viewModel.navigation.value
-                assertEquals(before.tabs.size, after.tabs.size)
-                assertSame(first, after.tabs[0])
-                assertSame(persisted, after.tabs[1])
-                assertEquals(before.selectedIndex, after.selectedIndex)
-                assertIs<PersistedSessionViewModel>(after.selected)
-            } finally {
-                fixture.close()
-            }
+    test("opening a persisted session reuses its tab and unarchives it") {
+        applicationFixture { app, _ ->
+            val vm = app.viewModel
+            val session = vm.materializeNewSession(0)
+            val catalog = vm.openSessionCatalogPopup().viewModel
+            catalog.archive(session.sessionIndex)
+            catalog.setShowArchived(true)
+            assertTrue(assertIs<SessionCatalogState.Loaded>(catalog.state.value).sessions.single().archived)
+            vm.createNewSessionTab()
+            assertSame(session, vm.openSession(session.sessionIndex))
+            catalog.refresh()
+            assertFalse(assertIs<SessionCatalogState.Loaded>(catalog.state.value).sessions.single().archived)
         }
     }
-
-    test("opening an existing persisted session reuses its tab") {
-        coroutineScope {
-            val fixture = applicationFixture()
-            val index = fixture.repository.create()
-            fixture.repository.open(index).runtime.modify { storage ->
-                storage.initialize(
-                    KodexAgentSettings(
-                        model = OpenAiModelId("test-model"),
-                        threadName = "Existing",
-                    ),
-                )
-            }
-            try {
-                val first = fixture.viewModel.openSession(index)
-                val count = fixture.viewModel.navigation.value.tabs.size
-
-                val second = fixture.viewModel.openSession(index)
-
-                assertSame(first, second)
-                assertEquals(count, fixture.viewModel.navigation.value.tabs.size)
-                assertSame(second, fixture.viewModel.navigation.value.selected)
-            } finally {
-                fixture.close()
-            }
+    test("close and archive disposes the exact tab but retains backend state") {
+        applicationFixture { app, _ ->
+            val vm = app.viewModel
+            val session = vm.materializeNewSession(0)
+            assertTrue(vm.closeAndArchiveSession(session))
+            assertEquals(PersistedSessionLifecycleState.Closed, session.lifecycle.value)
+            val catalog = vm.openSessionCatalogPopup().viewModel
+            catalog.setShowArchived(true)
+            val row = assertIs<SessionCatalogState.Loaded>(catalog.state.value).sessions.single()
+            assertTrue(row.archived)
+            assertTrue(row.isActive)
+            assertFalse(vm.closeAndArchiveSession(session))
         }
     }
-
-    test("opening an archived persisted session unarchives new and reused tabs") {
-        coroutineScope {
-            val fixture = applicationFixture()
-            val index = fixture.repository.create()
-            fixture.repository.open(index).runtime.modify { storage ->
-                storage.initialize(
-                    KodexAgentSettings(
-                        model = OpenAiModelId("test-model"),
-                        threadName = "Archived",
-                    ),
-                )
-            }
-            fixture.repository.getEntry(index).archive()
-            try {
-                val first = fixture.viewModel.openSession(index)
-
-                assertFalse(fixture.repository.getEntry(index).archived)
-
-                fixture.repository.getEntry(index).archive()
-                fixture.viewModel.createNewSessionTab()
-                val reused = fixture.viewModel.openSession(index)
-
-                assertSame(first, reused)
-                assertSame(reused, fixture.viewModel.navigation.value.selected)
-                assertFalse(fixture.repository.getEntry(index).archived)
-            } finally {
-                fixture.close()
-            }
+    test("popup dismissal compares the exact handle") {
+        applicationFixture { app, _ ->
+            val first = app.viewModel.openSessionCatalogPopup()
+            val next = app.viewModel.openSessionCatalogPopup()
+            assertFalse(app.viewModel.dismissPopup(first))
+            assertSame(next, app.viewModel.popup.value)
+            assertTrue(app.viewModel.dismissPopup(next))
+            assertEquals(ApplicationPopupState.Closed, app.viewModel.popup.value)
         }
     }
-
-    test("close and archive archives the exact persisted tab before releasing it") {
-        coroutineScope {
-            val fixture = applicationFixture()
-            val index = fixture.repository.create()
-            fixture.repository.open(index).runtime.modify { storage ->
-                storage.initialize(
-                    KodexAgentSettings(
-                        model = OpenAiModelId("test-model"),
-                        threadName = "Close and archive",
-                    ),
-                )
-            }
-            try {
-                val target = fixture.viewModel.openSession(index)
-
-                assertTrue(fixture.viewModel.closeAndArchiveSession(target))
-
-                assertTrue(fixture.repository.getEntry(index).archived)
-                assertTrue(fixture.viewModel.navigation.value.tabs.none { child -> child === target })
-                assertIs<PersistedSessionLifecycleState.Closed>(target.lifecycle.value)
-            } finally {
-                fixture.close()
-            }
+    test("login dismissal restores its settings parent and target closure disposes both") {
+        applicationFixture { app, _ ->
+            val vm = app.viewModel
+            val target = vm.navigation.value.selected
+            val settings = vm.openSettingsPopup(target, SettingsPage.OpenAi)
+            val login = vm.openLoginPopup(settings)
+            assertSame(settings, login.returnTo)
+            assertTrue(vm.dismissPopup(login))
+            assertSame(settings, vm.popup.value)
+            val second = vm.openLoginPopup(settings)
+            assertTrue(vm.closeTab(target))
+            assertEquals(ApplicationPopupState.Closed, vm.popup.value)
+            assertFalse(vm.dismissPopup(second))
         }
     }
-
-    test("popup dismissal requires the exact still-current handle") {
-        coroutineScope {
-            val fixture = applicationFixture()
-            try {
-                val catalog = fixture.viewModel.openSessionCatalogPopup()
-                val replacement = fixture.viewModel.openSessionCatalogPopup()
-
-                assertFalse(fixture.viewModel.dismissPopup(catalog))
-                assertSame(replacement, fixture.viewModel.popup.value)
-                assertTrue(fixture.viewModel.dismissPopup(replacement))
-                assertIs<ApplicationPopupState.Closed>(fixture.viewModel.popup.value)
-            } finally {
-                fixture.close()
-            }
+    test("working directory popup edits only its captured draft") {
+        applicationFixture { app, home ->
+            val vm = app.viewModel
+            val first = assertIs<NewSessionViewModel>(vm.navigation.value.selected)
+            val popup = vm.openWorkingDirectoryPopup(first)
+            val second = vm.createNewSessionTab()
+            val chosen = Path(home, "chosen")
+            Fs.createDirectories(chosen)
+            popup.viewModel.select(chosen)
+            assertEquals(chosen, first.settings.value.cwd)
+            assertEquals(Fs.resolve(home), second.settings.value.cwd)
+            assertSame(first, popup.viewModel.target)
+            assertTrue(vm.closeTab(first))
+            assertEquals(ApplicationPopupState.Closed, vm.popup.value)
         }
     }
-
-    test("login dismissal restores the exact settings popup") {
-        coroutineScope {
-            val fixture = applicationFixture()
+    test("child updates do not republish navigation and command replies need no optimistic cache") {
+        applicationFixture { app, _ ->
+            val vm = app.viewModel
+            val session = vm.materializeNewSession(0)
+            val agent = requireNotNull(session.rootAgent.value)
+            val snapshot = vm.navigation.value
+            var emissions = 0
+            val collector = launch(start = CoroutineStart.UNDISPATCHED) { vm.navigation.collect { emissions++ } }
             try {
-                val target = fixture.viewModel.navigation.value.selected
-                val settings = fixture.viewModel.openSettingsPopup(
-                    target = target,
-                    initialPage = SettingsPage.OpenAi,
-                )
-                val login = fixture.viewModel.openLoginPopup(settings)
-
-                assertSame(settings, login.returnTo)
-                assertSame(login, fixture.viewModel.popup.value)
-                assertTrue(fixture.viewModel.dismissPopup(login))
-                assertSame(settings, fixture.viewModel.popup.value)
-                assertEquals(SettingsPage.OpenAi, settings.viewModel.selectedPage.value)
-            } finally {
-                fixture.close()
-            }
+                repeat(128) { agent.composer.update("draft-$it", 0) }
+                session.rename("renamed")
+                session.name.first { it == "renamed" }
+                assertSame(snapshot, vm.navigation.value)
+                assertEquals(1, emissions)
+                assertEquals(128, agent.composer.state.value.revision)
+            } finally { collector.cancelAndJoin() }
         }
     }
-
-    test("closing the settings target also closes its login child") {
-        coroutineScope {
-            val fixture = applicationFixture()
-            try {
-                val target = fixture.viewModel.navigation.value.selected
-                val settings = fixture.viewModel.openSettingsPopup(
-                    target = target,
-                    initialPage = SettingsPage.OpenAi,
-                )
-                val login = fixture.viewModel.openLoginPopup(settings)
-
-                assertTrue(fixture.viewModel.closeTab(target))
-
-                assertIs<ApplicationPopupState.Closed>(fixture.viewModel.popup.value)
-                assertFalse(fixture.viewModel.dismissPopup(login))
-            } finally {
-                fixture.close()
-            }
+    test("already-created child tabs are deduplicated without changing selection") {
+        applicationFixture { app, _ ->
+            val vm = app.viewModel
+            val source = vm.materializeNewSession(0)
+            val fork = vm.forkSession(source.sessionIndex)
+            val selected = vm.navigation.value.selected
+            vm.openCreatedSessions(listOf(fork, fork, source.sessionIndex))
+            assertSame(selected, vm.navigation.value.selected)
+            assertEquals(2, vm.navigation.value.tabs.size)
         }
-    }
-
-    test("working-directory popup updates only its captured settings owner") {
-        coroutineScope {
-            lateinit var picker: TestDirectoryPickerViewModel
-            val fixture = applicationFixture { initialDirectory ->
-                TestDirectoryPickerViewModel(initialDirectory).also { picker = it }
-            }
-            try {
-                val first = assertIs<NewSessionViewModel>(
-                    fixture.viewModel.navigation.value.selected,
-                )
-                val open = fixture.viewModel.openWorkingDirectoryPopup(first)
-                val second = fixture.viewModel.createNewSessionTab()
-                val selectedDirectory = Path("captured-directory")
-
-                open.viewModel.select(selectedDirectory)
-
-                assertSame(first, open.viewModel.target)
-                assertEquals(selectedDirectory, first.settings.value.cwd)
-                assertEquals(Path("."), second.settings.value.cwd)
-                assertTrue(picker.closed)
-                assertTrue(fixture.viewModel.closeTab(first))
-                assertIs<ApplicationPopupState.Closed>(fixture.viewModel.popup.value)
-            } finally {
-                fixture.close()
-            }
-        }
-    }
-
-    test("child-owned changes do not republish application state") {
-        coroutineScope {
-            val fixture = applicationFixture()
-            val index = fixture.repository.create()
-            fixture.repository.open(index).runtime.modify { storage ->
-                storage.initialize(
-                    KodexAgentSettings(
-                        model = OpenAiModelId("test-model"),
-                        threadName = "Child state",
-                    ),
-                )
-            }
-            val persisted = fixture.viewModel.openSession(index)
-            val navigationEmissions = MutableStateFlow(0)
-            val popupEmissions = MutableStateFlow(0)
-            val collectors = listOf(
-                launch(start = CoroutineStart.UNDISPATCHED) {
-                    fixture.viewModel.navigation.collect {
-                        navigationEmissions.update { count -> count + 1 }
-                    }
-                },
-                launch(start = CoroutineStart.UNDISPATCHED) {
-                    fixture.viewModel.popup.collect {
-                        popupEmissions.update { count -> count + 1 }
-                    }
-                },
-            )
-            try {
-                val navigation = fixture.viewModel.navigation.value
-                val popup = fixture.viewModel.popup.value
-
-                repeat(128) { revision ->
-                    val text = "draft-$revision"
-                    persisted.rootAgent.composer.update(text, text.length)
-                }
-                persisted.rename("Renamed child")
-                yield()
-
-                assertEquals(128, persisted.rootAgent.composer.state.value.revision)
-                assertEquals("Renamed child", persisted.name.value)
-                assertSame(navigation, fixture.viewModel.navigation.value)
-                assertSame(popup, fixture.viewModel.popup.value)
-                assertEquals(1, navigationEmissions.value)
-                assertEquals(1, popupEmissions.value)
-            } finally {
-                collectors.forEach(Job::cancel)
-                collectors.joinAll()
-                fixture.close()
-            }
-        }
-    }
-}
-
-private class TestSuggestionViewModel : SuggestSubagentTaskViewModel {
-    override val state = MutableStateFlow<SuggestSubagentTaskState>(
-        SuggestSubagentTaskState.Pending(
-            callId = "suggestion",
-            arguments = SuggestSubagentTaskArgs(listOf(SuggestedSubagentTask("Task", "Work"))),
-            configuration = SuggestedSessionConfiguration(
-                OpenAiModelId("test"), ReasoningEffort.Low, ServiceTier.Default,
-                Path("batch-directory"), RequestUserInputMode.AskUser,
-            ),
-        ),
-    )
-    override fun updateFeedback(callId: String, text: String): Boolean = false
-    override fun updateConfiguration(callId: String, configuration: SuggestedSessionConfiguration): Boolean {
-        val pending = state.value as? SuggestSubagentTaskState.Pending ?: return false
-        if (pending.callId != callId || pending.submitting) return false
-        state.value = pending.copy(configuration = configuration)
-        return true
-    }
-    override suspend fun submit(
-        callId: String, expectedRevision: Long, accepted: Boolean,
-    ): SuggestSubagentTaskSubmissionResult = error("Submission is not used by this test.")
-    override fun close(): Unit = Unit
-}
-
-private class TestDirectoryPickerViewModel(
-    initialDirectory: Path,
-) : DirectoryPickerViewModel {
-    override val state: StateFlow<DirectoryPickerState> = MutableStateFlow(
-        DirectoryPickerState(
-            loadState = DirectoryPickerLoadState.Ready(
-                requestId = 1,
-                requestedDirectory = initialDirectory,
-                directory = initialDirectory,
-                children = emptyList(),
-            ),
-        ),
-    )
-    override val effects: Flow<DirectoryPickerEffect> = emptyFlow()
-    var closed: Boolean = false
-        private set
-
-    override fun navigateTo(directory: Path): Unit = Unit
-
-    override fun navigateUp(): Unit = Unit
-
-    override fun updateFilter(query: String): Unit = Unit
-
-    override fun clearFilter(): Unit = Unit
-
-    override fun retry(): Unit = Unit
-
-    override fun confirm(): Unit = Unit
-
-    override fun close() {
-        closed = true
     }
 }

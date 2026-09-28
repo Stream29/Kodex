@@ -1,73 +1,28 @@
 package io.github.stream29.kodex.cli.app
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.cli.settings.InMemoryKodexGlobalSettings
-import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
-import io.github.stream29.kodex.cli.settings.NewLineKey
-import io.github.stream29.kodex.cli.settings.SidebarContent
-import io.github.stream29.kodex.cli.settings.SidebarSettings
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import io.github.stream29.kodex.cli.settings.*
 import kotlinx.coroutines.flow.first
-import kotlinx.io.files.Path
-import kotlin.test.assertEquals
+import kotlin.test.*
 
 val sidebarSettingsViewModelTest by testSuite {
-    test("updates each sidebar independently without replacing other settings") {
-        val store = InMemoryKodexGlobalSettings(
-            KodexGlobalSettings(
-                newLineKey = NewLineKey.Enter,
-                sidebars = SidebarSettings(
-                    leftWidth = 24,
-                    rightWidth = 32,
-                ),
-            ),
-        )
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-        try {
-            val viewModel = SidebarSettingsViewModelImpl(store, scope)
-
-            viewModel.selectRight(SidebarContent.TerminalSessions)
-            val rightUpdated = viewModel.state.first {
-                it.right == SidebarContent.TerminalSessions
+    test("contents persist locally while initial and resized widths remain invocation-local") {
+        applicationFixture { app, home ->
+            val vm = app.sidebarSettings
+            assertEquals(30, vm.state.value.leftWidth)
+            vm.selectRight(SidebarContent.TerminalSessions)
+            vm.selectLeft(SidebarContent.None)
+            vm.resizeLeft(19)
+            vm.resizeRight(17)
+            val result = vm.state.first {
+                it.left == SidebarContent.None && it.right == SidebarContent.TerminalSessions &&
+                    it.leftWidth == 19 && it.rightWidth == 17
             }
-            assertEquals(
-                SidebarSettings(
-                    left = SidebarContent.HistoryIndex,
-                    right = SidebarContent.TerminalSessions,
-                    leftWidth = 24,
-                    rightWidth = 32,
-                ),
-                rightUpdated,
-            )
-
-            viewModel.selectLeft(SidebarContent.None)
-            assertEquals(
-                SidebarSettings(
-                    left = SidebarContent.None,
-                    right = SidebarContent.TerminalSessions,
-                    leftWidth = 24,
-                    rightWidth = 32,
-                ),
-                viewModel.state.first { it.left == SidebarContent.None },
-            )
-
-            viewModel.resizeLeft(30)
-            viewModel.resizeRight(18)
-            assertEquals(
-                SidebarSettings(
-                    left = SidebarContent.None,
-                    right = SidebarContent.TerminalSessions,
-                    leftWidth = 30,
-                    rightWidth = 18,
-                ),
-                viewModel.state.first { it.leftWidth == 30 && it.rightWidth == 18 },
-            )
-            assertEquals(NewLineKey.Enter, store.settings.value.newLineKey)
-        } finally {
-            scope.cancel()
+            vm.initializeViewport(200) // Later resizes must not reset the user's widths.
+            assertEquals(result, vm.state.value)
+            val persisted = openCliFrontendSettings(home).settings.value
+            assertEquals(SidebarContent.None, persisted.sidebars.left)
+            assertEquals(SidebarContent.TerminalSessions, persisted.sidebars.right)
         }
     }
 }

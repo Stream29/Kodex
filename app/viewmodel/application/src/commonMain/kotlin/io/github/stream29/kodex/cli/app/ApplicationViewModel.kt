@@ -142,53 +142,13 @@ internal class ApplicationViewModelImpl(
         sessions.fork(sessionIndex)
     }
 
-    override suspend fun createSuggestedSessions(
-        arguments: SuggestSubagentTaskArgs,
-        configuration: SuggestedSessionConfiguration,
-    ): List<SuggestedSessionMeta> = commandMutex.withLock {
+    override suspend fun openCreatedSessions(sessionIndexes: List<Int>): Unit = commandMutex.withLock {
         ensureOpen()
-        val created = mutableListOf<PersistedSessionViewModel>()
-        try {
-            arguments.tasks.forEach { task ->
-                created += sessions.create {
-                    KodexAgentSettings(
-                        model = configuration.model,
-                        cwd = configuration.cwd,
-                        requestUserInputMode = configuration.requestUserInputMode,
-                        reasoning = Reasoning(effort = configuration.reasoningEffort),
-                        serviceTier = configuration.serviceTier,
-                        threadName = task.name,
-                    )
-                }
-            }
+        for (index in sessionIndexes.distinct()) {
             val current = mutableNavigation.value
-            mutableNavigation.value = current.copy(
-                tabs = current.tabs + created,
-                selectedIndex = current.selectedIndex,
-            )
-            created.forEachIndexed { index, session ->
-                ownerScope.launch {
-                    try {
-                        session.rootAgent.suppressAutomaticTitle()
-                        session.rootAgent.submit(
-                            listOf(ContentItem.InputText(arguments.tasks[index].prompt)),
-                        )
-                    } catch (failure: CancellationException) {
-                        throw failure
-                    } catch (_: Throwable) {
-                        // The child Agent owns the failure notification.
-                    }
-                }
-            }
-            created.map { session ->
-                SuggestedSessionMeta(
-                    uri = session.rootAgent.storageUri,
-                    name = session.name.value,
-                )
-            }
-        } catch (failure: Throwable) {
-            created.forEach { session -> sessions.rollbackCreated(session.sessionIndex) }
-            throw failure
+            if (current.tabs.filterIsInstance<PersistedSessionViewModel>().any { it.sessionIndex == index }) continue
+            val child = sessions.open(index)
+            mutableNavigation.value = current.copy(tabs = current.tabs + child)
         }
     }
 
@@ -346,7 +306,6 @@ internal class ApplicationViewModelImpl(
     }
 
     override suspend fun shutdown() = commandMutex.withLock {
-        if (closed) return@withLock
         closeOwnedResources()
         sessions.shutdown()
     }
@@ -411,7 +370,7 @@ internal class ApplicationViewModelImpl(
     private fun AgentSettingsViewModel.belongsTo(target: SessionViewModel): Boolean = when {
         this === target -> true
         this is AgentViewModel && target is PersistedSessionViewModel ->
-            target.rootAgent === this
+            target.rootAgent.value === this
 
         else -> false
     }
@@ -458,7 +417,7 @@ internal class ApplicationViewModelImpl(
         require(
             mutableNavigation.value.tabs.any { child ->
                 child === target ||
-                    (child as? PersistedSessionViewModel)?.rootAgent === target
+                    (child as? PersistedSessionViewModel)?.rootAgent?.value === target
             },
         ) {
             "Working-directory target is not owned by this application."

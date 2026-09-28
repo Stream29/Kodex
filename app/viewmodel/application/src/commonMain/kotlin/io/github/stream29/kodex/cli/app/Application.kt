@@ -1,586 +1,182 @@
 package io.github.stream29.kodex.cli.app
 
-import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
-import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
-import io.github.stream29.kodex.agentsession.filesystem.FileSystemKodexSessionRepository
-import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
-import io.github.stream29.kodex.agentstate.contract.KodexAgentState
-import io.github.stream29.kodex.app.agent.contract.ComposerViewModelFactory
-import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
-import io.github.stream29.kodex.app.application.contract.SidebarSettingsViewModel
+import io.github.stream29.kodex.app.application.contract.*
+import io.github.stream29.kodex.app.migration.CurrentKodexApplicationVersion
 import io.github.stream29.kodex.app.migration.KodexHomeHandle
-import io.github.stream29.kodex.app.migration.prepareKodexHome
-import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
-import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
 import io.github.stream29.kodex.app.pathpicker.createDirectoryPickerViewModel
-import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
-import io.github.stream29.kodex.app.settings.DefaultOpenAiLoginViewModelFactory
-import io.github.stream29.kodex.app.settings.DefaultSettingsViewModelFactory
-import io.github.stream29.kodex.app.settings.SettingsViewModelDependencies
-import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModelFactory
-import io.github.stream29.kodex.app.settings.contract.SettingsViewModelFactory
-import io.github.stream29.kodex.cli.agent.AgentAutomaticTitleConfiguration
-import io.github.stream29.kodex.cli.agent.AgentAutomaticTitleSettings
-import io.github.stream29.kodex.cli.agent.AgentRuntimeHistoryViewModelFactory
-import io.github.stream29.kodex.cli.agent.AgentRuntimeViewModelArguments
-import io.github.stream29.kodex.cli.agent.DefaultAgentRuntimeViewModelFactory
-import io.github.stream29.kodex.cli.auth.FileSystemKodexAuthStore
-import io.github.stream29.kodex.cli.auth.KodexAuthStore
-import io.github.stream29.kodex.cli.history.DefaultAgentHistoryViewModelFactory
+import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
+import io.github.stream29.kodex.app.settings.createOpenAiLoginViewModel
+import io.github.stream29.kodex.app.settings.createSessionSettingsViewModel
+import io.github.stream29.kodex.app.settings.createSettingsViewModel
+import io.github.stream29.kodex.app.settings.contract.*
 import io.github.stream29.kodex.cli.newsession.DEFAULT_NEW_SESSION_NAME
-import io.github.stream29.kodex.cli.session.KodexSessionRepositoryFactory
-import io.github.stream29.kodex.cli.session.PersistedSessionAgentViewModelFactory
-import io.github.stream29.kodex.cli.sessiontitle.OpenAiSessionTitleGenerator
-import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
-import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
-import io.github.stream29.kodex.cli.settings.KodexGlobalSettingsStore
+import io.github.stream29.kodex.cli.newsession.DefaultNewSessionViewModelFactory
+import io.github.stream29.kodex.cli.newsession.RpcNewSessionViewModel
+import io.github.stream29.kodex.cli.notification.collectNotificationHooks
+import io.github.stream29.kodex.cli.rpc.*
+import io.github.stream29.kodex.cli.session.DefaultPersistedSessionViewModelRegistry
+import io.github.stream29.kodex.cli.session.RpcPersistedSessionViewModel
 import io.github.stream29.kodex.cli.settings.NewLineKey
-import io.github.stream29.kodex.cli.settings.openGlobalSettings
-import io.github.stream29.kodex.hook.contract.HookManager
-import io.github.stream29.kodex.hook.impl.HookManagerImpl
-import io.github.stream29.kodex.hook.impl.KodexHooksImpl
-import io.github.stream29.kodex.mcp.contract.McpManager
-import io.github.stream29.kodex.mcp.impl.DefaultMcpOAuthClient
-import io.github.stream29.kodex.mcp.impl.McpManagerImpl
-import io.github.stream29.kodex.mcp.impl.McpServiceImpl
+import io.github.stream29.kodex.cli.settings.openCliFrontendSettings
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.Reasoning
-import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageStore
-import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageStore as createCodexAccountUsageStore
 import io.github.stream29.kodex.openai.client.OpenAiClient
-import io.github.stream29.kodex.openai.client.OpenAiClientConfig
-import io.github.stream29.kodex.openai.client.contract.OpenAiClient as OpenAiClientContract
-import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
-import io.github.stream29.kodex.openai.codexclistorage.CodexCliMcpImportCandidate
-import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
-import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
-import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
-import io.github.stream29.kodex.utils.kodexhome.KodexHome
+import io.github.stream29.kodex.openai.client.OpenAiLoginClient
+import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
+import io.github.stream29.kodex.openai.client.contract.OpenAiClient as ModelClient
+import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient as LoginClient
+import io.github.stream29.kodex.rpc.client.RestoringRpcClient
+import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
+import io.github.stream29.kodex.rpc.models.OAuthTarget
+import io.github.stream29.kodex.rpc.server.withBackendServices
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import io.github.stream29.kodex.utils.logging.global
 import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
-import io.github.stream29.kodex.utils.shellclient.Shell
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 import kotlinx.io.files.Path
-import org.koin.core.KoinApplication
-import org.koin.core.annotation.Factory
-import org.koin.core.annotation.InjectedParam
-import org.koin.core.parameter.parametersOf
-import org.koin.plugin.module.dsl.koinApplication
 
-/**
- * Process host and composition root.
- *
- * The frontend receives application ViewModels and presentation settings.
- * Infrastructure children remain private and are injected into their exact
- * ViewModel factories here.
- */
-public class KodexApplication private constructor(
-    private val dependencyGraph: KoinApplication,
-    private val dependencies: KodexAgentDependencies,
-    private val authStore: KodexAuthStore,
-    private val accountUsageStore: CodexAccountUsageStore,
-    private val mcpManager: McpManager,
-    private val hookManager: HookManager,
-    private val applicationScope: CoroutineScope,
-    private val homeHandle: KodexHomeHandle,
+/** Only local frontend presentation is passed to the renderer. */
+public class KodexApplication internal constructor(
     public val viewModel: ApplicationViewModel,
     public val newLineKey: StateFlow<NewLineKey>,
     public val sidebarSettings: SidebarSettingsViewModel,
-) : AutoCloseable {
-    private var closed = false
+)
 
-    public suspend fun shutdown() {
-        if (closed) return
-        closed = true
-        try {
-            viewModel.shutdown()
-        } finally {
-            try {
-                closeInfrastructure()
-            } finally {
-                withContext(NonCancellable) { homeHandle.closeAndJoin() }
-            }
-        }
-    }
-
-    override fun close() {
-        if (closed) return
-        closed = true
-        try {
-            viewModel.close()
-        } finally {
-            try {
-                closeInfrastructure()
-            } finally {
-                homeHandle.close()
-            }
-        }
-    }
-
-    private fun closeInfrastructure() {
-        var failure: Throwable? = null
-        fun closeResource(close: () -> Unit) {
-            try {
-                close()
-            } catch (resourceFailure: Throwable) {
-                failure?.addSuppressed(resourceFailure) ?: run {
-                    failure = resourceFailure
-                }
-            }
-        }
-        closeResource(accountUsageStore::close)
-        closeResource(mcpManager::close)
-        closeResource(hookManager::close)
-        closeResource(dependencies::close)
-        closeResource(authStore::close)
-        closeResource(applicationScope::cancel)
-        closeResource(dependencyGraph::close)
-        closeResource { ApplicationLogger.info { "Application closed." } }
-        failure?.let { throw it }
-    }
-
-    public companion object {
-        public suspend fun openDefault(
-            workingDirectory: Path = Path("."),
-            homeHandle: KodexHomeHandle? = null,
-        ): KodexApplication = open(
-            agentsDirectory = defaultAgentsHome(),
-            workingDirectory = workingDirectory,
-            dataDirectory = KodexHome,
-            homeHandle = homeHandle,
-        )
-
-        public suspend fun open(
-            agentsDirectory: Path = defaultAgentsHome(),
-            workingDirectory: Path = Path("."),
-            dataDirectory: Path = KodexHome,
-            homeHandle: KodexHomeHandle? = null,
-            sessionTitleGeneratorFactory: (OpenAiClientContract) -> SessionTitleGenerator =
-                ::OpenAiSessionTitleGenerator,
-            sessionRepositoryFactory:
-            suspend CoroutineScope.(Path, KodexAgentDependencies) ->
-            FileSystemKodexSessionRepository = { root, dependencies ->
-                FileSystemKodexSessionRepository(root, dependencies)
-            },
-        ): KodexApplication = openWithCodexDirectory(
-            codexDirectory = defaultCodexHome(),
-            agentsDirectory = agentsDirectory,
-            workingDirectory = workingDirectory,
-            dataDirectory = dataDirectory,
-            homeHandle = homeHandle,
-            sessionTitleGeneratorFactory = sessionTitleGeneratorFactory,
-            sessionRepositoryFactory = sessionRepositoryFactory,
-        )
-
-        internal suspend fun openWithCodexDirectory(
-            codexDirectory: Path,
-            agentsDirectory: Path = defaultAgentsHome(),
-            workingDirectory: Path = Path("."),
-            dataDirectory: Path = KodexHome,
-            homeHandle: KodexHomeHandle? = null,
-            sessionTitleGeneratorFactory: (OpenAiClientContract) -> SessionTitleGenerator =
-                ::OpenAiSessionTitleGenerator,
-            sessionRepositoryFactory:
-            suspend CoroutineScope.(Path, KodexAgentDependencies) ->
-            FileSystemKodexSessionRepository = { root, dependencies ->
-                FileSystemKodexSessionRepository(root, dependencies)
-            },
-        ): KodexApplication {
-            val scope = CoroutineScope(currentCoroutineContext()).supervisorChildScope()
-            val preparedHome = try {
-                homeHandle ?: scope.prepareKodexHome(dataDirectory)
-            } catch (failure: Throwable) {
-                withContext(NonCancellable) { scope.cancelAndJoin() }
-                throw failure
-            }
-            return try {
-                require(preparedHome.home == dataDirectory) {
-                    "Prepared Kodex Home ${preparedHome.home} does not match " +
-                        "data directory $dataDirectory."
-                }
-                openPrepared(
-                    codexDirectory = codexDirectory,
-                    agentsDirectory = agentsDirectory,
-                    workingDirectory = workingDirectory,
-                    dataDirectory = dataDirectory,
-                    scope = scope,
-                    homeHandle = preparedHome,
-                    sessionTitleGeneratorFactory = sessionTitleGeneratorFactory,
-                    sessionRepositoryFactory = sessionRepositoryFactory,
-                )
-            } catch (failure: Throwable) {
-                withContext(NonCancellable) {
-                    try {
-                        preparedHome.closeAndJoin()
-                    } catch (cleanupFailure: Throwable) {
-                        failure.addSuppressed(cleanupFailure)
-                    }
-                    try {
-                        scope.cancelAndJoin()
-                    } catch (cleanupFailure: Throwable) {
-                        failure.addSuppressed(cleanupFailure)
-                    }
-                }
-                throw failure
-            }
-        }
-
-        private suspend fun openPrepared(
-            codexDirectory: Path,
-            agentsDirectory: Path,
-            workingDirectory: Path,
-            dataDirectory: Path,
-            scope: CoroutineScope,
-            homeHandle: KodexHomeHandle,
-            sessionTitleGeneratorFactory: (OpenAiClientContract) -> SessionTitleGenerator,
-            sessionRepositoryFactory:
-            suspend CoroutineScope.(Path, KodexAgentDependencies) ->
-            FileSystemKodexSessionRepository = { root, dependencies ->
-                FileSystemKodexSessionRepository(root, dependencies)
-            },
-        ): KodexApplication {
-            val resolvedWorkingDirectory = SystemCoroutineFileSystem.resolve(workingDirectory)
-            val resolvedAgentsDirectory = resolveAllowingMissing(agentsDirectory)
-            val globalSettings = openGlobalSettings(
-                settingsDirectory = dataDirectory,
-                defaults = KodexGlobalSettings(),
-            )
-            val authStore = scope.FileSystemKodexAuthStore(
-                dataDirectory = dataDirectory,
-                codexHome = codexDirectory,
-                globalSettings = globalSettings,
-                fileSystem = SystemCoroutineFileSystem,
-            )
-            val clientConfig = OpenAiClientConfig()
-            val contextSettings = globalSettings.settings
-                .map { settings ->
-                    ApplicationAgentContextSettings(
-                        agentsHome = resolvedAgentsDirectory,
-                        kodexHome = dataDirectory,
-                        codexHome = codexDirectory,
-                        sources = settings.contextSources,
-                        shell = settings.shell,
-                    )
-                }
-                .stateIn(
-                    scope = scope,
-                    started = SharingStarted.Eagerly,
-                    initialValue = ApplicationAgentContextSettings(
-                        agentsHome = resolvedAgentsDirectory,
-                        kodexHome = dataDirectory,
-                        codexHome = codexDirectory,
-                        sources = globalSettings.settings.value.contextSources,
-                        shell = globalSettings.settings.value.shell,
-                    ),
-                )
-            val mcpConfigurationStore = KodexMcpConfigurationStore(globalSettings, scope)
-            val mcpOAuth = scope.DefaultMcpOAuthClient()
-            val mcpService = scope.McpServiceImpl(
-                settings = globalSettings.settings,
-                configurationStore = mcpConfigurationStore,
-                tokenRefresher = mcpOAuth,
-            )
-            val mcpManager = scope.McpManagerImpl(
-                store = mcpConfigurationStore,
-                service = mcpService,
-                codexImportSource = {
-                    CodexCliStorage(codexDirectory)
-                        .readMcpImportCandidates()
-                        .map(CodexCliMcpImportCandidate::toKodexMcpImportCandidate)
-                },
-                loginAttemptFactory = mcpOAuth,
-            )
-            val hookManager = scope.HookManagerImpl(
-                store = KodexHookConfigurationStore(globalSettings, scope),
-            )
-            val graph = koinApplication<KodexKoinApplication>()
-            try {
-                val openAiServices = graph.koin.get<OpenAiApplicationServices> {
-                    parametersOf(
-                        authStore,
-                        clientConfig,
-                    )
-                }
-                val client = openAiServices.client
-                val modelCatalog = openAiServices.modelCatalog
-                val accountUsage = openAiServices.accountUsage
-                val hooks = scope.KodexHooksImpl(globalSettings.settings)
-                val reportUnhandledError: (Throwable, Path) -> Unit = { failure, cwd ->
-                    if (failure !is CancellationException) {
-                        ApplicationLogger.error(failure) { "Application operation failed (cwd=$cwd)." }
-                        val message = failure.message
-                        scope.launch {
-                            hooks.onUnhandledError(message, cwd)
-                        }
-                    }
-                }
-                val dependencies = KodexAgentDependencies(
-                    client = client,
-                    modelCatalog = modelCatalog,
-                    contextSettings = contextSettings,
-                    shellSettings = globalSettings.settings,
-                    mcpService = mcpService,
-                    hooks = hooks,
-                )
-                val repositoryFactory = KodexSessionRepositoryFactory { ownerScope ->
-                    ownerScope.sessionRepositoryFactory(dataDirectory, dependencies)
-                }
-                val automaticTitles = AgentAutomaticTitleConfiguration(
-                    generator = sessionTitleGeneratorFactory(client),
-                    settingsProvider = {
-                        globalSettings.settings.value.sessionTitle.let { settings ->
-                            AgentAutomaticTitleSettings(
-                                enabled = settings.enabled,
-                                model = settings.model,
-                                reasoningEffort = settings.reasoningEffort,
-                            )
-                        }
-                    },
-                )
-                val agentHistoryFactory = AgentRuntimeHistoryViewModelFactory {
-                        agentSession,
-                        ownerScope,
-                    ->
-                    val agentState: KodexAgentState = agentSession.runtime
-                    graph.koin.get<DefaultAgentHistoryViewModelFactory> {
-                        parametersOf(agentState, ownerScope, agentSession.runtime.runningTurn)
-                    }.create()
-                }
-                lateinit var applicationForSuggestedSessions: ApplicationViewModel
-                val sessionAgentFactory = PersistedSessionAgentViewModelFactory {
-                        agentSession,
-                        ownerScope,
-                    ->
-                    graph.koin.get<DefaultAgentRuntimeViewModelFactory> {
-                        parametersOf(
-                            AgentRuntimeViewModelArguments(
-                                session = agentSession,
-                                ownerScope = ownerScope,
-                                models = modelCatalog.models,
-                                automaticTitleConfiguration = automaticTitles,
-                                createSuggestedSessions = { arguments, configuration ->
-                                    applicationForSuggestedSessions.createSuggestedSessions(
-                                        arguments,
-                                        configuration,
-                                    )
-                                },
-                                reportUnhandledError = reportUnhandledError,
-                            ),
-                            agentHistoryFactory,
-                        )
-                    }.create()
-                }
-                val store = graph.koin.get<PersistedSessionViewModelRegistry> {
-                    parametersOf(
-                        repositoryFactory,
-                        scope,
-                        sessionAgentFactory,
-                        reportUnhandledError,
-                        resolvedWorkingDirectory,
-                    )
-                }
-                val catalogFactory = graph.koin.get<SessionCatalogViewModelFactory> {
-                    parametersOf(
-                        repositoryFactory,
-                        scope,
-                        { failure: Throwable -> reportUnhandledError(failure, resolvedWorkingDirectory) },
-                    )
-                }
-                val composerFactory = graph.koin.get<ComposerViewModelFactory>()
-                val newSessionFactory = graph.koin.get<NewSessionViewModelFactory> {
-                    parametersOf(store, composerFactory, modelCatalog.models)
-                }
-                val settingsFactory = SettingsViewModelFactory { arguments ->
-                    val pickerFactory = { initialDirectory: Path ->
-                        createDirectoryPickerViewModel(initialDirectory, scope)
-                    }
-                    graph.koin.get<DefaultSettingsViewModelFactory> {
-                        parametersOf(
-                            SettingsViewModelDependencies(
-                                initialPage = arguments.initialPage,
-                                globalSettings = globalSettings,
-                                authentication = authStore,
-                                accountUsage = accountUsage,
-                                mcpManager = mcpManager,
-                                hookManager = hookManager,
-                                models = modelCatalog.models,
-                                sessionSettings = ContractSessionSettingsDataSource(
-                                    target = arguments.target,
-                                    scope = scope.supervisorChildScope(),
-                                ),
-                                createDirectoryPicker = pickerFactory,
-                                ownerScope = scope,
-                                reportUnhandledError = reportUnhandledError,
-                                startupWorkingDirectory = resolvedWorkingDirectory,
-                            ),
-                        )
-                    }.create()
-                }
-                val loginFactory = OpenAiLoginViewModelFactory {
-                    graph.koin.get<DefaultOpenAiLoginViewModelFactory> {
-                        parametersOf(authStore, scope)
-                    }.create()
-                }
-                val applicationViewModel = graph.koin.get<ApplicationViewModel> {
-                    parametersOf(
-                        store,
-                        newSessionFactory,
-                        catalogFactory,
-                        settingsFactory,
-                        loginFactory,
-                        { initialDirectory: Path ->
-                            createDirectoryPickerViewModel(initialDirectory, scope)
-                        },
-                        NewSessionViewModelArgumentsProvider(
-                            globalSettings = globalSettings,
-                            workingDirectory = resolvedWorkingDirectory,
-                        ),
-                        scope,
-                    )
-                }
-                applicationForSuggestedSessions = applicationViewModel
-                val newLineKey = globalSettings.settings
-                    .map { settings -> settings.newLineKey }
-                    .stateIn(
-                        scope = scope,
-                        started = SharingStarted.Eagerly,
-                        initialValue = globalSettings.settings.value.newLineKey,
-                    )
-                val sidebarSettings = SidebarSettingsViewModelImpl(
-                    globalSettings = globalSettings,
-                    scope = scope,
-                )
-                return KodexApplication(
-                    dependencyGraph = graph,
-                    dependencies = dependencies,
-                    authStore = authStore,
-                    accountUsageStore = accountUsage,
-                    mcpManager = mcpManager,
-                    hookManager = hookManager,
-                    applicationScope = scope,
-                    homeHandle = homeHandle,
-                    viewModel = applicationViewModel,
-                    newLineKey = newLineKey,
-                    sidebarSettings = sidebarSettings,
-                ).also {
-                    ApplicationLogger.info { "Application opened." }
-                }
-            } catch (failure: Throwable) {
-                hookManager.close()
-                mcpManager.close()
-                mcpService.close()
-                scope.cancel()
-                graph.close()
-                throw failure
-            }
-        }
-    }
-}
+/** Fault-injection checkpoints for isolated startup/shutdown validation. */
+public enum class ApplicationStartupPhase { HomePrepared, BackendReady, ServicesRegistered, FrontendReady, RendererStarted }
 
 /**
- * OpenAI services whose constructors require process-specific runtime values.
- *
- * Koin owns this typed definition while [KodexApplication] supplies values
- * that cannot be known by a static module.
+ * One structured CLI host. The supplied prepared Home is consumed and released last.
+ * Factories are composition-root test seams, never dependencies of a frontend ViewModel.
  */
-@Factory
-internal class OpenAiApplicationServices(
-    @InjectedParam authStore: KodexAuthStore,
-    @InjectedParam clientConfig: OpenAiClientConfig,
-) {
-    val client: OpenAiClient = OpenAiClient(authStore, clientConfig)
-    val accountUsage: CodexAccountUsageStore =
-        createCodexAccountUsageStore(client, authStore)
-    val modelCatalog: OpenAiModelCatalog = OpenAiModelCatalog(client)
+public suspend fun <R> withKodexApplication(
+    homeHandle: KodexHomeHandle,
+    workingDirectory: Path = Path("."),
+    codexDirectory: Path = Path(requireUserHomeDirectory(), ".codex"),
+    agentsDirectory: Path = Path(requireUserHomeDirectory(), ".agents"),
+    applicationWidth: Int? = null,
+    createClient: (OpenAiAuthStore) -> ModelClient = { OpenAiClient(it) },
+    createLoginClient: () -> LoginClient = { OpenAiLoginClient() },
+    onPhase: suspend (ApplicationStartupPhase) -> Unit = {},
+    render: suspend CoroutineScope.(KodexApplication) -> R,
+): R {
+    var primary: Throwable? = null
+    try {
+        require(homeHandle.version == CurrentKodexApplicationVersion) { "The Home was not prepared for this application version." }
+        onPhase(ApplicationStartupPhase.HomePrepared)
+        val cwd = SystemCoroutineFileSystem.resolve(workingDirectory)
+        return withBackendServices(
+            homeHandle.home, resolveAllowingMissing(codexDirectory), resolveAllowingMissing(agentsDirectory),
+            createClient = createClient, createLoginClient = createLoginClient,
+        ) { backend ->
+            onPhase(ApplicationStartupPhase.BackendReady)
+            withInMemoryRpc(registerServices = { backend.register(this) }) { rawClient ->
+                onPhase(ApplicationStartupPhase.ServicesRegistered)
+                val owner = Job(coroutineContext[Job])
+                val frontendScope = CoroutineScope(coroutineContext + owner)
+                var application: ApplicationViewModel? = null
+                var views: RpcSessionViews? = null
+                var global: RpcGlobalSettings? = null
+                var failure: Throwable? = null
+                try {
+                    val services = RpcServices(RestoringRpcClient(rawClient))
+                    val frontendStore = openCliFrontendSettings(homeHandle.home)
+                    val settings = RpcGlobalSettings.open(services.global, frontendStore, frontendScope, applicationWidth ?: 0)
+                        .also { global = it }
+                    lateinit var root: ApplicationViewModelImpl
+                    val sessionViews = RpcSessionViews(frontendScope, services) { created ->
+                        frontendScope.launch {
+                            try { root.openCreatedSessions(created.map { it.sessionIndex }) }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (error: Throwable) { ApplicationLogger.error(error) { "Unable to open created Session tabs." } }
+                        }
+                    }.also { views = it }
+                    val sessions = DefaultPersistedSessionViewModelRegistry(sessionViews, settings.models, frontendScope)
+                    val draftFactory = DefaultNewSessionViewModelFactory(sessionViews, sessions, settings.models, frontendScope)
+                    val directoryPicker = { path: Path -> createDirectoryPickerViewModel(path, frontendScope) }
+                    root = ApplicationViewModelImpl(
+                        sessions, draftFactory,
+                        SessionCatalogViewModelFactory { fork, delete ->
+                            RpcSessionCatalog(frontendScope, services.global, deleteSession = delete, forkSession = fork)
+                        },
+                        SettingsViewModelFactory { arguments ->
+                            val source = when (val target = arguments.target) {
+                                is RpcPersistedSessionViewModel -> RpcSessionSettingsSource(target.view, frontendScope)
+                                is RpcNewSessionViewModel -> RpcDraftSettingsSource(target.draft, frontendScope)
+                                else -> error("Unknown frontend Session view.")
+                            }
+                            createSettingsViewModel(
+                                arguments.initialPage, RpcGlobalEditor(settings, services.global, frontendScope),
+                                createSessionSettingsViewModel(source, settings.models, frontendScope, directoryPicker),
+                                RpcNewSessionSettings(settings, frontendScope),
+                            )
+                        },
+                        OpenAiLoginViewModelFactory {
+                            val target = OAuthTarget.OpenAi(settings.settings.value.authSource)
+                            createOpenAiLoginViewModel(frontendScope) { startRpcOAuth(services.global, target, frontendScope) }
+                        },
+                        directoryPicker,
+                        { ordinal ->
+                            val defaults = settings.settings.value.newSession
+                            NewSessionViewModelArguments(
+                                if (ordinal == 1) DEFAULT_NEW_SESSION_NAME else "$DEFAULT_NEW_SESSION_NAME $ordinal",
+                                KodexAgentSettings(model = defaults.model, cwd = cwd,
+                                    reasoning = Reasoning(effort = defaults.reasoningEffort), serviceTier = defaults.serviceTier,
+                                    requestUserInputMode = defaults.requestUserInputMode),
+                            )
+                        },
+                        frontendScope,
+                    )
+                    application = root
+                    frontendScope.launch {
+                        try { collectNotificationHooks(services.global.getNotificationFlow(), frontendStore.settings, cwd) }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: Throwable) { ApplicationLogger.error(error) { "Notification subscription ended." } }
+                    }
+                    val result = KodexApplication(
+                        root, frontendStore.settings.map { it.newLineKey }.stateIn(
+                            frontendScope, SharingStarted.Eagerly, frontendStore.settings.value.newLineKey,
+                        ),
+                        SidebarSettingsViewModelImpl(settings, frontendScope, applicationWidth != null),
+                    )
+                    onPhase(ApplicationStartupPhase.FrontendReady)
+                    onPhase(ApplicationStartupPhase.RendererStarted)
+                    render(result)
+                } catch (error: Throwable) {
+                    failure = error
+                    throw error
+                } finally {
+                    withContext(NonCancellable) {
+                        val original = failure
+                        suspend fun cleanup(action: suspend () -> Unit) {
+                            try { action() } catch (error: Throwable) {
+                                if (failure == null) failure = error else failure.addSuppressed(error)
+                            }
+                        }
+                        cleanup { application?.close() }
+                        cleanup { views?.close() }
+                        cleanup { global?.close() }
+                        cleanup { owner.cancelAndJoin() }
+                        cleanup { application?.shutdown() }
+                        if (original == null) failure?.let { throw it }
+                    }
+                }
+            }
+        }
+    } catch (error: Throwable) {
+        primary = error
+        throw error
+    } finally {
+        try { withContext(NonCancellable) { homeHandle.closeAndJoin() } }
+        catch (error: Throwable) { if (primary == null) throw error else primary.addSuppressed(error) }
+    }
 }
-
-/** Exact runtime arguments for one compiler-generated application definition. */
-internal class NewSessionViewModelArgumentsProvider(
-    private val globalSettings: KodexGlobalSettingsStore,
-    private val workingDirectory: Path,
-) {
-    fun create(ordinal: Int): NewSessionViewModelArguments =
-        NewSessionViewModelArguments(
-            defaultName = if (ordinal == 1) {
-                DEFAULT_NEW_SESSION_NAME
-            } else {
-                "$DEFAULT_NEW_SESSION_NAME $ordinal"
-            },
-            initialSettings = globalSettings.settings.value.newSession
-                .toAgentSettings(workingDirectory),
-        )
-}
-
-@Factory(binds = [ApplicationViewModel::class])
-internal fun createApplicationViewModel(
-    @InjectedParam sessions: PersistedSessionViewModelRegistry,
-    @InjectedParam newSessionFactory: NewSessionViewModelFactory,
-    @InjectedParam catalogFactory: SessionCatalogViewModelFactory,
-    @InjectedParam settingsFactory: SettingsViewModelFactory,
-    @InjectedParam loginFactory: OpenAiLoginViewModelFactory,
-    @InjectedParam createDirectoryPicker: (Path) -> DirectoryPickerViewModel,
-    @InjectedParam newSessionArguments: NewSessionViewModelArgumentsProvider,
-    @InjectedParam ownerScope: CoroutineScope,
-): ApplicationViewModel = ApplicationViewModelImpl(
-    sessions = sessions,
-    newSessionFactory = newSessionFactory,
-    catalogFactory = catalogFactory,
-    settingsFactory = settingsFactory,
-    loginFactory = loginFactory,
-    createDirectoryPicker = createDirectoryPicker,
-    newSessionArguments = newSessionArguments::create,
-    ownerScope = ownerScope,
-)
-
-private fun io.github.stream29.kodex.cli.settings.KodexNewSessionSettings.toAgentSettings(
-    workingDirectory: Path,
-): KodexAgentSettings = KodexAgentSettings(
-    model = model,
-    cwd = workingDirectory,
-    requestUserInputMode = requestUserInputMode,
-    reasoning = Reasoning(effort = reasoningEffort),
-    serviceTier = serviceTier,
-)
-
-private data class ApplicationAgentContextSettings(
-    override val agentsHome: Path,
-    override val kodexHome: Path,
-    override val codexHome: Path,
-    override val sources: io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings,
-    override val shell: Shell,
-) : AgentContextSettings
-
-private fun defaultCodexHome(): Path = Path(requireUserHomeDirectory(), ".codex")
-
-private fun defaultAgentsHome(): Path = Path(requireUserHomeDirectory(), ".agents")
 
 private suspend fun resolveAllowingMissing(path: Path): Path {
-    if (SystemCoroutineFileSystem.metadataOrNull(path) != null) {
-        return SystemCoroutineFileSystem.resolve(path)
-    }
+    if (SystemCoroutineFileSystem.metadataOrNull(path) != null) return SystemCoroutineFileSystem.resolve(path)
     val parent = path.parent
-    val resolvedParent = if (parent == null) {
-        SystemCoroutineFileSystem.resolve(Path("."))
-    } else {
-        resolveAllowingMissing(parent)
-    }
-    return Path(resolvedParent, path.name)
+    return Path(if (parent == null) SystemCoroutineFileSystem.resolve(Path(".")) else resolveAllowingMissing(parent), path.name)
 }
-
-private val ApplicationLogger: KLogger by lazy {
-    KotlinLogging.logger {}.global()
-}
+private val ApplicationLogger = KotlinLogging.logger {}

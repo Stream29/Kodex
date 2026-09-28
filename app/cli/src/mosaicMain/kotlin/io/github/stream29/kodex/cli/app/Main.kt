@@ -27,29 +27,27 @@ public fun main() {
             println("Unable to initialize Kodex logging: ${failure.message ?: failure}")
             return@runBlocking
         }
-        val application = try {
-            KodexApplication.openDefault(homeHandle = homeHandle)
-        } catch (failure: Throwable) {
-            println("Unable to start Kodex: ${failure.message ?: failure}")
-            return@runBlocking
-        }
         try {
-            try {
-                runMosaic(
-                    mouseTracking = MouseTracking.AnyEvents,
-                    screen = TerminalScreen.Alternate,
-                ) {
-                    SessionTreeCliScreen(
-                        viewModel = application.viewModel,
-                        newLineKey = application.newLineKey,
-                        sidebarSettings = application.sidebarSettings,
-                    )
+            withKodexApplication(homeHandle) { application ->
+                try {
+                    runMosaic(
+                        mouseTracking = MouseTracking.AnyEvents,
+                        screen = TerminalScreen.Alternate,
+                    ) {
+                        SessionTreeCliScreen(
+                            viewModel = application.viewModel,
+                            newLineKey = application.newLineKey,
+                            sidebarSettings = application.sidebarSettings,
+                        )
+                    }
+                } finally {
+                    resetTerminalTitle()
                 }
-            } finally {
-                resetTerminalTitle()
             }
-        } finally {
-            application.shutdown()
+        } catch (failure: kotlinx.coroutines.CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            println("Unable to run Kodex: ${failure.message ?: failure}")
         }
     }
 }

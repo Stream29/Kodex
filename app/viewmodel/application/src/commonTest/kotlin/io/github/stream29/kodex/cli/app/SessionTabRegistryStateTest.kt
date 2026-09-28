@@ -1,181 +1,30 @@
 package io.github.stream29.kodex.cli.app
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
-import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
-import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
-import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
-import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
-import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModelFactory
-import io.github.stream29.kodex.app.settings.contract.OpenAiLoginEffect
-import io.github.stream29.kodex.app.settings.contract.OpenAiLoginState
-import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
-import io.github.stream29.kodex.app.settings.contract.GlobalSettingsViewModel
-import io.github.stream29.kodex.app.settings.contract.NewSessionSettingsViewModel
-import io.github.stream29.kodex.app.settings.contract.SessionSettingsViewModel
-import io.github.stream29.kodex.app.settings.contract.SettingsPage
-import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
-import io.github.stream29.kodex.app.settings.contract.SettingsViewModelFactory
-import io.github.stream29.kodex.cli.agent.DefaultComposerViewModelFactory
-import io.github.stream29.kodex.cli.newsession.DefaultNewSessionViewModelFactory
-import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.OpenAiModelId
-import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.io.files.Path
-import kotlin.test.assertEquals
-import kotlin.test.assertIs
-import kotlin.test.assertSame
+import kotlin.test.*
 
 val sessionTabRegistryStateTest by testSuite {
     test("navigation preserves ordered child handles and selected index") {
-        coroutineScope {
-            val fixture = applicationFixture()
-            try {
-                val first = assertIs<NewSessionViewModel>(fixture.viewModel.navigation.value.selected)
-                val second = fixture.viewModel.createNewSessionTab()
-
-                assertEquals(
-                    ApplicationNavigationState(listOf(first, second), selectedIndex = 1),
-                    fixture.viewModel.navigation.value,
-                )
-                assertEquals(true, fixture.viewModel.selectTab(0))
-                assertSame(first, fixture.viewModel.navigation.value.selected)
-
-                assertEquals(true, fixture.viewModel.closeTab(first))
-                assertEquals(listOf(second), fixture.viewModel.navigation.value.tabs)
-                assertEquals(0, fixture.viewModel.navigation.value.selectedIndex)
-            } finally {
-                fixture.close()
-            }
+        applicationFixture { app, _ ->
+            val vm = app.viewModel
+            val first = assertIs<NewSessionViewModel>(vm.navigation.value.selected)
+            val second = vm.createNewSessionTab()
+            assertEquals(ApplicationNavigationState(listOf(first, second), 1), vm.navigation.value)
+            assertTrue(vm.selectTab(0))
+            assertSame(first, vm.navigation.value.selected)
+            assertTrue(vm.closeTab(first))
+            assertEquals(listOf(second), vm.navigation.value.tabs)
+            assertEquals(0, vm.navigation.value.selectedIndex)
         }
     }
-
     test("closing the final tab creates a replacement draft") {
-        coroutineScope {
-            val fixture = applicationFixture()
-            try {
-                val original = fixture.viewModel.navigation.value.selected
-
-                assertEquals(true, fixture.viewModel.closeTab(original))
-
-                val replacement = fixture.viewModel.navigation.value.selected
-                assertIs<NewSessionViewModel>(replacement)
-                assertEquals("New Session 2", replacement.name.value)
-            } finally {
-                fixture.close()
-            }
+        applicationFixture { app, _ ->
+            val vm = app.viewModel
+            assertTrue(vm.closeTab(vm.navigation.value.selected))
+            val next = assertIs<NewSessionViewModel>(vm.navigation.value.selected)
+            assertEquals("New Session 2", next.name.value)
         }
     }
-}
-
-internal data class ApplicationTestFixture(
-    val repository: InMemoryKodexSessionRepository,
-    val sessions: PersistedSessionViewModelRegistry,
-    val viewModel: ApplicationViewModelImpl,
-) {
-    suspend fun close() {
-        viewModel.shutdown()
-        repository.cancelAndJoin()
-    }
-}
-
-internal suspend fun kotlinx.coroutines.CoroutineScope.applicationFixture(
-    newSessionFactory: NewSessionViewModelFactory? = null,
-    decorateAgent: (io.github.stream29.kodex.app.agent.contract.AgentViewModel) ->
-        io.github.stream29.kodex.app.agent.contract.AgentViewModel = { it },
-    createDirectoryPicker: (Path) -> DirectoryPickerViewModel = {
-        error("Directory picker is not used by this fixture.")
-    },
-): ApplicationTestFixture {
-    val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-    val sessions = testSessionViewModelRegistry(repository, this, decorateAgent)
-    val drafts = newSessionFactory ?: DefaultNewSessionViewModelFactory(
-        sessions,
-        DefaultComposerViewModelFactory,
-        MutableStateFlow(emptyList()),
-    )
-    val viewModel = ApplicationViewModelImpl(
-        sessions = sessions,
-        newSessionFactory = drafts,
-        catalogFactory = SessionCatalogViewModelFactory { _, _ -> EmptySessionCatalogViewModel() },
-        settingsFactory = SettingsViewModelFactory { arguments ->
-            EmptySettingsViewModel(arguments.initialPage)
-        },
-        loginFactory = OpenAiLoginViewModelFactory { EmptyOpenAiLoginViewModel() },
-        createDirectoryPicker = createDirectoryPicker,
-        newSessionArguments = { ordinal ->
-            NewSessionViewModelArguments(
-                defaultName = if (ordinal == 1) "New Session" else "New Session $ordinal",
-                initialSettings = KodexAgentSettings(
-                    model = OpenAiModelId("test-model"),
-                    cwd = Path("."),
-                ),
-            )
-        },
-        ownerScope = this,
-    )
-    return ApplicationTestFixture(repository, sessions, viewModel)
-}
-
-private class EmptySettingsViewModel(initialPage: SettingsPage) : SettingsViewModel {
-    private val mutableSelectedPage = MutableStateFlow(initialPage)
-    override val selectedPage: StateFlow<SettingsPage> = mutableSelectedPage
-    override val global: GlobalSettingsViewModel
-        get() = error("Global settings are not used by this fixture.")
-    override val session: SessionSettingsViewModel
-        get() = error("Session settings are not used by this fixture.")
-    override val newSession: NewSessionSettingsViewModel
-        get() = error("New-session settings are not used by this fixture.")
-
-    override fun selectPage(page: SettingsPage) {
-        mutableSelectedPage.value = page
-    }
-
-    override fun close(): Unit = Unit
-}
-
-private class EmptyOpenAiLoginViewModel : OpenAiLoginViewModel {
-    override val state: StateFlow<OpenAiLoginState> = MutableStateFlow(OpenAiLoginState.Ready)
-    override val effects: Flow<OpenAiLoginEffect> = emptyFlow()
-
-    override fun start(): Unit = Unit
-    override fun retryBrowser(attemptId: Long): Unit = Unit
-    override fun cancel(): Unit = Unit
-    override fun onBrowserOpened(attemptId: Long): Unit = Unit
-    override fun onBrowserOpenFailed(attemptId: Long): Unit = Unit
-    override fun isActive(attemptId: Long): Boolean = false
-    override fun close(): Unit = Unit
-}
-
-private class EmptySessionCatalogViewModel : SessionCatalogViewModel {
-    override suspend fun readCreatedAt(sessionIndex: Int): kotlin.time.Instant? = null
-    override suspend fun readUpdatedAt(sessionIndex: Int): kotlin.time.Instant? = null
-
-    override val state: StateFlow<SessionCatalogState> =
-        MutableStateFlow(SessionCatalogState.Loaded(false, emptyList()))
-
-    override suspend fun refresh(): Unit = Unit
-
-    override suspend fun setShowArchived(showArchived: Boolean): Unit = Unit
-
-    override suspend fun archive(sessionIndex: Int): Unit = Unit
-
-    override suspend fun unarchive(sessionIndex: Int): Unit = Unit
-
-    override suspend fun fork(sessionIndex: Int): Int = error("Fork is not used by this fixture.")
-
-    override suspend fun delete(sessionIndex: Int): Boolean = false
-
-    override fun close(): Unit = Unit
 }
