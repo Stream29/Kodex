@@ -27,10 +27,12 @@ kotlin {
                 implementation(project(":agent-storage-filesystem-layout"))
                 implementation(project(":utils-filesystem-lease-impl"))
                 implementation(libs.kotlinx.serialization.json)
+                implementation(libs.kaml)
             }
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
+            implementation(project(":app-shared-settings-filesystem"))
         }
     }
 }
