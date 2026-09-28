@@ -6,12 +6,17 @@ import de.infix.testBalloon.framework.core.testSuite
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
@@ -87,6 +92,34 @@ private fun assertFailurePreserved(expected: Throwable, actual: Throwable) {
 }
 
 val inMemoryRpcTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
+    test("parallel active collectors release without completion-handler failures on parent cancellation") {
+        withTimeout(60.seconds) {
+            repeat(32) {
+                val errors = MutableStateFlow<List<Throwable>>(emptyList())
+                val observed = MutableStateFlow(0)
+                val handler = CoroutineExceptionHandler { _, error -> errors.update { it + error } }
+                val operation = launch(Dispatchers.Default + handler) {
+                    withInMemoryRpc(
+                        registerServices = { registerService(EchoProbe::class) { EchoProbeImpl() } },
+                    ) { client ->
+                        val rpc = client.withService<EchoProbe>()
+                        repeat(32) {
+                            launch {
+                                rpc.heldValues().buffer(0).collect { observed.update { it + 1 } }
+                            }
+                        }
+                        awaitCancellation()
+                    }
+                }
+                try {
+                    observed.first { it == 32 }
+                } finally {
+                    operation.cancelAndJoin()
+                }
+                assertTrue(errors.value.isEmpty(), errors.value.joinToString { it.stackTraceToString() })
+            }
+        }
+    }
     test("two services share a JSON connection without dropping concurrent calls") {
         checked {
             val backend = EchoProbeImpl()
