@@ -5,16 +5,14 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation(project(":agent-session-contract"))
+            implementation(project(":app-viewmodel-rpc"))
             implementation(project(":app-contract-session"))
             implementation(project(":app-contract-session-catalog"))
-            implementation(project(":agent-state-contract"))
             implementation(libs.kotlinx.coroutines.core)
-            implementation(project(":agent-storage-contract"))
-            implementation(project(":agent-storage-contract-ext"))
             implementation(project(":utils-coroutines"))
         }
         commonTest.dependencies {
+            implementation(project(":app-test-support-rpc"))
             implementation(project(":agent-storage-contract-ext"))
             implementation(project(":agent-session-filesystem"))
             implementation(project(":app-viewmodel-agent"))

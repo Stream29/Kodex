@@ -9,6 +9,7 @@ import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
+import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
 import io.github.stream29.kodex.tool.multiagent.SuggestedSessionMeta
 import kotlinx.coroutines.flow.StateFlow
@@ -68,7 +69,10 @@ public interface AgentViewModel :
     public val suggestSubagentTask: SuggestSubagentTaskViewModel
     public val shellSessions: AgentShellSessionRegistry
 
-    public val execution: StateFlow<AgentExecutionState>
+    /** Independent backend facts; controls derive their own presentation predicates. */
+    public val state: StateFlow<AgentStateValue>
+    public val running: StateFlow<Boolean>
+    public val latestIndex: StateFlow<Int>
     public val tokenCount: StateFlow<Long?>
     public val pendingSteer: StateFlow<List<StableIndexEvent.Steerable>>
     public val historyAction: StateFlow<AgentHistoryActionState>
@@ -78,9 +82,6 @@ public interface AgentViewModel :
     /** Submits content to this exact Agent address. */
     public suspend fun submit(content: List<ContentItem>): Unit
 
-    /** Prevents automatic title generation for the next submitted turn. */
-    public suspend fun suppressAutomaticTitle(): Unit
-
     /**
      * Consumes and submits only [expectedRevision] from this Agent's composer.
      */
@@ -89,8 +90,7 @@ public interface AgentViewModel :
     ): AgentComposerSubmissionResult
 
     /**
-     * Starts continuation work in this ViewModel's lifetime and returns after
-     * the owned operation has started.
+     * Starts waiting for a backend-owned continuation; closing this view only cancels the wait.
      */
     public fun resume(): Unit
 
@@ -98,7 +98,7 @@ public interface AgentViewModel :
 
     public fun clearPending(): Unit
 
-    /** Starts compaction in this ViewModel's lifetime. */
+    /** Starts waiting for backend-owned compaction. */
     public fun forceCompact(): Unit
 
     /** Updates only the thread name on the latest persisted settings snapshot. */

@@ -61,11 +61,8 @@ public interface ApplicationViewModel : AutoCloseable {
     /** Forks one complete persisted root Session without changing navigation. */
     public suspend fun forkSession(sessionIndex: Int): Int
 
-    /** Creates and opens one accepted batch of ordinary new Sessions. */
-    public suspend fun createSuggestedSessions(
-        arguments: SuggestSubagentTaskArgs,
-        configuration: SuggestedSessionConfiguration,
-    ): List<SuggestedSessionMeta>
+    /** Adds already-created child tabs without repeating creation or changing the selected tab. */
+    public suspend fun openCreatedSessions(sessionIndexes: List<Int>): Unit
 
     /**
      * Materializes the New Session currently at [tabIndex], then replaces that

@@ -3,50 +3,6 @@ package io.github.stream29.kodex.app.agent.contract
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import kotlinx.coroutines.flow.StateFlow
 
-/** Lightweight execution phase without a streaming payload or runtime handle. */
-public enum class AgentExecutionPhase {
-    Empty,
-    UserMessage,
-    Responding,
-    AssistantMessage,
-    ToolPending,
-    ToolCompleted,
-    ExternalWrite,
-    Compacting,
-}
-
-/** Commands currently admissible for one exact Agent snapshot. */
-public data class AgentExecutionCapabilities(
-    public val canSubmit: Boolean = false,
-    public val canResume: Boolean = false,
-    public val canCancel: Boolean = false,
-    public val canClearPending: Boolean = false,
-    public val canCompact: Boolean = false,
-    public val canReplaceHistory: Boolean = false,
-    public val canForkHistory: Boolean = false,
-)
-
-/**
- * Low-frequency execution facts consumed by controls and lightweight summaries.
- *
- * Stream events, pending steer content, settings, tokens, and failures
- * are intentionally absent.
- */
-public data class AgentExecutionState(
-    public val phase: AgentExecutionPhase = AgentExecutionPhase.Empty,
-    public val running: Boolean = false,
-    public val latestStorageIndex: Int = -1,
-    public val activityVersion: Long = 0,
-    public val capabilities: AgentExecutionCapabilities = AgentExecutionCapabilities(),
-) {
-    init {
-        require(latestStorageIndex >= -1) {
-            "An Agent latest storage index must be -1 or non-negative."
-        }
-        require(activityVersion >= 0) { "An Agent activity version must not be negative." }
-    }
-}
-
 /** Observable process handle safe for frontend presentation and cancellation. */
 public interface AgentShellSession : AutoCloseable {
     public val sessionId: Int

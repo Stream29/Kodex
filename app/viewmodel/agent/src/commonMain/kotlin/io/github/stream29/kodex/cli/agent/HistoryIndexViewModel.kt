@@ -33,19 +33,30 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.time.Instant
+import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
+
+public fun createHistoryIndexViewModel(
+    timeline: IndexVersioned<CleanIndexEntry>,
+    timestamp: IndexVersioned<Instant>,
+    latestIndex: StateFlow<Int>,
+    state: StateFlow<KodexAgentStateValue>,
+    scope: CoroutineScope,
+    cacheNonce: StateFlow<Long>,
+): HistoryIndexViewModel = HistoryIndexViewModelImpl(timeline, timestamp, latestIndex, state, scope, cacheNonce)
 
 internal class HistoryIndexViewModelImpl(
     private val timeline: IndexVersioned<CleanIndexEntry>,
     private val timestamp: IndexVersioned<Instant>,
-    latestIndex: StateFlow<Int>,
+    private val latestIndex: StateFlow<Int>,
     agentState: StateFlow<KodexAgentStateValue>,
     scope: CoroutineScope,
+    private val cacheNonce: StateFlow<Long>? = null,
 ) : HistoryIndexViewModel {
     private val scanMutex = Mutex()
     private var scannedThrough = -1
     private val mutableWindow = MutableStateFlow(
         HistoryIndexWindow(
-            generation = 0,
+            generation = cacheNonce?.value ?: 0,
             indexes = emptyList(),
         ),
     )
@@ -53,6 +64,9 @@ internal class HistoryIndexViewModelImpl(
     override val window: StateFlow<HistoryIndexWindow> = mutableWindow.asStateFlow()
 
     init {
+        cacheNonce?.let { nonce ->
+            scope.launch { nonce.collect { sync(latestIndex.value, forceInvalidate = true) } }
+        }
         scope.launch {
             latestIndex.collect { latest ->
                 sync(latest = latest, forceInvalidate = false)
@@ -81,7 +95,9 @@ internal class HistoryIndexViewModelImpl(
 
     override fun contains(generation: Long, index: Int): Boolean {
         val current = mutableWindow.value
-        return current.generation == generation && current.indexes.binarySearch(index) >= 0
+        return current.generation == generation &&
+            (cacheNonce?.value?.let { it == generation } != false) &&
+            current.indexes.binarySearch(index) >= 0
     }
 
     override suspend fun load(generation: Long, index: Int): HistoryIndexEntry =
@@ -115,25 +131,34 @@ internal class HistoryIndexViewModelImpl(
     private suspend fun sync(latest: Int, forceInvalidate: Boolean) {
         scanMutex.withLock {
             val current = mutableWindow.value
-            when {
-                forceInvalidate || latest < scannedThrough -> {
-                    val replacement = loadVisibleIndexes(0, latest)
-                    mutableWindow.value = HistoryIndexWindow(
-                        generation = current.generation + 1,
-                        indexes = replacement,
-                    )
-                }
-
-                latest > scannedThrough -> {
-                    val appended = loadVisibleIndexes(scannedThrough + 1, latest)
-                    if (appended.isNotEmpty()) {
-                        mutableWindow.value = current.copy(
-                            indexes = current.indexes + appended,
+            val nonce = cacheNonce?.value
+            val target = if (cacheNonce != null) latestIndex.value else latest
+            try {
+                when {
+                    forceInvalidate || target < scannedThrough || (nonce != null && nonce != current.generation) -> {
+                        val replacement = loadVisibleIndexes(0, target)
+                        if (nonce != cacheNonce?.value) return
+                        mutableWindow.value = HistoryIndexWindow(
+                            generation = nonce ?: (current.generation + 1),
+                            indexes = replacement,
                         )
                     }
+
+                    target > scannedThrough -> {
+                        val appended = loadVisibleIndexes(scannedThrough + 1, target)
+                        if (nonce != cacheNonce?.value) return
+                        if (appended.isNotEmpty()) {
+                            mutableWindow.value = current.copy(
+                                indexes = current.indexes + appended,
+                            )
+                        }
+                    }
                 }
+                scannedThrough = target
+            } catch (failure: CacheNonceMismatch) {
+                if (cacheNonce == null) throw failure
+                // Wait for the already-subscribed nonce rather than replaying an old read.
             }
-            scannedThrough = latest
         }
     }
 

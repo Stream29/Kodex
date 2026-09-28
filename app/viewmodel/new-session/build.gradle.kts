@@ -5,6 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":app-viewmodel-rpc"))
             implementation(project(":app-contract-agent"))
             implementation(project(":app-contract-session"))
             implementation(project(":openai-models"))
@@ -12,6 +13,7 @@ kotlin {
             implementation(libs.kotlinx.io.core)
         }
         commonTest.dependencies {
+            implementation(project(":app-test-support-rpc"))
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
             implementation(project(":app-viewmodel-agent"))

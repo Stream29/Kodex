@@ -4,7 +4,6 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginEffect
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginState
 import io.github.stream29.kodex.cli.auth.KodexAuthLoginAttempt
-import io.github.stream29.kodex.cli.auth.KodexAuthStore
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.coroutineScope
@@ -19,7 +18,7 @@ val openAiLoginViewModelTest by testSuite {
     test("authorization URL is emitted as an effect instead of popup state") {
         coroutineScope {
             val attempt = TestLoginAttempt("https://auth.example.test/authorize?state=secret-state")
-            val viewModel = createOpenAiLoginViewModel(TestKodexAuthStore(attempt), this)
+            val viewModel = createOpenAiLoginViewModel(this) { attempt }
             try {
                 viewModel.start()
 
@@ -49,7 +48,7 @@ val openAiLoginViewModelTest by testSuite {
     test("retry reuses the active callback attempt") {
         coroutineScope {
             val attempt = TestLoginAttempt("https://auth.example.test/authorize?state=secret-state")
-            val viewModel = createOpenAiLoginViewModel(TestKodexAuthStore(attempt), this)
+            val viewModel = createOpenAiLoginViewModel(this) { attempt }
             try {
                 viewModel.start()
                 val first = withTimeout(1_000) {
@@ -77,22 +76,6 @@ val openAiLoginViewModelTest by testSuite {
             }
         }
     }
-}
-
-private class TestKodexAuthStore(
-    private val attempt: TestLoginAttempt,
-) : KodexAuthStore {
-    override val state = MutableStateFlow<OpenAiAuthState>(
-        OpenAiAuthState.Unavailable.CredentialsNotFound,
-    )
-
-    override suspend fun reload(): Unit = Unit
-
-    override suspend fun startKodexLogin(): KodexAuthLoginAttempt = attempt
-
-    override suspend fun logoutKodex(): Unit = Unit
-
-    override fun close(): Unit = Unit
 }
 
 private class TestLoginAttempt(

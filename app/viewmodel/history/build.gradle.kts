@@ -11,6 +11,7 @@ kotlin {
             implementation(project(":app-contract-history"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(project(":utils-coroutines"))
+            implementation(project(":utils-rpc-exception"))
         }
         commonTest.dependencies {
             implementation(project(":openai-json-codec"))

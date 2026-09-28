@@ -1,0 +1,476 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
+package io.github.stream29.kodex.cli.rpc
+
+import de.infix.testBalloon.framework.core.TestCompartment
+import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.app.settings.contract.*
+import io.github.stream29.kodex.app.settings.createSessionSettingsViewModel
+import io.github.stream29.kodex.cli.settings.*
+import io.github.stream29.kodex.mcp.contract.*
+import io.github.stream29.kodex.openai.*
+import io.github.stream29.kodex.openai.accountusage.*
+import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetCredit
+import io.github.stream29.kodex.rpc.client.asSuspendMutableStateFlow
+import io.github.stream29.kodex.rpc.contract.GlobalRpc
+import io.github.stream29.kodex.rpc.models.*
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.test.*
+import kotlinx.io.files.Path
+import kotlinx.rpc.RpcClient
+import kotlinx.rpc.RpcCall
+import kotlin.test.*
+import kotlin.time.Instant
+
+val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("field retries merge unrelated changes and do not publish a successful reply") {
+        runTest {
+            val source = MutableStateFlow("old" to 1)
+            var calls = 0
+            var written: Pair<String, Int>? = null
+            val state = source.asSuspendMutableStateFlow { _, update ->
+                calls++
+                if (calls == 1) { source.value = "old" to 2; false }
+                else { written = update; true }
+            }
+            assertTrue(state.editField("old", { it.first }, { "new" to it.second }))
+            assertEquals(50, currentTime)
+            assertEquals("new" to 2, written)
+            assertEquals("old" to 2, state.value)
+        }
+    }
+    test("target conflicts stop retries without resetting the baseline") {
+        runTest {
+            val source = MutableStateFlow("old")
+            var calls = 0
+            val state = source.asSuspendMutableStateFlow { _, _ -> calls++; source.value = "other"; false }
+            assertFalse(state.editField("old", { it }, { "new" }))
+            assertEquals(1, calls)
+            assertEquals("other", state.value)
+        }
+    }
+    test("no subscription progress still retries at 50ms and cancellation ends the loop") {
+        runTest {
+            var calls = 0
+            val state = MutableStateFlow(1).asSuspendMutableStateFlow { _, _ -> calls++; false }
+            val work = launch { state.editField(1, { it }, { 2 }) }
+            runCurrent()
+            advanceTimeBy(149)
+            assertEquals(3, calls)
+            work.cancelAndJoin()
+            advanceTimeBy(1000)
+            assertEquals(3, calls)
+        }
+    }
+    test("unknown write failure is not compared or retried") {
+        runTest {
+            var calls = 0
+            val state = MutableStateFlow(1).asSuspendMutableStateFlow { _, _ -> calls++; error("lost reply") }
+            assertFailsWith<IllegalStateException> { state.editField(1, { it }, { 2 }) }
+            assertEquals(1, calls)
+        }
+    }
+    test("global observations and frontend-only settings have separate persistence") {
+        frontend {
+            val store = openCliFrontendSettings(home)
+            val global = RpcGlobalSettings.open(services.global, store, this, 120)
+            try {
+                assertEquals(30 to 30, global.sidebarWidths.value)
+                global.resizeSidebars(17, 29)
+                global.updateHooks(listOf(NotificationHook("notify", setOf(NotificationHookType.StopAssistantMessage), "echo local")))
+                assertNotNull(SystemCoroutineFileSystem.metadataOrNull(Path(home, "settings.frontend.cli.yml")))
+                assertNull(SystemCoroutineFileSystem.metadataOrNull(Path(home, "settings.backend.yml")))
+                val initial = global.settings.value.sessionTitle
+                assertTrue(global.edit(initial, { it.sessionTitle }, { it.copy(sessionTitle = initial.copy(enabled = true)) }))
+                global.settings.first { it.sessionTitle.enabled }
+                assertEquals(store.settings.value, openCliFrontendSettings(home).settings.value)
+                assertEquals(17 to 29, global.sidebarWidths.value)
+                assertTrue(global.models.value.isNotEmpty())
+            } finally { global.close(); global.join() }
+            assertFailsWith<CancellationException> {
+                global.edit(global.settings.value.authSource, { it.authSource }, { it })
+            }
+        }
+    }
+    test("failed initial Get is not replaced with frontend defaults") {
+        frontend {
+            val store = openCliFrontendSettings(home)
+            val rpc = object : GlobalRpc by services.global {
+                override suspend fun getSettings(): BackendSettings = error("unavailable")
+            }
+            assertFailsWith<IllegalStateException> { RpcGlobalSettings.open(rpc, store, this, 120) }
+            assertNull(SystemCoroutineFileSystem.metadataOrNull(store.settingsPath))
+        }
+    }
+    test("Session editor uses real CAS and becomes unavailable after its binding closes") {
+        frontend {
+            val view = views.open(services.global.createSession(KodexAgentSettings(OpenAiModelId("test-model"))))
+            val source = RpcSessionSettingsSource(view, this)
+            try {
+                val expected = assertIs<SessionSettingsDataState.Available>(source.state.value).snapshot
+                assertTrue(source.tryRenameSession(expected.revision, "renamed"))
+                source.state.first { it is SessionSettingsDataState.Available && it.snapshot.sessionName == "renamed" }
+                assertFalse(source.tryRenameSession(expected.revision, "stale"))
+                views.release(view)
+                source.state.first { it == SessionSettingsDataState.Unavailable }
+                assertFalse(source.tryRenameSession(expected.revision, "closed"))
+            } finally { source.close() }
+        }
+    }
+    test("closing the settings popup cancels a paced pending CAS edit") {
+        val calls = MutableStateFlow(0)
+        frontend(decorate = { delegate ->
+            object : RpcClient by delegate {
+                @Suppress("UNCHECKED_CAST")
+                override suspend fun <T> call(call: RpcCall): T {
+                    if (call.callableName == "compareAndSet") {
+                        calls.value += 1
+                        return false as T
+                    }
+                    return delegate.call(call)
+                }
+            }
+        }) {
+            val view = views.open(services.global.createSession(KodexAgentSettings(OpenAiModelId("test-model"))))
+            val source = RpcSessionSettingsSource(view, this)
+            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this)
+            val initial = assertIs<SessionSettingsState.Available>(vm.state.value).snapshot
+            vm.renameSession(initial.revision, "queued")
+            calls.first { it > 0 }
+            vm.close()
+            val stopped = calls.value
+            delay(150)
+            assertEquals(stopped, calls.value)
+            assertEquals(SessionSettingsDataState.Unavailable, source.state.value)
+        }
+    }
+    test("defaults editor observes CAS changes and rejects delayed local revisions") {
+        frontend {
+            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
+            val vm = RpcNewSessionSettings(global, this)
+            try {
+                val initial = vm.state.value
+                vm.updateModel(initial.revision, OpenAiModelId("another-model"))
+                vm.state.first { it.settings.model == OpenAiModelId("another-model") }
+                vm.updateModel(initial.revision, OpenAiModelId("stale"))
+                assertEquals(OpenAiModelId("another-model"), services.global.getSettings().newSession.model)
+                vm.close()
+                vm.updateModel(vm.state.value.revision, OpenAiModelId("closed"))
+                assertEquals(OpenAiModelId("another-model"), services.global.getSettings().newSession.model)
+            } finally { vm.close(); global.close(); global.join() }
+        }
+    }
+    test("global page uses separate local preferences and preserves unrelated concurrent fields") {
+        frontend {
+            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 120)
+            val page = RpcGlobalEditor(global, services.global, this)
+            try {
+                page.updateSessionTitleEnabled(true)
+                page.updateSessionTitleModel(OpenAiModelId("title-model"))
+                page.updateNewLineKey(NewLineKey.Enter)
+                page.updateLeftSidebarWidth(19)
+                page.state.first {
+                    it.sessionTitle.enabled && it.sessionTitle.model == OpenAiModelId("title-model") &&
+                        it.newLineKey == NewLineKey.Enter && it.sidebars.leftWidth == 19
+                }
+                val hook = NotificationHook("local", setOf(NotificationHookType.StopUnhandledError), "echo error")
+                page.saveHook(null, hook)
+                global.frontend.settings.first { it.hooks == listOf(hook) }
+                val loaded = openCliFrontendSettings(home)
+                assertEquals(NewLineKey.Enter, loaded.settings.value.newLineKey)
+                assertEquals(listOf(hook), loaded.settings.value.hooks)
+                assertEquals(OpenAiModelId("title-model"), services.global.getSettings().sessionTitle.model)
+                page.close()
+                page.updateSessionTitleEnabled(false)
+                assertTrue(services.global.getSettings().sessionTitle.enabled)
+            } finally { page.close(); global.close(); global.join() }
+        }
+    }
+    test("an accepted global settings write survives popup close") {
+        val entered = CompletableDeferred<Unit>()
+        val proceed = CompletableDeferred<Unit>()
+        var calls = 0
+        frontend(decorate = { delegate ->
+            object : RpcClient by delegate {
+                override suspend fun <T> call(call: RpcCall): T {
+                    if (call.callableName == "compareAndSetSettings") {
+                        calls++
+                        entered.complete(Unit)
+                        proceed.await()
+                    }
+                    return delegate.call(call)
+                }
+            }
+        }) {
+            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
+            val page = RpcGlobalEditor(global, services.global, this)
+            try {
+                page.updateSessionTitleEnabled(true)
+                entered.await()
+                page.close()
+                proceed.complete(Unit)
+                global.settings.first { it.sessionTitle.enabled }
+                assertEquals(1, calls)
+                assertTrue(services.global.getSettings().sessionTitle.enabled)
+            } finally { proceed.complete(Unit); page.close(); global.close(); global.join() }
+        }
+    }
+    test("accepted new-session defaults survive popup close") {
+        val entered = CompletableDeferred<Unit>()
+        val proceed = CompletableDeferred<Unit>()
+        frontend(decorate = { delegate ->
+            object : RpcClient by delegate {
+                override suspend fun <T> call(call: RpcCall): T {
+                    if (call.callableName == "compareAndSetSettings") {
+                        entered.complete(Unit)
+                        proceed.await()
+                    }
+                    return delegate.call(call)
+                }
+            }
+        }) {
+            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
+            val page = RpcNewSessionSettings(global, this)
+            try {
+                page.updateModel(page.state.value.revision, OpenAiModelId("after-close"))
+                entered.await()
+                page.close()
+                proceed.complete(Unit)
+                global.settings.first { it.newSession.model == OpenAiModelId("after-close") }
+                assertEquals(OpenAiModelId("after-close"), services.global.getSettings().newSession.model)
+            } finally { proceed.complete(Unit); page.close(); global.close(); global.join() }
+        }
+    }
+    test("accepted MCP settings edit keeps its source alive until the write drains") {
+        val entered = CompletableDeferred<Unit>()
+        val proceed = CompletableDeferred<Unit>()
+        frontend(decorate = { delegate ->
+            object : RpcClient by delegate {
+                override suspend fun <T> call(call: RpcCall): T {
+                    if (call.callableName == "compareAndSetSettings") {
+                        entered.complete(Unit)
+                        proceed.await()
+                    }
+                    return delegate.call(call)
+                }
+            }
+        }) {
+            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
+            val page = RpcGlobalEditor(global, services.global, this)
+            try {
+                page.addMcpServer(McpServerDraft.StreamableHttp(
+                    "after-close", enabled = false, McpStreamableHttpDraft("https://example.invalid/mcp"),
+                ))
+                entered.await()
+                page.close()
+                proceed.complete(Unit)
+                global.settings.first { "after-close" in it.mcpServers }
+                assertNotNull(services.global.getSettings().mcpServers["after-close"])
+            } finally { proceed.complete(Unit); page.close(); global.close(); global.join() }
+        }
+    }
+    test("accepted frontend Hook edit drains after popup close") {
+        frontend {
+            val store = openCliFrontendSettings(home)
+            val global = RpcGlobalSettings.open(services.global, store, this, 80)
+            val page = RpcGlobalEditor(global, services.global, this)
+            val hook = NotificationHook("after-close", setOf(NotificationHookType.StopAssistantMessage), "echo kept")
+            try {
+                page.saveHook(null, hook)
+                page.close()
+                store.settings.first { it.hooks == listOf(hook) }
+                assertEquals(listOf(hook), openCliFrontendSettings(home).settings.value.hooks)
+            } finally { page.close(); global.close(); global.join() }
+        }
+    }
+    test("a failed global write remains visible after popup close and clears on success") {
+        val entered = CompletableDeferred<Unit>()
+        val proceed = CompletableDeferred<Unit>()
+        var reject = true
+        frontend(decorate = { delegate ->
+            object : RpcClient by delegate {
+                override suspend fun <T> call(call: RpcCall): T {
+                    if (call.callableName == "compareAndSetSettings" && reject) {
+                        reject = false
+                        entered.complete(Unit)
+                        proceed.await()
+                        error("private-value-must-not-be-rendered")
+                    }
+                    return delegate.call(call)
+                }
+            }
+        }) {
+            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
+            val page = RpcGlobalEditor(global, services.global, this)
+            try {
+                page.updateSessionTitleEnabled(true)
+                entered.await()
+                page.close()
+                proceed.complete(Unit)
+                global.operationFailure.first { it }
+                assertFalse(services.global.getSettings().sessionTitle.enabled)
+                val reopened = RpcGlobalEditor(global, services.global, this)
+                try {
+                    assertTrue(reopened.operationFailure.value)
+                    reopened.updateSessionTitleEnabled(true)
+                    global.settings.first { it.sessionTitle.enabled }
+                    global.operationFailure.first { !it }
+                    reopened.dismissOperationFailure()
+                    assertFalse(global.operationFailure.value)
+                } finally { reopened.close() }
+            } finally { proceed.complete(Unit); page.close(); global.close(); global.join() }
+        }
+    }
+    test("new-session defaults write failures use the shared visible failure state") {
+        frontend(decorate = { delegate ->
+            object : RpcClient by delegate {
+                override suspend fun <T> call(call: RpcCall): T {
+                    if (call.callableName == "compareAndSetSettings") error("defaults write rejected")
+                    return delegate.call(call)
+                }
+            }
+        }) {
+            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
+            val page = RpcNewSessionSettings(global, this)
+            try {
+                val originalModel = services.global.getSettings().newSession.model
+                page.updateModel(page.state.value.revision, OpenAiModelId("failed-default"))
+                global.operationFailure.first { it }
+                assertEquals(originalModel, services.global.getSettings().newSession.model)
+                global.dismissOperationFailure()
+                assertFalse(global.operationFailure.value)
+            } finally { page.close(); global.close(); global.join() }
+        }
+    }
+    test("settings snapshot revisions ignore backend-only fields while CAS preserves them") {
+        frontend {
+            val view = views.open(services.global.createSession(KodexAgentSettings(OpenAiModelId("test-model"))))
+            val source = RpcSessionSettingsSource(view, this)
+            try {
+                val before = assertIs<SessionSettingsDataState.Available>(source.state.value).snapshot
+                val old = view.current().settings.value
+                assertTrue(view.current().settings.compareAndSet(old, old.copy(instructions = "external")))
+                view.current().settings.first { it.instructions == "external" }
+                assertTrue(source.tryRenameSession(before.revision, "edited"))
+                view.current().settings.first { it.threadName == "edited" }
+                assertEquals("external", view.current().settings.value.instructions)
+            } finally { source.close() }
+        }
+    }
+    test("draft edits remain local and explicit names survive materialization") {
+        frontend {
+            val draft = RpcSessionDraft(KodexAgentSettings(OpenAiModelId("test-model")), views)
+            val source = RpcDraftSettingsSource(draft, this)
+            try {
+                val expected = assertIs<SessionSettingsDataState.Available>(source.state.value).snapshot
+                assertTrue(source.tryRenameSession(expected.revision, "explicit"))
+                assertFalse(source.tryRenameSession(expected.revision, "stale"))
+                assertTrue(services.global.getSessionCatalog(true).isEmpty())
+                val view = draft.materialize()
+                view.current().settings.first { it.threadName == "explicit" }
+                source.state.first { it == SessionSettingsDataState.Unavailable }
+            } finally { source.close(); draft.close() }
+        }
+    }
+    test("MCP edit and import use values only, with sanitized observations") {
+        frontend {
+            val existing = McpServerConfiguration.StreamableHttp("https://example.invalid/mcp", enabled = false)
+            val before = services.global.getSettings()
+            services.global.compareAndSetSettings(before, before.copy(mcpServers = mapOf("remote" to existing)))
+            var reconnects = 0
+            val rpc = object : GlobalRpc by services.global {
+                override suspend fun getCodexMcpSettings(): List<McpCodexImportCandidate> =
+                    listOf(McpCodexImportCandidate.Supported("remote", existing))
+                override suspend fun reconnectMcpServer(serverName: String) { reconnects++ }
+            }
+            val global = RpcGlobalSettings.open(rpc, openCliFrontendSettings(home), this, 80)
+            val mcp = RpcMcpSettings(global, rpc, this)
+            try {
+                val preview = mcp.readImport()
+                assertEquals(McpImportItemKind.Conflict, preview.items.single().kind)
+                assertTrue(mcp.applyImport(preview.id, mapOf("remote" to McpImportDecision.Replace)))
+                assertEquals(0, reconnects)
+                assertEquals(existing, services.global.getSettings().mcpServers["remote"])
+                mcp.servers.first { it.singleOrNull()?.status == McpServerSettingsStatus.Disabled }
+                val captured = mcp.capture()
+                assertTrue(mcp.save(captured, "remote", McpServerDraft.StreamableHttp(
+                    "renamed", enabled = false, McpStreamableHttpDraft("https://example.invalid/new"),
+                )))
+                global.settings.first { "renamed" in it.mcpServers }
+                assertFalse("remote" in services.global.getSettings().mcpServers)
+            } finally { mcp.close(); global.close(); global.join() }
+        }
+    }
+    test("reset with no detailed credits cannot choose or consume") {
+        frontend {
+            var calls = 0
+            val rpc = object : GlobalRpc by services.global {
+                override suspend fun consumeUsageReset(creditId: String): CodexRateLimitResetOutcome {
+                    calls++; return CodexRateLimitResetOutcome.Reset
+                }
+            }
+            val reset = RpcUsageReset(rpc, MutableStateFlow(usage(null)), this)
+            try {
+                reset.show()
+                assertEquals(UsageResetState.PreparationFailed, reset.state.value)
+                reset.select("anything")
+                assertEquals(0, calls)
+            } finally { reset.close() }
+        }
+    }
+    test("reset requires exact second confirmation and preserves the returned outcome") {
+        frontend {
+            val called = mutableListOf<String>()
+            val rpc = object : GlobalRpc by services.global {
+                override suspend fun consumeUsageReset(creditId: String): CodexRateLimitResetOutcome {
+                    called += creditId; return CodexRateLimitResetOutcome.AlreadyRedeemed
+                }
+                override suspend fun refreshAccountUsage(): Unit = error("refresh failed")
+            }
+            val reset = RpcUsageReset(rpc, MutableStateFlow(usage(listOf(credit))), this)
+            try {
+                reset.show()
+                reset.select("credit")
+                val confirmation = assertIs<UsageResetState.Confirming>(reset.state.value)
+                assertNull(confirmation.option.expiresAt)
+                assertTrue(called.isEmpty())
+                reset.confirm(confirmation.copy())
+                assertTrue(called.isEmpty())
+                reset.confirm(confirmation)
+                val result = assertIs<UsageResetState.Completed>(reset.state.first { it is UsageResetState.Completed })
+                assertEquals(CodexRateLimitResetOutcome.AlreadyRedeemed, result.outcome)
+                reset.confirm(confirmation)
+                assertEquals(listOf("credit"), called)
+            } finally { reset.close() }
+        }
+    }
+    test("unknown reset outcome refreshes once without repeating consumption") {
+        frontend {
+            var calls = 0
+            val refreshed = CompletableDeferred<Unit>()
+            val rpc = object : GlobalRpc by services.global {
+                override suspend fun consumeUsageReset(creditId: String): CodexRateLimitResetOutcome {
+                    calls++; error("reply lost")
+                }
+                override suspend fun refreshAccountUsage() { refreshed.complete(Unit) }
+            }
+            val reset = RpcUsageReset(rpc, MutableStateFlow(usage(listOf(credit))), this)
+            try {
+                reset.show(); reset.select("credit")
+                reset.confirm(assertIs(reset.state.value))
+                refreshed.await()
+                assertIs<UsageResetState.ConsumeFailed>(reset.state.value)
+                assertEquals(1, calls)
+            } finally { reset.close() }
+        }
+    }
+}
+
+private val credit = CodexRateLimitResetCredit("credit", null, null)
+private fun usage(credits: List<CodexRateLimitResetCredit>?): SettingsAccountUsageState =
+    SettingsAccountUsageState.Available(CodexAccountUsageSnapshot(
+        rateLimits = emptyList(), resetCredits = CodexRateLimitResetCredits(1, credits),
+        fetchedAt = Instant.parse("2026-09-27T00:00:00Z"),
+    ))

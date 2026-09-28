@@ -19,9 +19,10 @@ public interface NewSessionViewModel : SessionViewModel {
     /**
      * Materializes the latest settings and composer as a persisted Session.
      *
-     * The command is serialized with this ViewModel's edits. Failure leaves the
-     * draft editable and escapes to the caller; success consumes the draft and
-     * returns the stable persisted child that must replace this exact surface.
+     * The command is serialized with this ViewModel's edits. A known successful
+     * creation consumes its settings even if a later step fails; it is not rolled
+     * back or recreated. Failure escapes to the caller. Success returns the stable
+     * persisted child that must replace this exact surface.
      */
     public suspend fun materialize(): PersistedSessionViewModel
 }

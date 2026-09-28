@@ -4,11 +4,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemViewModel
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
+import io.github.stream29.kodex.agentstorage.contract.CachedIndexVersioned
+import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
@@ -39,32 +40,34 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.koin.core.annotation.Factory
-import org.koin.core.annotation.InjectedParam
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Instant
 
 /** Newest-first History state backed by a bounded, index-driven local window. */
 internal class AgentHistoryViewModelImpl(
-    private val agentState: KodexAgentState,
+    private val agentState: AgentHistorySource,
     private val scope: CoroutineScope,
-    private val runningTurn: StateFlow<Job?>,
+    private val runningTurn: StateFlow<Boolean>,
 ) : AgentHistoryViewModel {
     private val commands = Channel<HistoryCommand>(capacity = Channel.BUFFERED)
     private val olderDemandPending = MutableStateFlow(false)
     private val newerDemandPending = MutableStateFlow(false)
     private val turnDurationResolver = HistoryTurnDurationResolver(agentState.storage)
-    private var activeGeneration: Long = 0
+    private var activeGeneration: Long = agentState.cacheNonce?.value ?: 0
     private var closed = false
 
     private val itemCache = mutableMapOf<Int, HistoryItemViewModel>()
     private val groupCache = mutableMapOf<GroupKey, WorkGroupHistoryItemViewModelImpl>()
     private val mutableHistoryItems = MutableStateFlow(
         HistoryItemWindowImpl(
-            generation = 0,
+            generation = activeGeneration,
             items = emptyList(),
             hasOlder = false,
             hasNewer = false,
@@ -103,18 +106,31 @@ internal class AgentHistoryViewModelImpl(
                 commands.send(HistoryCommand.Refresh(latestIndex))
             }
         }
+        agentState.cacheNonce?.let { nonce ->
+            scope.launch {
+                nonce.collect { commands.send(HistoryCommand.Invalidate) }
+            }
+        }
         scope.launch {
-            agentState.latestIndex.collect { latestIndex ->
-                publishPendingTools(loadPendingTools(latestIndex))
+            val unstable = agentState.storage.unstable as? CachedIndexVersioned<*>
+            val changes = if (unstable == null) agentState.latestIndex.map { it to null }
+                else combine(agentState.latestIndex, unstable.cacheNonce) { index, nonce -> index to nonce }
+            changes.collect { (latestIndex, nonce) ->
+                try {
+                    val pending = loadPendingTools(latestIndex)
+                    if (nonce == unstable?.cacheNonce?.value) publishPendingTools(pending)
+                } catch (failure: CacheNonceMismatch) {
+                    if (unstable == null) throw failure
+                }
             }
         }
         scope.launch {
             var ticker: Job? = null
             try {
-                runningTurn.collect { turnJob ->
+                runningTurn.collect { active ->
                     ticker?.cancel()
-                    ticker = turnJob?.let { parent ->
-                        CoroutineScope(scope.coroutineContext.minusKey(Job) + parent).launch {
+                    ticker = if (active) {
+                        scope.launch {
                             try {
                                 commands.send(HistoryCommand.UpdateLatestTurn(active = true))
                                 while (true) {
@@ -125,8 +141,8 @@ internal class AgentHistoryViewModelImpl(
                                 commands.trySend(HistoryCommand.UpdateLatestTurn(active = false))
                             }
                         }
-                    }
-                    if (turnJob == null) {
+                    } else null
+                    if (!active) {
                         commands.send(HistoryCommand.UpdateLatestTurn(active = false))
                     }
                 }
@@ -199,6 +215,7 @@ internal class AgentHistoryViewModelImpl(
     override fun contains(generation: Long, storageIndex: Int): Boolean {
         val window = mutableHistoryItems.value
         return generation == window.generation &&
+            (agentState.cacheNonce?.value?.let { it == generation } != false) &&
             window.containsStableIndex(storageIndex)
     }
 
@@ -227,7 +244,8 @@ internal class AgentHistoryViewModelImpl(
             agentState = agentState,
             scope = scope,
             isGenerationCurrent = {
-                !closed && activeGeneration == generation
+                !closed && activeGeneration == generation &&
+                    (agentState.cacheNonce?.value?.let { it == generation } != false)
             },
             turnDurationResolver = turnDurationResolver,
         )
@@ -380,7 +398,7 @@ internal class AgentHistoryViewModelImpl(
         var nextOlderIndex: Int? = null
         var hasNewer = false
         var lastInvalidation: Pair<Int, Int>? = null
-        var activeTurn = runningTurn.value != null
+        var activeTurn = runningTurn.value
         var activeTurnStart: Instant? = null
         var chunks: List<HistoryWindowChunk> = emptyList()
 
@@ -423,7 +441,7 @@ internal class AgentHistoryViewModelImpl(
             invalidate: Boolean,
         ) {
             val currentGeneration = mutableHistoryItems.value.generation
-            val replacementGeneration = if (invalidate) {
+            val replacementGeneration = agentState.cacheNonce?.value ?: if (invalidate) {
                 check(currentGeneration < Long.MAX_VALUE) {
                     "History generations are exhausted."
                 }
@@ -695,7 +713,10 @@ internal class AgentHistoryViewModelImpl(
         for (command in commands) {
             try {
                 when (command) {
-                    is HistoryCommand.Refresh -> refresh(command.latestIndex)
+                    HistoryCommand.Invalidate -> replaceWindow(agentState.latestIndex.value, invalidate = true)
+                    is HistoryCommand.Refresh -> refresh(
+                        if (agentState.cacheNonce == null) command.latestIndex else agentState.latestIndex.value,
+                    )
                     HistoryCommand.LoadOlder -> loadOlder()
                     HistoryCommand.LoadNewer -> loadNewer()
                     HistoryCommand.JumpToLatest -> {
@@ -756,6 +777,7 @@ internal class AgentHistoryViewModelImpl(
         hasOlder: Boolean,
         hasNewer: Boolean,
     ) {
+        if (closed || agentState.cacheNonce?.value?.let { it != generation } == true) return
         val items = chunks.flatMap { chunk -> chunk.items }
         val current = mutableHistoryItems.value
         if (
@@ -819,27 +841,12 @@ internal class AgentHistoryViewModelImpl(
     }
 }
 
-/** Creates the History View state owned by one materialized Agent ViewModel. */
+/** RPC views supply only these read inputs; the existing window and item implementation is reused. */
 public fun createAgentHistoryViewModel(
-    agentState: KodexAgentState,
+    source: AgentHistorySource,
     ownerScope: CoroutineScope,
-    runningTurn: StateFlow<Job?> = MutableStateFlow(null),
-): AgentHistoryViewModel = AgentHistoryViewModelImpl(
-    agentState = agentState,
-    scope = ownerScope,
-    runningTurn = runningTurn,
-)
-
-/** Koin-resolved History creator with one exact Agent runtime parameter set. */
-@Factory
-public class DefaultAgentHistoryViewModelFactory(
-    @InjectedParam private val agentState: KodexAgentState,
-    @InjectedParam private val ownerScope: CoroutineScope,
-    @InjectedParam private val runningTurn: StateFlow<Job?>,
-) {
-    public fun create(): AgentHistoryViewModel =
-        createAgentHistoryViewModel(agentState, ownerScope, runningTurn)
-}
+    running: StateFlow<Boolean>,
+): AgentHistoryViewModel = AgentHistoryViewModelImpl(source, ownerScope, running)
 
 private fun KodexAgentStateValue.toStreamingItem(): HistoryStreamingItem? = when (this) {
     KodexAgentStateValue.RequestResponse.Started -> HistoryStreamingItem.Started
@@ -893,6 +900,7 @@ private val HistoryProjectionItem.newestStorageIndex: Int
     }
 
 private sealed interface HistoryCommand {
+    data object Invalidate : HistoryCommand
     data class Refresh(val latestIndex: Int) : HistoryCommand
     data object LoadOlder : HistoryCommand
     data object LoadNewer : HistoryCommand

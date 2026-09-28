@@ -4,7 +4,6 @@ import io.github.stream29.kodex.app.settings.contract.OpenAiLoginEffect
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginState
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
 import io.github.stream29.kodex.cli.auth.KodexAuthLoginAttempt
-import io.github.stream29.kodex.cli.auth.KodexAuthStore
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -17,12 +16,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
-import org.koin.core.annotation.Factory
-import org.koin.core.annotation.InjectedParam
 
 /** Coordinates one short-lived OpenAI browser sign-in attempt. */
 internal class OpenAiLoginViewModelImpl(
-    private val authStore: KodexAuthStore,
+    private val startLogin: suspend () -> KodexAuthLoginAttempt,
     private val scope: CoroutineScope,
 ) : OpenAiLoginViewModel {
     private val mutableState = MutableStateFlow<OpenAiLoginState>(OpenAiLoginState.Ready)
@@ -43,7 +40,7 @@ internal class OpenAiLoginViewModelImpl(
         mutableState.value = OpenAiLoginState.Preparing
         loginJob = scope.launch {
             try {
-                val attempt = authStore.startKodexLogin()
+                val attempt = startLogin()
                 if (closed || pendingAttemptId != attemptId) {
                     attempt.cancel()
                     return@launch
@@ -144,25 +141,11 @@ internal class OpenAiLoginViewModelImpl(
     }
 }
 
-/** Creates an independently disposable OpenAI login ViewModel. */
+/** Uses the same browser/revision UI with a frontend-owned RPC login attempt. */
 public fun createOpenAiLoginViewModel(
-    authStore: KodexAuthStore,
     ownerScope: CoroutineScope,
-): OpenAiLoginViewModel =
-    OpenAiLoginViewModelImpl(
-        authStore = authStore,
-        scope = ownerScope.supervisorChildScope(),
-    )
-
-/** Koin-resolved login child factory with exact process dependencies. */
-@Factory
-public class DefaultOpenAiLoginViewModelFactory(
-    @InjectedParam private val authStore: KodexAuthStore,
-    @InjectedParam private val ownerScope: CoroutineScope,
-) {
-    public fun create(): OpenAiLoginViewModel =
-        createOpenAiLoginViewModel(authStore, ownerScope)
-}
+    startLogin: suspend () -> KodexAuthLoginAttempt,
+): OpenAiLoginViewModel = OpenAiLoginViewModelImpl(startLogin, ownerScope.supervisorChildScope())
 
 private data class ActiveLogin(
     val id: Long,

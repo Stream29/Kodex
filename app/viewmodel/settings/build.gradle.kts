@@ -9,7 +9,6 @@ kotlin {
             implementation(project(":app-contract-path-picker"))
             api(project(":app-shared-auth-contract"))
             implementation(project(":app-shared-session-title"))
-            implementation(project(":hook-contract"))
             implementation(project(":mcp-contract"))
             implementation(project(":openai-client-contract"))
             implementation(project(":utils-coroutines"))
@@ -19,6 +18,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
+            implementation(project(":app-test-support-rpc"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

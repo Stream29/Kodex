@@ -1,234 +1,74 @@
 package io.github.stream29.kodex.cli.session
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.agentsession.filesystem.FileSystemKodexSessionRepository
-import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
-import io.github.stream29.kodex.agentstorage.contract.ext.initialize
-import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.OpenAiModelId
-import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.coroutineScope
-import kotlinx.io.files.Path
-import kotlinx.io.files.SystemTemporaryDirectory
-import kotlin.random.Random
-import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
-import kotlin.test.assertFalse
-import kotlin.test.assertSame
-import kotlin.test.assertTrue
-import kotlin.time.Instant
-
-private suspend fun temporaryViewModelRepositoryRoot(): Path =
-    Path(SystemTemporaryDirectory, "kodex-session-view-model-${Random.nextLong()}").also { root ->
-        SystemCoroutineFileSystem.createDirectories(root)
-    }
+import io.github.stream29.kodex.app.test.*
+import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
+import io.github.stream29.kodex.openai.*
+import io.github.stream29.kodex.rpc.models.AgentStateValue
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import kotlin.test.*
 
 val fileSystemSessionViewModelOwnershipTest by testSuite {
-    testFixture { temporaryViewModelRepositoryRoot() } closeWith {
-        deleteViewModelRepositoryRecursively(this)
-    } asParameterForEach {
-        test("opened Session uses cached first index while Catalog requires zero") { root ->
-            coroutineScope {
-                val dependencies = testKodexAgentDependencies()
-                val setup = FileSystemKodexSessionRepository(root, dependencies)
-                val index = setup.create()
-                val session = setup.open(index)
-                session.runtime.modify { it.initialize(KodexAgentSettings(OpenAiModelId("test-model"))) }
-                val first = Instant.parse("2026-09-01T12:00:00Z")
-                val latest = Instant.parse("2020-01-01T00:00:00Z")
-                session.storage.timestamp[2] = first
-                session.storage.timestamp[3] = latest
-                setup.cancelAndJoin()
-                SystemCoroutineFileSystem.delete(Path(root, "sessions/$index/timestamp/0.json"))
-                val factory = KodexSessionRepositoryFactory { owner ->
-                    owner.FileSystemKodexSessionRepository(root, dependencies)
-                }
-                val registry = testSessionViewModelRegistry(factory, this)
-                try {
-                    val model = registry.open(index)
-                    assertEquals(first, model.readCreatedAt())
-                    assertEquals(latest, model.readUpdatedAt())
-                    val catalogRepository = FileSystemKodexSessionRepository(root, dependencies)
-                    try {
-                        assertEquals(null, catalogRepository.readCreatedAt(index))
-                        assertEquals(latest, catalogRepository.readUpdatedAt(index))
-                    } finally {
-                        catalogRepository.cancelAndJoin()
-                    }
-                } finally {
-                    registry.shutdown()
-                }
-            }
-        }
-
-        test("releasing a Session ViewModel closes its repository and root lease") { root ->
-            coroutineScope {
-                val repositories = mutableListOf<FileSystemKodexSessionRepository>()
-                val repositoryFactory = KodexSessionRepositoryFactory { ownerScope ->
-                    ownerScope.FileSystemKodexSessionRepository(
-                        root = root,
-                        dependencies = testKodexAgentDependencies(),
-                    ).also(repositories::add)
-                }
-                val registry = testSessionViewModelRegistry(repositoryFactory, this)
-                try {
-                    val model = registry.create { sessionIndex ->
-                        KodexAgentSettings(
-                            model = OpenAiModelId("test-model"),
-                            threadName = "Session $sessionIndex",
-                        )
-                    }
-                    val lock = Path(root, "sessions/${model.sessionIndex}/lock.json")
-                    val repository = repositories.single()
-                    assertTrue(repository.coroutineContext[Job]?.isActive == true)
-                    assertTrue(SystemCoroutineFileSystem.exists(lock))
-                    assertSame(model, registry.open(model.sessionIndex))
-                    assertTrue(repository.coroutineContext[Job]?.isActive == true)
-                    assertTrue(SystemCoroutineFileSystem.exists(lock))
-
-                    registry.release(model.sessionIndex)
-
-                    assertFalse(repository.coroutineContext[Job]?.isActive == true)
-                    assertFalse(SystemCoroutineFileSystem.exists(lock))
-                    val reopened = FileSystemKodexSessionRepository(
-                        root = root,
-                        dependencies = testKodexAgentDependencies(),
-                    )
-                    try {
-                        assertEquals(
-                            "Session ${model.sessionIndex}",
-                            reopened.open(model.sessionIndex).storage.settings[0].threadName,
-                        )
-                    } finally {
-                        reopened.cancelAndJoin()
-                    }
-                } finally {
-                    registry.shutdown()
-                }
-            }
-        }
-
-        test("registry forks an unopened archived root") { root ->
-            coroutineScope {
-                val dependencies = testKodexAgentDependencies()
-                val setup = FileSystemKodexSessionRepository(root, dependencies)
-                val sourceIndex = setup.create()
-                val source = setup.open(sourceIndex)
-                source.runtime.modify { storage ->
-                    storage.initialize(
-                        KodexAgentSettings(
-                            model = OpenAiModelId("test-model"),
-                            threadName = "Source",
-                        ),
-                    )
-                }
-                source.runtime.updateSettings(source.storage.settings[0].copy(cwd = Path("fork-cwd")))
-                setup.listEntries().single { it.entryIndex == sourceIndex }.archive()
-                setup.cancelAndJoin()
-
-                val repositoryFactory = KodexSessionRepositoryFactory { ownerScope ->
-                    ownerScope.FileSystemKodexSessionRepository(
-                        root = root,
-                        dependencies = dependencies,
-                    )
-                }
-                val registry = testSessionViewModelRegistry(repositoryFactory, this)
-                try {
-                    val targetIndex = registry.fork(sourceIndex)
-                    val inspection = FileSystemKodexSessionRepository(root, dependencies)
-                    try {
-                        val entries = inspection.listEntries(includeArchived = true)
-                        assertTrue(entries.single { it.entryIndex == sourceIndex }.archived)
-                        assertFalse(entries.single { it.entryIndex == targetIndex }.archived)
-                        val target = inspection.open(targetIndex)
-                        assertEquals("fork-cwd", target.storage.settings[2].cwd.toString())
-                        assertEquals("[fork] Source", target.storage.settings[2].threadName)
-                    } finally {
-                        inspection.cancelAndJoin()
-                    }
-                } finally {
-                    registry.shutdown()
-                }
-            }
-        }
-
-        test("closing a Catalog ViewModel closes its repository during repair") { root ->
-            coroutineScope {
-                val dependencies = testKodexAgentDependencies()
-                val setup = FileSystemKodexSessionRepository(root, dependencies)
-                val index = setup.create()
-                setup.open(index).runtime.modify { storage ->
-                    storage.initialize(
-                        KodexAgentSettings(
-                            model = OpenAiModelId("test-model"),
-                            threadName = "Catalog",
-                        ),
-                    )
-                    storage.timestamp[2] = Instant.parse("2026-08-24T08:00:00Z")
-                }
-                setup.cancelAndJoin()
-                val latest = Path(root, "sessions/$index/timestamp/latest.json")
-                val lock = Path(root, "sessions/$index/lock.json")
-                SystemCoroutineFileSystem.writeString(latest, "3")
-
-                val fileSystem = SuspendingViewModelTimelineFileSystem("timestamp")
-                lateinit var repository: FileSystemKodexSessionRepository
-                val repositoryFactory = KodexSessionRepositoryFactory { ownerScope ->
-                    ownerScope.FileSystemKodexSessionRepository(
-                        root = root,
-                        dependencies = dependencies,
-                        fileSystem = fileSystem,
-                    ).also { repository = it }
-                }
-                val catalog = createSessionCatalogViewModelFactory(repositoryFactory, this).create(
-                    forkSession = { -1 },
-                    deleteSession = { false },
-                )
-                val refresh = async { catalog.refresh() }
-                fileSystem.listStarted.await()
-                assertTrue(repository.coroutineContext[Job]?.isActive == true)
-                assertTrue(SystemCoroutineFileSystem.exists(lock))
-
-                catalog.close()
-
-                assertFailsWith<CancellationException> { refresh.await() }
-                repository.coroutineContext[Job]?.join()
-                assertFalse(repository.coroutineContext[Job]?.isActive == true)
-                assertFalse(SystemCoroutineFileSystem.exists(lock))
-                assertEquals("3", SystemCoroutineFileSystem.readString(latest))
-            }
+    test("release disposes only the frontend and reopens a fresh view of the same backend") {
+        withRpcFrontend {
+            val session = create("retained")
+            val index = session.sessionIndex
+            val first = requireNotNull(session.rootAgent.value)
+            assertSame(session, sessions.open(index))
+            sessions.release(index)
+            assertEquals(PersistedSessionLifecycleState.Closed, session.lifecycle.value)
+            assertNull(session.rootAgent.value)
+            assertTrue(services.global.getSessionCatalog(true).single().isActive)
+            val second = sessions.open(index)
+            assertNotSame(session, second)
+            assertNotSame(first, second.rootAgent.value)
+            assertEquals("retained", second.settings.value.threadName)
         }
     }
-}
-
-private class SuspendingViewModelTimelineFileSystem(
-    private val timelineName: String,
-    private val delegate: CoroutineFileSystem = SystemCoroutineFileSystem,
-) : CoroutineFileSystem by delegate {
-    val listStarted = CompletableDeferred<Unit>()
-
-    override suspend fun list(directory: Path): Collection<Path> {
-        if (directory.name == timelineName) {
-            listStarted.complete(Unit)
-            awaitCancellation()
-        }
-        return delegate.list(directory)
-    }
-}
-
-private suspend fun deleteViewModelRepositoryRecursively(path: Path) {
-    val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
-    if (metadata.isDirectory) {
-        SystemCoroutineFileSystem.list(path).forEach { child ->
-            deleteViewModelRepositoryRecursively(child)
+    test("closing a running tab does not stop accepted backend work") {
+        val entered = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        withRpcFrontend(response = { entered.complete(Unit); finish.await(); testAnswer() }) {
+            val session = create()
+            val binding = views.open(session.sessionIndex).current()
+            binding.appendUserMessage(listOf(ContentItem.InputText("run")))
+            val waiter = async { binding.resume() }
+            entered.await()
+            sessions.release(session.sessionIndex)
+            assertTrue(services.global.getSessionCatalog(true).single().running)
+            finish.complete(Unit)
+            // A released local wait may cancel; it does not cancel the accepted operation.
+            runCatching { waiter.await() }
+            val fresh = sessions.open(session.sessionIndex)
+            requireNotNull(fresh.rootAgent.value).state.first { it == AgentStateValue.AssistantMessage }
         }
     }
-    SystemCoroutineFileSystem.delete(path, mustExist = false)
+    test("archive opening fork and delete retain their repository semantics over RPC") {
+        withRpcFrontend {
+            val session = create("source")
+            sessions.archive(session.sessionIndex)
+            assertTrue(services.global.getSessionCatalog(true).single().archived)
+            assertSame(session, sessions.open(session.sessionIndex))
+            assertFalse(services.global.getSessionCatalog(true).single().archived)
+            val fork = sessions.fork(session.sessionIndex)
+            assertEquals("[fork] source", sessions.open(fork).settings.value.threadName)
+            assertTrue(sessions.delete(session.sessionIndex))
+            assertEquals(PersistedSessionLifecycleState.Closed, session.lifecycle.value)
+            assertFalse(sessions.delete(session.sessionIndex))
+            assertEquals(listOf(fork), services.global.getSessionCatalog(true).map { it.sessionIndex })
+        }
+    }
+    test("settings commands observe subscriptions rather than writing a reply into the tab") {
+        withRpcFrontend {
+            val session = create()
+            session.rename("renamed")
+            session.name.first { it == "renamed" }
+            session.updateReasoningEffort(ReasoningEffort.High)
+            session.settings.first { it.reasoning.effort == ReasoningEffort.High }
+            assertEquals("renamed", session.settings.value.threadName)
+            assertNotNull(session.readCreatedAt())
+            assertNotNull(session.readUpdatedAt())
+        }
+    }
 }

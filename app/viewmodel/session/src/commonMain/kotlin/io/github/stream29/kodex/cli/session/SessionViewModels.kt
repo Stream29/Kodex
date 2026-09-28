@@ -1,698 +1,127 @@
-@file:OptIn(ExperimentalUuidApi::class)
-
 package io.github.stream29.kodex.cli.session
 
-import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
-import io.github.stream29.kodex.agentsession.contract.KodexRootSessionEntry
-import io.github.stream29.kodex.agentsession.contract.KodexRootSessionRepository
-import io.github.stream29.kodex.agentstorage.contract.ext.initialize
-import io.github.stream29.kodex.agentstorage.contract.latestIndex
-import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
-import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState
-import io.github.stream29.kodex.app.session.contract.PersistedSessionNotification
-import io.github.stream29.kodex.app.session.contract.PersistedSessionNotificationLevel
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
-import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
-import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.ModelInfo
-import io.github.stream29.kodex.openai.OpenAiModelId
-import io.github.stream29.kodex.openai.ReasoningEffort
-import io.github.stream29.kodex.openai.RequestUserInputMode
-import io.github.stream29.kodex.openai.ServiceTier
-import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
-import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
+import io.github.stream29.kodex.app.session.contract.*
+import io.github.stream29.kodex.cli.rpc.*
+import io.github.stream29.kodex.openai.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
-import org.koin.core.annotation.Factory
-import org.koin.core.annotation.InjectedParam
 import kotlin.time.Instant
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 
-/** Creates one repository as a child of [ownerScope]. */
-public fun interface KodexSessionRepositoryFactory {
-    public suspend fun create(ownerScope: CoroutineScope): KodexRootSessionRepository
-}
-
-/** Repository operations shared by persisted Session, catalog, and draft factories. */
-@OptIn(ExperimentalUuidApi::class)
-@Factory(binds = [PersistedSessionViewModelRegistry::class])
+/** Frontend handles only. The real repository and its resource graph never enter this module. */
 public class DefaultPersistedSessionViewModelRegistry(
-    @InjectedParam private val repositoryFactory: KodexSessionRepositoryFactory,
-    @InjectedParam private val scope: CoroutineScope,
-    @InjectedParam private val agentFactory: PersistedSessionAgentViewModelFactory,
-    @InjectedParam private val reportUnhandledError: ((Throwable, Path) -> Unit)? = null,
-    @InjectedParam private val startupWorkingDirectory: Path = Path("."),
+    public val views: RpcSessionViews,
+    private val models: StateFlow<List<ModelInfo>>,
+    private val scope: CoroutineScope,
 ) : PersistedSessionViewModelRegistry {
     private val mutex = Mutex()
-    private val opened = linkedMapOf<Int, PersistedSessionViewModelImpl>()
-
-    override suspend fun open(sessionIndex: Int): PersistedSessionViewModel = mutex.withLock {
-        val cwd = opened[sessionIndex]?.rootAgent?.settings?.value?.cwd ?: startupWorkingDirectory
-        try {
-            opened[sessionIndex]?.let { existing ->
-                existing.unarchive()
-                return@withLock existing
-            }
-            createOpened(sessionIndex).also { created ->
-                opened[sessionIndex] = created
-            }
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (failure: Throwable) {
-            reportUnhandledError?.invoke(failure, cwd)
-            throw failure
-        }
-    }
-
-    override suspend fun create(
-        initialSettings: (sessionIndex: Int) -> KodexAgentSettings,
-    ): PersistedSessionViewModel = mutex.withLock {
-        val ownerScope = scope.supervisorChildScope()
-        var repository: KodexRootSessionRepository? = null
-        var index: Int? = null
-        try {
-            val createdRepository = repositoryFactory.create(ownerScope)
-            repository = createdRepository
-            val createdIndex = createdRepository.create()
-            index = createdIndex
-            buildOpened(createdIndex, createdRepository, ownerScope) { rootSession ->
-                rootSession.runtime.modify { storage ->
-                    storage.initialize(initialSettings(createdIndex))
-                }
-            }.also { created ->
-                opened[createdIndex] = created
-            }
-        } catch (failure: Throwable) {
-            withContext(NonCancellable) {
-                repository?.let { createdRepository ->
-                    index?.let { createdIndex ->
-                        runCatching { createdRepository.delete(createdIndex) }
-                            .onFailure(failure::addSuppressed)
-                    }
-                }
-                ownerScope.cancelAndJoin()
-            }
-            throw failure
-        }
-    }
-
-    override suspend fun archive(sessionIndex: Int): Unit = mutex.withLock {
-        opened[sessionIndex]?.let { existing ->
-            existing.archive()
-            return@withLock
-        }
-        withRepository { repository ->
-            repository.getEntry(sessionIndex).archive()
-        }
-    }
-
-    override suspend fun unarchive(sessionIndex: Int): Unit = mutex.withLock {
-        opened[sessionIndex]?.let { existing ->
-            existing.unarchive()
-            return@withLock
-        }
-        withRepository { repository ->
-            repository.getEntry(sessionIndex).unarchive()
-        }
-    }
-
-    override suspend fun fork(sessionIndex: Int): Int = mutex.withLock {
-        opened[sessionIndex]?.let { existing -> return@withLock existing.fork() }
-        val ownerScope = scope.supervisorChildScope()
-        var temporary: PersistedSessionViewModelImpl? = null
-        try {
-            val created = try {
-                val repository = repositoryFactory.create(ownerScope)
-                require(sessionIndex in repository.list()) {
-                    "No persisted Session at index $sessionIndex."
-                }
-                buildOpened(sessionIndex, repository, ownerScope)
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (failure: Throwable) {
-                reportUnhandledError?.invoke(failure, startupWorkingDirectory)
-                throw failure
-            }
-            temporary = created
-            created.fork()
-        } finally {
-            withContext(NonCancellable) {
-                temporary?.shutdown() ?: ownerScope.cancelAndJoin()
-            }
-        }
-    }
-
-    override suspend fun delete(sessionIndex: Int): Boolean = mutex.withLock {
-        withRepository { repository ->
-            if (sessionIndex !in repository.list()) return@withRepository false
-            opened.remove(sessionIndex)?.shutdown()
-            repository.delete(sessionIndex)
-            true
-        }
-    }
-
-    /**
-     * Removes a Session created by a failed draft materialization.
-     *
-     * This is intentionally an implementation-layer rollback boundary rather
-     * than part of the frontend Session contract.
-     */
-    override suspend fun rollbackCreated(sessionIndex: Int) {
-        mutex.withLock {
-            withRepository { repository ->
-                opened.remove(sessionIndex)?.shutdown()
-                if (sessionIndex in repository.list()) repository.delete(sessionIndex)
-            }
-        }
-    }
-
-    override suspend fun release(sessionIndex: Int): Unit = mutex.withLock {
-        opened.remove(sessionIndex)?.shutdown()
-    }
-
-    override suspend fun shutdown(): Unit = mutex.withLock {
-        opened.values.toList().forEach { it.shutdown() }
-        opened.clear()
-    }
-
-    private suspend fun createOpened(
-        index: Int,
-    ): PersistedSessionViewModelImpl {
-        val ownerScope = scope.supervisorChildScope()
-        return try {
-            val repository = repositoryFactory.create(ownerScope)
-            require(index in repository.list()) {
-                "No persisted Session at index $index."
-            }
-            buildOpened(index, repository, ownerScope).also { created ->
-                created.unarchive()
-            }
-        } catch (failure: Throwable) {
-            withContext(NonCancellable) { ownerScope.cancelAndJoin() }
-            throw failure
-        }
-    }
-
-    private suspend fun buildOpened(
-        index: Int,
-        repository: KodexRootSessionRepository,
-        ownerScope: CoroutineScope,
-        initialize: suspend (KodexAgentSession) -> Unit = {},
-    ): PersistedSessionViewModelImpl {
-        val rootSession = repository.open(index)
-        initialize(rootSession)
-        return PersistedSessionViewModelImpl(
-            sessionIndex = index,
-            rootSession = rootSession,
-            repository = repository,
-            ownerScope = ownerScope,
-            agentFactory = agentFactory,
-            reportUnhandledError = reportUnhandledError,
-        ).also { it.initialize() }
-    }
-
-    private suspend fun <T> withRepository(
-        block: suspend (KodexRootSessionRepository) -> T,
-    ): T {
-        val ownerScope = scope.supervisorChildScope()
-        return try {
-            block(repositoryFactory.create(ownerScope))
-        } finally {
-            withContext(NonCancellable) { ownerScope.cancelAndJoin() }
-        }
-    }
-}
-
-/** Creates the root Agent for its owning persisted Session. */
-public fun interface PersistedSessionAgentViewModelFactory {
-    public suspend fun create(
-        session: KodexAgentSession,
-        ownerScope: CoroutineScope,
-    ): AgentViewModel
-}
-
-private class PersistedSessionViewModelImpl(
-    override val sessionIndex: Int,
-    private val rootSession: KodexAgentSession,
-    private val repository: KodexRootSessionRepository,
-    private val ownerScope: CoroutineScope,
-    private val agentFactory: PersistedSessionAgentViewModelFactory,
-    private val reportUnhandledError: ((Throwable, Path) -> Unit)? = null,
-) : PersistedSessionViewModel {
-    private val mutex = Mutex()
-    private val mutableName = MutableStateFlow("Session $sessionIndex")
-    private val mutableLifecycle =
-        MutableStateFlow<PersistedSessionLifecycleState>(PersistedSessionLifecycleState.Open)
-    private val mutableNotification = MutableStateFlow<PersistedSessionNotification?>(null)
-    private var nextNotificationId = 1L
+    private val handles = mutableMapOf<Int, RpcPersistedSessionViewModel>()
     private var closed = false
 
-    override lateinit var rootAgent: AgentViewModel
-        private set
-    override val name: StateFlow<String> = mutableName.asStateFlow()
-    override val settings: StateFlow<KodexAgentSettings>
-        get() = rootAgent.settings
-    override val models: StateFlow<List<ModelInfo>>
-        get() = rootAgent.models
-    override val lifecycle: StateFlow<PersistedSessionLifecycleState> =
-        mutableLifecycle.asStateFlow()
-    override val notification: StateFlow<PersistedSessionNotification?> =
-        mutableNotification.asStateFlow()
-
-    suspend fun archive() {
-        ensureOpen()
-        repository.getEntry(sessionIndex).archive()
+    override suspend fun open(sessionIndex: Int): PersistedSessionViewModel = mutex.withLock {
+        check(!closed)
+        views.services.global.unarchiveSession(sessionIndex)
+        handles[sessionIndex] ?: RpcPersistedSessionViewModel(
+            views.open(sessionIndex), views.services, models, scope,
+        ).also { handles[sessionIndex] = it }
     }
-
-    suspend fun unarchive() {
-        ensureOpen()
-        repository.getEntry(sessionIndex).unarchive()
+    override suspend fun release(sessionIndex: Int) {
+        val handle = mutex.withLock { handles.remove(sessionIndex)?.also { it.close() } }
+        views.release(sessionIndex)
+        handle?.join()
     }
-
-    suspend fun initialize() {
-        rootAgent = agentFactory.create(
-            session = rootSession,
-            ownerScope = ownerScope,
-        )
-        ownerScope.launch {
-            rootAgent.settings.collect {
-                refresh()
-            }
+    override suspend fun archive(sessionIndex: Int): Unit = views.services.global.archiveSession(sessionIndex)
+    override suspend fun unarchive(sessionIndex: Int): Unit = views.services.global.unarchiveSession(sessionIndex)
+    override suspend fun fork(sessionIndex: Int): Int = views.services.global.forkSession(sessionIndex)
+    override suspend fun delete(sessionIndex: Int): Boolean =
+        views.services.global.deleteSession(sessionIndex).also { if (it) release(sessionIndex) }
+    override suspend fun shutdown() {
+        val previous = mutex.withLock {
+            closed = true
+            handles.values.toList().also { handles.clear(); it.forEach(RpcPersistedSessionViewModel::close) }
         }
-        refresh()
-    }
-
-    override suspend fun refresh() = mutex.withLock {
-        ensureOpen()
-        refreshName()
-    }
-
-    override suspend fun fork(
-        source: AgentViewModel,
-        untilExclusive: Int,
-        expectedGeneration: Long,
-    ): Int = reportForkFailure {
-        forkHistory(source, untilExclusive, expectedGeneration)
-    }
-
-    private suspend fun forkHistory(
-        source: AgentViewModel,
-        untilExclusive: Int,
-        expectedGeneration: Long,
-    ): Int = mutex.withLock {
-        ensureOpen()
-        require(source === rootAgent) {
-            "Fork source is not owned by this persisted Session."
-        }
-        require(source.history.historyItems.value.generation == expectedGeneration) {
-            "Fork generation is stale."
-        }
-        require(
-            !source.execution.value.running &&
-                source.execution.value.capabilities.canForkHistory,
-        ) {
-            "Cannot fork a running or unavailable Agent."
-        }
-        val sourceIndex = untilExclusive - 1
-        val sourceStorage = rootSession.runtime.storage
-        require(untilExclusive > 0 && sourceStorage.latestIndex() >= sourceIndex) {
-            "Fork boundary must preserve initialization and be within the source storage."
-        }
-        val targetIndex = repository.createFork(
-            sourceEntryIndex = sessionIndex,
-        )
-        try {
-            val targetSession = repository.open(targetIndex)
-            try {
-                targetSession.runtime.modify { storage ->
-                    val boundary = storage.settings[sourceIndex]
-                    storage.revert(untilExclusive)
-                    val latest = storage.latestIndex()
-                    val baseTitle = boundary.threadName.trim().ifEmpty {
-                        "Session $targetIndex"
-                    }
-                    storage.settings[latest + 1] = boundary.copy(
-                        turnId = Uuid.generateV7().toString(),
-                        turnState = null,
-                        threadName = "[fork] $baseTitle",
-                    )
-                }
-            } finally {
-                withContext(NonCancellable) { targetSession.cancelAndJoin() }
-            }
-            targetIndex
-        } catch (failure: Throwable) {
-            withContext(NonCancellable) {
-                runCatching { repository.delete(targetIndex) }.onFailure(failure::addSuppressed)
-            }
-            throw failure
-        }
-    }
-
-    override suspend fun fork(): Int = reportForkFailure { forkRoot() }
-
-    private suspend fun forkRoot(): Int = mutex.withLock {
-        ensureOpen()
-        require(
-            !rootAgent.execution.value.running &&
-                rootAgent.execution.value.capabilities.canForkHistory,
-        ) {
-            "Cannot fork a running or unavailable Session."
-        }
-        val sourceStorage = rootSession.runtime.storage
-        val sourceIndex = sourceStorage.latestIndex()
-        require(sourceIndex >= 0) { "Cannot fork an uninitialized Session." }
-        val targetIndex = repository.createFork(
-            sourceEntryIndex = sessionIndex,
-        )
-        try {
-            val targetSession = repository.open(targetIndex)
-            try {
-                targetSession.runtime.modify { storage ->
-                    val latest = storage.latestIndex()
-                    val boundary = storage.settings[sourceIndex]
-                    val baseTitle = boundary.threadName.trim().ifEmpty {
-                        "Session $targetIndex"
-                    }
-                    storage.settings[latest + 1] = boundary.copy(
-                        turnId = Uuid.generateV7().toString(),
-                        turnState = null,
-                        threadName = "[fork] $baseTitle",
-                    )
-                }
-            } finally {
-                withContext(NonCancellable) { targetSession.cancelAndJoin() }
-            }
-            targetIndex
-        } catch (failure: Throwable) {
-            withContext(NonCancellable) {
-                runCatching { repository.delete(targetIndex) }.onFailure(failure::addSuppressed)
-            }
-            throw failure
-        }
-    }
-
-    private suspend fun <T> reportForkFailure(block: suspend () -> T): T {
-        val cwd = rootAgent.settings.value.cwd
-        return try {
-            block()
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (failure: Throwable) {
-            publishFailure("Unable to fork Session.", failure, cwd)
-            throw failure
-        }
-    }
-
-    override suspend fun rename(name: String) {
-        val normalized = name.trim()
-        require(normalized.isNotEmpty()) { "A Session name cannot be blank." }
-        rootAgent.renameThread(normalized)
-        mutex.withLock {
-            ensureOpen()
-            refreshName()
-        }
-    }
-
-    override suspend fun updateModel(model: OpenAiModelId) = rootAgent.updateModel(model)
-
-    override suspend fun updateWorkingDirectory(workingDirectory: Path) =
-        rootAgent.updateWorkingDirectory(workingDirectory)
-
-    override suspend fun updateReasoningEffort(reasoningEffort: ReasoningEffort) =
-        rootAgent.updateReasoningEffort(reasoningEffort)
-
-    override suspend fun updateServiceTier(serviceTier: ServiceTier) =
-        rootAgent.updateServiceTier(serviceTier)
-
-    override suspend fun updateRequestUserInputMode(mode: RequestUserInputMode) =
-        rootAgent.updateRequestUserInputMode(mode)
-
-    override suspend fun updateModelConfiguration(
-        model: OpenAiModelId,
-        reasoningEffort: ReasoningEffort,
-        serviceTier: ServiceTier,
-    ) = rootAgent.updateModelConfiguration(model, reasoningEffort, serviceTier)
-
-    override fun dismissNotification(notificationId: Long) {
-        val current = mutableNotification.value ?: return
-        if (current.id == notificationId) {
-            mutableNotification.compareAndSet(current, null)
-        }
-    }
-
-    override suspend fun shutdown() = mutex.withLock {
-        closeOwnedResources()
-        withContext(NonCancellable) { ownerScope.cancelAndJoin() }
-    }
-
-    override fun close() {
-        closeOwnedResources()
-    }
-
-    private fun closeOwnedResources() {
-        if (closed) return
-        closed = true
-        mutableLifecycle.value = PersistedSessionLifecycleState.Closing
-        rootAgent.close()
-        mutableLifecycle.value = PersistedSessionLifecycleState.Closed
-        ownerScope.cancel()
-    }
-
-    override suspend fun readCreatedAt(): Instant? = withContext(Dispatchers.Default) {
-        mutex.withLock {
-            ensureOpen()
-            val timestamp = rootSession.storage.timestamp
-            timestamp.ceilToIndex(0)?.let { timestamp.getExact(it) }
-        }
-    }
-
-    override suspend fun readUpdatedAt(): Instant? = withContext(Dispatchers.Default) {
-        mutex.withLock {
-            ensureOpen()
-            val timestamp = rootSession.storage.timestamp
-            timestamp.latestIndex().takeIf { it >= 0 }?.let { timestamp.getExact(it) }
-        }
-    }
-
-    private fun refreshName() {
-        val threadName = rootAgent.settings.value.threadName
-            .takeIf(String::isNotBlank)
-        mutableName.value = threadName ?: "Session $sessionIndex"
-    }
-
-    private fun publishFailure(message: String, failure: Throwable, cwd: Path) {
-        val id = nextNotificationId
-        check(id < Long.MAX_VALUE) { "Session notification ids are exhausted." }
-        nextNotificationId += 1
-        mutableNotification.value = PersistedSessionNotification(
-            id = id,
-            level = PersistedSessionNotificationLevel.Error,
-            message = message,
-            detail = failure.stackTraceToString(),
-        )
-        reportUnhandledError?.invoke(failure, cwd)
-    }
-
-    private fun ensureOpen() {
-        check(!closed) { "Persisted Session ViewModel is closed." }
+        views.close()
+        withContext(NonCancellable) { views.join(); previous.forEach { it.join() } }
     }
 }
 
-private class SessionCatalogViewModelImpl(
-    private val repositoryFactory: KodexSessionRepositoryFactory,
-    private val scope: CoroutineScope,
-    private val forkSession: suspend (sessionIndex: Int) -> Int,
-    private val deleteSession: suspend (sessionIndex: Int) -> Boolean,
-    private val reportUnhandledError: ((Throwable) -> Unit)? = null,
-) : SessionCatalogViewModel {
-    private val commandMutex = Mutex()
-    private val mutableState = MutableStateFlow<SessionCatalogState>(SessionCatalogState.Unloaded)
-    private var sessionRepository: KodexRootSessionRepository? = null
-    private var rootEntries: Map<Int, KodexRootSessionEntry> = emptyMap()
-    override val state: StateFlow<SessionCatalogState> = mutableState.asStateFlow()
-
-    override suspend fun refresh(): Unit = commandMutex.withLock {
-        reload(showArchived = mutableState.value.showArchived)
-    }
-
-    override suspend fun readCreatedAt(sessionIndex: Int): Instant? = withContext(Dispatchers.Default) {
-        commandMutex.withLock {
-            check(mutableState.value.sessions.any { it.sessionIndex == sessionIndex })
-            getOrCreateRepository().readCreatedAt(sessionIndex)
+/** A stable tab owns successive read bindings, not a stable backend resource reference. */
+public class RpcPersistedSessionViewModel internal constructor(
+    public val view: RpcSessionView,
+    private val services: RpcServices,
+    override val models: StateFlow<List<ModelInfo>>,
+    scope: CoroutineScope,
+) : PersistedSessionViewModel {
+    private val owner = Job(scope.coroutineContext[Job])
+    private val local = CoroutineScope(scope.coroutineContext + owner)
+    private val initial = requireNotNull(view.presentation.value)
+    private val mutableAgent = MutableStateFlow<AgentViewModel?>(createRpcAgentViewModel(initial, models, local))
+    override val rootAgent: StateFlow<AgentViewModel?> = mutableAgent.asStateFlow()
+    override val sessionIndex: Int = view.index
+    private val mutableSettings = MutableStateFlow(view.current().settings.value)
+    override val settings: StateFlow<KodexAgentSettings> = mutableSettings.asStateFlow()
+    override val name: StateFlow<String> = settings.map { it.threadName }
+        .stateIn(local, SharingStarted.Eagerly, settings.value.threadName)
+    private fun lifecycleStatus(status: SessionViewStatus): PersistedSessionLifecycleState =
+        when (status) {
+            SessionViewStatus.Loading -> PersistedSessionLifecycleState.Loading
+            SessionViewStatus.Ready -> PersistedSessionLifecycleState.Open
+            SessionViewStatus.Missing -> PersistedSessionLifecycleState.Failed("Session no longer exists.")
+            is SessionViewStatus.Failed -> PersistedSessionLifecycleState.Failed(status.cause.message ?: "Session view failed.")
+            SessionViewStatus.Closed -> PersistedSessionLifecycleState.Closed
         }
-    }
+    private val mutableLifecycle = MutableStateFlow(lifecycleStatus(view.status.value))
+    override val lifecycle: StateFlow<PersistedSessionLifecycleState> = mutableLifecycle.asStateFlow()
 
-    override suspend fun readUpdatedAt(sessionIndex: Int): Instant? = withContext(Dispatchers.Default) {
-        commandMutex.withLock {
-            check(mutableState.value.sessions.any { it.sessionIndex == sessionIndex })
-            getOrCreateRepository().readUpdatedAt(sessionIndex)
+    init {
+        owner.invokeOnCompletion {
+            mutableAgent.value?.close(); mutableAgent.value = null
+            mutableLifecycle.value = PersistedSessionLifecycleState.Closed
         }
-    }
-
-    override suspend fun setShowArchived(showArchived: Boolean): Unit = commandMutex.withLock {
-        if (mutableState.value.showArchived == showArchived) return@withLock
-        reload(showArchived)
-    }
-
-    override suspend fun archive(sessionIndex: Int): Unit = commandMutex.withLock {
-        val previous = mutableState.value
-        getRootEntry(sessionIndex).archive()
-        updateEntry(previous, sessionIndex, archived = true)
-    }
-
-    override suspend fun unarchive(sessionIndex: Int): Unit = commandMutex.withLock {
-        val previous = mutableState.value
-        getRootEntry(sessionIndex).unarchive()
-        updateEntry(previous, sessionIndex, archived = false)
-    }
-
-    override suspend fun fork(sessionIndex: Int): Int = commandMutex.withLock {
-        val targetIndex = forkSession(sessionIndex)
-        try {
-            reloadRepository(mutableState.value.showArchived)
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (failure: Throwable) {
-            reportUnhandledError?.invoke(failure)
-            throw failure
-        }
-        targetIndex
-    }
-
-    override suspend fun delete(sessionIndex: Int): Boolean = commandMutex.withLock {
-        if (!deleteSession(sessionIndex)) return@withLock false
-        val previous = mutableState.value
-        sessionRepository?.let { repository ->
-            withContext(NonCancellable) { repository.cancelAndJoin() }
-        }
-        sessionRepository = null
-        rootEntries = emptyMap()
-        when (previous) {
-            SessionCatalogState.Unloaded -> Unit
-            is SessionCatalogState.Loading -> Unit
-            is SessionCatalogState.Loaded -> {
-                mutableState.value = previous.copy(
-                    sessions = previous.sessions.filterNot { entry ->
-                        entry.sessionIndex == sessionIndex
-                    },
-                )
+        local.launch { view.status.collect { mutableLifecycle.value = lifecycleStatus(it) } }
+        local.launch {
+            var previous: RpcAgentPresentation? = initial
+            view.presentation.collect { next ->
+                if (next !== previous) {
+                    mutableAgent.value?.close()
+                    mutableAgent.value = next?.let { createRpcAgentViewModel(it, models, local) }
+                    previous = next
+                }
             }
         }
-        true
-    }
-
-    private suspend fun reloadRepository(showArchived: Boolean) {
-        sessionRepository?.let { repository ->
-            withContext(NonCancellable) { repository.cancelAndJoin() }
-        }
-        sessionRepository = null
-        rootEntries = emptyMap()
-        reload(showArchived)
-    }
-
-    override fun close() {
-        scope.cancel()
-    }
-
-    private suspend fun reload(showArchived: Boolean) {
-        val previous = mutableState.value
-        mutableState.value = SessionCatalogState.Loading(showArchived)
-        try {
-            val entries = getOrCreateRepository().listEntries(includeArchived = showArchived)
-                .sortedWith(
-                    compareByDescending<KodexRootSessionEntry> { entry -> entry.lastActivityAt }
-                        .thenByDescending { entry -> entry.entryIndex },
-                )
-            val sessions = entries.map { entry ->
-                SessionCatalogEntry(
-                    sessionIndex = entry.entryIndex,
-                    threadName = entry.threadName,
-                    updatedAt = entry.lastActivityAt,
-                    archived = entry.archived,
-                    running = entry.running,
-                    isActive = entry.isActive,
-                )
-            }
-            rootEntries = entries.associateBy { entry -> entry.entryIndex }
-            mutableState.value = SessionCatalogState.Loaded(showArchived, sessions)
-        } catch (failure: Throwable) {
-            mutableState.value = previous
-            throw failure
-        }
-    }
-
-    private suspend fun updateEntry(
-        previous: SessionCatalogState,
-        sessionIndex: Int,
-        archived: Boolean,
-    ) {
-        when (previous) {
-            SessionCatalogState.Unloaded -> Unit
-            is SessionCatalogState.Loading -> Unit
-            is SessionCatalogState.Loaded -> {
-                val index = previous.sessions.indexOfFirst { entry ->
-                    entry.sessionIndex == sessionIndex
-                }
-                if (index < 0) {
-                    reload(previous.showArchived)
-                    return
-                }
-                val updated = previous.sessions[index].copy(archived = archived)
-                val sessions = if (archived && !previous.showArchived) {
-                    rootEntries = rootEntries - sessionIndex
-                    previous.sessions.toMutableList().apply { removeAt(index) }
-                } else {
-                    previous.sessions.toMutableList().apply { set(index, updated) }
-                }
-                mutableState.value = previous.copy(sessions = sessions)
+        local.launch {
+            view.binding.collectLatest { binding ->
+                binding?.settings?.collect { mutableSettings.value = it }
             }
         }
     }
-
-    private suspend fun getOrCreateRepository(): KodexRootSessionRepository =
-        sessionRepository ?: repositoryFactory.create(scope).also { sessionRepository = it }
-
-    private suspend fun getRootEntry(sessionIndex: Int): KodexRootSessionEntry {
-        rootEntries[sessionIndex]?.let { return it }
-        return requireNotNull(
-            getOrCreateRepository().listEntries()
-                .firstOrNull { entry -> entry.entryIndex == sessionIndex },
-        ) {
-            "No root Session entry exists at index $sessionIndex."
-        }
+    private fun current(): AgentViewModel {
+        owner.ensureActive()
+        val binding = view.current()
+        // The observed child can lag one coordinator turn; never send a command through an old binding.
+        check(view.presentation.value?.binding === binding)
+        return requireNotNull(rootAgent.value).also { check(it.settings === binding.settings) }
     }
+    override suspend fun refresh() { view.current() /* subscriptions own the settings projection */ }
+    override suspend fun readCreatedAt(): Instant? = view.current().readCreatedAt()
+    override suspend fun readUpdatedAt(): Instant? = view.current().readUpdatedAt()
+    override suspend fun fork(source: AgentViewModel, untilExclusive: Int, expectedGeneration: Long): Int {
+        require(source === current()) { "The history target expired." }
+        return view.current().forkHistory(untilExclusive, expectedGeneration)
+    }
+    override suspend fun fork(): Int = services.global.forkSession(sessionIndex)
+    override suspend fun rename(name: String): Unit = current().renameThread(name.trim())
+    override suspend fun updateModel(model: OpenAiModelId): Unit = current().updateModel(model)
+    override suspend fun updateWorkingDirectory(workingDirectory: Path): Unit = current().updateWorkingDirectory(workingDirectory)
+    override suspend fun updateReasoningEffort(reasoningEffort: ReasoningEffort): Unit = current().updateReasoningEffort(reasoningEffort)
+    override suspend fun updateServiceTier(serviceTier: ServiceTier): Unit = current().updateServiceTier(serviceTier)
+    override suspend fun updateRequestUserInputMode(mode: RequestUserInputMode): Unit = current().updateRequestUserInputMode(mode)
+    override suspend fun updateModelConfiguration(model: OpenAiModelId, reasoningEffort: ReasoningEffort, serviceTier: ServiceTier): Unit =
+        current().updateModelConfiguration(model, reasoningEffort, serviceTier)
+    override suspend fun shutdown() { close(); join() }
+    override fun close() { view.close(); owner.cancel() }
+    public suspend fun join() { owner.join(); view.join() }
 }
-
-@Factory(binds = [SessionCatalogViewModelFactory::class])
-internal fun createSessionCatalogViewModelFactory(
-    @InjectedParam repositoryFactory: KodexSessionRepositoryFactory,
-    @InjectedParam scope: CoroutineScope,
-    @InjectedParam reportUnhandledError: ((Throwable) -> Unit)? = null,
-): SessionCatalogViewModelFactory =
-    SessionCatalogViewModelFactory { forkSession, deleteSession ->
-        SessionCatalogViewModelImpl(
-            repositoryFactory = repositoryFactory,
-            scope = scope.supervisorChildScope(),
-            forkSession = forkSession,
-            deleteSession = deleteSession,
-            reportUnhandledError = reportUnhandledError,
-        )
-    }

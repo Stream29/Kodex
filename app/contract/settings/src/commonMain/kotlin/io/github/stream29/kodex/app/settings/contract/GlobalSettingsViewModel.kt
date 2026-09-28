@@ -6,8 +6,7 @@ import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.cli.settings.SidebarSettings
-import io.github.stream29.kodex.hook.contract.HookDraft
-import io.github.stream29.kodex.hook.contract.HookManagedState
+import io.github.stream29.kodex.rpc.models.NotificationHook
 import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
 import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpImportDecision
@@ -85,14 +84,12 @@ public sealed interface SettingsAuthenticationState {
 
 /** One account-management command owned by Settings > OpenAI. */
 public enum class SettingsAuthenticationOperation {
-    Reload,
     Logout,
 }
 
 /** Frontend-safe lifecycle of the current account-management command. */
 public sealed interface SettingsAuthenticationOperationState {
     public data object Idle : SettingsAuthenticationOperationState
-    public data object Reloading : SettingsAuthenticationOperationState
     public data object SigningOut : SettingsAuthenticationOperationState
 
     public data class Failed(
@@ -278,9 +275,12 @@ public interface GlobalSettingsViewModel : AutoCloseable {
 
     public val mcpServers: StateFlow<List<McpServerSettingsState>>
     public val mcpImportPreview: StateFlow<McpImportPreview?>
-    public val hooks: StateFlow<List<HookManagedState>>
+    public val hooks: StateFlow<List<NotificationHook>>
     public val usageReset: StateFlow<UsageResetState>
     public val effects: Flow<GlobalSettingsEffect>
+    /** Application-owned failure flag also survives closing and reopening this popup. */
+    public val operationFailure: StateFlow<Boolean>
+    public fun dismissOperationFailure(): Unit
 
     public fun setBuiltInContextSourceEnabled(
         source: BuiltInContextSource,
@@ -302,8 +302,7 @@ public interface GlobalSettingsViewModel : AutoCloseable {
     public fun updateRightSidebarWidth(columns: Int): Unit
 
     public fun requestLogin(): Unit
-    public fun reloadAuthentication(): Unit
-    public fun logoutKodex(): Unit
+    public fun removeAuthentication(): Unit
     public fun dismissAuthenticationOperationFailure(): Unit
     public fun refreshUsage(): Unit
     public fun requestUsageReset(): Unit
@@ -316,6 +315,8 @@ public interface GlobalSettingsViewModel : AutoCloseable {
     public fun reconnectMcpServer(serverName: String): Unit
     public fun addMcpServer(draft: McpServerDraft): Unit
     public fun editMcpServer(existingServerName: String, draft: McpServerDraft): Unit
+    /** Captures the exact editable configuration; returned secrets are Keep markers only. */
+    public fun mcpEditorDraft(serverName: String): McpServerDraft?
     public fun deleteMcpServer(serverName: String): Unit
     public fun setMcpServerEnabled(serverName: String, enabled: Boolean): Unit
     public fun loginMcpServer(serverName: String): Unit
@@ -328,10 +329,10 @@ public interface GlobalSettingsViewModel : AutoCloseable {
     ): Unit
     public fun dismissCodexMcpImport(): Unit
 
-    public fun addHook(draft: HookDraft): Unit
-    public fun editHook(name: String, draft: HookDraft): Unit
-    public fun deleteHook(name: String): Unit
-    public fun hookEditorDraft(name: String): HookDraft?
+    public fun addHook(draft: NotificationHook): Unit
+    public fun editHook(name: String, draft: NotificationHook): Unit
+    public fun deleteHook(hook: NotificationHook): Unit
+    public fun hookEditorDraft(name: String): NotificationHook?
 
     override fun close(): Unit
 }

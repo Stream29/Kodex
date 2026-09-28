@@ -69,7 +69,8 @@ val agentHistoryModelsTest by testSuite {
                 session.storage.index[1] = StableUserMessage(listOf(ContentItem.InputText("readable")))
                 var current = true
                 val context = HistoryItemLoadContext(
-                    session.runtime, this, { current }, HistoryTurnDurationResolver(session.storage),
+                    AgentHistorySource(session.storage, session.runtime.latestIndex, session.runtime.state),
+                    this, { current }, HistoryTurnDurationResolver(session.storage),
                 )
                 val item = MessageHistoryItemViewModelImpl(
                     1, HistoryItemDescriptor(1, HistoryItemSource.Index, HistoryItemKind.Message, Duration.ZERO),
@@ -99,7 +100,8 @@ val agentHistoryModelsTest by testSuite {
                     99, HistoryItemSource.Index, HistoryItemKind.SuggestSubagentTask, Duration.ZERO,
                 )
                 val context = HistoryItemLoadContext(
-                    session.runtime, this, { true }, HistoryTurnDurationResolver(session.storage),
+                    AgentHistorySource(session.storage, session.runtime.latestIndex, session.runtime.state),
+                    this, { true }, HistoryTurnDurationResolver(session.storage),
                 )
                 val item = SuggestSubagentTaskHistoryItemViewModelImpl(99, descriptor, context)
                 item.ensureLoaded()

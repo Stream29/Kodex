@@ -1,6 +1,5 @@
 package io.github.stream29.kodex.cli.history
 
-import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
@@ -109,7 +108,7 @@ internal fun StableCleanEvent.toHistoryItemDescriptor(
  * its value cache and all reads are dispatched away from the UI thread.
  */
 internal class HistoryItemLoadContext(
-    private val agentState: KodexAgentState,
+    private val agentState: AgentHistorySource,
     private val scope: CoroutineScope,
     private val isGenerationCurrent: () -> Boolean,
     private val turnDurationResolver: HistoryTurnDurationResolver,

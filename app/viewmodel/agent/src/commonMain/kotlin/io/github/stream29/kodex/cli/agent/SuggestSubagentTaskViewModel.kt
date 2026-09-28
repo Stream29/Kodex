@@ -1,9 +1,9 @@
 package io.github.stream29.kodex.cli.agent
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
-import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskViewModel
@@ -16,9 +16,30 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
+
+/** Keeps editing and revision checks local, but delegates creation and completion separately. */
+public fun createSuggestSubagentTaskViewModel(
+    ownerScope: CoroutineScope,
+    pending: Flow<PendingSuggestSubagentTaskToolEvent?>,
+    completeToolCall: suspend (StableCleanEvent.CompletedTool) -> Int,
+    createSessions: suspend (
+        io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs,
+        SuggestedSessionConfiguration,
+    ) -> List<io.github.stream29.kodex.tool.multiagent.SuggestedSessionMeta>,
+    resumeRuntime: () -> Unit,
+    defaultConfiguration: () -> SuggestedSessionConfiguration,
+): SuggestSubagentTaskViewModel = SuggestSubagentTaskViewModelImpl(
+    completeToolCall, ownerScope, createSessions, resumeRuntime, defaultConfiguration,
+).also { view ->
+    ownerScope.launch {
+        try { pending.collect(view::synchronize) } finally { view.close() }
+    }
+}
 
 internal class SuggestSubagentTaskViewModelImpl(
-    private val runtime: AgentRuntime,
+    private val completeToolCall: suspend (StableCleanEvent.CompletedTool) -> Int,
     private val ownerScope: CoroutineScope,
     private val createSessions: (suspend (
         io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs,
@@ -75,7 +96,7 @@ internal class SuggestSubagentTaskViewModelImpl(
                     sessions = dispatcher(event.arguments, submitting.configuration),
                 )
             }
-            runtime.completeToolCall(
+            completeToolCall(
                 StableSuggestSubagentTaskToolEvent(
                     callId = event.callId,
                     itemId = event.itemId,

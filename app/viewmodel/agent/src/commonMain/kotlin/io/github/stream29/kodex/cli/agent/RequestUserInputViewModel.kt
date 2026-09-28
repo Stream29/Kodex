@@ -1,9 +1,9 @@
 package io.github.stream29.kodex.cli.agent
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
-import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputDraftAnswer
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionResult
@@ -21,10 +21,26 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
+
+/** Reuses revision-bound drafts while the command and pending values come from RPC. */
+public fun createRequestUserInputViewModel(
+    ownerScope: CoroutineScope,
+    pending: Flow<PendingRequestUserInputToolEvent?>,
+    completeToolCall: suspend (StableCleanEvent.CompletedTool) -> Int,
+    resumeRuntime: () -> Unit,
+): RequestUserInputViewModel = RequestUserInputViewModelImpl(
+    completeToolCall, ownerScope, resumeRuntime,
+).also { view ->
+    ownerScope.launch {
+        try { pending.collect(view::synchronize) } finally { view.close() }
+    }
+}
 
 /** Revision-bound answer drafts for one Agent's current blocking interaction. */
 internal class RequestUserInputViewModelImpl(
-    private val runtime: AgentRuntime,
+    private val completeToolCall: suspend (StableCleanEvent.CompletedTool) -> Int,
     private val ownerScope: CoroutineScope,
     private val resumeRuntime: () -> Unit,
 ) : RequestUserInputViewModel {
@@ -118,7 +134,7 @@ internal class RequestUserInputViewModelImpl(
             }
         }
         try {
-            runtime.completeToolCall(
+            completeToolCall(
                 StableRequestUserInputToolEvent(
                     callId = event.callId,
                     itemId = event.itemId,

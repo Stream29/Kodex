@@ -22,7 +22,7 @@ val requestUserInputViewModelTest by testSuite {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
-            val model = RequestUserInputViewModelImpl(runtime, this, resumeRuntime = {})
+            val model = RequestUserInputViewModelImpl(runtime::completeToolCall, this, resumeRuntime = {})
             val pending = pendingRequest()
             try {
                 model.synchronize(pending)
@@ -57,7 +57,7 @@ val requestUserInputViewModelTest by testSuite {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val model = RequestUserInputViewModelImpl(
-                repository.open(repository.create()).runtime,
+                repository.open(repository.create()).runtime::completeToolCall,
                 this,
                 resumeRuntime = {},
             )

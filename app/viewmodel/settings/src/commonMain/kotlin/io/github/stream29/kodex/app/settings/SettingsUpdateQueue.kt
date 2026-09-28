@@ -12,7 +12,7 @@ import kotlinx.coroutines.launch
  *
  * Closing rejects new work and drains already accepted writes.
  */
-internal class SettingsUpdateQueue(
+public class SettingsUpdateQueue(
     commandScope: CoroutineScope,
     private val defaultReportError: ((Throwable) -> Unit)? = null,
 ) {
@@ -36,7 +36,7 @@ internal class SettingsUpdateQueue(
         }
     }
 
-    fun submit(
+    public fun submit(
         reportError: ((Throwable) -> Unit)? = null,
         block: suspend () -> Unit,
     ) {
@@ -56,7 +56,7 @@ internal class SettingsUpdateQueue(
         }
     }
 
-    fun close(onDrained: (() -> Unit)? = null) {
+    public fun close(onDrained: (() -> Unit)? = null) {
         if (!closed) {
             closed = true
             commands.close()

@@ -33,9 +33,10 @@ internal class SessionSettingsViewModelImpl(
     parentScope: CoroutineScope,
     private val createDirectoryPicker: (Path) -> DirectoryPickerViewModel?,
     private val reportUnhandledError: ((Throwable, Path) -> Unit)? = null,
+    private val cancelEditsOnClose: Boolean = false,
 ) : SessionSettingsViewModel {
     private val scope = parentScope.supervisorChildScope()
-    private val updates = SettingsUpdateQueue(parentScope)
+    private val updates = SettingsUpdateQueue(if (cancelEditsOnClose) scope else parentScope)
     private val effectChannel = Channel<SessionSettingsEffect>(Channel.BUFFERED)
     private var closed: Boolean = false
     private val mutableState = MutableStateFlow(source.state.value.toFrontendState(models.value))
@@ -147,6 +148,7 @@ internal class SessionSettingsViewModelImpl(
         mutableDirectoryPicker.value?.viewModel?.close()
         mutableDirectoryPicker.value = null
         effectChannel.close()
+        if (cancelEditsOnClose) source.close()
         scope.cancel()
         updates.close(source::close)
     }
@@ -182,6 +184,17 @@ internal class SessionSettingsViewModelImpl(
         return available
     }
 }
+
+/** RPC-bound editors cancel their local retries and release the exact target on disposal. */
+public fun createSessionSettingsViewModel(
+    source: SessionSettingsDataSource,
+    models: StateFlow<List<ModelInfo>>,
+    ownerScope: CoroutineScope,
+    createDirectoryPicker: (Path) -> DirectoryPickerViewModel? = { null },
+    reportUnhandledError: ((Throwable, Path) -> Unit)? = null,
+): SessionSettingsViewModel = SessionSettingsViewModelImpl(
+    source, models, ownerScope, createDirectoryPicker, reportUnhandledError, cancelEditsOnClose = true,
+)
 
 private fun SessionSettingsDataState.toFrontendState(
     models: List<ModelInfo>,

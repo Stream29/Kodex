@@ -42,7 +42,7 @@ val suggestSubagentTaskFeedbackTest by testSuite {
                     }
                     var dispatched = false
                     val model = SuggestSubagentTaskViewModelImpl(
-                        runtime, this,
+                        runtime::completeToolCall, this,
                         createSessions = { _, _ -> dispatched = true; emptyList() },
                         resumeRuntime = {},
                         defaultConfiguration = {

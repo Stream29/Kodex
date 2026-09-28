@@ -35,14 +35,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.seconds
-import kotlin.time.Duration.Companion.milliseconds
 
 val historyIndexViewModelTest by testSuite {
     test("only exact Message timestamps are exposed and replacement invalidates requests") {
@@ -106,6 +104,7 @@ val historyIndexViewModelTest by testSuite {
             )
             val latestIndex = MutableStateFlow(0)
             val agentState = MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.Empty)
+            val cacheNonce = MutableStateFlow(11L)
             val childScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
             val viewModel = HistoryIndexViewModelImpl(
                 timeline = storage.index,
@@ -113,6 +112,7 @@ val historyIndexViewModelTest by testSuite {
                 latestIndex = latestIndex,
                 agentState = agentState,
                 scope = childScope,
+                cacheNonce = cacheNonce,
             )
             try {
                 assertEquals(emptyList(), viewModel.awaitIndexes(emptyList()).indexes)
@@ -144,17 +144,17 @@ val historyIndexViewModelTest by testSuite {
 
                 storage.revert(5)
                 latestIndex.value = 3
-                val reverted = viewModel.awaitIndexes(listOf(2))
-                assertEquals(1, reverted.generation)
+                cacheNonce.value = 12L
+                val reverted = viewModel.awaitGenerationAtLeast(12)
+                assertEquals(12L, reverted.generation)
+                assertEquals(listOf(2), reverted.indexes)
 
-                agentState.value = KodexAgentStateValue.ExternalWrite
-                delay(50.milliseconds)
                 storage.index.revert(2)
                 storage.index[2] = StableUserMessage(
                     content = listOf(ContentItem.InputText("rewritten")),
                 )
-                agentState.value = KodexAgentStateValue.UserMessage
-                val refreshed = viewModel.awaitGenerationAtLeast(2)
+                cacheNonce.value = 13L
+                val refreshed = viewModel.awaitGenerationAtLeast(13)
                 assertEquals(
                     "rewritten",
                     viewModel.load(refreshed.generation, 2).summary,

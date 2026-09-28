@@ -3,9 +3,10 @@ package io.github.stream29.kodex.app.session.contract
 /**
  * UI-facing lifetime of one persisted Session handle.
  *
- * The factory publishes a handle only after opening the root Agent.
+ * A handle can temporarily lose its local child while RPC observations recover.
  */
 public sealed interface PersistedSessionLifecycleState {
+    public data object Loading : PersistedSessionLifecycleState
     public data object Open : PersistedSessionLifecycleState
 
     public data class Failed(
@@ -18,27 +19,5 @@ public sealed interface PersistedSessionLifecycleState {
         }
     }
 
-    public data object Closing : PersistedSessionLifecycleState
     public data object Closed : PersistedSessionLifecycleState
-}
-
-public enum class PersistedSessionNotificationLevel {
-    Information,
-    Warning,
-    Error,
-}
-
-/** Latest operation result owned only by one persisted Session. */
-public data class PersistedSessionNotification(
-    public val id: Long,
-    public val level: PersistedSessionNotificationLevel,
-    public val message: String,
-    public val detail: String? = null,
-) {
-    init {
-        require(id > 0) { "A persisted Session notification id must be positive." }
-        require(message.isNotBlank()) {
-            "A persisted Session notification message must not be blank."
-        }
-    }
 }

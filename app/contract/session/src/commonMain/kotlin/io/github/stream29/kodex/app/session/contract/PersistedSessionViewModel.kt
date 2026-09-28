@@ -13,10 +13,10 @@ import kotlin.time.Instant
 public interface PersistedSessionViewModel : SessionViewModel {
     public val sessionIndex: Int
 
-    public val rootAgent: AgentViewModel
+    /** A new child is published after reactivation; null means this view is not ready. */
+    public val rootAgent: StateFlow<AgentViewModel?>
 
     public val lifecycle: StateFlow<PersistedSessionLifecycleState>
-    public val notification: StateFlow<PersistedSessionNotification?>
 
     /** Refreshes the lightweight name projection from root settings. */
     public suspend fun refresh(): Unit
@@ -50,8 +50,6 @@ public interface PersistedSessionViewModel : SessionViewModel {
 
     /** Forks the complete current root storage into a new root Session. */
     public suspend fun fork(): Int
-
-    public fun dismissNotification(notificationId: Long): Unit
 
     /**
      * Stops new commands and closes the root Agent. Repeated calls are
