@@ -426,13 +426,28 @@ private class KodexAgentStateImpl(
 
     override suspend fun updateSettings(settings: KodexAgentSettings): Int =
         writeMutex.withLock {
-            val index = storage.latestIndex() + 1
-            require(index > 0) { "Settings updates require an existing state index." }
-            storage.settings[index] = settings
-            storage.timestamp[index] = now()
-            latestIndex.value = index
-            index
+            appendSettings(settings)
         }
+
+    override suspend fun compareAndSetSettings(
+        expect: KodexAgentSettings,
+        update: KodexAgentSettings,
+    ): Boolean = writeMutex.withLock {
+        val current = storage.settings[storage.latestIndex()]
+        if (current != expect) return@withLock false
+        if (current != update) appendSettings(update)
+        true
+    }
+
+    /** Caller holds [writeMutex], just as for the unconditional settings write. */
+    private suspend fun appendSettings(settings: KodexAgentSettings): Int {
+        val index = storage.latestIndex() + 1
+        require(index > 0) { "Settings updates require an existing state index." }
+        storage.settings[index] = settings
+        storage.timestamp[index] = now()
+        latestIndex.value = index
+        return index
+    }
 
     private suspend fun appendResponseHistoryItem(
         item: ResponseItem.HistoryItem,

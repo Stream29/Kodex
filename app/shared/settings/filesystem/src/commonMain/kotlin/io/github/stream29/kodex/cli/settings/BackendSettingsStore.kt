@@ -54,14 +54,23 @@ public class BackendSettingsStore internal constructor(
      *
      * This is process-local file CAS, not cross-process coordination or the complete
      * RPC business operation. Validation and lifecycle side effects still belong to
-     * the backend service. I/O, decoding and cancellation failures propagate.
+     * the backend service. Its pure [validate] callback runs after a matching
+     * comparison and before persistence while the same lock is held; stale and
+     * equal proposals skip it. I/O, validation and cancellation failures propagate.
      */
-    public suspend fun compareAndSet(expect: BackendSettings, update: BackendSettings): Boolean =
+    public suspend fun compareAndSet(
+        expect: BackendSettings,
+        update: BackendSettings,
+        validate: (BackendSettings, BackendSettings) -> Unit = { _, _ -> },
+    ): Boolean =
         updateMutex.withLock {
             val current = read()
             settings.value = current
             if (current != expect) return@withLock false
             if (current == update) return@withLock true
+            // Validation observes the same file snapshot as the actual comparison.
+            // A rejected/stale/no-op proposal has no business side effects.
+            validate(current, update)
             writeSplitSettings(fileSystem, settingsPath, encodeBackendSettingsFile(update))
             settings.value = update
             true

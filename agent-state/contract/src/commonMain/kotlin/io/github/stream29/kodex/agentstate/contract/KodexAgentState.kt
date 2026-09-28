@@ -255,4 +255,18 @@ public interface KodexAgentState : CoroutineScope {
      * compaction requests, so callers cannot supply an arbitrary value here.
      */
     public suspend fun updateSettings(settings: KodexAgentSettings): Int
+
+    /**
+     * Compares the complete current settings and appends [update] under the
+     * same write boundary as other state mutations, including response headers.
+     *
+     * A mismatch returns false; an equal update succeeds without appending
+     * settings or a timestamp. Like [updateSettings], this may run during a
+     * model request without changing its captured settings or conversation
+     * state. Storage failures and cancellation propagate to the caller.
+     */
+    public suspend fun compareAndSetSettings(
+        expect: KodexAgentSettings,
+        update: KodexAgentSettings,
+    ): Boolean
 }
