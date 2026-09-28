@@ -14,8 +14,9 @@ import kotlin.time.Instant
 internal fun SessionCatalogEntry.sessionBrowserLabel(
     maximumColumns: Int,
     now: Instant = Clock.System.now(),
+    runningFrame: String = RunningIndicatorFrames.first(),
 ): AnnotatedString {
-    val title = threadName ?: "Session $sessionIndex"
+    val title = runningIndicatorLabel(threadName ?: "Session $sessionIndex", running, runningFrame)
     val lastActivity = updatedAt?.relativeTimeFrom(now)
         ?: return buildAnnotatedString {
             append(title.ellipsizeToTerminalWidth(maximumColumns))

@@ -993,6 +993,7 @@ private fun BoxScope.SessionCatalogPopup(
 ) {
     val scope = rememberCoroutineScope()
     val state by open.viewModel.state.collectAsState()
+    val runningFrame by rememberRunningIndicatorFrame(active = state.sessions.any { it.running })
     var contextMenu by remember(open) { mutableStateOf<SessionCatalogMenuRequest?>(null) }
     var deleteTarget by remember(open) { mutableStateOf<SessionCatalogEntry?>(null) }
     LaunchedEffect(open) { open.viewModel.refresh() }
@@ -1023,6 +1024,7 @@ private fun BoxScope.SessionCatalogPopup(
                             SessionCatalogRow(
                                 entry = entry,
                                 maximumLabelColumns = SessionCatalogWidth - 2,
+                                runningIndicatorFrame = runningFrame,
                                 onClick = {
                                     contextMenu = null
                                     scope.launch {
@@ -1156,12 +1158,13 @@ internal fun SessionCatalogHeader(
 internal fun SessionCatalogRow(
     entry: SessionCatalogEntry,
     maximumLabelColumns: Int,
+    runningIndicatorFrame: String = RunningIndicatorFrames.first(),
     onClick: () -> Unit,
     onOpenContextMenu: (TuiPopupAnchor, IntOffset?) -> Unit,
 ) {
     val anchor = rememberTuiPopupAnchor()
     TuiButton(
-        label = entry.sessionBrowserLabel(maximumLabelColumns),
+        label = entry.sessionBrowserLabel(maximumLabelColumns, runningFrame = runningIndicatorFrame),
         modifier = Modifier
             .fillMaxWidth()
             .background(SettingsDialogNavigationBackground)
