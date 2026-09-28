@@ -27,7 +27,6 @@ val authenticationSettingsTest by testSuite {
                         ),
                         operation = SettingsAuthenticationOperationState.Idle,
                         onOpenLogin = {},
-                        onReload = {},
                         onRequestLogout = {},
                         onDismissOperationFailure = {},
                     )
@@ -38,7 +37,7 @@ val authenticationSettingsTest by testSuite {
             assertTrue("Plan: pro" in snapshot, snapshot)
             assertFalse("account-id" in snapshot, snapshot)
             assertTrue("[Sign in again]" in snapshot, snapshot)
-            assertTrue("[Reload]" in snapshot, snapshot)
+            assertFalse("[Reload]" in snapshot, snapshot)
             assertTrue("[Log out]" in snapshot, snapshot)
         }
     }
@@ -54,7 +53,6 @@ val authenticationSettingsTest by testSuite {
                         ),
                         operation = SettingsAuthenticationOperationState.Idle,
                         onOpenLogin = {},
-                        onReload = {},
                         onRequestLogout = {},
                         onDismissOperationFailure = {},
                     )
@@ -64,12 +62,12 @@ val authenticationSettingsTest by testSuite {
             assertTrue("Authentication unavailable" in snapshot, snapshot)
             assertTrue("No credentials were found" in snapshot, snapshot)
             assertTrue("[Sign in]" in snapshot, snapshot)
-            assertTrue("[Reload]" in snapshot, snapshot)
+            assertFalse("[Reload]" in snapshot, snapshot)
             assertFalse("[Log out]" in snapshot, snapshot)
         }
     }
 
-    test("codexCredentialsRemainReadOnly") {
+    test("codexSourceUsesBackendLifecycleWithoutReload") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(80)) {
@@ -81,17 +79,16 @@ val authenticationSettingsTest by testSuite {
                         ),
                         operation = SettingsAuthenticationOperationState.Idle,
                         onOpenLogin = {},
-                        onReload = {},
                         onRequestLogout = {},
                         onDismissOperationFailure = {},
                     )
                 }
             }
 
-            assertTrue("Managed by Codex CLI" in snapshot, snapshot)
-            assertTrue("[Reload]" in snapshot, snapshot)
-            assertFalse("[Sign in again]" in snapshot, snapshot)
-            assertFalse("[Log out]" in snapshot, snapshot)
+            assertTrue("Maintained by the backend" in snapshot, snapshot)
+            assertFalse("[Reload]" in snapshot, snapshot)
+            assertTrue("[Sign in again]" in snapshot, snapshot)
+            assertTrue("[Log out]" in snapshot, snapshot)
         }
     }
 }

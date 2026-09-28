@@ -7,9 +7,8 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Column
 import io.github.stream29.kodex.cli.components.TuiPopupHost
-import io.github.stream29.kodex.hook.contract.HookDraft
-import io.github.stream29.kodex.hook.contract.HookManagedState
-import io.github.stream29.kodex.hook.contract.HookType
+import io.github.stream29.kodex.rpc.models.NotificationHook
+import io.github.stream29.kodex.rpc.models.NotificationHookType
 import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -28,7 +27,7 @@ val hookSettingsContentTest by testSuite {
             }
 
             assertTrue("Hooks [Add]" in snapshot, snapshot)
-            assertTrue("[guard tools Pre tool use]" in snapshot, snapshot)
+            assertTrue("notify Assistant message, Unhandled error" in snapshot, snapshot)
             assertFalse("Import from Codex" in snapshot, snapshot)
             assertFalse("Enabled" in snapshot, snapshot)
             assertFalse("matcher" in snapshot.lowercase(), snapshot)
@@ -52,8 +51,8 @@ val hookSettingsContentTest by testSuite {
                 }
             }
 
-            assertTrue("guard tools" in snapshot, snapshot)
-            assertTrue("Type: Pre tool use" in snapshot, snapshot)
+            assertTrue("notify" in snapshot, snapshot)
+            assertTrue("Types: Assistant message, Unhandled error" in snapshot, snapshot)
             assertTrue("[Close] [Edit] [Delete]" in snapshot, snapshot)
             assertFalse("Command:" in snapshot, snapshot)
         }
@@ -67,9 +66,9 @@ val hookSettingsContentTest by testSuite {
                         HookEditorDialog(
                             request = HookEditorRequest(
                                 name = "guard tools",
-                                draft = HookDraft(
+                                draft = NotificationHook(
                                     name = "guard tools",
-                                    type = HookType.PreToolUse,
+                                    types = setOf(NotificationHookType.StopAssistantMessage),
                                     command = "guard-command",
                                 ),
                             ),
@@ -82,7 +81,10 @@ val hookSettingsContentTest by testSuite {
 
             assertTrue("Edit Hook" in snapshot, snapshot)
             assertTrue("Name" in snapshot, snapshot)
-            assertTrue("Type: [Pre tool use]" in snapshot, snapshot)
+            assertTrue("[x] Assistant message" in snapshot, snapshot)
+            assertTrue("[ ] Request user input" in snapshot, snapshot)
+            assertTrue("[ ] Suggest subagent" in snapshot, snapshot)
+            assertTrue("[ ] Unhandled error" in snapshot, snapshot)
             assertTrue("Command" in snapshot, snapshot)
             assertTrue("guard-command" in snapshot, snapshot)
             assertFalse("Matcher" in snapshot, snapshot)
@@ -93,8 +95,9 @@ val hookSettingsContentTest by testSuite {
 
 }
 
-private fun managedHook(): HookManagedState =
-    HookManagedState(
-        name = "guard tools",
-        type = HookType.PreToolUse,
+private fun managedHook(): NotificationHook =
+    NotificationHook(
+        name = "notify",
+        types = linkedSetOf(NotificationHookType.StopAssistantMessage, NotificationHookType.StopUnhandledError),
+        command = "notify-command",
     )

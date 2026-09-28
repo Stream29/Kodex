@@ -38,6 +38,8 @@ import io.github.stream29.kodex.utils.applypatch.UpdateFileChunk
 import io.github.stream29.kodex.utils.applypatch.AddFileHunk
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.openai.*
+import io.github.stream29.kodex.rpc.models.AgentStateValue
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
 import io.github.stream29.kodex.tool.requestuserinput.*
@@ -224,16 +226,16 @@ val docsRecordingTest by testSuite {
     test("runtime screen renders running steer and distinct idle controls") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
-            val real = fixture.persistedSession("Documentation example").rootAgent
-            val running = MutableStateFlow(AgentExecutionState(
-                running = true, capabilities = AgentExecutionCapabilities(canCancel = true),
-            ))
+            val real = requireNotNull(fixture.persistedSession("Documentation example").rootAgent.value)
+            val active = MutableStateFlow(true)
+            val phase = MutableStateFlow<AgentStateValue>(AgentStateValue.AssistantMessage)
             val steer = MutableStateFlow<List<StableIndexEvent.Steerable>>(emptyList())
             val streaming = MutableStateFlow<HistoryStreamingItem?>(null)
             var resumed = false
             var compacted = false
             val model = object : AgentViewModel by real {
-                override val execution = running
+                override val running = active
+                override val state = phase
                 override val pendingSteer = steer
                 override val history = object : AgentHistoryViewModel by real.history {
                     override val streamingItem = streaming
@@ -241,20 +243,19 @@ val docsRecordingTest by testSuite {
                 // No model calls: these are input states for the real screen.
                 override fun cancel() {
                     streaming.value = null
-                    running.value = AgentExecutionState(
-                        capabilities = AgentExecutionCapabilities(canResume = true, canCompact = true),
-                    )
+                    active.value = false
+                    phase.value = AgentStateValue.AssistantMessage
                 }
                 override fun resume() {
                     resumed = true
-                    running.value = AgentExecutionState(running = true, phase = AgentExecutionPhase.Responding,
-                        capabilities = AgentExecutionCapabilities(canCancel = true))
+                    active.value = true
+                    phase.value = AgentStateValue.RequestResponse.Started
                     streaming.value = HistoryStreamingItem.Started
                 }
                 override fun forceCompact() {
                     compacted = true
-                    running.value = AgentExecutionState(running = true, phase = AgentExecutionPhase.Compacting,
-                        capabilities = AgentExecutionCapabilities(canCancel = true))
+                    active.value = true
+                    phase.value = AgentStateValue.Compacting
                     streaming.value = HistoryStreamingItem.Compacting
                 }
                 override fun clearPending() { cancel() }
@@ -284,7 +285,9 @@ val docsRecordingTest by testSuite {
                 clip.add(settle(), "Pending steer")
                 clickLabel("Stop")
                 clip.add(settle(), "Resume")
-                running.value = AgentExecutionState(capabilities = AgentExecutionCapabilities(canClearPending = true))
+                phase.value = AgentStateValue.ToolPending(listOf(PendingRequestUserInputToolEvent(
+                    "example", arguments = RequestUserInputArgs(listOf(RequestUserInputQuestion("id", "Header", "Question"))),
+                )))
                 clip.add(settle(), "Clear pending")
                 clickLabel("Clear pending")
                 clip.add(settle(), "Compact")

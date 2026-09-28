@@ -31,7 +31,7 @@ val docsWorkspaceRecordingTest by testSuite {
     test("terminal row hover and close route to the exact fixture handle") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
-            val real = fixture.persistedSession("Terminal example").rootAgent
+            val real = requireNotNull(fixture.persistedSession("Terminal example").rootAgent.value)
             val shell = object : AgentShellSession {
                 override val sessionId = 42
                 override val arguments = ExecCommandArguments(

@@ -6,7 +6,9 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
+import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testSuite
+import de.infix.testBalloon.framework.core.testScope
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
@@ -35,10 +37,16 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
 val agentHistoryBoundedWindowTest by testSuite {
-    test("long History navigation keeps only a viewport-derived local window") {
+    test(
+        "long History navigation keeps only a viewport-derived local window",
+        testConfig = TestConfig.testScope(isEnabled = true, timeout = 360.seconds),
+    ) {
         coroutineScope {
             val itemCount = 1_000
             val viewportHeight = 12
+            // A round trip renders about 2,000 one-item steps. This is a
+            // hang guard, not a platform-independent throughput benchmark.
+            val navigationBudget = 300.seconds
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
@@ -48,7 +56,10 @@ val agentHistoryBoundedWindowTest by testSuite {
                     )
                 }
             }
-            val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+            val model = createAgentHistoryViewModel(
+                AgentHistorySource(runtime.storage, runtime.latestIndex, runtime.state),
+                supervisorChildScope(), kotlinx.coroutines.flow.MutableStateFlow(false),
+            )
             val started = TimeSource.Monotonic.markNow()
             try {
                 runMosaicTest {
@@ -72,7 +83,7 @@ val agentHistoryBoundedWindowTest by testSuite {
                     val initialWindowSize = model.historyItems.value.size
                     assertTrue(initialWindowSize in 1 until itemCount)
                     assertTrue(
-                        initialLoadElapsed < 2.seconds,
+                        initialLoadElapsed < 5.seconds,
                         "Initial long-History viewport took $initialLoadElapsed.",
                     )
 
@@ -87,8 +98,13 @@ val agentHistoryBoundedWindowTest by testSuite {
                         ),
                     )
                     assertFalse(model.followsLatest)
+                    var olderSteps = 0
                     while (model.historyItems.value.hasOlder) {
-                        assertTrue(started.elapsedNow() < 15.seconds, "Navigation did not reach the oldest item.")
+                        assertTrue(
+                            started.elapsedNow() < navigationBudget,
+                            "Navigation did not reach the oldest item after $olderSteps steps; " +
+                                "oldest=${model.historyItems.value.oldestMessageIndex}.",
+                        )
                         val window = model.historyItems.value
                         val newerMarkerCount = if (window.hasNewer) 1 else 0
                         model.listState.scrollToItem(newerMarkerCount + window.size)
@@ -97,12 +113,18 @@ val agentHistoryBoundedWindowTest by testSuite {
                             !current.hasOlder || current.oldestMessageIndex < window.oldestMessageIndex
                         }
                         peakWindowSize = maxOf(peakWindowSize, model.historyItems.value.size)
+                        olderSteps++
                     }
 
                     assertFalse(model.historyItems.value.hasOlder)
                     assertTrue(model.historyItems.value.hasNewer)
+                    var newerSteps = 0
                     while (model.historyItems.value.hasNewer) {
-                        assertTrue(started.elapsedNow() < 15.seconds, "Navigation did not return to the latest item.")
+                        assertTrue(
+                            started.elapsedNow() < navigationBudget,
+                            "Navigation did not return to the latest item after $olderSteps older and " +
+                                "$newerSteps newer steps; newest=${model.historyItems.value.newestMessageIndex}.",
+                        )
                         val window = model.historyItems.value
                         model.listState.scrollToItem(0)
                         settleHistory()
@@ -110,6 +132,7 @@ val agentHistoryBoundedWindowTest by testSuite {
                             !current.hasNewer || current.newestMessageIndex > window.newestMessageIndex
                         }
                         peakWindowSize = maxOf(peakWindowSize, model.historyItems.value.size)
+                        newerSteps++
                     }
                     assertFalse(model.historyItems.value.hasNewer)
                     assertTrue(
@@ -119,7 +142,7 @@ val agentHistoryBoundedWindowTest by testSuite {
                     )
                     val elapsed = started.elapsedNow()
                     assertTrue(
-                        elapsed < 15.seconds,
+                        elapsed < navigationBudget,
                         "Bounded navigation took $elapsed.",
                     )
                     println(

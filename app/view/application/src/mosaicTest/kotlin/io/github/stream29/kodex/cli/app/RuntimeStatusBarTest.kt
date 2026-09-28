@@ -13,7 +13,6 @@ import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.unit.IntOffset
-import io.github.stream29.kodex.app.agent.contract.AgentExecutionState
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
@@ -68,8 +67,8 @@ val runtimeStatusBarTest by testSuite {
     }
 
     test("runningAgentHidesOnlyCompact") {
-        assertTrue(compactVisible(AgentExecutionState(running = false)))
-        assertFalse(compactVisible(AgentExecutionState(running = true)))
+        assertTrue(compactVisible(false))
+        assertFalse(compactVisible(true))
     }
 
     test("modelMenuSelectsModelReasoningAndTierAcrossThreeLevels") {

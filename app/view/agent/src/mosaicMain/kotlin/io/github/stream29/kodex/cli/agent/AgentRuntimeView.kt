@@ -19,7 +19,7 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
-import io.github.stream29.kodex.app.agent.contract.AgentExecutionState
+import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputDraftAnswer
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionState
@@ -39,8 +39,8 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import kotlinx.coroutines.launch
 
 @Composable
-public fun AgentRuntimeStatus(state: AgentExecutionState) {
-    Text(state.phase.label())
+public fun AgentRuntimeStatus(state: AgentStateValue) {
+    Text(state.label())
 }
 
 @Composable

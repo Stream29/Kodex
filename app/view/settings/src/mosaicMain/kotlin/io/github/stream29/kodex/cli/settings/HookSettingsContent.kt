@@ -9,15 +9,15 @@ import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.cli.components.TuiTheme
-import io.github.stream29.kodex.hook.contract.HookManagedState
-import io.github.stream29.kodex.hook.contract.HookType
+import io.github.stream29.kodex.rpc.models.NotificationHook
+import io.github.stream29.kodex.rpc.models.NotificationHookType
 
 /** Hook management entry point backed only by command-free manager state. */
 @Composable
 internal fun HookSettingsContent(
-    hooks: List<HookManagedState>,
+    hooks: List<NotificationHook>,
     onAdd: () -> Unit,
-    onOpenDetails: (HookManagedState) -> Unit,
+    onOpenDetails: (NotificationHook) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().background(SettingsHomeBackground)) {
         Row(
@@ -41,7 +41,7 @@ internal fun HookSettingsContent(
         } else {
             hooks.forEach { hook ->
                 SettingsContentButton(
-                    label = "${hook.name} ${hook.type.settingsLabel()}",
+                    label = "${hook.name} ${hook.types.joinToString { it.settingsLabel() }}",
                     modifier = Modifier.fillMaxWidth(),
                     idleTextStyle = TuiTheme.typography.body + TextStyle.Bold,
                     onClick = { onOpenDetails(hook) },
@@ -51,13 +51,10 @@ internal fun HookSettingsContent(
     }
 }
 
-internal fun HookType.settingsLabel(): String =
+internal fun NotificationHookType.settingsLabel(): String =
     when (this) {
-        HookType.PreToolUse -> "Pre tool use"
-        HookType.PostToolUse -> "Post tool use"
-        HookType.UserPromptSubmit -> "User prompt submit"
-        HookType.Stop -> "Stop"
-        HookType.PreCompact -> "Pre compact"
-        HookType.PostCompact -> "Post compact"
-        HookType.UnhandledError -> "Unhandled error"
+        NotificationHookType.StopAssistantMessage -> "Assistant message"
+        NotificationHookType.StopRequestUserInput -> "Request user input"
+        NotificationHookType.StopSuggestSubagent -> "Suggest subagent"
+        NotificationHookType.StopUnhandledError -> "Unhandled error"
     }

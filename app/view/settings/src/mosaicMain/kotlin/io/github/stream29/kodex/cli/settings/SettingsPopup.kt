@@ -49,7 +49,7 @@ import io.github.stream29.kodex.cli.components.TuiInteractionStyle
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.verticalScroll
-import io.github.stream29.kodex.hook.contract.HookManagedState
+import io.github.stream29.kodex.rpc.models.NotificationHook
 import io.github.stream29.kodex.mcp.contract.McpImportDecision
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -72,6 +72,7 @@ public fun BoxScope.SettingsPopup(
     onOpenLogin: () -> Unit,
 ) {
     val selectedPage by viewModel.selectedPage.collectAsState()
+    val operationFailed by viewModel.global.operationFailure.collectAsState()
     val dropdowns = SettingsDropdownStates(
         authentication = rememberTuiDropdownState(),
         model = rememberTuiDropdownState(),
@@ -98,7 +99,7 @@ public fun BoxScope.SettingsPopup(
         mutableStateOf<HookEditorRequest?>(null)
     }
     var hookDeleteRequest by remember(viewModel) {
-        mutableStateOf<HookManagedState?>(null)
+        mutableStateOf<NotificationHook?>(null)
     }
     var hookDetailsName by remember(viewModel) { mutableStateOf<String?>(null) }
     var contextSourceAddOpen by remember(viewModel) { mutableStateOf(false) }
@@ -157,6 +158,7 @@ public fun BoxScope.SettingsPopup(
                 color = SettingsForeground,
                 textStyle = TuiTheme.typography.headline,
             )
+            SettingsOperationFailureBanner(operationFailed, viewModel.global::dismissOperationFailure)
             Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 Column(
                     modifier = Modifier
@@ -224,7 +226,7 @@ public fun BoxScope.SettingsPopup(
             onDismiss = { logoutConfirmationOpen = false },
             onConfirm = {
                 logoutConfirmationOpen = false
-                viewModel.global.logoutKodex()
+                viewModel.global.removeAuthentication()
             },
         )
     }
@@ -246,7 +248,9 @@ public fun BoxScope.SettingsPopup(
                 onDismiss = { mcpDetailsServerName = null },
                 onEdit = {
                     mcpDetailsServerName = null
-                    mcpEditorRequest = McpEditorRequest(existing = server)
+                    viewModel.global.mcpEditorDraft(serverName)?.let {
+                        mcpEditorRequest = McpEditorRequest(existing = server, draft = it)
+                    }
                 },
                 onDelete = {
                     mcpDetailsServerName = null
@@ -337,7 +341,7 @@ public fun BoxScope.SettingsPopup(
             hook = hook,
             onDismiss = { hookDeleteRequest = null },
             onConfirm = {
-                viewModel.global.deleteHook(hook.name)
+                viewModel.global.deleteHook(hook)
                 hookDeleteRequest = null
             },
         )
@@ -361,6 +365,18 @@ public fun BoxScope.SettingsPopup(
                 viewModel.session.selectWorkingDirectory(picker, directory)
             },
         )
+    }
+}
+
+@Composable
+internal fun SettingsOperationFailureBanner(failed: Boolean, onDismiss: () -> Unit) {
+    if (!failed) return
+    Column(modifier = Modifier.fillMaxWidth().background(SettingsActionBackground)) {
+        Text(
+            value = "Could not confirm a Settings operation. Check current values before retrying.",
+            color = SettingsErrorForeground,
+        )
+        SettingsActionButton(label = "Dismiss", onClick = onDismiss)
     }
 }
 
@@ -390,7 +406,7 @@ private fun SettingsPageContent(
     onOpenMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
     onImportMcp: () -> Unit,
     onAddHook: () -> Unit,
-    onOpenHook: (HookManagedState) -> Unit,
+    onOpenHook: (NotificationHook) -> Unit,
     onAddContextSource: () -> Unit,
     onRequestLogout: () -> Unit,
 ) {
@@ -490,7 +506,6 @@ private fun OpenAiSettingsContent(
             authState = authentication,
             operation = operation,
             onOpenLogin = viewModel::requestLogin,
-            onReload = viewModel::reloadAuthentication,
             onRequestLogout = onRequestLogout,
             onDismissOperationFailure = viewModel::dismissAuthenticationOperationFailure,
         )
@@ -522,7 +537,7 @@ private fun McpSettingsPageContent(
 private fun HookSettingsPageContent(
     viewModel: GlobalSettingsViewModel,
     onAddHook: () -> Unit,
-    onOpenHook: (HookManagedState) -> Unit,
+    onOpenHook: (NotificationHook) -> Unit,
 ) {
     val hooks by viewModel.hooks.collectAsState()
     HookSettingsContent(
@@ -572,7 +587,6 @@ internal fun AuthenticationSettingsContent(
     authState: SettingsAuthenticationState,
     operation: SettingsAuthenticationOperationState,
     onOpenLogin: () -> Unit,
-    onReload: () -> Unit,
     onRequestLogout: () -> Unit,
     onDismissOperationFailure: () -> Unit,
 ) {
@@ -583,24 +597,10 @@ internal fun AuthenticationSettingsContent(
             supportingText = authState.settingsSummary(),
         )
 
-        when (authSource) {
-            KodexAuthSource.Codex -> {
-                SettingsItem(
-                    label = "Codex credentials",
-                    supportingText =
-                        "Managed by Codex CLI. Update credentials there, then reload, " +
-                            "or select Kodex to sign in here.",
-                    enabled = !operationRunning,
-                ) {
-                    SettingsActionButton(
-                        label = "Reload",
-                        enabled = !operationRunning,
-                        onClick = onReload,
-                    )
-                }
-            }
-
-            KodexAuthSource.Kodex -> {
+        SettingsItem(
+            label = "${authSource.dialogLabel()} credentials",
+            supportingText = "Maintained by the backend for the selected source.",
+        )
                 SettingsItem(
                     label = "Browser sign-in",
                     enabled = !operationRunning,
@@ -615,19 +615,9 @@ internal fun AuthenticationSettingsContent(
                         onClick = onOpenLogin,
                     )
                 }
-                SettingsItem(
-                    label = "Private credentials",
-                    enabled = !operationRunning,
-                ) {
-                    SettingsActionButton(
-                        label = "Reload",
-                        enabled = !operationRunning,
-                        onClick = onReload,
-                    )
-                }
                 if (authState is SettingsAuthenticationState.Authenticated) {
                     SettingsItem(
-                        label = "Remove private credentials",
+                        label = "Remove selected credentials",
                         enabled = !operationRunning,
                     ) {
                         SettingsDangerButton(
@@ -637,16 +627,8 @@ internal fun AuthenticationSettingsContent(
                         )
                     }
                 }
-            }
-        }
-
         when (operation) {
             SettingsAuthenticationOperationState.Idle -> Unit
-            SettingsAuthenticationOperationState.Reloading -> SettingsItem(
-                label = "Authentication operation",
-                supportingText = "Reloading credentials…",
-                enabled = false,
-            )
 
             SettingsAuthenticationOperationState.SigningOut -> SettingsItem(
                 label = "Authentication operation",
@@ -1197,14 +1179,10 @@ private fun SettingsAuthenticationState.settingsSummary(): String =
     }
 
 private fun SettingsAuthenticationOperationState.isRunning(): Boolean =
-    this === SettingsAuthenticationOperationState.Reloading ||
-        this === SettingsAuthenticationOperationState.SigningOut
+    this === SettingsAuthenticationOperationState.SigningOut
 
 private fun SettingsAuthenticationOperationState.Failed.failureDescription(): String =
     when (operation) {
-        SettingsAuthenticationOperation.Reload ->
-            "Could not reload credentials."
-
         SettingsAuthenticationOperation.Logout ->
             "Could not log out. Existing credentials were kept."
     }

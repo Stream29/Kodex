@@ -5,6 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonTest.dependencies {
+            implementation(project(":app-test-support-rpc"))
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
             implementation(project(":agent-storage-contract"))

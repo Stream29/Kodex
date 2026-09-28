@@ -45,7 +45,10 @@ val agentHistoryAnchorTest by testSuite {
                         )
                     }
                 }
-                val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+                val model = createAgentHistoryViewModel(
+                    AgentHistorySource(runtime.storage, runtime.latestIndex, runtime.state),
+                    supervisorChildScope(), kotlinx.coroutines.flow.MutableStateFlow(false),
+                )
                 try {
                     withContext(Dispatchers.Default) {
                         withTimeout(5.seconds) {

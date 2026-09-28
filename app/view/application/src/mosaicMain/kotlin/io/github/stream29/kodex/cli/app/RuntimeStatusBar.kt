@@ -15,7 +15,8 @@ import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.IntOffset
-import io.github.stream29.kodex.app.agent.contract.AgentExecutionState
+import io.github.stream29.kodex.rpc.models.AgentStateValue
+import io.github.stream29.kodex.cli.agent.canCompact
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.cli.agent.AgentRuntimeControl
@@ -61,7 +62,8 @@ internal class RuntimeConfigurationDropdowns private constructor(
 internal fun AgentRuntimeStatusBar(
     columns: Int,
     viewModel: AgentViewModel,
-    execution: AgentExecutionState,
+    state: AgentStateValue,
+    running: Boolean,
     settings: KodexAgentSettings,
     tokenCount: Long?,
     dropdowns: RuntimeConfigurationDropdowns,
@@ -72,7 +74,7 @@ internal fun AgentRuntimeStatusBar(
         columns = columns,
         regularContent = {
             tokenCount?.let { Text("${it}t") }
-            val control = execution.runtimeControl()
+            val control = state.runtimeControl(running)
             TuiButton(
                 label = control.label(),
                 modifier = Modifier.background(SessionButtonBackground),
@@ -85,12 +87,12 @@ internal fun AgentRuntimeStatusBar(
                     }
                 },
             )
-            if (compactVisible(execution)) {
+            if (compactVisible(running)) {
                 TuiButton(
                     label = "Compact",
                     modifier = Modifier.background(SessionButtonBackground),
                     color = SessionButtonForeground,
-                    enabled = execution.capabilities.canCompact,
+                    enabled = state.canCompact(running),
                     onClick = viewModel::forceCompact,
                 )
             }
@@ -283,15 +285,16 @@ internal fun WorkingDirectoryStatusButton(
 
 internal fun agentRuntimeStatusBarRows(
     columns: Int,
-    execution: AgentExecutionState,
+    state: AgentStateValue,
+    running: Boolean,
     settings: KodexAgentSettings,
     tokenCount: Long?,
 ): Int {
     val configuration = settings.configuration()
     val widths = buildList {
         tokenCount?.let { add("${it}t".terminalCellWidth()) }
-        add(buttonWidth(execution.runtimeControl().label()))
-        if (compactVisible(execution)) add(buttonWidth("Compact"))
+        add(buttonWidth(state.runtimeControl(running).label()))
+        if (compactVisible(running)) add(buttonWidth("Compact"))
         addAll(runtimeConfigurationButtonWidths(configuration))
         add(buttonWidth(workingDirectoryStatusLabel(settings.cwd, columns)))
     }
@@ -529,7 +532,7 @@ internal fun workingDirectoryStatusLabel(
     return displayPath
 }
 
-internal fun compactVisible(execution: AgentExecutionState): Boolean = !execution.running
+internal fun compactVisible(running: Boolean): Boolean = !running
 
 private fun AgentRuntimeControl.label(): String = when (this) {
     AgentRuntimeControl.Stop -> "Stop"

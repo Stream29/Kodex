@@ -7,7 +7,7 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.settings.createOpenAiLoginViewModel
-import io.github.stream29.kodex.cli.auth.InMemoryKodexAuthStore
+import io.github.stream29.kodex.cli.auth.KodexAuthLoginAttempt
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
 import kotlinx.coroutines.CoroutineScope
@@ -20,10 +20,12 @@ val openAiLoginPopupTest by testSuite {
     test("renders a browser sign-in popup") {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val viewModel = createOpenAiLoginViewModel(
-            authStore = InMemoryKodexAuthStore(
-                OpenAiSubscriptionAuthState(accessToken = "test-access-token"),
-            ),
             ownerScope = scope,
+            startLogin = { object : KodexAuthLoginAttempt {
+                override val authorizationUrl: String = "https://login.example.invalid"
+                override suspend fun awaitCompletion(): Unit = kotlinx.coroutines.awaitCancellation()
+                override fun cancel(): Unit = Unit
+            } },
         )
         try {
             runMosaicTest {

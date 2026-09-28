@@ -18,6 +18,10 @@ import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.first
 import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -68,6 +72,9 @@ val sessionTabBarTest by testSuite {
         try {
             val target = fixture.newSession("New Session")
             target.rename("Research plan")
+            withContext(Dispatchers.Default) {
+                withTimeout(5_000) { target.name.first { it == "Research plan" } }
+            }
 
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {

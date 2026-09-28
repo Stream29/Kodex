@@ -44,6 +44,7 @@ import kotlinx.io.files.Path
 
 internal data class McpEditorRequest(
     val existing: McpServerSettingsState? = null,
+    val draft: McpServerDraft? = null,
 )
 
 /** Add/edit form whose persistent state never receives stored secret values. */
@@ -54,36 +55,41 @@ internal fun BoxScope.McpServerEditorDialog(
     onSave: (McpServerDraft) -> Unit,
 ) {
     val existing = request.existing
+    val draft = request.draft
+    val http = (draft as? McpServerDraft.StreamableHttp)?.configuration
+    val stdio = (draft as? McpServerDraft.Stdio)?.configuration
+    val oauth = http?.oauth
     val width = (LocalTerminalState.current.size.columns - 4)
         .coerceIn(1, McpEditorMaximumWidth)
     var transport by remember(request) {
-        mutableStateOf(existing?.transport ?: McpTransportKind.StreamableHttp)
+        mutableStateOf(if (draft is McpServerDraft.Stdio) McpTransportKind.Stdio else
+            existing?.transport ?: McpTransportKind.StreamableHttp)
     }
     var oauthEnabled by remember(request) {
-        mutableStateOf(existing?.oauth != null)
+        mutableStateOf(if (draft != null) oauth != null else existing?.oauth != null)
     }
     val transportDropdown = rememberTuiDropdownState()
     var error by remember(request) { mutableStateOf<String?>(null) }
-    val name = rememberInput(existing?.serverName.orEmpty())
-    val httpUrl = rememberInput(existing?.streamableHttpUrl.orEmpty())
-    val stdioCommand = rememberInput(existing?.stdioCommand.orEmpty())
-    val arguments = rememberInput(existing?.stdioArguments?.formatArguments().orEmpty())
-    val headers = rememberInput(existing?.headerNames?.keepValuesText().orEmpty())
-    val environment = rememberInput(existing?.environmentNames?.keepValuesText().orEmpty())
-    val workingDirectory = rememberInput(existing?.stdioWorkingDirectory?.toString() ?: ".")
-    val oauthClientId = rememberInput(existing?.oauth?.clientId.orEmpty())
+    val name = rememberInput(draft?.serverName ?: existing?.serverName.orEmpty())
+    val httpUrl = rememberInput(http?.url ?: existing?.streamableHttpUrl.orEmpty())
+    val stdioCommand = rememberInput(stdio?.command ?: existing?.stdioCommand.orEmpty())
+    val arguments = rememberInput((stdio?.args ?: existing?.stdioArguments)?.formatArguments().orEmpty())
+    val headers = rememberInput((http?.headers?.keys?.toList() ?: existing?.headerNames)?.keepValuesText().orEmpty())
+    val environment = rememberInput((stdio?.environment?.keys?.toList() ?: existing?.environmentNames)?.keepValuesText().orEmpty())
+    val workingDirectory = rememberInput((stdio?.workingDirectory ?: existing?.stdioWorkingDirectory)?.toString() ?: ".")
+    val oauthClientId = rememberInput(oauth?.clientId ?: existing?.oauth?.clientId.orEmpty())
     val oauthClientSecret = rememberInput(
-        if (existing?.oauth?.hasClientSecret == true) KeepValueMarker else "",
+        if (oauth?.clientSecret != null || (draft == null && existing?.oauth?.hasClientSecret == true)) KeepValueMarker else "",
     )
     val oauthRedirect = rememberInput(
-        existing?.oauth?.redirectUri ?: DefaultMcpOAuthRedirectUri,
+        oauth?.redirectUri ?: existing?.oauth?.redirectUri ?: DefaultMcpOAuthRedirectUri,
     )
     val oauthAuthorizationEndpoint = rememberInput(
-        existing?.oauth?.authorizationEndpoint.orEmpty(),
+        oauth?.authorizationEndpoint ?: existing?.oauth?.authorizationEndpoint.orEmpty(),
     )
-    val oauthTokenEndpoint = rememberInput(existing?.oauth?.tokenEndpoint.orEmpty())
-    val oauthResource = rememberInput(existing?.oauth?.resource.orEmpty())
-    val oauthScopes = rememberInput(existing?.oauth?.scopes?.joinToString(",").orEmpty())
+    val oauthTokenEndpoint = rememberInput(oauth?.tokenEndpoint ?: existing?.oauth?.tokenEndpoint.orEmpty())
+    val oauthResource = rememberInput(oauth?.resource ?: existing?.oauth?.resource.orEmpty())
+    val oauthScopes = rememberInput((oauth?.scopes ?: existing?.oauth?.scopes)?.joinToString(",").orEmpty())
 
     fun save() {
         runCatching {
@@ -97,7 +103,7 @@ internal fun BoxScope.McpServerEditorDialog(
             when (transport) {
                 McpTransportKind.StreamableHttp -> McpServerDraft.StreamableHttp(
                     serverName = serverName,
-                    enabled = existing?.enabled ?: true,
+                    enabled = draft?.enabled ?: existing?.enabled ?: true,
                     configuration = McpStreamableHttpDraft(
                         url = endpointValue,
                         headers = parseSecretEntries(headers.value.text),
@@ -129,7 +135,7 @@ internal fun BoxScope.McpServerEditorDialog(
 
                 McpTransportKind.Stdio -> McpServerDraft.Stdio(
                     serverName = serverName,
-                    enabled = existing?.enabled ?: true,
+                    enabled = draft?.enabled ?: existing?.enabled ?: true,
                     configuration = McpStdioDraft(
                         command = endpointValue,
                         args = parseArguments(arguments.value.text),

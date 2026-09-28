@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.app.test.seedTestHistory
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -8,6 +10,7 @@ import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.MouseEvent
+import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.testing.MosaicSnapshots
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
@@ -43,12 +46,6 @@ import kotlin.time.Duration.Companion.seconds
 
 val docsHistoryRecordingTest by testSuite {
     test("history index hover check out and return to latest use real history") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val store = testSessionViewModelRegistry(repository, this)
-        val session = store.create {
-                KodexAgentSettings(model = OpenAiModelId("test-model"), threadName = "History Index design")
-        }
-        val root = repository.open(session.sessionIndex)
         // English translation of a contiguous, user-authorized local feature
         // discussion. Preserve real event types, index gaps and answered choices.
         val history = Json.decodeFromString<Map<Int, StableIndexEvent>>(
@@ -56,10 +53,13 @@ val docsHistoryRecordingTest by testSuite {
         )
         assertEquals(13, history.size)
         assertEquals(4, history.values.map { it::class }.toSet().size)
-        root.runtime.modify { storage ->
-            history.filterKeys { it < 826 }.forEach { (index, entry) -> storage.index[index] = entry }
+        var sourceIndex = -1
+        val fixture = SessionViewModelTestFixture.create(this) { home ->
+            sourceIndex = seedTestHistory(home, "History Index design", history.filterKeys { it < 826 })
         }
-        val agent = session.rootAgent
+        val session = fixture.rpc.sessions.open(sourceIndex)
+        val binding = fixture.rpc.views.open(sourceIndex).current()
+        val agent = requireNotNull(session.rootAgent.value)
         try {
             var hover by mutableStateOf<HistoryIndexInteractionRequest?>(null)
             var menu by mutableStateOf<HistoryIndexMenuRequest?>(null)
@@ -127,10 +127,8 @@ val docsHistoryRecordingTest by testSuite {
                 }
                 clip.add(settle(), "[↓]")
                 assertEquals(783, checkedOut)
-                assertEquals(824, root.storage.latestIndex(), "Check out must not alter storage")
-                root.runtime.modify { storage ->
-                    storage.index[826] = history.getValue(826)
-                }
+                assertEquals(824, fixture.rpc.services.index.getLatestIndex(sourceIndex), "Check out must not alter storage")
+                binding.appendUserMessage((history.getValue(826) as StableUserMessage).content)
                 clip.add(settle(), "[↓]")
                 assertTrue(!agent.history.followsLatest)
                 clickLabel("[↓]")
@@ -142,23 +140,21 @@ val docsHistoryRecordingTest by testSuite {
             }
             clip.save()
         } finally {
-            store.shutdown()
-            repository.cancelAndJoin()
+            fixture.close()
         }
     }
 
     test("real revert dialog cancels and reverts disposable history") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val store = testSessionViewModelRegistry(repository, this)
-        val session = store.create {
-            KodexAgentSettings(model = OpenAiModelId("test-model"), threadName = "History example")
+        var sourceIndex = -1
+        val fixture = SessionViewModelTestFixture.create(this) { home ->
+            sourceIndex = seedTestHistory(home, "History example", (2..5).associateWith {
+                StableUserMessage(listOf(ContentItem.InputText("Offline example entry $it")))
+            })
         }
-        val root = repository.open(session.sessionIndex)
-        root.runtime.modify { storage ->
-            for (i in 2..5) storage.index[i] =
-                StableUserMessage(listOf(ContentItem.InputText("Offline example entry $i")))
-        }
-        val agent = session.rootAgent
+        val store = fixture.rpc.sessions
+        val session = store.open(sourceIndex)
+        val binding = fixture.rpc.views.open(sourceIndex).current()
+        val agent = requireNotNull(session.rootAgent.value)
         try {
             withContext(Dispatchers.Default) {
                 withTimeout(5.seconds) {
@@ -185,8 +181,8 @@ val docsHistoryRecordingTest by testSuite {
                                 { _, _, _, _ -> }, {}, {},
                             )
                             AgentRuntimeScreen(
-                                selected.rootAgent, 80, 17, io.github.stream29.kodex.cli.settings.NewLineKey.ShiftEnter,
-                                RuntimeConfigurationDropdowns.remember(selected.rootAgent),
+                                requireNotNull(selected.rootAgent.value), 80, 17, io.github.stream29.kodex.cli.settings.NewLineKey.ShiftEnter,
+                                RuntimeConfigurationDropdowns.remember(requireNotNull(selected.rootAgent.value)),
                                 RuntimeConfigurationDropdowns.remember("suggestions"),
                                 { generation, index, _, anchor, position ->
                                     menuGeneration = generation
@@ -198,14 +194,14 @@ val docsHistoryRecordingTest by testSuite {
                             HistoryEntryContextMenuPopup(
                                 anchor, position, { menu = null },
                                 {
-                                    selected.rootAgent.requestHistoryRevert(target + 1, menuGeneration)
+                                    requireNotNull(selected.rootAgent.value).requestHistoryRevert(target + 1, menuGeneration)
                                     menu = null
                                 },
                                 {
                                     menu = null
                                     scope.launch {
                                         val fork = store.open(
-                                            selected.fork(selected.rootAgent, target + 1, menuGeneration),
+                                            selected.fork(requireNotNull(selected.rootAgent.value), target + 1, menuGeneration),
                                         )
                                         tabs = tabs + fork
                                         selected = fork
@@ -213,7 +209,7 @@ val docsHistoryRecordingTest by testSuite {
                                 },
                             )
                         }
-                        AgentHistoryRevertDialog(selected.rootAgent)
+                        AgentHistoryRevertDialog(selected.rootAgent.value)
                     }
                 }
                 clip.add(settle(), "Offline example entry")
@@ -224,8 +220,8 @@ val docsHistoryRecordingTest by testSuite {
                     withTimeout(5.seconds) { while (tabs.size < 2) delay(20) }
                 }
                 clip.add(settle(), "[fork]")
-                assertEquals(5, root.storage.latestIndex(), "Fork must preserve its source")
-                assertEquals(4, repository.open(selected.sessionIndex).storage.index.floorToIndex(Int.MAX_VALUE))
+                assertEquals(5, fixture.rpc.services.index.getLatestIndex(sourceIndex), "Fork must preserve its source")
+                assertEquals(4, fixture.rpc.services.index.getLatestIndex(selected.sessionIndex))
                 clickLabel("[History example]")
                 clip.add(settle(), "Offline example entry 5")
                 clickLabel("Offline example entry 4", MouseEvent.Button.Right)
@@ -234,7 +230,7 @@ val docsHistoryRecordingTest by testSuite {
                 clip.add(settle(), "This cannot be undone.")
                 clickLabel("Cancel")
                 assertIs<AgentHistoryActionState.None>(agent.historyAction.value)
-                assertEquals(5, root.storage.latestIndex())
+                assertEquals(5, fixture.rpc.services.index.getLatestIndex(sourceIndex))
                 clip.add(settle(), "Offline example entry 5")
                 clickLabel("Offline example entry 4", MouseEvent.Button.Right)
                 clip.add(settle(), "Revert to here")
@@ -242,15 +238,23 @@ val docsHistoryRecordingTest by testSuite {
                 clip.add(settle(), "Keep the selected history entry")
                 clickLabel("[Revert]")
                 withContext(Dispatchers.Default) {
-                    withTimeout(5.seconds) { root.runtime.latestIndex.first { it == 4 } }
+                    withTimeout(5.seconds) { binding.latestIndex.first { it == 4 } }
                 }
-                clip.add(settle(), "Offline example entry 4")
-                assertEquals(4, root.storage.latestIndex())
+                var rendered = settle()
+                withContext(Dispatchers.Default) {
+                    withTimeout(5.seconds) {
+                        while (!rendered.draw().render(AnsiLevel.NONE, false).contains("Offline example entry 4")) {
+                            delay(10)
+                            rendered = settle()
+                        }
+                    }
+                }
+                clip.add(rendered, "Offline example entry 4")
+                assertEquals(4, fixture.rpc.services.index.getLatestIndex(sourceIndex))
             }
             clip.save()
         } finally {
-            store.shutdown()
-            repository.cancelAndJoin()
+            fixture.close()
         }
     }
 }

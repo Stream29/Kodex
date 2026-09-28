@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.cli.agent.canEditHistory
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -98,6 +100,7 @@ public fun SessionTreeCliScreen(
 
     val columns = (terminal.size.columns - 1).coerceAtLeast(1)
     val rows = (terminal.size.rows - 1).coerceAtLeast(1)
+    LaunchedEffect(sidebarSettings, columns) { sidebarSettings.initializeViewport(columns) }
     val scope = rememberCoroutineScope()
     var leftSidebarPinnedExpanded by remember { mutableStateOf(false) }
     var leftSidebarExpandButtonHovered by remember { mutableStateOf(false) }
@@ -179,7 +182,8 @@ public fun SessionTreeCliScreen(
     val contentRows = (rows - SessionTabBarRows).coerceAtLeast(0)
     val selected = navigation.selected
     val selectedPersisted = selected as? PersistedSessionViewModel
-    val selectedAgent = selectedPersisted?.rootAgent
+    val selectedAgent = selectedPersisted?.rootAgent?.collectAsState()?.value
+    val selectedLifecycle = selectedPersisted?.lifecycle?.collectAsState()?.value
     val currentSelectedAgent by rememberUpdatedState(selectedAgent)
     val composerFocusRequester = remember(selectedAgent) { FocusRequester() }
     val currentComposerFocusRequester by rememberUpdatedState(composerFocusRequester)
@@ -537,7 +541,13 @@ public fun SessionTreeCliScreen(
                                             },
                                         )
                                     }
-                                }
+                                } ?: Text(
+                                    when (val status = selectedLifecycle) {
+                                        is io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState.Failed -> status.detail
+                                        io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleState.Closed -> "Session view closed."
+                                        else -> "Loading Session…"
+                                    },
+                                )
                             }
                         }
                         if (rightSidebarColumns > 0) {
@@ -1463,14 +1473,13 @@ private fun BoxScope.HistoryEntryContextMenu(
     onFork: (HistoryEntryMenuRequest) -> Unit,
 ) {
     val current = request ?: return
-    val execution by current.agent.execution.collectAsState()
+    val state by current.agent.state.collectAsState()
+    val running by current.agent.running.collectAsState()
     val historyItems by current.agent.history.historyItems.collectAsState()
     val targetMatches =
         current.session === selectedSession &&
             current.agent === selectedAgent &&
-            !execution.running &&
-            execution.capabilities.canReplaceHistory &&
-            execution.capabilities.canForkHistory &&
+            state.canEditHistory(running) &&
             historyItems.size > 0 &&
             current.generation == historyItems.generation &&
             current.agent.history.contains(
@@ -1551,11 +1560,11 @@ internal fun BoxScope.AgentHistoryRevertDialog(agent: AgentViewModel?) {
     val confirm =
         action as? AgentHistoryActionState.ConfirmRevert
             ?: return
-    val execution by agent.execution.collectAsState()
+    val state by agent.state.collectAsState()
+    val running by agent.running.collectAsState()
     val historyItems by agent.history.historyItems.collectAsState()
     val targetMatches =
-        !execution.running &&
-            execution.capabilities.canReplaceHistory &&
+        state.canEditHistory(running) &&
             confirm.expectedGeneration == historyItems.generation
     LaunchedEffect(agent, confirm.requestId, targetMatches) {
         if (!targetMatches) agent.dismissHistoryRevert(confirm.requestId)

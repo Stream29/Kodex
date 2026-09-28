@@ -50,7 +50,7 @@ val sessionViewportTest by testSuite {
     test("sidebar width changes keep runtime drawing inside the terminal without any context menu") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
-            val agent = fixture.persistedSession("Narrow").rootAgent
+            val agent = requireNotNull(fixture.persistedSession("Narrow").rootAgent.value)
             var columns by mutableStateOf(110)
             var sidebarColumns by mutableStateOf(24)
             runMosaicTest {

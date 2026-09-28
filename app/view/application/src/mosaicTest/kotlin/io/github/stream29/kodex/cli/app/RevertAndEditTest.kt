@@ -67,44 +67,42 @@ val revertAndEditTest by testSuite {
     }
 
     test("first user message reverts to empty history and replaces only its owner's draft") {
-        val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
-        val store = testSessionViewModelRegistry(repository, this)
+        val fixture = SessionViewModelTestFixture.create(this)
         val text = "  修改这条消息\n保留换行  "
         try {
-            val session = store.create { KodexAgentSettings(model = OpenAiModelId("test-model")) }
-            val other = store.create { KodexAgentSettings(model = OpenAiModelId("test-model")) }
-            val root = repository.open(session.sessionIndex)
-            root.runtime.modify { storage ->
-                storage.index[2] = StableUserMessage(listOf(ContentItem.InputText(text)))
-                storage.index[8] = StableAssistantMessage(listOf(ContentItem.OutputText("remove")))
-            }
-            val agent = session.rootAgent
+            val session = fixture.persistedSession("owner")
+            val other = fixture.persistedSession("other")
+            val binding = fixture.rpc.views.open(session.sessionIndex).current()
+            binding.appendUserMessage(listOf(ContentItem.InputText(text)))
+            val userIndex = fixture.rpc.services.index.getLatestIndex(session.sessionIndex)
+            binding.latestIndex.first { it >= userIndex }
+            val agent = requireNotNull(session.rootAgent.value)
+            val otherAgent = requireNotNull(other.rootAgent.value)
             agent.composer.update("replace this draft", 0)
-            other.rootAgent.composer.update("other draft", 3)
+            otherAgent.composer.update("other draft", 3)
             val generation = withContext(Dispatchers.Default) {
-                agent.history.requestScrollToStorageIndex(2)
+                agent.history.requestScrollToStorageIndex(userIndex)
                 withTimeout(5.seconds) {
-                    agent.history.historyItems.first { agent.history.contains(it.generation, 2) }.generation
+                    agent.history.historyItems.first { agent.history.contains(it.generation, userIndex) }.generation
                 }
             }
-            revertAndEdit(agent, 2, generation, text)
-            assertTrue(root.storage.index.indexesIn(0..10).isEmpty())
+            revertAndEdit(agent, userIndex, generation, text)
+            binding.storage.index.cacheNonce.first { it != generation }
+            assertFalse(userIndex in binding.storage.index.indexesIn(0..userIndex))
             assertEquals(text, agent.composer.state.value.text)
             assertEquals(text.length, agent.composer.state.value.cursorOffset)
-            assertEquals("other draft", other.rootAgent.composer.state.value.text)
+            assertEquals("other draft", otherAgent.composer.state.value.text)
             assertIs<AgentHistoryActionState.None>(agent.historyAction.value)
-            assertFalse(agent.execution.value.running)
-            assertNull(root.runtime.runningTurn.value)
+            assertFalse(agent.running.value)
         } finally {
-            store.shutdown()
-            repository.cancelAndJoin()
+            fixture.close()
         }
     }
 
     test("frontend waits for success and leaves draft unchanged on failure") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
-            val real = fixture.persistedSession("Draft owner").rootAgent
+            val real = requireNotNull(fixture.persistedSession("Draft owner").rootAgent.value)
             real.composer.update("existing draft", 4)
             val original = real.composer.state.value
             val started = CompletableDeferred<Unit>()

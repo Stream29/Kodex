@@ -27,6 +27,7 @@ import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.cli.agent.RequestUserInputPanel
+import io.github.stream29.kodex.cli.agent.canEditHistory
 import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskPanel
 import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
@@ -59,7 +60,8 @@ internal fun AgentRuntimeScreen(
     onOpenSettings: () -> Unit,
     composerFocusRequester: FocusRequester? = null,
 ) {
-    val execution by viewModel.execution.collectAsState()
+    val state by viewModel.state.collectAsState()
+    val running by viewModel.running.collectAsState()
     val pendingSteer by viewModel.pendingSteer.collectAsState()
     val requestUserInput by viewModel.requestUserInput.state.collectAsState()
     val suggestSubagentTask by viewModel.suggestSubagentTask.state.collectAsState()
@@ -75,14 +77,15 @@ internal fun AgentRuntimeScreen(
         continuationLinePrefix = "  ",
         softWrap = true,
     )
-    val submitHint = submitToSteerHint(execution.running, composer.value.text)
+    val submitHint = submitToSteerHint(running, composer.value.text)
     val pendingRequest = requestUserInput as? RequestUserInputState.Pending
     val pendingSuggestion = suggestSubagentTask as? SuggestSubagentTaskState.Pending
     val hostInteractionPending = pendingRequest != null || pendingSuggestion != null
     val submitHintRows = if (submitHint == null) 0 else 1
     val statusBarRows = agentRuntimeStatusBarRows(
         columns = columns,
-        execution = execution,
+        state = state,
+        running = running,
         settings = settings,
         tokenCount = tokenCount,
     )
@@ -121,8 +124,7 @@ internal fun AgentRuntimeScreen(
                 model = viewModel.history,
                 shellSessions = viewModel.shellSessions,
                 onOpenEntryContextMenu = if (
-                    execution.capabilities.canReplaceHistory &&
-                    execution.capabilities.canForkHistory
+                    state.canEditHistory(running)
                 ) {
                     { generation, storageIndex, item, anchor, position ->
                         onOpenHistoryEntryContextMenu(
@@ -201,7 +203,8 @@ internal fun AgentRuntimeScreen(
         AgentRuntimeStatusBar(
             columns = columns,
             viewModel = viewModel,
-            execution = execution,
+            state = state,
+            running = running,
             settings = settings,
             tokenCount = tokenCount,
             dropdowns = dropdowns,

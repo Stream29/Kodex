@@ -22,28 +22,27 @@ import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiDialogActionRow
 import io.github.stream29.kodex.cli.components.TuiTheme
-import io.github.stream29.kodex.hook.contract.HookDraft
-import io.github.stream29.kodex.hook.contract.HookManagedState
-import io.github.stream29.kodex.hook.contract.HookType
+import io.github.stream29.kodex.rpc.models.NotificationHook
+import io.github.stream29.kodex.rpc.models.NotificationHookType
 
 internal data class HookEditorRequest(
     val name: String? = null,
-    val draft: HookDraft? = null,
+    val draft: NotificationHook? = null,
 )
 
-/** Add/edit form for one name, type, and command Hook definition. */
+/** Add/edit form for a frontend command and its selected notification types. */
 @Composable
 internal fun BoxScope.HookEditorDialog(
     request: HookEditorRequest,
     onDismiss: () -> Unit,
-    onSave: (HookDraft) -> Unit,
+    onSave: (NotificationHook) -> Unit,
 ) {
     val width = (LocalTerminalState.current.size.columns - 4)
         .coerceIn(1, HookEditorMaximumWidth)
     val initial = request.draft
     val name = rememberHookInput(initial?.name.orEmpty())
     val command = rememberHookInput(initial?.command.orEmpty())
-    var type by remember(request) { mutableStateOf(initial?.type ?: HookType.PreToolUse) }
+    var types by remember(request) { mutableStateOf(initial?.types ?: NotificationHookType.entries.toSet()) }
     var error by remember(request) { mutableStateOf<String?>(null) }
 
     fun save() {
@@ -51,9 +50,9 @@ internal fun BoxScope.HookEditorDialog(
             val normalizedName = name.value.text.trim()
             require(normalizedName.isNotEmpty()) { "Hook name is required." }
             require(command.value.text.isNotBlank()) { "Command is required." }
-            HookDraft(
+            NotificationHook(
                 name = normalizedName,
-                type = type,
+                types = types,
                 command = command.value.text,
             )
         }.fold(
@@ -76,11 +75,11 @@ internal fun BoxScope.HookEditorDialog(
                 textStyle = TuiTheme.typography.headline,
             )
             HookInputField("Name", name, width, autoFocus = true)
-            Row {
-                Text("Type: ", color = SettingsForeground)
+            Text("Types:", color = SettingsForeground)
+            NotificationHookType.entries.forEach { type ->
                 SettingsContentButton(
-                    label = type.settingsLabel(),
-                    onClick = { type = type.next() },
+                    label = "${if (type in types) "[x]" else "[ ]"} ${type.settingsLabel()}",
+                    onClick = { types = if (type in types) types - type else types + type },
                 )
             }
             HookInputField("Command", command, width)
@@ -102,7 +101,7 @@ internal fun BoxScope.HookEditorDialog(
 /** Command-free Hook details and management commands. */
 @Composable
 internal fun BoxScope.HookDetailsDialog(
-    hook: HookManagedState,
+    hook: NotificationHook,
     onDismiss: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -121,7 +120,7 @@ internal fun BoxScope.HookDetailsDialog(
                 textStyle = TuiTheme.typography.headline,
             )
             Text(
-                value = "Type: ${hook.type.settingsLabel()}",
+                value = "Types: ${hook.types.joinToString { it.settingsLabel() }}",
                 color = SettingsForeground,
                 textStyle = TextStyle.Dim,
             )
@@ -143,7 +142,7 @@ internal fun BoxScope.HookDetailsDialog(
 
 @Composable
 internal fun BoxScope.HookDeleteConfirmationDialog(
-    hook: HookManagedState,
+    hook: NotificationHook,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
@@ -207,9 +206,6 @@ private fun rememberHookInput(initialValue: String = ""): TextInputState =
             ),
         )
     }
-
-private fun HookType.next(): HookType =
-    HookType.entries[(ordinal + 1) % HookType.entries.size]
 
 private const val HookEditorMaximumWidth: Int = 96
 private const val HookDetailsMaximumWidth: Int = 72
