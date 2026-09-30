@@ -44,22 +44,23 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
         try {
             assertEquals(
                 listOf(
+                    "gpt-6-astra",
+                    "gpt-6.1-sol",
+                    "gpt-6-sol",
+                    "gpt-6-luna",
                     "gpt-5.6-sol",
                     "gpt-5.6-terra",
                     "gpt-5.6-luna",
                     "gpt-5.5",
-                    "gpt-5.4",
-                    "gpt-5.4-mini",
-                    "gpt-5.2",
                     "codex-auto-review",
                 ),
                 catalog.models.value.map { it.slug.value },
             )
-            assertEquals(1_000_000L, catalog.resolve(OpenAiModelId("gpt-5.4")).maxContextWindow)
-            assertEquals(ReasoningEffort.Low, catalog.resolve(OpenAiModelId("gpt-5.6-sol")).defaultReasoningLevel)
+            assertEquals(872_000L, catalog.resolve(OpenAiModelId("gpt-6.1-sol")).maxContextWindow)
+            assertEquals(ReasoningEffort.Low, catalog.resolve(OpenAiModelId("gpt-6.1-sol")).defaultReasoningLevel)
             assertEquals(
                 ReasoningEffort.Max,
-                catalog.resolve(OpenAiModelId("gpt-5.6-sol")).supportedReasoningLevels.last().effort,
+                catalog.resolve(OpenAiModelId("gpt-6.1-sol")).supportedReasoningLevels.last().effort,
             )
         } finally {
             catalog.close()
@@ -73,10 +74,10 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
             },
         )
         try {
-            val resolved = catalog.resolve(OpenAiModelId("gpt-5.4-mini-preview"))
+            val resolved = catalog.resolve(OpenAiModelId("gpt-5.6-luna-preview"))
 
-            assertEquals(OpenAiModelId("gpt-5.4-mini-preview"), resolved.slug)
-            assertEquals("GPT-5.4-Mini", resolved.displayName)
+            assertEquals(OpenAiModelId("gpt-5.6-luna-preview"), resolved.slug)
+            assertEquals("GPT-5.6-Luna", resolved.displayName)
         } finally {
             catalog.close()
         }
@@ -90,12 +91,12 @@ val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnab
         )
         try {
             assertEquals(
-                "GPT-5.4-Mini",
-                catalog.resolve(OpenAiModelId("provider/gpt-5.4-mini")).displayName,
+                "GPT-5.6-Luna",
+                catalog.resolve(OpenAiModelId("provider/gpt-5.6-luna")).displayName,
             )
             assertEquals(
-                "provider/nested/gpt-5.4-mini",
-                catalog.resolve(OpenAiModelId("provider/nested/gpt-5.4-mini")).displayName,
+                "provider/nested/gpt-5.6-luna",
+                catalog.resolve(OpenAiModelId("provider/nested/gpt-5.6-luna")).displayName,
             )
         } finally {
             catalog.close()
