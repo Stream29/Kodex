@@ -38,8 +38,8 @@ public object UnifiedExecTools {
             outputSchema = UnifiedExecOutputSchema,
         )
 
-    /** Creates both tools around one shared [UnifiedExecToolClient]. */
-    public fun createTools(client: UnifiedExecToolClient): List<Tool> =
+    /** Creates both tools around one shared [UnifiedExecClient]. */
+    public fun createTools(client: UnifiedExecClient): List<Tool> =
         listOf(
             CloseableUnifiedExecTool(
                 delegate = typedTool(
@@ -108,7 +108,7 @@ public object UnifiedExecTools {
 
 private class CloseableUnifiedExecTool(
     private val delegate: Tool,
-    private val client: UnifiedExecToolClient,
+    private val client: UnifiedExecClient,
 ) : Tool {
     override val spec: ResponsesApiTool
         get() = delegate.spec as ResponsesApiTool

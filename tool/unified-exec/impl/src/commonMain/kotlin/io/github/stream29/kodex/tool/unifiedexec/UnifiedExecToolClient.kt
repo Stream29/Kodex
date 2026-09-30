@@ -23,40 +23,28 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
-public const val UnifiedExecMinimumYieldTimeMillis: Long = 250L
-public const val UnifiedExecMaximumYieldTimeMillis: Long = 30_000L
 internal const val UnifiedExecWindowsMinimumYieldTimeMillis: Long = 10_000L
-public const val UnifiedExecMinimumEmptyPollYieldTimeMillis: Long = 5_000L
-public const val UnifiedExecMaximumEmptyPollYieldTimeMillis: Long = 300_000L
-public const val UnifiedExecMaximumOutputByteCount: Int = 1_024 * 1_024
 
 /**
- * Stateful local process manager shared by `exec_command` and `write_stdin`.
+ * ShellClient-backed implementation of [UnifiedExecClient].
  *
  * This client owns one [ShellClient], which owns every process session it
- * creates. Closing this client closes that shell client and cancels all active
- * sessions. Commands always use the selected shell's login initialization;
- * model calls cannot disable it. A command without an explicit shell captures
- * the current [ShellSettings.shell] value when its process starts.
+ * creates. The registry and process-session synchronization remain local to
+ * this implementation.
  */
 public class UnifiedExecToolClient internal constructor(
     private val workingDirectoryProvider: suspend () -> Path,
     private val settingsProvider: suspend () -> ShellSettings,
     private val shellClient: ShellClient,
-) : AutoCloseable {
+) : UnifiedExecClient {
     private val registryMutex: Mutex = Mutex()
     private val mutableSessions: MutableStateFlow<Map<Int, ManagedProcessSession>> =
         MutableStateFlow(emptyMap())
 
-    /**
-     * Sessions that can still be read through `write_stdin`, keyed by their
-     * public session identifier. A session can report [UnifiedExecProcessSession.completed]
-     * without leaving this snapshot: its final output still needs to be read.
-     */
-    public val activeSessions: StateFlow<Map<Int, UnifiedExecProcessSession>> =
+    override val activeSessions: StateFlow<Map<Int, UnifiedExecProcessSession>> =
         mutableSessions.asStateFlow()
 
-    public suspend fun execCommand(arguments: ExecCommandArguments): UnifiedExecOutput {
+    override suspend fun execCommand(arguments: ExecCommandArguments): UnifiedExecOutput {
         arguments.validate()
         val started = TimeSource.Monotonic.markNow()
         val session = runProcessOperation {
@@ -100,7 +88,7 @@ public class UnifiedExecToolClient internal constructor(
         }
     }
 
-    public suspend fun writeStdin(arguments: WriteStdinArguments): UnifiedExecOutput {
+    override suspend fun writeStdin(arguments: WriteStdinArguments): UnifiedExecOutput {
         arguments.validate()
         val managed = sessionFor(arguments.sessionId)
         val started = TimeSource.Monotonic.markNow()
@@ -230,22 +218,6 @@ internal class ManagedProcessSession(
     override fun close() {
         session.close()
     }
-}
-
-/**
- * Observable control surface for one active unified-exec process session.
- *
- * Implementations retain the process and synchronization details; consumers
- * can use the original command and [completed] state for presentation. [close]
- * requests process-tree termination but leaves the session registered so its
- * final output and exit code remain readable through `write_stdin`.
- */
-public interface UnifiedExecProcessSession : AutoCloseable {
-    public val sessionId: Int
-    public val arguments: ExecCommandArguments
-    public val completed: StateFlow<Boolean>
-
-    override fun close()
 }
 
 private data class ProcessSessionOutput(

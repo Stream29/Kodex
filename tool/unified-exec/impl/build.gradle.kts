@@ -19,7 +19,7 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            api(project(":tool-unified-exec-contract"))
+            api(project(":tool-unified-exec-spec"))
             api(project(":tool-contract"))
             api(project(":utils-shell-client"))
             api(libs.kotlinx.schema.json)
