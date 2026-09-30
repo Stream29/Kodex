@@ -184,26 +184,27 @@ private class KodexAgentStateImpl(
             val contextPrefix = contextPrefixResolver.resolve(settings, storage.uri).render()
             val threadId = storage.uri.toCodexThreadId()
             val windowId = settings.codexRequestWindowId(threadId)
-            val metadata = CodexResponsesMetadata(
+            var responseHeaders: OpenAiResponseHeaders? = null
+
+            client.createResponse(
+                model = settings.model,
+                input = (listOf(planningContext) + contextPrefix + durableInput).toResponsesApiInput(),
+                instructions = settings.instructions,
+                store = false,
+                previousResponseId = settings.previousResponseId,
+                tools = mcpService.visibleToolSpecs(settings),
+                toolChoice = settings.toolChoice,
+                parallelToolCalls = settings.parallelToolCalls,
+                reasoning = settings.reasoning,
+                include = settings.include,
+                serviceTier = settings.serviceTier,
+                promptCacheKey = settings.promptCacheKey ?: threadId,
+                text = settings.text,
                 installationId = settings.installationId,
                 sessionId = settings.sessionId,
                 threadId = threadId,
                 turnId = settings.turnId,
                 windowId = windowId,
-                requestKind = CodexResponsesRequestKind.Turn,
-            )
-            val clientMetadata = metadata.toCodexClientMetadata()
-            var responseHeaders: OpenAiResponseHeaders? = null
-
-            client.createResponse(
-                request = settings.toResponsesApiRequest(
-                    input = listOf(planningContext) + contextPrefix + durableInput,
-                    clientMetadata = clientMetadata,
-                    tools = mcpService.visibleToolSpecs(settings),
-                ),
-                installationId = clientMetadata.installationId,
-                turnMetadata = clientMetadata.turnMetadata,
-                windowId = clientMetadata.windowId,
                 turnState = settings.turnState,
                 onResponseHeaders = { headers ->
                     responseHeaders = headers
@@ -312,9 +313,6 @@ private class KodexAgentStateImpl(
                     clientMetadata = clientMetadata,
                     tools = mcpService.visibleToolSpecs(snapshot.settings),
                 ),
-                installationId = clientMetadata.installationId,
-                turnMetadata = clientMetadata.turnMetadata,
-                windowId = clientMetadata.windowId,
             )
             commitCompaction(
                 previousSettings = snapshot.settings,

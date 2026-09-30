@@ -7,10 +7,10 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":agent-state-contract"))
-            api(project(":openai-client-contract"))
-            api(project(":openai-models"))
+            api(project(":openai-spec-client"))
+            api(project(":openai-spec-models"))
             api(libs.kotlinx.coroutines.core)
-            implementation(project(":openai-json-codec"))
+            implementation(project(":openai-spec-json-codec"))
             implementation(libs.kotlinx.schema.json)
             implementation(libs.kotlinx.serialization.json)
         }
@@ -20,7 +20,7 @@ kotlin {
             implementation(project(":agent-storage-contract"))
             implementation(project(":agent-storage-contract-ext"))
             implementation(project(":utils-coroutines"))
-            implementation(project(":openai-client-test"))
+            implementation(project(":openai-impl-client-test"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

@@ -13,7 +13,7 @@ kotlin {
             api(project(":mcp-contract"))
             api(project(":agent-storage-clean-models"))
             api(project(":agent-storage-contract"))
-            api(project(":openai-models"))
+            api(project(":openai-spec-models"))
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.rpc.core)
             api(libs.kotlinx.serialization.core)

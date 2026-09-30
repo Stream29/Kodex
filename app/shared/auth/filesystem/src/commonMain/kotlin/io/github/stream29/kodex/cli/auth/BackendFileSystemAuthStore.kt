@@ -3,6 +3,7 @@ package io.github.stream29.kodex.cli.auth
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.openai.OpenAiAuthState
+import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.OpenAiSubscriptionTokens
 import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
@@ -140,9 +141,16 @@ public class BackendFileSystemAuthStore internal constructor(
                 publishSelected()
                 return@withLock
             }
-            val refreshed = current.refreshed(
-                loginClient.refreshSubscriptionTokens(current.tokens.refreshToken), clock.now(),
-            )
+            val refreshedResponse = loginClient.refreshSubscriptionTokens(current.tokens.refreshToken)
+            val refreshed = when (refreshedResponse) {
+                is OpenAiResult.Success -> current.refreshed(refreshedResponse.value, clock.now())
+                is OpenAiResult.Failure -> {
+                    BackendAuthLogger.warn {
+                        "Authentication refresh failed for $source: ${refreshedResponse.error.message}"
+                    }
+                    return@withLock
+                }
+            }
             // An independent Codex process can replace its file while our HTTP
             // request is in flight. Never overwrite an observed newer snapshot.
             val latest = read(source)

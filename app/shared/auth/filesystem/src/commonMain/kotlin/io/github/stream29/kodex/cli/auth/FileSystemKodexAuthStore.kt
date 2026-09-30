@@ -5,6 +5,7 @@ import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettingsStore
 import io.github.stream29.kodex.openai.OpenAiAuthState
+import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
 import io.github.stream29.kodex.openai.OpenAiSubscriptionTokenRefresh
 import io.github.stream29.kodex.openai.OpenAiSubscriptionTokens
@@ -228,10 +229,19 @@ private class FileSystemKodexAuthStoreImpl(
             publish(current)
             return@withLock
         }
-        val refreshed = current.refreshed(
-            response = loginClient.refreshSubscriptionTokens(current.tokens.refreshToken),
-            refreshedAt = Clock.System.now(),
-        )
+        val refreshedResponse = loginClient.refreshSubscriptionTokens(current.tokens.refreshToken)
+        val refreshed = when (refreshedResponse) {
+            is OpenAiResult.Success -> current.refreshed(
+                response = refreshedResponse.value,
+                refreshedAt = Clock.System.now(),
+            )
+            is OpenAiResult.Failure -> {
+                logger.warn {
+                    "Authentication refresh failed: ${refreshedResponse.error.message}"
+                }
+                return@withLock
+            }
+        }
         val refreshedFile = KodexAuthFile(
             authMode = CodexAuthMode.Chatgpt,
             tokens = refreshed.tokens,

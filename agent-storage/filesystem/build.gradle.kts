@@ -23,7 +23,7 @@ kotlin {
             api(project(":agent-storage-contract"))
             api(project(":utils-kotlinx-io-coroutines"))
             api(libs.kotlinx.serialization.json)
-            implementation(project(":openai-json-codec"))
+            implementation(project(":openai-spec-json-codec"))
         }
         commonTest.dependencies {
             implementation(project(":agent-storage-contract-ext"))

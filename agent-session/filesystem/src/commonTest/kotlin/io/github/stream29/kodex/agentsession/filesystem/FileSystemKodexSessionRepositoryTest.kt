@@ -132,7 +132,7 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
         test("catalog samples residency and running without activating entries") { root ->
             val entered = CompletableDeferred<Unit>()
             val client = mockOpenAiClient {
-                createResponse { _, _, _, _ ->
+                createResponse { _ ->
                     flow {
                         entered.complete(Unit)
                         awaitCancellation()

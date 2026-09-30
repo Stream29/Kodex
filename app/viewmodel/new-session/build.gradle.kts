@@ -8,7 +8,7 @@ kotlin {
             implementation(project(":app-viewmodel-rpc"))
             implementation(project(":app-contract-agent"))
             implementation(project(":app-contract-session"))
-            implementation(project(":openai-models"))
+            implementation(project(":openai-spec-models"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.io.core)
         }
@@ -20,7 +20,7 @@ kotlin {
             implementation(project(":app-viewmodel-history"))
             implementation(project(":app-viewmodel-session"))
             implementation(project(":app-shared-session-title"))
-            implementation(project(":openai-client-test"))
+            implementation(project(":openai-impl-client-test"))
             implementation(project(":utils-coroutines"))
             implementation(libs.kotlinx.coroutines.test)
         }

@@ -158,7 +158,7 @@ val agentContextProjectionTest by testSuite {
                 val compactionRequests = mutableListOf<ResponsesApiRequest>()
                 val agent = KodexAgentState(
                     client = mockOpenAiClient {
-                        createRemoteCompactionV2Response { request, _, _, _ ->
+                        createRemoteCompactionV2Response { request ->
                             compactionRequests += request
                             RemoteCompactionV2Response(
                                 compactionOutput = ResponseItem.Compaction(

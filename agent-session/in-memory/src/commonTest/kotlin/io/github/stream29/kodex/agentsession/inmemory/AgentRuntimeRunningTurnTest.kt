@@ -54,8 +54,8 @@ val agentRuntimeRunningTurnTest by testSuite {
             val metadata = mutableListOf<String>()
             val root = openTurnTestSession(
                 mockOpenAiClient {
-                    createRemoteCompactionV2Response { _, _, turnMetadata, _ ->
-                        metadata += turnMetadata
+                    createRemoteCompactionV2Response { request ->
+                        metadata += requireNotNull(request.clientMetadata).turnMetadata
                         entered.complete(Unit)
                         finish.await()
                         compactedResponse()
@@ -98,7 +98,7 @@ val agentRuntimeRunningTurnTest by testSuite {
             val entered = CompletableDeferred<Unit>()
             val root = openTurnTestSession(
                 mockOpenAiClient {
-                    createRemoteCompactionV2Response { _, _, _, _ ->
+                    createRemoteCompactionV2Response { _ ->
                         entered.complete(Unit)
                         awaitCancellation()
                     }
@@ -150,7 +150,7 @@ val agentRuntimeRunningTurnTest by testSuite {
             var calls = 0
             val root = openTurnTestSession(
                 mockOpenAiClient {
-                    createRemoteCompactionV2Response { _, _, _, _ ->
+                    createRemoteCompactionV2Response { _ ->
                         if (++calls == 1) throw failure
                         compactedResponse()
                     }
@@ -182,7 +182,7 @@ val agentRuntimeRunningTurnTest by testSuite {
             val finishCleanup = CompletableDeferred<Unit>()
             val root = openTurnTestSession(
                 mockOpenAiClient {
-                    createRemoteCompactionV2Response { _, _, _, _ ->
+                    createRemoteCompactionV2Response { _ ->
                         try {
                             entered.complete(Unit)
                             awaitCancellation()
@@ -228,8 +228,8 @@ val agentRuntimeRunningTurnTest by testSuite {
                 var responses = 0
                 val root = openTurnTestSession(
                     mockOpenAiClient {
-                        createRemoteCompactionV2Response { _, _, turnMetadata, _ ->
-                            metadata += turnMetadata
+                        createRemoteCompactionV2Response { request ->
+                            metadata += requireNotNull(request.clientMetadata).turnMetadata
                             entered.complete(Unit)
                             finish.await()
                             compactedResponse()

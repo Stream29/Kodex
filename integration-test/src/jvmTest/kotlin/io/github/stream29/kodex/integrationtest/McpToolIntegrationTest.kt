@@ -19,9 +19,16 @@ import io.github.stream29.kodex.mcp.impl.McpServiceImpl
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
+import io.github.stream29.kodex.openai.OpenAiModelId
+import io.github.stream29.kodex.openai.Reasoning
+import io.github.stream29.kodex.openai.ResponseInclude
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.github.stream29.kodex.openai.ServiceTier
+import io.github.stream29.kodex.openai.TextControls
+import io.github.stream29.kodex.openai.ToolChoice
+import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
@@ -177,21 +184,63 @@ private class McpRecordingOpenAiClient(
     val requests: MutableList<ResponsesApiRequest> = mutableListOf()
 
     override suspend fun createResponse(
-        request: ResponsesApiRequest,
+        model: OpenAiModelId,
+        input: List<ResponseItem>,
+        instructions: String,
+        store: Boolean,
+        previousResponseId: String?,
+        tools: List<ToolSpec>,
+        toolChoice: ToolChoice,
+        parallelToolCalls: Boolean,
+        reasoning: Reasoning,
+        include: Set<ResponseInclude>,
+        serviceTier: ServiceTier,
+        promptCacheKey: String?,
+        text: TextControls,
         installationId: String?,
-        turnMetadata: String,
-        windowId: String,
+        sessionId: String?,
+        threadId: String?,
+        turnId: String?,
+        windowId: String?,
         turnState: String?,
         onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit,
     ): Flow<ResponsesStreamEvent> {
-        requests += request
+        requests += ResponsesApiRequest(
+            model = model,
+            input = input,
+            instructions = instructions,
+            store = store,
+            previousResponseId = previousResponseId,
+            tools = tools,
+            toolChoice = toolChoice,
+            parallelToolCalls = parallelToolCalls,
+            reasoning = reasoning,
+            include = include,
+            serviceTier = serviceTier,
+            promptCacheKey = promptCacheKey,
+            text = text,
+        )
         return delegate.createResponse(
-            request,
-            installationId,
-            turnMetadata,
-            windowId,
-            turnState,
-            onResponseHeaders,
+            model = model,
+            input = input,
+            instructions = instructions,
+            store = store,
+            previousResponseId = previousResponseId,
+            tools = tools,
+            toolChoice = toolChoice,
+            parallelToolCalls = parallelToolCalls,
+            reasoning = reasoning,
+            include = include,
+            serviceTier = serviceTier,
+            promptCacheKey = promptCacheKey,
+            text = text,
+            installationId = installationId,
+            sessionId = sessionId,
+            threadId = threadId,
+            turnId = turnId,
+            windowId = windowId,
+            turnState = turnState,
+            onResponseHeaders = onResponseHeaders,
         )
     }
 }

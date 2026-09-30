@@ -2,6 +2,7 @@ package io.github.stream29.kodex.cli.auth
 
 import io.github.stream29.kodex.openai.OpenAiAuthorizationCodeExchange
 import io.github.stream29.kodex.openai.OpenAiLoginAuthorization
+import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.OpenAiSubscriptionTokens
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.ktor.http.HttpStatusCode
@@ -37,14 +38,17 @@ internal class LocalKodexLoginAttempt private constructor(
     override suspend fun awaitCompletion() {
         try {
             val authorizationCode = callbackServer.awaitAuthorizationCode()
-            val tokens = loginClient.exchangeAuthorizationCode(
+            val result = loginClient.exchangeAuthorizationCode(
                 OpenAiAuthorizationCodeExchange(
                     authorizationCode = authorizationCode,
                     redirectUri = redirectUri,
                     codeVerifier = codeVerifier,
                 ),
             )
-            persistTokens(tokens)
+            when (result) {
+                is OpenAiResult.Success -> persistTokens(result.value)
+                is OpenAiResult.Failure -> throw LocalLoginException(result.error.message)
+            }
         } finally {
             withContext(NonCancellable) { finish() }
         }

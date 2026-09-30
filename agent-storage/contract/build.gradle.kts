@@ -8,7 +8,7 @@ kotlin {
         commonMain.dependencies {
             api(libs.kotlinx.coroutines.core)
             api(project(":agent-storage-clean-models"))
-            api(project(":openai-models"))
+            api(project(":openai-spec-models"))
         }
     }
 }

@@ -11,7 +11,7 @@ kotlin {
             api(project(":mcp-contract"))
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
-            api(project(":openai-models"))
+            api(project(":openai-spec-models"))
             api(project(":utils-shell-client"))
         }
     }

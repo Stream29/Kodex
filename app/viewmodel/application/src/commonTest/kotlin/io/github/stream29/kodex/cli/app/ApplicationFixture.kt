@@ -46,8 +46,12 @@ internal fun applicationClient(
 
 internal object ApplicationLoginClient : OpenAiLoginClient {
     override fun authorizationUrl(request: OpenAiLoginAuthorization): String = "https://login.example.invalid"
-    override suspend fun exchangeAuthorizationCode(request: OpenAiAuthorizationCodeExchange): OpenAiSubscriptionTokens =
+    override suspend fun exchangeAuthorizationCode(
+        request: OpenAiAuthorizationCodeExchange,
+    ): OpenAiLoginResult<OpenAiSubscriptionTokens> =
         error("No credentials are exchanged by these tests.")
-    override suspend fun refreshSubscriptionTokens(refreshToken: String): OpenAiSubscriptionTokenRefresh =
+    override suspend fun refreshSubscriptionTokens(
+        refreshToken: String,
+    ): OpenAiLoginResult<OpenAiSubscriptionTokenRefresh> =
         error("No credentials are present in these isolated Homes.")
 }

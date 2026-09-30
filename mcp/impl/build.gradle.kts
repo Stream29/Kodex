@@ -22,7 +22,7 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {
-            implementation(project(":openai-json-codec"))
+            implementation(project(":openai-spec-json-codec"))
             implementation(libs.kotlinx.coroutines.test)
         }
         jvmTest.dependencies {

@@ -14,13 +14,14 @@ import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.ModelsResponse
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
+import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-private fun testCatalog(): OpenAiModelCatalog =
+private fun testCatalog(): OpenAiModelCatalogStore =
     OpenAiModelCatalog(
         client = mockOpenAiClient {
             listModels { OpenAiResult.Success(ModelsResponse()) }

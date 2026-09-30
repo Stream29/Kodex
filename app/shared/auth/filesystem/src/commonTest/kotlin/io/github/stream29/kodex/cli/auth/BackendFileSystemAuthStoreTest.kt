@@ -241,13 +241,17 @@ private class BackendAuthTestLoginClient : OpenAiLoginClient {
         authorization = request
         return "https://authorization.example.test"
     }
-    override suspend fun exchangeAuthorizationCode(request: OpenAiAuthorizationCodeExchange): OpenAiSubscriptionTokens {
+    override suspend fun exchangeAuthorizationCode(
+        request: OpenAiAuthorizationCodeExchange,
+    ): OpenAiLoginResult<OpenAiSubscriptionTokens> {
         exchange = request
-        return tokens("login")
+        return OpenAiResult.Success(tokens("login"))
     }
-    override suspend fun refreshSubscriptionTokens(refreshToken: String): OpenAiSubscriptionTokenRefresh {
+    override suspend fun refreshSubscriptionTokens(
+        refreshToken: String,
+    ): OpenAiLoginResult<OpenAiSubscriptionTokenRefresh> {
         refreshed += refreshToken
-        return refresh(refreshToken)
+        return OpenAiResult.Success(refresh(refreshToken))
     }
     override fun close() { closed = true }
 }

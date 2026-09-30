@@ -8,7 +8,7 @@ kotlin {
         api(project(":app-viewmodel-rpc"))
         api(project(":app-viewmodel-session"))
         api(project(":app-viewmodel-new-session"))
-        api(project(":openai-client-test"))
+        api(project(":openai-impl-client-test"))
         implementation(project(":rpc-server"))
         implementation(project(":rpc-in-memory"))
         implementation(project(":app-migration-impl"))

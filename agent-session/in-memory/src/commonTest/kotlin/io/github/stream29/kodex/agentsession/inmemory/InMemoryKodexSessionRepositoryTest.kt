@@ -80,7 +80,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
         test("catalog samples residency and running without activating entries") {
             val entered = CompletableDeferred<Unit>()
             val client = mockOpenAiClient {
-                createResponse { _, _, _, _ ->
+                createResponse { _ ->
                     flow {
                         entered.complete(Unit)
                         awaitCancellation()
@@ -276,7 +276,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
         test("runtime rejects concurrent resume operations") {
             val entered = CompletableDeferred<Unit>()
             val client = mockOpenAiClient {
-                createResponse { _, _, _, _ ->
+                createResponse { _ ->
                     flow {
                         entered.complete(Unit)
                         awaitCancellation()
@@ -306,7 +306,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
 
         test("runtime leaves host-owned pending calls in state") {
             val client = mockOpenAiClient {
-                createResponse { _, _, _, _ ->
+                createResponse { _ ->
                     flowOf(
                         ResponsesStreamEvent.OutputItemDone(
                             outputIndex = 0,
@@ -335,7 +335,7 @@ val inMemoryKodexSessionRepositoryTest by testSuite {
         test("cancelling a turn fails its persisted pending tool calls") {
             val pending = CompletableDeferred<Unit>()
             val client = mockOpenAiClient {
-                createResponse { _, _, _, _ ->
+                createResponse { _ ->
                     flow {
                         emit(
                             ResponsesStreamEvent.OutputItemDone(

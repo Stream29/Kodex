@@ -142,8 +142,12 @@ public suspend fun CoroutineScope.seedTestHistory(
 
 private object TestLoginClient : OpenAiLoginClient {
     override fun authorizationUrl(request: OpenAiLoginAuthorization): String = "https://login.example.invalid"
-    override suspend fun exchangeAuthorizationCode(request: OpenAiAuthorizationCodeExchange): OpenAiSubscriptionTokens =
+    override suspend fun exchangeAuthorizationCode(
+        request: OpenAiAuthorizationCodeExchange,
+    ): OpenAiLoginResult<OpenAiSubscriptionTokens> =
         error("This fixture does not exchange credentials.")
-    override suspend fun refreshSubscriptionTokens(refreshToken: String): OpenAiSubscriptionTokenRefresh =
+    override suspend fun refreshSubscriptionTokens(
+        refreshToken: String,
+    ): OpenAiLoginResult<OpenAiSubscriptionTokenRefresh> =
         error("This fixture has no credentials.")
 }

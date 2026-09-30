@@ -15,7 +15,7 @@ import io.github.stream29.kodex.mcp.impl.McpServiceImpl
 import io.github.stream29.kodex.mcp.impl.validateMcpConfigurationUpdate
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.ModelInfo
-import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
+import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 import io.github.stream29.kodex.openai.modelcatalog.ownedOpenAiModelCatalog
 import io.github.stream29.kodex.rpc.models.BackendSettings
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
@@ -63,7 +63,7 @@ internal suspend fun <R> withBackendGlobalState(
     val owner = supervisorChildScope()
     var service: McpService? = null
     var manager: McpManagerImpl? = null
-    var models: OpenAiModelCatalog? = null
+    var models: OpenAiModelCatalogStore? = null
     var failure: Throwable? = null
     try {
         val configurations = BackendMcpConfigurationStore(store, owner)
@@ -101,7 +101,7 @@ public class BackendGlobalState internal constructor(
     public val contextSettings: StateFlow<AgentContextSettings>,
     public val mcpService: McpService,
     public val mcpManager: McpManagerImpl,
-    public val modelCatalog: OpenAiModelCatalog,
+    public val modelCatalog: OpenAiModelCatalogStore,
     private val codexHome: Path,
 ) {
     public val settings: StateFlow<BackendSettings> get() = store.settings

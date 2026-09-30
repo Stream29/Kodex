@@ -4,7 +4,7 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.ModelContextWindowTokenStatus
 import io.github.stream29.kodex.openai.contextWindowTokenStatus
-import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
+import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 
 /**
  * Calculates the current model-context status from one storage snapshot.
@@ -14,7 +14,7 @@ import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
  * successful compaction contributes its synthetic `0` reset as a usable count.
  */
 public suspend fun KodexAgentState.contextWindowTokenStatus(
-    modelCatalog: OpenAiModelCatalog,
+    modelCatalog: OpenAiModelCatalogStore,
 ): ModelContextWindowTokenStatus? {
     val snapshotIndex = storage.latestIndex()
     if (snapshotIndex < 0 || storage.tokenCount.latestIndex() < 0) {
@@ -35,6 +35,6 @@ public suspend fun KodexAgentState.contextWindowTokenStatus(
  * contains an active context token count; `null` means the budget is unknown.
  */
 public suspend fun KodexAgentState.tokensUntilCompaction(
-    modelCatalog: OpenAiModelCatalog,
+    modelCatalog: OpenAiModelCatalogStore,
 ): Long? =
     contextWindowTokenStatus(modelCatalog)?.tokensUntilCompaction

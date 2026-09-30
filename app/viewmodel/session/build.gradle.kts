@@ -20,7 +20,7 @@ kotlin {
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
             implementation(project(":app-shared-session-title"))
-            implementation(project(":openai-client-test"))
+            implementation(project(":openai-impl-client-test"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

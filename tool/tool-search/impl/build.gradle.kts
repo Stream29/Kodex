@@ -5,7 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":openai-models"))
+            api(project(":openai-spec-models"))
             api(project(":tool-tool-search-contract"))
             api(libs.kotlinx.schema.json)
             implementation(project(":utils-search-index"))

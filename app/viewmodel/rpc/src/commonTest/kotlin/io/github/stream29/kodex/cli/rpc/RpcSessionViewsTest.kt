@@ -746,9 +746,15 @@ private class FixtureLoginClient : OpenAiLoginClient {
         URLBuilder("https://login.example.invalid/authorize").apply {
             parameters.append("state", request.state)
         }.buildString()
-    override suspend fun exchangeAuthorizationCode(request: OpenAiAuthorizationCodeExchange): OpenAiSubscriptionTokens =
-        OpenAiSubscriptionTokens("opaque-test-id", "test-access", "test-refresh", "test-account")
-    override suspend fun refreshSubscriptionTokens(refreshToken: String): OpenAiSubscriptionTokenRefresh =
+    override suspend fun exchangeAuthorizationCode(
+        request: OpenAiAuthorizationCodeExchange,
+    ): OpenAiLoginResult<OpenAiSubscriptionTokens> =
+        OpenAiResult.Success(
+            OpenAiSubscriptionTokens("opaque-test-id", "test-access", "test-refresh", "test-account"),
+        )
+    override suspend fun refreshSubscriptionTokens(
+        refreshToken: String,
+    ): OpenAiLoginResult<OpenAiSubscriptionTokenRefresh> =
         error("Fresh test credentials should not refresh.")
 }
 

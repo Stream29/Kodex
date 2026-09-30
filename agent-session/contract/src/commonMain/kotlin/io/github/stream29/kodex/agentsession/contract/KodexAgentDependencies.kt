@@ -4,7 +4,7 @@ import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.hook.contract.KodexHooks
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
-import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
+import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 import io.github.stream29.kodex.utils.shellclient.ShellSettings
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
  */
 public class KodexAgentDependencies(
     public val client: OpenAiClient,
-    public val modelCatalog: OpenAiModelCatalog,
+    public val modelCatalog: OpenAiModelCatalogStore,
     public val contextSettings: StateFlow<AgentContextSettings>,
     public val shellSettings: StateFlow<ShellSettings>,
     public val mcpService: McpService,

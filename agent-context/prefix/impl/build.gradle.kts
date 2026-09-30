@@ -7,7 +7,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-context-contract"))
             api(project(":agent-context-prefix-contract"))
-            api(project(":openai-models"))
+            api(project(":openai-spec-models"))
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
             implementation(project(":agent-context-prefix-agents-md-filesystem"))

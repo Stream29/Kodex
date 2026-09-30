@@ -314,7 +314,7 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
             val started = CompletableDeferred<Unit>()
             val finish = CompletableDeferred<Unit>()
             val client = mockOpenAiClient {
-                createRemoteCompactionV2Response { _, _, _, _ ->
+                createRemoteCompactionV2Response { _ ->
                     started.complete(Unit)
                     finish.await()
                     RemoteCompactionV2Response(ResponseItem.Compaction(encryptedContent = "test"), null)

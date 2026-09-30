@@ -187,10 +187,16 @@ private class ServicesTestLogin : OpenAiLoginClient {
     var closed = false
     override fun authorizationUrl(request: OpenAiLoginAuthorization): String =
         URLBuilder("https://auth.example.test/authorize").apply { parameters.append("state", request.state) }.buildString()
-    override suspend fun exchangeAuthorizationCode(request: OpenAiAuthorizationCodeExchange): OpenAiSubscriptionTokens {
+    override suspend fun exchangeAuthorizationCode(
+        request: OpenAiAuthorizationCodeExchange,
+    ): OpenAiLoginResult<OpenAiSubscriptionTokens> {
         exchanges++
-        return OpenAiSubscriptionTokens("opaque-id", "access", "refresh", "account")
+        return OpenAiResult.Success(
+            OpenAiSubscriptionTokens("opaque-id", "access", "refresh", "account"),
+        )
     }
-    override suspend fun refreshSubscriptionTokens(refreshToken: String): OpenAiSubscriptionTokenRefresh = error("Fresh fixture tokens")
+    override suspend fun refreshSubscriptionTokens(
+        refreshToken: String,
+    ): OpenAiLoginResult<OpenAiSubscriptionTokenRefresh> = error("Fresh fixture tokens")
     override fun close() { closed = true }
 }

@@ -8,7 +8,7 @@ kotlin {
             api(project(":agent-session-contract"))
             api(project(":utils-kotlinx-io-coroutines"))
             api(libs.kotlinx.coroutines.core)
-            implementation(project(":agent-runtime-impl"))
+            implementation(project(":agent-runtime-impl-composition"))
             implementation(project(":agent-state-impl"))
             implementation(project(":agent-storage-filesystem"))
             implementation(project(":utils-coroutines"))
@@ -17,7 +17,7 @@ kotlin {
             implementation(libs.cache4k)
         }
         commonTest.dependencies {
-            implementation(project(":openai-client-test"))
+            implementation(project(":openai-impl-client-test"))
             implementation(project(":agent-storage-contract-ext"))
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))

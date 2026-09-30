@@ -32,6 +32,9 @@ internal fun KodexAgentSettings.toResponsesApiRequest(
     )
 }
 
+internal fun List<ResponseItem>.toResponsesApiInput(): List<ResponseItem> =
+    map(ResponseItem::toResponsesApiInput)
+
 private fun ResponseItem.toResponsesApiInput(): ResponseItem =
     when (this) {
         is ResponseItem.McpToolCallOutput -> ResponseItem.FunctionCallOutput(

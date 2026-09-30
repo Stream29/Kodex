@@ -7,7 +7,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-storage-contract"))
             api(project(":hook-contract"))
-            implementation(project(":openai-json-codec"))
+            implementation(project(":openai-spec-json-codec"))
         }
     }
 }

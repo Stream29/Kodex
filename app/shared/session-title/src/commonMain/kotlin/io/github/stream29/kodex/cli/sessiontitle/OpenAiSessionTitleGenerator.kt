@@ -7,7 +7,6 @@ import io.github.stream29.kodex.openai.Reasoning
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.Response
 import io.github.stream29.kodex.openai.ResponseItem
-import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.TextControls
 import io.github.stream29.kodex.openai.TextFormat
@@ -29,7 +28,30 @@ public class OpenAiSessionTitleGenerator(
         val streamedText = StringBuilder()
         val completedItemsText = StringBuilder()
         var terminal: TitleStreamTerminal = TitleStreamTerminal.Open
-        client.createResponse(titleRequest(userText, model, reasoningEffort)).collect { event ->
+        client.createResponse(
+            model = model,
+            input = listOf(
+                ResponseItem.Message(
+                    role = MessageRole.User,
+                    content = listOf(
+                        ContentItem.InputText(
+                            "User prompt:\n${userText.takeUnicodeScalars(SessionTitleInputLimit).trim()}\n",
+                        ),
+                    ),
+                ),
+            ),
+            instructions = SessionTitlePrompt,
+            store = false,
+            tools = emptyList(),
+            parallelToolCalls = false,
+            reasoning = Reasoning(effort = reasoningEffort),
+            text = TextControls(
+                format = TextFormat(
+                    name = "session_title",
+                    schema = OpenAiJsonCodec.encodeToJsonElement(SessionTitleOutputSchema).jsonObject,
+                ),
+            ),
+        ).collect { event ->
             when (event) {
                 is ResponsesStreamEvent.OutputTextDelta -> streamedText.append(event.delta)
                 is ResponsesStreamEvent.OutputItemDone -> {
@@ -74,36 +96,6 @@ public class OpenAiSessionTitleGenerator(
         return SessionTitleGenerationResult.Generated(normalized)
     }
 }
-
-private fun titleRequest(
-    userText: String,
-    model: OpenAiModelId,
-    reasoningEffort: ReasoningEffort,
-): ResponsesApiRequest =
-    ResponsesApiRequest(
-        model = model,
-        input = listOf(
-            ResponseItem.Message(
-                role = MessageRole.User,
-                content = listOf(
-                    ContentItem.InputText(
-                        "User prompt:\n${userText.takeUnicodeScalars(SessionTitleInputLimit).trim()}\n",
-                    ),
-                ),
-            ),
-        ),
-        instructions = SessionTitlePrompt,
-        store = false,
-        tools = emptyList(),
-        parallelToolCalls = false,
-        reasoning = Reasoning(effort = reasoningEffort),
-        text = TextControls(
-            format = TextFormat(
-                name = "session_title",
-                schema = OpenAiJsonCodec.encodeToJsonElement(SessionTitleOutputSchema).jsonObject,
-            ),
-        ),
-    )
 
 /**
  * @return Text carried by a completed assistant message, or `null` when this

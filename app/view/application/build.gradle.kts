@@ -31,7 +31,7 @@ kotlin {
             implementation(project(":app-view-history"))
             implementation(project(":app-view-path-picker"))
             implementation(project(":app-view-settings"))
-            implementation(project(":openai-models"))
+            implementation(project(":openai-spec-models"))
             implementation(project(":utils-coroutines"))
             implementation(project(":utils-terminal-text"))
             implementation(libs.kotlinx.coroutines.core)

@@ -6,7 +6,6 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.ResponseItem
-import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -35,16 +34,14 @@ val openAiResponseStreamingTest by testSuite {
 
             withContext(Dispatchers.Default) {
                 val stream = client.createResponse(
-                    ResponsesApiRequest(
-                        model = ResponsesTestModel,
-                        input = listOf(
-                            ResponseItem.Message(
-                                role = MessageRole.User,
-                                content = listOf(ContentItem.InputText(StreamingProbePrompt)),
-                            ),
+                    model = ResponsesTestModel,
+                    input = listOf(
+                        ResponseItem.Message(
+                            role = MessageRole.User,
+                            content = listOf(ContentItem.InputText(StreamingProbePrompt)),
                         ),
-                        store = false,
                     ),
+                    store = false,
                 )
 
                 stream.collect { event ->

@@ -8,6 +8,7 @@ import io.github.stream29.kodex.mcp.contract.McpOAuthLoginAttemptFactory
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.impl.McpManagerImpl
 import io.github.stream29.kodex.mcp.impl.PreparedMcpOAuthLogin
+import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthTarget
@@ -91,8 +92,12 @@ public class BackendOAuth internal constructor(
                                 val generation = credentials.beginLogin(target.source)
                                 val prepared = prepareOpenAiLogin(openAi, redirectUri)
                                 ready(entry, prepared.state, prepared.authorizationUrl, entry.code)
-                                val tokens = prepared.exchangeCode(entry.code.await())
-                                credentials.commitLogin(target.source, generation, tokens)
+                                when (val result = prepared.exchangeCode(entry.code.await())) {
+                                    is OpenAiResult.Success ->
+                                        credentials.commitLogin(target.source, generation, result.value)
+                                    is OpenAiResult.Failure ->
+                                        error("OpenAI login failed: ${result.error.message}")
+                                }
                             }
                             is OAuthTarget.Mcp -> mcp.loginWithPreparedCallback(target.serverName, redirectUri) { raw ->
                                 val remote = raw as? RemoteMcpAttempt

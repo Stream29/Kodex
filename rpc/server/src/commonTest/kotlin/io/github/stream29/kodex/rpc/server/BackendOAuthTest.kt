@@ -92,7 +92,11 @@ val backendOAuthTest by testSuite(compartment = { TestCompartment.RealTime }) {
         withOAuth { f ->
             val entered = CompletableDeferred<Unit>()
             val release = CompletableDeferred<Unit>()
-            f.login.exchange = { entered.complete(Unit); release.await(); oauthTokens() }
+            f.login.exchange = {
+                entered.complete(Unit)
+                release.await()
+                OpenAiResult.Success(oauthTokens())
+            }
             val login = f.oauth.start(OpenAiTarget, OpenAiRedirect)
             val waiter = async { f.oauth.complete(login.attemptId, login.callback(OpenAiRedirect)) }
             entered.await()
@@ -117,7 +121,11 @@ val backendOAuthTest by testSuite(compartment = { TestCompartment.RealTime }) {
         withOAuth { f ->
             val entered = CompletableDeferred<Unit>()
             val release = CompletableDeferred<Unit>()
-            f.login.exchange = { entered.complete(Unit); release.await(); oauthTokens() }
+            f.login.exchange = {
+                entered.complete(Unit)
+                release.await()
+                OpenAiResult.Success(oauthTokens())
+            }
             val login = f.oauth.start(OpenAiTarget, OpenAiRedirect)
             val deadline = f.deadlines.receive()
             val waiter = async { f.oauth.complete(login.attemptId, login.callback(OpenAiRedirect)) }
@@ -322,14 +330,20 @@ private class OAuthFixture(
 
 private class OAuthTestLoginClient : OpenAiLoginClient {
     val exchanged = mutableListOf<OpenAiAuthorizationCodeExchange>()
-    var exchange: suspend () -> OpenAiSubscriptionTokens = { oauthTokens() }
+    var exchange: suspend () -> OpenAiLoginResult<OpenAiSubscriptionTokens> = {
+        OpenAiResult.Success(oauthTokens())
+    }
     override fun authorizationUrl(request: OpenAiLoginAuthorization): String =
         URLBuilder("https://auth.example.test/authorize").apply { parameters.append("state", request.state) }.buildString()
-    override suspend fun exchangeAuthorizationCode(request: OpenAiAuthorizationCodeExchange): OpenAiSubscriptionTokens {
+    override suspend fun exchangeAuthorizationCode(
+        request: OpenAiAuthorizationCodeExchange,
+    ): OpenAiLoginResult<OpenAiSubscriptionTokens> {
         exchanged += request
         return exchange()
     }
-    override suspend fun refreshSubscriptionTokens(refreshToken: String): OpenAiSubscriptionTokenRefresh =
+    override suspend fun refreshSubscriptionTokens(
+        refreshToken: String,
+    ): OpenAiLoginResult<OpenAiSubscriptionTokenRefresh> =
         error("Fresh fake credentials must not refresh.")
 }
 private class OAuthTestMcpService : McpService {

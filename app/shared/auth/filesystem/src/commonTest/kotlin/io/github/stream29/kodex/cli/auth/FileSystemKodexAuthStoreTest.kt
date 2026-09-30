@@ -6,6 +6,8 @@ import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
 import io.github.stream29.kodex.cli.settings.InMemoryKodexGlobalSettings
 import io.github.stream29.kodex.openai.OpenAiAuthState
+import io.github.stream29.kodex.openai.OpenAiLoginResult
+import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.OpenAiSubscriptionPlan
 import io.github.stream29.kodex.openai.OpenAiSubscriptionTokenRefresh
 import io.github.stream29.kodex.openai.OpenAiSubscriptionTokens
@@ -491,13 +493,14 @@ private class RecordingOpenAiLoginClient(
 
     override suspend fun exchangeAuthorizationCode(
         request: io.github.stream29.kodex.openai.OpenAiAuthorizationCodeExchange,
-    ): OpenAiSubscriptionTokens = error("Authorization-code exchange is not used by this test.")
+    ): OpenAiLoginResult<OpenAiSubscriptionTokens> =
+        error("Authorization-code exchange is not used by this test.")
 
     override suspend fun refreshSubscriptionTokens(
         refreshToken: String,
-    ): OpenAiSubscriptionTokenRefresh {
+    ): OpenAiLoginResult<OpenAiSubscriptionTokenRefresh> {
         refreshTokens += refreshToken
-        return refreshResponse
+        return OpenAiResult.Success(refreshResponse)
     }
 }
 

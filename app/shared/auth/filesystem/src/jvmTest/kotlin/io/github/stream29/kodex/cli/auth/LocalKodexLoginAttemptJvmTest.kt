@@ -4,6 +4,8 @@ import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.openai.OpenAiAuthorizationCodeExchange
 import io.github.stream29.kodex.openai.OpenAiLoginAuthorization
+import io.github.stream29.kodex.openai.OpenAiLoginResult
+import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.OpenAiSubscriptionTokenRefresh
 import io.github.stream29.kodex.openai.OpenAiSubscriptionTokens
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
@@ -110,11 +112,13 @@ private class RecordingLoginClient(
 
     override suspend fun exchangeAuthorizationCode(
         request: OpenAiAuthorizationCodeExchange,
-    ): OpenAiSubscriptionTokens {
+    ): OpenAiLoginResult<OpenAiSubscriptionTokens> {
         exchange = request
-        return tokens
+        return OpenAiResult.Success(tokens)
     }
 
-    override suspend fun refreshSubscriptionTokens(refreshToken: String): OpenAiSubscriptionTokenRefresh =
+    override suspend fun refreshSubscriptionTokens(
+        refreshToken: String,
+    ): OpenAiLoginResult<OpenAiSubscriptionTokenRefresh> =
         error("Token refresh is not used by this test.")
 }

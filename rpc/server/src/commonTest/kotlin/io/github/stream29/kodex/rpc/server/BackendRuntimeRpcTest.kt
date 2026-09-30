@@ -183,7 +183,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
     test("manual compaction shares Stop and does not consume queued steer") {
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
-        val client = mockOpenAiClient { createRemoteCompactionV2Response { _, _, _, _ ->
+        val client = mockOpenAiClient { createRemoteCompactionV2Response { _ ->
             entered.complete(Unit)
             release.await()
             RemoteCompactionV2Response(ResponseItem.Compaction(encryptedContent = "test"), null)

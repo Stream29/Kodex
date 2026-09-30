@@ -2,6 +2,7 @@ package io.github.stream29.kodex.cli.auth
 
 import io.github.stream29.kodex.openai.OpenAiAuthorizationCodeExchange
 import io.github.stream29.kodex.openai.OpenAiLoginAuthorization
+import io.github.stream29.kodex.openai.OpenAiLoginResult
 import io.github.stream29.kodex.openai.OpenAiSubscriptionTokens
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.ktor.util.generateNonceBlocking
@@ -14,7 +15,7 @@ public class PreparedOpenAiLogin internal constructor(
     private val verifier: String,
     private val client: OpenAiLoginClient,
 ) {
-    public suspend fun exchangeCode(code: String): OpenAiSubscriptionTokens =
+    public suspend fun exchangeCode(code: String): OpenAiLoginResult<OpenAiSubscriptionTokens> =
         client.exchangeAuthorizationCode(OpenAiAuthorizationCodeExchange(code, redirectUri, verifier))
 }
 

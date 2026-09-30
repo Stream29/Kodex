@@ -10,7 +10,7 @@ kotlin {
             api(project(":app-shared-auth-contract"))
             implementation(project(":app-shared-session-title"))
             implementation(project(":mcp-contract"))
-            implementation(project(":openai-client-contract"))
+            implementation(project(":openai-spec-client"))
             implementation(project(":utils-coroutines"))
             implementation(project(":utils-logging"))
             implementation(project(":utils-os-environment"))

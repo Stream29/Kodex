@@ -60,21 +60,19 @@ val openAiResponsesProbeJvmTest by testSuite(
         try {
             val events = withTimeout(180.seconds) {
                 client.createResponse(
-                    ResponsesApiRequest(
-                        model = OpenAiModelId("gpt-5.6-sol"),
-                        input = listOf(
-                            ResponseItem.Message(
-                                role = MessageRole.User,
-                                content = listOf(
-                                    ContentItem.InputText(
-                                        "Reply with exactly $ProbeMarker and no other text.",
-                                    ),
+                    model = OpenAiModelId("gpt-5.6-sol"),
+                    input = listOf(
+                        ResponseItem.Message(
+                            role = MessageRole.User,
+                            content = listOf(
+                                ContentItem.InputText(
+                                    "Reply with exactly $ProbeMarker and no other text.",
                                 ),
                             ),
                         ),
-                        reasoning = Reasoning(effort = ReasoningEffort.Max),
-                        serviceTier = ServiceTier.Fast,
                     ),
+                    reasoning = Reasoning(effort = ReasoningEffort.Max),
+                    serviceTier = ServiceTier.Fast,
                 ).toList()
             }
             val eventTypes = events.map { event -> event.javaClass.simpleName }

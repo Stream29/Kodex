@@ -96,7 +96,7 @@ val kodexAgentStateImplTest by testSuite {
                                 if (requests.size == 1) flowOf()
                                 else flowOf(ResponsesStreamEvent.Completed(Response(id = "response", endTurn = false)))
                             }
-                            createRemoteCompactionV2Response { request, _, _, _ ->
+                            createRemoteCompactionV2Response { request ->
                                 requests += request
                                 RemoteCompactionV2Response(ResponseItem.Compaction(encryptedContent = "compact"), null)
                             }
@@ -671,11 +671,11 @@ val kodexAgentStateImplTest by testSuite {
             val compactRequests = mutableListOf<ResponsesApiRequest>()
             val agent = KodexAgentState(
                 client = mockOpenAiClient {
-                    createRemoteCompactionV2Response { request, _, _, windowId ->
+                    createRemoteCompactionV2Response { request ->
                         compactRequests += request
                         assertEquals(
                             storage.settings[0].codexRequestWindowId(storage.uri.toCodexThreadId()),
-                            windowId,
+                            request.clientMetadata?.windowId,
                         )
                         RemoteCompactionV2Response(
                             compactionOutput = compaction,
@@ -719,7 +719,7 @@ val kodexAgentStateImplTest by testSuite {
             var compactionNumber = 0
             val agent = KodexAgentState(
                 client = mockOpenAiClient {
-                    createRemoteCompactionV2Response { _, _, _, _ ->
+                    createRemoteCompactionV2Response { _ ->
                         compactionNumber += 1
                         RemoteCompactionV2Response(
                             compactionOutput = ResponseItem.Compaction(
@@ -779,7 +779,7 @@ val kodexAgentStateImplTest by testSuite {
             val storage = storage()
             val agent = KodexAgentState(
                 client = mockOpenAiClient {
-                    createRemoteCompactionV2Response { _, _, _, _ ->
+                    createRemoteCompactionV2Response { _ ->
                         RemoteCompactionV2Response(
                             compactionOutput = ResponseItem.Compaction(encryptedContent = "compact"),
                             completedResponse = Response(id = "compact_response"),
@@ -804,7 +804,7 @@ val kodexAgentStateImplTest by testSuite {
             val compactionItem = ResponseItem.Compaction(encryptedContent = "queued-compaction")
             val agent = KodexAgentState(
                 client = mockOpenAiClient {
-                    createRemoteCompactionV2Response { _, _, _, _ ->
+                    createRemoteCompactionV2Response { _ ->
                         compactionStarted.complete(Unit)
                         releaseCompaction.await()
                         RemoteCompactionV2Response(compactionItem, null)
@@ -845,7 +845,7 @@ val kodexAgentStateImplTest by testSuite {
             val compaction = ResponseItem.Compaction(encryptedContent = "compact")
             val agent = KodexAgentState(
                 client = mockOpenAiClient {
-                    createRemoteCompactionV2Response { _, _, _, _ ->
+                    createRemoteCompactionV2Response { _ ->
                         RemoteCompactionV2Response(compaction, null)
                     }
                     createResponse { request ->

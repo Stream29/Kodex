@@ -6,7 +6,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":mcp-contract"))
-            api(project(":openai-models"))
+            api(project(":openai-spec-models"))
             api(project(":tool-tool-search-impl"))
             implementation(project(":tool-apply-patch"))
             implementation(project(":tool-current-time"))
@@ -18,7 +18,7 @@ kotlin {
             implementation(project(":tool-multi-agent-impl"))
             implementation(project(":tool-unified-exec-impl"))
             implementation(project(":tool-web-run"))
-            implementation(project(":openai-json-codec"))
+            implementation(project(":openai-spec-json-codec"))
         }
     }
 }

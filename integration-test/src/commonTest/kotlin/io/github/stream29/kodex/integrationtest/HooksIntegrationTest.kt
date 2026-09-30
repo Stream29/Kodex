@@ -21,6 +21,7 @@ import io.github.stream29.kodex.openai.client.OpenAiClientConfig
 import io.github.stream29.kodex.openai.client.test.InMemoryOpenAiAuthStore
 import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
+import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.osenvironment.environmentVariable
 import io.github.stream29.kodex.utils.osenvironment.userHomeDirectory
@@ -74,7 +75,7 @@ private suspend fun runFreshSessionHookIntegration() {
     val workingDirectory = Path(root, "workspace")
     val hookLog = Path(root, "hook-events.jsonl")
     var client: RealOpenAiClient? = null
-    var modelCatalog: OpenAiModelCatalog? = null
+    var modelCatalog: OpenAiModelCatalogStore? = null
     var hooks: KodexHooksImpl? = null
     var sessionRepository: FileSystemKodexSessionRepository? = null
     try {

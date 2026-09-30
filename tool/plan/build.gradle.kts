@@ -6,7 +6,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":agent-state-contract"))
-            api(project(":openai-models"))
+            api(project(":openai-spec-models"))
             api(project(":tool-contract"))
             api(libs.kotlinx.schema.json)
             implementation(project(":tool-tool-builder"))
@@ -16,8 +16,8 @@ kotlin {
             implementation(project(":agent-state-impl"))
             implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-in-memory"))
-            implementation(project(":openai-client-test"))
-            implementation(project(":openai-json-codec"))
+            implementation(project(":openai-impl-client-test"))
+            implementation(project(":openai-spec-json-codec"))
             implementation(project(":utils-coroutines"))
         }
     }
