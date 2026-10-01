@@ -21,7 +21,7 @@ kotlin {
             implementation(project(":app-viewmodel-session"))
             implementation(project(":app-shared-session-title"))
             implementation(project(":openai-impl-client-test"))
-            implementation(project(":utils-coroutines"))
+            implementation(project(":utils-coroutines-spec"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

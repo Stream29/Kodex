@@ -9,16 +9,17 @@ kotlin {
             api(libs.kotlinx.serialization.json)
             api(libs.kotlinx.schema.json)
             api(project(":openai-spec-models"))
-            api(project(":tool-image-generation-contract"))
-            api(project(":tool-request-user-input-contract"))
-            api(project(":tool-multi-agent-contract"))
-            api(project(":tool-tool-search-contract"))
-            api(project(":tool-unified-exec-spec"))
-            api(project(":tool-view-image-contract"))
-            api(project(":utils-patch"))
+            api(project(":tool-spec-image-generation"))
+            api(project(":tool-spec-request-user-input"))
+            api(project(":tool-spec-multi-agent"))
+            api(project(":tool-spec-tool-search"))
+            api(project(":tool-spec-unified-exec"))
+            api(project(":tool-spec-view-image"))
+            api(project(":utils-patch-spec"))
         }
         commonTest.dependencies {
             implementation(project(":openai-spec-json-codec"))
+            implementation(project(":utils-patch-impl"))
         }
     }
 }

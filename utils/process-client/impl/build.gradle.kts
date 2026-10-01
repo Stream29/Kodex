@@ -1,0 +1,54 @@
+@file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi::class)
+
+import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.jetbrains.kotlin.konan.target.Family
+
+plugins {
+    id("kodex.kmp-host")
+}
+
+kotlin {
+    compilerOptions {
+        freeCompilerArgs.add("-Xexpect-actual-classes")
+    }
+
+    applyHierarchyTemplate(KotlinHierarchyTemplate.default) {
+        common {
+            group("posix") {
+                withLinuxX64()
+                withLinuxArm64()
+                withMacosArm64()
+            }
+        }
+    }
+
+    sourceSets {
+        commonMain.dependencies {
+            api(project(":utils-process-client-spec"))
+            api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.io.core)
+            api(project(":utils-kotlinx-io-coroutines-impl"))
+            implementation(project(":utils-coroutines-spec"))
+        }
+        jsMain.dependencies {
+            implementation(libs.kotlin.wrappers.node)
+        }
+        commonTest.dependencies {
+            implementation(libs.kotlinx.coroutines.test)
+        }
+    }
+
+    targets.withType<KotlinNativeTarget>().configureEach {
+        if (konanTarget.family == Family.LINUX || konanTarget.family == Family.OSX) {
+            compilations.named("main") {
+                cinterops.create("processClientSpawn") {
+                    defFile(project.file("src/nativeInterop/cinterop/process_client_spawn.def"))
+                    if (konanTarget.family == Family.LINUX) {
+                        compilerOpts("-D_GNU_SOURCE")
+                    }
+                }
+            }
+        }
+    }
+}

@@ -7,7 +7,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-state-contract"))
             api(project(":agent-storage-clean-models"))
-            api(project(":tool-unified-exec-spec"))
+            api(project(":tool-spec-unified-exec"))
             api(libs.kotlinx.coroutines.core)
         }
     }

@@ -7,7 +7,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(libs.kotlinx.serialization.core)
-            api(project(":utils-shell-client"))
+            api(project(":utils-shell-client-impl"))
             api(libs.kotlinx.io.core)
         }
     }

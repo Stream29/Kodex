@@ -20,7 +20,7 @@ kotlin {
             implementation(project(":agent-storage-in-memory"))
             implementation(project(":openai-impl-client-test"))
             implementation(project(":openai-impl-model-catalog"))
-            implementation(project(":utils-coroutines"))
+            implementation(project(":utils-coroutines-spec"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

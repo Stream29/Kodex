@@ -9,7 +9,7 @@ kotlin {
             implementation(project(":app-contract-session"))
             implementation(project(":app-contract-session-catalog"))
             implementation(libs.kotlinx.coroutines.core)
-            implementation(project(":utils-coroutines"))
+            implementation(project(":utils-coroutines-spec"))
         }
         commonTest.dependencies {
             implementation(project(":app-test-support-rpc"))

@@ -6,9 +6,9 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":app-contract-path-picker"))
-            implementation(project(":utils-coroutines"))
-            implementation(project(":utils-kotlinx-io-coroutines"))
-            implementation(project(":utils-os-environment"))
+            implementation(project(":utils-coroutines-spec"))
+            implementation(project(":utils-kotlinx-io-coroutines-impl"))
+            implementation(project(":utils-os-environment-impl"))
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {

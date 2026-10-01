@@ -22,7 +22,7 @@ kotlin {
             implementation(project(":agent-session-test"))
             implementation(project(":agent-storage-contract-ext"))
             implementation(project(":app-viewmodel-history"))
-            implementation(project(":utils-coroutines"))
+            implementation(project(":utils-coroutines-spec"))
             implementation(libs.mosaic.testing)
         }
     }

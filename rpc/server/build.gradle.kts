@@ -6,11 +6,11 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":agent-session-contract"))
-            api(project(":utils-rpc-exception"))
+            api(project(":utils-rpc-exception-spec"))
             api(libs.kotlinx.coroutines.core)
-            implementation(project(":utils-coroutines"))
+            implementation(project(":utils-coroutines-spec"))
             api(project(":app-shared-settings-filesystem"))
-            api(project(":mcp-impl"))
+            api(project(":mcp-impl-composition"))
             api(project(":openai-impl-model-catalog"))
             implementation(project(":openai-impl-codex-cli-storage"))
             api(project(":app-shared-auth-filesystem"))
@@ -30,7 +30,7 @@ kotlin {
             implementation(project(":agent-session-test"))
             implementation(project(":agent-storage-contract-ext"))
             implementation(project(":openai-impl-client-test"))
-            implementation(project(":utils-kotlinx-io-coroutines"))
+            implementation(project(":utils-kotlinx-io-coroutines-impl"))
             implementation(libs.kotlinx.coroutines.test)
             implementation(project(":rpc-in-memory"))
             implementation(project(":rpc-client"))

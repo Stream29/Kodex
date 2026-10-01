@@ -10,7 +10,7 @@ kotlin {
             implementation(project(":agent-runtime-impl-composition"))
             implementation(project(":agent-state-impl"))
             implementation(project(":agent-storage-in-memory"))
-            implementation(project(":utils-coroutines"))
+            implementation(project(":utils-coroutines-spec"))
         }
         commonTest.dependencies {
             implementation(project(":agent-storage-contract-ext"))

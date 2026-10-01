@@ -7,7 +7,7 @@ kotlin {
         mosaicMain.dependencies {
             api(project(":app-contract-lazy-list"))
             api(libs.mosaic.runtime)
-            implementation(project(":utils-terminal-text"))
+            implementation(project(":utils-terminal-text-spec"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.mosaic.animation)
         }

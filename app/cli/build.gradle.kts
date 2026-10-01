@@ -5,7 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation(project(":utils-logging"))
+            implementation(project(":utils-logging-impl"))
             implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.coroutines.core)
         }
@@ -13,9 +13,9 @@ kotlin {
             implementation(project(":app-migration-impl"))
             implementation(project(":app-view-application"))
             implementation(project(":app-viewmodel-application"))
-            implementation(project(":utils-kodex-home"))
-            implementation(project(":utils-logging"))
-            implementation(project(":utils-os-environment"))
+            implementation(project(":utils-kodex-home-impl"))
+            implementation(project(":utils-logging-impl"))
+            implementation(project(":utils-os-environment-impl"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.io.core)
             implementation(libs.mosaic.runtime)

@@ -15,7 +15,7 @@ kotlin {
             implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-in-memory"))
             implementation(project(":openai-impl-client-test"))
-            implementation(project(":utils-coroutines"))
+            implementation(project(":utils-coroutines-spec"))
         }
     }
 }

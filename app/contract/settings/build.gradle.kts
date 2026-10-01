@@ -10,7 +10,7 @@ kotlin {
             api(project(":app-contract-session"))
             api(project(":app-shared-settings-contract"))
             api(project(":rpc-models"))
-            api(project(":mcp-contract"))
+            api(project(":mcp-spec-contract"))
             api(project(":openai-spec-account-usage"))
             api(project(":openai-spec-models"))
             api(libs.kotlinx.coroutines.core)

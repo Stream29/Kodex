@@ -6,11 +6,11 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":utils-filesystem-lease-contract"))
-            api(project(":utils-kotlinx-io-coroutines"))
+            api(project(":utils-filesystem-lease-spec"))
+            api(project(":utils-kotlinx-io-coroutines-impl"))
             api(libs.kotlinx.coroutines.core)
-            implementation(project(":utils-coroutines"))
-            implementation(project(":utils-os-environment"))
+            implementation(project(":utils-coroutines-spec"))
+            implementation(project(":utils-os-environment-impl"))
             implementation(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {

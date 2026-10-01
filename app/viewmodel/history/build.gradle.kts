@@ -10,8 +10,8 @@ kotlin {
             implementation(project(":agent-storage-contract"))
             implementation(project(":app-contract-history"))
             implementation(libs.kotlinx.coroutines.core)
-            implementation(project(":utils-coroutines"))
-            implementation(project(":utils-rpc-exception"))
+            implementation(project(":utils-coroutines-spec"))
+            implementation(project(":utils-rpc-exception-spec"))
         }
         commonTest.dependencies {
             implementation(project(":openai-spec-json-codec"))

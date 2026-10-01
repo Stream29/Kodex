@@ -9,7 +9,7 @@ kotlin {
         commonMain.dependencies {
             api(libs.kotlinx.rpc.core)
             api(libs.kotlinx.coroutines.core)
-            api(project(":utils-rpc-exception"))
+            api(project(":utils-rpc-exception-spec"))
             api(project(":rpc-contract"))
             api(project(":agent-storage-contract"))
             implementation(libs.cache4k)

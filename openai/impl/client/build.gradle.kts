@@ -10,8 +10,8 @@ kotlin {
             api(project(":openai-spec-client"))
             api(project(":openai-spec-models"))
             implementation(project(":openai-spec-json-codec"))
-            implementation(project(":utils-ktor-client-ext"))
-            implementation(project(":utils-os-environment"))
+            implementation(project(":utils-ktor-client-ext-impl"))
+            implementation(project(":utils-os-environment-impl"))
             implementation(libs.kotlin.logging)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
@@ -21,7 +21,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(project(":openai-impl-client-test"))
             implementation(project(":openai-spec-json-codec"))
-            implementation(project(":utils-host-test-support"))
+            implementation(project(":utils-host-test-support-impl"))
         }
     }
 }

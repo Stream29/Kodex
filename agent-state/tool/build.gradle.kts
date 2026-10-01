@@ -5,19 +5,19 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":mcp-contract"))
+            api(project(":mcp-spec-contract"))
             api(project(":openai-spec-models"))
-            api(project(":tool-tool-search-impl"))
-            implementation(project(":tool-apply-patch"))
-            implementation(project(":tool-current-time"))
-            implementation(project(":tool-image-generation-impl"))
-            implementation(project(":tool-view-image-impl"))
-            implementation(project(":tool-get-context-remaining"))
-            implementation(project(":tool-plan"))
-            implementation(project(":tool-request-user-input-impl"))
-            implementation(project(":tool-multi-agent-impl"))
-            implementation(project(":tool-unified-exec-impl"))
-            implementation(project(":tool-web-run"))
+            api(project(":tool-impl-tool-search"))
+            implementation(project(":tool-impl-apply-patch"))
+            implementation(project(":tool-impl-current-time"))
+            implementation(project(":tool-impl-image-generation"))
+            implementation(project(":tool-impl-view-image"))
+            implementation(project(":tool-impl-get-context-remaining"))
+            implementation(project(":tool-impl-plan"))
+            implementation(project(":tool-impl-request-user-input"))
+            implementation(project(":tool-impl-multi-agent"))
+            implementation(project(":tool-impl-unified-exec"))
+            implementation(project(":tool-impl-web-run"))
             implementation(project(":openai-spec-json-codec"))
         }
     }

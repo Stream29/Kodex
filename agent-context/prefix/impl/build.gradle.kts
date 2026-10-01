@@ -12,10 +12,10 @@ kotlin {
             api(libs.kotlinx.io.core)
             implementation(project(":agent-context-prefix-agents-md-filesystem"))
             implementation(project(":agent-context-skill-filesystem"))
-            implementation(project(":utils-os-environment"))
+            implementation(project(":utils-os-environment-impl"))
         }
         commonTest.dependencies {
-            implementation(project(":utils-kotlinx-io-coroutines"))
+            implementation(project(":utils-kotlinx-io-coroutines-impl"))
         }
     }
 }

@@ -10,7 +10,7 @@ kotlin {
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))
             implementation(project(":app-view-path-picker"))
-            implementation(project(":utils-external-url"))
+            implementation(project(":utils-external-url-impl"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.mosaic.runtime)
         }

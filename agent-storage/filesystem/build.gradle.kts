@@ -21,7 +21,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":agent-storage-contract"))
-            api(project(":utils-kotlinx-io-coroutines"))
+            api(project(":utils-kotlinx-io-coroutines-impl"))
             api(libs.kotlinx.serialization.json)
             implementation(project(":openai-spec-json-codec"))
         }

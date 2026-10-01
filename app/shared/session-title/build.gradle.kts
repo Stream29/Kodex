@@ -19,7 +19,7 @@ kotlin {
             implementation(project(":agent-session-test"))
             implementation(project(":agent-storage-contract"))
             implementation(project(":agent-storage-contract-ext"))
-            implementation(project(":utils-coroutines"))
+            implementation(project(":utils-coroutines-spec"))
             implementation(project(":openai-impl-client-test"))
             implementation(libs.kotlinx.coroutines.test)
         }

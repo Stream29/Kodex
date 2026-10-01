@@ -7,7 +7,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-context-prefix-agents-md-contract"))
             api(project(":agent-context-prefix-skill-contract"))
-            api(project(":utils-shell-client"))
+            api(project(":utils-shell-client-impl"))
             api(libs.kotlinx.io.core)
         }
     }

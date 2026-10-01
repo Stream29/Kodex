@@ -10,7 +10,7 @@ kotlin {
             api(project(":rpc-models"))
             api(project(":app-contract-settings"))
             api(project(":app-contract-session-catalog"))
-            api(project(":mcp-contract"))
+            api(project(":mcp-spec-contract"))
             api(project(":agent-storage-clean-models"))
             api(project(":agent-storage-contract"))
             api(project(":openai-spec-models"))
@@ -19,7 +19,7 @@ kotlin {
             api(libs.kotlinx.serialization.core)
         }
         commonTest.dependencies {
-            implementation(project(":utils-rpc-exception"))
+            implementation(project(":utils-rpc-exception-spec"))
             implementation(libs.kotlinx.rpc.krpc.client)
             implementation(libs.kotlinx.rpc.krpc.server)
             implementation(libs.kotlinx.rpc.krpc.serialization.json)

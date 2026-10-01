@@ -7,7 +7,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-storage-contract"))
             implementation(libs.kotlinx.coroutines.core)
-            implementation(project(":utils-read-write-mutex"))
+            implementation(project(":utils-read-write-mutex-impl"))
         }
         commonTest.dependencies {
             implementation(project(":agent-storage-contract-ext"))
