@@ -9,7 +9,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":rpc-spec-models"))
             api(project(":app-contract-settings"))
-            api(project(":app-contract-session-catalog"))
+            api(project(":app-component-session-catalog-spec"))
             api(project(":mcp-spec-contract"))
             api(project(":agent-storage-spec-clean-models"))
             api(project(":agent-storage-spec-contract"))

@@ -6,7 +6,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":app-contract-path-picker"))
+            api(project(":app-component-path-picker-spec"))
             api(project(":app-contract-session"))
             api(project(":app-shared-settings-contract"))
             api(project(":rpc-spec-models"))

@@ -47,10 +47,6 @@ import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.cli.components.LazyColumn
-import io.github.stream29.kodex.cli.components.TextInput
-import io.github.stream29.kodex.cli.components.TextInputLayout
-import io.github.stream29.kodex.cli.components.TextInputState
-import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiCheckbox
 import io.github.stream29.kodex.cli.components.TuiContextMenu
@@ -70,6 +66,10 @@ import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.OpenAiLoginPopup
 import io.github.stream29.kodex.cli.settings.SettingsPopup
 import io.github.stream29.kodex.cli.settings.SidebarContent
+import io.github.stream29.kodex.app.sessiondelete.createSessionDeleteViewModel
+import io.github.stream29.kodex.app.sessiondelete.contract.SessionDeleteDependencies
+import io.github.stream29.kodex.cli.sessiondelete.SessionDeletePopup
+import io.github.stream29.kodex.cli.sessionrename.SessionRenamePopup
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import kotlinx.coroutines.CancellationException
@@ -934,10 +934,18 @@ public fun SessionTreeCliScreen(
                 }
 
                 is ApplicationPopupState.RenameSession ->
-                    RenameSessionPopup(viewModel, open)
+                    SessionRenamePopup(
+                        viewModel = open.viewModel,
+                        onDismissRequest = { viewModel.dismissPopup(open) },
+                        onSubmitted = { viewModel.dismissPopup(open) },
+                    )
 
                 is ApplicationPopupState.DeleteSession ->
-                    DeleteSessionPopup(viewModel, open)
+                    SessionDeletePopup(
+                        viewModel = open.viewModel,
+                        onDismissRequest = { viewModel.dismissPopup(open) },
+                        onResult = { viewModel.dismissPopup(open) },
+                    )
 
                 is ApplicationPopupState.Login -> OpenAiLoginPopup(
                     viewModel = open.viewModel,
@@ -1114,15 +1122,18 @@ private fun BoxScope.SessionCatalogPopup(
         )
     }
     deleteTarget?.let { target ->
-        SessionCatalogDeleteDialog(
-            target = target,
-            onDismissRequest = { deleteTarget = null },
-            onDelete = {
-                scope.launch {
-                    if (open.viewModel.delete(target.sessionIndex)) {
-                        deleteTarget = null
-                    }
-                }
+        val deleteChild = remember(open, target) {
+            createSessionDeleteViewModel(
+                target.sessionIndex,
+                target.threadName,
+                SessionDeleteDependencies(open.viewModel::delete),
+            )
+        }
+        SessionDeletePopup(
+            viewModel = deleteChild,
+            onDismissRequest = { if (deleteTarget === target) deleteTarget = null },
+            onResult = { deleted ->
+                if (deleted && deleteTarget === target) deleteTarget = null
             },
         )
     }
@@ -1229,145 +1240,9 @@ internal fun BoxScope.SessionCatalogContextMenuPopup(
 }
 
 @Composable
-private fun BoxScope.SessionCatalogDeleteDialog(
-    target: SessionCatalogEntry,
-    onDismissRequest: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    val title = target.threadName ?: "Session ${target.sessionIndex}"
-    TuiDialog(
-        onDismissRequest = onDismissRequest,
-        modifier = Modifier.width(DeleteDialogWidth).background(SettingsDialogHomeBackground),
-    ) {
-        Column {
-            Text("Delete $title?", textStyle = TuiTheme.typography.title)
-            Text(
-                "This removes the persisted session.",
-                textStyle = TuiTheme.typography.supporting,
-            )
-            TuiDialogActionRow(modifier = Modifier.fillMaxWidth()) {
-                TuiButton(
-                    label = "Cancel",
-                    autoFocus = true,
-                    onClick = onDismissRequest,
-                )
-                TuiButton(
-                    label = "Delete",
-                    color = TuiTheme.colorScheme.error,
-                    onClick = onDelete,
-                )
-            }
-        }
-    }
-}
-
-@Composable
 internal fun SessionCatalogLoadingIndicator() {
     val frame by rememberRunningIndicatorFrame(active = true)
     Text("$frame Loading sessions…", color = SettingsDialogForeground)
-}
-
-@Composable
-private fun BoxScope.RenameSessionPopup(
-    application: ApplicationViewModel,
-    open: ApplicationPopupState.RenameSession,
-) {
-    val scope = rememberCoroutineScope()
-    val draft by open.viewModel.draftName.collectAsState()
-    val input = remember(open) {
-        TextInputState(TextInputValue(draft, draft.length))
-    }
-    LaunchedEffect(draft) {
-        if (input.value.text != draft) input.reset(TextInputValue(draft, draft.length))
-    }
-    TuiDialog(
-        onDismissRequest = { application.dismissPopup(open) },
-        modifier = Modifier.width(RenameDialogWidth).background(SettingsDialogHomeBackground),
-    ) {
-        SessionRenameEditor(
-            draftName = draft,
-            input = input,
-            width = RenameDialogWidth - 2,
-            onDraftNameChanged = open.viewModel::updateDraftName,
-            onSubmit = {
-                scope.launch {
-                    open.viewModel.rename()
-                    application.dismissPopup(open)
-                }
-            },
-        )
-    }
-}
-
-@Composable
-internal fun SessionRenameEditor(
-    draftName: String,
-    input: TextInputState,
-    width: Int,
-    onDraftNameChanged: (String) -> Unit,
-    onSubmit: () -> Unit,
-) {
-    Column {
-        Text("Rename session", textStyle = TuiTheme.typography.title)
-        TextInput(
-            state = input,
-            layout = TextInputLayout.create(input.value, width, "> ", "  "),
-            onValueChanged = { value -> onDraftNameChanged(value.text) },
-            autoFocus = true,
-            onKeyEvent = { event ->
-                if (
-                    draftName.isNotBlank() &&
-                    event.key == "Enter" &&
-                    !event.shift &&
-                    !event.ctrl &&
-                    !event.alt
-                ) {
-                    onSubmit()
-                    true
-                } else {
-                    false
-                }
-            },
-        )
-    }
-}
-
-@Composable
-private fun BoxScope.DeleteSessionPopup(
-    application: ApplicationViewModel,
-    open: ApplicationPopupState.DeleteSession,
-) {
-    val scope = rememberCoroutineScope()
-    val target = open.viewModel.threadName ?: "Session ${open.viewModel.sessionIndex}"
-    TuiDialog(
-        onDismissRequest = { application.dismissPopup(open) },
-        modifier = Modifier.width(DeleteDialogWidth).background(SettingsDialogHomeBackground),
-    ) {
-        Column {
-            Text("Delete $target?", textStyle = TuiTheme.typography.title)
-            Text(
-                "This removes the persisted session.",
-                textStyle = TuiTheme.typography.supporting,
-            )
-            TuiDialogActionRow(modifier = Modifier.fillMaxWidth()) {
-                TuiButton(
-                    label = "Cancel",
-                    autoFocus = true,
-                    onClick = { application.dismissPopup(open) },
-                )
-                TuiButton(
-                    label = "Delete",
-                    color = TuiTheme.colorScheme.error,
-                    onClick = {
-                        scope.launch {
-                            open.viewModel.delete()
-                            application.dismissPopup(open)
-                        }
-                    },
-                )
-            }
-        }
-    }
 }
 
 /** @param request null means no tab menu is open. */
@@ -1670,6 +1545,4 @@ private const val SessionTabBarRows: Int = 1
 private val SidebarHoverCloseGrace = 180.milliseconds
 private const val SessionCatalogWidth: Int = 64
 private const val SessionCatalogRows: Int = 16
-private const val RenameDialogWidth: Int = 48
-private const val DeleteDialogWidth: Int = 52
 private const val RevertDialogWidth: Int = 56

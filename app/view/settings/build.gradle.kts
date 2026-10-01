@@ -8,14 +8,15 @@ kotlin {
             api(project(":app-contract-settings"))
         }
         mosaicMain.dependencies {
+            implementation(project(":app-component-session-rename-impl-view"))
+            implementation(project(":app-component-session-rename-impl-viewmodel"))
             implementation(project(":app-view-components"))
-            implementation(project(":app-view-path-picker"))
+            implementation(project(":app-component-path-picker-impl-view"))
             implementation(project(":utils-external-url-impl"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.mosaic.runtime)
         }
         mosaicTest.dependencies {
-            implementation(project(":app-shared-auth-contract"))
             implementation(project(":app-viewmodel-settings"))
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.mosaic.testing)

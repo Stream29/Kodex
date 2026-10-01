@@ -6,8 +6,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":app-contract-settings"))
-            implementation(project(":app-contract-path-picker"))
-            api(project(":app-shared-auth-contract"))
+            implementation(project(":app-component-path-picker-spec"))
             implementation(project(":app-shared-session-title"))
             implementation(project(":mcp-spec-contract"))
             implementation(project(":openai-spec-client"))

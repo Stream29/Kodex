@@ -35,10 +35,6 @@ import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationStat
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
 import io.github.stream29.kodex.cli.pathpicker.DirectoryPickerPopup
-import io.github.stream29.kodex.cli.components.TextInput
-import io.github.stream29.kodex.cli.components.TextInputLayout
-import io.github.stream29.kodex.cli.components.TextInputState
-import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.ScrollState
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiDialogActionRow
@@ -58,12 +54,15 @@ import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.utils.externalurl.OpenExternalUrlResult
 import io.github.stream29.kodex.utils.externalurl.openExternalUrl
+import io.github.stream29.kodex.cli.sessionrename.SessionRenamePopup
+import io.github.stream29.kodex.cli.sessionrename.SessionRenamePresentation
 
 /**
  * Direct renderer for one Settings ViewModel and its three stable page children.
  *
- * Dropdowns and rename input remain frontend-local. Business writes and reset
- * workflows are owned by the corresponding child ViewModel.
+ * Dropdowns remain frontend-local. Rename draft and submission belong to the
+ * session-rename child, whose dependency binds the exact source and revision.
+ * Business writes and reset workflows remain owned by the page ViewModels.
  */
 @Composable
 public fun BoxScope.SettingsPopup(
@@ -231,12 +230,15 @@ public fun BoxScope.SettingsPopup(
         )
     }
     renameRequest?.let { request ->
-        RenameSessionDialog(
-            request = request,
-            onDismiss = { renameRequest = null },
-            onRename = { name ->
-                renameRequest = null
-                viewModel.session.renameSession(request.expectedRevision, name)
+        val renameChild = remember(viewModel.session, request) {
+            createSessionSettingsRenameChild(viewModel.session, request)
+        }
+        SessionRenamePopup(
+            viewModel = renameChild,
+            presentation = SessionRenamePresentation.Labeled,
+            onDismissRequest = { if (renameRequest === request) renameRequest = null },
+            onSubmitted = {
+                if (renameRequest === request) renameRequest = null
             },
         )
     }
@@ -1079,56 +1081,6 @@ private fun BoxScope.OpenAiLogoutConfirmationDialog(
     }
 }
 
-@Composable
-private fun BoxScope.RenameSessionDialog(
-    request: SessionSettingsEffect.RenameSession,
-    onDismiss: () -> Unit,
-    onRename: (String) -> Unit,
-) {
-    val width = (LocalTerminalState.current.size.columns - 4).coerceIn(1, RenameMaximumWidth)
-    val input = remember(request) {
-        TextInputState(
-            TextInputValue(
-                text = request.initialName,
-                cursorOffset = request.initialName.length,
-            ),
-        )
-    }
-    val layout = TextInputLayout.create(value = input.value, width = width)
-    fun confirm() {
-        input.value.text.trim().takeIf(String::isNotEmpty)?.let(onRename)
-    }
-
-    TuiDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.width(width).background(SettingsDialogBackground),
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().background(SettingsDialogBackground)) {
-            Text(
-                value = "Rename session",
-                modifier = Modifier.fillMaxWidth().background(SettingsHeaderBackground),
-                color = SettingsForeground,
-                textStyle = TuiTheme.typography.headline,
-            )
-            Text("Session name", color = SettingsForeground)
-            TextInput(
-                state = input,
-                layout = layout,
-                modifier = Modifier.fillMaxWidth(),
-                autoFocus = true,
-                onKeyEvent = { event ->
-                    if (event.key == "Enter" && !event.shift && !event.ctrl && !event.alt) {
-                        confirm()
-                        true
-                    } else {
-                        false
-                    }
-                },
-            )
-        }
-    }
-}
-
 private class SettingsDropdownStates(
     val authentication: TuiDropdownState,
     val model: TuiDropdownState,
@@ -1257,5 +1209,4 @@ private val knownReasoningEfforts: List<ReasoningEffort> = listOf(
 
 private const val SettingsMaximumWidth: Int = 84
 private const val SettingsNavigationWidth: Int = 18
-private const val RenameMaximumWidth: Int = 72
 private const val AuthenticationLogoutMaximumWidth: Int = 72

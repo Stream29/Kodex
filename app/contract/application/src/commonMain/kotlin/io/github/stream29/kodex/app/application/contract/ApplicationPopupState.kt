@@ -6,7 +6,8 @@ import io.github.stream29.kodex.app.session.contract.SessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
-import kotlinx.coroutines.flow.StateFlow
+import io.github.stream29.kodex.app.sessionrename.contract.SessionRenameViewModel
+import io.github.stream29.kodex.app.sessiondelete.contract.SessionDeleteViewModel
 import kotlinx.io.files.Path
 
 /**
@@ -61,38 +62,11 @@ public interface WorkingDirectoryPopupViewModel : AutoCloseable {
     override fun close(): Unit
 }
 
-/** Editable state and command boundary for one Rename Session popup. */
-public interface RenameSessionPopupViewModel : AutoCloseable {
+/** Application ownership adapter; interaction behavior is defined by [SessionRenameViewModel]. */
+public interface RenameSessionPopupViewModel : SessionRenameViewModel {
+    /** Exact captured Session, used by the parent to validate child ownership. */
     public val target: SessionViewModel
-    public val draftName: StateFlow<String>
-
-    public fun updateDraftName(name: String): Unit
-
-    /**
-     * Trims and applies the latest [draftName] to [target].
-     *
-     * The frontend submits this command directly from the text input's Enter
-     * key and dismisses the exact open handle after it returns.
-     */
-    public suspend fun rename(): Unit
-
-    override fun close(): Unit
 }
 
-/** Captured target and command boundary for one Delete Session popup. */
-public interface DeleteSessionPopupViewModel : AutoCloseable {
-    public val sessionIndex: Int
-
-    /** Root Session title captured when the popup opened, when one is available. */
-    public val threadName: String?
-
-    /**
-     * Deletes the captured persisted Session.
-     *
-     * Returns false when the captured target no longer exists. A successful
-     * deletion does not dismiss the parent popup.
-     */
-    public suspend fun delete(): Boolean
-
-    override fun close(): Unit
-}
+/** Compatibility name for the independent deletion component. */
+public typealias DeleteSessionPopupViewModel = SessionDeleteViewModel

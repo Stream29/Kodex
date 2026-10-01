@@ -6,6 +6,7 @@ import io.github.stream29.kodex.app.migration.CurrentKodexApplicationVersion
 import io.github.stream29.kodex.app.migration.KodexHomeHandle
 import io.github.stream29.kodex.app.pathpicker.createDirectoryPickerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
+import io.github.stream29.kodex.app.sessioncatalog.DefaultSessionCatalogViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
 import io.github.stream29.kodex.app.settings.createOpenAiLoginViewModel
 import io.github.stream29.kodex.app.settings.createSessionSettingsViewModel
@@ -98,9 +99,10 @@ public suspend fun <R> withKodexApplication(
                     val directoryPicker = { path: Path -> createDirectoryPickerViewModel(path, frontendScope) }
                     root = ApplicationViewModelImpl(
                         sessions, draftFactory,
-                        SessionCatalogViewModelFactory { fork, delete ->
-                            RpcSessionCatalog(frontendScope, services.global, deleteSession = delete, forkSession = fork)
+                        SessionCatalogViewModelFactory { dependencies ->
+                            DefaultSessionCatalogViewModel(frontendScope, dependencies)
                         },
+                        catalogDependencies = RpcSessionCatalogDependencies(services.global),
                         SettingsViewModelFactory { arguments ->
                             val source = when (val target = arguments.target) {
                                 is RpcPersistedSessionViewModel -> RpcSessionSettingsSource(target.view, frontendScope)
@@ -115,7 +117,12 @@ public suspend fun <R> withKodexApplication(
                         },
                         OpenAiLoginViewModelFactory {
                             val target = OAuthTarget.OpenAi(settings.settings.value.authSource)
-                            createOpenAiLoginViewModel(frontendScope) { startRpcOAuth(services.global, target, frontendScope) }
+                            createOpenAiLoginViewModel(
+                                dependencies = OpenAiLoginDependencies {
+                                    startRpcOAuth(services.global, target, frontendScope)
+                                },
+                                ownerScope = frontendScope,
+                            )
                         },
                         directoryPicker,
                         { ordinal ->

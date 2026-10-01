@@ -7,6 +7,7 @@ import io.github.stream29.kodex.app.settings.staticContextSourcePaths
 import io.github.stream29.kodex.app.settings.toContextPath
 import io.github.stream29.kodex.app.settings.withBuiltIn
 import io.github.stream29.kodex.app.settings.createOpenAiLoginViewModel
+import io.github.stream29.kodex.app.settings.contract.OpenAiLoginDependencies
 import io.github.stream29.kodex.app.settings.SettingsUpdateQueue
 import io.github.stream29.kodex.app.settings.contract.*
 import io.github.stream29.kodex.cli.settings.*
@@ -231,7 +232,10 @@ public class RpcGlobalEditor(
     public fun createLogin(ownerScope: CoroutineScope = scope): OpenAiLoginViewModel {
         owner.ensureActive()
         val target = OAuthTarget.OpenAi(global.settings.value.authSource)
-        return createOpenAiLoginViewModel(ownerScope) { startRpcOAuth(rpc, target, ownerScope) }
+        return createOpenAiLoginViewModel(
+            dependencies = OpenAiLoginDependencies { startRpcOAuth(rpc, target, ownerScope) },
+            ownerScope = ownerScope,
+        )
     }
 
     override fun loginMcpServer(serverName: String) {

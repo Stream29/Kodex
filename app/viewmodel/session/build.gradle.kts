@@ -7,7 +7,7 @@ kotlin {
         commonMain.dependencies {
             implementation(project(":app-viewmodel-rpc"))
             implementation(project(":app-contract-session"))
-            implementation(project(":app-contract-session-catalog"))
+            implementation(project(":app-component-session-catalog-spec"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(project(":utils-coroutines-spec"))
         }

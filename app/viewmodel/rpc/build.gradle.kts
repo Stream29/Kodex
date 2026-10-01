@@ -5,6 +5,9 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            api(project(":app-component-openai-login-spec"))
+            implementation(project(":app-component-openai-login-impl-viewmodel"))
+            implementation(project(":app-component-session-catalog-impl-viewmodel"))
             api(project(":rpc-impl-client"))
             api(project(":app-viewmodel-history"))
             api(project(":app-contract-agent"))

@@ -5,6 +5,9 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":app-component-session-rename-impl-viewmodel"))
+            implementation(project(":app-component-session-delete-impl-viewmodel"))
+            implementation(project(":app-component-openai-login-impl-viewmodel"))
             implementation(project(":app-migration-impl"))
             implementation(project(":rpc-impl-server"))
             implementation(project(":rpc-impl-in-memory"))
@@ -12,7 +15,8 @@ kotlin {
             implementation(project(":app-shared-notification"))
             implementation(project(":app-contract-application"))
             implementation(project(":app-contract-session"))
-            implementation(project(":app-contract-session-catalog"))
+            implementation(project(":app-component-session-catalog-spec"))
+            implementation(project(":app-component-session-catalog-impl-viewmodel"))
             implementation(project(":app-contract-settings"))
             implementation(project(":app-viewmodel-history"))
             implementation(project(":app-viewmodel-new-session"))
@@ -23,7 +27,7 @@ kotlin {
             implementation(project(":openai-spec-models"))
             implementation(project(":app-shared-settings-filesystem"))
             implementation(project(":app-viewmodel-settings"))
-            implementation(project(":app-viewmodel-path-picker"))
+            implementation(project(":app-component-path-picker-impl-viewmodel"))
             implementation(project(":openai-impl-client"))
             implementation(project(":utils-kodex-home-impl"))
             implementation(project(":utils-coroutines-spec"))

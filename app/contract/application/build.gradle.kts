@@ -5,10 +5,13 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            api(project(":app-component-session-rename-spec"))
+            api(project(":app-component-session-delete-spec"))
+            api(project(":app-component-openai-login-spec"))
             api(project(":app-contract-agent"))
             api(project(":tool-spec-multi-agent"))
-            api(project(":app-contract-path-picker"))
-            api(project(":app-contract-session-catalog"))
+            api(project(":app-component-path-picker-spec"))
+            api(project(":app-component-session-catalog-spec"))
             api(project(":app-contract-session"))
             api(project(":app-contract-settings"))
             api(project(":app-shared-settings-contract"))

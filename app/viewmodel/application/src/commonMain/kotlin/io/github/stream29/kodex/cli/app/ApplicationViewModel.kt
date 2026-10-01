@@ -7,7 +7,11 @@ import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
 import io.github.stream29.kodex.app.application.contract.ApplicationNavigationState
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
-import io.github.stream29.kodex.app.application.contract.DeleteSessionPopupViewModel
+import io.github.stream29.kodex.app.sessiondelete.createSessionDeleteViewModel
+import io.github.stream29.kodex.app.sessiondelete.contract.SessionDeleteDependencies
+import io.github.stream29.kodex.app.sessionrename.createSessionRenameViewModel
+import io.github.stream29.kodex.app.sessionrename.contract.SessionRenameDependencies
+import io.github.stream29.kodex.app.sessionrename.contract.SessionRenameViewModel
 import io.github.stream29.kodex.app.application.contract.RenameSessionPopupViewModel
 import io.github.stream29.kodex.app.application.contract.WorkingDirectoryPopupViewModel
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
@@ -18,6 +22,7 @@ import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogDependencies
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModelArguments
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModelFactory
@@ -48,6 +53,7 @@ internal class ApplicationViewModelImpl(
     private val sessions: PersistedSessionViewModelRegistry,
     private val newSessionFactory: NewSessionViewModelFactory,
     private val catalogFactory: SessionCatalogViewModelFactory,
+    private val catalogDependencies: SessionCatalogDependencies,
     private val settingsFactory: SettingsViewModelFactory,
     private val loginFactory: OpenAiLoginViewModelFactory,
     private val createDirectoryPicker: (Path) -> DirectoryPickerViewModel,
@@ -180,8 +186,13 @@ internal class ApplicationViewModelImpl(
             installPopup(
                 ApplicationPopupState.SessionCatalog(
                     catalogFactory.create(
-                        forkSession = { sessionIndex -> forkSession(sessionIndex) },
-                        deleteSession = { sessionIndex -> deleteSession(sessionIndex) },
+                        dependencies = object : SessionCatalogDependencies by catalogDependencies {
+                            override suspend fun fork(sessionIndex: Int) =
+                                forkSession(sessionIndex)
+
+                            override suspend fun delete(sessionIndex: Int) =
+                                deleteSession(sessionIndex)
+                        },
                     ),
                 ),
             )
@@ -209,7 +220,7 @@ internal class ApplicationViewModelImpl(
         ensureOpen()
         requireOwned(target)
         installPopup(
-            ApplicationPopupState.RenameSession(RenameSessionPopupViewModelImpl(target)),
+            ApplicationPopupState.RenameSession(ApplicationSessionRenameAdapter(target)),
         )
     }
 
@@ -222,10 +233,10 @@ internal class ApplicationViewModelImpl(
             .firstOrNull { child -> child.sessionIndex == sessionIndex }
         installPopup(
             ApplicationPopupState.DeleteSession(
-                DeleteSessionPopupViewModelImpl(
+                createSessionDeleteViewModel(
                     sessionIndex = sessionIndex,
                     threadName = target?.name?.value,
-                    deleteCommand = ::deleteSessionFromPopup,
+                    dependencies = SessionDeleteDependencies(::deleteSessionFromPopup),
                 ),
             ),
         )
@@ -437,43 +448,13 @@ internal class ApplicationViewModelImpl(
     }
 }
 
-private class RenameSessionPopupViewModelImpl(
+private class ApplicationSessionRenameAdapter(
     override val target: SessionViewModel,
-) : RenameSessionPopupViewModel {
-    private val mutableDraftName = MutableStateFlow(target.name.value)
-    private var closed = false
-    override val draftName: StateFlow<String> = mutableDraftName.asStateFlow()
-
-    override fun updateDraftName(name: String) {
-        if (!closed) mutableDraftName.value = name
-    }
-
-    override suspend fun rename() {
-        check(!closed) { "Rename Session popup is closed." }
-        target.rename(mutableDraftName.value.trim())
-    }
-
-    override fun close() {
-        closed = true
-    }
-}
-
-private class DeleteSessionPopupViewModelImpl(
-    override val sessionIndex: Int,
-    override val threadName: String?,
-    private val deleteCommand: suspend (Int) -> Boolean,
-) : DeleteSessionPopupViewModel {
-    private var closed = false
-
-    override suspend fun delete(): Boolean {
-        check(!closed) { "Delete Session popup is closed." }
-        return deleteCommand(sessionIndex)
-    }
-
-    override fun close() {
-        closed = true
-    }
-}
+    private val child: SessionRenameViewModel = createSessionRenameViewModel(
+        target.name.value,
+        SessionRenameDependencies(target::rename),
+    ),
+) : RenameSessionPopupViewModel, SessionRenameViewModel by child
 
 private class WorkingDirectoryPopupViewModelImpl(
     override val target: AgentSettingsViewModel,
