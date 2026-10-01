@@ -14,7 +14,7 @@ val patchRendererPerformanceProbeRepetitions = providers
 kotlin {
     sourceSets {
         commonTest.dependencies {
-            implementation(project(":agent-context-prefix-render"))
+            implementation(project(":agent-context-impl-prefix-render"))
             implementation(project(":agent-runtime-impl-decorator-compact"))
             implementation(project(":agent-runtime-impl-composition"))
             implementation(project(":agent-session-filesystem"))
@@ -23,8 +23,8 @@ kotlin {
             implementation(project(":agent-storage-contract"))
             implementation(project(":agent-storage-contract-ext"))
             implementation(project(":agent-storage-in-memory"))
-            implementation(project(":hook-contract"))
-            implementation(project(":hook-impl"))
+            implementation(project(":hook-spec-hooks"))
+            implementation(project(":hook-impl-hooks"))
             implementation(project(":mcp-spec-contract"))
             implementation(project(":openai-impl-client"))
             implementation(project(":openai-spec-client"))

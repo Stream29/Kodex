@@ -9,7 +9,7 @@ kotlin {
             api(project(":app-contract-path-picker"))
             api(project(":app-contract-session"))
             api(project(":app-shared-settings-contract"))
-            api(project(":rpc-models"))
+            api(project(":rpc-spec-models"))
             api(project(":mcp-spec-contract"))
             api(project(":openai-spec-account-usage"))
             api(project(":openai-spec-models"))

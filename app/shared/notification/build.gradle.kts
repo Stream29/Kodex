@@ -5,7 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":rpc-models"))
+            api(project(":rpc-spec-models"))
             api(project(":utils-shell-client-impl"))
             implementation(project(":utils-coroutines-spec"))
             implementation(libs.kotlinx.serialization.json)

@@ -7,12 +7,12 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-runtime-spec-decorator-tool"))
             api(project(":agent-runtime-spec-contract"))
-            api(project(":hook-contract"))
+            api(project(":hook-spec-hooks"))
             api(project(":tool-spec-contract"))
             api(project(":tool-impl-tool-search"))
             api(libs.kotlin.logging)
             api(libs.kotlinx.coroutines.core)
-            implementation(project(":hook-tool-utils"))
+            implementation(project(":hook-impl-hooks"))
             implementation(project(":utils-logging-impl"))
         }
         commonTest.dependencies {

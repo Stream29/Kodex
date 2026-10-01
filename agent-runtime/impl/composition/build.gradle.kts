@@ -14,7 +14,7 @@ kotlin {
             implementation(project(":agent-runtime-impl-decorator-turn-hook"))
             implementation(project(":agent-state-tool"))
             implementation(project(":agent-storage-contract"))
-            implementation(project(":hook-contract"))
+            implementation(project(":hook-spec-hooks"))
             implementation(project(":mcp-spec-contract"))
             implementation(project(":openai-spec-client"))
             implementation(project(":openai-spec-model-catalog"))

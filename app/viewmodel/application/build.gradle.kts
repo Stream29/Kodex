@@ -6,8 +6,8 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(project(":app-migration-impl"))
-            implementation(project(":rpc-server"))
-            implementation(project(":rpc-in-memory"))
+            implementation(project(":rpc-impl-server"))
+            implementation(project(":rpc-impl-in-memory"))
             implementation(project(":app-viewmodel-rpc"))
             implementation(project(":app-shared-notification"))
             implementation(project(":app-contract-application"))

@@ -5,7 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":rpc-client"))
+            api(project(":rpc-impl-client"))
             api(project(":app-viewmodel-history"))
             api(project(":app-contract-agent"))
             api(project(":agent-state-contract"))
@@ -17,8 +17,8 @@ kotlin {
             implementation(libs.ktor.server.core)
         }
         commonTest.dependencies {
-            implementation(project(":rpc-server"))
-            implementation(project(":rpc-in-memory"))
+            implementation(project(":rpc-impl-server"))
+            implementation(project(":rpc-impl-in-memory"))
             implementation(project(":openai-impl-client-test"))
             implementation(project(":utils-kotlinx-io-coroutines-impl"))
             implementation(libs.kotlinx.coroutines.test)

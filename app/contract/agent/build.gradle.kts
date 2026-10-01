@@ -8,7 +8,7 @@ kotlin {
             api(project(":agent-storage-clean-models"))
             api(project(":app-contract-history"))
             api(project(":openai-spec-models"))
-            api(project(":rpc-models"))
+            api(project(":rpc-spec-models"))
             api(project(":tool-spec-request-user-input"))
             api(project(":tool-spec-multi-agent"))
             api(project(":tool-spec-unified-exec"))

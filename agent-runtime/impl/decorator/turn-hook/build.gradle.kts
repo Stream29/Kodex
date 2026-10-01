@@ -8,10 +8,10 @@ kotlin {
             api(project(":agent-runtime-spec-decorator-turn-hook"))
             api(project(":agent-runtime-spec-contract"))
             api(project(":agent-storage-contract"))
-            api(project(":hook-contract"))
+            api(project(":hook-spec-hooks"))
             api(libs.kotlin.logging)
             api(libs.kotlinx.coroutines.core)
-            implementation(project(":agent-context-prompt-dsl"))
+            implementation(project(":agent-context-spec-prompt-dsl"))
         }
         commonTest.dependencies {
             implementation(project(":agent-runtime-impl-decorator-compact"))
