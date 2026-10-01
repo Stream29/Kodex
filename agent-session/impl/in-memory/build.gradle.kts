@@ -5,22 +5,18 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-session-contract"))
-            api(project(":utils-kotlinx-io-coroutines-impl"))
+            api(project(":agent-session-spec-contract"))
             api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-runtime-impl-composition"))
             implementation(project(":agent-state-impl"))
-            implementation(project(":agent-storage-impl-filesystem"))
+            implementation(project(":agent-storage-impl-in-memory"))
             implementation(project(":utils-coroutines-spec"))
-            implementation(project(":utils-filesystem-lease-impl"))
-            implementation(project(":utils-read-write-mutex-impl"))
-            implementation(libs.cache4k)
         }
         commonTest.dependencies {
-            implementation(project(":openai-impl-client-test"))
             implementation(project(":agent-storage-spec-contract-ext"))
-            implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
+            implementation(project(":openai-impl-client-test"))
+            implementation(project(":openai-spec-json-codec"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

@@ -6,7 +6,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":agent-runtime-spec-contract"))
-            api(project(":agent-session-contract"))
+            api(project(":agent-session-spec-contract"))
             api(project(":agent-state-contract"))
             implementation(project(":agent-runtime-impl-decorator-compact"))
             implementation(project(":agent-runtime-impl-decorator-steer"))

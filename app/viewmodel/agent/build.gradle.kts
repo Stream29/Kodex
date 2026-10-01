@@ -16,7 +16,7 @@ kotlin {
             implementation(project(":utils-rpc-exception-spec"))
         }
         commonTest.dependencies {
-            implementation(project(":agent-session-in-memory"))
+            implementation(project(":agent-session-impl-in-memory"))
             implementation(project(":agent-session-test"))
             implementation(project(":agent-storage-impl-in-memory"))
             implementation(project(":utils-coroutines-spec"))

@@ -14,7 +14,7 @@ kotlin {
         implementation(project(":app-migration-impl"))
         implementation(project(":utils-kotlinx-io-coroutines-impl"))
         implementation(project(":utils-coroutines-spec"))
-        implementation(project(":agent-session-filesystem"))
+        implementation(project(":agent-session-impl-filesystem"))
         implementation(project(":agent-session-test"))
         implementation(project(":agent-storage-spec-contract-ext"))
     }

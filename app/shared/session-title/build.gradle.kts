@@ -15,7 +15,7 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {
-            implementation(project(":agent-session-in-memory"))
+            implementation(project(":agent-session-impl-in-memory"))
             implementation(project(":agent-session-test"))
             implementation(project(":agent-storage-spec-contract"))
             implementation(project(":agent-storage-spec-contract-ext"))

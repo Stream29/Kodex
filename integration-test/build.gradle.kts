@@ -17,7 +17,7 @@ kotlin {
             implementation(project(":agent-context-impl-prefix-render"))
             implementation(project(":agent-runtime-impl-decorator-compact"))
             implementation(project(":agent-runtime-impl-composition"))
-            implementation(project(":agent-session-filesystem"))
+            implementation(project(":agent-session-impl-filesystem"))
             implementation(project(":agent-state-impl"))
             implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-spec-contract"))

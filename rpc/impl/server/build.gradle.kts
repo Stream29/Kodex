@@ -5,7 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-session-contract"))
+            api(project(":agent-session-spec-contract"))
             api(project(":utils-rpc-exception-spec"))
             api(libs.kotlinx.coroutines.core)
             implementation(project(":utils-coroutines-spec"))
@@ -20,13 +20,13 @@ kotlin {
             api(project(":rpc-spec-contract"))
             implementation(project(":app-shared-session-title"))
             implementation(project(":agent-storage-spec-contract-ext"))
-            implementation(project(":agent-session-filesystem"))
+            implementation(project(":agent-session-impl-filesystem"))
             implementation(project(":openai-impl-client"))
             implementation(libs.kotlin.logging)
         }
         commonTest.dependencies {
-            implementation(project(":agent-session-in-memory"))
-            implementation(project(":agent-session-filesystem"))
+            implementation(project(":agent-session-impl-in-memory"))
+            implementation(project(":agent-session-impl-filesystem"))
             implementation(project(":agent-session-test"))
             implementation(project(":agent-storage-spec-contract-ext"))
             implementation(project(":openai-impl-client-test"))
