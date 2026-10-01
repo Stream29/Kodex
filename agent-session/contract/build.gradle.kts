@@ -7,7 +7,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-context-spec-contract"))
             api(project(":agent-runtime-spec-contract"))
-            api(project(":agent-storage-contract"))
+            api(project(":agent-storage-spec-contract"))
             api(project(":hook-spec-hooks"))
             api(project(":mcp-spec-contract"))
             api(project(":openai-spec-client"))

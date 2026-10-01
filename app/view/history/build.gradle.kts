@@ -9,7 +9,7 @@ kotlin {
             api(project(":app-contract-history"))
         }
         commonTest.dependencies {
-            implementation(project(":agent-storage-in-memory"))
+            implementation(project(":agent-storage-impl-in-memory"))
         }
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))
@@ -20,7 +20,7 @@ kotlin {
         mosaicTest.dependencies {
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
-            implementation(project(":agent-storage-contract-ext"))
+            implementation(project(":agent-storage-spec-contract-ext"))
             implementation(project(":app-viewmodel-history"))
             implementation(project(":utils-coroutines-spec"))
             implementation(libs.mosaic.testing)

@@ -5,7 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-storage-clean-models"))
+            api(project(":agent-storage-spec-clean-models"))
             api(project(":app-contract-history"))
             api(project(":openai-spec-models"))
             api(project(":rpc-spec-models"))

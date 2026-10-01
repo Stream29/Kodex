@@ -5,10 +5,10 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-storage-contract"))
+            api(project(":agent-storage-spec-contract"))
         }
         commonTest.dependencies {
-            implementation(project(":agent-storage-in-memory"))
+            implementation(project(":agent-storage-impl-in-memory"))
         }
     }
 }

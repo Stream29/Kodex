@@ -7,7 +7,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-state-contract"))
             api(project(":agent-context-spec-contract"))
-            api(project(":agent-storage-contract-ext"))
+            api(project(":agent-storage-spec-contract-ext"))
             api(project(":mcp-spec-contract"))
             api(project(":openai-spec-client"))
             api(libs.kotlinx.coroutines.core)
@@ -19,7 +19,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(project(":agent-context-impl-prefix-render"))
-            implementation(project(":agent-storage-in-memory"))
+            implementation(project(":agent-storage-impl-in-memory"))
             implementation(project(":openai-impl-client-test"))
             implementation(project(":tool-impl-current-time"))
             implementation(project(":utils-kotlinx-io-coroutines-impl"))

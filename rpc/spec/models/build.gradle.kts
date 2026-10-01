@@ -6,7 +6,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-storage-clean-models"))
+            api(project(":agent-storage-spec-clean-models"))
             api(project(":app-shared-settings-contract"))
             api(libs.kotlinx.serialization.core)
         }

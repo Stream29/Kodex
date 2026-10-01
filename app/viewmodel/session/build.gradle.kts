@@ -13,7 +13,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(project(":app-test-support-rpc"))
-            implementation(project(":agent-storage-contract-ext"))
+            implementation(project(":agent-storage-spec-contract-ext"))
             implementation(project(":agent-session-filesystem"))
             implementation(project(":app-viewmodel-agent"))
             implementation(project(":app-viewmodel-history"))

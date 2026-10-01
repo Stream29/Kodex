@@ -8,7 +8,7 @@ kotlin {
             implementation(project(":app-test-support-rpc"))
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
-            implementation(project(":agent-storage-contract"))
+            implementation(project(":agent-storage-spec-contract"))
             implementation(project(":app-shared-auth-contract"))
             implementation(project(":app-shared-settings-contract"))
             implementation(project(":app-viewmodel-new-session"))

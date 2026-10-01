@@ -20,6 +20,7 @@ kotlin {
         commonTest.dependencies {
             implementation(project(":openai-spec-json-codec"))
             implementation(project(":utils-patch-impl"))
+            implementation(project(":utils-kotlinx-io-coroutines-impl"))
         }
     }
 }

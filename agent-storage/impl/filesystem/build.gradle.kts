@@ -20,13 +20,13 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-storage-contract"))
+            api(project(":agent-storage-spec-contract"))
             api(project(":utils-kotlinx-io-coroutines-impl"))
             api(libs.kotlinx.serialization.json)
             implementation(project(":openai-spec-json-codec"))
         }
         commonTest.dependencies {
-            implementation(project(":agent-storage-contract-ext"))
+            implementation(project(":agent-storage-spec-contract-ext"))
         }
     }
 }

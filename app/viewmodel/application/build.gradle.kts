@@ -37,7 +37,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(project(":app-test-support-rpc"))
-            implementation(project(":agent-storage-contract-ext"))
+            implementation(project(":agent-storage-spec-contract-ext"))
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
             implementation(project(":app-shared-auth-contract"))

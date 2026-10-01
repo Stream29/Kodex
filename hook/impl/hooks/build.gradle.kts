@@ -11,7 +11,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":hook-spec-hooks"))
-            api(project(":agent-storage-contract"))
+            api(project(":agent-storage-spec-contract"))
             api(libs.kotlinx.coroutines.core)
             implementation(project(":utils-coroutines-spec"))
             implementation(project(":utils-shell-client-impl"))

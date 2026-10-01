@@ -16,6 +16,6 @@ kotlin {
         implementation(project(":utils-coroutines-spec"))
         implementation(project(":agent-session-filesystem"))
         implementation(project(":agent-session-test"))
-        implementation(project(":agent-storage-contract-ext"))
+        implementation(project(":agent-storage-spec-contract-ext"))
     }
 }

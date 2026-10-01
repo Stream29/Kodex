@@ -7,7 +7,7 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.kotlin.logging)
             implementation(project(":agent-state-contract"))
-            implementation(project(":agent-storage-contract"))
+            implementation(project(":agent-storage-spec-contract"))
             implementation(project(":app-contract-history"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(project(":utils-coroutines-spec"))
@@ -17,8 +17,8 @@ kotlin {
             implementation(project(":openai-spec-json-codec"))
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
-            implementation(project(":agent-storage-contract-ext"))
-            implementation(project(":agent-storage-in-memory"))
+            implementation(project(":agent-storage-spec-contract-ext"))
+            implementation(project(":agent-storage-impl-in-memory"))
         }
     }
 }

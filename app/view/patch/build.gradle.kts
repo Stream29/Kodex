@@ -5,7 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-storage-clean-models"))
+            api(project(":agent-storage-spec-clean-models"))
         }
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))

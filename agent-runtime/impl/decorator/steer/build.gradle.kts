@@ -13,7 +13,7 @@ kotlin {
         commonTest.dependencies {
             implementation(project(":agent-state-impl"))
             implementation(project(":agent-state-test"))
-            implementation(project(":agent-storage-in-memory"))
+            implementation(project(":agent-storage-impl-in-memory"))
             implementation(project(":openai-impl-client-test"))
             implementation(project(":utils-coroutines-spec"))
         }
