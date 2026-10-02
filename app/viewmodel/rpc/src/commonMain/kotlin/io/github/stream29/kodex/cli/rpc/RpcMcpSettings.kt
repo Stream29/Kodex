@@ -2,6 +2,8 @@ package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.app.settings.toSettingsState
 import io.github.stream29.kodex.app.settings.contract.McpServerSettingsState
+import io.github.stream29.kodex.app.mcpsettings.McpImportHandle
+import io.github.stream29.kodex.app.mcpsettings.McpWriteAdmission
 import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
 import io.github.stream29.kodex.mcp.contract.McpImportDecision
 import io.github.stream29.kodex.mcp.contract.McpImportItem
@@ -33,7 +35,6 @@ public class RpcMcpSettings(
         .map { values -> values.map { it.toSettingsState() } }
         .stateIn(local, SharingStarted.Eagerly, global.mcp.value.map { it.toSettingsState() })
     private var nextPreview = 0L
-    private var preview: Import? = null
 
     /** Capture before opening a delayed dialog, not when its submit coroutine finally runs. */
     public fun capture(): Map<String, McpServerConfiguration> {
@@ -81,25 +82,37 @@ public class RpcMcpSettings(
         )
     }
 
-    public suspend fun readImport(): McpImportPreview {
+    public suspend fun readImport(
+        accept: (suspend () -> Unit) -> Boolean,
+    ): McpImportHandle {
         owner.ensureActive()
         val baseline = capture()
         val candidates = rpc.getCodexMcpSettings()
         owner.ensureActive()
         check(nextPreview < Long.MAX_VALUE)
         val value = Import(++nextPreview, candidates, baseline)
-        preview = value
-        return value.present("")
+        return object : McpImportHandle {
+            private var released = false
+            override val preview: McpImportPreview = value.present("")
+            override fun filter(filter: String): McpImportPreview = value.present(filter)
+            override fun apply(decisions: Map<String, McpImportDecision>): McpWriteAdmission {
+                if (released) return McpWriteAdmission.Rejected("The import preview is no longer active.")
+                val capturedDecisions = decisions.toMap()
+                val accepted = accept {
+                    check(applyImport(value, capturedDecisions)) {
+                        "The import target changed. Open a new preview."
+                    }
+                }
+                if (accepted) released = true
+                return if (accepted) McpWriteAdmission.Accepted
+                else McpWriteAdmission.Rejected("Settings is no longer accepting edits.")
+            }
+            override fun release() { released = true }
+        }
     }
 
-    public fun filterImport(id: Long, filter: String): McpImportPreview? {
+    private suspend fun applyImport(value: Import, decisions: Map<String, McpImportDecision>): Boolean {
         owner.ensureActive()
-        return preview?.takeIf { it.id == id }?.present(filter)
-    }
-
-    public suspend fun applyImport(id: Long, decisions: Map<String, McpImportDecision>): Boolean {
-        owner.ensureActive()
-        val value = preview?.takeIf { it.id == id } ?: return false
         val selected = decisions.filterValues { it != McpImportDecision.Skip }
         val configurations = selected.mapValues { (name, decision) ->
             val candidate = value.candidates.singleOrNull { it.serverName == name } as? McpCodexImportCandidate.Supported
@@ -115,15 +128,13 @@ public class RpcMcpSettings(
             { current -> current.copy(mcpServers = current.mcpServers + configurations) },
             {
                 owner.ensureActive(); global.ensureActive()
-                check(preview === value) { "The import preview expired." }
             },
-        ).also { if (it && preview === value) preview = null }
+        )
     }
 
     public suspend fun reconnect(name: String) { owner.ensureActive(); rpc.reconnectMcpServer(name) }
     public suspend fun logout(name: String) { owner.ensureActive(); rpc.logoutMcpServer(name) }
-    public fun dismissImport() { preview = null }
-    override fun close() { preview = null; owner.cancel() }
+    override fun close() { owner.cancel() }
 }
 
 private class Import(

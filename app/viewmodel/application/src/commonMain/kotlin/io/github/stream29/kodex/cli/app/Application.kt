@@ -87,7 +87,7 @@ public suspend fun <R> withKodexApplication(
                     val settings = RpcGlobalSettings.open(services.global, frontendStore, frontendScope, applicationWidth ?: 0)
                         .also { global = it }
                     lateinit var root: ApplicationViewModelImpl
-                    val sessionViews = RpcSessionViews(frontendScope, services) { created ->
+                    val sessionViews = RpcSessionViews(frontendScope, services, settings.models) { created ->
                         frontendScope.launch {
                             try { root.openCreatedSessions(created.map { it.sessionIndex }) }
                             catch (cancelled: CancellationException) { throw cancelled }

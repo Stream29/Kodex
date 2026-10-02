@@ -15,6 +15,9 @@ import io.github.stream29.kodex.app.sessionrename.contract.SessionRenameViewMode
 import io.github.stream29.kodex.app.application.contract.RenameSessionPopupViewModel
 import io.github.stream29.kodex.app.application.contract.WorkingDirectoryPopupViewModel
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
+import io.github.stream29.kodex.app.workingdirectory.createWorkingDirectoryViewModel
+import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryDependencies
+import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory
@@ -265,9 +268,10 @@ internal class ApplicationViewModelImpl(
         requireOwned(target)
         installPopup(
             ApplicationPopupState.WorkingDirectory(
-                WorkingDirectoryPopupViewModelImpl(
+                ApplicationWorkingDirectoryAdapter(
                     target = target,
                     picker = createDirectoryPicker(target.settings.value.cwd),
+                    dependencies = WorkingDirectoryDependencies(target::updateWorkingDirectory),
                 ),
             ),
         )
@@ -285,17 +289,10 @@ internal class ApplicationViewModelImpl(
             ?: return@withLock null
         installPopup(
             ApplicationPopupState.WorkingDirectory(
-                WorkingDirectoryPopupViewModelImpl(
+                ApplicationWorkingDirectoryAdapter(
                     target = target,
                     picker = createDirectoryPicker(pending.configuration.cwd),
-                    onSelectDirectory = { directory ->
-                        val current = suggestion.state.value as? SuggestSubagentTaskState.Pending
-                        if (current != null && current.callId == callId && !current.submitting) {
-                            suggestion.updateConfiguration(
-                                callId, current.configuration.copy(cwd = directory),
-                            )
-                        }
-                    },
+                    dependencies = bindSuggestedWorkingDirectory(suggestion, callId),
                 ),
             ),
         )
@@ -456,25 +453,12 @@ private class ApplicationSessionRenameAdapter(
     ),
 ) : RenameSessionPopupViewModel, SessionRenameViewModel by child
 
-private class WorkingDirectoryPopupViewModelImpl(
+private class ApplicationWorkingDirectoryAdapter(
     override val target: AgentSettingsViewModel,
-    override val picker: DirectoryPickerViewModel,
-    private val onSelectDirectory: suspend (Path) -> Unit = target::updateWorkingDirectory,
-) : WorkingDirectoryPopupViewModel {
-    private var closed = false
-
-    override suspend fun select(directory: Path) {
-        check(!closed) { "Working-directory popup is closed." }
-        onSelectDirectory(directory)
-        close()
-    }
-
-    override fun close() {
-        if (closed) return
-        closed = true
-        picker.close()
-    }
-}
+    picker: DirectoryPickerViewModel,
+    dependencies: WorkingDirectoryDependencies,
+    private val child: WorkingDirectoryViewModel = createWorkingDirectoryViewModel(picker, dependencies),
+) : WorkingDirectoryPopupViewModel, WorkingDirectoryViewModel by child
 
 private fun ApplicationPopupState.Open.closeChild() {
     when (this) {

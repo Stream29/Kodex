@@ -24,6 +24,18 @@ import kotlinx.rpc.RpcCall
 import kotlin.test.*
 import kotlin.time.Instant
 
+private fun queueHook(page: RpcGlobalEditor, hook: NotificationHook) {
+    val child = page.hookSettings
+    child.add()
+    val editing = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Editing>(
+        child.state.value.dialog,
+    )
+    child.updateDraft(editing.token, io.github.stream29.kodex.app.hooksettings.HookEditorDraft(
+        name = hook.name, command = hook.command, types = hook.types,
+    ))
+    child.save(editing.token)
+}
+
 val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
     test("field retries merge unrelated changes and do not publish a successful reply") {
         runTest {
@@ -176,7 +188,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                         it.newLineKey == NewLineKey.Enter && it.sidebars.leftWidth == 19
                 }
                 val hook = NotificationHook("local", setOf(NotificationHookType.StopUnhandledError), "echo error")
-                page.saveHook(null, hook)
+                queueHook(page, hook)
                 global.frontend.settings.first { it.hooks == listOf(hook) }
                 val loaded = openCliFrontendSettings(home)
                 assertEquals(NewLineKey.Enter, loaded.settings.value.newLineKey)
@@ -260,14 +272,90 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
             val page = RpcGlobalEditor(global, services.global, this)
             try {
-                page.addMcpServer(McpServerDraft.StreamableHttp(
-                    "after-close", enabled = false, McpStreamableHttpDraft("https://example.invalid/mcp"),
+                page.mcpSettings.add()
+                val editing = assertIs<io.github.stream29.kodex.app.mcpsettings.McpSettingsDialog.Editing>(
+                    page.mcpSettings.state.value.dialog,
+                )
+                page.mcpSettings.updateDraft(editing.token, editing.draft.copy(
+                    name = "after-close", enabled = false, httpUrl = "https://example.invalid/mcp",
                 ))
+                page.mcpSettings.save(editing.token)
                 entered.await()
                 page.close()
                 proceed.complete(Unit)
                 global.settings.first { "after-close" in it.mcpServers }
                 assertNotNull(services.global.getSettings().mcpServers["after-close"])
+            } finally { proceed.complete(Unit); page.close(); global.close(); global.join() }
+        }
+    }
+    test("accepted MCP import retains candidates across hiding and closing its component") {
+        frontend {
+            val entered = CompletableDeferred<Unit>()
+            val proceed = CompletableDeferred<Unit>()
+            val candidate = McpServerConfiguration.StreamableHttp("https://example.invalid/import", enabled = false)
+            val rpc = object : GlobalRpc by services.global {
+                override suspend fun getCodexMcpSettings(): List<McpCodexImportCandidate> =
+                    listOf(McpCodexImportCandidate.Supported("imported", candidate))
+                override suspend fun compareAndSetSettings(expect: BackendSettings, update: BackendSettings): Boolean {
+                    entered.complete(Unit)
+                    proceed.await()
+                    return services.global.compareAndSetSettings(expect, update)
+                }
+            }
+            val global = RpcGlobalSettings.open(rpc, openCliFrontendSettings(home), this, 80)
+            val page = RpcGlobalEditor(global, rpc, this)
+            try {
+                val child = page.mcpSettings
+                child.importCodex()
+                val ready = child.state.first {
+                    it.dialog is io.github.stream29.kodex.app.mcpsettings.McpSettingsDialog.ImportPreview
+                }
+                val preview = assertIs<io.github.stream29.kodex.app.mcpsettings.McpSettingsDialog.ImportPreview>(ready.dialog)
+                child.applyImport(preview.token)
+                entered.await()
+                child.hidePage()
+                page.close()
+                proceed.complete(Unit)
+                global.settings.first { it.mcpServers["imported"] == candidate }
+                assertEquals(candidate, services.global.getSettings().mcpServers["imported"])
+                assertFalse(global.operationFailure.value)
+            } finally { proceed.complete(Unit); page.close(); global.close(); global.join() }
+        }
+    }
+    test("MCP and Hook children preserve shared admission order after popup close") {
+        frontend {
+            val entered = CompletableDeferred<Unit>()
+            val proceed = CompletableDeferred<Unit>()
+            val rpc = object : GlobalRpc by services.global {
+                override suspend fun compareAndSetSettings(expect: BackendSettings, update: BackendSettings): Boolean {
+                    entered.complete(Unit)
+                    proceed.await()
+                    return services.global.compareAndSetSettings(expect, update)
+                }
+            }
+            val store = openCliFrontendSettings(home)
+            val global = RpcGlobalSettings.open(rpc, store, this, 80)
+            val page = RpcGlobalEditor(global, rpc, this)
+            val hook = NotificationHook("queued-after-mcp", setOf(NotificationHookType.StopAssistantMessage), "echo ordered")
+            try {
+                val child = page.mcpSettings
+                child.add()
+                val editor = assertIs<io.github.stream29.kodex.app.mcpsettings.McpSettingsDialog.Editing>(
+                    child.state.value.dialog,
+                )
+                child.updateDraft(editor.token, editor.draft.copy(
+                    name = "ordered", enabled = false, httpUrl = "https://example.invalid/ordered",
+                ))
+                child.save(editor.token)
+                entered.await()
+                queueHook(page, hook)
+                page.close()
+                // A per-component queue would write Hook while the earlier MCP CAS is blocked.
+                assertTrue(store.settings.value.hooks.isEmpty())
+                proceed.complete(Unit)
+                store.settings.first { it.hooks == listOf(hook) }
+                global.settings.first { "ordered" in it.mcpServers }
+                assertFalse(global.operationFailure.value)
             } finally { proceed.complete(Unit); page.close(); global.close(); global.join() }
         }
     }
@@ -278,7 +366,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             val page = RpcGlobalEditor(global, services.global, this)
             val hook = NotificationHook("after-close", setOf(NotificationHookType.StopAssistantMessage), "echo kept")
             try {
-                page.saveHook(null, hook)
+                queueHook(page, hook)
                 page.close()
                 store.settings.first { it.hooks == listOf(hook) }
                 assertEquals(listOf(hook), openCliFrontendSettings(home).settings.value.hooks)
@@ -388,9 +476,13 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             val global = RpcGlobalSettings.open(rpc, openCliFrontendSettings(home), this, 80)
             val mcp = RpcMcpSettings(global, rpc, this)
             try {
-                val preview = mcp.readImport()
-                assertEquals(McpImportItemKind.Conflict, preview.items.single().kind)
-                assertTrue(mcp.applyImport(preview.id, mapOf("remote" to McpImportDecision.Replace)))
+                var write: (suspend () -> Unit)? = null
+                val imported = mcp.readImport { write = it; true }
+                assertEquals(McpImportItemKind.Conflict, imported.preview.items.single().kind)
+                assertSame(io.github.stream29.kodex.app.mcpsettings.McpWriteAdmission.Accepted,
+                    imported.apply(mapOf("remote" to McpImportDecision.Replace)))
+                imported.release()
+                requireNotNull(write).invoke()
                 assertEquals(0, reconnects)
                 assertEquals(existing, services.global.getSettings().mcpServers["remote"])
                 mcp.servers.first { it.singleOrNull()?.status == McpServerSettingsStatus.Disabled }

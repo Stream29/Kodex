@@ -13,6 +13,7 @@ import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskViewModel
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskSubmissionResult
 import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskPanel
+import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskConfigurationMenus
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -46,7 +47,7 @@ val suggestedConfigurationTest by testSuite {
                 Path("."), configuration.requestUserInputMode,
             ),
         )
-        val viewModel = object : SuggestSubagentTaskViewModel {
+        val viewModel = object : io.github.stream29.kodex.app.test.SuggestionTestViewModel() {
             override val state = MutableStateFlow<SuggestSubagentTaskState>(pending)
             override fun updateFeedback(callId: String, text: String) = false
             override fun updateConfiguration(callId: String, configuration: SuggestedSessionConfiguration) = false
@@ -57,24 +58,17 @@ val suggestedConfigurationTest by testSuite {
         }
         runMosaicTest {
             setContentAndSnapshot {
-                val dropdowns = RuntimeConfigurationDropdowns.remember(Unit)
+                val dropdowns = io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns.remember(viewModel, pending.callId)
                 TuiPopupHost(Modifier.width(90).height(25)) {
                     Row {
                         Spacer(Modifier.width(7))
                         Column {
                             Spacer(Modifier.height(4))
-                            SuggestSubagentTaskPanel(viewModel, pending, columns = 70, rows = 12) {
-                                SuggestedConfigurationTriggers(
-                                    70, configuration, Path("."), dropdowns, enabled = true, onBrowse = {},
-                                )
-                            }
+                            SuggestSubagentTaskPanel(viewModel, pending, columns = 70, rows = 12,
+                                dropdowns = dropdowns, onBrowseWorkingDirectory = {})
                         }
                     }
-                    RuntimeConfigurationMenus(
-                        configuration, emptyList(), listOf(configuration.model), dropdowns,
-                        onConfigurationSelected = { _, _, _ -> },
-                        onRequestUserInputModeSelected = {},
-                    )
+                    SuggestSubagentTaskConfigurationMenus(viewModel, pending, dropdowns)
                 }
             }
             repeat(50) {
@@ -106,12 +100,26 @@ private val configuration = RuntimeConfiguration(
 )
 
 private suspend fun verifyWidth(columns: Int, sameRow: Boolean) {
+    val pending = SuggestSubagentTaskState.Pending(
+        callId = "layout",
+        arguments = SuggestSubagentTaskArgs(listOf(SuggestedSubagentTask("Task", "Prompt"))),
+        configuration = SuggestedSessionConfiguration(
+            configuration.model, configuration.reasoning, configuration.tier,
+            Path("."), configuration.requestUserInputMode,
+        ),
+    )
+    val model = object : io.github.stream29.kodex.app.test.SuggestionTestViewModel() {
+        override val state = MutableStateFlow<SuggestSubagentTaskState>(pending)
+        override fun updateFeedback(callId: String, text: String) = false
+        override fun updateConfiguration(callId: String, configuration: SuggestedSessionConfiguration) = false
+        override suspend fun submit(callId: String, expectedRevision: Long, accepted: Boolean) =
+            SuggestSubagentTaskSubmissionResult.Stale
+        override fun close() = Unit
+    }
     runMosaicTest {
         val snapshot = setContentAndSnapshot {
-            SuggestedConfigurationTriggers(
-                columns, configuration, Path("."), RuntimeConfigurationDropdowns.remember(Unit),
-                enabled = true, onBrowse = {},
-            )
+            val dropdowns = io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns.remember(model, pending.callId)
+            SuggestSubagentTaskPanel(model, pending, columns, 15, dropdowns, {})
         }
         val lines = snapshot.lines()
         val modelRow = lines.indexOfFirst { "[test low]" in it }

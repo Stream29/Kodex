@@ -25,6 +25,7 @@ import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.cli.agent.RequestUserInputPanel
 import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskPanel
+import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskConfigurationMenus
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
@@ -151,7 +152,7 @@ val docsRecordingTest by testSuite {
             ),
         )
         var decision: Boolean? = null
-        val model = object : SuggestSubagentTaskViewModel {
+        val model = object : io.github.stream29.kodex.app.test.SuggestionTestViewModel() {
             override val state = MutableStateFlow<SuggestSubagentTaskState>(initial)
             override fun updateFeedback(callId: String, text: String): Boolean {
                 val current = state.value as SuggestSubagentTaskState.Pending
@@ -171,32 +172,21 @@ val docsRecordingTest by testSuite {
             override fun close() = Unit
         }
         val clip = DocsClip("suggestions")
+        model.models.value = listOf(ModelInfo(
+            initial.configuration.model, "Offline model fixture",
+            supportedReasoningLevels = listOf(
+                ReasoningEffortPreset(ReasoningEffort.Medium, "Medium"),
+                ReasoningEffortPreset(ReasoningEffort.High, "High"),
+            ),
+        ))
         runMosaicTest(MosaicSnapshots) {
             setContentAndSnapshot {
                 val state by model.state.collectAsState()
                 val pending = state as SuggestSubagentTaskState.Pending
-                val c = pending.configuration
-                val configuration = RuntimeConfiguration(c.model, c.reasoningEffort, c.serviceTier, c.requestUserInputMode)
-                val dropdowns = RuntimeConfigurationDropdowns.remember(model)
+                val dropdowns = io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns.remember(model, pending.callId)
                 TuiPopupHost(Modifier.width(80).height(18)) {
-                    SuggestSubagentTaskPanel(model, pending, 80, 18) {
-                        SuggestedConfigurationTriggers(80, configuration, c.cwd, dropdowns, true, {})
-                    }
-                    RuntimeConfigurationMenus(
-                        configuration, listOf(ModelInfo(
-                            c.model, "Offline model fixture",
-                            supportedReasoningLevels = listOf(
-                                ReasoningEffortPreset(ReasoningEffort.Medium, "Medium"),
-                                ReasoningEffortPreset(ReasoningEffort.High, "High"),
-                            ),
-                        )), listOf(c.model), dropdowns,
-                        onConfigurationSelected = { m, r, t ->
-                            model.updateConfiguration(pending.callId, c.copy(model = m, reasoningEffort = r, serviceTier = t))
-                        },
-                        onRequestUserInputModeSelected = { mode ->
-                            model.updateConfiguration(pending.callId, c.copy(requestUserInputMode = mode))
-                        },
-                    )
+                    SuggestSubagentTaskPanel(model, pending, 80, 18, dropdowns, {})
+                    SuggestSubagentTaskConfigurationMenus(model, pending, dropdowns)
                 }
             }
             clip.add(settle(), "Review tests")
@@ -273,7 +263,9 @@ val docsRecordingTest by testSuite {
                         AgentRuntimeScreen(
                             model, 80, 18, NewLineKey.ShiftEnter,
                             RuntimeConfigurationDropdowns.remember(model),
-                            RuntimeConfigurationDropdowns.remember("suggestions"),
+                            io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns.remember(
+                                model.suggestSubagentTask, null,
+                            ),
                             { _, _, _, _, _ -> }, {}, {}, {},
                         )
                     }

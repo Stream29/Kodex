@@ -29,6 +29,7 @@ import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.cli.agent.RequestUserInputPanel
 import io.github.stream29.kodex.cli.agent.canEditHistory
 import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskPanel
+import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns
 import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
@@ -47,7 +48,7 @@ internal fun AgentRuntimeScreen(
     rows: Int,
     newLineKey: NewLineKey,
     dropdowns: RuntimeConfigurationDropdowns,
-    suggestionDropdowns: RuntimeConfigurationDropdowns,
+    suggestionDropdowns: SuggestSubagentTaskDropdowns,
     onOpenHistoryEntryContextMenu: (
         generation: Long,
         storageIndex: Int,
@@ -152,27 +153,13 @@ internal fun AgentRuntimeScreen(
         }
         pendingSuggestion?.let { pending ->
             if (requestUserInputRows > 0) {
-                val configuration = RuntimeConfiguration(
-                    pending.configuration.model,
-                    pending.configuration.reasoningEffort,
-                    pending.configuration.serviceTier,
-                    pending.configuration.requestUserInputMode,
-                )
                 SuggestSubagentTaskPanel(
                     viewModel = viewModel.suggestSubagentTask,
                     state = pending,
                     columns = columns,
                     rows = requestUserInputRows,
-                    configurationContent = {
-                        SuggestedConfigurationTriggers(
-                            columns = columns,
-                            configuration = configuration,
-                            cwd = pending.configuration.cwd,
-                            dropdowns = suggestionDropdowns,
-                            enabled = !pending.submitting,
-                            onBrowse = { onBrowseSuggestedWorkingDirectory(pending.callId) },
-                        )
-                    },
+                    dropdowns = suggestionDropdowns,
+                    onBrowseWorkingDirectory = onBrowseSuggestedWorkingDirectory,
                 )
             }
         }

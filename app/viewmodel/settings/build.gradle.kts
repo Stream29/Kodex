@@ -5,6 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":app-component-working-directory-impl-viewmodel"))
             api(project(":app-contract-settings"))
             implementation(project(":app-component-path-picker-spec"))
             implementation(project(":app-shared-session-title"))

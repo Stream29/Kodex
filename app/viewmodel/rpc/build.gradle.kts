@@ -5,6 +5,10 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":app-component-request-user-input-impl-viewmodel"))
+            implementation(project(":app-component-suggest-subagent-task-impl-viewmodel"))
+            implementation(project(":app-component-hook-settings-impl-viewmodel"))
+            implementation(project(":app-component-mcp-settings-impl-viewmodel"))
             api(project(":app-component-openai-login-spec"))
             implementation(project(":app-component-openai-login-impl-viewmodel"))
             implementation(project(":app-component-session-catalog-impl-viewmodel"))

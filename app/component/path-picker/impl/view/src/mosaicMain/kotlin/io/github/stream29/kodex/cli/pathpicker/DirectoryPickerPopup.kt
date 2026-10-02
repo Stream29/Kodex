@@ -54,17 +54,34 @@ public fun BoxScope.DirectoryPickerPopup(
     onDismissRequest: () -> Unit,
     onDirectorySelected: (Path) -> Unit,
 ) {
+    DirectoryPickerPopup(viewModel, onDismissRequest, onDirectorySelected, closeOnDispose = true)
+}
+
+/**
+ * Explicit disposal-ownership variant. Set [closeOnDispose] false when an
+ * enclosing component owns/closes the child. Keep this choice fixed for the
+ * lifetime of one child; the three-argument overload retains standalone ownership.
+ */
+@Composable
+public fun BoxScope.DirectoryPickerPopup(
+    viewModel: DirectoryPickerViewModel,
+    onDismissRequest: () -> Unit,
+    onDirectorySelected: (Path) -> Unit,
+    closeOnDispose: Boolean,
+) {
     val terminal = LocalTerminalState.current
     DisposableEffect(viewModel) {
-        onDispose(viewModel::close)
+        onDispose { if (closeOnDispose) viewModel.close() }
     }
     val state by viewModel.state.collectAsState()
     val currentOnDirectorySelected by rememberUpdatedState(onDirectorySelected)
+    val currentViewModel by rememberUpdatedState(viewModel)
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
             when (effect) {
-                is DirectoryPickerEffect.DirectorySelected ->
+                is DirectoryPickerEffect.DirectorySelected -> if (currentViewModel === viewModel) {
                     currentOnDirectorySelected(effect.directory)
+                }
             }
         }
     }

@@ -1,14 +1,13 @@
 package io.github.stream29.kodex.app.application.contract
 
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
-import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
+import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryViewModel
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
 import io.github.stream29.kodex.app.sessionrename.contract.SessionRenameViewModel
 import io.github.stream29.kodex.app.sessiondelete.contract.SessionDeleteViewModel
-import kotlinx.io.files.Path
 
 /**
  * The one application-level popup surface.
@@ -51,15 +50,10 @@ public sealed interface ApplicationPopupState {
     ) : Open
 }
 
-/** Captured settings target and directory-picker child for one cwd popup. */
-public interface WorkingDirectoryPopupViewModel : AutoCloseable {
+/** Application ownership adapter; behavior is defined by [WorkingDirectoryViewModel]. */
+public interface WorkingDirectoryPopupViewModel : WorkingDirectoryViewModel {
+    /** Captured owner used to dispose this exact popup when its Session/Agent closes. */
     public val target: AgentSettingsViewModel
-    public val picker: DirectoryPickerViewModel
-
-    /** Applies [directory] to the captured target, then closes this child. */
-    public suspend fun select(directory: Path): Unit
-
-    override fun close(): Unit
 }
 
 /** Application ownership adapter; interaction behavior is defined by [SessionRenameViewModel]. */

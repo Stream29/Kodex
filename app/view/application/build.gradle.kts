@@ -18,6 +18,9 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
         mosaicMain.dependencies {
+            implementation(project(":app-component-request-user-input-impl-view"))
+            implementation(project(":app-component-suggest-subagent-task-impl-view"))
+            implementation(project(":app-component-working-directory-impl-view"))
             implementation(project(":app-component-session-rename-impl-view"))
             implementation(project(":app-component-session-delete-impl-view"))
             implementation(project(":app-component-session-delete-impl-viewmodel"))
@@ -33,7 +36,6 @@ kotlin {
             implementation(project(":app-view-agent"))
             implementation(project(":app-view-components"))
             implementation(project(":app-view-history"))
-            implementation(project(":app-component-path-picker-impl-view"))
             implementation(project(":app-view-settings"))
             implementation(project(":openai-spec-models"))
             implementation(project(":utils-coroutines-spec"))

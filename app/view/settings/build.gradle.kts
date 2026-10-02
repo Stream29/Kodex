@@ -8,10 +8,12 @@ kotlin {
             api(project(":app-contract-settings"))
         }
         mosaicMain.dependencies {
+            implementation(project(":app-component-hook-settings-impl-view"))
+            implementation(project(":app-component-mcp-settings-impl-view"))
             implementation(project(":app-component-session-rename-impl-view"))
             implementation(project(":app-component-session-rename-impl-viewmodel"))
             implementation(project(":app-view-components"))
-            implementation(project(":app-component-path-picker-impl-view"))
+            implementation(project(":app-component-working-directory-impl-view"))
             implementation(project(":utils-external-url-impl"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.mosaic.runtime)

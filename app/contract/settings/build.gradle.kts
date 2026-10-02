@@ -6,6 +6,9 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            api(project(":app-component-hook-settings-spec"))
+            api(project(":app-component-mcp-settings-spec"))
+            api(project(":app-component-working-directory-spec"))
             api(project(":app-component-path-picker-spec"))
             api(project(":app-contract-session"))
             api(project(":app-shared-settings-contract"))

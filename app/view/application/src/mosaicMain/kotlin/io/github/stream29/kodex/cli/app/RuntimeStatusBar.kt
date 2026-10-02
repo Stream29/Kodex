@@ -179,21 +179,6 @@ private fun StatusBarLayout(
 }
 
 @Composable
-internal fun SuggestedConfigurationTriggers(
-    columns: Int,
-    configuration: RuntimeConfiguration,
-    cwd: Path,
-    dropdowns: RuntimeConfigurationDropdowns,
-    enabled: Boolean,
-    onBrowse: () -> Unit,
-) {
-    StatusBarLayout(columns = columns, regularContent = {
-        RuntimeConfigurationStatusItemsWithoutSpacing(configuration, dropdowns, enabled)
-        WorkingDirectoryStatusButton(columns, cwd, enabled, onBrowse)
-    })
-}
-
-@Composable
 private fun SettingsStatusButton(onOpenSettings: () -> Unit) {
     TuiButton(
         label = SettingsLabel,

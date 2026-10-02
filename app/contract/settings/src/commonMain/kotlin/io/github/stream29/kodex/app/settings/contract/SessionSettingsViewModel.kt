@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.app.settings.contract
 
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
+import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryViewModel
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.RequestUserInputMode
@@ -99,11 +100,20 @@ public sealed interface SessionSettingsState {
     }
 }
 
-/** One exact directory-picker child owned by Session Settings. */
+/**
+ * One reference-identity working-directory selection handle owned by Session
+ * Settings, bound to the source revision when it opened. Render [selection];
+ * use this exact handle for admission, not a newly resolved active Session.
+ *
+ * @throws IllegalArgumentException if the captured revision is negative.
+ */
 public class SessionWorkingDirectoryPicker(
     public val expectedRevision: Long,
-    public val viewModel: DirectoryPickerViewModel,
+    public val selection: WorkingDirectoryViewModel,
 ) {
+    /** Compatibility access to the browser; its lifetime is owned by [selection]. */
+    public val viewModel: DirectoryPickerViewModel
+        get() = selection.picker
     init {
         require(expectedRevision >= 0) {
             "A working-directory picker revision must not be negative."
@@ -142,15 +152,26 @@ public interface SessionSettingsViewModel : AutoCloseable {
         mode: RequestUserInputMode,
     ): Unit
 
+    /**
+     * Opens a fresh chooser only for the current editable snapshot at the
+     * expected revision and when a browser can be created. Replaces/closes the
+     * previous child. Closed, unavailable, stale or noneditable targets do nothing.
+     */
     public fun requestWorkingDirectory(expectedRevision: Long): Unit
 
-    /** Applies a directory only while [expected] is the current owned child. */
+    /**
+     * Consumes/closes [expected] only while it is the exact current owned handle,
+     * then attempts to enqueue a configuration update at its captured revision.
+     * Returns true for handle consumption, not persistence: a stale, unavailable
+     * or noneditable source may still cause no write. A stale handle returns
+     * false without closing a replacement child or changing configuration.
+     */
     public fun selectWorkingDirectory(
         expected: SessionWorkingDirectoryPicker,
         workingDirectory: Path,
     ): Boolean
 
-    /** Closes [expected] only while it is the current owned child. */
+    /** Closes/consumes only the exact current handle, with no configuration write. */
     public fun dismissWorkingDirectoryPicker(
         expected: SessionWorkingDirectoryPicker,
     ): Boolean

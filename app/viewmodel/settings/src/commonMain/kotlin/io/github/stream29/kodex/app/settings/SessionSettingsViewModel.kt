@@ -1,6 +1,8 @@
 package io.github.stream29.kodex.app.settings
 
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
+import io.github.stream29.kodex.app.workingdirectory.createWorkingDirectoryViewModel
+import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryDependencies
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsConfiguration
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsDataSource
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsDataState
@@ -86,13 +88,19 @@ internal class SessionSettingsViewModelImpl(
         val child = createDirectoryPicker(
             available.snapshot.configuration.workingDirectory,
         ) ?: return
-        val created = SessionWorkingDirectoryPicker(
+        lateinit var created: SessionWorkingDirectoryPicker
+        created = SessionWorkingDirectoryPicker(
             expectedRevision = expectedRevision,
-            viewModel = child,
+            selection = createWorkingDirectoryViewModel(
+                child,
+                WorkingDirectoryDependencies { directory ->
+                    selectWorkingDirectory(created, directory)
+                },
+            ),
         )
         val replaced = mutableDirectoryPicker.value
         mutableDirectoryPicker.value = created
-        replaced?.viewModel?.close()
+        replaced?.selection?.close()
     }
 
     override fun selectWorkingDirectory(
@@ -114,7 +122,7 @@ internal class SessionSettingsViewModelImpl(
         expected: SessionWorkingDirectoryPicker,
     ): Boolean {
         if (!mutableDirectoryPicker.compareAndSet(expected, null)) return false
-        expected.viewModel.close()
+        expected.selection.close()
         return true
     }
 
@@ -145,7 +153,7 @@ internal class SessionSettingsViewModelImpl(
     override fun close() {
         if (closed) return
         closed = true
-        mutableDirectoryPicker.value?.viewModel?.close()
+        mutableDirectoryPicker.value?.selection?.close()
         mutableDirectoryPicker.value = null
         effectChannel.close()
         if (cancelEditsOnClose) source.close()

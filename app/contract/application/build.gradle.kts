@@ -5,6 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            api(project(":app-component-working-directory-spec"))
             api(project(":app-component-session-rename-spec"))
             api(project(":app-component-session-delete-spec"))
             api(project(":app-component-openai-login-spec"))

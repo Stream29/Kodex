@@ -3,6 +3,8 @@ package io.github.stream29.kodex.cli.app
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
+import io.github.stream29.kodex.app.hooksettings.HookEditorDraft
+import io.github.stream29.kodex.app.hooksettings.HookSettingsDialog
 import io.github.stream29.kodex.app.test.testAnswer
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.rpc.models.*
@@ -21,8 +23,12 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
             val popup = app.viewModel.openSettingsPopup(session, SettingsPage.Hooks)
             val hook = NotificationHook("capture", NotificationHookType.entries.toSet(),
                 "cat >> notification.jsonl; printf '\\n' >> notification.jsonl")
-            popup.viewModel.global.addHook(hook)
-            popup.viewModel.global.hooks.first { it == listOf(hook) }
+            val hooks = popup.viewModel.global.hookSettings
+            hooks.add()
+            val editor = hooks.state.value.dialog as HookSettingsDialog.Editing
+            hooks.updateDraft(editor.token, HookEditorDraft(hook.name, hook.command, hook.types))
+            hooks.save(editor.token)
+            hooks.state.first { it.hooks == listOf(hook) }
             app.viewModel.dismissPopup(popup) // The single application consumer outlives the editor.
             val agent = requireNotNull(session.rootAgent.value)
             agent.submit(listOf(ContentItem.InputText("first")))

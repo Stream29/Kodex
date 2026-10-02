@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns
+import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskConfigurationMenus
+
 import io.github.stream29.kodex.cli.agent.canEditHistory
 
 import androidx.compose.runtime.Composable
@@ -61,7 +64,7 @@ import io.github.stream29.kodex.cli.components.items
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiColorSchemeFor
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
-import io.github.stream29.kodex.cli.pathpicker.DirectoryPickerPopup
+import io.github.stream29.kodex.cli.workingdirectory.WorkingDirectoryPopup
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.OpenAiLoginPopup
 import io.github.stream29.kodex.cli.settings.SettingsPopup
@@ -193,8 +196,8 @@ public fun SessionTreeCliScreen(
     val pendingSuggestion = selectedAgent?.let { agent ->
         key(agent) { agent.suggestSubagentTask.state.collectAsState().value }
     } as? io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState.Pending
-    val suggestionDropdowns = RuntimeConfigurationDropdowns.remember(
-        settingsOwner to pendingSuggestion?.callId,
+    val suggestionDropdowns = SuggestSubagentTaskDropdowns.remember(
+        selectedAgent?.suggestSubagentTask, pendingSuggestion?.callId,
     )
     val runtimeSettings = collectRuntimeSettings(settingsOwner)
     val runtimeModels = collectRuntimeModels(settingsOwner)
@@ -886,25 +889,10 @@ public fun SessionTreeCliScreen(
             )
             AgentHistoryRevertDialog(selectedAgent)
             if (selectedAgent != null && pendingSuggestion != null) {
-                val batch = pendingSuggestion.configuration
-                RuntimeConfigurationMenus(
-                    configuration = RuntimeConfiguration(
-                        batch.model, batch.reasoningEffort, batch.serviceTier, batch.requestUserInputMode,
-                    ),
-                    models = runtimeModels,
-                    modelOptions = (runtimeModels.map { it.slug } + batch.model).distinct(),
+                SuggestSubagentTaskConfigurationMenus(
+                    viewModel = selectedAgent.suggestSubagentTask,
+                    state = pendingSuggestion,
                     dropdowns = suggestionDropdowns,
-                    onConfigurationSelected = { model, effort, tier ->
-                        selectedAgent.suggestSubagentTask.updateConfiguration(
-                            pendingSuggestion.callId,
-                            batch.copy(model = model, reasoningEffort = effort, serviceTier = tier),
-                        )
-                    },
-                    onRequestUserInputModeSelected = { mode ->
-                        selectedAgent.suggestSubagentTask.updateConfiguration(
-                            pendingSuggestion.callId, batch.copy(requestUserInputMode = mode),
-                        )
-                    },
                 )
             }
             if (settingsOwner != null && runtimeSettings != null) {
@@ -952,15 +940,10 @@ public fun SessionTreeCliScreen(
                     onDismissRequest = { viewModel.dismissPopup(open) },
                 )
 
-                is ApplicationPopupState.WorkingDirectory -> DirectoryPickerPopup(
-                    viewModel = open.viewModel.picker,
+                is ApplicationPopupState.WorkingDirectory -> WorkingDirectoryPopup(
+                    viewModel = open.viewModel,
                     onDismissRequest = { viewModel.dismissPopup(open) },
-                    onDirectorySelected = { directory ->
-                        scope.launch {
-                            open.viewModel.select(directory)
-                            viewModel.dismissPopup(open)
-                        }
-                    },
+                    onSelected = { viewModel.dismissPopup(open) },
                 )
             }
         }

@@ -76,7 +76,7 @@ val sessionViewportTest by testSuite {
                                 rows = 17,
                                 newLineKey = NewLineKey.ShiftEnter,
                                 dropdowns = RuntimeConfigurationDropdowns.remember(agent),
-                                suggestionDropdowns = RuntimeConfigurationDropdowns.remember("suggestions"),
+                                suggestionDropdowns = io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns.remember("suggestions", null),
                                 onOpenHistoryEntryContextMenu = { _, _, _, _, _ -> },
                                 onBrowseWorkingDirectory = {},
                                 onBrowseSuggestedWorkingDirectory = {},

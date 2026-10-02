@@ -62,7 +62,9 @@ val docsWorkspaceRecordingTest by testSuite {
                             AgentRuntimeScreen(
                                 model, 52, 18, NewLineKey.ShiftEnter,
                                 RuntimeConfigurationDropdowns.remember(model),
-                                RuntimeConfigurationDropdowns.remember("suggestions"),
+                                io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns.remember(
+                                    model.suggestSubagentTask, null,
+                                ),
                                 { _, _, _, _, _ -> }, {}, {}, {},
                             )
                         }

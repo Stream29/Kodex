@@ -94,15 +94,34 @@ val settingsViewModelTest by testSuite {
                 assertNull(editor.addCustomContextSource(contextPath))
                 global.settings.first { !it.contextSources.workingDirectoryEnabled && it.contextSources.customSources.size == 1 }
                 val hook = NotificationHook("notify", NotificationHookType.entries.toSet(), "echo test")
-                editor.addHook(hook)
-                editor.hooks.first { it == listOf(hook) }
-                val captured = requireNotNull(editor.hookEditorDraft("notify"))
-                assertEquals(hook, captured)
-                editor.editHook("notify", hook.copy(command = "echo changed"))
-                editor.hooks.first { it.single().command == "echo changed" }
-                editor.deleteHook(hook) // A stale details window may not remove the edited entry.
-                editor.deleteHook(editor.hooks.value.single())
-                editor.hooks.first { it.isEmpty() }
+                val child = editor.hookSettings
+                child.add()
+                val adding = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Editing>(child.state.value.dialog)
+                child.updateDraft(adding.token, io.github.stream29.kodex.app.hooksettings.HookEditorDraft(
+                    hook.name, hook.command, hook.types,
+                ))
+                child.save(adding.token)
+                child.state.first { it.hooks == listOf(hook) }
+                child.details("notify")
+                val details = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Details>(child.state.value.dialog)
+                child.requestDelete(details.token)
+                val staleDelete = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Deleting>(child.state.value.dialog)
+                child.details("notify")
+                val reopened = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Details>(child.state.value.dialog)
+                child.edit(reopened.token)
+                val editing = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Editing>(child.state.value.dialog)
+                assertEquals(hook.command, editing.draft.command)
+                child.updateDraft(editing.token, editing.draft.copy(command = "echo changed"))
+                child.save(editing.token)
+                child.state.first { it.hooks.single().command == "echo changed" }
+                child.confirmDelete(staleDelete.token)
+                assertEquals(1, child.state.value.hooks.size)
+                child.details("notify")
+                val current = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Details>(child.state.value.dialog)
+                child.requestDelete(current.token)
+                val deletion = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Deleting>(child.state.value.dialog)
+                child.confirmDelete(deletion.token)
+                child.state.first { it.hooks.isEmpty() }
                 editor.removeCustomContextSource(contextPath)
                 global.settings.first { it.contextSources.customSources.isEmpty() }
             } finally { editor.close(); global.close(); global.join() }

@@ -726,7 +726,7 @@ internal suspend fun frontend(
         ) { backend ->
             withInMemoryRpc(backend::register) { raw ->
                 val services = RpcServices(decorate(RestoringRpcClient(raw)))
-                val views = RpcSessionViews(this, services)
+                val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()))
                 try { FrontendFixture(coroutineContext, services, views, root).block() }
                 finally { views.close(); withContext(NonCancellable) { views.join() } }
             }

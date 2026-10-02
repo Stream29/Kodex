@@ -83,8 +83,8 @@ public suspend fun startRpcFrontendFixture(
                 ) { backend ->
                     withInMemoryRpc(backend::register) { raw ->
                         val services = RpcServices(RestoringRpcClient(raw))
-                        val views = RpcSessionViews(this, services)
                         val models = MutableStateFlow(services.global.getModels())
+                        val views = RpcSessionViews(this, services, models)
                         val sessions = DefaultPersistedSessionViewModelRegistry(views, models, this)
                         val drafts = DefaultNewSessionViewModelFactory(views, sessions, models, this)
                         try {

@@ -34,19 +34,15 @@ import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationOper
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
-import io.github.stream29.kodex.cli.pathpicker.DirectoryPickerPopup
+import io.github.stream29.kodex.cli.workingdirectory.WorkingDirectoryPopup
 import io.github.stream29.kodex.cli.components.ScrollState
 import io.github.stream29.kodex.cli.components.TuiDialog
 import io.github.stream29.kodex.cli.components.TuiDialogActionRow
 import io.github.stream29.kodex.cli.components.TuiDropdownMenu
 import io.github.stream29.kodex.cli.components.TuiDropdownState
-import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
-import io.github.stream29.kodex.cli.components.TuiInteractionStyle
 import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.components.verticalScroll
-import io.github.stream29.kodex.rpc.models.NotificationHook
-import io.github.stream29.kodex.mcp.contract.McpImportDecision
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
@@ -86,21 +82,6 @@ public fun BoxScope.SettingsPopup(
     var renameRequest by remember(viewModel) {
         mutableStateOf<SessionSettingsEffect.RenameSession?>(null)
     }
-    var mcpEditorRequest by remember(viewModel) {
-        mutableStateOf<McpEditorRequest?>(null)
-    }
-    var mcpDeleteRequest by remember(viewModel) {
-        mutableStateOf<io.github.stream29.kodex.app.settings.contract.McpServerSettingsState?>(null)
-    }
-    var mcpDetailsServerName by remember(viewModel) { mutableStateOf<String?>(null) }
-    var mcpImportOpen by remember(viewModel) { mutableStateOf(false) }
-    var hookEditorRequest by remember(viewModel) {
-        mutableStateOf<HookEditorRequest?>(null)
-    }
-    var hookDeleteRequest by remember(viewModel) {
-        mutableStateOf<NotificationHook?>(null)
-    }
-    var hookDetailsName by remember(viewModel) { mutableStateOf<String?>(null) }
     var contextSourceAddOpen by remember(viewModel) { mutableStateOf(false) }
     var logoutConfirmationOpen by remember(viewModel) { mutableStateOf(false) }
     val currentOpenLogin by rememberUpdatedState(onOpenLogin)
@@ -109,13 +90,12 @@ public fun BoxScope.SettingsPopup(
         viewModel.global.effects.collect { effect ->
             when (effect) {
                 GlobalSettingsEffect.OpenLogin -> currentOpenLogin()
-                is GlobalSettingsEffect.OpenMcpAuthorizationUrl -> {
-                    if (openExternalUrl(effect.url) is OpenExternalUrlResult.Failed) {
-                        viewModel.global.cancelMcpServerLogin(effect.serverName)
-                    }
-                }
             }
         }
+    }
+    // Keep the single component effect handler alive when another Settings page is visible.
+    McpSettingsEffects(viewModel.global.mcpSettings) { url ->
+        openExternalUrl(url) !is OpenExternalUrlResult.Failed
     }
     LaunchedEffect(viewModel.session) {
         viewModel.session.effects.collect { effect ->
@@ -126,18 +106,8 @@ public fun BoxScope.SettingsPopup(
     }
     LaunchedEffect(selectedPage) {
         renameRequest = null
-        mcpEditorRequest = null
-        mcpDeleteRequest = null
-        mcpDetailsServerName = null
-        hookEditorRequest = null
-        hookDeleteRequest = null
-        hookDetailsName = null
         contextSourceAddOpen = false
         logoutConfirmationOpen = false
-        if (selectedPage != SettingsPage.Mcp) {
-            mcpImportOpen = false
-            viewModel.global.dismissCodexMcpImport()
-        }
     }
 
     val terminalSize = LocalTerminalState.current.size
@@ -185,15 +155,6 @@ public fun BoxScope.SettingsPopup(
                         viewModel = viewModel,
                         page = selectedPage,
                         dropdowns = dropdowns,
-                        onAddMcp = { mcpEditorRequest = McpEditorRequest() },
-                        onOpenMcp = { server -> mcpDetailsServerName = server.serverName },
-                        onImportMcp = {
-                            viewModel.global.dismissCodexMcpImport()
-                            mcpImportOpen = true
-                            viewModel.global.previewCodexMcpImport()
-                        },
-                        onAddHook = { hookEditorRequest = HookEditorRequest() },
-                        onOpenHook = { hook -> hookDetailsName = hook.name },
                         onAddContextSource = { contextSourceAddOpen = true },
                         onRequestLogout = { logoutConfirmationOpen = true },
                     )
@@ -217,6 +178,8 @@ public fun BoxScope.SettingsPopup(
         page = selectedPage,
         dropdowns = dropdowns,
     )
+    McpSettingsDialogs(viewModel.global.mcpSettings)
+    HookSettingsDialogs(viewModel.global.hookSettings)
     if (selectedPage == SettingsPage.OpenAi) {
         UsageResetDialogHost(viewModel.global)
     }
@@ -242,112 +205,6 @@ public fun BoxScope.SettingsPopup(
             },
         )
     }
-    mcpDetailsServerName?.let { serverName ->
-        val servers by viewModel.global.mcpServers.collectAsState()
-        servers.firstOrNull { server -> server.serverName == serverName }?.let { server ->
-            McpServerDetailsDialog(
-                server = server,
-                onDismiss = { mcpDetailsServerName = null },
-                onEdit = {
-                    mcpDetailsServerName = null
-                    viewModel.global.mcpEditorDraft(serverName)?.let {
-                        mcpEditorRequest = McpEditorRequest(existing = server, draft = it)
-                    }
-                },
-                onDelete = {
-                    mcpDetailsServerName = null
-                    mcpDeleteRequest = server
-                },
-                onSetEnabled = {
-                    viewModel.global.setMcpServerEnabled(server.serverName, !server.enabled)
-                },
-                onLogin = { viewModel.global.loginMcpServer(server.serverName) },
-                onCancelLogin = { viewModel.global.cancelMcpServerLogin(server.serverName) },
-                onLogout = { viewModel.global.logoutMcpServer(server.serverName) },
-                onReconnect = { viewModel.global.reconnectMcpServer(server.serverName) },
-            )
-        }
-    }
-    mcpEditorRequest?.let { request ->
-        McpServerEditorDialog(
-            request = request,
-            onDismiss = { mcpEditorRequest = null },
-            onSave = { draft ->
-                request.existing?.let { existing ->
-                    viewModel.global.editMcpServer(existing.serverName, draft)
-                } ?: viewModel.global.addMcpServer(draft)
-                mcpEditorRequest = null
-            },
-        )
-    }
-    mcpDeleteRequest?.let { server ->
-        McpDeleteConfirmationDialog(
-            server = server,
-            onDismiss = { mcpDeleteRequest = null },
-            onConfirm = {
-                viewModel.global.deleteMcpServer(server.serverName)
-                mcpDeleteRequest = null
-            },
-        )
-    }
-    if (mcpImportOpen) {
-        val preview by viewModel.global.mcpImportPreview.collectAsState()
-        McpImportDialog(
-            preview = preview,
-            onApply = { previewId: Long, decisions: Map<String, McpImportDecision> ->
-                viewModel.global.applyCodexMcpImport(previewId, decisions)
-                mcpImportOpen = false
-            },
-            onDismiss = {
-                viewModel.global.dismissCodexMcpImport()
-                mcpImportOpen = false
-            },
-        )
-    }
-    hookDetailsName?.let { name ->
-        val hooks by viewModel.global.hooks.collectAsState()
-        hooks.firstOrNull { hook -> hook.name == name }?.let { hook ->
-            HookDetailsDialog(
-                hook = hook,
-                onDismiss = { hookDetailsName = null },
-                onEdit = {
-                    viewModel.global.hookEditorDraft(hook.name)?.let { draft ->
-                        hookDetailsName = null
-                        hookEditorRequest = HookEditorRequest(
-                            name = hook.name,
-                            draft = draft,
-                        )
-                    }
-                },
-                onDelete = {
-                    hookDetailsName = null
-                    hookDeleteRequest = hook
-                },
-            )
-        }
-    }
-    hookEditorRequest?.let { request ->
-        HookEditorDialog(
-            request = request,
-            onDismiss = { hookEditorRequest = null },
-            onSave = { draft ->
-                request.name?.let { name ->
-                    viewModel.global.editHook(name, draft)
-                } ?: viewModel.global.addHook(draft)
-                hookEditorRequest = null
-            },
-        )
-    }
-    hookDeleteRequest?.let { hook ->
-        HookDeleteConfirmationDialog(
-            hook = hook,
-            onDismiss = { hookDeleteRequest = null },
-            onConfirm = {
-                viewModel.global.deleteHook(hook)
-                hookDeleteRequest = null
-            },
-        )
-    }
     if (contextSourceAddOpen) {
         ContextSourceAddDialog(
             onDismiss = { contextSourceAddOpen = false },
@@ -358,14 +215,12 @@ public fun BoxScope.SettingsPopup(
     }
     val directoryPicker by viewModel.session.directoryPicker.collectAsState()
     directoryPicker?.let { picker ->
-        DirectoryPickerPopup(
-            viewModel = picker.viewModel,
+        WorkingDirectoryPopup(
+            viewModel = picker.selection,
             onDismissRequest = {
                 viewModel.session.dismissWorkingDirectoryPicker(picker)
             },
-            onDirectorySelected = { directory ->
-                viewModel.session.selectWorkingDirectory(picker, directory)
-            },
+            onSelected = {},
         )
     }
 }
@@ -404,11 +259,6 @@ private fun SettingsPageContent(
     viewModel: SettingsViewModel,
     page: SettingsPage,
     dropdowns: SettingsDropdownStates,
-    onAddMcp: () -> Unit,
-    onOpenMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
-    onImportMcp: () -> Unit,
-    onAddHook: () -> Unit,
-    onOpenHook: (NotificationHook) -> Unit,
     onAddContextSource: () -> Unit,
     onRequestLogout: () -> Unit,
 ) {
@@ -429,18 +279,8 @@ private fun SettingsPageContent(
             onRequestLogout = onRequestLogout,
         )
 
-        SettingsPage.Mcp -> McpSettingsPageContent(
-            viewModel = viewModel.global,
-            onAddMcp = onAddMcp,
-            onOpenMcp = onOpenMcp,
-            onImportMcp = onImportMcp,
-        )
-
-        SettingsPage.Hooks -> HookSettingsPageContent(
-            viewModel = viewModel.global,
-            onAddHook = onAddHook,
-            onOpenHook = onOpenHook,
-        )
+        SettingsPage.Mcp -> McpSettingsPageContent(viewModel.global)
+        SettingsPage.Hooks -> HookSettingsPageContent(viewModel.global)
 
         SettingsPage.CurrentSession -> SessionSettingsContent(viewModel.session, dropdowns)
         SettingsPage.NewSession -> NewSessionSettingsContent(
@@ -522,31 +362,15 @@ private fun OpenAiSettingsContent(
 @Composable
 private fun McpSettingsPageContent(
     viewModel: GlobalSettingsViewModel,
-    onAddMcp: () -> Unit,
-    onOpenMcp: (io.github.stream29.kodex.app.settings.contract.McpServerSettingsState) -> Unit,
-    onImportMcp: () -> Unit,
 ) {
-    val servers by viewModel.mcpServers.collectAsState()
-    McpSettingsContent(
-        servers = servers,
-        onAdd = onAddMcp,
-        onOpenDetails = onOpenMcp,
-        onImport = onImportMcp,
-    )
+    McpSettingsPanel(viewModel.mcpSettings, showOperationFailure = false)
 }
 
 @Composable
 private fun HookSettingsPageContent(
     viewModel: GlobalSettingsViewModel,
-    onAddHook: () -> Unit,
-    onOpenHook: (NotificationHook) -> Unit,
 ) {
-    val hooks by viewModel.hooks.collectAsState()
-    HookSettingsContent(
-        hooks = hooks,
-        onAdd = onAddHook,
-        onOpenDetails = onOpenHook,
-    )
+    HookSettingsPanel(viewModel.hookSettings, showOperationFailure = false)
 }
 
 @Composable
@@ -833,31 +657,6 @@ private fun NewSessionConfigurationContent(
         dropdownState = dropdowns.requestUserInputMode,
         supportingText = "Controls whether the agent may pause to ask for input.",
     )
-}
-
-@Composable
-internal fun SettingsDropdownField(
-    label: String,
-    selectedLabel: String,
-    dropdownState: TuiDropdownState,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    supportingText: String? = null,
-) {
-    SettingsItem(
-        label = label,
-        supportingText = supportingText,
-        modifier = modifier,
-        enabled = enabled,
-    ) {
-        TuiDropdownTrigger(
-            dropdownState = dropdownState,
-            label = selectedLabel,
-            color = SettingsForeground,
-            interactionStyle = TuiInteractionStyle.PreserveColors,
-            enabled = enabled,
-        )
-    }
 }
 
 @Composable

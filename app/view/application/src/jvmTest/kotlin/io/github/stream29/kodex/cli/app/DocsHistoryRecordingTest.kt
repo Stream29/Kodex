@@ -81,7 +81,9 @@ val docsHistoryRecordingTest by testSuite {
                             AgentRuntimeScreen(
                                 agent, 64, 28, io.github.stream29.kodex.cli.settings.NewLineKey.ShiftEnter,
                                 RuntimeConfigurationDropdowns.remember(agent),
-                                RuntimeConfigurationDropdowns.remember("suggestions"),
+                                io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns.remember(
+                                    agent.suggestSubagentTask, null,
+                                ),
                                 { _, _, _, _, _ -> }, {}, {}, {},
                             )
                         }
@@ -183,7 +185,9 @@ val docsHistoryRecordingTest by testSuite {
                             AgentRuntimeScreen(
                                 requireNotNull(selected.rootAgent.value), 80, 17, io.github.stream29.kodex.cli.settings.NewLineKey.ShiftEnter,
                                 RuntimeConfigurationDropdowns.remember(requireNotNull(selected.rootAgent.value)),
-                                RuntimeConfigurationDropdowns.remember("suggestions"),
+                                io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns.remember(
+                                    requireNotNull(selected.rootAgent.value).suggestSubagentTask, null,
+                                ),
                                 { generation, index, _, anchor, position ->
                                     menuGeneration = generation
                                     menu = Triple(index, anchor, position)

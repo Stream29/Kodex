@@ -10,12 +10,14 @@ import io.github.stream29.kodex.app.settings.createOpenAiLoginViewModel
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginDependencies
 import io.github.stream29.kodex.app.settings.SettingsUpdateQueue
 import io.github.stream29.kodex.app.settings.contract.*
+import io.github.stream29.kodex.app.hooksettings.HookSettingsViewModel
+import io.github.stream29.kodex.app.hooksettings.createHookSettingsViewModel
+import io.github.stream29.kodex.app.mcpsettings.McpSettingsViewModel
+import io.github.stream29.kodex.app.mcpsettings.createMcpSettingsViewModel
 import io.github.stream29.kodex.cli.settings.*
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.models.*
-import io.github.stream29.kodex.mcp.contract.*
-import io.github.stream29.kodex.cli.auth.KodexAuthLoginAttempt
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
@@ -42,15 +44,17 @@ public class RpcGlobalEditor(
     override val effects: Flow<GlobalSettingsEffect> = effectsChannel.receiveAsFlow()
     override val authentication: StateFlow<SettingsAuthenticationState> = global.authentication
     override val accountUsage: StateFlow<SettingsAccountUsageState> = global.usage
-    override val mcpServers: StateFlow<List<McpServerSettingsState>> = mcp.servers
-    private val importPreview = MutableStateFlow<McpImportPreview?>(null)
-    override val mcpImportPreview: StateFlow<McpImportPreview?> = importPreview.asStateFlow()
-    override val hooks: StateFlow<List<NotificationHook>> = global.frontend.settings.map { it.hooks }
+    override val mcpSettings: McpSettingsViewModel = createMcpSettingsViewModel(
+        RpcMcpSettingsDependencies(global, rpc, mcp, ::acceptWrite),
+        this.scope,
+    )
+    private val hookSource: StateFlow<List<NotificationHook>> = global.frontend.settings.map { it.hooks }
         .stateIn(this.scope, SharingStarted.Eagerly, global.frontend.settings.value.hooks)
+    override val hookSettings: HookSettingsViewModel = createHookSettingsViewModel(
+        RpcHookSettingsDependencies(global, hookSource, ::acceptWrite),
+        this.scope,
+    )
     override val usageReset: StateFlow<UsageResetState> = reset.state
-    private val mcpEdits = mutableMapOf<String, Map<String, McpServerConfiguration>>()
-    private val hookEdits = mutableMapOf<String, NotificationHook>()
-    private val loginJobs = MutableStateFlow<Map<String, Job>>(emptyMap())
 
     init {
         this.scope.launch {
@@ -87,11 +91,17 @@ public class RpcGlobalEditor(
     }
 
     private fun persist(action: suspend () -> Unit) {
-        if (!owner.isActive) return
+        acceptWrite(action)
+    }
+
+    /** Admission only: all settings children share this queue and its original ordering. */
+    private fun acceptWrite(action: suspend () -> Unit): Boolean {
+        if (!owner.isActive) return false
         updates.submit {
             action()
             global.dismissOperationFailure()
         }
+        return true
     }
 
     private fun <F> edit(select: (BackendSettings) -> F, update: (BackendSettings) -> BackendSettings) {
@@ -150,21 +160,6 @@ public class RpcGlobalEditor(
             ))
         })
 
-    public fun saveHook(original: NotificationHook?, updated: NotificationHook): Unit = persist {
-        global.frontend.update { value ->
-            val current = value.hooks.find { it.name == (original?.name ?: updated.name) }
-            if (current != original) value
-            else value.copy(hooks = if (original == null) value.hooks + updated
-            else value.hooks.map { if (it.name == original.name) updated else it })
-        }
-    }
-    override fun deleteHook(hook: NotificationHook): Unit = persist {
-        global.frontend.update { value ->
-            if (value.hooks.find { it.name == hook.name } != hook) value
-            else value.copy(hooks = value.hooks.filterNot { it.name == hook.name })
-        }
-    }
-
     override fun removeAuthentication() {
         if (!owner.isActive || authOperation.value == SettingsAuthenticationOperationState.SigningOut) return
         val source = global.settings.value.authSource
@@ -188,47 +183,6 @@ public class RpcGlobalEditor(
     override fun confirmUsageReset() { (reset.state.value as? UsageResetState.Confirming)?.let(reset::confirm) }
     override fun retryUsageReset(): Unit = reset.show()
     override fun dismissUsageReset(): Unit = reset.dismiss()
-    override fun addHook(draft: NotificationHook): Unit = saveHook(null, draft)
-    override fun editHook(name: String, draft: NotificationHook) {
-        hookEdits.remove(name)?.let { saveHook(it, draft) }
-    }
-    override fun hookEditorDraft(name: String): NotificationHook? =
-        global.frontend.settings.value.hooks.find { it.name == name }?.also { hookEdits[name] = it }
-
-    override fun reconnectMcpServer(serverName: String): Unit = command { mcp.reconnect(serverName) }
-    override fun logoutMcpServer(serverName: String): Unit = command { mcp.logout(serverName) }
-    override fun mcpEditorDraft(serverName: String): McpServerDraft? {
-        val captured = mcp.capture()
-        val value = captured[serverName] ?: return null
-        mcpEdits[serverName] = captured
-        return value.editorDraft(serverName)
-    }
-    override fun addMcpServer(draft: McpServerDraft): Unit = persist {
-        check(mcp.save(emptyMap(), null, draft)) { "The selected MCP name is no longer available." }
-    }
-    override fun editMcpServer(existingServerName: String, draft: McpServerDraft) {
-        val captured = mcpEdits.remove(existingServerName) ?: return
-        persist { check(mcp.save(captured, existingServerName, draft)) { "The MCP configuration changed." } }
-    }
-    override fun deleteMcpServer(serverName: String) {
-        val captured = mcp.capture()[serverName] ?: return
-        persist { check(mcp.delete(serverName, captured)) { "The MCP configuration changed." } }
-    }
-    override fun setMcpServerEnabled(serverName: String, enabled: Boolean) {
-        val captured = mcp.capture()[serverName] ?: return
-        persist { check(mcp.setEnabled(serverName, captured, enabled)) { "The MCP configuration changed." } }
-    }
-    override fun previewCodexMcpImport(filter: String): Unit = command {
-        val current = importPreview.value
-        importPreview.value = if (current == null) mcp.readImport().let { mcp.filterImport(it.id, filter) }
-        else mcp.filterImport(current.id, filter)
-    }
-    override fun applyCodexMcpImport(previewId: Long, decisions: Map<String, McpImportDecision>): Unit = persist {
-        check(mcp.applyImport(previewId, decisions)) { "The import target changed. Open a new preview." }
-        importPreview.value = null
-    }
-    override fun dismissCodexMcpImport() { importPreview.value = null; mcp.dismissImport() }
-
     public fun createLogin(ownerScope: CoroutineScope = scope): OpenAiLoginViewModel {
         owner.ensureActive()
         val target = OAuthTarget.OpenAi(global.settings.value.authSource)
@@ -238,53 +192,12 @@ public class RpcGlobalEditor(
         )
     }
 
-    override fun loginMcpServer(serverName: String) {
-        val name = serverName
-        if (!owner.isActive) return
-        val configuration = global.settings.value.mcpServers[name] as? McpServerConfiguration.StreamableHttp ?: return
-        val redirect = configuration.oauth?.client?.redirectUri ?: return
-        val work = scope.launch(start = CoroutineStart.LAZY) {
-            var attempt: KodexAuthLoginAttempt? = null
-            try {
-                attempt = startRpcOAuth(rpc, OAuthTarget.Mcp(name), scope, redirect)
-                effectsChannel.send(GlobalSettingsEffect.OpenMcpAuthorizationUrl(name, attempt.authorizationUrl))
-                attempt.awaitCompletion()
-            } catch (error: CancellationException) { throw error }
-            catch (error: Throwable) { global.reportOperationFailure(error) }
-            finally { attempt?.cancel() }
-        }
-        while (true) {
-            val previous = loginJobs.value
-            if (previous[name]?.isActive == true || previous[name]?.isCompleted == false) {
-                work.cancel()
-                return
-            }
-            if (loginJobs.compareAndSet(previous, previous + (name to work))) break
-        }
-        work.invokeOnCompletion {
-            loginJobs.update { if (it[name] === work) it - name else it }
-        }
-        work.start()
-    }
-
-    override fun cancelMcpServerLogin(serverName: String) { loginJobs.value[serverName]?.cancel() }
     override fun close() {
+        mcpSettings.close()
+        hookSettings.close()
         owner.cancel(); effectsChannel.close(); reset.close()
         updates.close(mcp::close)
-        mcpEdits.clear(); hookEdits.clear()
     }
-}
-
-private fun McpServerConfiguration.editorDraft(name: String): McpServerDraft = when (this) {
-    is McpServerConfiguration.StreamableHttp -> McpServerDraft.StreamableHttp(
-        name, enabled, McpStreamableHttpDraft(url, headers.mapValues { McpSecretDraft.Keep }, oauth?.let {
-            McpOAuthDraft(it.client.clientId, it.client.clientSecret?.let { McpSecretDraft.Keep },
-                it.client.redirectUri, it.client.authorizationEndpoint, it.client.tokenEndpoint, it.resource, it.scopes)
-        }),
-    )
-    is McpServerConfiguration.Stdio -> McpServerDraft.Stdio(
-        name, enabled, McpStdioDraft(command, args, environment.mapValues { McpSecretDraft.Keep }, workingDirectory),
-    )
 }
 
 private fun AgentContextSourceSettings.enabled(source: BuiltInContextSource): Boolean = when (source) {

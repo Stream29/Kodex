@@ -5,6 +5,7 @@ import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.cli.agent.DefaultComposerViewModelFactory
 import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
+import io.github.stream29.kodex.openai.ModelInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -39,6 +40,7 @@ public sealed interface SessionViewStatus {
 public class RpcSessionViews(
     scope: CoroutineScope,
     public val services: RpcServices,
+    private val models: StateFlow<List<ModelInfo>>,
     private val onCreated: (List<CreatedSuggestedSession>) -> Unit = {},
 ) : AutoCloseable {
     private val owner = SupervisorJob(scope.coroutineContext[Job])
@@ -49,7 +51,7 @@ public class RpcSessionViews(
     public suspend fun open(index: Int): RpcSessionView {
         val view = mutex.withLock {
             owner.ensureActive()
-            views.getOrPut(index) { RpcSessionView(index, services, localScope, onCreated) }
+            views.getOrPut(index) { RpcSessionView(index, services, localScope, models, onCreated) }
         }
         try {
             view.awaitReady()
@@ -100,6 +102,7 @@ public class RpcSessionView internal constructor(
     public val index: Int,
     private val services: RpcServices,
     scope: CoroutineScope,
+    private val models: StateFlow<List<ModelInfo>>,
     private val onCreated: (List<CreatedSuggestedSession>) -> Unit,
 ) : AutoCloseable {
     private val owner = SupervisorJob(scope.coroutineContext[Job])
@@ -166,7 +169,7 @@ public class RpcSessionView internal constructor(
                 owner.ensureActive()
                 bindingJob.ensureActive()
                 mutableBinding.value = next
-                mutablePresentation.value = RpcAgentPresentation(next, bindingScope, services, composer, onCreated)
+                mutablePresentation.value = RpcAgentPresentation(next, bindingScope, services, composer, models, onCreated)
                 mutableStatus.value = SessionViewStatus.Ready
                 initial.complete(Unit)
                 failure = failed.await()
