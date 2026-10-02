@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationDropdowns
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -225,6 +227,7 @@ internal fun NewSessionScreen(
         NewSessionStatusBar(
             columns = columns,
             settings = settings,
+            runtimeConfiguration = viewModel.runtimeConfiguration,
             dropdowns = dropdowns,
             onBrowseWorkingDirectory = onBrowseWorkingDirectory,
             onOpenSettings = onOpenSettings,

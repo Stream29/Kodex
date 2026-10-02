@@ -3,6 +3,7 @@ package io.github.stream29.kodex.cli.newsession
 import io.github.stream29.kodex.app.session.contract.*
 import io.github.stream29.kodex.cli.rpc.RpcSessionDraft
 import io.github.stream29.kodex.cli.rpc.RpcSessionViews
+import io.github.stream29.kodex.cli.rpc.createBoundRuntimeConfigurationViewModel
 import io.github.stream29.kodex.openai.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -33,6 +34,8 @@ public class RpcNewSessionViewModel internal constructor(
     private val defaultName = arguments.defaultName
     public val draft: RpcSessionDraft = RpcSessionDraft(arguments.initialSettings.copy(threadName = ""), views)
     override val settings: StateFlow<KodexAgentSettings> = draft.settings
+    override val runtimeConfiguration: io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel =
+        createBoundRuntimeConfigurationViewModel(this, local)
     override val composer: io.github.stream29.kodex.app.agent.contract.ComposerViewModel = draft.composer
     override val name: StateFlow<String> = settings.map { it.threadName.ifBlank { defaultName } }
         .stateIn(local, SharingStarted.Eagerly, defaultName)
@@ -54,5 +57,5 @@ public class RpcNewSessionViewModel internal constructor(
         owner.ensureActive()
         return sessions.open(draft.materialize().index)
     }
-    override fun close() { draft.close(); owner.cancel() }
+    override fun close() { runtimeConfiguration.close(); draft.close(); owner.cancel() }
 }

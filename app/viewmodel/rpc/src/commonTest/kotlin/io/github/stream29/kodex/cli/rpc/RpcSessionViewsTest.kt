@@ -226,10 +226,14 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val old = presentation.historyIndex.window.first { committed in it.indexes }
             assertEquals(binding.storage.index.cacheNonce.value, old.generation)
             assertTrue(presentation.historyIndex.load(old.generation, committed).summary.contains("history"))
+            presentation.history.historyItems.first { it.size > 0 }
+            assertTrue(presentation.historyIndex.checkOut(old.generation, committed))
+            assertEquals(committed, binding.latestIndex.value) // Check out did not revert history.
             binding.revertHistory(committed, old.generation)
             val changed = presentation.historyIndex.window.first { it.generation != old.generation }
             assertEquals(binding.storage.index.cacheNonce.value, changed.generation)
             assertFalse(presentation.historyIndex.contains(old.generation, committed))
+            assertFalse(presentation.historyIndex.checkOut(old.generation, committed))
             assertFailsWith<CacheNonceMismatch> { binding.forkHistory(1, old.generation) }
             binding.settings.first { it.threadName == "Session ${view.index}" }
         }
@@ -254,6 +258,35 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertTrue(catalog.delete(fork))
                 assertEquals(index, catalog.state.value.sessions.single().sessionIndex)
             } finally { catalog.close() }
+        }
+    }
+
+    test("runtime component binds exact Agent and atomically preserves unrelated fields") {
+        frontend {
+            val view = views.open(services.global.createSession(settings.copy(threadName = "fixed", instructions = "keep")))
+            val other = views.open(services.global.createSession(settings.copy(threadName = "other")))
+            val agent = createRpcAgentViewModel(
+                requireNotNull(view.presentation.value), MutableStateFlow(services.global.getModels()), this,
+            )
+            try {
+                val child = agent.runtimeConfiguration
+                val before = agent.settings.value
+                assertSame(child, agent.runtimeConfiguration)
+                child.updateModelConfiguration(OpenAiModelId("edited"), ReasoningEffort.Max, ServiceTier.Fast)
+                agent.settings.first { it.model == OpenAiModelId("edited") }
+                assertEquals(ReasoningEffort.Max, agent.settings.value.reasoning.effort)
+                assertEquals(ServiceTier.Fast, agent.settings.value.serviceTier)
+                assertEquals(before.threadName, agent.settings.value.threadName)
+                assertEquals(before.instructions, agent.settings.value.instructions)
+                assertEquals(settings.model, other.current().settings.value.model)
+                child.updateRequestUserInputMode(RequestUserInputMode.NoQuestion)
+                agent.settings.first { it.requestUserInputMode == RequestUserInputMode.NoQuestion }
+                agent.close()
+                assertTrue(child.state.value.closed)
+                child.updateModelConfiguration(OpenAiModelId("late"), ReasoningEffort.Low, ServiceTier.Default)
+                assertEquals(OpenAiModelId("edited"), view.current().settings.value.model)
+                assertEquals(settings.model, other.current().settings.value.model)
+            } finally { agent.close() }
         }
     }
 

@@ -1,65 +1,73 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package io.github.stream29.kodex.cli.settings
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.app.settings.createSessionSettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.*
-import io.github.stream29.kodex.openai.OpenAiModelId
-import io.github.stream29.kodex.openai.ReasoningEffort
-import io.github.stream29.kodex.openai.RequestUserInputMode
-import io.github.stream29.kodex.openai.ServiceTier
+import io.github.stream29.kodex.openai.*
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.io.files.Path
 import kotlin.test.*
 
+/** The old renderer adapter is gone: verify the real component owns its exact rename child. */
 val sessionRenameAdapterTest by testSuite {
-    test("binds the exact Settings source and effect revision, not a later snapshot") {
-        val source = RenameSettingsSource()
-        val other = RenameSettingsSource()
-        val first = createSessionSettingsRenameChild(source, SessionSettingsEffect.RenameSession(7, "first"))
-        val second = createSessionSettingsRenameChild(other, SessionSettingsEffect.RenameSession(9, "second"))
-        try {
-            first.updateDraftName("  edited  ")
-            first.rename()
-            assertEquals(listOf(7L to "edited"), source.requests)
-            assertTrue(other.requests.isEmpty())
-            second.rename()
-            assertEquals(listOf(9L to "second"), other.requests)
-            // The source enqueues a write; a normal return does not wait for a new snapshot.
-            assertEquals(SessionSettingsState.Unavailable, source.state.value)
-        } finally {
-            first.close()
-            second.close()
+    test("binds exact Settings source and captured revision, not another target") {
+        runTest {
+            val source = RenameSettingsSource(7, "first")
+            val other = RenameSettingsSource(9, "second")
+            val first = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this)
+            val second = createSessionSettingsViewModel(other, MutableStateFlow(emptyList()), this)
+            try {
+                first.requestRename(7)
+                second.requestRename(9)
+                val firstChild = assertNotNull(first.rename.value).viewModel
+                val secondChild = assertNotNull(second.rename.value).viewModel
+                firstChild.updateDraftName("  edited  ")
+                firstChild.rename()
+                runCurrent()
+                assertEquals(listOf(7L to "edited"), source.requests)
+                assertTrue(other.requests.isEmpty())
+                secondChild.rename()
+                runCurrent()
+                assertEquals(listOf(9L to "second"), other.requests)
+            } finally { first.close(); second.close() }
+            assertTrue(source.closed)
+            assertTrue(other.closed)
         }
-        assertFalse(source.closed)
-        assertFalse(other.closed)
     }
-    test("disposed rename cannot dispatch a late write to its Settings source") {
-        val source = RenameSettingsSource()
-        val child = createSessionSettingsRenameChild(source, SessionSettingsEffect.RenameSession(7, "first"))
-        child.close()
-        child.updateDraftName("late")
-        assertFailsWith<IllegalStateException> { child.rename() }
-        assertTrue(source.requests.isEmpty())
-        assertFalse(source.closed)
+    test("dismissed exact rename cannot dispatch late writes or close its Settings source") {
+        runTest {
+            val source = RenameSettingsSource(7, "first")
+            val parent = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this)
+            try {
+                parent.requestRename(7)
+                val handle = assertNotNull(parent.rename.value)
+                assertTrue(parent.dismissRename(handle))
+                handle.viewModel.updateDraftName("late")
+                assertFailsWith<IllegalStateException> { handle.viewModel.rename() }
+                runCurrent()
+                assertTrue(source.requests.isEmpty())
+                assertFalse(source.closed)
+            } finally { parent.close() }
+        }
     }
 }
 
-private class RenameSettingsSource : SessionSettingsViewModel {
-    override val state = MutableStateFlow<SessionSettingsState>(SessionSettingsState.Unavailable)
-    override val directoryPicker = MutableStateFlow<SessionWorkingDirectoryPicker?>(null)
-    override val effects = emptyFlow<SessionSettingsEffect>()
+private class RenameSettingsSource(revision: Long, name: String) : SessionSettingsDataSource {
+    override val state = MutableStateFlow<SessionSettingsDataState>(SessionSettingsDataState.Available(
+        SessionSettingsSnapshot(revision, SessionSettingsTargetKind.MaterializedSession, name,
+            SessionSettingsConfiguration(OpenAiModelId("test"), Path("."), ReasoningEffort.High,
+                ServiceTier.Default, RequestUserInputMode.AskUser), editable = true),
+    ))
     val requests = mutableListOf<Pair<Long, String>>()
     var closed = false
-    override fun renameSession(expectedRevision: Long, sessionName: String) {
+    override suspend fun tryRenameSession(expectedRevision: Long, sessionName: String): Boolean {
         requests += expectedRevision to sessionName
+        return true
     }
-    override fun updateModel(expectedRevision: Long, model: OpenAiModelId) = Unit
-    override fun updateReasoningEffort(expectedRevision: Long, reasoningEffort: ReasoningEffort) = Unit
-    override fun updateServiceTier(expectedRevision: Long, serviceTier: ServiceTier) = Unit
-    override fun updateRequestUserInputMode(expectedRevision: Long, mode: RequestUserInputMode) = Unit
-    override fun requestWorkingDirectory(expectedRevision: Long) = Unit
-    override fun selectWorkingDirectory(expected: SessionWorkingDirectoryPicker, workingDirectory: Path) = false
-    override fun dismissWorkingDirectoryPicker(expected: SessionWorkingDirectoryPicker) = false
-    override fun requestRename(expectedRevision: Long) = Unit
+    override suspend fun tryUpdateConfiguration(expectedRevision: Long, configuration: SessionSettingsConfiguration) = true
     override fun close() { closed = true }
 }

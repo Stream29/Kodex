@@ -6,6 +6,8 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            api(project(":app-component-session-settings-spec"))
+            api(project(":app-component-new-session-defaults-spec"))
             api(project(":app-component-context-source-settings-spec"))
             api(project(":app-component-session-title-settings-spec"))
             api(project(":app-component-application-preferences-spec"))

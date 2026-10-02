@@ -6,6 +6,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            api(project(":app-component-session-delete-spec"))
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.serialization.core)
         }

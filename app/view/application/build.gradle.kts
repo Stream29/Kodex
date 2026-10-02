@@ -18,6 +18,9 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
         mosaicMain.dependencies {
+            implementation(project(":app-component-runtime-configuration-impl-view"))
+            implementation(project(":app-component-session-catalog-impl-view"))
+            implementation(project(":app-component-history-index-impl-view"))
             implementation(project(":app-component-request-user-input-impl-view"))
             implementation(project(":app-component-suggest-subagent-task-impl-view"))
             implementation(project(":app-component-working-directory-impl-view"))

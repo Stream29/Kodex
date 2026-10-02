@@ -8,6 +8,8 @@ kotlin {
             api(project(":app-contract-settings"))
         }
         mosaicMain.dependencies {
+            implementation(project(":app-component-session-settings-impl-view"))
+            implementation(project(":app-component-new-session-defaults-impl-view"))
             implementation(project(":app-component-context-source-settings-impl-view"))
             implementation(project(":app-component-session-title-settings-impl-view"))
             implementation(project(":app-component-application-preferences-impl-view"))
@@ -25,6 +27,7 @@ kotlin {
             implementation(libs.mosaic.runtime)
         }
         mosaicTest.dependencies {
+            implementation(project(":app-component-session-settings-impl-viewmodel"))
             implementation(project(":app-component-session-title-settings-impl-viewmodel"))
             implementation(project(":app-component-application-preferences-impl-viewmodel"))
             implementation(project(":app-component-authentication-settings-impl-viewmodel"))

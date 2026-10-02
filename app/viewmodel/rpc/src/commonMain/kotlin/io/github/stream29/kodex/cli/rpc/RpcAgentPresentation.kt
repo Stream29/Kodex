@@ -9,6 +9,7 @@ import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
+import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputDependencies
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskViewModel
@@ -70,8 +71,20 @@ public class RpcAgentPresentation internal constructor(
         binding.running,
     )
     public val historyIndex: HistoryIndexViewModel = createHistoryIndexViewModel(
-        binding.storage.index, binding.storage.timestamp, binding.latestIndex, binding.displayState,
-        local, binding.storage.index.cacheNonce,
+        dependencies = object : HistoryIndexDependencies {
+            override val timeline = binding.storage.index
+            override val timestamp = binding.storage.timestamp
+            override val latestIndex = binding.latestIndex
+            override val cacheNonce = binding.storage.index.cacheNonce
+            override val externalWrite = binding.displayState.projectState {
+                it == io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue.ExternalWrite
+            }
+            override fun requestScrollToStorageIndex(index: Int) {
+                binding.ensureActive()
+                history.requestScrollToStorageIndex(index)
+            }
+        },
+        ownerScope = local,
     )
     public val requestUserInput: RequestUserInputViewModel = createRequestUserInputViewModel(
         dependencies = object : RequestUserInputDependencies {
@@ -120,7 +133,9 @@ public class RpcAgentPresentation internal constructor(
     )
 
     init {
-        owner.invokeOnCompletion { history.close(); requestUserInput.close(); suggestSubagentTask.close() }
+        owner.invokeOnCompletion {
+            history.close(); historyIndex.close(); requestUserInput.close(); suggestSubagentTask.close()
+        }
         updateShells(binding.shellSessions.value)
         local.launch {
             binding.shellSessions.collect(::updateShells)

@@ -16,10 +16,8 @@ import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
-import com.jakewharton.mosaic.ui.SubcomposeLayout
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
-import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
@@ -66,7 +64,6 @@ import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiInteractionTextStyle
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
-import io.github.stream29.kodex.cli.components.wrapToTerminalWidth
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
@@ -823,7 +820,6 @@ private enum class HistoryContentType {
 
 private data object StreamingStartedHistoryKey
 private data object CompactingHistoryKey
-private data object WrappedHistoryTextSlot
 
 private const val MaximumHistoryCommandPreviewLength: Int = 240
 
@@ -833,58 +829,4 @@ private fun HistoryMarkerText(value: String) {
         value = value,
         textStyle = TextStyle.Dim,
     )
-}
-
-/**
- * Mosaic's Text clips at its measured width instead of wrapping. Subcomposing from the incoming
- * finite width keeps each lazy item independently measurable.
- */
-@Composable
-internal fun WrappedHistoryText(
-    value: String,
-    textStyle: TextStyle = TextStyle.Unspecified,
-    color: Color = Color.Unspecified,
-) {
-    val layoutCache = remember(value) { WrappedHistoryTextLayoutCache(value) }
-    SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
-        check(constraints.hasBoundedWidth) {
-            "Agent history text must be measured with a finite maximum width."
-        }
-        val wrapWidth = constraints.maxWidth.coerceAtLeast(1)
-        val lines = layoutCache.linesFor(wrapWidth)
-        val placeable = subcompose(WrappedHistoryTextSlot) {
-            Column {
-                lines.forEach { line ->
-                    Text(value = line, color = color, textStyle = textStyle)
-                }
-            }
-        }.single().measure(
-            constraints.copy(
-                minWidth = 0,
-                minHeight = 0,
-                maxHeight = Constraints.Infinity,
-            ),
-        )
-        layout(
-            width = constraints.constrainWidth(placeable.width),
-            height = constraints.constrainHeight(placeable.height),
-        ) {
-            placeable.place(0, 0)
-        }
-    }
-}
-
-internal class WrappedHistoryTextLayoutCache(
-    private val value: String,
-) {
-    private var cachedWidth: Int? = null
-    private var cachedLines: List<String> = emptyList()
-
-    internal fun linesFor(width: Int): List<String> {
-        if (cachedWidth != width) {
-            cachedWidth = width
-            cachedLines = value.wrapToTerminalWidth(width)
-        }
-        return cachedLines
-    }
 }

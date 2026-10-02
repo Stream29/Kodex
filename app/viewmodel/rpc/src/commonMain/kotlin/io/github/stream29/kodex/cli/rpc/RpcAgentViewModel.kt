@@ -23,6 +23,7 @@ private class RpcAgentViewModel(
     private val local = CoroutineScope(scope.coroutineContext + owner)
     override val storageUri = binding.storage.uri
     override val settings = binding.settings
+    override val runtimeConfiguration = createBoundRuntimeConfigurationViewModel(this, local)
     override val state = binding.state
     override val running = binding.running
     override val latestIndex = binding.latestIndex
@@ -104,5 +105,5 @@ private class RpcAgentViewModel(
             presentation.dismissFailure()
         }
     }
-    override fun close() { owner.cancel() }
+    override fun close() { runtimeConfiguration.close(); owner.cancel() }
 }

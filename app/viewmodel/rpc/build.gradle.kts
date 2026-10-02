@@ -5,6 +5,9 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":app-component-new-session-defaults-impl-viewmodel"))
+            implementation(project(":app-component-runtime-configuration-impl-viewmodel"))
+            implementation(project(":app-component-history-index-impl-viewmodel"))
             implementation(project(":app-component-context-source-settings-impl-viewmodel"))
             implementation(project(":app-component-session-title-settings-impl-viewmodel"))
             implementation(project(":app-component-application-preferences-impl-viewmodel"))
@@ -32,6 +35,7 @@ kotlin {
             implementation(libs.ktor.server.core)
         }
         commonTest.dependencies {
+            implementation(project(":app-component-session-settings-impl-viewmodel"))
             implementation(project(":rpc-impl-server"))
             implementation(project(":rpc-impl-in-memory"))
             implementation(project(":openai-impl-client-test"))

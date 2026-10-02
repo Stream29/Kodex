@@ -63,6 +63,22 @@ val sessionTreeCliViewModelTest by testSuite {
             assertEquals(ApplicationPopupState.Closed, app.viewModel.popup.value)
         }
     }
+    test("catalog navigation dismisses its exact opening and stale callbacks cannot dismiss its replacement") {
+        applicationFixture { app, _ ->
+            val vm = app.viewModel
+            val session = vm.materializeNewSession(0)
+            val first = vm.openSessionCatalogPopup()
+            first.viewModel.refresh()
+            val row = assertIs<SessionCatalogState.Loaded>(first.viewModel.state.value).sessions.single()
+            first.viewModel.requestOpen(row)
+            assertSame(session, vm.navigation.value.selected)
+            assertEquals(ApplicationPopupState.Closed, vm.popup.value)
+            val replacement = vm.openSessionCatalogPopup()
+            assertFailsWith<CancellationException> { first.viewModel.dismiss() }
+            assertSame(replacement, vm.popup.value)
+            assertFalse(vm.dismissPopup(first))
+        }
+    }
     test("login dismissal restores its settings parent and target closure disposes both") {
         applicationFixture { app, _ ->
             val vm = app.viewModel

@@ -12,11 +12,10 @@ val settingsPathFieldTest by testSuite {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(40)) {
-                    SettingsPathField(
+                    SettingsItem(
                         label = "Working directory",
-                        value = "/workspace",
-                        onBrowse = {},
-                    )
+                        supportingText = "/workspace",
+                    ) { SettingsActionButton("Browse", onClick = {}) }
                 }
             }
 

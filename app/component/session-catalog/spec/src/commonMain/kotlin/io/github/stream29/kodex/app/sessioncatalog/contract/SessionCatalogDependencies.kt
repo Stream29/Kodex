@@ -26,24 +26,28 @@ public interface SessionCatalogDependencies {
      * entries; when true, include both archived and unarchived entries.
      *
      * @throws CancellationException when the operation is cancelled.
+     * @throws Exception when persistence/transport/catalog sampling fails, unchanged.
      */
     public suspend fun load(showArchived: Boolean): List<SessionCatalogEntry>
 
     /**
      * Archives one persisted root Session.
      * @throws CancellationException when the operation is cancelled.
+     * @throws Exception when the owner rejects the target or persistence/transport fails.
      */
     public suspend fun archive(sessionIndex: Int): Unit
 
     /**
      * Unarchives one persisted root Session.
      * @throws CancellationException when the operation is cancelled.
+     * @throws Exception when the owner rejects the target or persistence/transport fails.
      */
     public suspend fun unarchive(sessionIndex: Int): Unit
 
     /**
      * Forks one complete root Session through the owner and returns the new index.
      * @throws CancellationException when the operation is cancelled.
+     * @throws Exception when fork admission, persistence or transport fails; never replay automatically.
      */
     public suspend fun fork(sessionIndex: Int): Int
 
@@ -52,6 +56,7 @@ public interface SessionCatalogDependencies {
      * Return false if it did not exist. The owner handles affected tabs and
      * children; the catalog must not dispose those resources itself.
      * @throws CancellationException when the operation is cancelled.
+     * @throws Exception when deletion fails; failure is not equivalent to a false result.
      */
     public suspend fun delete(sessionIndex: Int): Boolean
 }

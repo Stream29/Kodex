@@ -33,6 +33,34 @@ private val popupMenuAnsiSnapshots = SnapshotStrategy { mosaic ->
 }
 
 val tuiPopupMenuTest by testSuite {
+    test("caller-owned leaf dismissal admits exact handle before disposal") {
+        val calls = mutableListOf<String>()
+        var expanded by mutableStateOf(true)
+        runMosaicTest {
+            setContentAndSnapshot {
+                TuiPopupHost(Modifier.width(30).height(6)) {
+                    val anchor = rememberTuiPopupAnchor()
+                    Text("owner", Modifier.tuiPopupAnchor(anchor))
+                    TuiPopupMenu(expanded = expanded, anchor = anchor, onDismissRequest = {
+                        calls += "dismiss"
+                        expanded = false
+                    }) {
+                        TuiPopupMenuItem(key = "command", dismissOnClick = false, onClick = {
+                            assertTrue(expanded)
+                            calls += "admit"
+                            expanded = false
+                        }) { Text("command") }
+                    }
+                }
+            }
+            awaitSnapshot()
+            sendKeyEvent(KeyboardEvent(codepoint = 13))
+            awaitSnapshot()
+            assertEquals(listOf("admit"), calls)
+            assertFalse(expanded)
+        }
+    }
+
     test("default popup uses a tonal container instead of the native background") {
         val scheme = DefaultTuiColorScheme.copy(
             surface = Color(1, 2, 3),

@@ -24,6 +24,7 @@ private class SettingsViewModelImpl(
     init { if (initialPage == SettingsPage.OpenAi) global.accountUsage.refresh() }
     override fun selectPage(page: SettingsPage) {
         if (closed || this.page.value == page) return
+        if (this.page.value == SettingsPage.CurrentSession) session.hidePage()
         if (this.page.value == SettingsPage.Mcp) global.mcpSettings.hidePage()
         if (this.page.value == SettingsPage.Hooks) global.hookSettings.hidePage()
         if (this.page.value == SettingsPage.ContextSources) global.contextSourceSettings.hidePage()

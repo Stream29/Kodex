@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.app.runtimeconfiguration.*
+import io.github.stream29.kodex.cli.runtimeconfiguration.*
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -23,13 +26,40 @@ import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ReasoningEffortPreset
 import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
+import io.github.stream29.kodex.openai.availableServiceTiers
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.io.files.Path
 import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+
+private fun configurationState(
+    configuration: RuntimeConfiguration,
+    models: List<ModelInfo> = emptyList(),
+): RuntimeConfigurationState = RuntimeConfigurationState(
+    configuration,
+    (models.map { it.slug } + configuration.model).distinct().map { model ->
+        val info = models.firstOrNull { it.slug == model }
+        RuntimeConfigurationModelOption(
+            model,
+            info?.supportedReasoningLevels?.map { it.effort }.orEmpty().ifEmpty { listOf(configuration.reasoning) },
+            info?.availableServiceTiers().orEmpty().ifEmpty { listOf(ServiceTier.Default) },
+        )
+    },
+)
+
+private fun configurationViewModel(settings: KodexAgentSettings): RuntimeConfigurationViewModel =
+    object : RuntimeConfigurationViewModel {
+        override val state = MutableStateFlow(configurationState(RuntimeConfiguration(
+            settings.model, settings.reasoning.effort, settings.serviceTier, settings.requestUserInputMode,
+        )))
+        override suspend fun updateModelConfiguration(model: OpenAiModelId, effort: ReasoningEffort, tier: ServiceTier) = Unit
+        override suspend fun updateRequestUserInputMode(mode: RequestUserInputMode) = Unit
+        override fun close() = Unit
+    }
 
 val runtimeStatusBarTest by testSuite {
     test("requestUserInputModesUseExplicitLabels") {
@@ -102,12 +132,10 @@ val runtimeStatusBarTest by testSuite {
                 dropdowns = RuntimeConfigurationDropdowns.remember(owner = Unit)
                 TuiPopupHost(modifier = Modifier.width(60).height(12)) {
                     Row {
-                        RuntimeConfigurationTriggers(configuration, dropdowns)
+                        RuntimeConfigurationTriggers(configurationState(configuration, listOf(modelInfo)), dropdowns)
                     }
                     RuntimeConfigurationMenus(
-                        configuration = configuration,
-                        models = listOf(modelInfo),
-                        modelOptions = listOf(model),
+                        state = configurationState(configuration, listOf(modelInfo)),
                         dropdowns = dropdowns,
                         onConfigurationSelected = { selectedModel, effort, tier ->
                             configuration = configuration.copy(
@@ -158,12 +186,10 @@ val runtimeStatusBarTest by testSuite {
                 val dropdowns = RuntimeConfigurationDropdowns.remember(owner = Unit)
                 TuiPopupHost(modifier = Modifier.width(60).height(8)) {
                     Row {
-                        RuntimeConfigurationTriggers(configuration, dropdowns)
+                        RuntimeConfigurationTriggers(configurationState(configuration), dropdowns)
                     }
                     RuntimeConfigurationMenus(
-                        configuration = configuration,
-                        models = emptyList(),
-                        modelOptions = listOf(model),
+                        state = configurationState(configuration),
                         dropdowns = dropdowns,
                         onConfigurationSelected = { selectedModel, effort, tier ->
                             configuration = configuration.copy(
@@ -200,6 +226,7 @@ val runtimeStatusBarTest by testSuite {
                 NewSessionStatusBar(
                     columns = columns,
                     settings = testSettings(Path(".")),
+                    runtimeConfiguration = configurationViewModel(testSettings(Path("."))),
                     dropdowns = RuntimeConfigurationDropdowns.remember(owner = Unit),
                     onBrowseWorkingDirectory = {},
                     onOpenSettings = {},
@@ -250,6 +277,7 @@ val runtimeStatusBarTest by testSuite {
                     NewSessionStatusBar(
                         columns = columns,
                         settings = settings,
+                        runtimeConfiguration = configurationViewModel(settings),
                         dropdowns = RuntimeConfigurationDropdowns.remember(owner = columns),
                         onBrowseWorkingDirectory = {},
                         onOpenSettings = {},
@@ -276,6 +304,7 @@ val runtimeStatusBarTest by testSuite {
                 NewSessionStatusBar(
                     columns = columns,
                     settings = testSettings(workingDirectory),
+                    runtimeConfiguration = configurationViewModel(testSettings(workingDirectory)),
                     dropdowns = RuntimeConfigurationDropdowns.remember(owner = Unit),
                     onBrowseWorkingDirectory = { browseCount += 1 },
                     onOpenSettings = {},

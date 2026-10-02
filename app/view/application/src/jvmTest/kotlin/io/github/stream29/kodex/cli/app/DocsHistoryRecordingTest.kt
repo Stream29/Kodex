@@ -1,4 +1,12 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package io.github.stream29.kodex.cli.app
+
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexInteractionRequest
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexMenuRequest
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexHoverPopup
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexContextMenu
+import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationDropdowns
 
 import io.github.stream29.kodex.app.test.seedTestHistory
 
@@ -16,6 +24,7 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import de.infix.testBalloon.framework.core.testSuite
+import de.infix.testBalloon.framework.core.TestCompartment
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
@@ -41,11 +50,18 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-val docsHistoryRecordingTest by testSuite {
+// These clips load real repository/RPC payloads on Dispatchers.Default. Virtual
+// frame time must not outrun those reads and pointer-anchor placement. Frontend
+// observation, interactions, drawing and layout share one serialized dispatcher.
+private val historyRecordingDispatcher = Dispatchers.Default.limitedParallelism(1)
+
+val docsHistoryRecordingTest by testSuite(compartment = { TestCompartment.RealTime }) {
     test("history index hover check out and return to latest use real history") {
+        withContext(historyRecordingDispatcher) {
         // English translation of a contiguous, user-authorized local feature
         // discussion. Preserve real event types, index gaps and answered choices.
         val history = Json.decodeFromString<Map<Int, StableIndexEvent>>(
@@ -54,7 +70,7 @@ val docsHistoryRecordingTest by testSuite {
         assertEquals(13, history.size)
         assertEquals(4, history.values.map { it::class }.toSet().size)
         var sourceIndex = -1
-        val fixture = SessionViewModelTestFixture.create(this) { home ->
+        val fixture = SessionViewModelTestFixture.create(this, frontendDispatcher = historyRecordingDispatcher) { home ->
             sourceIndex = seedTestHistory(home, "History Index design", history.filterKeys { it < 826 })
         }
         val session = fixture.rpc.sessions.open(sourceIndex)
@@ -63,7 +79,6 @@ val docsHistoryRecordingTest by testSuite {
         try {
             var hover by mutableStateOf<HistoryIndexInteractionRequest?>(null)
             var menu by mutableStateOf<HistoryIndexMenuRequest?>(null)
-            var checkedOut: Int? = null
             val clip = DocsClip("history-index", width = 100, height = 28)
             runMosaicTest(MosaicSnapshots) {
                 setContentAndSnapshot {
@@ -88,9 +103,7 @@ val docsHistoryRecordingTest by testSuite {
                             )
                         }
                         HistoryIndexHoverPopup(hover, 64, 28, {})
-                        HistoryIndexContextMenu(menu, agent, { menu = null }) {
-                            checkedOut = it.index
-                            agent.history.requestScrollToStorageIndex(it.index)
+                        HistoryIndexContextMenu(menu) {
                             menu = null
                         }
                     }
@@ -106,7 +119,7 @@ val docsHistoryRecordingTest by testSuite {
                     sendMouseEvent(MouseEvent(6, row, MouseEvent.Type.Motion))
                     settle()
                     assertTrue(requireNotNull(hover).anchor.isPlaced)
-                    withContext(Dispatchers.Default) { delay(500) }
+                    delay(500)
                     repeat(3) { settle() }
                     clip.add(settle(), title)
                     return row
@@ -124,11 +137,12 @@ val docsHistoryRecordingTest by testSuite {
                 // Loading an older, variable-height entry crosses the real
                 // asynchronous history window before its scroll can settle.
                 repeat(20) {
-                    withContext(Dispatchers.Default) { delay(25) }
+                    delay(25)
                     settle()
                 }
                 clip.add(settle(), "[↓]")
-                assertEquals(783, checkedOut)
+                assertNull(menu)
+                assertTrue(!agent.history.followsLatest)
                 assertEquals(824, fixture.rpc.services.index.getLatestIndex(sourceIndex), "Check out must not alter storage")
                 binding.appendUserMessage((history.getValue(826) as StableUserMessage).content)
                 clip.add(settle(), "[↓]")
@@ -144,11 +158,13 @@ val docsHistoryRecordingTest by testSuite {
         } finally {
             fixture.close()
         }
+        }
     }
 
     test("real revert dialog cancels and reverts disposable history") {
+        withContext(historyRecordingDispatcher) {
         var sourceIndex = -1
-        val fixture = SessionViewModelTestFixture.create(this) { home ->
+        val fixture = SessionViewModelTestFixture.create(this, frontendDispatcher = historyRecordingDispatcher) { home ->
             sourceIndex = seedTestHistory(home, "History example", (2..5).associateWith {
                 StableUserMessage(listOf(ContentItem.InputText("Offline example entry $it")))
             })
@@ -158,12 +174,10 @@ val docsHistoryRecordingTest by testSuite {
         val binding = fixture.rpc.views.open(sourceIndex).current()
         val agent = requireNotNull(session.rootAgent.value)
         try {
-            withContext(Dispatchers.Default) {
-                withTimeout(5.seconds) {
-                    while (!agent.history.contains(agent.history.historyItems.value.generation, 4)) {
-                        agent.history.historyItems.value.requestOlder()
-                        delay(20)
-                    }
+            withTimeout(5.seconds) {
+                while (!agent.history.contains(agent.history.historyItems.value.generation, 4)) {
+                    agent.history.historyItems.value.requestOlder()
+                    delay(20)
                 }
             }
             val clip = DocsClip("history-actions")
@@ -220,9 +234,7 @@ val docsHistoryRecordingTest by testSuite {
                 clickLabel("Offline example entry 4", MouseEvent.Button.Right)
                 clip.add(settle(), "Fork from here")
                 clickLabel("Fork from here")
-                withContext(Dispatchers.Default) {
-                    withTimeout(5.seconds) { while (tabs.size < 2) delay(20) }
-                }
+                withTimeout(5.seconds) { while (tabs.size < 2) delay(20) }
                 clip.add(settle(), "[fork]")
                 assertEquals(5, fixture.rpc.services.index.getLatestIndex(sourceIndex), "Fork must preserve its source")
                 assertEquals(4, fixture.rpc.services.index.getLatestIndex(selected.sessionIndex))
@@ -241,16 +253,12 @@ val docsHistoryRecordingTest by testSuite {
                 clickLabel("Revert to here")
                 clip.add(settle(), "Keep the selected history entry")
                 clickLabel("[Revert]")
-                withContext(Dispatchers.Default) {
-                    withTimeout(5.seconds) { binding.latestIndex.first { it == 4 } }
-                }
+                withTimeout(5.seconds) { binding.latestIndex.first { it == 4 } }
                 var rendered = settle()
-                withContext(Dispatchers.Default) {
-                    withTimeout(5.seconds) {
-                        while (!rendered.draw().render(AnsiLevel.NONE, false).contains("Offline example entry 4")) {
-                            delay(10)
-                            rendered = settle()
-                        }
+                withTimeout(5.seconds) {
+                    while (!rendered.draw().render(AnsiLevel.NONE, false).contains("Offline example entry 4")) {
+                        delay(10)
+                        rendered = settle()
                     }
                 }
                 clip.add(rendered, "Offline example entry 4")
@@ -259,6 +267,7 @@ val docsHistoryRecordingTest by testSuite {
             clip.save()
         } finally {
             fixture.close()
+        }
         }
     }
 }

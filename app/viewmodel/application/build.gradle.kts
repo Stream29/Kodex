@@ -5,6 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":app-component-session-settings-impl-viewmodel"))
             implementation(project(":app-component-working-directory-impl-viewmodel"))
             implementation(project(":app-component-session-rename-impl-viewmodel"))
             implementation(project(":app-component-session-delete-impl-viewmodel"))

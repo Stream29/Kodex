@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.app.session.contract
 
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
+import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
 import io.github.stream29.kodex.openai.KodexAgentSettings
 
 /**
@@ -12,6 +13,8 @@ import io.github.stream29.kodex.openai.KodexAgentSettings
  */
 public interface NewSessionViewModel : SessionViewModel {
     public val composer: ComposerViewModel
+    /** Stable configuration child of this draft; neither rendering nor tab selection owns it. */
+    public val runtimeConfiguration: RuntimeConfigurationViewModel
 
     /** Clears the explicit thread name and restores the derived default name. */
     public suspend fun clearExplicitThreadName(): Unit

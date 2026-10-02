@@ -10,6 +10,9 @@ import kotlin.time.Instant
  * and archive, running and activity flags independently; none implies another.
  * Missing timestamps mean unavailable metadata, not an epoch value.
  *
+ * @property sessionIndex Current backend addressing number, not permanent identity across deletion/reuse.
+ * @property threadName Optional non-blank title; null renders as `Session <index>`.
+ * @property archived Persisted archive flag; independent of running/owner residency.
  * @throws IllegalArgumentException if the index is negative or the name is blank.
  */
 @Serializable

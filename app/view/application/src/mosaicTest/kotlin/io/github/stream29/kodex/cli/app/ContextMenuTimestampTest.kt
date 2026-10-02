@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.cli.components.formatPopupTimestamp as formatMenuTimestamp
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue

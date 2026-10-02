@@ -5,6 +5,8 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            api(project(":app-component-runtime-configuration-spec"))
+            api(project(":app-component-history-index-spec"))
             api(project(":app-component-request-user-input-spec"))
             api(project(":app-component-suggest-subagent-task-spec"))
             api(project(":agent-storage-spec-clean-models"))

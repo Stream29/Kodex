@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.cli.sessioncatalog.sessionBrowserLabel
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue

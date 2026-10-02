@@ -7,11 +7,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.ui.Text
+import io.github.stream29.kodex.cli.components.formatPopupTimestamp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.datetime.TimeZone
-import kotlinx.datetime.offsetAt
-import kotlinx.datetime.toLocalDateTime
 import kotlin.coroutines.coroutineContext
 import kotlin.time.Instant
 
@@ -25,7 +24,7 @@ internal fun rememberMenuTimestamp(request: Any, read: suspend () -> Instant?): 
     var value by remember(request) { mutableStateOf<String?>(null) }
     LaunchedEffect(request) {
         val loaded = try {
-            read()?.let { formatMenuTimestamp(it, TimeZone.currentSystemDefault()) }
+            read()?.let { formatPopupTimestamp(it, TimeZone.currentSystemDefault()) }
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (_: Throwable) {
@@ -35,18 +34,6 @@ internal fun rememberMenuTimestamp(request: Any, read: suspend () -> Instant?): 
         value = loaded
     }
     return value
-}
-
-internal fun formatMenuTimestamp(timestamp: Instant, timeZone: TimeZone): String {
-    val local = timestamp.toLocalDateTime(timeZone)
-    val dateTime = "${local.year.toString().padStart(4, '0')}-" +
-        "${(local.month.ordinal + 1).toString().padStart(2, '0')}-" +
-        "${local.day.toString().padStart(2, '0')} " +
-        "${local.hour.toString().padStart(2, '0')}:" +
-        "${local.minute.toString().padStart(2, '0')}:" +
-        local.second.toString().padStart(2, '0')
-    val offset = timeZone.offsetAt(timestamp).toString().let { if (it == "Z") "+00:00" else it }
-    return "$dateTime UTC$offset"
 }
 
 /** @param value null omits this information item entirely. */

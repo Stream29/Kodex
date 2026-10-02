@@ -103,8 +103,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.microseconds
-import kotlin.time.Duration.Companion.milliseconds
 
 /** Renders one committed clean event without flattening its domain model first. */
 @Composable
@@ -797,19 +795,6 @@ internal fun HistoryItemHeader(
 
 private fun Duration.historyElapsedSuffix(): String =
     " +${roundToMilliseconds()}"
-
-internal fun Duration.roundToMilliseconds(): Duration {
-    if (!isFinite()) return this
-    val truncatedMilliseconds = inWholeMilliseconds
-    val truncated = truncatedMilliseconds.milliseconds
-    val remainder = this - truncated
-    val roundedMilliseconds = when {
-        remainder >= 500.microseconds -> truncatedMilliseconds + 1
-        remainder <= (-500).microseconds -> truncatedMilliseconds - 1
-        else -> truncatedMilliseconds
-    }
-    return roundedMilliseconds.milliseconds
-}
 
 @Composable
 private fun Detail(

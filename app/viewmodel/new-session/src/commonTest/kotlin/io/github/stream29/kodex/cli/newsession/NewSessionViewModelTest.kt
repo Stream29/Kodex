@@ -7,6 +7,32 @@ import kotlinx.coroutines.flow.first
 import kotlin.test.*
 
 val newSessionViewModelTest by testSuite {
+    test("stable runtime child edits only its exact draft tuple and closes without materializing") {
+        withRpcFrontend {
+            val draft = draft("target")
+            val other = draft("other")
+            try {
+                draft.rename("keep title")
+                val cwd = draft.settings.value.cwd
+                val child = draft.runtimeConfiguration
+                assertSame(child, draft.runtimeConfiguration)
+                child.updateModelConfiguration(OpenAiModelId("selected"), ReasoningEffort.Max, ServiceTier.Fast)
+                child.updateRequestUserInputMode(RequestUserInputMode.NoQuestion)
+                assertEquals(OpenAiModelId("selected"), draft.settings.value.model)
+                assertEquals(ReasoningEffort.Max, draft.settings.value.reasoning.effort)
+                assertEquals(ServiceTier.Fast, draft.settings.value.serviceTier)
+                assertEquals(RequestUserInputMode.NoQuestion, draft.settings.value.requestUserInputMode)
+                assertEquals("keep title", draft.settings.value.threadName)
+                assertEquals(cwd, draft.settings.value.cwd)
+                assertNotEquals(OpenAiModelId("selected"), other.settings.value.model)
+                assertTrue(services.global.getSessionCatalog(true).isEmpty())
+                draft.close()
+                assertTrue(child.state.value.closed)
+                child.updateRequestUserInputMode(RequestUserInputMode.AskUser)
+                assertEquals(RequestUserInputMode.NoQuestion, draft.settings.value.requestUserInputMode)
+            } finally { draft.close(); other.close() }
+        }
+    }
     test("draft settings stay local until one captured materialization") {
         withRpcFrontend {
             val draft = draft()

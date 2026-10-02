@@ -16,6 +16,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
+            implementation(project(":app-component-session-settings-impl-viewmodel"))
             implementation(project(":app-test-support-rpc"))
             implementation(libs.kotlinx.coroutines.test)
         }

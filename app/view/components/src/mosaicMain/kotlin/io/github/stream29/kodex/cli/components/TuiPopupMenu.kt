@@ -180,6 +180,10 @@ public fun rememberTuiPopupMenuState(initialFocusedKey: Any? = null): TuiPopupMe
  *
  * @param leadingContent `null` omits the leading content slot.
  * @param trailingContent `null` omits the trailing content slot.
+ * @param dismissOnClick When true, dismisses the menu group before invoking [onClick].
+ * False delegates leaf dismissal to the caller, for exact-handle admission that must precede
+ * disposal. Escape/outside dismissal is unaffected; a caller accepting the command must close
+ * its own menu. Submenu navigation never dismisses the group.
  */
 @Suppress("FunctionName")
 public fun TuiPopupMenuScope.TuiPopupMenuItem(
@@ -190,6 +194,7 @@ public fun TuiPopupMenuScope.TuiPopupMenuItem(
     selected: Boolean = false,
     leadingContent: (@Composable () -> Unit)? = null,
     trailingContent: (@Composable () -> Unit)? = null,
+    dismissOnClick: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     entries += TuiPopupMenuEntry.Item(
@@ -202,6 +207,7 @@ public fun TuiPopupMenuScope.TuiPopupMenuItem(
         content = content,
         onClick = onClick,
         submenu = null,
+        dismissOnClick = dismissOnClick,
     )
 }
 
@@ -268,7 +274,8 @@ public fun TuiPopupMenuScope.TuiPopupSubmenuItem(
  * Displays a keyed popup menu over the surrounding [TuiPopupHost].
  *
  * The menu owns focus navigation and popup lifecycle but not domain selection. Selecting a normal
- * item dismisses the whole menu group before invoking that item's callback.
+ * item dismisses the whole menu group before invoking that item's callback unless the item
+ * explicitly delegates dismissal to its caller with `dismissOnClick = false`.
  */
 @Composable
 public fun BoxScope.TuiPopupMenu(
@@ -575,7 +582,7 @@ private fun TuiPopupMenuItemContent(
     TuiPressable(
         onClick = {
             if (entry.submenu == null) {
-                dismissGroup()
+                if (entry.dismissOnClick) dismissGroup()
                 entry.onClick()
             } else {
                 state.focusedKey = entry.key
@@ -794,6 +801,7 @@ internal sealed interface TuiPopupMenuEntry {
         val content: @Composable () -> Unit,
         val onClick: () -> Unit,
         val submenu: TuiPopupSubmenu?,
+        val dismissOnClick: Boolean = true,
     ) : TuiPopupMenuEntry
 
     class Divider(

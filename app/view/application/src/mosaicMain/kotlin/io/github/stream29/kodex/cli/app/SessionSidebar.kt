@@ -1,5 +1,10 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexSidebarBody
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexInteractionRequest
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexMenuRequest
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexSide
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -181,7 +186,10 @@ private fun SessionSidebarContent(
                 SidebarContent.HistoryIndex -> selectedAgent?.let { agent ->
                     HistoryIndexSidebarBody(
                         viewModel = agent.historyIndex,
-                        side = side,
+                        side = when (side) {
+                            SessionSidebarSide.Left -> HistoryIndexSide.Left
+                            SessionSidebarSide.Right -> HistoryIndexSide.Right
+                        },
                         columns = columns,
                         rows = rows - 1,
                         onHoverChanged = onHistoryIndexHoverChanged,
@@ -311,156 +319,6 @@ private data class SessionSidebarDragStart(
     val pointerColumn: Int,
     val sidebarColumns: Int,
 )
-
-@Composable
-internal fun HistoryIndexSidebarBody(
-    viewModel: HistoryIndexViewModel,
-    columns: Int,
-    rows: Int,
-    side: SessionSidebarSide = SessionSidebarSide.Left,
-    onHoverChanged: (HistoryIndexInteractionRequest, Boolean) -> Unit = { _, _ -> },
-    onOpenMenu: (HistoryIndexMenuRequest) -> Unit = {},
-    listState: LazyListState = remember(viewModel) {
-        LazyListState().apply { requestScrollToEnd() }
-    },
-) {
-    val window by viewModel.window.collectAsState()
-    val followsLatest = remember(viewModel) { mutableStateOf(true) }
-    val interactionSource = remember(viewModel, listState) {
-        MutableScrollInteractionSource { interaction ->
-            if (
-                interaction.orientation == ScrollOrientation.Vertical &&
-                (
-                    interaction.source == ScrollInputSource.Pointer ||
-                        interaction.source == ScrollInputSource.Keyboard
-                    )
-            ) {
-                if (interaction.consumedDelta < 0) {
-                    followsLatest.value = false
-                } else if (!listState.canScrollForward) {
-                    followsLatest.value = true
-                }
-            }
-        }
-    }
-    LaunchedEffect(viewModel, listState) {
-        snapshotFlow { listState.canScrollForward }.collect { canScrollForward ->
-            if (!canScrollForward) followsLatest.value = true
-        }
-    }
-    LaunchedEffect(
-        viewModel,
-        window.generation,
-        window.indexes.lastOrNull(),
-        followsLatest.value,
-    ) {
-        if (followsLatest.value) listState.requestScrollToEnd()
-    }
-
-    LazyColumn(
-        modifier = Modifier.width(columns).height(rows),
-        state = listState,
-        interactionSource = interactionSource,
-    ) {
-        items(
-            items = window.indexes,
-            key = { index -> HistoryIndexRowKey(window.generation, index) },
-        ) { index ->
-            val position = window.indexes.binarySearch(index)
-            HistoryIndexSidebarRow(
-                viewModel = viewModel,
-                generation = window.generation,
-                index = index,
-                graph = historyIndexGraph(
-                    position = position,
-                    size = window.indexes.size,
-                ),
-                side = side,
-                onHoverChanged = onHoverChanged,
-                onOpenMenu = onOpenMenu,
-            )
-        }
-    }
-}
-
-@Composable
-private fun HistoryIndexSidebarRow(
-    viewModel: HistoryIndexViewModel,
-    generation: Long,
-    index: Int,
-    graph: String,
-    side: SessionSidebarSide,
-    onHoverChanged: (HistoryIndexInteractionRequest, Boolean) -> Unit,
-    onOpenMenu: (HistoryIndexMenuRequest) -> Unit,
-) {
-    val anchor = rememberTuiPopupAnchor()
-    val request = remember(side, viewModel, generation, index, anchor) {
-        HistoryIndexInteractionRequest(
-            side = side,
-            viewModel = viewModel,
-            generation = generation,
-            index = index,
-            anchor = anchor,
-        )
-    }
-    DisposableEffect(request) {
-        onDispose { onHoverChanged(request, false) }
-    }
-    val state = remember(viewModel, generation, index) {
-        mutableStateOf<HistoryIndexRowState>(HistoryIndexRowState.Loading)
-    }
-    LaunchedEffect(viewModel, generation, index) {
-        state.value = try {
-            HistoryIndexRowState.Ready(viewModel.load(generation, index))
-        } catch (failure: CancellationException) {
-            throw failure
-        } catch (_: Throwable) {
-            HistoryIndexRowState.Failed
-        }
-    }
-    val rowState = state.value
-    val label = when (rowState) {
-        HistoryIndexRowState.Loading -> "…"
-        HistoryIndexRowState.Failed -> "[error]"
-        is HistoryIndexRowState.Ready -> rowState.entry.summary
-    }
-    TuiPressable(
-        onClick = {},
-        onSecondaryClick = { position ->
-            onOpenMenu(HistoryIndexMenuRequest(request, position))
-        },
-        modifier = Modifier
-            .fillMaxWidth()
-            .tuiPopupAnchor(anchor)
-            .onPointerEvent { event ->
-                if (event.type == MouseEvent.Type.Motion) {
-                    request.pointerPosition = event.position
-                }
-                false
-            }
-            .onPointerHover(
-                onPointerEnter = { onHoverChanged(request, true) },
-                onPointerExit = { onHoverChanged(request, false) },
-            ),
-    ) { _, hovered, pressed ->
-        EllipsizedText(
-            value = "$graph $label",
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(SettingsDialogNavigationBackground),
-            color = if (rowState == HistoryIndexRowState.Failed) {
-                TuiTheme.colorScheme.error
-            } else {
-                SettingsDialogForeground
-            },
-            textStyle = tuiInteractionTextStyle(
-                hovered = hovered,
-                pressed = pressed,
-                idleTextStyle = TextStyle.Dim,
-            ),
-        )
-    }
-}
 
 @Composable
 private fun SessionSidebarHeader(
@@ -704,72 +562,6 @@ internal fun BoxScope.ShellSessionHoverPopup(
 }
 
 @Composable
-internal fun BoxScope.HistoryIndexHoverPopup(
-    request: HistoryIndexInteractionRequest?,
-    contentColumns: Int,
-    contentRows: Int,
-    onHoverChanged: (Boolean) -> Unit,
-) {
-    val current = request ?: return
-    if (contentColumns <= 0 || contentRows <= 0 || !current.anchor.isPlaced) return
-    val state = remember(current) {
-        mutableStateOf<HistoryIndexHoverState>(HistoryIndexHoverState.Waiting)
-    }
-    LaunchedEffect(current) {
-        delay(SidebarHoverDelay)
-        state.value = try {
-            if (!current.viewModel.contains(current.generation, current.index)) {
-                HistoryIndexHoverState.Failed
-            } else {
-                HistoryIndexHoverState.Ready(
-                    current.viewModel.loadDetail(current.generation, current.index),
-                )
-            }
-        } catch (failure: CancellationException) {
-            throw failure
-        } catch (_: Throwable) {
-            HistoryIndexHoverState.Failed
-        }
-    }
-    val loaded = state.value
-    if (loaded == HistoryIndexHoverState.Waiting) return
-    val title: String
-    val content: String
-    when (loaded) {
-        HistoryIndexHoverState.Waiting -> return
-        HistoryIndexHoverState.Failed -> {
-            title = "Error"
-            content = "Unable to read or decode the history entry."
-        }
-
-        is HistoryIndexHoverState.Ready -> {
-            title = loaded.detail.kind.displayName
-            content = loaded.detail.content
-        }
-    }
-    val requestUserInputRows = (loaded as? HistoryIndexHoverState.Ready)
-        ?.detail
-        ?.requestUserInput
-        ?.requestUserInputHistoryRows()
-    SidebarHoverPopupSurface(
-        anchor = current.anchor,
-        side = current.side,
-        pointerPosition = current.pointerPosition,
-        title = title,
-        content = content,
-        contentColumns = contentColumns,
-        contentRows = contentRows,
-        requestUserInputRows = requestUserInputRows,
-        titleColor = if (loaded == HistoryIndexHoverState.Failed) {
-            TuiTheme.colorScheme.error
-        } else {
-            SettingsDialogForeground
-        },
-        onHoverChanged = onHoverChanged,
-    )
-}
-
-@Composable
 private fun BoxScope.SidebarHoverPopupSurface(
     anchor: TuiPopupAnchor,
     side: SessionSidebarSide,
@@ -867,77 +659,6 @@ private fun BoxScope.SidebarHoverPopupSurface(
 }
 
 @Composable
-internal fun BoxScope.HistoryIndexContextMenu(
-    request: HistoryIndexMenuRequest?,
-    selectedAgent: AgentViewModel?,
-    onDismissRequest: () -> Unit,
-    onCheckOut: (HistoryIndexInteractionRequest) -> Unit,
-) {
-    val current = request ?: return
-    val target = current.target
-    val window by target.viewModel.window.collectAsState()
-    val targetMatches =
-        selectedAgent?.historyIndex === target.viewModel &&
-            window.generation == target.generation &&
-            target.viewModel.contains(target.generation, target.index)
-    val anchorPlaced = target.anchor.isPlaced
-    LaunchedEffect(current, targetMatches, anchorPlaced) {
-        if (!targetMatches || !anchorPlaced) onDismissRequest()
-    }
-    if (!targetMatches || !anchorPlaced) return
-    val timestamp = rememberMenuTimestamp(current) {
-        target.viewModel.readMessageTimestamp(target.generation, target.index)
-    }
-    HistoryIndexContextMenuPopup(
-        anchor = target.anchor,
-        clickPosition = current.clickPosition,
-        index = target.index,
-        timestamp = timestamp,
-        onDismissRequest = onDismissRequest,
-        onCheckOut = { onCheckOut(target) },
-    )
-}
-
-/**
- * @param clickPosition null uses the keyboard anchor position.
- * @param timestamp null hides the timestamp field, including for non-Message entries.
- */
-@Composable
-internal fun BoxScope.HistoryIndexContextMenuPopup(
-    anchor: TuiPopupAnchor,
-    clickPosition: IntOffset?,
-    index: Int,
-    onDismissRequest: () -> Unit,
-    onCheckOut: () -> Unit,
-    timestamp: String? = null,
-) {
-    TuiContextMenu(
-        expanded = true,
-        anchor = anchor,
-        clickPosition = clickPosition,
-        onDismissRequest = onDismissRequest,
-        backgroundColor = PopupMenuBackground,
-    ) {
-        TuiPopupMenuItem(
-            key = "history-index-information",
-            onClick = {},
-            enabled = false,
-        ) {
-            Column {
-                Text("Index: $index")
-                TimestampInformation("Timestamp", timestamp)
-            }
-        }
-        TuiPopupMenuItem(
-            key = "history-index-check-out",
-            onClick = onCheckOut,
-        ) {
-            Text("Check out")
-        }
-    }
-}
-
-@Composable
 private fun collectOngoingShellSessions(selectedAgent: AgentViewModel?): List<AgentShellSession> {
     if (selectedAgent == null) return emptyList()
     return key(selectedAgent) {
@@ -968,23 +689,6 @@ internal class ShellSessionInteractionRequest(
     var pointerPosition: IntOffset? by mutableStateOf(null)
 }
 
-@Stable
-internal class HistoryIndexInteractionRequest(
-    val side: SessionSidebarSide,
-    val viewModel: HistoryIndexViewModel,
-    val generation: Long,
-    val index: Int,
-    val anchor: TuiPopupAnchor,
-) {
-    var pointerPosition: IntOffset? by mutableStateOf(null)
-}
-
-/** Each instance identifies a fresh opening, even for the same target and anchor. */
-internal class HistoryIndexMenuRequest(
-    val target: HistoryIndexInteractionRequest,
-    val clickPosition: IntOffset?,
-)
-
 internal enum class SessionSidebarSide(
     val collapseLabel: String,
     val expandLabel: String,
@@ -1000,44 +704,6 @@ internal val SidebarContent.displayName: String
         SidebarContent.TerminalSessions -> "Terminal sessions"
         SidebarContent.HistoryIndex -> "History Index"
     }
-
-private val HistoryIndexEntryKind.displayName: String
-    get() = when (this) {
-        HistoryIndexEntryKind.CompactionPoint -> "Compaction point"
-        HistoryIndexEntryKind.UserMessage -> "User message"
-        HistoryIndexEntryKind.AssistantMessage -> "Assistant message"
-        HistoryIndexEntryKind.AssistantCommentary -> "Assistant commentary"
-        HistoryIndexEntryKind.AssistantFinal -> "Assistant final"
-        HistoryIndexEntryKind.DeveloperMessage -> "Developer message"
-        HistoryIndexEntryKind.AgentMessage -> "Agent message"
-        HistoryIndexEntryKind.RequestUserInput -> "Request user input"
-        HistoryIndexEntryKind.SuggestSubagents -> "suggest subagents"
-        HistoryIndexEntryKind.PlanUpdate -> "Plan update"
-    }
-
-private fun historyIndexGraph(position: Int, size: Int): String = when {
-    size <= 1 -> "●"
-    position == 0 -> "┌●"
-    position == size - 1 -> "└●"
-    else -> "├●"
-}
-
-private data class HistoryIndexRowKey(
-    val generation: Long,
-    val index: Int,
-)
-
-private sealed interface HistoryIndexRowState {
-    data object Loading : HistoryIndexRowState
-    data object Failed : HistoryIndexRowState
-    data class Ready(val entry: HistoryIndexEntry) : HistoryIndexRowState
-}
-
-private sealed interface HistoryIndexHoverState {
-    data object Waiting : HistoryIndexHoverState
-    data object Failed : HistoryIndexHoverState
-    data class Ready(val detail: HistoryIndexEntryDetail) : HistoryIndexHoverState
-}
 
 private class SidebarHoverPopupPositionProvider(
     private val side: SessionSidebarSide,

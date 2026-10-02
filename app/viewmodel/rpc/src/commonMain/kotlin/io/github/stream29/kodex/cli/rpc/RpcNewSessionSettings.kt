@@ -1,62 +1,70 @@
 package io.github.stream29.kodex.cli.rpc
 
-import io.github.stream29.kodex.app.settings.contract.NewSessionSettingsState
-import io.github.stream29.kodex.app.settings.contract.NewSessionSettingsViewModel
 import io.github.stream29.kodex.app.settings.SettingsUpdateQueue
+import io.github.stream29.kodex.app.settings.contract.*
+import io.github.stream29.kodex.app.settings.createNewSessionDefaultsViewModel
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.openai.*
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 
-/** A disposable defaults editor whose accepted writes drain in the app scope. */
-public class RpcNewSessionSettings(
+/**
+ * Host composition of a real defaults component and its independent application-scope write queue.
+ * All projection, revisions and command admission belong to the component; this adapter owns only
+ * field-specific backend writes and queue disposal. Closing the child cannot cancel accepted writes.
+ */
+public class RpcNewSessionSettings private constructor(
+    private val resources: DefaultsResources,
+) : NewSessionSettingsViewModel by resources.child {
+    public constructor(global: RpcGlobalSettings, applicationScope: CoroutineScope) :
+        this(DefaultsResources(global, applicationScope))
+
+    override fun close() {
+        resources.child.close()
+        resources.dependencies.close()
+    }
+}
+
+private class DefaultsResources(global: RpcGlobalSettings, scope: CoroutineScope) {
+    val dependencies = RpcNewSessionDefaultsDependencies(global, scope)
+    val child = createNewSessionDefaultsViewModel(dependencies, scope)
+}
+
+private class RpcNewSessionDefaultsDependencies(
     private val global: RpcGlobalSettings,
     applicationScope: CoroutineScope,
-) : NewSessionSettingsViewModel {
-    private val owner = Job(applicationScope.coroutineContext[Job])
-    private val local = CoroutineScope(applicationScope.coroutineContext + owner)
+) : NewSessionDefaultsDependencies, AutoCloseable {
     private val updates = SettingsUpdateQueue(applicationScope)
-    private val mutable = MutableStateFlow(project(0, global.settings.value.newSession))
-    override val state: StateFlow<NewSessionSettingsState> = mutable.asStateFlow()
+    private var closed = false
+    override val defaults = global.settings.projectState { it.newSession }
+    override val models = global.models
+    override val operationFailure = global.operationFailure
 
-    init {
-        local.launch {
-            combine(global.settings, global.models) { settings, _ -> settings.newSession }.collect { value ->
-                val previous = mutable.value
-                mutable.value = project(previous.revision + if (value == previous.settings) 0 else 1, value)
-            }
-        }
-    }
-
-    private fun project(revision: Long, value: KodexNewSessionSettings): NewSessionSettingsState =
-        NewSessionSettingsState(revision, value, (global.models.value.map { it.slug } + value.model).distinct())
-
-    private fun <F> edit(
-        revision: Long,
+    private fun <F> admit(
+        expected: F,
         select: (KodexNewSessionSettings) -> F,
         replace: (KodexNewSessionSettings) -> KodexNewSessionSettings,
-    ) {
-        if (!owner.isActive || state.value.revision != revision) return
-        val initial = select(state.value.settings)
+    ): NewSessionDefaultsAdmission {
+        if (closed) return NewSessionDefaultsAdmission.Rejected
         updates.submit {
             try {
-                global.settings.editField(initial, { select(it.newSession) },
-                    { it.copy(newSession = replace(it.newSession)) },
-                    global::ensureActive,
-                )
+                global.settings.editField(expected, { select(it.newSession) },
+                    { it.copy(newSession = replace(it.newSession)) }, global::ensureActive)
                 global.dismissOperationFailure()
-            } catch (error: CancellationException) { throw error }
-            catch (error: Throwable) { global.reportOperationFailure(error) }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Throwable) { global.reportOperationFailure(failure) }
         }
+        return NewSessionDefaultsAdmission.Accepted
     }
-
-    override fun updateModel(expectedRevision: Long, model: OpenAiModelId): Unit =
-        edit(expectedRevision, { it.model }, { it.copy(model = model) })
-    override fun updateReasoningEffort(expectedRevision: Long, reasoningEffort: ReasoningEffort): Unit =
-        edit(expectedRevision, { it.reasoningEffort }, { it.copy(reasoningEffort = reasoningEffort) })
-    override fun updateServiceTier(expectedRevision: Long, serviceTier: ServiceTier): Unit =
-        edit(expectedRevision, { it.serviceTier }, { it.copy(serviceTier = serviceTier) })
-    override fun updateRequestUserInputMode(expectedRevision: Long, mode: RequestUserInputMode): Unit =
-        edit(expectedRevision, { it.requestUserInputMode }, { it.copy(requestUserInputMode = mode) })
-    override fun close() { owner.cancel(); updates.close() }
+    override fun admitModel(expected: OpenAiModelId, requested: OpenAiModelId) =
+        admit(expected, { it.model }, { it.copy(model = requested) })
+    override fun admitReasoningEffort(expected: ReasoningEffort, requested: ReasoningEffort) =
+        admit(expected, { it.reasoningEffort }, { it.copy(reasoningEffort = requested) })
+    override fun admitServiceTier(expected: ServiceTier, requested: ServiceTier) =
+        admit(expected, { it.serviceTier }, { it.copy(serviceTier = requested) })
+    override fun admitRequestUserInputMode(expected: RequestUserInputMode, requested: RequestUserInputMode) =
+        admit(expected, { it.requestUserInputMode }, { it.copy(requestUserInputMode = requested) })
+    override fun reportFailure(failure: Throwable) { global.reportOperationFailure(failure) }
+    override fun dismissFailure() { global.dismissOperationFailure() }
+    override fun close() { closed = true; updates.close() }
 }

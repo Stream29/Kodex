@@ -1,62 +1,30 @@
 package io.github.stream29.kodex.cli.app
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Stable
-import androidx.compose.runtime.key
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import com.jakewharton.mosaic.layout.background
 import com.jakewharton.mosaic.layout.clipToBounds
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
-import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Layout
-import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.cli.agent.canCompact
-import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
+import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfiguration
+import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
+import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationDropdowns
+import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationStatusItemsWithoutSpacing
+import io.github.stream29.kodex.cli.runtimeconfiguration.runtimeConfigurationLabel
+import io.github.stream29.kodex.cli.runtimeconfiguration.runtimeRequestUserInputModeLabel
 import io.github.stream29.kodex.cli.agent.AgentRuntimeControl
 import io.github.stream29.kodex.cli.agent.runtimeControl
 import io.github.stream29.kodex.cli.components.TuiButton
-import io.github.stream29.kodex.cli.components.TuiDropdownMenu
-import io.github.stream29.kodex.cli.components.TuiDropdownState
-import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
-import io.github.stream29.kodex.cli.components.TuiPopupMenuItem
-import io.github.stream29.kodex.cli.components.TuiPopupSubmenuItem
-import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.ModelInfo
-import io.github.stream29.kodex.openai.OpenAiModelId
-import io.github.stream29.kodex.openai.ReasoningEffort
-import io.github.stream29.kodex.openai.RequestUserInputMode
-import io.github.stream29.kodex.openai.ServiceTier
-import io.github.stream29.kodex.openai.availableServiceTiers
 import io.github.stream29.kodex.utils.terminaltext.takeLastFittingTerminalWidth
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
-import kotlinx.coroutines.launch
 import kotlinx.io.files.Path
-
-/** Target-scoped presentation state shared by triggers and host-level menus. */
-@Stable
-internal class RuntimeConfigurationDropdowns private constructor(
-    val model: TuiDropdownState,
-    val requestUserInputMode: TuiDropdownState,
-) {
-    companion object {
-        @Composable
-        fun remember(owner: Any?): RuntimeConfigurationDropdowns = key(owner) {
-            val model = rememberTuiDropdownState()
-            val requestUserInputMode = rememberTuiDropdownState()
-            remember(model, requestUserInputMode) {
-                RuntimeConfigurationDropdowns(model, requestUserInputMode)
-            }
-        }
-    }
-}
 
 @Composable
 internal fun AgentRuntimeStatusBar(
@@ -97,7 +65,7 @@ internal fun AgentRuntimeStatusBar(
                 )
             }
             RuntimeConfigurationStatusItemsWithoutSpacing(
-                configuration = settings.configuration(),
+                viewModel = viewModel.runtimeConfiguration,
                 dropdowns = dropdowns,
             )
             WorkingDirectoryStatusButton(
@@ -117,6 +85,7 @@ internal fun AgentRuntimeStatusBar(
 internal fun NewSessionStatusBar(
     columns: Int,
     settings: KodexAgentSettings,
+    runtimeConfiguration: RuntimeConfigurationViewModel,
     dropdowns: RuntimeConfigurationDropdowns,
     onBrowseWorkingDirectory: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -124,7 +93,7 @@ internal fun NewSessionStatusBar(
     StatusBarLayout(
         columns = columns,
         regularContent = {
-            RuntimeConfigurationStatusItemsWithoutSpacing(settings.configuration(), dropdowns)
+            RuntimeConfigurationStatusItemsWithoutSpacing(runtimeConfiguration, dropdowns)
             WorkingDirectoryStatusButton(
                 columns = columns,
                 workingDirectory = settings.cwd,
@@ -189,70 +158,6 @@ private fun SettingsStatusButton(onOpenSettings: () -> Unit) {
 }
 
 @Composable
-internal fun RuntimeConfigurationTriggers(
-    configuration: RuntimeConfiguration,
-    dropdowns: RuntimeConfigurationDropdowns,
-    enabled: Boolean = true,
-) {
-    Row {
-        RuntimeConfigurationStatusItems(configuration, dropdowns, enabled)
-    }
-}
-
-@Composable
-private fun RuntimeConfigurationStatusItems(
-    configuration: RuntimeConfiguration,
-    dropdowns: RuntimeConfigurationDropdowns,
-    enabled: Boolean = true,
-) {
-    TuiDropdownTrigger(
-        dropdownState = dropdowns.model,
-        label = runtimeConfigurationLabel(
-            model = configuration.model,
-            reasoning = configuration.reasoning,
-            tier = configuration.tier,
-        ),
-        modifier = Modifier.background(SessionButtonBackground),
-        color = SessionButtonForeground,
-        enabled = enabled,
-    )
-    Text(" ")
-    TuiDropdownTrigger(
-        dropdownState = dropdowns.requestUserInputMode,
-        label = configuration.requestUserInputMode.displayName(),
-        modifier = Modifier.background(SessionButtonBackground),
-        color = SessionButtonForeground,
-        enabled = enabled,
-    )
-}
-
-@Composable
-private fun RuntimeConfigurationStatusItemsWithoutSpacing(
-    configuration: RuntimeConfiguration,
-    dropdowns: RuntimeConfigurationDropdowns,
-    enabled: Boolean = true,
-) {
-    TuiDropdownTrigger(
-        dropdownState = dropdowns.model,
-        label = runtimeConfigurationLabel(
-            model = configuration.model,
-            reasoning = configuration.reasoning,
-            tier = configuration.tier,
-        ),
-        modifier = Modifier.background(SessionButtonBackground),
-        color = SessionButtonForeground,
-        enabled = enabled,
-    )
-    TuiDropdownTrigger(
-        dropdownState = dropdowns.requestUserInputMode,
-        label = configuration.requestUserInputMode.displayName(),
-        modifier = Modifier.background(SessionButtonBackground),
-        color = SessionButtonForeground,
-        enabled = enabled,
-    )
-}
-
-@Composable
 internal fun WorkingDirectoryStatusButton(
     columns: Int,
     workingDirectory: Path,
@@ -313,7 +218,7 @@ private fun runtimeConfigurationButtonWidths(
             tier = configuration.tier,
         ),
     ),
-    buttonWidth(configuration.requestUserInputMode.displayName()),
+    buttonWidth(runtimeRequestUserInputModeLabel(configuration.requestUserInputMode)),
 )
 
 private fun buttonWidth(label: String): Int = label.terminalCellWidth() + ButtonBorderColumns
@@ -364,139 +269,12 @@ internal fun statusBarLayoutPlan(
     )
 }
 
-@Composable
-internal fun BoxScope.RuntimeConfigurationMenus(
-    viewModel: AgentSettingsViewModel,
-    settings: KodexAgentSettings,
-    models: List<ModelInfo>,
-    dropdowns: RuntimeConfigurationDropdowns,
-) {
-    val scope = rememberCoroutineScope()
-    val configuration = settings.configuration()
-    RuntimeConfigurationMenus(
-        configuration = configuration,
-        models = models,
-        modelOptions = (models.map(ModelInfo::slug) + settings.model).distinct(),
-        dropdowns = dropdowns,
-        onConfigurationSelected = { model, effort, tier ->
-            scope.launch {
-                viewModel.updateModelConfiguration(model, effort, tier)
-            }
-        },
-        onRequestUserInputModeSelected = { mode ->
-            scope.launch { viewModel.updateRequestUserInputMode(mode) }
-        },
-    )
-}
-
-@Composable
-internal fun BoxScope.RuntimeConfigurationMenus(
-    configuration: RuntimeConfiguration,
-    models: List<ModelInfo>,
-    modelOptions: List<OpenAiModelId>,
-    dropdowns: RuntimeConfigurationDropdowns,
-    onConfigurationSelected: (OpenAiModelId, ReasoningEffort, ServiceTier) -> Unit,
-    onRequestUserInputModeSelected: (RequestUserInputMode) -> Unit,
-) {
-    val popupMenuBackground = PopupMenuBackground
-    TuiDropdownMenu(
-        dropdownState = dropdowns.model,
-        backgroundColor = popupMenuBackground,
-    ) {
-        modelOptions.forEach { model ->
-            val modelInfo = models.firstOrNull { info -> info.slug == model }
-            val efforts = modelInfo
-                ?.supportedReasoningLevels
-                ?.map { preset -> preset.effort }
-                .orEmpty()
-                .ifEmpty { listOf(configuration.reasoning) }
-            val tiers = modelInfo
-                ?.availableServiceTiers()
-                .orEmpty()
-                .ifEmpty { listOf(ServiceTier.Default) }
-            TuiPopupSubmenuItem(
-                key = model,
-                selected = model == configuration.model,
-                initialSubmenuFocusedKey = configuration.reasoning
-                    .takeIf { model == configuration.model && it in efforts }
-                    ?: efforts.first(),
-                backgroundColor = popupMenuBackground,
-                submenuContent = {
-                    efforts.forEach { effort ->
-                        TuiPopupSubmenuItem(
-                            key = effort,
-                            selected = model == configuration.model &&
-                                effort == configuration.reasoning,
-                            initialSubmenuFocusedKey = configuration.tier
-                                .takeIf {
-                                    model == configuration.model &&
-                                        effort == configuration.reasoning &&
-                                        it in tiers
-                                }
-                                ?: ServiceTier.Default,
-                            backgroundColor = popupMenuBackground,
-                            submenuContent = {
-                                tiers.forEach { tier ->
-                                    TuiPopupMenuItem(
-                                        key = tier,
-                                        selected = model == configuration.model &&
-                                            effort == configuration.reasoning &&
-                                            tier == configuration.tier,
-                                        onClick = {
-                                            onConfigurationSelected(model, effort, tier)
-                                        },
-                                    ) {
-                                        Text(tier.displayName())
-                                    }
-                                }
-                            },
-                        ) {
-                            Text(effort.displayName())
-                        }
-                    }
-                },
-            ) {
-                Text(model.value)
-            }
-        }
-    }
-    TuiDropdownMenu(
-        dropdownState = dropdowns.requestUserInputMode,
-        options = RequestUserInputMode.entries.toList(),
-        selected = configuration.requestUserInputMode,
-        optionLabel = RequestUserInputMode::displayName,
-        backgroundColor = popupMenuBackground,
-        onSelect = onRequestUserInputModeSelected,
-    )
-}
-
-internal data class RuntimeConfiguration(
-    val model: OpenAiModelId,
-    val reasoning: ReasoningEffort,
-    val tier: ServiceTier,
-    val requestUserInputMode: RequestUserInputMode,
-)
-
 private fun KodexAgentSettings.configuration(): RuntimeConfiguration = RuntimeConfiguration(
     model = model,
     reasoning = reasoning.effort,
     tier = serviceTier,
     requestUserInputMode = requestUserInputMode,
 )
-
-internal fun runtimeConfigurationLabel(
-    model: OpenAiModelId,
-    reasoning: ReasoningEffort,
-    tier: ServiceTier,
-): String = buildString {
-    append(model.value)
-    append(' ')
-    append(reasoning.displayName())
-    if (tier != ServiceTier.Default) {
-        append(' ')
-        append(tier.displayName())
-    }
-}
 
 internal fun workingDirectoryStatusLabel(
     workingDirectory: Path,

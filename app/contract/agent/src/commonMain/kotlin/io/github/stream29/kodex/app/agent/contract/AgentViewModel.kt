@@ -2,6 +2,7 @@ package io.github.stream29.kodex.app.agent.contract
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
+import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
@@ -63,6 +64,8 @@ public interface AgentViewModel :
     public val composer: ComposerViewModel
     public val history: AgentHistoryViewModel
     public val historyIndex: HistoryIndexViewModel
+    /** Stable configuration child bound to this exact Agent, closed with it; not the selected tab. */
+    public val runtimeConfiguration: RuntimeConfigurationViewModel
     public val requestUserInput: RequestUserInputViewModel
     public val suggestSubagentTask: SuggestSubagentTaskViewModel
     public val shellSessions: AgentShellSessionRegistry

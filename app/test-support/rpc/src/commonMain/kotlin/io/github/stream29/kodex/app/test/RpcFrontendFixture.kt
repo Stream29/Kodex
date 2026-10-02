@@ -57,10 +57,17 @@ public class RpcFrontendFixture internal constructor(
 public fun testSettings(name: String = "", cwd: Path = Path(".")): KodexAgentSettings =
     KodexAgentSettings(model = OpenAiModelId("test-model"), cwd = cwd, threadName = name)
 
+/**
+ * Runs the backend on Default. A renderer test may supply its single interaction dispatcher
+ * for frontend views, so Compose state/commands and drawing do not execute concurrently.
+ * Null preserves the existing backend-context frontend used by non-renderer fixtures.
+ * The fixture owns all frontend jobs until [RpcFrontendFixture.closeAndJoin].
+ */
 public suspend fun startRpcFrontendFixture(
     scope: CoroutineScope,
     response: suspend FlowCollector<ResponsesStreamEvent>.() -> Unit = { testAnswer() },
     seed: suspend CoroutineScope.(Path) -> Unit = {},
+    frontendDispatcher: CoroutineDispatcher? = null,
 ): RpcFrontendFixture {
     val ready = CompletableDeferred<RpcFrontendFixture>()
     val finish = CompletableDeferred<Unit>()
@@ -84,11 +91,13 @@ public suspend fun startRpcFrontendFixture(
                     withInMemoryRpc(backend::register) { raw ->
                         val services = RpcServices(RestoringRpcClient(raw))
                         val models = MutableStateFlow(services.global.getModels())
-                        val views = RpcSessionViews(this, services, models)
-                        val sessions = DefaultPersistedSessionViewModelRegistry(views, models, this)
-                        val drafts = DefaultNewSessionViewModelFactory(views, sessions, models, this)
+                        val frontendScope = if (frontendDispatcher == null) this
+                            else CoroutineScope(coroutineContext + frontendDispatcher)
+                        val views = RpcSessionViews(frontendScope, services, models)
+                        val sessions = DefaultPersistedSessionViewModelRegistry(views, models, frontendScope)
+                        val drafts = DefaultNewSessionViewModelFactory(views, sessions, models, frontendScope)
                         try {
-                            ready.complete(RpcFrontendFixture(coroutineContext, root, services, views, sessions, drafts, models, finish))
+                            ready.complete(RpcFrontendFixture(frontendScope.coroutineContext, root, services, views, sessions, drafts, models, finish))
                             finish.await()
                         } finally { withContext(NonCancellable) { sessions.shutdown() } }
                     }

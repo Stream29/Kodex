@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfiguration
+
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier

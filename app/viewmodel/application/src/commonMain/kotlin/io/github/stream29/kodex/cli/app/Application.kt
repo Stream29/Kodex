@@ -99,8 +99,8 @@ public suspend fun <R> withKodexApplication(
                     val directoryPicker = { path: Path -> createDirectoryPickerViewModel(path, frontendScope) }
                     root = ApplicationViewModelImpl(
                         sessions, draftFactory,
-                        SessionCatalogViewModelFactory { dependencies ->
-                            DefaultSessionCatalogViewModel(frontendScope, dependencies)
+                        SessionCatalogViewModelFactory { dependencies, interactions ->
+                            DefaultSessionCatalogViewModel(frontendScope, dependencies, interactions)
                         },
                         catalogDependencies = RpcSessionCatalogDependencies(services.global),
                         SettingsViewModelFactory { arguments ->
@@ -111,7 +111,12 @@ public suspend fun <R> withKodexApplication(
                             }
                             createSettingsViewModel(
                                 arguments.initialPage, RpcGlobalEditor(settings, services.global, frontendScope),
-                                createSessionSettingsViewModel(source, settings.models, frontendScope, directoryPicker),
+                                createSessionSettingsViewModel(
+                                    io.github.stream29.kodex.app.settings.contract.SessionSettingsDependencies(
+                                        source, settings.models, directoryPicker,
+                                    ),
+                                    frontendScope,
+                                ),
                                 RpcNewSessionSettings(settings, frontendScope),
                             )
                         },

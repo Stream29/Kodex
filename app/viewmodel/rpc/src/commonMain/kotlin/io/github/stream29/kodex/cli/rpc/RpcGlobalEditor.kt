@@ -126,30 +126,3 @@ public class RpcGlobalEditor(
         updates.close(mcp::close)
     }
 }
-
-/**
- * Read-through field port: value reads the current authority synchronously, not an eagerly
- * scheduled mirror. Collection maps and conflates only this field; no new owner/store is created.
- */
-@OptIn(InternalCoroutinesApi::class, ExperimentalForInheritanceCoroutinesApi::class)
-private fun <T, R> StateFlow<T>.projectState(select: (T) -> R): StateFlow<R> {
-    val source = this
-    return object : StateFlow<R> {
-        override val value: R get() = select(source.value)
-        override val replayCache: List<R> get() = listOf(value)
-        override suspend fun collect(collector: FlowCollector<R>): Nothing {
-            var initialized = false
-            var previous: R? = null
-            return source.collect(object : FlowCollector<T> {
-                override suspend fun emit(value: T) {
-                    val next = select(value)
-                    if (!initialized || next != previous) {
-                        initialized = true
-                        previous = next
-                        collector.emit(next)
-                    }
-                }
-            })
-        }
-    }
-}

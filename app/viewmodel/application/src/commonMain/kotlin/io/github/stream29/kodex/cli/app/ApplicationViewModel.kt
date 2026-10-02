@@ -25,6 +25,7 @@ import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
+import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogInteractions
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogDependencies
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModelArguments
@@ -186,7 +187,8 @@ internal class ApplicationViewModelImpl(
     override suspend fun openSessionCatalogPopup(): ApplicationPopupState.SessionCatalog =
         commandMutex.withLock {
             ensureOpen()
-            installPopup(
+            lateinit var opening: ApplicationPopupState.SessionCatalog
+            opening =
                 ApplicationPopupState.SessionCatalog(
                     catalogFactory.create(
                         dependencies = object : SessionCatalogDependencies by catalogDependencies {
@@ -196,9 +198,15 @@ internal class ApplicationViewModelImpl(
                             override suspend fun delete(sessionIndex: Int) =
                                 deleteSession(sessionIndex)
                         },
+                        interactions = object : SessionCatalogInteractions {
+                            override suspend fun openSession(sessionIndex: Int) {
+                                this@ApplicationViewModelImpl.openSession(sessionIndex)
+                            }
+                            override fun dismissPopup() { this@ApplicationViewModelImpl.dismissPopup(opening) }
+                        },
                     ),
-                ),
-            )
+                )
+            installPopup(opening)
         }
 
     override suspend fun openSettingsPopup(

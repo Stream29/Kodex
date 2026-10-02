@@ -1,5 +1,14 @@
 package io.github.stream29.kodex.cli.app
 
+import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationDropdowns
+import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationMenus
+import io.github.stream29.kodex.cli.sessioncatalog.SessionCatalogPopup
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexInteractionRequest
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexMenuRequest
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexSide
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexHoverPopup
+import io.github.stream29.kodex.cli.historyindex.HistoryIndexContextMenu
+
 import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns
 import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskConfigurationMenus
 
@@ -51,6 +60,7 @@ import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import io.github.stream29.kodex.cli.components.LazyColumn
 import io.github.stream29.kodex.cli.components.TuiButton
+import io.github.stream29.kodex.cli.components.rememberRunningIndicatorFrame
 import io.github.stream29.kodex.cli.components.TuiCheckbox
 import io.github.stream29.kodex.cli.components.TuiContextMenu
 import io.github.stream29.kodex.cli.components.TuiDialog
@@ -134,8 +144,8 @@ public fun SessionTreeCliScreen(
         leftSidebarDropdown.expanded ||
         shellSessionMenu?.side == SessionSidebarSide.Left ||
         shellSessionHover?.side == SessionSidebarSide.Left ||
-        historyIndexHover?.side == SessionSidebarSide.Left ||
-        historyIndexMenu?.target?.side == SessionSidebarSide.Left
+        historyIndexHover?.side == HistoryIndexSide.Left ||
+        historyIndexMenu?.target?.side == HistoryIndexSide.Left
     val rightSidebarExpanded = rightSidebarPinnedExpanded ||
         rightSidebarExpandButtonHovered ||
         rightSidebarSurfaceHovered ||
@@ -143,8 +153,8 @@ public fun SessionTreeCliScreen(
         rightSidebarDropdown.expanded ||
         shellSessionMenu?.side == SessionSidebarSide.Right ||
         shellSessionHover?.side == SessionSidebarSide.Right ||
-        historyIndexHover?.side == SessionSidebarSide.Right ||
-        historyIndexMenu?.target?.side == SessionSidebarSide.Right
+        historyIndexHover?.side == HistoryIndexSide.Right ||
+        historyIndexMenu?.target?.side == HistoryIndexSide.Right
     val leftSidebarPreferredColumns =
         leftSidebarResizeColumns ?: sidebarConfiguration.leftWidth
     val rightSidebarPreferredColumns =
@@ -192,15 +202,18 @@ public fun SessionTreeCliScreen(
     val currentComposerFocusRequester by rememberUpdatedState(composerFocusRequester)
     val settingsOwner: AgentSettingsViewModel? =
         selectedAgent ?: (selected as? NewSessionViewModel)
-    val runtimeDropdowns = RuntimeConfigurationDropdowns.remember(settingsOwner)
+    val runtimeConfiguration = when (settingsOwner) {
+        is AgentViewModel -> settingsOwner.runtimeConfiguration
+        is NewSessionViewModel -> settingsOwner.runtimeConfiguration
+        else -> null
+    }
+    val runtimeDropdowns = RuntimeConfigurationDropdowns.remember(runtimeConfiguration)
     val pendingSuggestion = selectedAgent?.let { agent ->
         key(agent) { agent.suggestSubagentTask.state.collectAsState().value }
     } as? io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState.Pending
     val suggestionDropdowns = SuggestSubagentTaskDropdowns.remember(
         selectedAgent?.suggestSubagentTask, pendingSuggestion?.callId,
     )
-    val runtimeSettings = collectRuntimeSettings(settingsOwner)
-    val runtimeModels = collectRuntimeModels(settingsOwner)
 
     fun closeShellSessionHoverAfterGrace(
         request: ShellSessionInteractionRequest? = shellSessionHover,
@@ -753,7 +766,9 @@ public fun SessionTreeCliScreen(
                 },
             )
             HistoryIndexHoverPopup(
-                request = historyIndexHover.takeIf { historyIndexMenu == null },
+                request = historyIndexHover.takeIf {
+                    historyIndexMenu == null && it?.viewModel === selectedAgent?.historyIndex
+                },
                 contentColumns = contentColumns,
                 contentRows = contentRows,
                 onHoverChanged = { hovered ->
@@ -764,20 +779,11 @@ public fun SessionTreeCliScreen(
                         closeHistoryIndexHoverAfterGrace()
                     }
                 },
+                onDismissRequest = { historyIndexHover = null },
             )
             HistoryIndexContextMenu(
-                request = historyIndexMenu,
-                selectedAgent = selectedAgent,
+                request = historyIndexMenu.takeIf { it?.target?.viewModel === selectedAgent?.historyIndex },
                 onDismissRequest = { historyIndexMenu = null },
-                onCheckOut = { target ->
-                    historyIndexMenu = null
-                    if (
-                        selectedAgent?.historyIndex === target.viewModel &&
-                        target.viewModel.contains(target.generation, target.index)
-                    ) {
-                        selectedAgent.history.requestScrollToStorageIndex(target.index)
-                    }
-                },
             )
             ShellSessionContextMenu(shellSessionMenu?.request) { shellSessionMenu = null }
             SessionSidebarContentMenu(
@@ -895,11 +901,9 @@ public fun SessionTreeCliScreen(
                     dropdowns = suggestionDropdowns,
                 )
             }
-            if (settingsOwner != null && runtimeSettings != null) {
+            if (runtimeConfiguration != null) {
                 RuntimeConfigurationMenus(
-                    viewModel = settingsOwner,
-                    settings = runtimeSettings,
-                    models = runtimeModels,
+                    viewModel = runtimeConfiguration,
                     dropdowns = runtimeDropdowns,
                 )
             }
@@ -907,7 +911,7 @@ public fun SessionTreeCliScreen(
             when (val open = popup) {
                 ApplicationPopupState.Closed -> Unit
                 is ApplicationPopupState.SessionCatalog ->
-                    SessionCatalogPopup(viewModel, open)
+                    SessionCatalogPopup(open.viewModel)
 
                 is ApplicationPopupState.Settings -> TuiTheme(
                     colorScheme = tuiColorSchemeFor(terminal.theme),
@@ -954,279 +958,6 @@ private data class SidebarShellSessionMenuRequest(
     val side: SessionSidebarSide,
     val request: ShellSessionMenuRequest,
 )
-
-@Composable
-private fun collectRuntimeSettings(
-    viewModel: AgentSettingsViewModel?,
-): KodexAgentSettings? {
-    if (viewModel == null) return null
-    return key(viewModel) {
-        val settings by viewModel.settings.collectAsState()
-        settings
-    }
-}
-
-@Composable
-private fun collectRuntimeModels(
-    viewModel: AgentSettingsViewModel?,
-): List<ModelInfo> {
-    if (viewModel == null) return emptyList()
-    return key(viewModel) {
-        val models by viewModel.models.collectAsState()
-        models
-    }
-}
-
-@Composable
-private fun BoxScope.SessionCatalogPopup(
-    application: ApplicationViewModel,
-    open: ApplicationPopupState.SessionCatalog,
-) {
-    val scope = rememberCoroutineScope()
-    val state by open.viewModel.state.collectAsState()
-    val runningFrame by rememberRunningIndicatorFrame(active = state.sessions.any { it.running })
-    var contextMenu by remember(open) { mutableStateOf<SessionCatalogMenuRequest?>(null) }
-    var deleteTarget by remember(open) { mutableStateOf<SessionCatalogEntry?>(null) }
-    LaunchedEffect(open) { open.viewModel.refresh() }
-    TuiDialog(
-        onDismissRequest = { application.dismissPopup(open) },
-        modifier = Modifier
-            .width(SessionCatalogWidth)
-            .background(SettingsDialogHomeBackground),
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            SessionCatalogHeader(
-                showArchived = state.showArchived,
-                onShowArchivedChange = { showArchived ->
-                    contextMenu = null
-                    scope.launch { open.viewModel.setShowArchived(showArchived) }
-                },
-            )
-            LazyColumn(modifier = Modifier.fillMaxWidth().height(SessionCatalogRows)) {
-                when (val current = state) {
-                    SessionCatalogState.Unloaded,
-                    is SessionCatalogState.Loading,
-                        -> item { SessionCatalogLoadingIndicator() }
-
-                    is SessionCatalogState.Loaded -> if (current.sessions.isEmpty()) {
-                        item { Text("No persisted sessions", color = SettingsDialogForeground) }
-                    } else {
-                        items(current.sessions, key = { entry -> entry.sessionIndex }) { entry ->
-                            SessionCatalogRow(
-                                entry = entry,
-                                maximumLabelColumns = SessionCatalogWidth - 2,
-                                runningIndicatorFrame = runningFrame,
-                                onClick = {
-                                    contextMenu = null
-                                    scope.launch {
-                                        try {
-                                            application.openSession(entry.sessionIndex)
-                                            application.dismissPopup(open)
-                                        } catch (cancellation: CancellationException) {
-                                            throw cancellation
-                                        } catch (_: Throwable) {
-                                            // The Session registry reports open failures.
-                                        }
-                                    }
-                                },
-                                onOpenContextMenu = { anchor, clickPosition ->
-                                    contextMenu = SessionCatalogMenuRequest(
-                                        entry = entry,
-                                        anchor = anchor,
-                                        clickPosition = clickPosition,
-                                    )
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-            TuiDialogActionRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(SettingsDialogActionBackground),
-            ) {
-                TuiButton(
-                    label = "Close",
-                    color = SettingsDialogForeground,
-                    onClick = { application.dismissPopup(open) },
-                )
-            }
-        }
-    }
-    contextMenu?.let { request ->
-        val valid = state.sessions.any { it.sessionIndex == request.entry.sessionIndex } &&
-            request.anchor.isPlaced
-        LaunchedEffect(request, valid) {
-            if (!valid) contextMenu = null
-        }
-        if (!valid) return@let
-        val createdAt = rememberMenuTimestamp(request) {
-            open.viewModel.readCreatedAt(request.entry.sessionIndex)
-        }
-        val updatedAt = rememberMenuTimestamp(request) {
-            open.viewModel.readUpdatedAt(request.entry.sessionIndex)
-        }
-        SessionCatalogContextMenuPopup(
-            entry = request.entry,
-            createdAt = createdAt,
-            updatedAt = updatedAt,
-            anchor = request.anchor,
-            clickPosition = request.clickPosition,
-            onDismissRequest = { contextMenu = null },
-            onFork = {
-                contextMenu = null
-                scope.launch {
-                    try {
-                        open.viewModel.fork(request.entry.sessionIndex)
-                    } catch (cancellation: CancellationException) {
-                        throw cancellation
-                    } catch (_: Throwable) {
-                        // The registry or catalog reports the failed operation.
-                    }
-                }
-            },
-            onArchive = {
-                contextMenu = null
-                scope.launch {
-                    open.viewModel.archive(request.entry.sessionIndex)
-                }
-            },
-            onUnarchive = {
-                contextMenu = null
-                scope.launch {
-                    open.viewModel.unarchive(request.entry.sessionIndex)
-                }
-            },
-            onDelete = {
-                contextMenu = null
-                deleteTarget = request.entry
-            },
-        )
-    }
-    deleteTarget?.let { target ->
-        val deleteChild = remember(open, target) {
-            createSessionDeleteViewModel(
-                target.sessionIndex,
-                target.threadName,
-                SessionDeleteDependencies(open.viewModel::delete),
-            )
-        }
-        SessionDeletePopup(
-            viewModel = deleteChild,
-            onDismissRequest = { if (deleteTarget === target) deleteTarget = null },
-            onResult = { deleted ->
-                if (deleted && deleteTarget === target) deleteTarget = null
-            },
-        )
-    }
-}
-
-@Composable
-internal fun SessionCatalogHeader(
-    showArchived: Boolean,
-    onShowArchivedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(SettingsDialogHeaderBackground),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            "Sessions",
-            color = SettingsDialogForeground,
-            textStyle = TuiTheme.typography.headline,
-        )
-        TuiCheckbox(
-            label = "Show archived",
-            checked = showArchived,
-            onCheckedChange = onShowArchivedChange,
-            color = SettingsDialogForeground,
-        )
-    }
-}
-
-@Composable
-internal fun SessionCatalogRow(
-    entry: SessionCatalogEntry,
-    maximumLabelColumns: Int,
-    runningIndicatorFrame: String = RunningIndicatorFrames.first(),
-    onClick: () -> Unit,
-    onOpenContextMenu: (TuiPopupAnchor, IntOffset?) -> Unit,
-) {
-    val anchor = rememberTuiPopupAnchor()
-    TuiButton(
-        label = entry.sessionBrowserLabel(maximumLabelColumns, runningFrame = runningIndicatorFrame),
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(SettingsDialogNavigationBackground)
-            .tuiPopupAnchor(anchor),
-        color = SettingsDialogForeground,
-        onClick = onClick,
-        onSecondaryClick = { clickPosition ->
-            onOpenContextMenu(anchor, clickPosition)
-        },
-    )
-}
-
-/**
- * @param clickPosition null uses the keyboard anchor position.
- * @param createdAt null hides the creation field.
- * @param updatedAt null hides the updated field.
- */
-@Composable
-internal fun BoxScope.SessionCatalogContextMenuPopup(
-    entry: SessionCatalogEntry,
-    anchor: TuiPopupAnchor,
-    clickPosition: IntOffset?,
-    onDismissRequest: () -> Unit,
-    onFork: () -> Unit,
-    onArchive: () -> Unit,
-    onUnarchive: () -> Unit,
-    onDelete: () -> Unit,
-    createdAt: String? = null,
-    updatedAt: String? = null,
-) {
-    TuiContextMenu(
-        expanded = true,
-        anchor = anchor,
-        clickPosition = clickPosition,
-        onDismissRequest = onDismissRequest,
-        backgroundColor = PopupMenuBackground,
-    ) {
-        TuiPopupMenuItem(
-            key = "session-index-information",
-            onClick = {},
-            enabled = false,
-        ) {
-            Column {
-                Text("Index: ${entry.sessionIndex}")
-                TimestampInformation("Created at", createdAt)
-                TimestampInformation("Updated at", updatedAt)
-            }
-        }
-        TuiPopupMenuItem(
-            key = if (entry.archived) "unarchive" else "archive",
-            onClick = if (entry.archived) onUnarchive else onArchive,
-        ) {
-            Text(if (entry.archived) "Unarchive" else "Archive")
-        }
-        TuiPopupMenuItem(key = "delete", onClick = onDelete) {
-            Text("Delete")
-        }
-        TuiPopupMenuItem(key = "fork", onClick = onFork) {
-            Text("Fork")
-        }
-    }
-}
-
-@Composable
-internal fun SessionCatalogLoadingIndicator() {
-    val frame by rememberRunningIndicatorFrame(active = true)
-    Text("$frame Loading sessions…", color = SettingsDialogForeground)
-}
 
 /** @param request null means no tab menu is open. */
 @Composable
@@ -1483,12 +1214,6 @@ private class SessionTabMenuRequest(
 )
 
 /** Each instance identifies a fresh opening, even for the same target and anchor. */
-private class SessionCatalogMenuRequest(
-    val entry: SessionCatalogEntry,
-    val anchor: TuiPopupAnchor,
-    val clickPosition: IntOffset?,
-)
-
 /** Each instance identifies a fresh opening, even for the same target and anchor. */
 private class HistoryEntryMenuRequest(
     val session: PersistedSessionViewModel,
@@ -1526,6 +1251,4 @@ internal suspend fun revertAndEdit(
 
 private const val SessionTabBarRows: Int = 1
 private val SidebarHoverCloseGrace = 180.milliseconds
-private const val SessionCatalogWidth: Int = 64
-private const val SessionCatalogRows: Int = 16
 private const val RevertDialogWidth: Int = 56
