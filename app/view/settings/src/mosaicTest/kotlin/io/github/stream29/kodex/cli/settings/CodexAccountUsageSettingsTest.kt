@@ -4,6 +4,8 @@ import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
+import io.github.stream29.kodex.app.accountusage.AccountUsageState
+import io.github.stream29.kodex.cli.accountusage.AccountUsageContent
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.openai.accountusage.CodexAccountRateLimit
 import io.github.stream29.kodex.openai.accountusage.CodexAccountRateLimitWindow
@@ -20,10 +22,11 @@ val codexAccountUsageSettingsTest by testSuite {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(100)) {
-                    CodexAccountUsageSettingsContent(
-                        state = SettingsAccountUsageState.Available(accountUsageSnapshot()),
+                    AccountUsageContent(
+                        state = AccountUsageState(SettingsAccountUsageState.Available(accountUsageSnapshot())),
                         onRefresh = {},
                         onUseReset = {},
+                        onDismissFailure = {},
                     )
                 }
             }
@@ -42,10 +45,11 @@ val codexAccountUsageSettingsTest by testSuite {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(80)) {
-                    CodexAccountUsageSettingsContent(
-                        state = SettingsAccountUsageState.Unavailable,
+                    AccountUsageContent(
+                        state = AccountUsageState(SettingsAccountUsageState.Unavailable),
                         onRefresh = {},
                         onUseReset = {},
+                        onDismissFailure = {},
                     )
                 }
             }

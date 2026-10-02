@@ -49,19 +49,72 @@ val settingsViewModelTest by testSuite {
             val session = createSessionSettingsViewModel(RpcSessionSettingsSource(view, this), models, this)
             val vm = createSettingsViewModel(SettingsPage.General, editor, session, RpcNewSessionSettings(global, this))
             try {
-                vm.global.updateNewLineKey(NewLineKey.Enter)
-                vm.global.updateSessionTitleEnabled(true)
-                editor.state.first { it.newLineKey == NewLineKey.Enter && it.sessionTitle.enabled }
+                vm.global.applicationPreferences.setNewLineKey(NewLineKey.Enter)
+                vm.global.sessionTitleSettings.setEnabled(true)
+                editor.applicationPreferences.state.first { it.newLineKey == NewLineKey.Enter }
+                editor.sessionTitleSettings.state.first { it.enabled }
                 val available = assertIs<SessionSettingsState.Available>(session.state.value)
                 session.updateReasoningEffort(available.snapshot.revision, ReasoningEffort.High)
                 view.current().settings.first { it.reasoning.effort == ReasoningEffort.High }
                 vm.selectPage(SettingsPage.CurrentSession)
                 assertEquals(SettingsPage.CurrentSession, vm.selectedPage.value)
                 vm.close()
-                editor.updateNewLineKey(NewLineKey.ShiftEnter)
+                editor.applicationPreferences.setNewLineKey(NewLineKey.ShiftEnter)
                 assertEquals(NewLineKey.Enter, global.frontend.settings.value.newLineKey)
                 assertEquals("target", view.current().settings.value.threadName)
                 assertNotNull(services.global.getSettings())
+            } finally { vm.close(); global.close(); global.join() }
+        }
+    }
+    test("navigation retains component handles and refreshes only on entering OpenAI") {
+        withRpcFrontend {
+            val refreshes = MutableStateFlow(0)
+            val rpc = object : io.github.stream29.kodex.rpc.contract.GlobalRpc by services.global {
+                override suspend fun refreshAccountUsage() { refreshes.value++ }
+            }
+            val global = RpcGlobalSettings.open(rpc, openCliFrontendSettings(root), this, 120)
+            val editor = RpcGlobalEditor(global, rpc, this)
+            val view = views.open(create("navigation").sessionIndex)
+            val session = createSessionSettingsViewModel(RpcSessionSettingsSource(view, this), models, this)
+            val vm = createSettingsViewModel(SettingsPage.General, editor, session, RpcNewSessionSettings(global, this))
+            try {
+                val sources = vm.global.contextSourceSettings
+                val authentication = vm.global.authenticationSettings
+                val usage = vm.global.accountUsage
+                val reset = vm.global.usageReset
+                assertEquals(0, refreshes.value) // constructors do not refresh.
+                vm.selectPage(SettingsPage.ContextSources)
+                sources.add()
+                val draft = assertIs<io.github.stream29.kodex.app.contextsourcesettings.ContextSourceSettingsDialog.Adding>(
+                    sources.state.value.dialog,
+                )
+                sources.updateDraft(draft.token, "/unaccepted")
+                vm.selectPage(SettingsPage.OpenAi)
+                refreshes.first { it == 1 }
+                assertIs<io.github.stream29.kodex.app.contextsourcesettings.ContextSourceSettingsDialog.Hidden>(
+                    sources.state.value.dialog,
+                )
+                authentication.requestLogout()
+                assertNotNull(authentication.state.value.confirmation)
+                reset.show()
+                vm.selectPage(SettingsPage.OpenAi) // same page is not re-entry.
+                vm.selectPage(SettingsPage.General)
+                assertNull(authentication.state.value.confirmation)
+                assertEquals(UsageResetState.Hidden, reset.state.value)
+                vm.selectPage(SettingsPage.OpenAi)
+                refreshes.first { it == 2 }
+                assertSame(sources, vm.global.contextSourceSettings)
+                assertSame(authentication, vm.global.authenticationSettings)
+                assertSame(usage, vm.global.accountUsage)
+                assertSame(reset, vm.global.usageReset)
+                vm.close()
+                assertTrue(sources.state.value.closed)
+                assertTrue(authentication.state.value.closed)
+                assertTrue(usage.state.value.closed)
+                assertTrue(vm.global.sessionTitleSettings.state.value.closed)
+                assertTrue(vm.global.applicationPreferences.state.value.closed)
+                assertEquals(UsageResetState.Hidden, reset.state.value)
+                assertNotNull(services.global.getSettings()) // shared backend remains alive.
             } finally { vm.close(); global.close(); global.join() }
         }
     }
@@ -90,8 +143,14 @@ val settingsViewModelTest by testSuite {
             val editor = RpcGlobalEditor(global, services.global, this)
             try {
                 val contextPath = SystemCoroutineFileSystem.resolve(root).toString()
-                editor.setBuiltInContextSourceEnabled(BuiltInContextSource.WorkingDirectory, false)
-                assertNull(editor.addCustomContextSource(contextPath))
+                val sources = editor.contextSourceSettings
+                sources.setBuiltInEnabled(BuiltInContextSource.WorkingDirectory, false)
+                sources.add()
+                val add = assertIs<io.github.stream29.kodex.app.contextsourcesettings.ContextSourceSettingsDialog.Adding>(
+                    sources.state.value.dialog,
+                )
+                sources.updateDraft(add.token, contextPath)
+                sources.save(add.token)
                 global.settings.first { !it.contextSources.workingDirectoryEnabled && it.contextSources.customSources.size == 1 }
                 val hook = NotificationHook("notify", NotificationHookType.entries.toSet(), "echo test")
                 val child = editor.hookSettings
@@ -122,7 +181,7 @@ val settingsViewModelTest by testSuite {
                 val deletion = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Deleting>(child.state.value.dialog)
                 child.confirmDelete(deletion.token)
                 child.state.first { it.hooks.isEmpty() }
-                editor.removeCustomContextSource(contextPath)
+                sources.removeCustom(contextPath)
                 global.settings.first { it.contextSources.customSources.isEmpty() }
             } finally { editor.close(); global.close(); global.join() }
         }

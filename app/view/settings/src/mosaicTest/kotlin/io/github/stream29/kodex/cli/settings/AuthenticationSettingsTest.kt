@@ -4,6 +4,9 @@ import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
+import io.github.stream29.kodex.app.authenticationsettings.AuthenticationSettingsState
+import io.github.stream29.kodex.cli.authenticationsettings.AuthenticationSettingsContent
+import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationOperationState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
@@ -19,16 +22,15 @@ val authenticationSettingsTest by testSuite {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(80)) {
                     AuthenticationSettingsContent(
-                        authSource = KodexAuthSource.Kodex,
-                        authState = SettingsAuthenticationState.Authenticated(
+                        state = AuthenticationSettingsState(KodexAuthSource.Kodex, SettingsAuthenticationState.Authenticated(
                             accountId = "account-id",
                             planType = OpenAiSubscriptionPlan.Pro,
                             email = "person@example.com",
-                        ),
-                        operation = SettingsAuthenticationOperationState.Idle,
+                        )),
+                        sourceDropdown = rememberTuiDropdownState(),
                         onOpenLogin = {},
                         onRequestLogout = {},
-                        onDismissOperationFailure = {},
+                        onDismissFailure = {},
                     )
                 }
             }
@@ -47,14 +49,13 @@ val authenticationSettingsTest by testSuite {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(80)) {
                     AuthenticationSettingsContent(
-                        authSource = KodexAuthSource.Kodex,
-                        authState = SettingsAuthenticationState.Unavailable(
+                        state = AuthenticationSettingsState(KodexAuthSource.Kodex, SettingsAuthenticationState.Unavailable(
                             OpenAiAuthState.Unavailable.CredentialsNotFound,
-                        ),
-                        operation = SettingsAuthenticationOperationState.Idle,
+                        )),
+                        sourceDropdown = rememberTuiDropdownState(),
                         onOpenLogin = {},
                         onRequestLogout = {},
-                        onDismissOperationFailure = {},
+                        onDismissFailure = {},
                     )
                 }
             }
@@ -72,15 +73,14 @@ val authenticationSettingsTest by testSuite {
             val snapshot = setContentAndSnapshot {
                 Column(Modifier.width(80)) {
                     AuthenticationSettingsContent(
-                        authSource = KodexAuthSource.Codex,
-                        authState = SettingsAuthenticationState.Authenticated(
+                        state = AuthenticationSettingsState(KodexAuthSource.Codex, SettingsAuthenticationState.Authenticated(
                             planType = OpenAiSubscriptionPlan.Pro,
                             email = "person@example.com",
-                        ),
-                        operation = SettingsAuthenticationOperationState.Idle,
+                        )),
+                        sourceDropdown = rememberTuiDropdownState(),
                         onOpenLogin = {},
                         onRequestLogout = {},
-                        onDismissOperationFailure = {},
+                        onDismissFailure = {},
                     )
                 }
             }

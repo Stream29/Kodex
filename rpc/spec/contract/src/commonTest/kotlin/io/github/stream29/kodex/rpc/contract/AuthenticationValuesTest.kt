@@ -13,6 +13,18 @@ import kotlin.test.assertFailsWith
 val authenticationValuesTest by testSuite {
     val json = Json { encodeDefaults = true }
 
+    test("component relocation preserves the original authentication wire discriminator and defaults") {
+        val fixture = """{"type":"io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState.Authenticated","accountId":null,"planType":null,"email":null}"""
+        assertEquals(
+            fixture,
+            json.encodeToString(SettingsAuthenticationState.serializer(), SettingsAuthenticationState.Authenticated()),
+        )
+        assertEquals(
+            SettingsAuthenticationState.Authenticated(),
+            json.decodeFromString(SettingsAuthenticationState.serializer(), fixture),
+        )
+    }
+
     test("authentication summary round trips all plans without credential fields") {
         for (plan in listOf(null) + OpenAiSubscriptionPlan.entries) {
             val state = SettingsAuthenticationState.Authenticated(

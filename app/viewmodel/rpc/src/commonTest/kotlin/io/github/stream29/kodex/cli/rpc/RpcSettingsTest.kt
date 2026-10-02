@@ -179,14 +179,14 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 120)
             val page = RpcGlobalEditor(global, services.global, this)
             try {
-                page.updateSessionTitleEnabled(true)
-                page.updateSessionTitleModel(OpenAiModelId("title-model"))
-                page.updateNewLineKey(NewLineKey.Enter)
-                page.updateLeftSidebarWidth(19)
-                page.state.first {
-                    it.sessionTitle.enabled && it.sessionTitle.model == OpenAiModelId("title-model") &&
-                        it.newLineKey == NewLineKey.Enter && it.sidebars.leftWidth == 19
+                page.sessionTitleSettings.setEnabled(true)
+                page.sessionTitleSettings.setModel(OpenAiModelId("title-model"))
+                page.applicationPreferences.setNewLineKey(NewLineKey.Enter)
+                page.applicationPreferences.setLeftWidth(19)
+                page.sessionTitleSettings.state.first {
+                    it.enabled && it.configuredModel == OpenAiModelId("title-model")
                 }
+                page.applicationPreferences.state.first { it.newLineKey == NewLineKey.Enter && it.leftWidth == 19 }
                 val hook = NotificationHook("local", setOf(NotificationHookType.StopUnhandledError), "echo error")
                 queueHook(page, hook)
                 global.frontend.settings.first { it.hooks == listOf(hook) }
@@ -195,7 +195,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 assertEquals(listOf(hook), loaded.settings.value.hooks)
                 assertEquals(OpenAiModelId("title-model"), services.global.getSettings().sessionTitle.model)
                 page.close()
-                page.updateSessionTitleEnabled(false)
+                page.sessionTitleSettings.setEnabled(false)
                 assertTrue(services.global.getSettings().sessionTitle.enabled)
             } finally { page.close(); global.close(); global.join() }
         }
@@ -219,7 +219,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
             val page = RpcGlobalEditor(global, services.global, this)
             try {
-                page.updateSessionTitleEnabled(true)
+                page.sessionTitleSettings.setEnabled(true)
                 entered.await()
                 page.close()
                 proceed.complete(Unit)
@@ -227,6 +227,25 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 assertEquals(1, calls)
                 assertTrue(services.global.getSettings().sessionTitle.enabled)
             } finally { proceed.complete(Unit); page.close(); global.close(); global.join() }
+        }
+    }
+    test("component width writes preserve nonnegative runtime values without creating a preferences file") {
+        frontend {
+            val store = openCliFrontendSettings(home)
+            val global = RpcGlobalSettings.open(services.global, store, this, 120)
+            val page = RpcGlobalEditor(global, services.global, this)
+            try {
+                page.applicationPreferences.setLeftWidth(0)
+                assertEquals(0 to 30, global.sidebarWidths.value)
+                global.resizeSidebars(0, 2)
+                page.applicationPreferences.setLeftWidth(1)
+                assertEquals(1 to 2, global.sidebarWidths.value)
+                page.applicationPreferences.state.first { it.leftWidth == MinimumSidebarWidthColumns }
+                assertNull(SystemCoroutineFileSystem.metadataOrNull(store.settingsPath))
+                page.close()
+                page.applicationPreferences.setLeftWidth(-1) // a closed child is a no-op.
+                assertEquals(1 to 2, global.sidebarWidths.value)
+            } finally { page.close(); global.close(); global.join() }
         }
     }
     test("accepted new-session defaults survive popup close") {
@@ -393,7 +412,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
             val page = RpcGlobalEditor(global, services.global, this)
             try {
-                page.updateSessionTitleEnabled(true)
+                page.sessionTitleSettings.setEnabled(true)
                 entered.await()
                 page.close()
                 proceed.complete(Unit)
@@ -402,7 +421,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 val reopened = RpcGlobalEditor(global, services.global, this)
                 try {
                     assertTrue(reopened.operationFailure.value)
-                    reopened.updateSessionTitleEnabled(true)
+        reopened.sessionTitleSettings.setEnabled(true)
                     global.settings.first { it.sessionTitle.enabled }
                     global.operationFailure.first { !it }
                     reopened.dismissOperationFailure()
@@ -503,7 +522,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                     calls++; return CodexRateLimitResetOutcome.Reset
                 }
             }
-            val reset = RpcUsageReset(rpc, MutableStateFlow(usage(null)), this)
+            val reset = resetForRpc(rpc, MutableStateFlow(usage(null)), this)
             try {
                 reset.show()
                 assertEquals(UsageResetState.PreparationFailed, reset.state.value)
@@ -521,7 +540,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 }
                 override suspend fun refreshAccountUsage(): Unit = error("refresh failed")
             }
-            val reset = RpcUsageReset(rpc, MutableStateFlow(usage(listOf(credit))), this)
+            val reset = resetForRpc(rpc, MutableStateFlow(usage(listOf(credit))), this)
             try {
                 reset.show()
                 reset.select("credit")
@@ -548,7 +567,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 }
                 override suspend fun refreshAccountUsage() { refreshed.complete(Unit) }
             }
-            val reset = RpcUsageReset(rpc, MutableStateFlow(usage(listOf(credit))), this)
+            val reset = resetForRpc(rpc, MutableStateFlow(usage(listOf(credit))), this)
             try {
                 reset.show(); reset.select("credit")
                 reset.confirm(assertIs(reset.state.value))
@@ -561,6 +580,19 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
 }
 
 private val credit = CodexRateLimitResetCredit("credit", null, null)
+private fun resetForRpc(
+    rpc: GlobalRpc,
+    usage: kotlinx.coroutines.flow.StateFlow<SettingsAccountUsageState>,
+    scope: CoroutineScope,
+): io.github.stream29.kodex.app.usagereset.contract.UsageResetViewModel =
+    io.github.stream29.kodex.app.usagereset.createUsageResetViewModel(
+        object : io.github.stream29.kodex.app.usagereset.contract.UsageResetDependencies {
+            override val usage = usage
+            override suspend fun consume(creditId: String): CodexRateLimitResetOutcome = rpc.consumeUsageReset(creditId)
+            override suspend fun refreshUsage() { rpc.refreshAccountUsage() }
+        }, scope,
+    )
+
 private fun usage(credits: List<CodexRateLimitResetCredit>?): SettingsAccountUsageState =
     SettingsAccountUsageState.Available(CodexAccountUsageSnapshot(
         rateLimits = emptyList(), resetCredits = CodexRateLimitResetCredits(1, credits),

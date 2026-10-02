@@ -5,6 +5,14 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":app-component-context-source-settings-impl-viewmodel"))
+            implementation(project(":app-component-session-title-settings-impl-viewmodel"))
+            implementation(project(":app-component-application-preferences-impl-viewmodel"))
+            implementation(project(":app-component-authentication-settings-impl-viewmodel"))
+            implementation(project(":app-component-account-usage-impl-viewmodel"))
+            implementation(project(":app-component-usage-reset-impl-viewmodel"))
+            implementation(project(":app-shared-session-title"))
+            implementation(project(":utils-os-environment-impl"))
             implementation(project(":app-component-request-user-input-impl-viewmodel"))
             implementation(project(":app-component-suggest-subagent-task-impl-viewmodel"))
             implementation(project(":app-component-hook-settings-impl-viewmodel"))

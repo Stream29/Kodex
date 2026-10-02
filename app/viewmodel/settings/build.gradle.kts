@@ -8,12 +8,10 @@ kotlin {
             implementation(project(":app-component-working-directory-impl-viewmodel"))
             api(project(":app-contract-settings"))
             implementation(project(":app-component-path-picker-spec"))
-            implementation(project(":app-shared-session-title"))
             implementation(project(":mcp-spec-contract"))
             implementation(project(":openai-spec-client"))
             implementation(project(":utils-coroutines-spec"))
             implementation(project(":utils-logging-impl"))
-            implementation(project(":utils-os-environment-impl"))
             implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.coroutines.core)
         }

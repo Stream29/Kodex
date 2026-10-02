@@ -53,6 +53,21 @@ val accountUsageValuesTest by testSuite {
         fetchedAt = time,
     )
 
+    test("component relocation preserves original usage discriminators and optional fallback fields") {
+        val fixtures = listOf(
+            SettingsAccountUsageState.Unavailable to
+                """{"type":"io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState.Unavailable"}""",
+            SettingsAccountUsageState.Loading() to
+                """{"type":"io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState.Loading","previous":null}""",
+            SettingsAccountUsageState.Failed("Failed") to
+                """{"type":"io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState.Failed","message":"Failed","previous":null}""",
+        )
+        for ((state, fixture) in fixtures) {
+            assertEquals(fixture, json.encodeToString(SettingsAccountUsageState.serializer(), state))
+            assertEquals(state, json.decodeFromString(SettingsAccountUsageState.serializer(), fixture))
+        }
+    }
+
     test("all usage states round trip the original complete snapshot") {
         val states = listOf(
             SettingsAccountUsageState.Unavailable,

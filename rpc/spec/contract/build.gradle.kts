@@ -8,7 +8,8 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":rpc-spec-models"))
-            api(project(":app-contract-settings"))
+            api(project(":app-component-authentication-settings-spec"))
+            api(project(":app-component-account-usage-spec"))
             api(project(":app-component-session-catalog-spec"))
             api(project(":mcp-spec-contract"))
             api(project(":agent-storage-spec-clean-models"))

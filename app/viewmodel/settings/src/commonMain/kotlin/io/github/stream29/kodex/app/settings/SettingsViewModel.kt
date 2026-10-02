@@ -21,14 +21,18 @@ private class SettingsViewModelImpl(
     private val page = MutableStateFlow(initialPage)
     override val selectedPage = page.asStateFlow()
     private var closed = false
-    init { if (initialPage == SettingsPage.OpenAi) global.refreshUsage() }
+    init { if (initialPage == SettingsPage.OpenAi) global.accountUsage.refresh() }
     override fun selectPage(page: SettingsPage) {
         if (closed || this.page.value == page) return
         if (this.page.value == SettingsPage.Mcp) global.mcpSettings.hidePage()
         if (this.page.value == SettingsPage.Hooks) global.hookSettings.hidePage()
-        if (page != SettingsPage.OpenAi) global.dismissUsageReset()
+        if (this.page.value == SettingsPage.ContextSources) global.contextSourceSettings.hidePage()
+        if (this.page.value == SettingsPage.General) global.applicationPreferences.hidePage()
+        if (this.page.value == SettingsPage.NewSession) global.sessionTitleSettings.hidePage()
+        if (this.page.value == SettingsPage.OpenAi) global.authenticationSettings.hidePage()
+        if (page != SettingsPage.OpenAi) global.usageReset.dismiss()
         this.page.value = page
-        if (page == SettingsPage.OpenAi) global.refreshUsage()
+        if (page == SettingsPage.OpenAi) global.accountUsage.refresh()
     }
     override fun close() {
         if (closed) return

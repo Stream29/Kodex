@@ -27,9 +27,11 @@ public interface SettingsViewModel : AutoCloseable {
     public val newSession: NewSessionSettingsViewModel
 
     /**
-     * Switches navigation once. Leaving MCP/Hook clears that child's unaccepted dialog/draft;
+     * Switches navigation once. Leaving MCP/Hook/Context clears that child's unaccepted dialog/draft;
      * admitted application writes continue and changing page does not cancel MCP OAuth.
-     * Same page or a closed Settings owner is a no-op. Leaving OpenAI dismisses its usage reset.
+     * Same page or a closed Settings owner is a no-op. Leaving OpenAI clears unconfirmed logout
+     * and requests reset dismissal (which is ineffective during consumption). Entering OpenAI
+     * requests one usage refresh; component construction itself never triggers another refresh.
      */
     public fun selectPage(page: SettingsPage): Unit
 

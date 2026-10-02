@@ -8,6 +8,12 @@ kotlin {
             api(project(":app-contract-settings"))
         }
         mosaicMain.dependencies {
+            implementation(project(":app-component-context-source-settings-impl-view"))
+            implementation(project(":app-component-session-title-settings-impl-view"))
+            implementation(project(":app-component-application-preferences-impl-view"))
+            implementation(project(":app-component-authentication-settings-impl-view"))
+            implementation(project(":app-component-account-usage-impl-view"))
+            implementation(project(":app-component-usage-reset-impl-view"))
             implementation(project(":app-component-hook-settings-impl-view"))
             implementation(project(":app-component-mcp-settings-impl-view"))
             implementation(project(":app-component-session-rename-impl-view"))
@@ -19,6 +25,9 @@ kotlin {
             implementation(libs.mosaic.runtime)
         }
         mosaicTest.dependencies {
+            implementation(project(":app-component-session-title-settings-impl-viewmodel"))
+            implementation(project(":app-component-application-preferences-impl-viewmodel"))
+            implementation(project(":app-component-authentication-settings-impl-viewmodel"))
             implementation(project(":app-viewmodel-settings"))
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.mosaic.testing)

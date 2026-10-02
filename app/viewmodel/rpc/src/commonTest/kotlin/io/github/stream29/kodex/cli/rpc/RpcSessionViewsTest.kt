@@ -709,7 +709,9 @@ internal suspend fun frontend(
     decorate: (RpcClient) -> RpcClient = { it },
     login: OpenAiLoginClient = FixtureLoginClient(),
     block: suspend FrontendFixture.() -> Unit,
-) = withTimeout(40.seconds) {
+) = withContext(Dispatchers.Default.limitedParallelism(1)) { withTimeout(40.seconds) {
+    // Interaction commands and child observations share a serialized owner dispatcher,
+    // matching the component contracts rather than racing initial emissions on Default.
     val root = Path(SystemTemporaryDirectory, "kodex-rpc-frontend-${Random.nextLong()}")
     val client = mockOpenAiClient {
         listModels { OpenAiResult.Success(ModelsResponse(listOf(ModelInfo(
@@ -739,7 +741,7 @@ internal suspend fun frontend(
         }
         remove(root)
     }
-}
+} }
 
 private class FixtureLoginClient : OpenAiLoginClient {
     override fun authorizationUrl(request: OpenAiLoginAuthorization): String =
