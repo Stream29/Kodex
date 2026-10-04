@@ -19,6 +19,8 @@ import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.session.contract.SessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
+import io.github.stream29.kodex.cli.sessiontabbar.SessionTabBounds
+import io.github.stream29.kodex.cli.sessiontabbar.sessionTabBounds
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

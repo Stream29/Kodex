@@ -1,12 +1,25 @@
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
-import io.github.stream29.kodex.cli.agent.DefaultComposerViewModelFactory
+import io.github.stream29.kodex.app.agent.contract.ComposerDependencies
+import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
+import io.github.stream29.kodex.app.agent.contract.ComposerOwnerId
+import io.github.stream29.kodex.app.agent.contract.ComposerRequestInputPort
+import io.github.stream29.kodex.app.agent.contract.ComposerRequestInputPresentation
+import io.github.stream29.kodex.app.agent.contract.ComposerResumePort
+import io.github.stream29.kodex.app.agent.contract.ComposerRuntimePort
+import io.github.stream29.kodex.app.agent.contract.ComposerSteerPort
+import io.github.stream29.kodex.app.agent.contract.ComposerSubmitPort
+import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
+import io.github.stream29.kodex.cli.agent.createComposerViewModel
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -20,7 +33,31 @@ public class RpcSessionDraft(
     public val settings: StateFlow<KodexAgentSettings> = mutableSettings.asStateFlow()
     private val mutableEditable = MutableStateFlow(true)
     public val editable: StateFlow<Boolean> = mutableEditable.asStateFlow()
-    public val composer: ComposerViewModel = DefaultComposerViewModelFactory.create()
+    private val composerScope = CoroutineScope(SupervisorJob())
+    public val composer: ComposerViewModel = createComposerViewModel(
+        ownerId = ComposerOwnerId("session-draft"),
+        dependencies = object : ComposerDependencies {
+            override val runtime = object : ComposerRuntimePort {
+                override val running = MutableStateFlow(false)
+                override val pendingSteer = MutableStateFlow(emptyList<io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent.Steerable>())
+            }
+            override val submit = ComposerSubmitPort { _, _ ->
+                error("A draft must be submitted through its New Session owner.")
+            }
+            override val steer = ComposerSteerPort { _, _ ->
+                error("A non-persisted draft cannot steer an Agent.")
+            }
+            override val cancellation = ComposerCancellationPort {}
+            override val resume = ComposerResumePort {}
+            override val requestInput = object : ComposerRequestInputPort {
+                override val presentation = MutableStateFlow<ComposerRequestInputPresentation>(
+                    ComposerRequestInputPresentation.None,
+                )
+            }
+            override val failures = ComposerFailureReporter { _, _ -> }
+        },
+        ownerScope = composerScope,
+    )
     private var closed = false
     private var createdIndex: Int? = null
     private var submitted = false
@@ -65,5 +102,10 @@ public class RpcSessionDraft(
     }
 
     public val persistedIndex: Int? get() = createdIndex
-    override fun close() { closed = true; mutableEditable.value = false; composer.close() }
+    override fun close() {
+        closed = true
+        mutableEditable.value = false
+        composer.close()
+        composerScope.cancel()
+    }
 }

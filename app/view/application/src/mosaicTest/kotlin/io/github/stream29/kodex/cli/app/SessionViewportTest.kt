@@ -31,10 +31,14 @@ val sessionViewportTest by testSuite {
                             columns = columns,
                             rows = 17,
                             newLineKey = NewLineKey.ShiftEnter,
-                            dropdowns = RuntimeConfigurationDropdowns.remember(draft),
+                            statusBarRows = newSessionStatusBarRows(columns, draft.settings.value),
                             onSubmit = {},
-                            onBrowseWorkingDirectory = {},
-                            onOpenSettings = {},
+                            statusBar = {
+                                NewSessionStatusBar(
+                                    columns, draft.settings.value, draft.runtimeConfiguration,
+                                    RuntimeConfigurationDropdowns.remember(draft), {}, {},
+                                )
+                            },
                         )
                     }
                 }

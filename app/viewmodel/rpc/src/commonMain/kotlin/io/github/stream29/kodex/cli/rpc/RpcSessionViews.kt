@@ -1,9 +1,8 @@
 package io.github.stream29.kodex.cli.rpc
 
+import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
-import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
-import io.github.stream29.kodex.cli.agent.DefaultComposerViewModelFactory
 import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
 import io.github.stream29.kodex.openai.ModelInfo
 import kotlinx.coroutines.CancellationException
@@ -112,7 +111,9 @@ public class RpcSessionView internal constructor(
     private val mutableStatus = MutableStateFlow<SessionViewStatus>(SessionViewStatus.Loading)
     public val binding: StateFlow<RpcSessionBinding?> = mutableBinding.asStateFlow()
     public val status: StateFlow<SessionViewStatus> = mutableStatus.asStateFlow()
-    public val composer: ComposerViewModel = DefaultComposerViewModelFactory.create()
+    /** Composer child for the current binding; it is replaced with the binding on recovery. */
+    public lateinit var composer: ComposerViewModel
+        private set
     private val mutablePresentation = MutableStateFlow<RpcAgentPresentation?>(null)
     public val presentation: StateFlow<RpcAgentPresentation?> = mutablePresentation.asStateFlow()
 
@@ -120,7 +121,7 @@ public class RpcSessionView internal constructor(
         owner.invokeOnCompletion {
             mutableBinding.value = null
             mutablePresentation.value = null
-            composer.close()
+            if (this@RpcSessionView::composer.isInitialized) composer.close()
             mutableStatus.value = SessionViewStatus.Closed
             initial.cancel()
         }
@@ -169,7 +170,16 @@ public class RpcSessionView internal constructor(
                 owner.ensureActive()
                 bindingJob.ensureActive()
                 mutableBinding.value = next
-                mutablePresentation.value = RpcAgentPresentation(next, bindingScope, services, composer, models, onCreated)
+                if (this@RpcSessionView::composer.isInitialized) composer.close()
+                composer = createRpcComposerViewModel(next, bindingScope)
+                mutablePresentation.value = RpcAgentPresentation(
+                    next,
+                    bindingScope,
+                    services,
+                    composer,
+                    models,
+                    onCreated,
+                )
                 mutableStatus.value = SessionViewStatus.Ready
                 initial.complete(Unit)
                 failure = failed.await()
@@ -179,6 +189,7 @@ public class RpcSessionView internal constructor(
             } finally {
                 mutableBinding.value = null
                 mutablePresentation.value = null
+                if (this@RpcSessionView::composer.isInitialized) composer.close()
                 withContext(NonCancellable) { bindingJob.cancelAndJoin() }
             }
             when (val reason = requireNotNull(failure).remoteReason()) {

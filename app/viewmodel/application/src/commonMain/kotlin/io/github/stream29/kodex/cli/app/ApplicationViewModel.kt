@@ -353,6 +353,7 @@ internal class ApplicationViewModelImpl(
         when (target) {
             is PersistedSessionViewModel -> sessions.release(target.sessionIndex)
             is NewSessionViewModel -> target.close()
+            else -> target.close()
         }
         return true
     }

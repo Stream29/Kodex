@@ -8,7 +8,7 @@ kotlin {
             implementation(project(":agent-state-contract"))
             implementation(project(":agent-storage-spec-contract"))
             implementation(project(":app-contract-agent"))
-            implementation(project(":app-contract-history"))
+            implementation(project(":app-component-history-spec"))
             implementation(project(":tool-spec-request-user-input"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(project(":agent-storage-spec-clean-models"))
@@ -20,7 +20,7 @@ kotlin {
             implementation(project(":agent-session-test"))
             implementation(project(":agent-storage-impl-in-memory"))
             implementation(project(":utils-coroutines-spec"))
-            implementation(project(":app-viewmodel-history"))
+            implementation(project(":app-component-history-impl-viewmodel"))
         }
     }
 }

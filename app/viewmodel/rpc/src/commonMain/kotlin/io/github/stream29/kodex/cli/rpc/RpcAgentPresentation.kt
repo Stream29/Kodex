@@ -1,9 +1,7 @@
 package io.github.stream29.kodex.cli.rpc
 
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
-import io.github.stream29.kodex.app.agent.contract.AgentComposerSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
@@ -26,7 +24,6 @@ import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
 import io.github.stream29.kodex.tool.multiagent.SuggestedSessionMeta
-import io.github.stream29.kodex.rpc.client.update
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
 import io.github.stream29.kodex.rpc.models.ShellSessionState
@@ -41,8 +38,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 /** Existing history and draft implementations, supplied solely with frontend values and commands. */
 public class RpcAgentPresentation internal constructor(
@@ -55,7 +50,6 @@ public class RpcAgentPresentation internal constructor(
 ) : AutoCloseable {
     private val owner = Job(scope.coroutineContext[Job])
     private val local = CoroutineScope(scope.coroutineContext + owner)
-    private val submission = Mutex()
     private val mutableFailure = MutableStateFlow<Throwable?>(null)
     public val failure: StateFlow<Throwable?> = mutableFailure.asStateFlow()
     private val mutableHistoryAction = MutableStateFlow<AgentHistoryActionState>(AgentHistoryActionState.None)
@@ -134,7 +128,9 @@ public class RpcAgentPresentation internal constructor(
 
     init {
         owner.invokeOnCompletion {
-            history.close(); historyIndex.close(); requestUserInput.close(); suggestSubagentTask.close()
+            composer.close()
+            history.close()
+            historyIndex.close(); requestUserInput.close(); suggestSubagentTask.close()
         }
         updateShells(binding.shellSessions.value)
         local.launch {
@@ -153,25 +149,6 @@ public class RpcAgentPresentation internal constructor(
     }
 
     /** Return values do not write any observed backend state or overwrite a later draft revision. */
-    public suspend fun submitComposer(expectedRevision: Long): AgentComposerSubmissionResult = submission.withLock {
-        binding.ensureActive()
-        val captured = composer.state.value
-        if (captured.revision != expectedRevision) return AgentComposerSubmissionResult.Stale
-        val text = captured.text.trim()
-        if (text.isEmpty()) return AgentComposerSubmissionResult.Empty
-        val content = listOf(ContentItem.InputText(text))
-        if (binding.running.value) {
-            binding.pendingSteer.update { it + StableUserMessage(content) }
-            composer.clear(expectedRevision)
-            AgentComposerSubmissionResult.QueuedAsSteer
-        } else {
-            binding.appendUserMessage(content)
-            composer.clear(expectedRevision)
-            resume()
-            AgentComposerSubmissionResult.Submitted
-        }
-    }
-
     public suspend fun submit(content: List<ContentItem>) {
         binding.appendUserMessage(content)
         resume()

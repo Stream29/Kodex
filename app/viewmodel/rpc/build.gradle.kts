@@ -5,6 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":app-component-composer-impl-viewmodel"))
             implementation(project(":app-component-new-session-defaults-impl-viewmodel"))
             implementation(project(":app-component-runtime-configuration-impl-viewmodel"))
             implementation(project(":app-component-history-index-impl-viewmodel"))
@@ -24,7 +25,7 @@ kotlin {
             implementation(project(":app-component-openai-login-impl-viewmodel"))
             implementation(project(":app-component-session-catalog-impl-viewmodel"))
             api(project(":rpc-impl-client"))
-            api(project(":app-viewmodel-history"))
+            api(project(":app-component-history-impl-viewmodel"))
             api(project(":app-contract-agent"))
             api(project(":agent-state-contract"))
             implementation(project(":app-viewmodel-agent"))

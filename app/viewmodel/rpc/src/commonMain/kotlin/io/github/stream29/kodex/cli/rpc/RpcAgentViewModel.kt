@@ -87,8 +87,6 @@ private class RpcAgentViewModel(
         edit({ it.threadName }, { it.copy(threadName = threadName) })
     }
     override suspend fun submit(content: List<ContentItem>): Unit = presentation.submit(content)
-    override suspend fun submitComposer(expectedRevision: Long): AgentComposerSubmissionResult =
-        presentation.submitComposer(expectedRevision)
     override fun resume(): Unit = presentation.resume()
     override fun cancel(): Unit = presentation.stop()
     override fun forceCompact(): Unit = presentation.forcedCompact()

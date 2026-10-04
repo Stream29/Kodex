@@ -3,7 +3,7 @@ package io.github.stream29.kodex.cli.rpc
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
-import io.github.stream29.kodex.app.agent.contract.AgentComposerSubmissionResult
+import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
@@ -48,7 +48,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
     test("blank drafts and catalog construction allocate nothing") {
         frontend {
             val draft = RpcSessionDraft(settings, views)
-            draft.composer.update("draft", 5)
+            draft.composer.update("draft")
             draft.edit { it.copy(instructions = "local") }
             val catalog = RpcSessionCatalog(this, services.global)
             try {
@@ -305,8 +305,9 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             entered.await()
             binding.running.first { it }
             val presentation = requireNotNull(view.presentation.value)
-            val revision = view.composer.update("steer", 5)
-            assertEquals(AgentComposerSubmissionResult.QueuedAsSteer, presentation.submitComposer(revision))
+            presentation.composer.state.first { it.running }
+            val revision = view.composer.update("steer")
+            assertEquals(ComposerSubmissionResult.QueuedAsSteer, presentation.composer.submit(revision))
             binding.pendingSteer.first { it.isNotEmpty() }
             binding.pendingSteer.update { emptyList() }
             binding.pendingSteer.first { it.isEmpty() }
@@ -323,7 +324,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         frontend {
             val draft = RpcSessionDraft(settings, views)
             try {
-                draft.composer.update("first", 5)
+                draft.composer.update("first")
                 val view = draft.materialize()
                 assertEquals(view.index, draft.persistedIndex)
                 assertEquals("", draft.composer.state.value.text)
@@ -487,7 +488,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         }) {
             val draft = RpcSessionDraft(settings, views)
             try {
-                draft.composer.update("keep me", 7)
+                draft.composer.update("keep me")
                 assertFailsWith<IllegalStateException> { draft.materialize() }
                 val index = assertNotNull(draft.persistedIndex)
                 assertEquals(index, services.global.getSessionCatalog(true).single().sessionIndex)

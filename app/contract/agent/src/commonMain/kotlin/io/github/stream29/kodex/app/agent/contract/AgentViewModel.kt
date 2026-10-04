@@ -14,15 +14,6 @@ import io.github.stream29.kodex.rpc.models.AgentStateValue
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
 
-/** Outcome of consuming one exact composer revision. */
-public enum class AgentComposerSubmissionResult {
-    Submitted,
-    QueuedAsSteer,
-    Empty,
-    Stale,
-    Unavailable,
-}
-
 /**
  * Direct settings contract implemented by every stable settings owner.
  *
@@ -82,13 +73,6 @@ public interface AgentViewModel :
 
     /** Submits content to this exact Agent address. */
     public suspend fun submit(content: List<ContentItem>): Unit
-
-    /**
-     * Consumes and submits only [expectedRevision] from this Agent's composer.
-     */
-    public suspend fun submitComposer(
-        expectedRevision: Long,
-    ): AgentComposerSubmissionResult
 
     /**
      * Starts waiting for a backend-owned continuation; closing this view only cancels the wait.

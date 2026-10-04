@@ -229,6 +229,18 @@ val docsRecordingTest by testSuite {
                 override val running = active
                 override val state = phase
                 override val pendingSteer = steer
+                override val composer = object : ComposerViewModel by real.composer {
+                    override suspend fun submit(
+                        expectedRevision: Long,
+                    ): ComposerSubmissionResult {
+                        val text = state.value.text
+                        check(clear(expectedRevision))
+                        steer.value = steer.value + StableUserMessage(
+                            listOf(ContentItem.InputText(text)),
+                        )
+                        return ComposerSubmissionResult.QueuedAsSteer
+                    }
+                }
                 override val history = object : AgentHistoryViewModel by real.history {
                     override val streamingItem = streaming
                 }
@@ -251,12 +263,6 @@ val docsRecordingTest by testSuite {
                     streaming.value = HistoryStreamingItem.Compacting
                 }
                 override fun clearPending() { cancel() }
-                override suspend fun submitComposer(expectedRevision: Long): AgentComposerSubmissionResult {
-                    val text = composer.state.value.text
-                    check(composer.clear(expectedRevision))
-                    steer.value = steer.value + StableUserMessage(listOf(ContentItem.InputText(text)))
-                    return AgentComposerSubmissionResult.QueuedAsSteer
-                }
             }
             val clip = DocsClip("execution")
             runMosaicTest(MosaicSnapshots) {

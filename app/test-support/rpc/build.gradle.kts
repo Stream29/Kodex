@@ -7,7 +7,7 @@ kotlin {
     sourceSets.commonMain.dependencies {
         api(project(":app-viewmodel-rpc"))
         api(project(":app-viewmodel-session"))
-        api(project(":app-viewmodel-new-session"))
+        api(project(":app-component-new-session-impl-viewmodel"))
         api(project(":openai-impl-client-test"))
         implementation(project(":rpc-impl-server"))
         implementation(project(":rpc-impl-in-memory"))

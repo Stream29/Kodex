@@ -16,7 +16,7 @@ kotlin {
             implementation(project(":agent-storage-spec-contract-ext"))
             implementation(project(":agent-session-impl-filesystem"))
             implementation(project(":app-viewmodel-agent"))
-            implementation(project(":app-viewmodel-history"))
+            implementation(project(":app-component-history-impl-viewmodel"))
             implementation(project(":agent-session-impl-in-memory"))
             implementation(project(":agent-session-test"))
             implementation(project(":app-shared-session-title"))

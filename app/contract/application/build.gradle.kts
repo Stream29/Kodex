@@ -14,6 +14,7 @@ kotlin {
             api(project(":app-component-path-picker-spec"))
             api(project(":app-component-session-catalog-spec"))
             api(project(":app-contract-session"))
+            api(project(":app-component-new-session-spec"))
             api(project(":app-contract-settings"))
             api(project(":app-shared-settings-contract"))
             api(libs.kotlinx.coroutines.core)

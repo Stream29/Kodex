@@ -12,8 +12,44 @@ import io.github.stream29.kodex.cli.settings.NewLineKey
 import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertContains
 
 val newSessionScreenTest by testSuite {
+    test("unmounting a draft page does not close its registry-owned ViewModel") {
+        val fixture = SessionViewModelTestFixture.create(this)
+        try {
+            val draft = fixture.newSession("retained")
+            draft.composer.update("not submitted", 13)
+            var visible by mutableStateOf(true)
+            runMosaicTest {
+                setContentAndSnapshot {
+                    if (visible) {
+                        NewSessionScreen(
+                            viewModel = draft,
+                            columns = 40,
+                            rows = 8,
+                            newLineKey = NewLineKey.ShiftEnter,
+                            statusBarRows = 0,
+                            onSubmit = {},
+                            statusBar = {},
+                        )
+                    }
+                }
+                visible = false
+                awaitSnapshot()
+                assertEquals("not submitted", draft.composer.state.value.text)
+                assertEquals(
+                    io.github.stream29.kodex.app.agent.contract.ComposerLifecycle.Open,
+                    draft.composer.state.value.lifecycle,
+                )
+                visible = true
+                val snapshot = awaitSnapshot()
+                assertContains(snapshot, "not submitted")
+            }
+        } finally {
+            fixture.close()
+        }
+    }
     test("emptySessionDoesNotRenderCreationInstructions") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {

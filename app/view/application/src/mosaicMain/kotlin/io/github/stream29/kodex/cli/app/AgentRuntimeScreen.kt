@@ -3,10 +3,8 @@ package io.github.stream29.kodex.cli.app
 import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationDropdowns
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import com.jakewharton.mosaic.focus.FocusRequester
 import com.jakewharton.mosaic.layout.height
@@ -24,16 +22,14 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperM
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
-import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
-import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.cli.agent.RequestUserInputPanel
+import io.github.stream29.kodex.cli.agent.ComposerView
 import io.github.stream29.kodex.cli.agent.canEditHistory
 import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskPanel
 import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns
 import io.github.stream29.kodex.cli.components.TextInputLayout
-import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
@@ -72,15 +68,18 @@ internal fun AgentRuntimeScreen(
     val tokenCount by viewModel.tokenCount.collectAsState()
     val composerState by viewModel.composer.state.collectAsState()
     val activeTurnDuration by viewModel.history.activeTurnDuration.collectAsState()
-    val composer = rememberComposerInputState(viewModel.composer)
+    val composerText = composerState.text
     val fullComposerLayout = TextInputLayout.create(
-        value = composer.value,
+        value = TextInputValue(
+            text = composerText,
+            cursorOffset = composerText.length,
+        ),
         width = columns,
         firstLinePrefix = "> ",
         continuationLinePrefix = "  ",
         softWrap = true,
     )
-    val submitHint = submitToSteerHint(running, composer.value.text)
+    val submitHint = submitToSteerHint(running, composerText)
     val pendingRequest = requestUserInput as? RequestUserInputState.Pending
     val pendingSuggestion = suggestSubagentTask as? SuggestSubagentTaskState.Pending
     val hostInteractionPending = pendingRequest != null || pendingSuggestion != null
@@ -174,20 +173,15 @@ internal fun AgentRuntimeScreen(
             showScrollToLatest = !viewModel.history.followsLatest,
             onScrollToLatest = viewModel.history::requestScrollToLatest,
         )
-        ComposerInput(
-            state = composer,
-            layout = composerLayout,
+        ComposerView(
+            viewModel = viewModel.composer,
+            columns = columns,
+            rows = composerRows,
             newLineKey = newLineKey,
             autoFocus = !hostInteractionPending,
             enabled = !hostInteractionPending,
             focusRequester = composerFocusRequester,
-            submitHint = submitHint,
-            onSubmit = {
-                scope.launch { viewModel.submitComposer(composerState.revision) }
-            },
-            onValueChanged = { value ->
-                viewModel.composer.update(value.text, value.cursorOffset)
-            },
+            showAuxiliary = false,
         )
         AgentRuntimeStatusBar(
             columns = columns,
@@ -201,94 +195,6 @@ internal fun AgentRuntimeScreen(
             onOpenSettings = onOpenSettings,
         )
     }
-}
-
-@Composable
-internal fun NewSessionScreen(
-    viewModel: NewSessionViewModel,
-    columns: Int,
-    rows: Int,
-    newLineKey: NewLineKey,
-    dropdowns: RuntimeConfigurationDropdowns,
-    onSubmit: () -> Unit,
-    onBrowseWorkingDirectory: () -> Unit,
-    onOpenSettings: () -> Unit,
-) {
-    val settings by viewModel.settings.collectAsState()
-    val statusBarRows = newSessionStatusBarRows(columns, settings)
-    Column(modifier = Modifier.width(columns).height(rows)) {
-        NewSessionContent(
-            composerViewModel = viewModel.composer,
-            columns = columns,
-            rows = (rows - statusBarRows).coerceAtLeast(0),
-            newLineKey = newLineKey,
-            onSubmit = onSubmit,
-        )
-        NewSessionStatusBar(
-            columns = columns,
-            settings = settings,
-            runtimeConfiguration = viewModel.runtimeConfiguration,
-            dropdowns = dropdowns,
-            onBrowseWorkingDirectory = onBrowseWorkingDirectory,
-            onOpenSettings = onOpenSettings,
-        )
-    }
-}
-
-@Composable
-internal fun NewSessionContent(
-    composerViewModel: ComposerViewModel,
-    columns: Int,
-    rows: Int,
-    newLineKey: NewLineKey,
-    onSubmit: () -> Unit,
-) {
-    val composer = rememberComposerInputState(composerViewModel)
-    val fullComposerLayout = TextInputLayout.create(
-        value = composer.value,
-        width = columns,
-        firstLinePrefix = "> ",
-        continuationLinePrefix = "  ",
-        softWrap = true,
-    )
-    val availableRows = (rows - HistoryComposerSeparatorRows).coerceAtLeast(0)
-    val composerRows = boundedComposerRows(
-        availableRows = availableRows,
-        desiredRows = fullComposerLayout.rowCount,
-    )
-    val composerLayout = fullComposerLayout.withViewportRows(composerRows)
-    val historyRows = (availableRows - composerRows).coerceAtLeast(0)
-    Column(modifier = Modifier.width(columns).height(rows)) {
-        Box(modifier = Modifier.width(columns).height(historyRows)) {}
-        HistoryComposerSeparator(columns)
-        ComposerInput(
-            state = composer,
-            layout = composerLayout,
-            newLineKey = newLineKey,
-            onSubmit = onSubmit,
-            onValueChanged = { value ->
-                composerViewModel.update(value.text, value.cursorOffset)
-            },
-        )
-    }
-}
-
-@Composable
-private fun rememberComposerInputState(composer: ComposerViewModel): TextInputState {
-    val state by composer.state.collectAsState()
-    val input = remember(composer) {
-        TextInputState(TextInputValue(state.text, state.cursorOffset))
-    }
-    LaunchedEffect(composer, state) {
-        val value = TextInputValue(state.text, state.cursorOffset)
-        if (
-            input.value.text != value.text ||
-            input.value.cursorOffset != value.cursorOffset
-        ) {
-            input.reset(value)
-        }
-    }
-    return input
 }
 
 @Composable

@@ -74,7 +74,15 @@ import io.github.stream29.kodex.cli.components.items
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiColorSchemeFor
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
+import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarCallbacks
+import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarState
+import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabIdentity
+import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabPresentation
+import io.github.stream29.kodex.cli.sessiontabbar.SessionTabBar as ComponentSessionTabBar
 import io.github.stream29.kodex.cli.workingdirectory.WorkingDirectoryPopup
+import io.github.stream29.kodex.app.pathpicker.createDirectoryPickerViewModel
+import io.github.stream29.kodex.app.workingdirectory.createWorkingDirectoryViewModel
+import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryDependencies
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.OpenAiLoginPopup
 import io.github.stream29.kodex.cli.settings.SettingsPopup
@@ -105,6 +113,29 @@ public fun SessionTreeCliScreen(
     val currentNewLineKey by newLineKey.collectAsState()
     val sidebarConfiguration by sidebarSettings.state.collectAsState()
     val tabStates = collectSessionTabRenderStates(navigation.tabs, navigation.selectedIndex)
+    val tabIdentityCounter = remember { mutableStateOf(0) }
+    val tabIdentities = remember { mutableMapOf<SessionViewModel, SessionTabIdentity>() }
+    val componentTabEntries = tabStates.map { tab ->
+        val identity = tabIdentities.getOrPut(tab.target) {
+            tabIdentityCounter.value += 1
+            SessionTabIdentity("tab-${tabIdentityCounter.value}")
+        }
+        identity to (
+            tab.target to SessionTabPresentation(
+                identity = identity,
+                label = tab.sessionName,
+                running = tab.running,
+            )
+        )
+    }
+    val componentTabState = SessionTabBarState(
+        tabs = componentTabEntries.map { it.second.second },
+        selected = componentTabEntries
+            .getOrNull(navigation.selectedIndex)
+            ?.first,
+    )
+    fun targetFor(identity: SessionTabIdentity): SessionViewModel? =
+        componentTabEntries.firstOrNull { it.first == identity }?.second?.first
     val sessionSummary = summarizeOpenSessions(tabStates)
     val runningFrame = rememberRunningIndicatorFrame(
         active = sessionSummary.runningSessionCount > 0,
@@ -348,31 +379,55 @@ public fun SessionTreeCliScreen(
     TuiTheme(colorScheme = tuiColorSchemeFor(terminal.theme)) {
         TuiPopupHost {
             Column(modifier = Modifier.width(columns).height(rows)) {
-                SessionTabBar(
-                    tabs = tabStates,
+                ComponentSessionTabBar(
+                    state = componentTabState,
                     runningIndicatorFrame = runningFrame,
                     columns = columns,
-                    onSelectTab = { target ->
-                        historyMenu = null
-                        val index = navigation.tabs.indexOfFirst { child -> child === target }
-                        if (index >= 0) scope.launch { viewModel.selectTab(index) }
+                    callbacks = object : SessionTabBarCallbacks {
+                        override fun select(identity: SessionTabIdentity) {
+                            val target = targetFor(identity) ?: return
+                            val index = navigation.tabs.indexOfFirst { child -> child === target }
+                            if (index >= 0) scope.launch { viewModel.selectTab(index) }
+                        }
+
+                        override fun close(identity: SessionTabIdentity) {
+                            val target = targetFor(identity) ?: return
+                            if (navigation.tabs.any { child -> child === target }) {
+                                scope.launch { viewModel.closeTab(target) }
+                            }
+                        }
+
+                        override fun openContextMenu(identity: SessionTabIdentity) {
+                            // The geometry-bearing callback below opens the existing
+                            // Application-owned popup after this admission intent.
+                        }
+
+                        override fun createNewSession() {
+                            historyMenu = null
+                            scope.launch { viewModel.createNewSessionTab() }
+                        }
+
+                        override fun openSessions() {
+                            historyMenu = null
+                            scope.launch { viewModel.openSessionCatalogPopup() }
+                        }
                     },
-                    onOpenTabMenu = { target, name, anchor, position ->
-                        shellSessionMenu = null
-                        shellSessionHoverCloseJob?.cancel()
-                        shellSessionHover = null
-                        historyMenu = null
-                        historyIndexHover = null
-                        historyIndexMenu = null
-                        tabMenu = SessionTabMenuRequest(target, name, anchor, position)
-                    },
-                    onCreateNewSession = {
-                        historyMenu = null
-                        scope.launch { viewModel.createNewSessionTab() }
-                    },
-                    onOpenSessions = {
-                        historyMenu = null
-                        scope.launch { viewModel.openSessionCatalogPopup() }
+                    onOpenTabMenu = { request ->
+                        val target = targetFor(request.identity)
+                        if (target != null && navigation.tabs.any { child -> child === target }) {
+                            shellSessionMenu = null
+                            shellSessionHoverCloseJob?.cancel()
+                            shellSessionHover = null
+                            historyMenu = null
+                            historyIndexHover = null
+                            historyIndexMenu = null
+                            tabMenu = SessionTabMenuRequest(
+                                target,
+                                request.label,
+                                request.anchor,
+                                request.clickPosition,
+                            )
+                        }
                     },
                 )
                 Box(modifier = Modifier.width(columns).height(contentRows)) {
@@ -483,32 +538,38 @@ public fun SessionTreeCliScreen(
                         }
                         Box(modifier = Modifier.width(contentColumns).height(contentRows)) {
                             when (selected) {
-                                is NewSessionViewModel -> NewSessionScreen(
-                                    viewModel = selected,
-                                    columns = contentColumns,
-                                    rows = contentRows,
-                                    newLineKey = currentNewLineKey,
-                                    dropdowns = runtimeDropdowns,
-                                    onSubmit = {
-                                        val index = navigation.tabs.indexOfFirst { it === selected }
-                                        if (index >= 0) {
-                                            scope.launch { viewModel.materializeNewSession(index) }
-                                        }
-                                    },
-                                    onBrowseWorkingDirectory = {
-                                        scope.launch {
-                                            viewModel.openWorkingDirectoryPopup(selected)
-                                        }
-                                    },
-                                    onOpenSettings = {
-                                        scope.launch {
-                                            viewModel.openSettingsPopup(
-                                                selected,
-                                                SettingsPage.CurrentSession,
+                                is NewSessionViewModel -> {
+                                    val draftSettings by selected.settings.collectAsState()
+                                    NewSessionScreen(
+                                        viewModel = selected,
+                                        columns = contentColumns,
+                                        rows = contentRows,
+                                        newLineKey = currentNewLineKey,
+                                        statusBarRows = newSessionStatusBarRows(contentColumns, draftSettings),
+                                        onSubmit = {
+                                            val index = navigation.tabs.indexOfFirst { it === selected }
+                                            if (index >= 0) {
+                                                scope.launch { viewModel.materializeNewSession(index) }
+                                            }
+                                        },
+                                        statusBar = {
+                                            NewSessionStatusBar(
+                                                columns = contentColumns,
+                                                settings = draftSettings,
+                                                runtimeConfiguration = selected.runtimeConfiguration,
+                                                dropdowns = runtimeDropdowns,
+                                                onBrowseWorkingDirectory = {
+                                                    scope.launch { viewModel.openWorkingDirectoryPopup(selected) }
+                                                },
+                                                onOpenSettings = {
+                                                    scope.launch {
+                                                        viewModel.openSettingsPopup(selected, SettingsPage.CurrentSession)
+                                                    }
+                                                },
                                             )
-                                        }
-                                    },
-                                )
+                                        },
+                                    )
+                                }
 
                                 is PersistedSessionViewModel -> selectedAgent?.let { agent ->
                                     key(agent) {
@@ -1246,7 +1307,7 @@ internal suspend fun revertAndEdit(
     text: String,
 ) {
     agent.revertHistory(storageIndex, generation)
-    agent.composer.update(text, text.length)
+    agent.composer.update(text)
 }
 
 private const val SessionTabBarRows: Int = 1

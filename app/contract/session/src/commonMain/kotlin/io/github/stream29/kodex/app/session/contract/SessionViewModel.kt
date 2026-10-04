@@ -8,8 +8,10 @@ import kotlinx.coroutines.flow.StateFlow
  *
  * This contract only unifies frontend presentation and root-settings commands.
  * It does not give both variants the same persistence identity or lifecycle.
+ * Concrete component contracts may live in separate modules; sharing this presentation
+ * interface must not require moving their declarations back into one sealed root project.
  */
-public sealed interface SessionViewModel :
+public interface SessionViewModel :
     AgentSettingsViewModel,
     AutoCloseable {
     /** Root/tab display name, independent of agent settings. */

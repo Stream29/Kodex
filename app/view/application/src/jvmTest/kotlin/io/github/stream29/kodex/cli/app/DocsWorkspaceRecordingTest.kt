@@ -115,7 +115,14 @@ val docsWorkspaceRecordingTest by testSuite {
                             NewSessionScreen(
                                 selected as io.github.stream29.kodex.app.session.contract.NewSessionViewModel,
                                 80, 17, NewLineKey.ShiftEnter,
-                                RuntimeConfigurationDropdowns.remember(selected), {}, {}, {},
+                                newSessionStatusBarRows(80, selected.settings.value), {},
+                                {
+                                    NewSessionStatusBar(
+                                        80, selected.settings.value,
+                                        (selected as io.github.stream29.kodex.app.session.contract.NewSessionViewModel).runtimeConfiguration,
+                                        RuntimeConfigurationDropdowns.remember(selected), {}, {},
+                                    )
+                                },
                             )
                         }
                         anchor?.let {
