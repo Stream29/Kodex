@@ -46,7 +46,26 @@ public class PromptImageTransformRequest(
         get() = content.copyOf()
 }
 
+/**
+ * Transforms encoded image bytes according to the captured prompt-image plan.
+ *
+ * The returned image must have the plan's output dimensions and MIME type. It
+ * owns its encoded bytes; neither caller input nor returned bytes may alias a
+ * codec's mutable working buffer. Platform codecs may support different input
+ * formats, but do not choose a different resize policy or silently change the
+ * requested output format.
+ */
 public fun interface PromptImageTransformer {
+    /**
+     * Decodes, resizes and encodes the given request. The transformer does not
+     * own the calling scope or a persistent filesystem/application resource.
+     *
+     * @throws UnsupportedOperationException if the codec cannot decode the
+     * source or encode the requested output format.
+     * @throws IllegalStateException if a supported codec operation fails.
+     * @throws kotlinx.coroutines.CancellationException if the operation is
+     * cancelled at a suspending codec boundary.
+     */
     public suspend fun transform(request: PromptImageTransformRequest): EncodedImage
 }
 

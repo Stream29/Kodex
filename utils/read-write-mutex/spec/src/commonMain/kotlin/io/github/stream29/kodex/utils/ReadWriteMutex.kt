@@ -28,6 +28,12 @@ public interface ReadWriteMutex {
      */
     public val reader: Mutex
 
-    /** A write lock proxy that excludes all readers and other writers. */
+    /**
+     * A write lock proxy that excludes all readers and other writers.
+     *
+     * A non-null owner follows [Mutex] identity checks. Rejected unlock by a
+     * different owner throws [IllegalStateException] without changing either
+     * the held lock or [stateFlow]. The actual owner can still release it.
+     */
     public val writer: Mutex
 }

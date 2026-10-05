@@ -13,7 +13,7 @@ internal class PlanUpdateHistoryItemViewModelImpl(
     override val index: Int,
     private val descriptor: HistoryItemDescriptor,
     private val context: HistoryItemLoadContext,
-) : PlanUpdateHistoryItemViewModel, LoadableHistoryItem {
+) : PlanUpdateHistoryItemViewModel, LoadableHistoryItem, ReleasableHistoryItem {
     private val mutableState: MutableStateFlow<PlanUpdateHistoryItemState>
     private val loadingJob: kotlinx.coroutines.Job
 
@@ -41,5 +41,9 @@ internal class PlanUpdateHistoryItemViewModelImpl(
 
     override fun ensureLoaded() {
         loadingJob.start()
+    }
+
+    override fun release() {
+        loadingJob.cancel()
     }
 }

@@ -10,6 +10,10 @@ kotlin {
         jvmMain.dependencies {
             api(libs.bundles.ktor.client.jvm.engines)
         }
+        jvmTest.dependencies {
+            implementation(libs.ktor.server.cio)
+            implementation(libs.ktor.server.core)
+        }
         linuxMain.dependencies {
             api(libs.bundles.ktor.client.linux.engines)
         }

@@ -11,12 +11,28 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 
 
 val readWriteMutexTest by testSuite {
+    test("rejected writer owner does not alter state or prevent the actual owner unlocking") {
+        val mutex = ReadWriteMutex()
+        val owner = Any()
+        mutex.writer.lock(owner)
+
+        assertFailsWith<IllegalStateException> { mutex.writer.unlock(Any()) }
+        assertEquals(State.Write, mutex.stateFlow.value)
+        assertTrue(mutex.writer.holdsLock(owner))
+        assertFalse(mutex.reader.tryLock())
+        mutex.writer.unlock(owner)
+        assertEquals(State.Free, mutex.stateFlow.value)
+        assertTrue(mutex.reader.tryLock())
+        mutex.reader.unlock()
+    }
+
     test("multiple readers can hold the lock together") {
         val mutex = ReadWriteMutex()
 

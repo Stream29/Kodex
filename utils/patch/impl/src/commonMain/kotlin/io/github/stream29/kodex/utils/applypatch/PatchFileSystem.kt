@@ -4,26 +4,24 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
 
-public class PatchApplierImpl : PatchApplier {
-    override suspend fun apply(
-        patch: Patch,
-        root: Path,
-        fileSystem: CoroutineFileSystem,
-    ): PatchApplyResult =
-        patch.applyHunksToFileSystem(root, fileSystem)
-}
-
 /**
- * Applies this patch with the default concrete filesystem implementation.
+ * Applies this parsed patch in hunk order under [root], using [fileSystem].
  *
- * The extension is a compatibility convenience; [PatchApplier] remains the
- * implementation-independent operation contract.
+ * Absolute paths are preserved; relative paths are resolved against [root].
+ * Successful results list added, modified and deleted paths in operation order.
+ * This operation is not transactional: earlier hunks can remain applied when a
+ * later hunk fails. The supplied filesystem is borrowed, never closed.
+ *
+ * @throws ApplyPatchException if no files are modified, a required source is
+ * absent/not regular, or a hunk cannot be matched.
+ * @throws kotlinx.io.IOException if reading or publishing filesystem content fails.
+ * @throws kotlinx.coroutines.CancellationException if the calling operation is cancelled.
  */
 public suspend fun Patch.applyToFileSystem(
     root: Path = Path("."),
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ): PatchApplyResult =
-    PatchApplierImpl().apply(this, root, fileSystem)
+    applyHunksToFileSystem(root, fileSystem)
 
 private suspend fun Patch.applyHunksToFileSystem(
     root: Path,

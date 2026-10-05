@@ -76,6 +76,11 @@ private class ReadWriteMutexImpl : ReadWriteMutex {
          * means the write lock is ownerless.
          */
         override fun unlock(owner: Any?) {
+            // Validate before publishing Free: an underlying Mutex rejects a
+            // mismatched owner without unlocking, so our state must stay Write.
+            if (owner != null) {
+                check(canWrite.holdsLock(owner)) { "The writer is not locked by this owner." }
+            }
             stateFlow.releaseWriteOrThrow()
             canWrite.unlock(owner)
             canRead.unlock(owner)

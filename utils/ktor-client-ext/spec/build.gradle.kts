@@ -11,9 +11,5 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
         }
-        jvmTest.dependencies {
-            implementation(libs.ktor.server.cio)
-            implementation(libs.ktor.server.core)
-        }
     }
 }

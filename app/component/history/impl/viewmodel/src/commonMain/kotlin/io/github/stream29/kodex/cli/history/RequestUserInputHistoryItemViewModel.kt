@@ -13,7 +13,7 @@ internal class RequestUserInputHistoryItemViewModelImpl(
     override val index: Int,
     private val descriptor: HistoryItemDescriptor,
     private val context: HistoryItemLoadContext,
-) : RequestUserInputHistoryItemViewModel, LoadableHistoryItem {
+) : RequestUserInputHistoryItemViewModel, LoadableHistoryItem, ReleasableHistoryItem {
     private val mutableState: MutableStateFlow<RequestUserInputHistoryItemState>
     private val loadingJob: kotlinx.coroutines.Job
 
@@ -43,5 +43,9 @@ internal class RequestUserInputHistoryItemViewModelImpl(
 
     override fun ensureLoaded() {
         loadingJob.start()
+    }
+
+    override fun release() {
+        loadingJob.cancel()
     }
 }

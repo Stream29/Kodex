@@ -14,7 +14,7 @@ internal class MessageHistoryItemViewModelImpl(
     override val index: Int,
     private val descriptor: HistoryItemDescriptor,
     private val context: HistoryItemLoadContext,
-) : MessageHistoryItemViewModel, LoadableHistoryItem {
+) : MessageHistoryItemViewModel, LoadableHistoryItem, ReleasableHistoryItem {
     private val mutableState: MutableStateFlow<MessageHistoryItemState>
     private val loadingJob: kotlinx.coroutines.Job
 
@@ -49,5 +49,9 @@ internal class MessageHistoryItemViewModelImpl(
 
     override fun ensureLoaded() {
         loadingJob.start()
+    }
+
+    override fun release() {
+        loadingJob.cancel()
     }
 }

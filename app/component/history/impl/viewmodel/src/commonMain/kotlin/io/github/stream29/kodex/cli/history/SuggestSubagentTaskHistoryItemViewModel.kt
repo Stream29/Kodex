@@ -13,7 +13,7 @@ internal class SuggestSubagentTaskHistoryItemViewModelImpl(
     override val index: Int,
     private val descriptor: HistoryItemDescriptor,
     private val context: HistoryItemLoadContext,
-) : SuggestSubagentTaskHistoryItemViewModel, LoadableHistoryItem {
+) : SuggestSubagentTaskHistoryItemViewModel, LoadableHistoryItem, ReleasableHistoryItem {
     private val mutableState: MutableStateFlow<SuggestSubagentTaskHistoryItemState>
     private val loadingJob = context.launch(start = CoroutineStart.LAZY) {
         try {
@@ -36,4 +36,8 @@ internal class SuggestSubagentTaskHistoryItemViewModelImpl(
 
     override val state: StateFlow<SuggestSubagentTaskHistoryItemState> = mutableState.asStateFlow()
     override fun ensureLoaded() { loadingJob.start() }
+
+    override fun release() {
+        loadingJob.cancel()
+    }
 }

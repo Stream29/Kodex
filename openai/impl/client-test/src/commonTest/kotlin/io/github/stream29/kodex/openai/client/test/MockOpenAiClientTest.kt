@@ -58,6 +58,45 @@ val mockOpenAiClientTest by testSuite {
         )
     }
 
+    test("built simple response handlers are independent of later builder mutation") {
+        val builder = MockOpenAiClientBuilder()
+        val firstEvent = ResponsesStreamEvent.Completed(Response(id = "first"))
+        val secondEvent = ResponsesStreamEvent.Completed(Response(id = "second"))
+        builder.createResponse { _: ResponsesApiRequest -> flowOf(firstEvent) }
+        val first = builder.build()
+        builder.createResponse { _: ResponsesApiRequest -> flowOf(secondEvent) }
+        val second = builder.build()
+
+        assertEquals(
+            listOf(firstEvent),
+            first.createResponse(OpenAiModelId("model"), emptyList()).toList(),
+        )
+        assertEquals(
+            listOf(secondEvent),
+            second.createResponse(OpenAiModelId("model"), emptyList()).toList(),
+        )
+    }
+
+    test("built full response handlers are independent and retain explicit override") {
+        val builder = MockOpenAiClientBuilder()
+        val firstEvent = ResponsesStreamEvent.Completed(Response(id = "full-first"))
+        val secondEvent = ResponsesStreamEvent.Completed(Response(id = "full-second"))
+        builder.createResponse { _, _ -> flowOf(firstEvent) }
+        val first = builder.build()
+        builder.createResponse { _: ResponsesApiRequest -> error("Full handler should take precedence") }
+        builder.createResponse { _, _ -> flowOf(secondEvent) }
+        val second = builder.build()
+
+        assertEquals(
+            listOf(firstEvent),
+            first.createResponse(OpenAiModelId("model"), emptyList()).toList(),
+        )
+        assertEquals(
+            listOf(secondEvent),
+            second.createResponse(OpenAiModelId("model"), emptyList()).toList(),
+        )
+    }
+
     test("remote compaction v2 handler receives request-owned transport values") {
         val completed = ResponsesStreamEvent.Completed(Response(id = "done"))
         val request = ResponsesApiRequest(

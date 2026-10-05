@@ -10,20 +10,3 @@ public sealed interface OpenExternalUrlResult {
         public val message: String,
     ) : OpenExternalUrlResult
 }
-
-/**
- * Requests opening URLs through the host's registered handler.
- *
- * This boundary reports launcher acceptance, not whether a browser finished
- * loading the destination. It does not own the destination application's
- * lifetime.
- */
-public fun interface ExternalUrlOpener {
-    /**
-     * Opens [url], returning [OpenExternalUrlResult.Failed] for blank input or
-     * when the launcher cannot be started or rejects the request.
-     *
-     * Cancellation propagates rather than being converted into a failed result.
-     */
-    public suspend fun open(url: String): OpenExternalUrlResult
-}

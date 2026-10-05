@@ -59,13 +59,10 @@ internal class MockOpenAiClientBuilderImpl : MockOpenAiClientBuilder {
     private var createResponseHandler: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent> = {
         missingHandler("createResponse")
     }
-    private var codexResponseHandler: suspend (
+    private var codexResponseHandler: (suspend (
         ResponsesApiRequest,
         suspend (OpenAiResponseHeaders) -> Unit,
-    ) -> Flow<ResponsesStreamEvent> = {
-            request, _ ->
-        createResponseHandler(request)
-    }
+    ) -> Flow<ResponsesStreamEvent>)? = null
     private var createRemoteCompactionV2ResponseHandler:
         suspend (ResponsesApiRequest) -> RemoteCompactionV2Response = { _ ->
             missingHandler("createRemoteCompactionV2Response")
@@ -146,20 +143,27 @@ internal class MockOpenAiClientBuilderImpl : MockOpenAiClientBuilder {
         searchHandler = handler
     }
 
-    override fun build(): OpenAiClient =
-        MockOpenAiClient(
+    override fun build(): OpenAiClient {
+        val simpleResponseHandler = createResponseHandler
+        val responseHandler: suspend (
+            ResponsesApiRequest,
+            suspend (OpenAiResponseHeaders) -> Unit,
+        ) -> Flow<ResponsesStreamEvent> = codexResponseHandler ?: { request, _ ->
+            simpleResponseHandler(request)
+        }
+        return MockOpenAiClient(
             listModelsHandler = listModelsHandler,
             getCodexAccountUsageHandler = getCodexAccountUsageHandler,
             listCodexRateLimitResetCreditsHandler = listCodexRateLimitResetCreditsHandler,
             consumeCodexRateLimitResetCreditHandler = consumeCodexRateLimitResetCreditHandler,
             getCodexTokenUsageProfileHandler = getCodexTokenUsageProfileHandler,
-            createResponseHandler = createResponseHandler,
-            codexResponseHandler = codexResponseHandler,
+            codexResponseHandler = responseHandler,
             createRemoteCompactionV2ResponseHandler = createRemoteCompactionV2ResponseHandler,
             generateImageHandler = generateImageHandler,
             editImageHandler = editImageHandler,
             searchHandler = searchHandler,
         )
+    }
 }
 
 private class MockOpenAiClient(
@@ -173,7 +177,6 @@ private class MockOpenAiClient(
             OpenAiSubscriptionAuthState,
         ) -> OpenAiResponseResult<CodexRateLimitResetConsumeResponse>,
     private val getCodexTokenUsageProfileHandler: suspend () -> OpenAiResponseResult<CodexTokenUsageProfile>,
-    private val createResponseHandler: suspend (ResponsesApiRequest) -> Flow<ResponsesStreamEvent>,
     private val codexResponseHandler:
         suspend (
             ResponsesApiRequest,
