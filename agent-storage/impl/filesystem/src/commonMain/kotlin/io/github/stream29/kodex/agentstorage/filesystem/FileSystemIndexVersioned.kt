@@ -223,6 +223,7 @@ public class FileSystemIndexVersioned<T>(
         fileSystem.createDirectories(directory)
         val previousLatest = latestIndex()
         val temporary = Path(directory, ".kodex-write-${Uuid.generateV7()}.tmp")
+        var primaryFailure: Throwable? = null
         try {
             fileSystem.writeString(
                 temporary,
@@ -239,9 +240,16 @@ public class FileSystemIndexVersioned<T>(
                 }
                 throw failure
             }
+        } catch (failure: Throwable) {
+            primaryFailure = failure
+            throw failure
         } finally {
-            withContext(NonCancellable) {
-                fileSystem.delete(temporary, mustExist = false)
+            val cleanup = withContext(NonCancellable) {
+                runCatching { fileSystem.delete(temporary, mustExist = false) }
+            }
+            cleanup.onFailure { cleanupFailure ->
+                val failure = primaryFailure ?: throw cleanupFailure
+                if (cleanupFailure !== failure) failure.addSuppressed(cleanupFailure)
             }
         }
     }
@@ -314,12 +322,20 @@ public class FileSystemIndexVersioned<T>(
     @OptIn(ExperimentalUuidApi::class)
     private suspend fun writeAtomically(destination: Path, content: String) {
         val temporary = Path(directory, ".kodex-write-${Uuid.generateV7()}.tmp")
+        var primaryFailure: Throwable? = null
         try {
             fileSystem.writeString(temporary, content, mustCreate = true)
             fileSystem.atomicMove(temporary, destination)
+        } catch (failure: Throwable) {
+            primaryFailure = failure
+            throw failure
         } finally {
-            withContext(NonCancellable) {
-                fileSystem.delete(temporary, mustExist = false)
+            val cleanup = withContext(NonCancellable) {
+                runCatching { fileSystem.delete(temporary, mustExist = false) }
+            }
+            cleanup.onFailure { cleanupFailure ->
+                val failure = primaryFailure ?: throw cleanupFailure
+                if (cleanupFailure !== failure) failure.addSuppressed(cleanupFailure)
             }
         }
     }

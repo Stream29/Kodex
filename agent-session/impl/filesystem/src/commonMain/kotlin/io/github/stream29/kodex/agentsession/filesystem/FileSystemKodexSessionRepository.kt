@@ -142,13 +142,23 @@ public class FileSystemKodexSessionRepository internal constructor(
     override suspend fun create(): Int = entriesMutex.withLock {
         requireOpen()
         val (index, directory) = reserveSessionDirectory()
-        FileSystemAgentStorage.ofEmpty(
-            directory = directory,
-            fileSystem = fileSystem,
-            mustCreateDirectory = false,
-        )
-        mutableEntries.value = (entries.value + index).sorted()
-        index
+        try {
+            FileSystemAgentStorage.ofEmpty(
+                directory = directory,
+                fileSystem = fileSystem,
+                mustCreateDirectory = false,
+            )
+            mutableEntries.value = (entries.value + index).sorted()
+            index
+        } catch (failure: Throwable) {
+            withContext(NonCancellable) {
+                runCatching { deleteRecursively(directory) }
+                    .onFailure { cleanupFailure ->
+                        if (cleanupFailure !== failure) failure.addSuppressed(cleanupFailure)
+                    }
+            }
+            throw failure
+        }
     }
 
     override suspend fun createFork(sourceEntryIndex: Int): Int = entriesMutex.withLock {
@@ -166,7 +176,12 @@ public class FileSystemKodexSessionRepository internal constructor(
             mutableEntries.value = (entries.value + index).sorted()
             index
         } catch (failure: Throwable) {
-            withContext(NonCancellable) { deleteRecursively(directory) }
+            withContext(NonCancellable) {
+                runCatching { deleteRecursively(directory) }
+                    .onFailure { cleanupFailure ->
+                        if (cleanupFailure !== failure) failure.addSuppressed(cleanupFailure)
+                    }
+            }
             throw failure
         }
     }
