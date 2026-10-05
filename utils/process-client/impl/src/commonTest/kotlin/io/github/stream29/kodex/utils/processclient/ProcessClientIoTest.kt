@@ -23,7 +23,7 @@ val processClientIoTest by testSuite(
     compartment = { TestCompartment.RealTime },
 ) {
     test("exchanges raw bytes with a real direct child process") {
-        val client = CoroutineScope(currentCoroutineContext()).ProcessClient()
+        val client: ProcessClient = CoroutineScope(currentCoroutineContext()).ProcessClient()
         val process = client.start(interactiveProcessCommand)
         try {
             process.stdin.apply {
@@ -46,7 +46,7 @@ val processClientIoTest by testSuite(
     }
 
     test("closing a client terminates its real child process") {
-        val client = CoroutineScope(currentCoroutineContext()).ProcessClient()
+        val client: ProcessClient = CoroutineScope(currentCoroutineContext()).ProcessClient()
         val process = client.start(delayedProcessCommand)
 
         client.close()
@@ -55,7 +55,7 @@ val processClientIoTest by testSuite(
     }
 
     test("overlays configured environment variables on a real child process") {
-        val client = CoroutineScope(currentCoroutineContext()).ProcessClient()
+        val client: ProcessClient = CoroutineScope(currentCoroutineContext()).ProcessClient()
         val process = client.start(environmentProcessCommand)
         try {
             process.stdin.close()

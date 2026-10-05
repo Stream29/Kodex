@@ -38,7 +38,7 @@ kotlin {
             implementation(project(":tool-impl-web-run"))
             implementation(project(":utils-coroutines-spec"))
             implementation(project(":utils-kotlinx-io-coroutines-impl"))
-            implementation(project(":utils-os-environment-impl"))
+            implementation(project(":utils-os-environment-spec"))
             implementation(project(":utils-shell-client-impl"))
             implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.coroutines.core)

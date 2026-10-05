@@ -9,26 +9,20 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.coroutines.CoroutineContext
 
-/**
- * Stateful owner for direct child processes using ordinary byte pipes.
- *
- * A client created by [CoroutineScope.ProcessClient] is a child of that scope.
- * Closing it terminates every process session that it still owns.
- */
-public expect class ProcessClient internal constructor(
+internal expect class PlatformProcessClient(
     scope: CoroutineScope,
-) : CoroutineScope, AutoCloseable {
+) : ProcessClient {
     override val coroutineContext: CoroutineContext
 
     /** Starts [command] without inserting a shell between the caller and child process. */
-    public suspend fun start(command: ProcessCommand): ProcessSession
+    override suspend fun start(command: ProcessCommand): ProcessSession
 
     override fun close()
 }
 
 /** Creates an independently cancellable direct-process client under this scope. */
 public fun CoroutineScope.ProcessClient(): ProcessClient {
-    return ProcessClient(supervisorChildScope())
+    return PlatformProcessClient(supervisorChildScope())
 }
 
 internal fun CoroutineScope.requireOpen() {

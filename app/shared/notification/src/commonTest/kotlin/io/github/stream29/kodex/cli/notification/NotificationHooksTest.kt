@@ -2,6 +2,8 @@
 
 package io.github.stream29.kodex.cli.notification
 
+import io.github.stream29.kodex.utils.shellclient.default
+
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
@@ -80,7 +82,7 @@ val notificationHookControlTest by testSuite(testConfig = TestConfig.testScope(i
             val process = FakeNotificationProcess(backgroundScope, bufferedInput = false)
             val operation = async {
                 assertFailsWith<TimeoutCancellationException> {
-                    executeNotificationProcess(ShellProcessCommand("test"), "input") { process }
+                    executeNotificationProcess(ShellProcessCommand("test", shell = Shell.default), "input") { process }
                 }
             }
             runCurrent()
@@ -98,7 +100,7 @@ val notificationHookControlTest by testSuite(testConfig = TestConfig.testScope(i
             val process = FakeNotificationProcess(backgroundScope)
             process.exitCode.complete(17)
             assertFailsWith<IllegalStateException> {
-                executeNotificationProcess(ShellProcessCommand("test"), "json") { process }
+                executeNotificationProcess(ShellProcessCommand("test", shell = Shell.default), "json") { process }
             }
             assertEquals("json", process.stdin.receive())
             assertTrue(process.stdin.receiveCatching().isClosed)
@@ -111,7 +113,7 @@ val notificationHookControlTest by testSuite(testConfig = TestConfig.testScope(i
             process.exitCode.complete(4)
             process.closeFailure = IllegalStateException("cleanup")
             val failed = assertFailsWith<IllegalStateException> {
-                executeNotificationProcess(ShellProcessCommand("test"), "json") { process }
+                executeNotificationProcess(ShellProcessCommand("test", shell = Shell.default), "json") { process }
             }
             assertEquals("Notification command exited with code 4.", failed.message)
             assertEquals("cleanup", failed.suppressedExceptions.single().message)
@@ -121,7 +123,7 @@ val notificationHookControlTest by testSuite(testConfig = TestConfig.testScope(i
         runTest {
             val failure = IllegalStateException("start")
             val actual = assertFailsWith<IllegalStateException> {
-                executeNotificationProcess(ShellProcessCommand("test"), "json") { throw failure }
+                executeNotificationProcess(ShellProcessCommand("test", shell = Shell.default), "json") { throw failure }
             }
             assertEquals(failure.message, actual.message)
         }
@@ -166,7 +168,9 @@ val notificationHookProcessTest by testSuite(compartment = { TestCompartment.Rea
             val entered = CompletableDeferred<ProcessSession>()
             try {
                 val operation = launch {
-                    executeNotificationProcess(ShellProcessCommand("read first; read second; read third"), "one\n") {
+                    executeNotificationProcess(
+                        ShellProcessCommand("read first; read second; read third", shell = Shell.default), "one\n",
+                    ) {
                         client.start(it).also { process -> entered.complete(process) }
                     }
                 }

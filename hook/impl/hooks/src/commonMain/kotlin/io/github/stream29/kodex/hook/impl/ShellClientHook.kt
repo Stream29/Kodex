@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.hook.impl
 
+import io.github.stream29.kodex.utils.shellclient.default
+
 import io.github.stream29.kodex.utils.shellclient.ProcessSession
 import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.ShellClient

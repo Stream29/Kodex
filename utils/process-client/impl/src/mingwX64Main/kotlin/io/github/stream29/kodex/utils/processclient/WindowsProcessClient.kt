@@ -66,19 +66,19 @@ import platform.windows.WriteFile
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
-public actual class ProcessClient internal actual constructor(
+internal actual class PlatformProcessClient actual constructor(
     scope: CoroutineScope,
 ) :
     CoroutineScope by scope,
-    AutoCloseable {
+    ProcessClient {
 
-    public actual suspend fun start(command: ProcessCommand): ProcessSession =
+    actual override suspend fun start(command: ProcessCommand): ProcessSession =
         withContext(WindowsProcessIoDispatcher) {
-            this@ProcessClient.requireOpen()
-            command.startWindowsProcess(this@ProcessClient)
+            this@PlatformProcessClient.requireOpen()
+            command.startWindowsProcess(this@PlatformProcessClient)
         }
 
-    public actual override fun close() {
+    actual override fun close() {
         cancel()
     }
 }

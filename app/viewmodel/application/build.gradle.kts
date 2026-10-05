@@ -35,7 +35,7 @@ kotlin {
             implementation(project(":utils-coroutines-spec"))
             implementation(project(":utils-kotlinx-io-coroutines-impl"))
             implementation(project(":utils-logging-impl"))
-            implementation(project(":utils-os-environment-impl"))
+            implementation(project(":utils-os-environment-spec"))
             implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.datetime)

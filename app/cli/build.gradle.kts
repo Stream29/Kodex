@@ -15,7 +15,7 @@ kotlin {
             implementation(project(":app-viewmodel-application"))
             implementation(project(":utils-kodex-home-impl"))
             implementation(project(":utils-logging-impl"))
-            implementation(project(":utils-os-environment-impl"))
+            implementation(project(":utils-os-environment-spec"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.io.core)
             implementation(libs.mosaic.runtime)

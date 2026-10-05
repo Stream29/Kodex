@@ -9,6 +9,8 @@ import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.shellclient.ProcessSession
 import io.github.stream29.kodex.utils.shellclient.ShellClient
 import io.github.stream29.kodex.utils.shellclient.ShellProcessCommand
+import io.github.stream29.kodex.utils.shellclient.Shell
+import io.github.stream29.kodex.utils.shellclient.default
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,7 +42,7 @@ internal suspend fun collectNotificationHooks(
         val json = Json.encodeToString<Notification>(notification)
         for (hook in selected) {
             try {
-                execute(ShellProcessCommand(hook.command, workingDirectory), json)
+                execute(ShellProcessCommand(hook.command, workingDirectory, shell = Shell.default), json)
             } catch (timeout: TimeoutCancellationException) {
                 currentCoroutineContext().ensureActive()
                 runCatching { report(hook.name, timeout) }

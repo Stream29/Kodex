@@ -62,20 +62,20 @@ import platform.windows.WaitForSingleObject
 import platform.windows.WriteFile
 import kotlin.time.Duration.Companion.milliseconds
 
-public actual class ShellClient internal actual constructor(
+internal actual class PlatformShellClient actual constructor(
     scope: CoroutineScope,
 ) :
     CoroutineScope by scope,
-    AutoCloseable {
+    ShellClient {
     private val processClient = scope.ProcessClient()
 
-    public actual suspend fun start(command: ShellProcessCommand): ProcessSession =
+    actual override suspend fun start(command: ShellProcessCommand): ProcessSession =
         withContext(WindowsProcessIoDispatcher) {
-            this@ShellClient.requireOpen()
-            command.startWindowsProcess(processClient, this@ShellClient)
+            this@PlatformShellClient.requireOpen()
+            command.startWindowsProcess(processClient, this@PlatformShellClient)
         }
 
-    public actual override fun close() {
+    actual override fun close() {
         cancel()
     }
 }

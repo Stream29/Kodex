@@ -50,19 +50,19 @@ import platform.posix.waitpid
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
-public actual class ProcessClient internal actual constructor(
+internal actual class PlatformProcessClient actual constructor(
     scope: CoroutineScope,
 ) :
     CoroutineScope by scope,
-    AutoCloseable {
+    ProcessClient {
 
-    public actual suspend fun start(command: ProcessCommand): ProcessSession =
+    actual override suspend fun start(command: ProcessCommand): ProcessSession =
         withContext(PosixProcessIoDispatcher) {
-            this@ProcessClient.requireOpen()
-            command.startPosixProcess(this@ProcessClient)
+            this@PlatformProcessClient.requireOpen()
+            command.startPosixProcess(this@PlatformProcessClient)
         }
 
-    public actual override fun close() {
+    actual override fun close() {
         cancel()
     }
 }

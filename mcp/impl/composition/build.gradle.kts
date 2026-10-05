@@ -7,8 +7,8 @@ kotlin {
         commonMain.dependencies {
             api(project(":mcp-spec-contract"))
             api(libs.kotlinx.coroutines.core)
-            implementation(project(":mcp-impl-stdio"))
-            implementation(project(":mcp-impl-streamable-http"))
+            implementation(project(":mcp-spec-stdio"))
+            implementation(project(":mcp-spec-streamable-http"))
             implementation(libs.mcp.kotlin.sdk.client)
             implementation(project(":utils-coroutines-spec"))
             implementation(project(":utils-logging-impl"))
@@ -24,6 +24,7 @@ kotlin {
         commonTest.dependencies {
             implementation(project(":openai-spec-json-codec"))
             implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.ktor.client.mock)
         }
         jvmTest.dependencies {
             implementation(libs.ktor.server.cio)

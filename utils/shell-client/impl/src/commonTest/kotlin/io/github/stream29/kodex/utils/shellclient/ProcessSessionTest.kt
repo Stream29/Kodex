@@ -105,7 +105,7 @@ val processSessionTest by testSuite(
             Json.decodeFromString<Shell>("\"unsupported-shell\"")
         }
 
-        val command = ShellProcessCommand(command = "echo test")
+        val command = ShellProcessCommand(command = "echo test", shell = Shell.default)
 
         assertEquals(Path("."), command.workingDirectory)
         assertEquals(Shell.default, command.shell)
@@ -128,7 +128,7 @@ val processSessionTest by testSuite(
 
     test("starts a command through the dynamically resolved default shell") {
         val client = testShellClient()
-        val session = client.start(ShellProcessCommand(command = "echo default-shell"))
+        val session = client.start(ShellProcessCommand(command = "echo default-shell", shell = Shell.default))
         try {
             val result = session.readUntilCompleted()
 

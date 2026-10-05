@@ -10,7 +10,7 @@ kotlin {
             api(project(":utils-kotlinx-io-coroutines-impl"))
             api(libs.kotlinx.coroutines.core)
             implementation(project(":utils-coroutines-spec"))
-            implementation(project(":utils-os-environment-impl"))
+            implementation(project(":utils-os-environment-spec"))
             implementation(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {

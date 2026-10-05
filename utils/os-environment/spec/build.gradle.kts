@@ -1,5 +1,5 @@
 plugins {
-    id("kodex.kmp-shared")
+    id("kodex.kmp-host")
 }
 
 kotlin {

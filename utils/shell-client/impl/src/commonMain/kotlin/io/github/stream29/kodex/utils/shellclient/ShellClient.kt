@@ -5,27 +5,20 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.isActive
 import kotlin.coroutines.CoroutineContext
 
-/**
- * Stateful local shell-process client.
- *
- * A client created by [CoroutineScope.ShellClient] is a child of that scope and
- * owns every [ProcessSession] it starts. Calling [close] cancels all owned
- * sessions and their child process-I/O scopes.
- */
-public expect class ShellClient internal constructor(
+internal expect class PlatformShellClient(
     scope: CoroutineScope,
-) : CoroutineScope, AutoCloseable {
+) : ShellClient {
     override val coroutineContext: CoroutineContext
 
     /** Starts [command] in a session owned by this client. */
-    public suspend fun start(command: ShellProcessCommand): ProcessSession
+    override suspend fun start(command: ShellProcessCommand): ProcessSession
 
     override fun close()
 }
 
 /** Creates an independently cancellable shell client under this scope. */
 public fun CoroutineScope.ShellClient(): ShellClient {
-    return ShellClient(supervisorChildScope())
+    return PlatformShellClient(supervisorChildScope())
 }
 
 internal fun CoroutineScope.requireOpen() {

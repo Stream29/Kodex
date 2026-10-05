@@ -36,7 +36,7 @@ kotlin {
             api(libs.kotlinx.io.core)
             api(libs.kotlinx.serialization.core)
             implementation(project(":utils-coroutines-spec"))
-            implementation(project(":utils-os-environment-impl"))
+            implementation(project(":utils-os-environment-spec"))
         }
         named("processClientMain").dependencies {
             implementation(project(":utils-process-client-impl"))

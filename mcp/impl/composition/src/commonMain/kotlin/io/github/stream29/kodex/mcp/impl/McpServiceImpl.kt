@@ -43,10 +43,10 @@ public class McpServiceImpl internal constructor(
     private val settings: StateFlow<McpSettings>,
     private val configurationStore: McpConfigurationStore?,
     private val tokenRefresher: McpOAuthTokenRefresher?,
+    private val httpClient: HttpClient = scope.McpStreamableHttpClient(),
+    private val processClient: ProcessClient = scope.ProcessClient(),
 ) : McpService, CoroutineScope by scope {
     private val transitionMutex: Mutex = Mutex()
-    private val httpClient: HttpClient = scope.McpStreamableHttpClient()
-    private val processClient: ProcessClient = scope.ProcessClient()
     private var serviceState: McpServiceState = McpServiceState()
 
     override val clients: StateFlow<Map<String, McpClient>>

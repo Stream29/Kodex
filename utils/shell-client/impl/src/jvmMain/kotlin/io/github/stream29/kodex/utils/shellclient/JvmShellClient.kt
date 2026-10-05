@@ -23,31 +23,31 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.io.InputStream
 
-public actual class ShellClient internal actual constructor(
+internal actual class PlatformShellClient actual constructor(
     scope: CoroutineScope,
 ) :
     CoroutineScope by scope,
-    AutoCloseable {
+    ShellClient {
     private val processClient = scope.ProcessClient()
 
-    public actual suspend fun start(command: ShellProcessCommand): ProcessSession =
+    actual override suspend fun start(command: ShellProcessCommand): ProcessSession =
         withContext(Dispatchers.IO) {
-            this@ShellClient.requireOpen()
+            this@PlatformShellClient.requireOpen()
             if (command.command.isBlank()) {
                 throw ProcessException("Process command must not be blank.")
             }
             val invocation = command.shell.invocation(command.command, command.login)
             if (!command.tty) {
-                return@withContext this@ShellClient.startPipeProcess(
+                return@withContext this@PlatformShellClient.startPipeProcess(
                     client = processClient,
                     invocation = invocation,
                     command = command,
                 )
             }
-            JvmProcess(command.startPtyProcess(invocation), this@ShellClient)
+            JvmProcess(command.startPtyProcess(invocation), this@PlatformShellClient)
         }
 
-    public actual override fun close() {
+    actual override fun close() {
         cancel()
     }
 }

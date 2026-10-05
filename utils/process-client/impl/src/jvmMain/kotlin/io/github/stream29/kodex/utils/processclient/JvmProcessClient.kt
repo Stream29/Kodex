@@ -17,15 +17,15 @@ import java.util.concurrent.TimeUnit
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
-public actual class ProcessClient internal actual constructor(
+internal actual class PlatformProcessClient actual constructor(
     scope: CoroutineScope,
 ) :
     CoroutineScope by scope,
-    AutoCloseable {
+    ProcessClient {
 
-    public actual suspend fun start(command: ProcessCommand): ProcessSession =
+    actual override suspend fun start(command: ProcessCommand): ProcessSession =
         withContext(Dispatchers.IO) {
-            this@ProcessClient.requireOpen()
+            this@PlatformProcessClient.requireOpen()
             val process = try {
                 ProcessBuilder(listOf(command.executable) + command.arguments)
                     .redirectErrorStream(false)
@@ -35,10 +35,10 @@ public actual class ProcessClient internal actual constructor(
             } catch (failure: IOException) {
                 throw ProcessException("Failed to start process with ${command.executable}.", failure)
             }
-            JvmProcessSession(process, this@ProcessClient)
+            JvmProcessSession(process, this@PlatformProcessClient)
         }
 
-    public actual override fun close() {
+    actual override fun close() {
         cancel()
     }
 }

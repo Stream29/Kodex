@@ -11,7 +11,7 @@ kotlin {
             api(project(":openai-spec-models"))
             implementation(project(":openai-spec-json-codec"))
             implementation(project(":utils-ktor-client-ext-impl"))
-            implementation(project(":utils-os-environment-impl"))
+            implementation(project(":utils-os-environment-spec"))
             implementation(libs.kotlin.logging)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)

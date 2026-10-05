@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.rpc.server
 
+import io.github.stream29.kodex.utils.shellclient.default
+
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies

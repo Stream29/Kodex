@@ -12,7 +12,7 @@ kotlin {
             api(project(":mcp-spec-contract"))
             api(project(":openai-spec-client"))
             api(project(":openai-spec-model-catalog"))
-            api(project(":utils-shell-client-impl"))
+            api(project(":utils-shell-client-spec"))
             api(libs.kotlinx.coroutines.core)
         }
     }

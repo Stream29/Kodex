@@ -54,21 +54,21 @@ private val isWindowsNode: Boolean
 @JsName("process")
 private external val currentNodeProcess: Process
 
-public actual class ProcessClient internal actual constructor(
+internal actual class PlatformProcessClient actual constructor(
     scope: CoroutineScope,
 ) :
     CoroutineScope by scope,
-    AutoCloseable {
+    ProcessClient {
 
-    public actual suspend fun start(command: ProcessCommand): ProcessSession {
-        this@ProcessClient.requireOpen()
+    actual override suspend fun start(command: ProcessCommand): ProcessSession {
+        this@PlatformProcessClient.requireOpen()
         if (command.executable.isBlank()) {
             throw ProcessException("Process executable must not be blank.")
         }
-        return command.startNodeProcess(this@ProcessClient)
+        return command.startNodeProcess(this@PlatformProcessClient)
     }
 
-    public actual override fun close() {
+    actual override fun close() {
         cancel()
     }
 }

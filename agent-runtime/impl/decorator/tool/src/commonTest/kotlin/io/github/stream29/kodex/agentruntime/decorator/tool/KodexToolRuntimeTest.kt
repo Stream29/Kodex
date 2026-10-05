@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.agentruntime.decorator.tool
 
+import io.github.stream29.kodex.utils.shellclient.default
+
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.oshai.kotlinlogging.KotlinLogging

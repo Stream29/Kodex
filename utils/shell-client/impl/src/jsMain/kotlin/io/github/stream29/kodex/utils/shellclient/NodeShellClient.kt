@@ -76,15 +76,15 @@ private external interface NodePtyDisposable {
     fun dispose()
 }
 
-public actual class ShellClient internal actual constructor(
+internal actual class PlatformShellClient actual constructor(
     scope: CoroutineScope,
 ) :
     CoroutineScope by scope,
-    AutoCloseable {
+    ShellClient {
     private val processClient = scope.ProcessClient()
 
-    public actual suspend fun start(command: ShellProcessCommand): ProcessSession {
-        this@ShellClient.requireOpen()
+    actual override suspend fun start(command: ShellProcessCommand): ProcessSession {
+        this@PlatformShellClient.requireOpen()
         if (command.command.isBlank()) {
             throw ProcessException("Process command must not be blank.")
         }
@@ -96,9 +96,9 @@ public actual class ShellClient internal actual constructor(
                     invocation = invocation,
                     workingDirectory = command.workingDirectory.toString(),
                     environment = environment,
-                ).createSession(this@ShellClient)
+                ).createSession(this@PlatformShellClient)
             } else {
-                this@ShellClient.startPipeProcess(
+                this@PlatformShellClient.startPipeProcess(
                     client = processClient,
                     invocation = invocation,
                     command = command,
@@ -109,7 +109,7 @@ public actual class ShellClient internal actual constructor(
         }
     }
 
-    public actual override fun close() {
+    actual override fun close() {
         cancel()
     }
 }

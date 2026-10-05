@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.cli.settings
 
+import io.github.stream29.kodex.utils.shellclient.default
+
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.hook.contract.HookConfiguration
 import io.github.stream29.kodex.hook.contract.HookSettings
