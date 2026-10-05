@@ -37,7 +37,7 @@ public sealed interface ApplicationPopupState {
     ) : Open
 
     public class DeleteSession(
-        public val viewModel: DeleteSessionPopupViewModel,
+        public val viewModel: SessionDeleteViewModel,
     ) : Open
 
     public class Login(
@@ -61,6 +61,3 @@ public interface RenameSessionPopupViewModel : SessionRenameViewModel {
     /** Exact captured Session, used by the parent to validate child ownership. */
     public val target: SessionViewModel
 }
-
-/** Compatibility name for the independent deletion component. */
-public typealias DeleteSessionPopupViewModel = SessionDeleteViewModel

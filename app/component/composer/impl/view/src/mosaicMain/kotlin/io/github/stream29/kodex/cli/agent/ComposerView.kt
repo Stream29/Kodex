@@ -42,6 +42,8 @@ import kotlinx.coroutines.launch
  * [ComposerState.mode].
  * The Enter handler captures the displayed revision and invokes the component's revision-bound
  * submit command; it does not append messages, steer, clear drafts or inspect a sibling child.
+ * Hosts may render the pending preview and failure themselves; hiding either never hides
+ * the remaining status (including the running draft's submit-to-steer hint).
  */
 @Composable
 public fun ComposerView(
@@ -52,7 +54,8 @@ public fun ComposerView(
     autoFocus: Boolean = true,
     enabled: Boolean = true,
     focusRequester: FocusRequester? = null,
-    showAuxiliary: Boolean = true,
+    showPendingSteer: Boolean = true,
+    showFailure: Boolean = true,
 ) {
     val state by viewModel.state.collectAsState()
     if (state.mode == ComposerMode.Closed || rows <= 0) return
@@ -67,7 +70,7 @@ public fun ComposerView(
     }
 
     val width = columns.coerceAtLeast(1)
-    val previewLines = if (showAuxiliary && state.mode == ComposerMode.Steer) {
+    val previewLines = if (showPendingSteer && state.mode == ComposerMode.Steer) {
         pendingSteerPreviewLines(
             pending = state.pendingSteer,
             columns = width,
@@ -76,7 +79,7 @@ public fun ComposerView(
     } else {
         emptyList()
     }
-    val statusLine = composerStatusLine(state).takeIf { showAuxiliary }
+    val statusLine = composerStatusLine(state, showFailure)
     val auxiliaryRows = previewLines.size + if (statusLine == null) 0 else 1
     val composerAvailableRows = (rows - auxiliaryRows).coerceAtLeast(0)
     val fullLayout = TextInputLayout.create(
@@ -123,8 +126,9 @@ public fun ComposerView(
 }
 
 /** Renderer-local status copy; it is not a second submission/failure authority. */
-internal fun composerStatusLine(state: ComposerState): String? = when {
-    state.mode == ComposerMode.Error -> {
+public fun composerStatusLine(state: ComposerState, showFailure: Boolean = true): String? = when {
+    state.mode == ComposerMode.Closed -> null
+    state.mode == ComposerMode.Error && showFailure -> {
         val failure = (state.submission as? ComposerSubmissionState.Failed)?.failure
         failure?.let { "Unable to submit: ${it.message}" }
     }
@@ -135,7 +139,7 @@ internal fun composerStatusLine(state: ComposerState): String? = when {
     }
 
     state.submission is ComposerSubmissionState.Submitting -> "Submitting…"
-    state.mode == ComposerMode.Running || state.mode == ComposerMode.Steer ->
+    state.running ->
         submitToSteerHint(state.running, state.text)
     else -> null
 }

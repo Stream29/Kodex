@@ -200,7 +200,9 @@ public data class McpSettingsState(
 
 /**
  * Component-local, single-consumer effect. A Settings-lifetime handler (not just the MCP page)
- * opens the URL once. Opening failure invokes cancel EXACTLY on this effect's captured operation;
+ * opens the URL once. The handler is retained with the exact Settings owner across a temporary
+ * Login popup and return; removing a renderer composition alone does not close the operation.
+ * Opening failure invokes cancel EXACTLY on this effect's captured operation;
  * a late failure cannot cancel a newer login, even with the same serverName. URL is ephemeral,
  * never logged, persisted or broadcast globally. Opening is not protocol completion.
  */
@@ -237,8 +239,15 @@ public interface McpSettingsViewModel : AutoCloseable {
      * @throws kotlinx.coroutines.CancellationException Dependency capture was cancelled.
      */
     public fun requestDelete(token: McpDialogToken): Unit
-    /** Clears validation and preserves all inactive transport/OAuth fields. */
-    public fun updateDraft(token: McpDialogToken, draft: McpEditorDraft): Unit
+    /**
+     * Applies [update] synchronously to this token's latest VM-owned draft and clears validation.
+     * A late/noneditor token is ignored without invoking [update]. The pure, non-reentrant
+     * update runs once and must not capture a prior whole draft, perform I/O or call commands.
+     * Update only the intended fields, retaining inactive transport/OAuth fields and other edits.
+     *
+     * @throws Exception when [update] fails; the draft and validation remain unchanged.
+     */
+    public fun updateDraft(token: McpDialogToken, update: (McpEditorDraft) -> McpEditorDraft): Unit
     /** Validate baseline parser/name trimming; invalid/rejected admission retains draft.
      * Accepted hides once, without claiming persistence.
      * @throws kotlinx.coroutines.CancellationException Dependency admission was cancelled.

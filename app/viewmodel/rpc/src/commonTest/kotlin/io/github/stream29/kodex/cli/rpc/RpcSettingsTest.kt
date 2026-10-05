@@ -30,13 +30,78 @@ private fun queueHook(page: RpcGlobalEditor, hook: NotificationHook) {
     val editing = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Editing>(
         child.state.value.dialog,
     )
-    child.updateDraft(editing.token, io.github.stream29.kodex.app.hooksettings.HookEditorDraft(
+    child.updateDraft(editing.token) { io.github.stream29.kodex.app.hooksettings.HookEditorDraft(
         name = hook.name, command = hook.command, types = hook.types,
-    ))
+    ) }
     child.save(editing.token)
 }
 
 val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("real Hook adapter keeps stale and same-name queued writes unchanged after release") {
+        frontend {
+            val store = openCliFrontendSettings(home)
+            val global = RpcGlobalSettings.open(services.global, store, this, 80)
+            val queue = io.github.stream29.kodex.app.settings.SettingsUpdateQueue(
+                this, defaultReportError = global::reportOperationFailure,
+            )
+            val entered = CompletableDeferred<Unit>()
+            val proceed = CompletableDeferred<Unit>()
+            val drained = CompletableDeferred<Unit>()
+            var accepting = true
+            val dependencies = RpcHookSettingsDependencies(
+                global, global.frontend.settings.projectState { it.hooks },
+            ) { action ->
+                if (!accepting) false else {
+                    queue.submit { action(); global.dismissOperationFailure() }
+                    true
+                }
+            }
+            val original = NotificationHook(
+                "same", setOf(NotificationHookType.StopAssistantMessage), "echo original",
+            )
+            val replacement = original.copy(command = "echo replacement")
+            val added = original.copy(name = "admitted", command = "echo admitted")
+            try {
+                global.updateHooks(listOf(original))
+                queue.submit { entered.complete(Unit); proceed.await() }
+                entered.await()
+                val stale = requireNotNull(dependencies.captureEditor(original.name))
+                val conflictingAdd = requireNotNull(dependencies.captureEditor(null))
+                val admittedAdd = requireNotNull(dependencies.captureEditor(null))
+                assertEquals(io.github.stream29.kodex.app.hooksettings.HookWriteAdmission.Accepted,
+                    stale.save(original.copy(command = "echo stale")))
+                assertEquals(io.github.stream29.kodex.app.hooksettings.HookWriteAdmission.Accepted,
+                    conflictingAdd.save(original.copy(command = "echo conflict")))
+                assertEquals(io.github.stream29.kodex.app.hooksettings.HookWriteAdmission.Accepted,
+                    admittedAdd.save(added))
+                assertEquals(io.github.stream29.kodex.app.hooksettings.HookWriteAdmission.Accepted,
+                    dependencies.delete(original))
+                stale.release()
+                conflictingAdd.release()
+                admittedAdd.release()
+                assertIs<io.github.stream29.kodex.app.hooksettings.HookWriteAdmission.Rejected>(
+                    admittedAdd.save(added.copy(command = "echo too late")),
+                )
+                // Mutate the real frontend store before the admitted closures execute.
+                global.updateHooks(listOf(replacement))
+                accepting = false
+                queue.close { drained.complete(Unit) }
+                assertEquals(listOf(replacement), store.settings.value.hooks)
+                global.reportOperationFailure(IllegalStateException("safe test failure"))
+                proceed.complete(Unit)
+                drained.await()
+                assertEquals(listOf(replacement, added), store.settings.value.hooks)
+                assertEquals(listOf(replacement, added), openCliFrontendSettings(home).settings.value.hooks)
+                assertFalse(global.operationFailure.value)
+            } finally {
+                proceed.complete(Unit)
+                queue.close { drained.complete(Unit) }
+                drained.await()
+                global.close()
+                global.join()
+            }
+        }
+    }
     test("field retries merge unrelated changes and do not publish a successful reply") {
         runTest {
             val source = MutableStateFlow("old" to 1)
@@ -295,9 +360,9 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 val editing = assertIs<io.github.stream29.kodex.app.mcpsettings.McpSettingsDialog.Editing>(
                     page.mcpSettings.state.value.dialog,
                 )
-                page.mcpSettings.updateDraft(editing.token, editing.draft.copy(
+                page.mcpSettings.updateDraft(editing.token) { it.copy(
                     name = "after-close", enabled = false, httpUrl = "https://example.invalid/mcp",
-                ))
+                ) }
                 page.mcpSettings.save(editing.token)
                 entered.await()
                 page.close()
@@ -362,9 +427,9 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 val editor = assertIs<io.github.stream29.kodex.app.mcpsettings.McpSettingsDialog.Editing>(
                     child.state.value.dialog,
                 )
-                child.updateDraft(editor.token, editor.draft.copy(
+                child.updateDraft(editor.token) { it.copy(
                     name = "ordered", enabled = false, httpUrl = "https://example.invalid/ordered",
-                ))
+                ) }
                 child.save(editor.token)
                 entered.await()
                 queueHook(page, hook)

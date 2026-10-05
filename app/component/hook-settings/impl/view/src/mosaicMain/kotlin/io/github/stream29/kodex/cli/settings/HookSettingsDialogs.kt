@@ -29,7 +29,7 @@ import io.github.stream29.kodex.rpc.models.NotificationHookType
 @Composable
 internal fun BoxScope.HookEditorDialog(
     editor: HookSettingsDialog.Editing,
-    onDraftChange: (HookEditorDraft) -> Unit,
+    onDraftChange: ((HookEditorDraft) -> HookEditorDraft) -> Unit,
     onDismiss: () -> Unit,
     onSave: () -> Unit,
 ) {
@@ -50,20 +50,20 @@ internal fun BoxScope.HookEditorDialog(
                 color = SettingsForeground,
                 textStyle = TuiTheme.typography.headline,
             )
-            HookInputField("Name", name, width, autoFocus = true) {
-                onDraftChange(draft.copy(name = it))
+            HookInputField("Name", name, width, autoFocus = true) { name ->
+                onDraftChange { it.copy(name = name) }
             }
             Text("Types:", color = SettingsForeground)
             NotificationHookType.entries.forEach { type ->
                 SettingsContentButton(
                     label = "${if (type in draft.types) "[x]" else "[ ]"} ${type.settingsLabel()}",
-                    onClick = { onDraftChange(draft.copy(types =
-                        if (type in draft.types) draft.types - type else draft.types + type,
-                    )) },
+                    onClick = { onDraftChange { current -> current.copy(types =
+                        if (type in current.types) current.types - type else current.types + type,
+                    ) } },
                 )
             }
-            HookInputField("Command", command, width) {
-                onDraftChange(draft.copy(command = it))
+            HookInputField("Command", command, width) { command ->
+                onDraftChange { it.copy(command = command) }
             }
             editor.error?.let { message ->
                 SettingsErrorText(message)

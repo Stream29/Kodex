@@ -51,6 +51,8 @@ val openAiLoginRenderContractTest by testSuite {
                     assertFalse("transient-secret" in snapshot, snapshot)
                     if (case.state == OpenAiLoginState.Completed) {
                         assertFalse("[Cancel]" in snapshot, snapshot)
+                        assertFalse("private credentials" in snapshot, snapshot)
+                        assertFalse("now using" in snapshot, snapshot)
                     }
                     // Assert actual composition removal, not test-harness shutdown timing.
                     visible = false

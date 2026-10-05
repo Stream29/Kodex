@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.settings
 
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
@@ -17,6 +20,48 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.*
 
 val hookSettingsComponentTest by testSuite {
+    test("burst Name and Command renderer callbacks preserve both fields before recomposition") {
+        val deps = HookRenderPorts()
+        withHookVm(deps) { vm ->
+            vm.add()
+            val updates = mutableListOf<Pair<Int, HookEditorDraft>>()
+            val received = CompletableDeferred<Unit>()
+            var compositions = 0
+            val observed = object : HookSettingsViewModel by vm {
+                override fun updateDraft(token: HookDialogToken, update: (HookEditorDraft) -> HookEditorDraft) {
+                    val frame = compositions
+                    vm.updateDraft(token, update)
+                    updates += frame to assertIs<HookSettingsDialog.Editing>(vm.state.value.dialog).draft
+                    if (updates.size == 2) received.complete(Unit)
+                }
+            }
+            runMosaicTest {
+                try {
+                    setContentAndSnapshot {
+                        // Frame witness only; the genuine component still owns renderer callbacks.
+                        val state by vm.state.collectAsState()
+                        assertIs<HookSettingsDialog.Editing>(state.dialog)
+                        SideEffect { compositions++ }
+                        TuiPopupHost(Modifier.width(100).height(30)) { HookSettingsComponent(observed) }
+                    }
+                    val initialComposition = compositions
+                    sendKeyEvent(KeyboardEvent(codepoint = 'N'.code))
+                    repeat(5) { sendKeyEvent(KeyboardEvent(codepoint = 9)) }
+                    sendKeyEvent(KeyboardEvent(codepoint = 'C'.code))
+                    // No awaitSnapshot/frame between these two genuine TextInput callbacks.
+                    // Mosaic drains the entire queued burst before applying this frame.
+                    awaitSnapshot()
+                    withTimeout(1_000) { received.await() }
+                    assertEquals(listOf(initialComposition, initialComposition), updates.map { it.first })
+                    val draft = assertIs<HookSettingsDialog.Editing>(vm.state.value.dialog).draft
+                    assertEquals("N", draft.name)
+                    assertEquals("C", draft.command)
+                } finally {
+                    cancel()
+                }
+            }
+        }
+    }
     test("full renderer consumes VM empty list and application failure acknowledgement") {
         val deps = HookRenderPorts()
         deps.hooks.value = emptyList()
@@ -124,7 +169,7 @@ val hookSettingsComponentTest by testSuite {
             val old = (vm.state.value.dialog as HookSettingsDialog.Editing).token
             vm.add()
             val next = (vm.state.value.dialog as HookSettingsDialog.Editing).token
-            vm.updateDraft(next, HookEditorDraft("replacement", "command"))
+            vm.updateDraft(next) { HookEditorDraft("replacement", "command") }
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {
                     TuiPopupHost(Modifier.width(100).height(30)) { HookSettingsComponent(vm) }

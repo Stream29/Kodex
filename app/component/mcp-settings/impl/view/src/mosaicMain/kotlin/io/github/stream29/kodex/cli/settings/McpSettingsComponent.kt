@@ -105,8 +105,10 @@ public fun BoxScope.McpSettingsDialogs(viewModel: McpSettingsViewModel) {
 /**
  * Exactly one Settings-lifetime consumer. [openUrl] returns true iff platform opening succeeded.
  * False/ordinary exception invokes this effect's exact cancellation callback, never name lookup.
- * Composition cancellation cancels that in-flight effect and rethrows; other login lifecycles
- * remain VM-owned until Settings close. URL data is not logged or retained in renderer state.
+ * Composition cancellation cancels the captured in-flight effect and rethrows.
+ * The host retains this mount across Settings → Login → return, keyed by the exact Settings owner,
+ * so that transition does not cancel the collector. Other login waits remain VM-owned until
+ * Settings close. URL data is not logged or retained in renderer state.
  */
 @Composable
 public fun McpSettingsEffects(

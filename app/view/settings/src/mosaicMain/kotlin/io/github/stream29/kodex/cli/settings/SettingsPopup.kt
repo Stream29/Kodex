@@ -13,8 +13,6 @@ import io.github.stream29.kodex.cli.components.*
 import io.github.stream29.kodex.cli.newsessiondefaults.*
 import io.github.stream29.kodex.cli.sessionsettings.*
 import io.github.stream29.kodex.cli.usagereset.UsageResetDialogHost
-import io.github.stream29.kodex.utils.externalurl.OpenExternalUrlResult
-import io.github.stream29.kodex.utils.externalurl.openExternalUrl
 
 /**
  * Navigation and scroll layout for stable Settings children, with direct popup-host overlays.
@@ -39,9 +37,6 @@ public fun BoxScope.SettingsPopup(
         viewModel.global.effects.collect { effect ->
             when (effect) { GlobalSettingsEffect.OpenLogin -> currentOpenLogin() }
         }
-    }
-    McpSettingsEffects(viewModel.global.mcpSettings) { url ->
-        openExternalUrl(url) !is OpenExternalUrlResult.Failed
     }
     LaunchedEffect(selectedPage) {
         sessionDropdowns.dismissAll()

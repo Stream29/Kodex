@@ -15,6 +15,31 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.*
 
 val hookSettingsViewModelTest by testSuite {
+    test("draft updates use current fields once and a failing update leaves validation intact") {
+        runTest {
+            val vm = createHookSettingsViewModel(HookPorts(), backgroundScope)
+            try {
+                vm.add()
+                val token = vm.editor().token
+                vm.save(token)
+                val invalid = vm.state.value
+                val failure = IllegalArgumentException("injected draft update failure")
+                assertSame(failure, assertFailsWith<IllegalArgumentException> {
+                    vm.updateDraft(token) { throw failure }
+                })
+                assertSame(invalid, vm.state.value)
+                var updates = 0
+                vm.updateDraft(token) { updates++; it.copy(name = "latest") }
+                vm.updateDraft(token) { updates++; it.copy(command = "echo latest") }
+                assertEquals(2, updates)
+                assertEquals("latest", vm.editor().draft.name)
+                assertEquals("echo latest", vm.editor().draft.command)
+                assertNull(vm.editor().error)
+                vm.close()
+                vm.updateDraft(token) { error("Closed owner must not invoke update") }
+            } finally { vm.close() }
+        }
+    }
     test("initial ordered list and empty list require no capture or write") {
         runTest {
             val deps = HookPorts()
@@ -37,7 +62,7 @@ val hookSettingsViewModelTest by testSuite {
             vm.add()
             val editor = vm.editor()
             assertEquals(NotificationHookType.entries.toSet(), editor.draft.types)
-            vm.updateDraft(editor.token, editor.draft.copy(name = "  added  ", command = "  echo notify  "))
+            vm.updateDraft(editor.token) { it.copy(name = "  added  ", command = "  echo notify  ") }
             vm.save(editor.token)
             vm.save(editor.token)
             assertEquals("added", deps.accepted.single().second.name)
@@ -59,11 +84,11 @@ val hookSettingsViewModelTest by testSuite {
             val token = vm.editor().token
             vm.save(token)
             assertEquals("Hook name is required.", vm.editor().error)
-            vm.updateDraft(token, HookEditorDraft(name = "name"))
+            vm.updateDraft(token) { HookEditorDraft(name = "name") }
             assertNull(vm.editor().error)
             vm.save(token)
             assertEquals("Command is required.", vm.editor().error)
-            vm.updateDraft(token, HookEditorDraft("name", "echo", emptySet()))
+            vm.updateDraft(token) { HookEditorDraft("name", "echo", emptySet()) }
             vm.save(token)
             assertNotNull(vm.editor().error)
             assertTrue(vm.editor().draft.types.isEmpty())
@@ -87,7 +112,7 @@ val hookSettingsViewModelTest by testSuite {
             val captured = deps.handles.single().original
             deps.hooks.value = listOf(original.copy(command = "third command"))
             runCurrent()
-            vm.updateDraft(editor.token, editor.draft.copy(name = "renamed"))
+            vm.updateDraft(editor.token) { it.copy(name = "renamed") }
             vm.save(editor.token)
             assertSame(captured, deps.accepted.single().first)
             assertEquals("new command", deps.accepted.single().second.command)
@@ -102,7 +127,7 @@ val hookSettingsViewModelTest by testSuite {
             val vm = createHookSettingsViewModel(deps, backgroundScope)
             vm.add()
             val editor = vm.editor()
-            vm.updateDraft(editor.token, HookEditorDraft("existing", "echo"))
+            vm.updateDraft(editor.token) { HookEditorDraft("existing", "echo") }
             vm.save(editor.token)
             assertSame(editor.token, vm.editor().token)
             assertEquals("The Hook name is no longer available.", vm.editor().error)
@@ -136,7 +161,7 @@ val hookSettingsViewModelTest by testSuite {
             val old = vm.editor()
             vm.add()
             val next = vm.editor()
-            vm.updateDraft(old.token, HookEditorDraft("late", "late"))
+            vm.updateDraft(old.token) { error("A stale callback must not execute its update") }
             vm.save(old.token)
             vm.dismiss(old.token)
             assertSame(next.token, vm.editor().token)
@@ -174,7 +199,7 @@ val hookSettingsViewModelTest by testSuite {
             val vm = createHookSettingsViewModel(deps, backgroundScope)
             vm.add()
             val token = vm.editor().token
-            vm.updateDraft(token, HookEditorDraft("name", "echo"))
+            vm.updateDraft(token) { HookEditorDraft("name", "echo") }
             vm.save(token)
             runCurrent()
             assertEquals(1, deps.failures.size)
@@ -197,7 +222,7 @@ val hookSettingsViewModelTest by testSuite {
             val vm = createHookSettingsViewModel(deps, backgroundScope)
             vm.add()
             val token = vm.editor().token
-            vm.updateDraft(token, HookEditorDraft("name", "echo"))
+            vm.updateDraft(token) { HookEditorDraft("name", "echo") }
             assertSame(cancelled, assertFailsWith<CancellationException> { vm.save(token) })
             assertTrue(deps.failures.isEmpty())
             assertNotNull(vm.editor())
@@ -230,7 +255,7 @@ val hookSettingsViewModelTest by testSuite {
             val vm = createHookSettingsViewModel(deps, backgroundScope)
             vm.add()
             val token = vm.editor().token
-            vm.updateDraft(token, HookEditorDraft("name", "command"))
+            vm.updateDraft(token) { HookEditorDraft("name", "command") }
             deps.onWrite = { vm.close() }
             deps.admission = HookWriteAdmission.Rejected("No longer accepting.")
             vm.save(token)

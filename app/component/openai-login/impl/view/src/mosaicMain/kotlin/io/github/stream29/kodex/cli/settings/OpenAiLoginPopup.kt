@@ -125,7 +125,7 @@ private fun LoginContent(
 
             OpenAiLoginState.Completed -> {
                 Text(
-                    "Sign-in complete. Kodex is now using its private credentials.",
+                    "Sign-in complete",
                     color = LoginDialogForeground,
                 )
                 LoginActions(

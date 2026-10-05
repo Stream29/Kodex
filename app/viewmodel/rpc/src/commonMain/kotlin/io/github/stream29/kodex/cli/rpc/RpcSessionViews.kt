@@ -171,15 +171,15 @@ public class RpcSessionView internal constructor(
                 bindingJob.ensureActive()
                 mutableBinding.value = next
                 if (this@RpcSessionView::composer.isInitialized) composer.close()
-                composer = createRpcComposerViewModel(next, bindingScope)
-                mutablePresentation.value = RpcAgentPresentation(
+                val nextPresentation = RpcAgentPresentation(
                     next,
                     bindingScope,
                     services,
-                    composer,
                     models,
                     onCreated,
                 )
+                composer = nextPresentation.composer
+                mutablePresentation.value = nextPresentation
                 mutableStatus.value = SessionViewStatus.Ready
                 initial.complete(Unit)
                 failure = failed.await()

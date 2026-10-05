@@ -80,10 +80,10 @@ private class DefaultHookSettingsViewModel(
         if (!active || current.token !== token) return
         mutable.value = mutable.value.copy(dialog = HookSettingsDialog.Deleting(HookDialogToken(), current.hook))
     }
-    override fun updateDraft(token: HookDialogToken, draft: HookEditorDraft) {
+    override fun updateDraft(token: HookDialogToken, update: (HookEditorDraft) -> HookEditorDraft) {
         val current = mutable.value.dialog as? HookSettingsDialog.Editing ?: return
         if (active && current.token === token) {
-            mutable.value = mutable.value.copy(dialog = current.copy(draft = draft, error = null))
+            mutable.value = mutable.value.copy(dialog = current.copy(draft = update(current.draft), error = null))
         }
     }
     override fun save(token: HookDialogToken) {

@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.settings
 
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
@@ -18,6 +21,46 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.*
 
 val mcpSettingsComponentTest by testSuite {
+    test("burst Server name and URL renderer callbacks preserve both fields before recomposition") {
+        val deps = McpRenderPorts()
+        withMcpVm(deps) { vm ->
+            vm.add()
+            val updates = mutableListOf<Pair<Int, McpEditorDraft>>()
+            val received = CompletableDeferred<Unit>()
+            var compositions = 0
+            val observed = object : McpSettingsViewModel by vm {
+                override fun updateDraft(token: McpDialogToken, update: (McpEditorDraft) -> McpEditorDraft) {
+                    val frame = compositions
+                    vm.updateDraft(token, update)
+                    updates += frame to assertIs<McpSettingsDialog.Editing>(vm.state.value.dialog).draft
+                    if (updates.size == 2) received.complete(Unit)
+                }
+            }
+            runMosaicTest {
+                try {
+                    setContentAndSnapshot {
+                        val state by vm.state.collectAsState()
+                        assertIs<McpSettingsDialog.Editing>(state.dialog)
+                        SideEffect { compositions++ }
+                        TuiPopupHost(Modifier.width(100).height(36)) { McpSettingsComponent(observed) }
+                    }
+                    val initialComposition = compositions
+                    sendKeyEvent(KeyboardEvent(codepoint = 'N'.code))
+                    repeat(2) { sendKeyEvent(KeyboardEvent(codepoint = 9)) }
+                    sendKeyEvent(KeyboardEvent(codepoint = 'U'.code))
+                    // Mosaic drains the entire queued burst before applying this frame.
+                    awaitSnapshot()
+                    withTimeout(1_000) { received.await() }
+                    assertEquals(listOf(initialComposition, initialComposition), updates.map { it.first })
+                    val draft = assertIs<McpSettingsDialog.Editing>(vm.state.value.dialog).draft
+                    assertEquals("N", draft.name)
+                    assertEquals("U", draft.httpUrl)
+                } finally {
+                    cancel()
+                }
+            }
+        }
+    }
     test("full renderer empty list and failure use actual component state") {
         val deps = McpRenderPorts()
         deps.servers.value = emptyList()
@@ -130,7 +173,7 @@ val mcpSettingsComponentTest by testSuite {
             vm.details("server")
             vm.edit((vm.state.value.dialog as McpSettingsDialog.Details).token)
             val editor = vm.state.value.dialog as McpSettingsDialog.Editing
-            vm.updateDraft(editor.token, editor.draft.copy(oauthRedirect = ""))
+            vm.updateDraft(editor.token) { it.copy(oauthRedirect = "") }
             vm.save(editor.token)
             runMosaicTest {
                 val snapshot = setContentAndSnapshot {

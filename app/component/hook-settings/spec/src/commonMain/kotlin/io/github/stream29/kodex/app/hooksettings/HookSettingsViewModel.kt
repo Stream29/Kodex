@@ -8,8 +8,10 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Result of synchronous admission to the existing application write queue, NOT persistence.
  * [Accepted] means the adapter copied the exact captured baseline and update into that queue.
- * The queue retains those values after editor release, page hiding, component close and owner
- * cancellation; eventual conflicts/unknown failures are reported in the application failure flag.
+ * The queue retains those values after editor release, page hiding, component close and
+ * component-owner cancellation. This is not a persistence receipt: stale baselines and same-name
+ * Add conflicts leave settings unchanged under the existing adapter rules, without a conflict
+ * failure flag. Unexpected queue/write failures use the application failure flag.
  * [Rejected] means nothing was admitted; retain the draft and show [Rejected.message].
  */
 public sealed interface HookWriteAdmission {
@@ -21,7 +23,8 @@ public sealed interface HookWriteAdmission {
 /**
  * Bound capability captured at editor opening. [original] is null for Add, otherwise the EXACT
  * original Hook, not a later same-name value. save preserves replacement position; Add appends.
- * Same-name conflicts/stale originals follow the existing store's rules, never silently rebase.
+ * A stale original or same-name Add leaves settings unchanged, never silently rebases. Accepted
+ * admission does not guarantee that the queued update changes the stored value.
  * release drops unaccepted resources only and is idempotent/nonthrowing.
  */
 public interface HookEditHandle {
@@ -46,7 +49,8 @@ public interface HookSettingsDependencies {
     public fun captureEditor(name: String?): HookEditHandle?
     /**
      * Delete only if the current entry equals [original]; stale targets follow the existing
-     * application queue/store rules. Admission copies the original and survives component close.
+     * application queue/store rules (unchanged settings, not a conflict failure). Admission copies
+     * the original and survives component close.
      * @throws Exception Unexpected admission failure.
      */
     public fun delete(original: NotificationHook): HookWriteAdmission
@@ -125,8 +129,15 @@ public interface HookSettingsViewModel : AutoCloseable {
     public fun edit(token: HookDialogToken): Unit
     /** From exact Details token, capture original for delete confirmation. */
     public fun requestDelete(token: HookDialogToken): Unit
-    /** Update VM draft and clear displayed validation; late/noneditor token is ignored. */
-    public fun updateDraft(token: HookDialogToken, draft: HookEditorDraft): Unit
+    /**
+     * Applies [update] synchronously to this token's latest VM-owned draft and clears validation.
+     * A late/noneditor token is ignored without invoking [update]. The pure, non-reentrant
+     * update is invoked once; it must not capture a prior whole draft, perform I/O or call commands.
+     * Consequently multiple field callbacks before recomposition preserve each other's edits.
+     *
+     * @throws Exception when [update] fails; the draft and validation remain unchanged.
+     */
+    public fun updateDraft(token: HookDialogToken, update: (HookEditorDraft) -> HookEditorDraft): Unit
     /**
      * Trim name only (baseline renderer behavior); preserve command. Validate nonblank name,
      * command and nonempty four-type selection. Invalid/rejected admission retains the draft.

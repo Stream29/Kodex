@@ -86,6 +86,7 @@ import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryDe
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.OpenAiLoginPopup
 import io.github.stream29.kodex.cli.settings.SettingsPopup
+import io.github.stream29.kodex.cli.settings.McpSettingsEffects
 import io.github.stream29.kodex.cli.settings.SidebarContent
 import io.github.stream29.kodex.app.sessiondelete.createSessionDeleteViewModel
 import io.github.stream29.kodex.app.sessiondelete.contract.SessionDeleteDependencies
@@ -93,6 +94,8 @@ import io.github.stream29.kodex.cli.sessiondelete.SessionDeletePopup
 import io.github.stream29.kodex.cli.sessionrename.SessionRenamePopup
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
+import io.github.stream29.kodex.utils.externalurl.OpenExternalUrlResult
+import io.github.stream29.kodex.utils.externalurl.openExternalUrl
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -106,15 +109,28 @@ public fun SessionTreeCliScreen(
     viewModel: ApplicationViewModel,
     newLineKey: StateFlow<NewLineKey>,
     sidebarSettings: SidebarSettingsViewModel,
+    openMcpUrl: suspend (String) -> Boolean = { url ->
+        openExternalUrl(url) !is OpenExternalUrlResult.Failed
+    },
 ) {
     val terminal = LocalTerminalState.current
     val navigation by viewModel.navigation.collectAsState()
     val popup by viewModel.popup.collectAsState()
+    // Login changes the visible popup, not the retained Settings operation owner.
+    val settingsPopupOwner = when (val open = popup) {
+        is ApplicationPopupState.Settings -> open
+        is ApplicationPopupState.Login -> open.returnTo
+        else -> null
+    }
+    if (settingsPopupOwner != null) key(settingsPopupOwner) {
+        McpSettingsEffects(settingsPopupOwner.viewModel.global.mcpSettings, openMcpUrl)
+    }
     val currentNewLineKey by newLineKey.collectAsState()
     val sidebarConfiguration by sidebarSettings.state.collectAsState()
     val tabStates = collectSessionTabRenderStates(navigation.tabs, navigation.selectedIndex)
     val tabIdentityCounter = remember { mutableStateOf(0) }
     val tabIdentities = remember { mutableMapOf<SessionViewModel, SessionTabIdentity>() }
+    pruneSessionTabIdentities(tabIdentities, navigation.tabs)
     val componentTabEntries = tabStates.map { tab ->
         val identity = tabIdentities.getOrPut(tab.target) {
             tabIdentityCounter.value += 1
@@ -1013,6 +1029,14 @@ public fun SessionTreeCliScreen(
             }
         }
     }
+}
+
+/** Renderer-local retention only; departed handles never keep a tab identity alive. */
+internal fun pruneSessionTabIdentities(
+    identities: MutableMap<SessionViewModel, SessionTabIdentity>,
+    openTabs: List<SessionViewModel>,
+) {
+    identities.keys.retainAll(openTabs.toSet())
 }
 
 private data class SidebarShellSessionMenuRequest(

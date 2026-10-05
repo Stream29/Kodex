@@ -14,6 +14,31 @@ import kotlinx.io.files.Path
 import kotlin.test.*
 
 val mcpSettingsViewModelTest by testSuite {
+    test("draft updates use current fields once and a failing update leaves validation intact") {
+        runTest {
+            val vm = createMcpSettingsViewModel(McpPorts(), backgroundScope)
+            try {
+                vm.add()
+                val token = vm.editor().token
+                vm.save(token)
+                val invalid = vm.state.value
+                val failure = IllegalArgumentException("injected draft update failure")
+                assertSame(failure, assertFailsWith<IllegalArgumentException> {
+                    vm.updateDraft(token) { throw failure }
+                })
+                assertSame(invalid, vm.state.value)
+                var updates = 0
+                vm.updateDraft(token) { updates++; it.copy(name = "latest") }
+                vm.updateDraft(token) { updates++; it.copy(httpUrl = "https://latest.invalid/mcp") }
+                assertEquals(2, updates)
+                assertEquals("latest", vm.editor().draft.name)
+                assertEquals("https://latest.invalid/mcp", vm.editor().draft.httpUrl)
+                assertNull(vm.editor().error)
+                vm.close()
+                vm.updateDraft(token) { error("Closed owner must not invoke update") }
+            } finally { vm.close() }
+        }
+    }
     test("construction observes sanitized rows without implicit Codex read or commands") {
         runTest {
             val deps = McpPorts()
@@ -36,10 +61,10 @@ val mcpSettingsViewModelTest by testSuite {
             val token = vm.editor().token
             vm.save(token)
             assertEquals("Server name is required.", vm.editor().error)
-            vm.updateDraft(token, vm.editor().draft.copy(name = "  added  "))
+            vm.updateDraft(token) { it.copy(name = "  added  ") }
             vm.save(token)
             assertEquals("A URL or command is required.", vm.editor().error)
-            vm.updateDraft(token, vm.editor().draft.copy(httpUrl = "  https://new.example/mcp  "))
+            vm.updateDraft(token) { it.copy(httpUrl = "  https://new.example/mcp  ") }
             assertNull(vm.editor().error)
             vm.save(token)
             vm.save(token)
@@ -74,7 +99,7 @@ val mcpSettingsViewModelTest by testSuite {
             deps.baseline = "newer baseline"
             deps.servers.value = listOf(deps.servers.value.single().copy(streamableHttpUrl = "https://latest/mcp"))
             runCurrent()
-            vm.updateDraft(editor.token, editor.draft.copy(name = "renamed"))
+            vm.updateDraft(editor.token) { it.copy(name = "renamed") }
             vm.save(editor.token)
             assertEquals(captured, deps.saved.single().first)
             val saved = deps.saved.single().second as McpServerDraft.StreamableHttp
@@ -92,7 +117,7 @@ val mcpSettingsViewModelTest by testSuite {
             val vm = createMcpSettingsViewModel(deps, backgroundScope)
             vm.add()
             val editor = vm.editor()
-            vm.updateDraft(editor.token, editor.draft.copy(name = "existing", httpUrl = "https://a/mcp"))
+            vm.updateDraft(editor.token) { it.copy(name = "existing", httpUrl = "https://a/mcp") }
             vm.save(editor.token)
             assertSame(editor.token, vm.editor().token)
             assertEquals("existing", vm.editor().draft.name)
@@ -171,7 +196,7 @@ val mcpSettingsViewModelTest by testSuite {
             val old = vm.editor()
             vm.add()
             val next = vm.editor()
-            vm.updateDraft(old.token, McpEditorDraft(name = "late", httpUrl = "https://late/mcp"))
+            vm.updateDraft(old.token) { error("A stale callback must not execute its update") }
             vm.save(old.token)
             vm.dismiss(old.token)
             assertSame(next.token, vm.editor().token)
@@ -374,7 +399,7 @@ val mcpSettingsViewModelTest by testSuite {
             val vm = createMcpSettingsViewModel(deps, backgroundScope)
             vm.add()
             val token = vm.editor().token
-            vm.updateDraft(token, McpEditorDraft(name = "valid", httpUrl = "https://valid/mcp"))
+            vm.updateDraft(token) { McpEditorDraft(name = "valid", httpUrl = "https://valid/mcp") }
             deps.onWrite = { vm.close() }
             deps.admission = McpWriteAdmission.Rejected("No longer accepting.")
             vm.save(token)
@@ -389,7 +414,7 @@ val mcpSettingsViewModelTest by testSuite {
             val vm = createMcpSettingsViewModel(deps, backgroundScope)
             vm.add()
             val token = vm.editor().token
-            vm.updateDraft(token, McpEditorDraft(name = "valid", httpUrl = "https://valid/mcp"))
+            vm.updateDraft(token) { McpEditorDraft(name = "valid", httpUrl = "https://valid/mcp") }
             deps.writeFailure = IllegalStateException("private configuration")
             vm.save(token)
             runCurrent()

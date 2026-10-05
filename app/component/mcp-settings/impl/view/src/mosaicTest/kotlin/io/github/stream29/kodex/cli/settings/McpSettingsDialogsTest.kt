@@ -29,7 +29,7 @@ val mcpSettingsDialogsTest by testSuite {
                 TuiPopupHost(modifier = Modifier.width(100).height(30)) {
                     McpServerEditorDialog(
                         editor = editor,
-                        onDraftChange = { editor = editor.copy(draft = it) },
+                        onDraftChange = { update -> editor = editor.copy(draft = update(editor.draft)) },
                         onDismiss = {},
                         onSave = {},
                     )

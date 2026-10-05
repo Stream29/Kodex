@@ -19,19 +19,23 @@ import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.client.update
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.launch
 
-/** Creates the Composer child bound to one exact RPC Session binding. */
+/**
+ * Creates the Composer child bound to one exact RPC Session binding.
+ * Command callbacks must belong to that binding's presentation owner: resume/cancel admit
+ * work through its caught command boundary, and failures use its existing Agent failure sink.
+ * No callback may resolve the currently selected Session or silently discard a failure.
+ */
 public fun createRpcComposerViewModel(
     binding: RpcSessionBinding,
     ownerScope: CoroutineScope,
+    resumePort: ComposerResumePort,
+    cancellationPort: ComposerCancellationPort,
+    failureReporter: ComposerFailureReporter,
 ): ComposerViewModel {
     val presentation = combine(binding.state, binding.settings) { state, settings ->
         val pending = (state as? AgentStateValue.ToolPending)
@@ -64,19 +68,14 @@ public fun createRpcComposerViewModel(
                 binding.pendingSteer.update { it + StableUserMessage(content) }
             }
 
-            override val cancellation = ComposerCancellationPort {
-                ownerScope.launch { binding.stop() }
-            }
-
-            override val resume = ComposerResumePort {
-                ownerScope.launch { binding.resume() }
-            }
+            override val cancellation = cancellationPort
+            override val resume = resumePort
 
             override val requestInput = object : ComposerRequestInputPort {
                 override val presentation: StateFlow<ComposerRequestInputPresentation> = presentation
             }
 
-            override val failures = ComposerFailureReporter { _, _ -> }
+            override val failures = failureReporter
         },
         ownerScope = ownerScope,
     )

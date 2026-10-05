@@ -5,7 +5,6 @@ import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationDro
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
 import com.jakewharton.mosaic.focus.FocusRequester
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
@@ -26,6 +25,7 @@ import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
 import io.github.stream29.kodex.cli.agent.RequestUserInputPanel
 import io.github.stream29.kodex.cli.agent.ComposerView
+import io.github.stream29.kodex.cli.agent.composerStatusLine
 import io.github.stream29.kodex.cli.agent.canEditHistory
 import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskPanel
 import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns
@@ -37,7 +37,6 @@ import io.github.stream29.kodex.cli.history.AgentHistoryView
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
-import kotlinx.coroutines.launch
 
 @Composable
 internal fun AgentRuntimeScreen(
@@ -67,6 +66,7 @@ internal fun AgentRuntimeScreen(
     val settings by viewModel.settings.collectAsState()
     val tokenCount by viewModel.tokenCount.collectAsState()
     val composerState by viewModel.composer.state.collectAsState()
+    val notification by viewModel.notification.collectAsState()
     val activeTurnDuration by viewModel.history.activeTurnDuration.collectAsState()
     val composerText = composerState.text
     val fullComposerLayout = TextInputLayout.create(
@@ -79,11 +79,15 @@ internal fun AgentRuntimeScreen(
         continuationLinePrefix = "  ",
         softWrap = true,
     )
-    val submitHint = submitToSteerHint(running, composerText)
+    val composerStatus = composerStatusLine(composerState, showFailure = false)
+    val failureLine = notification?.let {
+        listOfNotNull(it.message, it.detail).joinToString(" ").ellipsizeToTerminalWidth(columns)
+    }
     val pendingRequest = requestUserInput as? RequestUserInputState.Pending
     val pendingSuggestion = suggestSubagentTask as? SuggestSubagentTaskState.Pending
     val hostInteractionPending = pendingRequest != null || pendingSuggestion != null
-    val submitHintRows = if (submitHint == null) 0 else 1
+    val composerStatusRows = if (composerStatus == null) 0 else 1
+    val failureRows = if (failureLine == null) 0 else 1
     val statusBarRows = agentRuntimeStatusBarRows(
         columns = columns,
         state = state,
@@ -92,7 +96,7 @@ internal fun AgentRuntimeScreen(
         tokenCount = tokenCount,
     )
     val flexibleRows =
-        (rows - HistoryComposerSeparatorRows - statusBarRows - submitHintRows).coerceAtLeast(0)
+        (rows - HistoryComposerSeparatorRows - statusBarRows - composerStatusRows - failureRows).coerceAtLeast(0)
     val minimumComposerRows = minOf(1, flexibleRows)
     val requestUserInputRows = if (!hostInteractionPending) {
         0
@@ -116,9 +120,7 @@ internal fun AgentRuntimeScreen(
         availableRows = composerAndHistoryRows,
         desiredRows = fullComposerLayout.rowCount,
     )
-    val composerLayout = fullComposerLayout.withViewportRows(composerRows)
     val historyRows = (composerAndHistoryRows - composerRows).coerceAtLeast(0)
-    val scope = rememberCoroutineScope()
 
     Column(modifier = Modifier.width(columns).height(rows)) {
         Box(modifier = Modifier.width(columns).height(historyRows)) {
@@ -173,15 +175,19 @@ internal fun AgentRuntimeScreen(
             showScrollToLatest = !viewModel.history.followsLatest,
             onScrollToLatest = viewModel.history::requestScrollToLatest,
         )
+        // The same Agent notification covers append/steer and caught asynchronous resume errors.
+        // Composer keeps its failure state, but this host renders that failure only here.
+        failureLine?.let { Text(it, textStyle = TextStyle.Dim) }
         ComposerView(
             viewModel = viewModel.composer,
             columns = columns,
-            rows = composerRows,
+            rows = composerRows + composerStatusRows,
             newLineKey = newLineKey,
             autoFocus = !hostInteractionPending,
             enabled = !hostInteractionPending,
             focusRequester = composerFocusRequester,
-            showAuxiliary = false,
+            showPendingSteer = false,
+            showFailure = false,
         )
         AgentRuntimeStatusBar(
             columns = columns,

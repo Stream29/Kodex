@@ -156,9 +156,9 @@ val settingsViewModelTest by testSuite {
                 val child = editor.hookSettings
                 child.add()
                 val adding = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Editing>(child.state.value.dialog)
-                child.updateDraft(adding.token, io.github.stream29.kodex.app.hooksettings.HookEditorDraft(
+                child.updateDraft(adding.token) { io.github.stream29.kodex.app.hooksettings.HookEditorDraft(
                     hook.name, hook.command, hook.types,
-                ))
+                ) }
                 child.save(adding.token)
                 child.state.first { it.hooks == listOf(hook) }
                 child.details("notify")
@@ -170,7 +170,7 @@ val settingsViewModelTest by testSuite {
                 child.edit(reopened.token)
                 val editing = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Editing>(child.state.value.dialog)
                 assertEquals(hook.command, editing.draft.command)
-                child.updateDraft(editing.token, editing.draft.copy(command = "echo changed"))
+                child.updateDraft(editing.token) { it.copy(command = "echo changed") }
                 child.save(editing.token)
                 child.state.first { it.hooks.single().command == "echo changed" }
                 child.confirmDelete(staleDelete.token)

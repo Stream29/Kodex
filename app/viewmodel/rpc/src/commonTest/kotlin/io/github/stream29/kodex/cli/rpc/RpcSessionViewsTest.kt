@@ -4,6 +4,8 @@ import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionResult
+import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionState
+import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
@@ -15,6 +17,7 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
+import io.github.stream29.kodex.app.sessioncatalog.DefaultSessionCatalogViewModel
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
@@ -50,7 +53,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val draft = RpcSessionDraft(settings, views)
             draft.composer.update("draft")
             draft.edit { it.copy(instructions = "local") }
-            val catalog = RpcSessionCatalog(this, services.global)
+            val catalog = DefaultSessionCatalogViewModel(this, RpcSessionCatalogDependencies(services.global))
             try {
                 assertEquals(SessionCatalogState.Unloaded, catalog.state.value)
                 assertTrue(services.global.getSessionCatalog(true).isEmpty())
@@ -242,7 +245,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
     test("catalog dates use the snapshot while mutations are backend commands") {
         frontend {
             val index = services.global.createSession(settings)
-            val catalog = RpcSessionCatalog(this, services.global)
+            val catalog = DefaultSessionCatalogViewModel(this, RpcSessionCatalogDependencies(services.global))
             try {
                 catalog.refresh()
                 val entry = catalog.state.value.sessions.single()
@@ -286,6 +289,152 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 child.updateModelConfiguration(OpenAiModelId("late"), ReasoningEffort.Low, ServiceTier.Default)
                 assertEquals(OpenAiModelId("edited"), view.current().settings.value.model)
                 assertEquals(settings.model, other.current().settings.value.model)
+            } finally { agent.close() }
+        }
+    }
+
+    test("bound Composer stale and closed submissions never issue an RPC command") {
+        var appends = 0
+        var resumes = 0
+        frontend(decorate = { delegate ->
+            object : RpcClient by delegate {
+                override suspend fun <T> call(call: RpcCall): T {
+                    if (call.callableName == "appendUserMessage") appends++
+                    if (call.callableName == "resume") resumes++
+                    return delegate.call(call)
+                }
+            }
+        }) {
+            val view = views.open(services.global.createSession(settings))
+            val composer = view.composer
+            val original = composer.update("original")
+            val current = composer.update("current")
+            assertEquals(ComposerSubmissionResult.Stale, composer.submit(original))
+            assertEquals("current", composer.state.value.text)
+            assertEquals(current, composer.state.value.revision)
+            views.release(view)
+            assertEquals(ComposerLifecycle.Closed, composer.state.value.lifecycle)
+            assertEquals(ComposerSubmissionResult.Unavailable, composer.submit(current))
+            assertEquals(SessionViewStatus.Closed, view.status.value)
+            assertEquals(0, appends)
+            assertEquals(0, resumes)
+        }
+    }
+
+    test("cancelled caller of bound Composer append restores editing without Stop or Agent failure") {
+        val entered = CompletableDeferred<Unit>()
+        val cancelled = CompletableDeferred<Unit>()
+        var appends = 0
+        var resumes = 0
+        var stops = 0
+        frontend(decorate = { delegate ->
+            object : RpcClient by delegate {
+                override suspend fun <T> call(call: RpcCall): T {
+                    when (call.callableName) {
+                        "appendUserMessage" -> {
+                            appends++
+                            entered.complete(Unit)
+                            try { awaitCancellation() } finally { cancelled.complete(Unit) }
+                        }
+                        "resume" -> resumes++
+                        "cancelRunningTurn" -> stops++
+                    }
+                    return delegate.call(call)
+                }
+            }
+        }) {
+            val view = views.open(services.global.createSession(settings))
+            val binding = view.current()
+            val presentation = requireNotNull(view.presentation.value)
+            val revision = view.composer.update("  retained cancellation draft  ", 4)
+            val waiting = async { view.composer.submit(revision) }
+            entered.await()
+            waiting.cancelAndJoin()
+            cancelled.await()
+            assertFailsWith<CancellationException> { waiting.await() }
+            assertEquals("  retained cancellation draft  ", view.composer.state.value.text)
+            assertEquals(4, view.composer.state.value.cursorOffset)
+            assertEquals(revision, view.composer.state.value.revision)
+            assertIs<ComposerSubmissionState.Editing>(view.composer.state.value.submission)
+            assertNull(presentation.failure.value)
+            assertEquals(SessionViewStatus.Ready, view.status.value)
+            assertSame(binding, view.current())
+            assertEquals(1, appends)
+            assertEquals(0, resumes)
+            assertEquals(0, stops)
+        }
+    }
+
+    test("bound Composer lost append reply reports once without rollback retry or draft loss") {
+        var appends = 0
+        var resumes = 0
+        frontend(decorate = { delegate ->
+            object : RpcClient by delegate {
+                override suspend fun <T> call(call: RpcCall): T {
+                    if (call.callableName == "resume") resumes++
+                    val result = delegate.call<T>(call)
+                    if (call.callableName == "appendUserMessage") {
+                        appends++
+                        error("accepted append reply lost")
+                    }
+                    return result
+                }
+            }
+        }) {
+            val view = views.open(services.global.createSession(settings))
+            val presentation = requireNotNull(view.presentation.value)
+            val agent = createRpcAgentViewModel(presentation, MutableStateFlow(services.global.getModels()), this)
+            try {
+                val revision = agent.composer.update("  persisted but retained  ", 6)
+                assertEquals(
+                    ComposerSubmissionResult.Failed("accepted append reply lost"),
+                    agent.composer.submit(revision),
+                )
+                val notification = agent.notification.filterNotNull().first()
+                assertEquals(1L, notification.id)
+                assertEquals("Session operation failed.", notification.message)
+                assertEquals("accepted append reply lost", notification.detail)
+                assertEquals("  persisted but retained  ", agent.composer.state.value.text)
+                assertEquals(6, agent.composer.state.value.cursorOffset)
+                assertEquals(revision + 1, agent.composer.state.value.revision)
+                assertEquals(AgentStateValue.UserMessage, services.runtime.getState(view.index))
+                assertEquals(SessionViewStatus.Ready, view.status.value)
+                assertEquals(1, appends)
+                assertEquals(0, resumes)
+            } finally { agent.close() }
+        }
+    }
+
+    test("root Stop and Composer cancel share the existing caught ordinary-failure boundary") {
+        val stopFailure = IllegalStateException("ordinary stop failure")
+        var stops = 0
+        frontend(decorate = { delegate ->
+            object : RpcClient by delegate {
+                override suspend fun <T> call(call: RpcCall): T {
+                    if (call.callableName == "cancelRunningTurn") { stops++; throw stopFailure }
+                    return delegate.call(call)
+                }
+            }
+        }) {
+            val view = views.open(services.global.createSession(settings))
+            val binding = view.current()
+            val presentation = requireNotNull(view.presentation.value)
+            val agent = createRpcAgentViewModel(presentation, MutableStateFlow(services.global.getModels()), this)
+            try {
+                agent.cancel() // Actual root Stop command, not the Composer cancel port.
+                val first = agent.notification.filterNotNull().first()
+                assertEquals("ordinary stop failure", first.detail)
+                assertSame(stopFailure, presentation.failure.value)
+                assertEquals(SessionViewStatus.Ready, view.status.value)
+                assertSame(binding, view.current())
+                agent.dismissNotification(first.id)
+                yield() // Let the existing collector observe dismissal before reusing this Throwable.
+                // The newly bound Composer callback also uses operate, not an uncaught launch.
+                agent.composer.cancel()
+                agent.notification.filterNotNull().first { it.id > first.id }
+                assertEquals(2, stops)
+                assertEquals(SessionViewStatus.Ready, view.status.value)
+                assertSame(binding, view.current())
             } finally { agent.close() }
         }
     }

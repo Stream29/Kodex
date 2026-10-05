@@ -12,6 +12,7 @@ kotlin {
             implementation(project(":utils-coroutines-spec"))
         }
         commonTest.dependencies {
+            implementation(project(":app-component-session-catalog-impl-viewmodel"))
             implementation(project(":app-test-support-rpc"))
             implementation(project(":agent-storage-spec-contract-ext"))
             implementation(project(":agent-session-impl-filesystem"))

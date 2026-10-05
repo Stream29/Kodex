@@ -97,10 +97,10 @@ private class DefaultMcpSettingsViewModel(
         deletion = handle
         mutable.value = mutable.value.copy(dialog = McpSettingsDialog.Deleting(McpDialogToken(), server))
     }
-    override fun updateDraft(token: McpDialogToken, draft: McpEditorDraft) {
+    override fun updateDraft(token: McpDialogToken, update: (McpEditorDraft) -> McpEditorDraft) {
         val current = mutable.value.dialog as? McpSettingsDialog.Editing ?: return
         if (active && current.token === token) {
-            mutable.value = mutable.value.copy(dialog = current.copy(draft = draft, error = null))
+            mutable.value = mutable.value.copy(dialog = current.copy(draft = update(current.draft), error = null))
         }
     }
     override fun save(token: McpDialogToken) {

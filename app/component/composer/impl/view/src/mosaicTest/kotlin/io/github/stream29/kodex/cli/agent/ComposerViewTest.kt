@@ -154,6 +154,30 @@ val composerViewTest by testSuite {
         }
     }
 
+    test("host-owned preview and failure suppression never hides remaining Composer status") {
+        val model = RenderComposerModel(ComposerState(
+            ownerId = ComposerOwnerId("agent-a"),
+            text = "retained steer",
+            running = true,
+            pendingSteer = listOf(StableUserMessage(listOf(ContentItem.InputText("queued")))),
+            submission = ComposerSubmissionState.Failed(ComposerFailure(ComposerOperation.Steer, "steer failed")),
+        ))
+        runMosaicTest {
+            val standaloneFailure = setContentAndSnapshot {
+                ComposerView(model, 48, 4, NewLineKey.ShiftEnter, showPendingSteer = false)
+            }
+            assertTrue("Unable to submit: steer failed" in standaloneFailure, standaloneFailure)
+            assertFalse("Pending steer (" in standaloneFailure, standaloneFailure)
+            val hostOwnedFailure = setContentAndSnapshot {
+                ComposerView(model, 48, 4, NewLineKey.ShiftEnter, showPendingSteer = false, showFailure = false)
+            }
+            assertTrue("Submit to steer" in hostOwnedFailure, hostOwnedFailure)
+            assertTrue("retained steer" in hostOwnedFailure, hostOwnedFailure)
+            assertFalse("Unable to submit:" in hostOwnedFailure, hostOwnedFailure)
+            assertFalse("Pending steer (" in hostOwnedFailure, hostOwnedFailure)
+        }
+    }
+
     test("newline and submit capture exact component revisions") {
         val model = RenderComposerModel(
             ComposerState(

@@ -18,6 +18,8 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
         mosaicMain.dependencies {
+            implementation(project(":app-component-mcp-settings-impl-view"))
+            implementation(project(":utils-external-url-impl"))
             implementation(project(":app-component-composer-impl-view"))
             implementation(project(":app-component-new-session-impl-view"))
             implementation(project(":app-component-session-tab-bar-impl-view"))
@@ -56,6 +58,11 @@ kotlin {
         }
         mosaicTest.dependencies {
             implementation(libs.mosaic.testing)
+            implementation(project(":app-migration-impl"))
+            implementation(project(":rpc-impl-server"))
+            implementation(project(":rpc-impl-in-memory"))
+            implementation(project(":app-viewmodel-application"))
+            implementation(project(":app-component-mcp-settings-impl-viewmodel"))
         }
     }
 }

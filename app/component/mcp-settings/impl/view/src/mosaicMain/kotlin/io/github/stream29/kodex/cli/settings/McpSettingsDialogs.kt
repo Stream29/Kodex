@@ -39,7 +39,7 @@ import io.github.stream29.kodex.mcp.contract.McpTransportKind
 @Composable
 internal fun BoxScope.McpServerEditorDialog(
     editor: McpSettingsDialog.Editing,
-    onDraftChange: (McpEditorDraft) -> Unit,
+    onDraftChange: ((McpEditorDraft) -> McpEditorDraft) -> Unit,
     onDismiss: () -> Unit,
     onSave: () -> Unit,
 ) {
@@ -60,8 +60,8 @@ internal fun BoxScope.McpServerEditorDialog(
                 color = SettingsForeground,
                 textStyle = TuiTheme.typography.headline,
             )
-            McpInputField("Server name", editor.token, draft.name, width, autoFocus = true) {
-                onDraftChange(draft.copy(name = it))
+            McpInputField("Server name", editor.token, draft.name, width, autoFocus = true) { name ->
+                onDraftChange { it.copy(name = name) }
             }
             SettingsDropdownField(
                 label = "Transport",
@@ -73,62 +73,64 @@ internal fun BoxScope.McpServerEditorDialog(
                 editor.token,
                 if (transport == McpTransportKind.StreamableHttp) draft.httpUrl else draft.command,
                 width,
-            ) {
-                onDraftChange(if (transport == McpTransportKind.StreamableHttp) draft.copy(httpUrl = it)
-                    else draft.copy(command = it))
+            ) { value ->
+                onDraftChange { current ->
+                    if (transport == McpTransportKind.StreamableHttp) current.copy(httpUrl = value)
+                    else current.copy(command = value)
+                }
             }
             if (transport == McpTransportKind.Stdio) {
-                McpInputField("Arguments (space separated)", editor.token, draft.arguments, width) {
-                    onDraftChange(draft.copy(arguments = it))
+                McpInputField("Arguments (space separated)", editor.token, draft.arguments, width) { value ->
+                    onDraftChange { it.copy(arguments = value) }
                 }
-                McpInputField("Working directory", editor.token, draft.workingDirectory, width) {
-                    onDraftChange(draft.copy(workingDirectory = it))
+                McpInputField("Working directory", editor.token, draft.workingDirectory, width) { value ->
+                    onDraftChange { it.copy(workingDirectory = value) }
                 }
                 McpInputField(
                     "Environment (KEY=value; use <keep> for stored values)",
                     editor.token, draft.environment,
                     width,
-                ) { onDraftChange(draft.copy(environment = it)) }
+                ) { value -> onDraftChange { it.copy(environment = value) } }
             } else {
                 McpInputField(
                     "Headers (KEY=value; use <keep> for stored values)",
                     editor.token, draft.headers,
                     width,
-                ) { onDraftChange(draft.copy(headers = it)) }
+                ) { value -> onDraftChange { it.copy(headers = value) } }
                 SettingsCheckboxItem(
                     label = "OAuth",
                     checked = draft.oauthEnabled,
-                    onCheckedChange = { enabled -> onDraftChange(draft.copy(oauthEnabled = enabled)) },
+                    onCheckedChange = { enabled -> onDraftChange { it.copy(oauthEnabled = enabled) } },
                 )
                 if (draft.oauthEnabled) {
                     McpInputField(
                         "OAuth client id (blank for dynamic registration)",
                         editor.token, draft.oauthClientId,
                         width,
-                    ) { onDraftChange(draft.copy(oauthClientId = it)) }
+                    ) { value -> onDraftChange { it.copy(oauthClientId = value) } }
                     McpInputField(
                         "OAuth client secret (blank for none; <keep> retains)",
                         editor.token, draft.oauthClientSecret,
                         width,
-                    ) { onDraftChange(draft.copy(oauthClientSecret = it)) }
-                    McpInputField("OAuth redirect URI", editor.token, draft.oauthRedirect, width) {
-                        onDraftChange(draft.copy(oauthRedirect = it))
+                    ) { value -> onDraftChange { it.copy(oauthClientSecret = value) } }
+                    McpInputField("OAuth redirect URI", editor.token, draft.oauthRedirect, width) { value ->
+                        onDraftChange { it.copy(oauthRedirect = value) }
                     }
                     McpInputField(
                         "Authorization endpoint (blank for discovery)",
                         editor.token, draft.oauthAuthorizationEndpoint,
                         width,
-                    ) { onDraftChange(draft.copy(oauthAuthorizationEndpoint = it)) }
+                    ) { value -> onDraftChange { it.copy(oauthAuthorizationEndpoint = value) } }
                     McpInputField(
                         "Token endpoint (blank for discovery)",
                         editor.token, draft.oauthTokenEndpoint,
                         width,
-                    ) { onDraftChange(draft.copy(oauthTokenEndpoint = it)) }
-                    McpInputField("Resource (optional)", editor.token, draft.oauthResource, width) {
-                        onDraftChange(draft.copy(oauthResource = it))
+                    ) { value -> onDraftChange { it.copy(oauthTokenEndpoint = value) } }
+                    McpInputField("Resource (optional)", editor.token, draft.oauthResource, width) { value ->
+                        onDraftChange { it.copy(oauthResource = value) }
                     }
-                    McpInputField("Scopes (comma separated)", editor.token, draft.oauthScopes, width) {
-                        onDraftChange(draft.copy(oauthScopes = it))
+                    McpInputField("Scopes (comma separated)", editor.token, draft.oauthScopes, width) { value ->
+                        onDraftChange { it.copy(oauthScopes = value) }
                     }
                 }
             }
@@ -151,7 +153,7 @@ internal fun BoxScope.McpServerEditorDialog(
         selected = transport,
         optionLabel = McpTransportKind::editorLabel,
         backgroundColor = PopupMenuBackground,
-        onSelect = { selected -> onDraftChange(draft.copy(transport = selected)) },
+        onSelect = { selected -> onDraftChange { it.copy(transport = selected) } },
     )
 }
 

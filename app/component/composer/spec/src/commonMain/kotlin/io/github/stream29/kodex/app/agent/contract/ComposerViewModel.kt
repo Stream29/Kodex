@@ -220,6 +220,8 @@ public fun interface ComposerSteerPort {
  *
  * Calling [ComposerViewModel.cancel] is distinct from cancelling the caller waiting for submit;
  * caller cancellation is propagated and never translated into this command.
+ * A host may admit asynchronous cancellation in its fixed owner scope; in that case ordinary
+ * completion failures use that owner's existing failure outlet, not an uncaught child failure.
  *
  * @throws CancellationException when the owner cancellation is cancelled.
  * @throws Exception when the exact owner reports a cancellation failure.
@@ -233,9 +235,13 @@ public fun interface ComposerCancellationPort {
  *
  * It receives the captured owner identity even if the child was closed or replaced while the
  * accepted operation completed; it never resolves a different current owner.
+ * A host may admit asynchronous resume in its fixed owner scope. Normal admission does not
+ * promise execution success: ordinary completion failures use that owner's existing failure
+ * outlet, while cancellation propagates within the command and invalidation still belongs to
+ * the binding. The caller's subsequent cancellation must not cancel admitted owner work.
  *
  * @throws CancellationException when the exact owner rejects the cancellation context.
- * @throws Exception when resuming the exact owner fails.
+ * @throws Exception when synchronous admission or resuming the exact owner fails.
  */
 public fun interface ComposerResumePort {
     public fun resume(ownerId: ComposerOwnerId): Unit

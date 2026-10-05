@@ -6,6 +6,9 @@ import io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
+import io.github.stream29.kodex.app.agent.contract.ComposerResumePort
+import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
+import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexViewModel
 import io.github.stream29.kodex.app.agent.contract.HistoryIndexDependencies
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputViewModel
@@ -44,7 +47,6 @@ public class RpcAgentPresentation internal constructor(
     public val binding: RpcSessionBinding,
     scope: CoroutineScope,
     private val services: RpcServices,
-    public val composer: ComposerViewModel,
     private val models: StateFlow<List<ModelInfo>>,
     private val onCreated: (List<CreatedSuggestedSession>) -> Unit,
 ) : AutoCloseable {
@@ -52,6 +54,16 @@ public class RpcAgentPresentation internal constructor(
     private val local = CoroutineScope(scope.coroutineContext + owner)
     private val mutableFailure = MutableStateFlow<Throwable?>(null)
     public val failure: StateFlow<Throwable?> = mutableFailure.asStateFlow()
+    public val composer: ComposerViewModel = createRpcComposerViewModel(
+        binding = binding,
+        ownerScope = local,
+        resumePort = ComposerResumePort { resume() },
+        cancellationPort = ComposerCancellationPort { stop() },
+        failureReporter = ComposerFailureReporter { _, failure ->
+            // Composer retains its typed summary; the existing Agent notification is the host outlet.
+            if (owner.isActive) mutableFailure.value = IllegalStateException(failure.message)
+        },
+    )
     private val mutableHistoryAction = MutableStateFlow<AgentHistoryActionState>(AgentHistoryActionState.None)
     public val historyAction: StateFlow<AgentHistoryActionState> = mutableHistoryAction.asStateFlow()
     private var nextHistoryRequest = 1L
