@@ -7,11 +7,11 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-runtime-spec-contract"))
             api(project(":agent-session-spec-contract"))
-            api(project(":agent-state-contract"))
+            api(project(":agent-state-spec-contract"))
             implementation(project(":agent-runtime-impl-decorator-compact"))
             implementation(project(":agent-runtime-impl-decorator-steer"))
             implementation(project(":agent-runtime-impl-decorator-tool"))
-            implementation(project(":agent-state-tool"))
+            implementation(project(":agent-state-impl-state"))
             implementation(project(":agent-storage-spec-contract"))
             implementation(project(":mcp-spec-contract"))
             implementation(project(":openai-spec-client"))

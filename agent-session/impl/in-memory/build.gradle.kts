@@ -8,7 +8,7 @@ kotlin {
             api(project(":agent-session-spec-contract"))
             api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-runtime-impl-composition"))
-            implementation(project(":agent-state-impl"))
+            implementation(project(":agent-state-impl-state"))
             implementation(project(":agent-storage-impl-in-memory"))
             implementation(project(":utils-coroutines-spec"))
         }

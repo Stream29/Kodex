@@ -5,7 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation(project(":agent-state-contract"))
+            implementation(project(":agent-state-spec-contract"))
             implementation(project(":agent-storage-spec-contract"))
             implementation(project(":app-contract-agent"))
             implementation(project(":app-component-history-spec"))

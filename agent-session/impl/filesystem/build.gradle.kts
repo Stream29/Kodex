@@ -9,7 +9,7 @@ kotlin {
             api(project(":utils-kotlinx-io-coroutines-impl"))
             api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-runtime-impl-composition"))
-            implementation(project(":agent-state-impl"))
+            implementation(project(":agent-state-impl-state"))
             implementation(project(":agent-storage-impl-filesystem"))
             implementation(project(":utils-coroutines-spec"))
             implementation(project(":utils-filesystem-lease-impl"))

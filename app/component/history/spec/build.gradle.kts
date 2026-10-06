@@ -8,7 +8,7 @@ kotlin {
             api(project(":app-contract-lazy-list"))
             api(project(":agent-storage-spec-clean-models"))
             api(project(":agent-storage-spec-contract"))
-            api(project(":agent-state-contract"))
+            api(project(":agent-state-spec-contract"))
             api(libs.kotlinx.coroutines.core)
         }
     }

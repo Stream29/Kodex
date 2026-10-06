@@ -6,7 +6,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(libs.kotlin.logging)
-            implementation(project(":agent-state-contract"))
+            implementation(project(":agent-state-spec-contract"))
             implementation(project(":agent-storage-spec-contract"))
             implementation(project(":app-component-history-spec"))
             implementation(libs.kotlinx.coroutines.core)

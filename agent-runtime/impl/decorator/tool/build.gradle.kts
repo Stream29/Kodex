@@ -14,8 +14,7 @@ kotlin {
             implementation(project(":utils-logging-impl"))
         }
         commonTest.dependencies {
-            implementation(project(":agent-state-impl"))
-            implementation(project(":agent-state-tool"))
+            implementation(project(":agent-state-impl-state"))
             implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-impl-in-memory"))
             implementation(project(":mcp-spec-contract"))

@@ -27,7 +27,7 @@ kotlin {
             api(project(":rpc-impl-client"))
             api(project(":app-component-history-impl-viewmodel"))
             api(project(":app-contract-agent"))
-            api(project(":agent-state-contract"))
+            api(project(":agent-state-spec-contract"))
             implementation(project(":app-viewmodel-agent"))
             api(project(":app-viewmodel-settings"))
             api(project(":app-settings-spec-persistence"))

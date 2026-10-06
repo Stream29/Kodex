@@ -21,7 +21,7 @@ kotlin {
             api(project(":utils-kotlinx-io-coroutines-impl"))
             implementation(project(":utils-logging-impl"))
             implementation(project(":utils-shell-client-impl"))
-            implementation(project(":agent-state-contract"))
+            implementation(project(":agent-state-spec-contract"))
             api(project(":rpc-spec-contract"))
             implementation(project(":agent-storage-spec-contract-ext"))
             implementation(project(":agent-session-impl-filesystem"))
