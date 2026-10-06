@@ -5,8 +5,8 @@ plugins {
 // Test fixtures only. No production module may depend on this module.
 kotlin {
     sourceSets.commonMain.dependencies {
-        api(project(":app-viewmodel-rpc"))
-        api(project(":app-viewmodel-session"))
+        api(project(":app-impl-rpc"))
+        api(project(":app-impl-session"))
         api(project(":app-component-new-session-impl-viewmodel"))
         api(project(":openai-impl-client-test"))
         implementation(project(":rpc-impl-server"))

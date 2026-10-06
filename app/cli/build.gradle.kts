@@ -11,8 +11,8 @@ kotlin {
         }
         mosaicMain.dependencies {
             implementation(project(":app-migration-impl"))
-            implementation(project(":app-view-application"))
-            implementation(project(":app-viewmodel-application"))
+            implementation(project(":app-impl-view"))
+            implementation(project(":app-impl-application"))
             implementation(project(":utils-kodex-home-impl"))
             implementation(project(":utils-logging-impl"))
             implementation(project(":utils-os-environment-spec"))

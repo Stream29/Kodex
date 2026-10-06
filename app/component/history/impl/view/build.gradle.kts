@@ -5,7 +5,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":app-contract-agent"))
+            api(project(":app-component-agent-spec"))
             api(project(":app-component-history-spec"))
         }
         commonTest.dependencies {

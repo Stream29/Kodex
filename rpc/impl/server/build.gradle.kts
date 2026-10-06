@@ -43,7 +43,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(project(":rpc-impl-in-memory"))
             implementation(project(":rpc-impl-client"))
-            implementation(project(":app-viewmodel-rpc"))
+            implementation(project(":app-impl-rpc"))
         }
     }
 }
