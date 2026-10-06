@@ -10,8 +10,7 @@ import io.github.stream29.kodex.openai.CompactionTrigger
  *
  * It delegates atomic state operations to the same underlying AgentState.
  * It does not execute pending tools; a pending tool event ends [resume] at the
- * observable state boundary for an outer layer to handle. Compaction Hooks
- * are optional for both explicit and automatic compaction.
+ * observable state boundary for an outer layer to handle.
  */
 public interface KodexAgentCompactionRuntime : ResumableAgentLayer {
     /**
@@ -30,9 +29,9 @@ public interface KodexAgentCompactionRuntime : ResumableAgentLayer {
     public override suspend fun resume()
 
     /**
-     * Runs the underlying state compaction with optional PreCompact and
-     * PostCompact Hooks. When Hooks are present, PreCompact runs before the
-     * state operation and PostCompact only after it succeeds.
+     * Directly delegates to underlying state compaction, preserving the supplied
+     * trigger, reason, phase, committed index and propagated failure or cancellation.
+     * No notification command participates in this operation.
      */
     public override suspend fun compact(
         trigger: CompactionTrigger,

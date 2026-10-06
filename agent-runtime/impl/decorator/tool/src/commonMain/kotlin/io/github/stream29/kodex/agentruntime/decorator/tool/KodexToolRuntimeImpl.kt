@@ -13,10 +13,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEve
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolSearchEvent
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
-import io.github.stream29.kodex.hook.contract.tool.PreToolUseResult
-import io.github.stream29.kodex.hook.contract.tool.ToolHooks
-import io.github.stream29.kodex.hook.toolutils.runPostToolUse
-import io.github.stream29.kodex.hook.toolutils.runPreToolUse
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.ToolName
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchEngine
@@ -32,7 +28,6 @@ public class KodexToolRuntimeImpl internal constructor(
     fixedTools: List<Tool>,
     private val dynamicTools: StateFlow<List<Tool>>,
     private val toolSearch: StateFlow<ToolSearchEngine>,
-    private val toolHooks: ToolHooks,
     private val logger: KLogger,
 ) : KodexToolRuntime, KodexAgentState by delegate {
     private val fixedToolsByName: Map<ToolName, Tool> = ToolRouting.index(fixedTools)
@@ -93,7 +88,7 @@ public class KodexToolRuntimeImpl internal constructor(
                     } else {
                         val toolLogger = logger.tool(toolName.toString(), pendingEvent.callId)
                         toolLogger.runToolCall {
-                            handleToolCall(tool, pendingEvent, toolLogger)
+                            handleToolCall(tool, pendingEvent)
                         }
                     }
                     handledEvent = true
@@ -106,22 +101,8 @@ public class KodexToolRuntimeImpl internal constructor(
     private suspend fun handleToolCall(
         tool: Tool,
         pending: PendingToolEvent,
-        logger: KLogger,
     ) {
-        when (val result = toolHooks.runPreToolUse(delegate.storage, pending)) {
-            is PreToolUseResult.Block -> {
-                logger.warn { "Tool call blocked by PreToolUse hook." }
-                completeToolCall(pending.failedEvent(result.reason))
-                return
-            }
-
-            PreToolUseResult.Continue -> Unit
-        }
         val completed = tool.handle(pending)
-        toolHooks.runPostToolUse(
-            storage = delegate.storage,
-            completed = completed,
-        )
         // State-bound tools may atomically persist their own specialized output.
         val remainsPending = (state.value as? KodexAgentStateValue.ToolPending)
             ?.events
@@ -172,7 +153,6 @@ public fun ResumableAgentLayer.toolRuntime(
     fixedTools: List<Tool>,
     dynamicTools: StateFlow<List<Tool>>,
     toolSearch: StateFlow<ToolSearchEngine>,
-    toolHooks: ToolHooks,
     logger: KLogger,
 ): KodexToolRuntime =
     KodexToolRuntimeImpl(
@@ -180,7 +160,6 @@ public fun ResumableAgentLayer.toolRuntime(
         fixedTools = fixedTools,
         dynamicTools = dynamicTools,
         toolSearch = toolSearch,
-        toolHooks = toolHooks,
         logger = logger,
     )
 

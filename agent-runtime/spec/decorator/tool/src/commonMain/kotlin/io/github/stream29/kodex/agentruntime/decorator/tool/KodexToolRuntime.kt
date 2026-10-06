@@ -18,19 +18,17 @@ public interface KodexToolRuntime : ResumableAgentLayer {
      * Handles an existing pending-tool boundary before delegating to the inner
      * layer. Otherwise delegates first and handles any tool calls it leaves
      * pending. Invalid invocations are persisted as invalid completions, and
-     * client tool-search calls use the current search engine; neither runs
-     * ordinary PreToolUse or PostToolUse Hooks.
+     * client tool-search calls use the current search engine.
      *
-     * For a routed local tool, PreToolUse may block the call and persist a
-     * failed completion without invoking the handler. Otherwise the handler
-     * runs before PostToolUse; its clean completion is persisted only if the
+     * A routed local tool invokes its handler directly, without a script control
+     * route. Its clean completion is persisted only if the
      * call is still pending, since state-bound tools may have completed it
      * atomically themselves. A missing `mcp__` route is completed as a failure;
      * an unowned non-MCP route remains pending.
      *
      * When handling advances state out of ToolPending, the inner layer resumes.
      * If calls remain unhandled, this call returns at the observable state
-     * boundary. Uncaught handler and Hook failures propagate rather than
+     * boundary. Uncaught handler failures propagate rather than
      * becoming completions.
      *
      * @throws IllegalArgumentException if the sampled dynamic catalog has

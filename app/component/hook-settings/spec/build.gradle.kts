@@ -3,7 +3,7 @@ plugins { id("kodex.kmp-cli") }
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":rpc-spec-models"))
+            api(project(":hook-spec-notification"))
             api(libs.kotlinx.coroutines.core)
         }
     }

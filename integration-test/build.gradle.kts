@@ -23,8 +23,6 @@ kotlin {
             implementation(project(":agent-storage-spec-contract"))
             implementation(project(":agent-storage-spec-contract-ext"))
             implementation(project(":agent-storage-impl-in-memory"))
-            implementation(project(":hook-spec-hooks"))
-            implementation(project(":hook-impl-hooks"))
             implementation(project(":mcp-spec-contract"))
             implementation(project(":openai-impl-client"))
             implementation(project(":openai-spec-client"))
@@ -49,7 +47,7 @@ kotlin {
             implementation(libs.mosaic.runtime)
         }
         jvmTest.dependencies {
-            implementation(project(":app-shared-auth-filesystem"))
+            implementation(project(":rpc-impl-server"))
             implementation(project(":app-view-patch"))
             implementation(project(":mcp-impl-composition"))
             implementation(project(":utils-patch-spec"))

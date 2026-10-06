@@ -8,7 +8,6 @@ import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResu
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentruntime.decorator.steer.steerRuntime
 import io.github.stream29.kodex.agentruntime.decorator.tool.toolRuntime
-import io.github.stream29.kodex.agentruntime.decorator.turnhook.turnHookRuntime
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -79,7 +78,6 @@ private fun KodexAgentState.masterRuntimeLayer(
             delegate = compactionRuntime(
                 modelCatalog = dependencies.modelCatalog,
                 logger = logger,
-                compactionHooks = dependencies.hooks,
             )
                 .steerRuntime(logger = logger) {
                     pendingSteer.getAndUpdate { emptyList() }
@@ -88,11 +86,6 @@ private fun KodexAgentState.masterRuntimeLayer(
                     fixedTools = fixedTools.tools,
                     dynamicTools = mcpTools,
                     toolSearch = toolSearch,
-                    toolHooks = dependencies.hooks,
-                    logger = logger,
-                )
-                .turnHookRuntime(
-                    hooks = dependencies.hooks,
                     logger = logger,
                 )
                 .also {

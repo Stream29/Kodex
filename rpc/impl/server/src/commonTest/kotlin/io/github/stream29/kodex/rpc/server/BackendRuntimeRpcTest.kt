@@ -269,6 +269,28 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
             assertEquals(1, calls)
         }
     }
+    test("closing the backend Session owner cancels its pending title request") {
+        val entered = CompletableDeferred<Unit>()
+        val stopped = CompletableDeferred<Unit>()
+        val job = CompletableDeferred<Job>()
+        runtimeFixture(generator = SessionTitleGenerator { _, _, _ ->
+            job.complete(currentCoroutineContext().job)
+            entered.complete(Unit)
+            try {
+                awaitCancellation()
+            } finally {
+                stopped.complete(Unit)
+            }
+        }, settings = SessionTitleSettings()) { host, index, rpc ->
+            assertEquals(1, rpc.appendUserMessage(index, listOf(ContentItem.InputText("Pending title"))))
+            entered.await()
+            assertTrue(host.deleteSession(index))
+            stopped.await()
+            job.await().join()
+            assertTrue(job.await().isCancelled)
+            assertFailsWith<SessionNotActive> { rpc.getLatestIndex(index) }
+        }
+    }
 
     test("automatic title keeps unrelated setting updates and failed titles do not fail append") {
         val entered = CompletableDeferred<Unit>()

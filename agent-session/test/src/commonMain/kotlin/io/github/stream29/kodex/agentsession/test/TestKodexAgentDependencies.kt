@@ -3,7 +3,6 @@ package io.github.stream29.kodex.agentsession.test
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentstate.test.TestAgentContextSettings
 import io.github.stream29.kodex.agentstate.test.TestMcpService
-import io.github.stream29.kodex.hook.contract.NoOpKodexHooks
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
@@ -28,7 +27,6 @@ public fun testKodexAgentDependencies(
         contextSettings = TestAgentContextSettings,
         shellSettings = TestAgentContextSettings,
         mcpService = TestMcpService(),
-        hooks = NoOpKodexHooks,
     )
 }
 

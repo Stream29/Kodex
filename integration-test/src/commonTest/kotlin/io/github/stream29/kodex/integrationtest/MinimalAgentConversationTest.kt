@@ -30,7 +30,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessag
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
-import io.github.stream29.kodex.hook.contract.NoOpKodexHooks
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.FunctionCallOutputBody
@@ -207,7 +206,6 @@ internal fun KodexAgentStateContract.integrationResumableAgent(
             contextSettings = TestAgentContextSettings,
             shellSettings = MutableStateFlow(IntegrationShellSettings),
             mcpService = mcpService,
-            hooks = NoOpKodexHooks,
         ),
     )
 

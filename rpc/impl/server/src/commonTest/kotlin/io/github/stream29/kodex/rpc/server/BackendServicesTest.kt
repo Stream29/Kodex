@@ -6,6 +6,8 @@ import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationStat
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
+import io.github.stream29.kodex.cli.sessiontitle.OpenAiSessionTitleGenerator
+import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
@@ -133,7 +135,8 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
     }
 }
 
-private suspend fun withServices(
+internal suspend fun withServices(
+    titleGenerator: SessionTitleGenerator? = null,
     block: suspend CoroutineScope.(BackendServices, ServicesTestLogin) -> Unit,
 ) = withTimeout(30.seconds) {
     val root = Path(SystemTemporaryDirectory, "kodex-rpc-services-${Random.nextLong()}")
@@ -164,8 +167,9 @@ private suspend fun withServices(
     try {
         withBackendServices(
             home = root, codexHome = Path(root, "codex"), agentsHome = Path(root, "agents"),
-            defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
+            defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(titleGenerator != null)),
             createLoginClient = { login }, createClient = { client },
+            createTitleGenerator = { titleGenerator ?: OpenAiSessionTitleGenerator(it) },
         ) { services ->
             services.global.getModelsFlow().first { models -> models.any { it.slug == OpenAiModelId("test-model") } }
             block(services, login)
@@ -182,7 +186,7 @@ private suspend fun withServices(
     }
 }
 
-private class ServicesTestLogin : OpenAiLoginClient {
+internal class ServicesTestLogin : OpenAiLoginClient {
     var exchanges = 0
     var closed = false
     override fun authorizationUrl(request: OpenAiLoginAuthorization): String =

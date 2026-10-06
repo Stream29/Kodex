@@ -7,7 +7,6 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-runtime-spec-decorator-compact"))
             api(project(":agent-runtime-spec-contract"))
-            api(project(":hook-spec-hooks"))
             api(project(":openai-spec-model-catalog"))
             api(libs.kotlin.logging)
             api(libs.kotlinx.coroutines.core)

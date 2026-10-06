@@ -26,7 +26,7 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
             val hooks = popup.viewModel.global.hookSettings
             hooks.add()
             val editor = hooks.state.value.dialog as HookSettingsDialog.Editing
-            hooks.updateDraft(editor.token, HookEditorDraft(hook.name, hook.command, hook.types))
+            hooks.updateDraft(editor.token) { HookEditorDraft(hook.name, hook.command, hook.types) }
             hooks.save(editor.token)
             hooks.state.first { it.hooks == listOf(hook) }
             app.viewModel.dismissPopup(popup) // The single application consumer outlives the editor.

@@ -10,7 +10,6 @@ import io.github.stream29.kodex.cli.auth.BackendFileSystemAuthStore
 import io.github.stream29.kodex.cli.sessiontitle.OpenAiSessionTitleGenerator
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.cli.settings.*
-import io.github.stream29.kodex.hook.contract.NoOpKodexHooks
 import io.github.stream29.kodex.mcp.impl.DefaultMcpOAuthClient
 import io.github.stream29.kodex.openai.client.OpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiLoginClient
@@ -65,7 +64,7 @@ public suspend fun <R> withBackendServices(
             try {
                 val dependencies = KodexAgentDependencies(
                     api, global.modelCatalog, global.contextSettings, global.contextSettings,
-                    global.mcpService, NoOpKodexHooks,
+                    global.mcpService,
                 )
                 withBackendSessionHost({
                     FileSystemKodexSessionRepository(home, dependencies)

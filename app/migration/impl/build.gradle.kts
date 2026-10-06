@@ -32,7 +32,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
-            implementation(project(":app-shared-settings-filesystem"))
+            implementation(project(":app-settings-impl-filesystem"))
         }
     }
 }

@@ -19,7 +19,6 @@ kotlin {
             api(project(":app-component-working-directory-spec"))
             api(project(":app-component-path-picker-spec"))
             api(project(":app-contract-session"))
-            api(project(":app-shared-settings-contract"))
             api(project(":rpc-spec-models"))
             api(project(":mcp-spec-contract"))
             api(project(":openai-spec-account-usage"))

@@ -20,7 +20,6 @@ kotlin {
             implementation(project(":app-component-history-impl-viewmodel"))
             implementation(project(":agent-session-impl-in-memory"))
             implementation(project(":agent-session-test"))
-            implementation(project(":app-shared-session-title"))
             implementation(project(":openai-impl-client-test"))
             implementation(libs.kotlinx.coroutines.test)
         }

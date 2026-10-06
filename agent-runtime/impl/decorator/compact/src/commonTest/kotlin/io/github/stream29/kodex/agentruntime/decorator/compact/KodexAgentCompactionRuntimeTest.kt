@@ -18,8 +18,6 @@ import io.github.stream29.kodex.agentstorage.contract.MutableKodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
 import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
-import io.github.stream29.kodex.hook.contract.compaction.CompactionHookRequest
-import io.github.stream29.kodex.hook.contract.compaction.CompactionHooks
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
@@ -281,15 +279,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         val responseRequests = mutableListOf<ResponsesApiRequest>()
         val compaction = ResponseItem.Compaction(encryptedContent = "pre-turn-compact")
         val final = assistantMessage("After compaction.")
-        val hookRequests = mutableListOf<CompactionHookRequest>()
-        val hooks = RecordingCompactionHooks(
-            pre = { request ->
-                hookRequests += request
-            },
-            post = { request ->
-                hookRequests += request
-            },
-        )
         val state = KodexAgentState(
             client = mockOpenAiClient {
                 createRemoteCompactionV2Response { request ->
@@ -314,7 +303,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
-            compactionHooks = hooks,
         )
         val user = userMessage("Keep this context.")
 
@@ -338,17 +326,16 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         )
         assertEquals(StableAssistantMessage(final.content), storage.index[5])
         assertEquals(initialWindowNumber + 1, storage.settings[storage.latestIndex()].windowNumber)
-        assertEquals(listOf(persistedTurnId, persistedTurnId), hookRequests.map { it.context.turnId })
         assertEquals(persistedTurnId, storage.settings[storage.latestIndex()].turnId)
     }
 
-    test("manual compaction runs observation hooks around the commit") {
-        val hookRequests = mutableListOf<CompactionHookRequest>()
-        val observedIndexes = mutableListOf<Int>()
+    test("manual compaction directly commits once and preserves metadata and turn identity") {
+        val compactRequests = mutableListOf<RecordedRemoteCompactionV2Request>()
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
         val state = KodexAgentState(
             client = mockOpenAiClient {
-                createRemoteCompactionV2Response { _ ->
+                createRemoteCompactionV2Response { request ->
+                    compactRequests += RecordedRemoteCompactionV2Request(request)
                     RemoteCompactionV2Response(
                         compactionOutput = ResponseItem.Compaction(encryptedContent = "committed"),
                         completedResponse = null,
@@ -363,16 +350,6 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
-            compactionHooks = RecordingCompactionHooks(
-                pre = { request ->
-                    hookRequests += request
-                    observedIndexes += storage.latestIndex()
-                },
-                post = { request ->
-                    hookRequests += request
-                    observedIndexes += storage.latestIndex()
-                },
-            ),
         )
         state.appendUserMessage(userMessage("Compact this."))
         val persistedTurnId = storage.settings[storage.latestIndex()].turnId
@@ -384,13 +361,15 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         )
 
         assertEquals(compactedIndex, storage.latestIndex())
-        assertEquals(listOf(1, compactedIndex), observedIndexes)
+        assertEquals(1, compactRequests.size)
+        assertTrue(compactRequests.single().turnMetadata.contains("\"trigger\":\"manual\""))
+        assertTrue(compactRequests.single().turnMetadata.contains("\"reason\":\"user_requested\""))
+        assertTrue(compactRequests.single().turnMetadata.contains("\"phase\":\"standalone_turn\""))
         assertEquals(persistedTurnId, storage.settings[compactedIndex].turnId)
         assertEquals(
             StableContextCompaction(encryptedContent = "committed"),
             storage.work[compactedIndex],
         )
-        assertEquals(listOf(persistedTurnId, persistedTurnId), hookRequests.map { it.context.turnId })
     }
 
     test("resume does not compact again after manual compaction resets the token count") {
@@ -576,15 +555,6 @@ private val TestLogger = KotlinLogging.logger {}
 private class DelegatingRuntime(
     private val delegate: ResumableAgentLayer,
 ) : ResumableAgentLayer by delegate
-
-private class RecordingCompactionHooks(
-    private val pre: suspend (CompactionHookRequest) -> Unit = {},
-    private val post: suspend (CompactionHookRequest) -> Unit = {},
-) : CompactionHooks {
-    override suspend fun onPreCompact(request: CompactionHookRequest): Unit = pre(request)
-
-    override suspend fun onPostCompact(request: CompactionHookRequest): Unit = post(request)
-}
 
 private fun userMessage(text: String): ResponseItem.Message =
     ResponseItem.Message(

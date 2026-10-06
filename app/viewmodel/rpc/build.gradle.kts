@@ -15,7 +15,7 @@ kotlin {
             implementation(project(":app-component-authentication-settings-impl-viewmodel"))
             implementation(project(":app-component-account-usage-impl-viewmodel"))
             implementation(project(":app-component-usage-reset-impl-viewmodel"))
-            implementation(project(":app-shared-session-title"))
+            implementation(project(":app-component-session-title-settings-spec"))
             implementation(project(":utils-os-environment-spec"))
             implementation(project(":app-component-request-user-input-impl-viewmodel"))
             implementation(project(":app-component-suggest-subagent-task-impl-viewmodel"))
@@ -30,12 +30,13 @@ kotlin {
             api(project(":agent-state-contract"))
             implementation(project(":app-viewmodel-agent"))
             api(project(":app-viewmodel-settings"))
-            api(project(":app-shared-settings-filesystem"))
+            api(project(":app-settings-spec-persistence"))
             implementation(libs.kotlin.logging)
             implementation(libs.ktor.server.cio)
             implementation(libs.ktor.server.core)
         }
         commonTest.dependencies {
+            implementation(project(":app-settings-impl-filesystem"))
             implementation(project(":app-component-session-settings-impl-viewmodel"))
             implementation(project(":rpc-impl-server"))
             implementation(project(":rpc-impl-in-memory"))

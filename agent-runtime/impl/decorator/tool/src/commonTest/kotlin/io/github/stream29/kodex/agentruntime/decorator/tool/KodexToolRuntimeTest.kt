@@ -6,7 +6,6 @@ import io.github.stream29.kodex.utils.shellclient.default
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
-import io.github.stream29.kodex.agentruntime.decorator.turnhook.turnHookRuntime
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.RequestFinish
@@ -21,18 +20,14 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEve
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePlanUpdate
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.latestValue
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
-import io.github.stream29.kodex.hook.contract.tool.HookToolInvocation
-import io.github.stream29.kodex.hook.contract.tool.NoOpToolHooks
-import io.github.stream29.kodex.hook.contract.turn.NoOpTurnHooks
-import io.github.stream29.kodex.hook.contract.tool.PostToolUseRequest
-import io.github.stream29.kodex.hook.contract.tool.PreToolUseResult
-import io.github.stream29.kodex.hook.contract.tool.ToolHooks
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpTool
 import io.github.stream29.kodex.openai.KodexAgentSettings
@@ -116,7 +111,7 @@ val kodexToolRuntimeTest by testSuite {
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Use a tool.")))
         val runtime = RequestOnlyRuntime(state)
-            .testToolRuntime(mcpService, NoOpToolHooks)
+            .testToolRuntime(mcpService)
 
         runtime.resume()
 
@@ -174,7 +169,7 @@ val kodexToolRuntimeTest by testSuite {
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Find and use the dynamic tool.")))
         val runtime = RequestOnlyRuntime(state)
-            .testToolRuntime(mcpService, NoOpToolHooks)
+            .testToolRuntime(mcpService)
 
         runtime.resume()
 
@@ -222,7 +217,7 @@ val kodexToolRuntimeTest by testSuite {
             mcpService = mcpService,
         )
         val runtime = RequestOnlyRuntime(state)
-            .testToolRuntime(mcpService, NoOpToolHooks)
+            .testToolRuntime(mcpService)
 
         state.appendUserMessage(listOf(ContentItem.InputText("Use alpha.")))
         runtime.resume()
@@ -273,7 +268,7 @@ val kodexToolRuntimeTest by testSuite {
         state.requestResponseApi()
 
         RequestOnlyRuntime(state)
-            .testToolRuntime(mcpService, NoOpToolHooks)
+            .testToolRuntime(mcpService)
             .resume()
 
         assertEquals(2, requestCount)
@@ -323,7 +318,7 @@ val kodexToolRuntimeTest by testSuite {
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Ask the host.")))
         val runtime = RequestOnlyRuntime(state)
-            .testToolRuntime(mcpService, NoOpToolHooks)
+            .testToolRuntime(mcpService)
 
         runtime.resume()
 
@@ -370,7 +365,7 @@ val kodexToolRuntimeTest by testSuite {
         state.appendUserMessage(listOf(ContentItem.InputText("Use MCP.")))
 
         RequestOnlyRuntime(state)
-            .testToolRuntime(mcpService, NoOpToolHooks)
+            .testToolRuntime(mcpService)
             .resume()
 
         val history = storage.stableHistoryItems()
@@ -378,20 +373,8 @@ val kodexToolRuntimeTest by testSuite {
         assertEquals(true, output.output.isError)
     }
 
-    test("tool hooks preserve handler input and observe successful output") {
-        val hookInvocations = mutableListOf<HookToolInvocation>()
-        val postRequests = mutableListOf<PostToolUseRequest>()
+    test("direct tool execution preserves handler input and successful output") {
         val handledCalls = mutableListOf<PendingMcpToolEvent>()
-        val hooks = object : ToolHooks {
-            override suspend fun onPreToolUse(invocation: HookToolInvocation): PreToolUseResult {
-                hookInvocations += invocation
-                return PreToolUseResult.Continue
-            }
-
-            override suspend fun onPostToolUse(request: PostToolUseRequest) {
-                postRequests += request
-            }
-        }
         val tool = RuntimeTestTool("mcp__shared", "dynamic") { pending ->
             handledCalls += pending
             mcpTextResult("original")
@@ -431,41 +414,24 @@ val kodexToolRuntimeTest by testSuite {
         )
         state.appendUserMessage(listOf(ContentItem.InputText("Use the tool.")))
         val runtime = RequestOnlyRuntime(state)
-            .testToolRuntime(mcpService, hooks)
-            .turnHookRuntime(
-                hooks = NoOpTurnHooks,
-                logger = TestLogger,
-            )
+            .testToolRuntime(mcpService)
 
         assertEquals(Unit, runtime.resume())
 
-        assertEquals("mcp__shared__dynamic", hookInvocations.single().toolName)
-        assertEquals(JsonPrimitive("before"), (hookInvocations.single().input as JsonObject)["value"])
         assertEquals(
             buildJsonObject { put("value", JsonPrimitive("before")) },
             handledCalls.single().arguments,
-        )
-        assertEquals(
-            OpenAiJsonCodec.encodeToJsonElement(CallToolResult.serializer(), mcpTextResult("original")),
-            postRequests.single().response,
         )
         val history = storage.stableHistoryItems()
         val output = history.filterIsInstance<ResponseItem.McpToolCallOutput>().single()
         assertEquals(mcpTextResult("original"), output.output)
     }
 
-    test("pre tool hook block skips the handler") {
+    test("tool output containing legacy block control data cannot skip or change execution") {
         var handlerCalls = 0
         val tool = RuntimeTestTool("mcp__shared", "dynamic") {
             handlerCalls += 1
-            mcpTextResult("should not run")
-        }
-        val hooks = object : ToolHooks {
-            override suspend fun onPreToolUse(invocation: HookToolInvocation): PreToolUseResult =
-                PreToolUseResult.Block("denied")
-
-            override suspend fun onPostToolUse(request: PostToolUseRequest): Unit =
-                error("PostToolUse must not run for a blocked call.")
+            mcpTextResult("""{"action":"block","reason":"denied"}""")
         }
         val mcpService = TestMcpService(listOf(tool))
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
@@ -505,28 +471,19 @@ val kodexToolRuntimeTest by testSuite {
         state.appendUserMessage(listOf(ContentItem.InputText("Use the tool.")))
 
         RequestOnlyRuntime(state)
-            .testToolRuntime(mcpService, hooks)
-            .turnHookRuntime(
-                hooks = NoOpTurnHooks,
-                logger = TestLogger,
-            )
+            .testToolRuntime(mcpService)
             .resume()
 
-        assertEquals(0, handlerCalls)
+        assertEquals(1, handlerCalls)
         val output = storage.stableHistoryItems()
             .filterIsInstance<ResponseItem.McpToolCallOutput>()
             .single()
-        assertEquals(true, output.output.isError)
+        assertEquals(mcpTextResult("""{"action":"block","reason":"denied"}"""), output.output)
+        assertEquals(KodexAgentStateValue.AssistantMessage, state.state.value)
+        assertEquals(2, requestCount)
     }
 
-    test("custom tool uses the latest cwd and preserves original input through hooks") {
-        val invocations = mutableListOf<HookToolInvocation>()
-        val hooks = RecordingToolHooks(
-            pre = { invocation ->
-                invocations += invocation
-                PreToolUseResult.Continue
-            },
-        )
+    test("custom tool uses the latest cwd and preserves original input") {
         val initialRoot = Path(
             SystemTemporaryDirectory,
             "codex-tool-runtime-initial-${Random.nextLong()}",
@@ -560,17 +517,11 @@ val kodexToolRuntimeTest by testSuite {
         )
         try {
             val runtime = RequestOnlyRuntime(fixture.state)
-                .testToolRuntime(mcpService, hooks)
-                .turnHookRuntime(
-                    hooks = NoOpTurnHooks,
-                    logger = TestLogger,
-                )
+                .testToolRuntime(mcpService)
             fixture.state.updateSettings(initialSettings.copy(cwd = updatedRoot))
 
             runtime.resume()
 
-            assertEquals("apply_patch", invocations.single().toolName)
-            assertEquals(JsonPrimitive(patch), invocations.single().input)
             assertEquals(null, SystemCoroutineFileSystem.metadataOrNull(Path(initialRoot, "hook.txt")))
             assertEquals(
                 "hook input\n",
@@ -587,18 +538,7 @@ val kodexToolRuntimeTest by testSuite {
         }
     }
 
-    test("exec command and failed write stdin run independent pre tool hooks") {
-        val preInvocations = mutableListOf<HookToolInvocation>()
-        val postRequests = mutableListOf<PostToolUseRequest>()
-        val hooks = RecordingToolHooks(
-            pre = { invocation ->
-                preInvocations += invocation
-                PreToolUseResult.Continue
-            },
-            post = { request ->
-                postRequests += request
-            },
-        )
+    test("exec command and failed write stdin persist independent completions") {
         val execCall = ResponseItem.FunctionCall(
             name = "exec_command",
             arguments = "{\"cmd\":\"sleep 1\",\"yield_time_ms\":250}",
@@ -613,30 +553,18 @@ val kodexToolRuntimeTest by testSuite {
         val fixture = testStateWithCalls(mcpService, calls = arrayOf(execCall, writeCall))
 
         val runtime = RequestOnlyRuntime(fixture.state)
-            .testToolRuntime(mcpService, hooks)
-            .turnHookRuntime(
-                hooks = NoOpTurnHooks,
-                logger = TestLogger,
-            )
+            .testToolRuntime(mcpService)
         assertEquals(Unit, runtime.resume())
 
-        assertEquals(
-            listOf("exec_command", "write_stdin"),
-            preInvocations.map(HookToolInvocation::toolName),
-        )
-        assertEquals(
-            JsonPrimitive("sleep 1"),
-            (preInvocations[0].input as JsonObject)["cmd"],
-        )
-        assertEquals(
-            JsonPrimitive(1),
-            (preInvocations[1].input as JsonObject)["session_id"],
-        )
-        assertEquals(
-            listOf("call_exec"),
-            postRequests.map { request -> request.invocation.toolUseId },
-        )
-        assertTrue(postRequests.all { request -> request.response is JsonPrimitive })
+        val outputs = fixture.state.storage.stableHistoryItems()
+            .filterIsInstance<ResponseItem.ToolCallOutput>()
+        assertEquals(listOf("call_exec", "call_write"), outputs.map { it.callId })
+        val completed = fixture.state.storage.work.indexesIn(0..fixture.state.latestIndex.value)
+            .map { fixture.state.storage.work[it] }
+            .filterIsInstance<StableCommandExecutionToolEvent>()
+        assertIs<StableCommandExecutionResult.Output>(completed.single { it.callId == "call_exec" }.result)
+        assertIs<StableCommandExecutionResult.Failure>(completed.single { it.callId == "call_write" }.result)
+        assertEquals(KodexAgentStateValue.AssistantMessage, fixture.state.state.value)
     }
 
     test("invalid pending calls complete without invoking their ordinary handler") {
@@ -649,7 +577,7 @@ val kodexToolRuntimeTest by testSuite {
         val fixture = testStateWithCalls(mcpService, calls = arrayOf(call))
 
         RequestOnlyRuntime(fixture.state)
-            .testToolRuntime(mcpService, NoOpToolHooks)
+            .testToolRuntime(mcpService)
             .resume()
 
             val completed = fixture.state.storage.work.indexesIn(0..fixture.state.latestIndex.value)
@@ -682,7 +610,7 @@ val kodexToolRuntimeTest by testSuite {
         val fixture = testStateWithCalls(mcpService, calls = arrayOf(call))
 
         RequestOnlyRuntime(fixture.state)
-            .testToolRuntime(mcpService, NoOpToolHooks)
+            .testToolRuntime(mcpService)
             .resume()
 
         assertEquals(plan, fixture.state.storage.settings.latestValue().plan)
@@ -691,6 +619,13 @@ val kodexToolRuntimeTest by testSuite {
             .filterIsInstance<StablePlanUpdate>()
             .single()
         assertEquals(plan, completed.arguments)
+        assertEquals(
+            listOf("call_plan"),
+            fixture.state.storage.stableHistoryItems()
+                .filterIsInstance<ResponseItem.ToolCallOutput>()
+                .map { it.callId },
+        )
+        assertEquals(KodexAgentStateValue.AssistantMessage, fixture.state.state.value)
     }
 
     }
@@ -701,7 +636,6 @@ private class ToolRuntimeTestContext(
 ) : CoroutineScope by scope {
     suspend fun ResumableAgentLayer.testToolRuntime(
         mcpService: McpService,
-        hooks: ToolHooks,
     ): KodexToolRuntime {
         val fixedTools = buildList {
             add(
@@ -745,7 +679,6 @@ private class ToolRuntimeTestContext(
             fixedTools = fixedTools,
             dynamicTools = mcpTools,
             toolSearch = toolSearch,
-            toolHooks = hooks,
             logger = TestLogger
                 .global()
                 .session(storage.uri)
@@ -814,20 +747,6 @@ private fun mcpTextResult(
         ),
         isError = isError,
     )
-
-private class RecordingToolHooks(
-    private val pre: suspend (HookToolInvocation) -> PreToolUseResult = {
-        PreToolUseResult.Continue
-    },
-    private val post: suspend (PostToolUseRequest) -> Unit = {},
-) : ToolHooks {
-    override suspend fun onPreToolUse(invocation: HookToolInvocation): PreToolUseResult =
-        pre(invocation)
-
-    override suspend fun onPostToolUse(request: PostToolUseRequest) {
-        post(request)
-    }
-}
 
 private data class ToolCallTestState(
     val state: KodexAgentStateContract,

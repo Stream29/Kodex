@@ -3,8 +3,17 @@ package io.github.stream29.kodex.app.migration.v0_4_7
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.migration.*
+import io.github.stream29.kodex.agentcontext.contract.AgentContextCustomSource
+import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.cli.settings.*
+import io.github.stream29.kodex.mcp.contract.*
+import io.github.stream29.kodex.openai.OpenAiModelId
+import io.github.stream29.kodex.openai.ReasoningEffort
+import io.github.stream29.kodex.openai.RequestUserInputMode
+import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.rpc.models.BackendSettings
+import io.github.stream29.kodex.utils.shellclient.Shell
+import io.github.stream29.kodex.utils.shellclient.ShellType
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.CancellationException
@@ -23,15 +32,14 @@ val migrateToV0_4_7Test by testSuite(compartment = { TestCompartment.RealTime })
         test("splits every retained field and credentials without old hooks or widths") { home ->
             fs.writeString(Path(home, "settings.yml"), LegacySettingsFixture)
             fs.writeString(Path(home, "unknown.txt"), "keep")
-            val old = openGlobalSettings(home, KodexGlobalSettings()).settings.value
-            val defaults = old.backend()
+            val expected = retainedFixtureBackend()
             migrateToV0_4_7(home, fs)
             assertFalse(fs.exists(Path(home, "settings.yml")))
-            assertEquals(defaults, openBackendSettings(home, defaults).settings.value)
+            assertEquals(expected, openBackendSettings(home, backendDefaults()).settings.value)
             val frontend = openCliFrontendSettings(home).settings.value
-            assertEquals(old.newLineKey, frontend.newLineKey)
-            assertEquals(old.sidebars.left, frontend.sidebars.left)
-            assertEquals(old.sidebars.right, frontend.sidebars.right)
+            assertEquals(NewLineKey.Enter, frontend.newLineKey)
+            assertEquals(SidebarContent.None, frontend.sidebars.left)
+            assertEquals(SidebarContent.HistoryIndex, frontend.sidebars.right)
             assertTrue(frontend.hooks.isEmpty())
             val encoded = fs.readString(Path(home, "settings.frontend.cli.yml"))
             assertFalse("left_width" in encoded)
@@ -52,7 +60,7 @@ val migrateToV0_4_7Test by testSuite(compartment = { TestCompartment.RealTime })
             val encoded = fs.readString(Path(home, "settings.backend.yml"))
             assertFalse("shell:" in encoded)
             assertTrue("gpt-5.6-sol" in encoded)
-            val defaults = KodexGlobalSettings().backend()
+            val defaults = backendDefaults()
             val backend = openBackendSettings(home, defaults).settings.value
             assertEquals(KodexAuthSource.Codex, backend.authSource)
             assertEquals(defaults.shell, backend.shell)
@@ -70,9 +78,20 @@ val migrateToV0_4_7Test by testSuite(compartment = { TestCompartment.RealTime })
                       client: {}
                       scopes: ["null", "true"]
             """.trimIndent())
-            val old = openGlobalSettings(home, KodexGlobalSettings()).settings.value
             migrateToV0_4_7(home, fs)
-            assertEquals(old.backend(), openBackendSettings(home, old.backend()).settings.value)
+            val expected = backendDefaults().copy(
+                mcpServers = mapOf("pending" to McpServerConfiguration.StreamableHttp(
+                    url = "https://fixture.invalid/mcp",
+                    headers = mapOf(
+                        "flag" to McpSecret("false"), "number" to McpSecret("0001"),
+                        "absent" to McpSecret("null"), "empty" to McpSecret(""),
+                    ),
+                    oauth = McpOAuthConfiguration.Uninitialized(
+                        client = McpOAuthClient(), scopes = listOf("null", "true"),
+                    ),
+                )),
+            )
+            assertEquals(expected, openBackendSettings(home, backendDefaults()).settings.value)
         }
         test("new Home has no settings files and migration writes no defaults") { home ->
             migrateToV0_4_7(home, fs)
@@ -235,7 +254,7 @@ val migrateToV0_4_7Test by testSuite(compartment = { TestCompartment.RealTime })
                 onMigrationStarted = { _, next -> applied += next.toString() },
             ).closeAndJoin()
             assertEquals(listOf("0.3.3", "0.3.5", "0.4.3", "0.4.5", "0.4.7"), applied)
-            assertEquals(KodexAuthSource.Kodex, openBackendSettings(home, KodexGlobalSettings().backend()).settings.value.authSource)
+            assertEquals(KodexAuthSource.Kodex, openBackendSettings(home, backendDefaults()).settings.value.authSource)
             assertEquals(NewLineKey.Enter, openCliFrontendSettings(home).settings.value.newLineKey)
             assertTrue(fs.exists(Path(home, "skills", "kodex-home", "SKILL.md")))
             assertFalse(fs.exists(Path(home, "settings.yml")))
@@ -244,8 +263,56 @@ val migrateToV0_4_7Test by testSuite(compartment = { TestCompartment.RealTime })
 }
 
 private val fs = SystemCoroutineFileSystem
-private fun KodexGlobalSettings.backend(): BackendSettings =
-    BackendSettings(authSource, shell, contextSources, newSession, sessionTitle, mcpServers)
+// Independent expectations, not values decoded by the migration under test or a retired loader.
+private fun backendDefaults(): BackendSettings = BackendSettings(
+    authSource = KodexAuthSource.Codex,
+    shell = Shell(ShellType.Bash, Path("/fixture/bash")),
+    contextSources = AgentContextSourceSettings(),
+    newSession = KodexNewSessionSettings(),
+    sessionTitle = SessionTitleSettings(),
+    mcpServers = emptyMap(),
+)
+
+private fun retainedFixtureBackend(): BackendSettings = backendDefaults().copy(
+    authSource = KodexAuthSource.Kodex,
+    shell = Shell(ShellType.Bash, Path("/bin/bash")),
+    contextSources = AgentContextSourceSettings(
+        agentsHomeEnabled = false, workingDirectoryEnabled = false,
+        customSources = listOf(AgentContextCustomSource("~/context", enabled = false)),
+    ),
+    newSession = KodexNewSessionSettings(
+        model = OpenAiModelId("fixture-model"), reasoningEffort = ReasoningEffort.Max,
+        serviceTier = ServiceTier.Fast, requestUserInputMode = RequestUserInputMode.NoQuestion,
+    ),
+    sessionTitle = SessionTitleSettings(
+        enabled = false, model = OpenAiModelId("title-model"),
+        reasoningEffort = ReasoningEffort.Custom("custom-effort"),
+    ),
+    mcpServers = mapOf(
+        "http" to McpServerConfiguration.StreamableHttp(
+            url = "https://fixture.invalid/mcp",
+            headers = mapOf("Authorization" to McpSecret("fixture-header")),
+            oauth = McpOAuthConfiguration.Initialized(
+                client = McpOAuthClient(
+                    clientId = "fixture-client", clientSecret = McpSecret("fixture-secret"),
+                    redirectUri = "http://127.0.0.1:8765/callback",
+                ),
+                resource = "fixture-resource", scopes = listOf("read", "write"),
+                resolvedAuthorizationEndpoint = "https://fixture.invalid/authorize",
+                resolvedTokenEndpoint = "https://fixture.invalid/token",
+                tokenEndpointAuthMethod = McpOAuthTokenEndpointAuthMethod.ClientSecretBasic,
+                accessToken = McpSecret("fixture-access"), refreshToken = McpSecret("fixture-refresh"),
+                tokenType = "Bearer", expiresAtEpochSeconds = 9999999999L,
+            ),
+            enabled = false,
+        ),
+        "process" to McpServerConfiguration.Stdio(
+            command = "fixture-command", args = listOf("--flag", "value"),
+            environment = mapOf("KEY" to McpSecret("fixture-value")),
+            workingDirectory = Path("relative/work"), enabled = false,
+        ),
+    ),
+)
 private suspend fun assertNoTemporary(home: Path) {
     assertTrue(fs.list(home).none { it.name.endsWith(".tmp") })
 }

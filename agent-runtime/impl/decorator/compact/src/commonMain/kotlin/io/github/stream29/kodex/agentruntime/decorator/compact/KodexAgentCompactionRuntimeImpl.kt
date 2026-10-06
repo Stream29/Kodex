@@ -5,10 +5,6 @@ import io.github.stream29.kodex.agentstate.contextwindow.tokensUntilCompaction
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.contract.RequestFinish
-import io.github.stream29.kodex.hook.contract.compaction.CompactionHookRequest
-import io.github.stream29.kodex.hook.contract.compaction.CompactionHooks
-import io.github.stream29.kodex.hook.contract.compaction.HookCompactionTrigger
-import io.github.stream29.kodex.hook.contract.toHookTurnContext
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
@@ -19,14 +15,11 @@ import kotlinx.coroutines.CancellationException
  * Default [KodexAgentCompactionRuntime] backed by the supplied Agent state.
  *
  * @param logger Agent-scoped logger for response and compaction operations.
- * @param compactionHooks Nullable because Hooks are an optional host feature;
- * `null` runs the compaction core without PreCompact or PostCompact.
  */
 public class KodexAgentCompactionRuntimeImpl(
     private val delegate: KodexAgentState,
     private val modelCatalog: OpenAiModelCatalogStore,
     private val logger: KLogger,
-    private val compactionHooks: CompactionHooks? = null,
 ) : KodexAgentCompactionRuntime, KodexAgentState by delegate {
 
     public override suspend fun resume() {
@@ -95,24 +88,7 @@ public class KodexAgentCompactionRuntimeImpl(
             "Agent compaction started (trigger=$trigger, reason=$reason, phase=$phase)."
         }
         return try {
-            val hooks = compactionHooks
-            val index = if (hooks == null) {
-                delegate.compact(trigger, reason, phase)
-            } else {
-                val settings = storage.settings[latestIndex.value]
-                val context = settings.toHookTurnContext(
-                    uri = storage.uri,
-                    turnId = settings.turnId,
-                )
-                val request = CompactionHookRequest(
-                    context = context,
-                    trigger = trigger.toHookTrigger(),
-                )
-                hooks.onPreCompact(request)
-                delegate.compact(trigger, reason, phase).also {
-                    hooks.onPostCompact(request)
-                }
-            }
+            val index = delegate.compact(trigger, reason, phase)
             index.also {
                 logger.info {
                     "Agent compaction completed (trigger=$trigger, reason=$reason, phase=$phase)."
@@ -149,22 +125,13 @@ public class KodexAgentCompactionRuntimeImpl(
  * response retry to this state.
  *
  * @param logger Agent-scoped logger for response and compaction operations.
- * @param compactionHooks Nullable because Hooks are optional; `null` disables
- * both compaction Hook boundaries.
  */
 public fun KodexAgentState.compactionRuntime(
     modelCatalog: OpenAiModelCatalogStore,
     logger: KLogger,
-    compactionHooks: CompactionHooks? = null,
 ): KodexAgentCompactionRuntime =
     KodexAgentCompactionRuntimeImpl(
         delegate = this,
         modelCatalog = modelCatalog,
         logger = logger,
-        compactionHooks = compactionHooks,
     )
-
-private fun CompactionTrigger.toHookTrigger(): HookCompactionTrigger = when (this) {
-    CompactionTrigger.Auto -> HookCompactionTrigger.Auto
-    CompactionTrigger.Manual -> HookCompactionTrigger.Manual
-}

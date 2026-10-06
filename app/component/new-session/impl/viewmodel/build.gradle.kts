@@ -19,7 +19,6 @@ kotlin {
             implementation(project(":app-viewmodel-agent"))
             implementation(project(":app-component-history-impl-viewmodel"))
             implementation(project(":app-viewmodel-session"))
-            implementation(project(":app-shared-session-title"))
             implementation(project(":openai-impl-client-test"))
             implementation(project(":utils-coroutines-spec"))
             implementation(libs.kotlinx.coroutines.test)

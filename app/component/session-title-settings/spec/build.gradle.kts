@@ -1,11 +1,17 @@
-plugins { id("kodex.kmp-cli") }
+plugins {
+    id("kodex.kmp-cli")
+    alias(libs.plugins.kotlin.serialization)
+}
 
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":app-shared-settings-contract"))
+            api(libs.kotlinx.serialization.core)
             api(project(":openai-spec-models"))
             api(libs.kotlinx.coroutines.core)
+        }
+        commonTest.dependencies {
+            implementation(libs.kotlinx.serialization.json)
         }
     }
 }

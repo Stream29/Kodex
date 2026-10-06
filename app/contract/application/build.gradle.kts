@@ -16,7 +16,7 @@ kotlin {
             api(project(":app-contract-session"))
             api(project(":app-component-new-session-spec"))
             api(project(":app-contract-settings"))
-            api(project(":app-shared-settings-contract"))
+            api(project(":app-component-application-preferences-spec"))
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
         }

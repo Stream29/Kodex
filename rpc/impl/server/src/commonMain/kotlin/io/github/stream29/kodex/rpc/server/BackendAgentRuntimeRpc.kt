@@ -206,7 +206,7 @@ public class BackendAgentRuntimeRpc(
 
 private class RuntimeView(val binding: BackendSessionBinding) {
     val runtime: AgentRuntime get() = binding.session.runtime
-    val title = AgentTitleGeneration(runtime, useSettingsCas = true)
+    val title = AgentTitleGeneration(runtime)
     private val admission = Mutex()
     private val output = RuntimeOutputProjection()
 
