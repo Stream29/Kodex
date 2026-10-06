@@ -1,6 +1,13 @@
 package io.github.stream29.kodex.app.migration
 
-/** Application version used to select Kodex Home migrations. */
+/**
+ * Application version used to select Kodex Home migrations.
+ *
+ * Ordering compares the three integer components, not the formatted string.
+ * The string representation is canonical `major.minor.patch`.
+ *
+ * @throws IllegalArgumentException If any component is negative.
+ */
 public data class MigrationVersion(
     public val major: Int,
     public val minor: Int,
@@ -12,6 +19,13 @@ public data class MigrationVersion(
         }
     }
 
+    /**
+     * Parses exactly three canonical, non-negative decimal [Int] components.
+     *
+     * @throws IllegalArgumentException If [value] has missing or extra components,
+     * leading zeros, non-decimal characters, prerelease/build metadata, or a
+     * component outside the non-negative [Int] range.
+     */
     public constructor(value: String) : this(parseMigrationVersion(value))
 
     private constructor(components: IntArray) : this(
