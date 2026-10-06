@@ -49,6 +49,7 @@ val agentHistoryAnchorTest by testSuite {
                     AgentHistorySource(runtime.storage, runtime.latestIndex, runtime.state),
                     supervisorChildScope(), kotlinx.coroutines.flow.MutableStateFlow(false),
                 )
+                val viewState = AgentHistoryViewState()
                 try {
                     withContext(Dispatchers.Default) {
                         withTimeout(5.seconds) {
@@ -61,6 +62,7 @@ val agentHistoryAnchorTest by testSuite {
                             repeat(7) {
                                 model.loadState.first { it == AgentHistoryLoadState.Ready }
                                 val window = model.historyItems.value
+                                model.reportViewport(window, listOf(window.peek(0)))
                                 window.requestOlder()
                                 model.historyItems.first { it !== window }
                             }
@@ -69,7 +71,7 @@ val agentHistoryAnchorTest by testSuite {
                     }
                     val original = model.historyItems.value
                     assertEquals(8, original.size)
-                    assertFalse(model.followsLatest)
+                    assertFalse(model.followsLatest.value)
                     var displayedWindow by mutableStateOf(original)
                     runMosaicTest {
                         // Hold the old provider across loading, without automatic edge demands.
@@ -77,7 +79,7 @@ val agentHistoryAnchorTest by testSuite {
                             val window = displayedWindow
                             LazyColumn(
                                 modifier = Modifier.width(20).height(6),
-                                state = model.listState,
+                                state = viewState.listState,
                                 reverseLayout = true,
                             ) {
                                 if (window.hasNewer) item(key = "newer") {}
@@ -88,12 +90,18 @@ val agentHistoryAnchorTest by testSuite {
                                 if (window.hasOlder) item(key = "older") {}
                             }
                         }
-                        model.listState.scrollToItem(index = 6, scrollOffset = scrollOffset)
+                        viewState.listState.scrollToItem(index = 6, scrollOffset = scrollOffset)
                         settleAnchorFrames()
-                        val anchor = model.listState.layoutInfo.visibleItemsInfo.first()
+                        val anchor = viewState.listState.layoutInfo.visibleItemsInfo.first()
                         assertEquals(5, (anchor.key as MessageHistoryItemViewModel).index)
                         assertEquals(-scrollOffset, anchor.offset)
 
+                        model.reportViewport(
+                            original,
+                            viewState.listState.layoutInfo.visibleItemsInfo.mapNotNull {
+                                it.key as? io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
+                            },
+                        )
                         if (newer) original.requestNewer() else original.requestOlder()
                         val replacement = withContext(Dispatchers.Default) {
                             withTimeout(5.seconds) {
@@ -103,13 +111,13 @@ val agentHistoryAnchorTest by testSuite {
                             }
                         }
                         settleAnchorFrames()
-                        val oldProviderAnchor = model.listState.layoutInfo.visibleItemsInfo.first()
+                        val oldProviderAnchor = viewState.listState.layoutInfo.visibleItemsInfo.first()
                         assertSame(anchor.key, oldProviderAnchor.key, "Loading must not reposition the old provider.")
                         assertEquals(anchor.offset, oldProviderAnchor.offset)
 
                         displayedWindow = replacement
                         settleAnchorFrames()
-                        val newProviderAnchor = model.listState.layoutInfo.visibleItemsInfo.first()
+                        val newProviderAnchor = viewState.listState.layoutInfo.visibleItemsInfo.first()
                         assertSame(anchor.key, newProviderAnchor.key, "The new provider must restore the same key.")
                         assertEquals(anchor.offset, newProviderAnchor.offset)
                     }

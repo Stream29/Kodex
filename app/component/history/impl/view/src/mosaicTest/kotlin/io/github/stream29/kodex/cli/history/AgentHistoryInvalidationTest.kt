@@ -12,11 +12,10 @@ import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
+import io.github.stream29.kodex.app.history.contract.HistoryScrollEffect
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.ReasoningHistoryItemViewModel
-import io.github.stream29.kodex.cli.components.LazyListState
-import io.github.stream29.kodex.cli.components.MutableScrollInteractionSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.yield
@@ -36,6 +35,7 @@ val agentHistoryInvalidationTest by testSuite {
             onRequestOlder = { olderRequests += 1 },
         )
         val model = ReplaceableHistoryModel(window)
+        val viewState = AgentHistoryViewState()
         model.replace(window, AgentHistoryLoadState.Ready)
 
         runMosaicTest {
@@ -43,13 +43,14 @@ val agentHistoryInvalidationTest by testSuite {
                 Column(modifier = Modifier.width(40).height(12)) {
                     AgentHistoryView(
                         model = model,
+                        viewState = viewState,
                         shellSessions = EmptyInvalidationHistoryShellSessions,
                     )
                 }
             }
             assertEquals(0, olderRequests)
 
-            model.listState.scrollToItem(index = 70)
+            viewState.listState.scrollToItem(index = 70)
             awaitSnapshot()
             yield()
             assertEquals(1, olderRequests)
@@ -67,20 +68,22 @@ val agentHistoryInvalidationTest by testSuite {
             onRequestNewer = { newerRequests += 1 },
         )
         val model = ReplaceableHistoryModel(window)
-        model.listState.scrollToItem(index = 60)
+        val viewState = AgentHistoryViewState()
+        viewState.listState.scrollToItem(index = 60)
 
         runMosaicTest {
             setContentAndSnapshot {
                 Column(modifier = Modifier.width(40).height(12)) {
                     AgentHistoryView(
                         model = model,
+                        viewState = viewState,
                         shellSessions = EmptyInvalidationHistoryShellSessions,
                     )
                 }
             }
             assertEquals(0, newerRequests)
 
-            model.listState.scrollToItem(index = 0)
+            viewState.listState.scrollToItem(index = 0)
             awaitSnapshot()
             yield()
             assertEquals(1, newerRequests)
@@ -95,17 +98,19 @@ val agentHistoryInvalidationTest by testSuite {
             },
         )
         val model = ReplaceableHistoryModel(oldWindow)
+        val viewState = AgentHistoryViewState()
 
         runMosaicTest {
             setContentAndSnapshot {
                 Column(modifier = Modifier.width(40).height(12)) {
                     AgentHistoryView(
                         model = model,
+                        viewState = viewState,
                         shellSessions = EmptyInvalidationHistoryShellSessions,
                     )
                 }
             }
-            model.listState.scrollToItem(index = 54)
+            viewState.listState.scrollToItem(index = 54)
             awaitSnapshot()
 
             model.replace(
@@ -143,10 +148,8 @@ private class ReplaceableHistoryModel(
     override val pendingTools: StateFlow<List<UnstableCleanEvent>> = MutableStateFlow(emptyList())
     override val streamingItem: StateFlow<HistoryStreamingItem?> = MutableStateFlow(null)
     override val activeTurnDuration: StateFlow<Duration?> = MutableStateFlow(null)
-    override val listState: LazyListState = LazyListState()
-    override val scrollInteractionSource: MutableScrollInteractionSource =
-        MutableScrollInteractionSource()
-    override val followsLatest: Boolean = false
+    override val followsLatest = MutableStateFlow(false)
+    override val pendingScrollEffect = MutableStateFlow<HistoryScrollEffect?>(null)
 
     fun replace(window: HistoryItemWindow, loadState: AgentHistoryLoadState) {
         mutableCommittedItems.value = window
@@ -161,7 +164,17 @@ private class ReplaceableHistoryModel(
             }
     }
 
-    override fun notifyContentChanged() = Unit
+    override fun reportViewport(window: HistoryItemWindow, visibleItems: List<HistoryItemViewModel>) = Unit
+
+    override fun setFollowsLatest(window: HistoryItemWindow, followsLatest: Boolean) {
+        if (historyItems.value === window && (!followsLatest || !window.hasNewer)) {
+            this.followsLatest.value = followsLatest
+        }
+    }
+
+    override fun acknowledgeScrollEffect(effect: HistoryScrollEffect) {
+        pendingScrollEffect.compareAndSet(effect, null)
+    }
 
     override fun requestScrollToLatest() = Unit
 

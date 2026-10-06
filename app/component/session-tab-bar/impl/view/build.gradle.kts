@@ -9,7 +9,6 @@ kotlin {
         }
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))
-            implementation(project(":app-contract-lazy-list"))
             implementation(project(":utils-terminal-text-spec"))
             implementation(libs.mosaic.runtime)
         }

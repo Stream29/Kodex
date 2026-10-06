@@ -31,9 +31,6 @@ import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
-import io.github.stream29.kodex.cli.components.ScrollInputSource
-import io.github.stream29.kodex.cli.components.ScrollInteraction
-import io.github.stream29.kodex.cli.components.ScrollOrientation
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -573,7 +570,7 @@ val agentHistoryModelsTest by testSuite {
         }
     }
 
-    test("retains stable item identity while LazyColumn demands older items") {
+    test("retains stable item identity while portable viewport demands older items") {
         coroutineScope {
             val itemCount = 3
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
@@ -587,11 +584,13 @@ val agentHistoryModelsTest by testSuite {
             try {
                 model.awaitReady(itemCount = 1, hasOlder = true)
                 val newest = model.historyItems.value.peek(0)
+                model.reportViewport(model.historyItems.value, listOf(newest))
                 model.historyItems.value.requestOlder()
                 model.awaitReady(itemCount = 2, hasOlder = true)
                 assertSame(newest, model.historyItems.value.peek(0))
 
                 val secondOldest = model.historyItems.value.peek(1)
+                model.reportViewport(model.historyItems.value, listOf(newest, secondOldest))
                 model.historyItems.value.requestOlder()
                 model.awaitReady(itemCount = itemCount, hasOlder = false)
                 assertSame(newest, model.historyItems.value.peek(0))
@@ -634,36 +633,20 @@ val agentHistoryModelsTest by testSuite {
         }
     }
 
-    test("owns follow-latest interaction intent") {
+    test("owns portable follow-latest intent") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
                 model.awaitReady(itemCount = 0, hasOlder = false)
-                model.scrollInteractionSource.tryEmit(
-                    ScrollInteraction(
-                        source = ScrollInputSource.Pointer,
-                        orientation = ScrollOrientation.Vertical,
-                        requestedDelta = -1,
-                        consumedDelta = 0,
-                    ),
-                )
-                assertTrue(model.followsLatest)
-
-                model.scrollInteractionSource.tryEmit(
-                    ScrollInteraction(
-                        source = ScrollInputSource.Pointer,
-                        orientation = ScrollOrientation.Vertical,
-                        requestedDelta = -1,
-                        consumedDelta = -1,
-                    ),
-                )
-                assertFalse(model.followsLatest)
-                model.notifyContentChanged()
-                assertFalse(model.followsLatest)
+                assertTrue(model.followsLatest.value)
+                model.setFollowsLatest(model.historyItems.value, false)
+                assertFalse(model.followsLatest.value)
+                model.reportViewport(model.historyItems.value, emptyList())
+                assertFalse(model.followsLatest.value)
                 model.requestScrollToLatest()
-                assertTrue(model.followsLatest)
+                assertTrue(model.followsLatest.value)
             } finally {
                 model.close()
                 repository.cancelAndJoin()
@@ -691,7 +674,7 @@ val agentHistoryModelsTest by testSuite {
                             window.peek(position).storageIndex == 1
                         }
                 }
-                assertFalse(model.followsLatest)
+                assertFalse(model.followsLatest.value)
                 assertEquals(1, older.peek(0).storageIndex)
 
                 runtime.modify { storage ->
@@ -707,7 +690,7 @@ val agentHistoryModelsTest by testSuite {
                         window.peek(0).storageIndex == 4
                 }
                 assertEquals(4, latest.peek(0).storageIndex)
-                assertTrue(model.followsLatest)
+                assertTrue(model.followsLatest.value)
             } finally {
                 model.close()
                 repository.cancelAndJoin()
@@ -736,7 +719,7 @@ val agentHistoryModelsTest by testSuite {
                         window.peek(0) is ContextCompactionHistoryItemViewModel
                 }
                 assertEquals(3, checkedOut.peek(0).storageIndex)
-                assertFalse(model.followsLatest)
+                assertFalse(model.followsLatest.value)
             } finally {
                 model.close()
                 repository.cancelAndJoin()
@@ -776,6 +759,7 @@ private suspend fun AgentHistoryViewModel.awaitReady(
                     "Expected $itemCount History items with hasOlder=$hasOlder, but observed " +
                         "${window.size} items with hasOlder=${window.hasOlder}."
                 }
+                reportViewport(window, listOf(window.peek(0)))
                 window.requestOlder()
                 loadState.first { updated ->
                     updated is AgentHistoryLoadState.Failed ||

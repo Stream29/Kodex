@@ -1,9 +1,5 @@
 package io.github.stream29.kodex.cli.history
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemViewModel
@@ -13,6 +9,8 @@ import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
+import io.github.stream29.kodex.app.history.contract.HistoryScrollEffect
+import io.github.stream29.kodex.app.history.contract.HistoryScrollTarget
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingKind
 import io.github.stream29.kodex.app.history.contract.item.ContextCompactionHistoryItemViewModel
@@ -25,11 +23,6 @@ import io.github.stream29.kodex.app.history.contract.item.RequestUserInputHistor
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupChildHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
-import io.github.stream29.kodex.cli.components.LazyListState
-import io.github.stream29.kodex.cli.components.MutableScrollInteractionSource
-import io.github.stream29.kodex.cli.components.ScrollInputSource
-import io.github.stream29.kodex.cli.components.ScrollInteraction
-import io.github.stream29.kodex.cli.components.ScrollOrientation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -91,13 +84,13 @@ internal class AgentHistoryViewModelImpl(
     override val activeTurnDuration: StateFlow<Duration?> =
         mutableActiveTurnDuration.asStateFlow()
 
-    override val listState: LazyListState = LazyListState()
-    override val scrollInteractionSource: MutableScrollInteractionSource =
-        MutableScrollInteractionSource(::onScrollInteraction)
-
-    private var mutableFollowsLatest: Boolean by mutableStateOf(true)
-    override val followsLatest: Boolean
-        get() = mutableFollowsLatest
+    private val mutableFollowsLatest = MutableStateFlow(true)
+    override val followsLatest: StateFlow<Boolean> = mutableFollowsLatest.asStateFlow()
+    private val mutablePendingScrollEffect = MutableStateFlow<HistoryScrollEffect?>(null)
+    override val pendingScrollEffect: StateFlow<HistoryScrollEffect?> =
+        mutablePendingScrollEffect.asStateFlow()
+    private var navigationIntent: Any? = null
+    private var visibleItems: List<HistoryItemViewModel> = emptyList()
 
     init {
         scope.launch { runHistoryLoop() }
@@ -108,7 +101,10 @@ internal class AgentHistoryViewModelImpl(
         }
         agentState.cacheNonce?.let { nonce ->
             scope.launch {
-                nonce.collect { commands.send(HistoryCommand.Invalidate) }
+                nonce.collect {
+                    withdrawNavigation()
+                    commands.send(HistoryCommand.Invalidate)
+                }
             }
         }
         scope.launch {
@@ -171,22 +167,13 @@ internal class AgentHistoryViewModelImpl(
                 }
             }
         }
-        scope.launch {
-            snapshotFlow { listState.canScrollForward }.collect { canScrollForward ->
-                if (mutableFollowsLatest) {
-                    if (canScrollForward) listState.requestScrollToStart()
-                } else if (!canScrollForward && !mutableHistoryItems.value.hasNewer) {
-                    mutableFollowsLatest = true
-                }
-            }
-        }
     }
 
     private fun registerOlderDemand(
         window: HistoryItemWindowImpl,
     ) {
         if (
-            mutableHistoryItems.value === window &&
+            !closed && mutableHistoryItems.value === window &&
             window.hasOlder &&
             mutableLoadState.value == AgentHistoryLoadState.Ready &&
             olderDemandPending.compareAndSet(expect = false, update = true)
@@ -201,7 +188,7 @@ internal class AgentHistoryViewModelImpl(
         window: HistoryItemWindowImpl,
     ) {
         if (
-            mutableHistoryItems.value === window &&
+            !closed && mutableHistoryItems.value === window &&
             window.hasNewer &&
             mutableLoadState.value == AgentHistoryLoadState.Ready &&
             newerDemandPending.compareAndSet(expect = false, update = true)
@@ -214,26 +201,67 @@ internal class AgentHistoryViewModelImpl(
 
     override fun contains(generation: Long, storageIndex: Int): Boolean {
         val window = mutableHistoryItems.value
-        return generation == window.generation &&
+        return !closed && generation == window.generation &&
             (agentState.cacheNonce?.value?.let { it == generation } != false) &&
             window.containsStableIndex(storageIndex)
     }
 
-    override fun notifyContentChanged() {
-        if (mutableFollowsLatest) listState.requestScrollToStart()
+    private fun isCurrent(window: HistoryItemWindow): Boolean =
+        !closed && mutableHistoryItems.value === window &&
+            (agentState.cacheNonce?.value?.let { it == window.generation } != false)
+
+    override fun reportViewport(
+        window: HistoryItemWindow,
+        visibleItems: List<HistoryItemViewModel>,
+    ) {
+        if (!isCurrent(window)) return
+        val current = mutableHistoryItems.value.items
+        if (visibleItems.any { visible -> current.none { it === visible } }) return
+        this.visibleItems = visibleItems.toList()
+    }
+
+    override fun setFollowsLatest(window: HistoryItemWindow, followsLatest: Boolean) {
+        if (!isCurrent(window) || (followsLatest && window.hasNewer)) return
+        mutableFollowsLatest.value = followsLatest
+    }
+
+    override fun acknowledgeScrollEffect(effect: HistoryScrollEffect) {
+        mutablePendingScrollEffect.compareAndSet(effect, null)
+    }
+
+    private fun withdrawNavigation() {
+        navigationIntent = null
+        mutablePendingScrollEffect.value = null
+    }
+
+    private fun publishScrollEffect(intent: Any, target: HistoryScrollTarget) {
+        val window = mutableHistoryItems.value
+        if (navigationIntent === intent && isCurrent(window)) {
+            mutablePendingScrollEffect.value = HistoryScrollEffect(window.generation, target)
+        }
     }
 
     override fun requestScrollToLatest() {
-        mutableFollowsLatest = true
-        commands.trySend(HistoryCommand.JumpToLatest)
+        if (closed) return
+        mutableFollowsLatest.value = true
+        val intent = Any()
+        navigationIntent = intent
+        mutablePendingScrollEffect.value = null
+        commands.trySend(HistoryCommand.JumpToLatest(intent))
     }
 
     override fun requestScrollToStorageIndex(storageIndex: Int) {
-        commands.trySend(HistoryCommand.SeekToStorageIndex(storageIndex))
+        if (closed) return
+        val intent = Any()
+        navigationIntent = intent
+        mutablePendingScrollEffect.value = null
+        commands.trySend(HistoryCommand.SeekToStorageIndex(storageIndex, intent))
     }
 
     override fun close() {
         closed = true
+        withdrawNavigation()
+        visibleItems = emptyList()
         commands.close()
         releaseAllCachedItems()
         scope.cancel()
@@ -377,10 +405,9 @@ internal class AgentHistoryViewModelImpl(
     )
 
     private fun visibleChunks(chunks: List<HistoryWindowChunk>): Set<HistoryWindowChunk> {
-        val visibleKeys = listState.layoutInfo.visibleItemsInfo.map { item -> item.key }
-        if (visibleKeys.isEmpty()) return emptySet()
+        if (visibleItems.isEmpty()) return emptySet()
         return chunks.filterTo(mutableSetOf()) { chunk ->
-            chunk.items.any { item -> visibleKeys.any { key -> key === item } }
+            chunk.items.any { item -> visibleItems.any { visible -> visible === item } }
         }
     }
 
@@ -453,6 +480,8 @@ internal class AgentHistoryViewModelImpl(
                 mutableLoadState.value = AgentHistoryLoadState.Initializing
             }
             if (invalidate) {
+                withdrawNavigation()
+                visibleItems = emptyList()
                 activeGeneration = replacementGeneration
                 releaseAllCachedItems()
                 chunks = emptyList()
@@ -503,7 +532,7 @@ internal class AgentHistoryViewModelImpl(
                 return
             }
             if (latestIndex == observedLatestIndex) return
-            if (!mutableFollowsLatest || hasNewer) {
+            if (!mutableFollowsLatest.value || hasNewer) {
                 observedLatestIndex = latestIndex
                 hasNewer = chunks.isNotEmpty()
                 publishHistoryItems(
@@ -520,7 +549,6 @@ internal class AgentHistoryViewModelImpl(
                 replaceWindow(latestIndex, invalidate = false)
                 return
             }
-            val visibleChunks = visibleChunks(chunks)
             val batch = withContext(Dispatchers.Default) {
                 agentState.storage.readHistoryChunk(
                     fromInclusive = latestIndex,
@@ -536,6 +564,7 @@ internal class AgentHistoryViewModelImpl(
             val retained = chunks.dropWhile { chunk ->
                 chunk.newestStorageIndex >= newChunk.oldestStorageIndex
             }
+            val visibleChunks = visibleChunks(chunks)
             var combined = listOf(newChunk) + retained
             val lastVisibleChunk = combined.indexOfLast(visibleChunks::contains)
             val keepCount = if (lastVisibleChunk < 0) {
@@ -570,7 +599,6 @@ internal class AgentHistoryViewModelImpl(
                     return
                 }
                 mutableLoadState.value = AgentHistoryLoadState.LoadingOlder
-                val visibleChunks = visibleChunks(chunks)
                 val batch = withContext(Dispatchers.Default) {
                     agentState.storage.readHistoryChunk(
                         fromInclusive = fromInclusive,
@@ -582,6 +610,7 @@ internal class AgentHistoryViewModelImpl(
                 } else {
                     val loaded = materializeChunk(fromInclusive, batch, activeGeneration)
                     var combined = chunks + loaded
+                    val visibleChunks = visibleChunks(chunks)
                     val firstVisibleChunk = combined.indexOfFirst(visibleChunks::contains)
                     val removeCount = (firstVisibleChunk - 1).coerceAtLeast(0)
                     if (removeCount > 0) {
@@ -612,7 +641,6 @@ internal class AgentHistoryViewModelImpl(
                     return
                 }
                 mutableLoadState.value = AgentHistoryLoadState.LoadingNewer
-                val visibleChunks = visibleChunks(chunks)
                 val batch = withContext(Dispatchers.Default) {
                     agentState.storage.readNewerHistoryChunk(
                         afterExclusive = head.newestStorageIndex,
@@ -627,6 +655,7 @@ internal class AgentHistoryViewModelImpl(
                     val retained = chunks.dropWhile { chunk ->
                         chunk.newestStorageIndex >= loaded.oldestStorageIndex
                     }
+                    val visibleChunks = visibleChunks(chunks)
                     var combined = listOf(loaded) + retained
                     val lastVisibleChunk = combined.indexOfLast(visibleChunks::contains)
                     val keepCount = if (lastVisibleChunk < 0) {
@@ -654,7 +683,8 @@ internal class AgentHistoryViewModelImpl(
             mutableLoadState.value = AgentHistoryLoadState.Ready
         }
 
-        suspend fun seekToStorageIndex(storageIndex: Int) {
+        suspend fun seekToStorageIndex(storageIndex: Int, intent: Any) {
+            if (navigationIntent !== intent || closed) return
             val snapshotIndex = agentState.latestIndex.value
             val indexEntry = withContext(Dispatchers.Default) {
                 agentState.storage.index.getExact(storageIndex)
@@ -677,35 +707,29 @@ internal class AgentHistoryViewModelImpl(
             check(batch.items.isNotEmpty()) {
                 "The selected History entry has no visible History item."
             }
-            val loaded = materializeChunk(displayIndex, batch, activeGeneration)
             val newer = withContext(Dispatchers.Default) {
                 agentState.storage.readNewerHistoryChunk(
-                    afterExclusive = loaded.newestStorageIndex,
+                    afterExclusive = batch.items.first().newestStorageIndex,
                     snapshotIndex = snapshotIndex,
                 )
             } != null
+            if (navigationIntent !== intent || closed) return
+            val loaded = materializeChunk(displayIndex, batch, activeGeneration)
             observedLatestIndex = snapshotIndex
             nextOlderIndex = batch.nextOlderIndex
             hasNewer = newer
             initialized = true
             chunks = listOf(loaded)
-            mutableFollowsLatest = !newer
+            if (navigationIntent === intent) mutableFollowsLatest.value = !newer
             pruneCaches(chunks.flatMap { chunk -> chunk.projections })
             publishHistoryItems(
                 chunks = chunks,
                 hasOlder = nextOlderIndex != null,
                 hasNewer = newer,
             )
-            if (newer) {
-                val localIndex = loaded.items.indexOfFirst { item ->
-                    item.storageIndex == displayIndex
-                }.takeIf { index -> index >= 0 } ?: 0
-                val transientPrefix =
-                    (if (mutableStreamingItem.value == null) 0 else 1) +
-                        mutablePendingTools.value.size +
-                        1
-                listState.scrollToItem(transientPrefix + localIndex)
-            }
+            val target = loaded.items.firstOrNull { it.storageIndex == displayIndex }
+                ?: loaded.items.first()
+            publishScrollEffect(intent, HistoryScrollTarget.Item(target))
             mutableLoadState.value = AgentHistoryLoadState.Ready
             refreshActiveTurnStart()
         }
@@ -719,13 +743,15 @@ internal class AgentHistoryViewModelImpl(
                     )
                     HistoryCommand.LoadOlder -> loadOlder()
                     HistoryCommand.LoadNewer -> loadNewer()
-                    HistoryCommand.JumpToLatest -> {
-                        replaceWindow(observedLatestIndex, invalidate = false)
-                        listState.requestScrollToStart()
+                    is HistoryCommand.JumpToLatest -> {
+                        if (navigationIntent === command.intent && !closed) {
+                            replaceWindow(agentState.latestIndex.value, invalidate = false)
+                            publishScrollEffect(command.intent, HistoryScrollTarget.Latest)
+                        }
                     }
 
                     is HistoryCommand.SeekToStorageIndex ->
-                        seekToStorageIndex(command.storageIndex)
+                        seekToStorageIndex(command.storageIndex, command.intent)
 
                     is HistoryCommand.UpdateLatestTurn -> {
                         val changed = activeTurn != command.active
@@ -797,47 +823,25 @@ internal class AgentHistoryViewModelImpl(
             onOlderDemand = ::registerOlderDemand,
             onNewerDemand = ::registerNewerDemand,
         )
-        if (mutableFollowsLatest) {
-            listState.requestScrollToStart()
+        visibleItems = visibleItems.filter { visible -> items.any { it === visible } }
+        mutablePendingScrollEffect.value?.let { effect ->
+            val target = effect.target
+            if (effect.generation != generation ||
+                (target is HistoryScrollTarget.Item && items.none { it === target.item })
+            ) {
+                mutablePendingScrollEffect.compareAndSet(effect, null)
+            }
         }
-        // Otherwise LazyListState restores the stable key against the provider it actually measures.
     }
 
     private fun publishPendingTools(pending: List<UnstableCleanEvent>) {
         if (mutablePendingTools.value == pending) return
         mutablePendingTools.value = pending
-        notifyContentChanged()
     }
 
     private fun publishStreamingItem(item: HistoryStreamingItem?) {
         if (mutableStreamingItem.value == item) return
         mutableStreamingItem.value = item
-        notifyContentChanged()
-    }
-
-    private fun onScrollInteraction(interaction: ScrollInteraction) {
-        if (
-            interaction.orientation != ScrollOrientation.Vertical ||
-            interaction.consumedDelta == 0
-        ) {
-            return
-        }
-        when (interaction.source) {
-            ScrollInputSource.Pointer,
-            ScrollInputSource.Keyboard,
-                -> if (interaction.consumedDelta < 0) {
-                mutableFollowsLatest = false
-            } else if (
-                !listState.canScrollForward &&
-                !mutableHistoryItems.value.hasNewer
-            ) {
-                mutableFollowsLatest = true
-            }
-
-            ScrollInputSource.FocusRelocation,
-            ScrollInputSource.Programmatic,
-                -> Unit
-        }
     }
 }
 
@@ -847,6 +851,8 @@ internal class AgentHistoryViewModelImpl(
  * [ownerScope] must be a dedicated child scope: [AgentHistoryViewModel.close] cancels it, including
  * paging, streaming observation and item payload reads. [running] belongs to the same Agent and
  * drives elapsed-turn presentation only. The caller retains storage/binding ownership.
+ * The returned owner starts structural loading asynchronously; failures are published through
+ * `loadState`. Construction does not synchronously read storage or throw for absent history.
  */
 public fun createAgentHistoryViewModel(
     source: AgentHistorySource,
@@ -910,8 +916,8 @@ private sealed interface HistoryCommand {
     data class Refresh(val latestIndex: Int) : HistoryCommand
     data object LoadOlder : HistoryCommand
     data object LoadNewer : HistoryCommand
-    data object JumpToLatest : HistoryCommand
-    data class SeekToStorageIndex(val storageIndex: Int) : HistoryCommand
+    data class JumpToLatest(val intent: Any) : HistoryCommand
+    data class SeekToStorageIndex(val storageIndex: Int, val intent: Any) : HistoryCommand
     data class UpdateLatestTurn(val active: Boolean) : HistoryCommand
     data class ExternalWriteFinished(val startIndex: Int, val endIndex: Int) : HistoryCommand
 }

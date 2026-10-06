@@ -142,17 +142,17 @@ val docsHistoryRecordingTest by testSuite(compartment = { TestCompartment.RealTi
                 }
                 clip.add(settle(), "[↓]")
                 assertNull(menu)
-                assertTrue(!agent.history.followsLatest)
+                assertTrue(!agent.history.followsLatest.value)
                 assertEquals(824, fixture.rpc.services.index.getLatestIndex(sourceIndex), "Check out must not alter storage")
                 binding.appendUserMessage((history.getValue(826) as StableUserMessage).content)
                 clip.add(settle(), "[↓]")
-                assertTrue(!agent.history.followsLatest)
+                assertTrue(!agent.history.followsLatest.value)
                 clickLabel("[↓]")
                 hover = null
                 sendMouseEvent(MouseEvent(98, 26, MouseEvent.Type.Motion))
                 repeat(3) { settle() }
                 clip.add(settle(), "Next, let's review the plan")
-                assertTrue(agent.history.followsLatest)
+                assertTrue(agent.history.followsLatest.value)
             }
             clip.save()
         } finally {

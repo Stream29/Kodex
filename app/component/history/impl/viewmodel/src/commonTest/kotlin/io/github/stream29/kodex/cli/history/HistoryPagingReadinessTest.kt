@@ -56,6 +56,7 @@ val historyPagingReadinessTest by testSuite {
                                     val window = model.historyItems.value
                                     val hasMore = if (newer) window.hasNewer else window.hasOlder
                                     if (hasMore) {
+                                        model.reportViewport(window, listOf(window.peek(0)))
                                         requests++
                                         if (newer) window.requestNewer() else window.requestOlder()
                                     }

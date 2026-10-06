@@ -7,13 +7,14 @@ kotlin {
         commonMain.dependencies {
             api(project(":app-component-agent-spec"))
             api(project(":app-component-history-spec"))
+            api(project(":agent-storage-spec-clean-models"))
+            api(project(":utils-patch-spec"))
         }
         commonTest.dependencies {
             implementation(project(":agent-storage-impl-in-memory"))
         }
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))
-            implementation(project(":app-view-patch"))
             implementation(libs.kotlin.logging)
             implementation(libs.mosaic.runtime)
         }

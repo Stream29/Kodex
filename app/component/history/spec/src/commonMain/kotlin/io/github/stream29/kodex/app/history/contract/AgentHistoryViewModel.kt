@@ -1,10 +1,7 @@
 package io.github.stream29.kodex.app.history.contract
 
-import androidx.compose.runtime.Stable
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
-import io.github.stream29.kodex.cli.components.LazyListState
-import io.github.stream29.kodex.cli.components.MutableScrollInteractionSource
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,17 +12,21 @@ import kotlin.time.Duration
  *
  * The window is the only first-level collection exposed to the View. The renderer requests
  * adjacent storage chunks when either edge enters the viewport. The implementation may evict the
- * opposite edge, including its item ViewModels, after preserving the visible LazyColumn anchor.
+ * opposite edge, including its item ViewModels, after protecting reported visible children.
+ * Old snapshots remain structurally readable after replacement, but their released children
+ * cannot start new reads. Paging commands on an obsolete snapshot are ignored.
  */
-@Stable
 public interface HistoryItemWindow {
     /** Destructive replacement generation for context-action validation. */
     public val generation: Long
 
+    /** Number of top-level rows; an expanded Work Group still occupies one row. */
     public val size: Int
 
+    /** An adjacent older structural chunk may be requested. */
     public val hasOlder: Boolean
 
+    /** Newer stored history is outside this bounded window, not necessarily in the viewport. */
     public val hasNewer: Boolean
 
     /**
@@ -42,24 +43,39 @@ public interface HistoryItemWindow {
      */
     public operator fun get(index: Int): HistoryItemViewModel
 
-    /** Requests the adjacent older structural chunk. Duplicate in-flight demand is ignored. */
+    /**
+     * Requests one adjacent older structural chunk, without reading row payloads.
+     * Duplicate in-flight, stale-window and post-close demand is ignored. Structural failures
+     * publish the owner's Failed state, not an empty page; no synchronous throws.
+     */
     public fun requestOlder()
 
-    /** Requests the adjacent newer structural chunk. Duplicate in-flight demand is ignored. */
+    /**
+     * Requests one adjacent newer structural chunk, preserving reported visible children.
+     * Duplicate in-flight, stale-window and post-close demand is ignored. Structural failures
+     * publish the owner's Failed state, not an empty page; no synchronous throws.
+     */
     public fun requestNewer()
 }
 
 /** Current structural loading state of the materialized history sequence. */
 public sealed interface AgentHistoryLoadState {
+    /** Render initial/replacement loading independently of pending and streaming content. */
     public data object Initializing : AgentHistoryLoadState
 
+    /** Render rows and enable visible-edge demands, including an empty-history marker. */
     public data object Ready : AgentHistoryLoadState
 
+    /** Keep existing rows and render the older-edge loading marker. */
     public data object LoadingOlder : AgentHistoryLoadState
 
+    /** Keep existing rows and render the newer-edge loading marker. */
     public data object LoadingNewer : AgentHistoryLoadState
 
-    /** @throws IllegalArgumentException if [message] is blank. */
+    /**
+     * Render a failure marker rather than treating unreadable history as empty.
+     * @throws IllegalArgumentException if [message] is blank.
+     */
     public data class Failed(
         public val message: String,
     ) : AgentHistoryLoadState {
@@ -80,18 +96,43 @@ public enum class HistoryStreamingKind {
 
 /** At most one active high-frequency row rendered after pending tools. */
 public sealed interface HistoryStreamingItem {
+    /** Render the turn-started indicator, before the stored window. */
     public data object Started : HistoryStreamingItem
 
+    /** Render this borrowed high-frequency stream in one transient row. */
     public data class Output(
         public val kind: HistoryStreamingKind,
         public val events: SharedFlow<ResponsesStreamEvent>,
     ) : HistoryStreamingItem
 
+    /** Render the transient compaction indicator. */
     public data object Compacting : HistoryStreamingItem
 }
 
+/** Portable destination; it carries no widget offset, transient-prefix count or storage resolver. */
+public sealed interface HistoryScrollTarget {
+    /** Scroll to the logical newest position, including pending/streaming content. */
+    public data object Latest : HistoryScrollTarget
+
+    /** Scroll to this exact top-level child in the materialized window. */
+    public data class Item(public val item: HistoryItemViewModel) : HistoryScrollTarget
+}
+
 /**
- * Complete History View state and interaction owner for one materialized Agent.
+ * One immutable navigation presentation published only after its destination has been loaded.
+ *
+ * Equality is instance identity: repeated requests for the same destination publish distinct
+ * instances. The renderer executes against [generation] and the exact child (if any), then
+ * acknowledges this instance. Unmounting does not consume it. Superseding navigation, generation
+ * invalidation, destination eviction and owner close withdraw it; no retry or journal is implied.
+ */
+public class HistoryScrollEffect(
+    public val generation: Long,
+    public val target: HistoryScrollTarget,
+)
+
+/**
+ * History data and interaction owner for one materialized Agent.
  *
  * Stable items, pending tools, and the streaming item are independent projections. The View only
  * renders their state and sends scroll/explicit expansion commands; it never reads storage.
@@ -105,43 +146,77 @@ public sealed interface HistoryStreamingItem {
  * cancellation is not converted into a successful or empty load.
  *
  * The owner calls [close] when this Agent binding is released. Unmounting or changing tabs must
- * not close it. The renderer borrows scroll state and focus/viewport presentation, and context
+ * not close it. The renderer owns scroll state and focus/viewport presentation, and context
  * menus capture the displayed generation plus storage index and validate [contains] before acting.
  */
 public interface AgentHistoryViewModel : AutoCloseable {
     /** Atomically published materialized history items. */
     public val historyItems: StateFlow<HistoryItemWindow>
 
+    /** Structural loading/failure presentation; payload failures remain on their exact children. */
     public val loadState: StateFlow<AgentHistoryLoadState>
 
+    /** Pending tools in storage order; renderer reverses them independently of stored rows. */
     public val pendingTools: StateFlow<List<UnstableCleanEvent>>
 
+    /** Transient newest row, or null when no streaming presentation is active. */
     public val streamingItem: StateFlow<HistoryStreamingItem?>
 
     /** Elapsed duration of the currently active turn, rendered by the composer. */
     public val activeTurnDuration: StateFlow<Duration?>
 
-    /** Scroll state used by the single Mosaic History View. */
-    public val listState: LazyListState
+    /**
+     * Portable intent, initially true. Genuine scrolling away sets false; genuine return to
+     * newest may set true only without newer stored history. Explicit Latest navigation restores
+     * true; exact-index navigation uses whether its loaded destination is the newest stored row.
+     * Renderer height changes maintain follow locally, without a VM command.
+     */
+    public val followsLatest: StateFlow<Boolean>
 
-    public val scrollInteractionSource: MutableScrollInteractionSource
+    /** Single pending navigation slot, retained until exact acknowledgment or withdrawal. */
+    public val pendingScrollEffect: StateFlow<HistoryScrollEffect?>
 
-    /** Observable Compose state indicating whether content changes follow the latest row. */
-    public val followsLatest: Boolean
+    /**
+     * Reports actual visible top-level children from the exact captured [window].
+     * Work Group nested content reports its owning top-level group. The latest valid report
+     * protects original visible chunks during opposite-edge eviction. Stale/released windows or
+     * foreign children are ignored; no payload read is started. The list is copied on acceptance.
+     * An empty valid report clears retention, including when the renderer unmounts.
+     * This operation is harmless after close and does not throw.
+     */
+    public fun reportViewport(window: HistoryItemWindow, visibleItems: List<HistoryItemViewModel>)
 
-    /** Validates a generation-scoped stable storage target for a context menu. */
+    /**
+     * Updates follow intent from renderer-classified genuine pointer/keyboard scrolling.
+     * The renderer sends true only when genuinely at newest; true is also rejected while the
+     * captured [window] has newer storage. Focus relocation and programmatic scrolling must not
+     * call this operation. Stale/released windows and calls after close are ignored; no throws.
+     */
+    public fun setFollowsLatest(window: HistoryItemWindow, followsLatest: Boolean)
+
+    /**
+     * Consumes only the exact pending [effect] after renderer execution. A late/duplicate ack
+     * cannot clear a newer instance. Calls after withdrawal/close are harmless; no throws.
+     */
+    public fun acknowledgeScrollEffect(effect: HistoryScrollEffect)
+
+    /** Validates a generation-scoped stable storage target; false after close; no throws. */
     public fun contains(generation: Long, storageIndex: Int): Boolean
 
-    /** Reconciles a renderer-local content-size change with current follow-latest intent. */
-    public fun notifyContentChanged()
-
-    /** Restores follow-latest intent and requests the logical newest position. */
+    /**
+     * Restores follow intent and loads the latest bounded window before publishing a Latest
+     * effect. Accepted requests supersede pending navigation. No-op after close; load failures
+     * publish Failed, not an effect; cancellation of the owner stops loading. No synchronous throws.
+     */
     public fun requestScrollToLatest()
 
     /**
      * Enqueues navigation to a committed index-timeline storage position, materializing the
      * needed bounded window when absent. This is a scroll command only, never revert/fork/write.
      * The renderer retains the stable row anchor when paging displaces the opposite edge.
+     * Repeated targets are distinct intents; the newest accepted navigation supersedes older
+     * pending/in-flight navigation. Missing/unreadable targets publish Failed, not a successful
+     * scroll. No-op after close; no synchronous throws.
      */
     public fun requestScrollToStorageIndex(storageIndex: Int)
 
@@ -149,6 +224,8 @@ public interface AgentHistoryViewModel : AutoCloseable {
      * Releases cached payloads and Work Group children, closes the command loop, and cancels the
      * dedicated History scope. Borrowed storage/Agent state remains open. No backend rollback or
      * retry is implied; stale reads cannot republish a replacement window.
+     * Pending navigation and viewport retention are withdrawn. Repeated close is harmless.
+     * This operation performs local cleanup only and does not throw.
      */
     override fun close()
 }

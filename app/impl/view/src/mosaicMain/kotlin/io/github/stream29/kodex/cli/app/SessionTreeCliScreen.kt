@@ -131,6 +131,7 @@ public fun SessionTreeCliScreen(
     val currentNewLineKey by newLineKey.collectAsState()
     val sidebarConfiguration by sidebarSettings.state.collectAsState()
     val tabStates = collectSessionTabRenderStates(navigation.tabs, navigation.selectedIndex)
+    val historyRenderStates = rememberHistoryRenderStates(navigation.tabs)
     val tabIdentityCounter = remember { mutableStateOf(0) }
     val tabIdentities = remember { mutableMapOf<SessionViewModel, SessionTabIdentity>() }
     pruneSessionTabIdentities(tabIdentities, navigation.tabs)
@@ -590,6 +591,7 @@ public fun SessionTreeCliScreen(
                                     key(agent) {
                                         AgentRuntimeScreen(
                                             viewModel = agent,
+                                            historyViewState = historyRenderStateFor(historyRenderStates, agent.history),
                                             columns = contentColumns,
                                             rows = contentRows,
                                             newLineKey = currentNewLineKey,

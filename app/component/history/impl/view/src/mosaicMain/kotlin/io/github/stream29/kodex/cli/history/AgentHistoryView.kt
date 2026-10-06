@@ -9,7 +9,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import com.jakewharton.mosaic.focus.FocusRequester
 import com.jakewharton.mosaic.layout.fillMaxSize
 import com.jakewharton.mosaic.layout.fillMaxWidth
@@ -30,6 +32,7 @@ import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
+import io.github.stream29.kodex.app.history.contract.HistoryScrollTarget
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingKind
 import io.github.stream29.kodex.app.history.contract.item.CommandExecutionHistoryAction
@@ -83,11 +86,18 @@ import kotlin.time.Duration
  *
  * Unmounting releases renderer focus bookkeeping only. The Agent binding, not this composition,
  * closes [model] and its item children.
+ * [viewState] contains only borrowed renderer geometry/input. The host retains it by exact model
+ * identity across tabs, not across binding replacement. No storage is read by this renderer.
+ * Pending navigation is acknowledged only after measuring its exact destination; unmounting
+ * beforehand leaves it pending. Framework input/render failures propagate to the renderer host.
+ * @throws IllegalStateException if [viewState] is simultaneously attached to another list, or
+ * the host does not provide a finite viewport height.
  */
 @Composable
 public fun AgentHistoryView(
     model: AgentHistoryViewModel,
     shellSessions: AgentShellSessionRegistry,
+    viewState: AgentHistoryViewState = remember(model) { AgentHistoryViewState() },
     onOpenEntryContextMenu: ((
         generation: Long,
         storageIndex: Int,
@@ -101,21 +111,99 @@ public fun AgentHistoryView(
     val loadState by model.loadState.collectAsState()
     val pendingTools by model.pendingTools.collectAsState()
     val streamingItem by model.streamingItem.collectAsState()
+    val followsLatest by model.followsLatest.collectAsState()
+    val pendingScrollEffect by model.pendingScrollEffect.collectAsState()
+    val listState = viewState.listState
+    val interactionSource = viewState.scrollInteractionSource
+    val transientPrefix = (if (streamingItem == null) 0 else 1) + pendingTools.size +
+        (if ((historyItems.hasNewer && loadState == AgentHistoryLoadState.Ready) ||
+            loadState == AgentHistoryLoadState.LoadingNewer
+        ) 1 else 0)
     val entryFocusRequesters = remember(model) {
         mutableMapOf<HistoryItemViewModel, FocusRequester>()
     }
 
     HistoryPagingFocusEffect(
-        listState = model.listState,
-        interactionSource = model.scrollInteractionSource,
+        listState = listState,
+        interactionSource = interactionSource,
         entryFocusRequesters = entryFocusRequesters,
     )
 
+    val displayedWindow = rememberUpdatedState(historyItems)
+    DisposableEffect(model, viewState) {
+        // Classify on the input emitter before its following measure pass can locally follow.
+        // The listener lives for this mount, not this window: no no-replay subscription gap
+        // when paging publishes another snapshot. The retained ViewState is unbound on disposal.
+        val unbindInput = viewState.bindInput { interaction ->
+            val window = displayedWindow.value
+            if (interaction.orientation == ScrollOrientation.Vertical &&
+                interaction.consumedDelta != 0 &&
+                (interaction.source == ScrollInputSource.Pointer ||
+                    interaction.source == ScrollInputSource.Keyboard)
+            ) {
+                if (interaction.consumedDelta < 0) {
+                    model.setFollowsLatest(window, false)
+                } else if (!listState.canScrollForward && !window.hasNewer) {
+                    model.setFollowsLatest(window, true)
+                }
+            }
+        }
+        // Clear only at actual unmount, even if a newer snapshot was published just before
+        // disposal. Ordinary window replacement must keep the last valid visible identities.
+        onDispose {
+            unbindInput()
+            model.reportViewport(model.historyItems.value, emptyList())
+        }
+    }
+    LaunchedEffect(model, viewState, historyItems) {
+        snapshotFlow { listState.layoutInfo }.collect { layout ->
+            model.reportViewport(historyItems, layout.visibleHistoryItems())
+        }
+    }
+    LaunchedEffect(model, viewState, followsLatest, pendingScrollEffect) {
+        // Layout/payload/stream height changes are local; they never generate VM navigation.
+        snapshotFlow { listState.layoutInfo to listState.canScrollForward }.collect { (_, canScroll) ->
+            if (model.followsLatest.value && model.pendingScrollEffect.value == null && canScroll) {
+                listState.requestScrollToStart()
+            }
+        }
+    }
+    LaunchedEffect(model, viewState, historyItems, pendingScrollEffect, transientPrefix) {
+        val effect = pendingScrollEffect ?: return@LaunchedEffect
+        if (effect.generation != historyItems.generation ||
+            model.pendingScrollEffect.value !== effect
+        ) return@LaunchedEffect
+        when (val target = effect.target) {
+            HistoryScrollTarget.Latest -> {
+                listState.requestScrollToStart()
+                // Requests are consumed in layout, not by scrollToItem itself. Wait across a
+                // complete renderer frame before accepting geometry from a previous provider.
+                withFrameNanos {}
+                withFrameNanos {}
+                snapshotFlow { listState.layoutInfo to listState.canScrollForward }
+                    .first { (layout, canScroll) -> layout.totalItemsCount > 0 && !canScroll }
+            }
+            is HistoryScrollTarget.Item -> {
+                val position = (0 until historyItems.size).firstOrNull {
+                    historyItems.peek(it) === target.item
+                } ?: return@LaunchedEffect
+                val rowIndex = transientPrefix + position
+                listState.scrollToItem(rowIndex)
+                withFrameNanos {}
+                withFrameNanos {}
+                snapshotFlow { listState.layoutInfo }.first { layout ->
+                    layout.visibleItemsInfo.any { it.index == rowIndex && it.key === target.item }
+                }
+            }
+        }
+        if (model.historyItems.value === historyItems) model.acknowledgeScrollEffect(effect)
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        state = model.listState,
+        state = listState,
         reverseLayout = true,
-        interactionSource = model.scrollInteractionSource,
+        interactionSource = interactionSource,
         keyboardPageSize = { viewportSize -> (viewportSize / 2).coerceAtLeast(1) },
     ) {
         streamingItem?.let { item ->
@@ -123,7 +211,11 @@ public fun AgentHistoryView(
                 key = item.historyIdentity(),
                 contentType = item.historyContentType(),
             ) {
-                item.renderTransientTail(onContentChange = model::notifyContentChanged)
+                item.renderTransientTail(onContentChange = {
+                    if (model.followsLatest.value && model.pendingScrollEffect.value == null) {
+                        listState.requestScrollToStart()
+                    }
+                })
             }
         }
 
@@ -145,7 +237,8 @@ public fun AgentHistoryView(
             item(key = NewerHistoryDemandKey) {
                 HistoryEdgeDemandEffect(
                     historyItems = historyItems,
-                    listState = model.listState,
+                    model = model,
+                    listState = listState,
                     edgePosition = 0,
                     request = historyItems::requestNewer,
                 )
@@ -192,7 +285,8 @@ public fun AgentHistoryView(
             item(key = OlderHistoryDemandKey) {
                 HistoryEdgeDemandEffect(
                     historyItems = historyItems,
-                    listState = model.listState,
+                    model = model,
+                    listState = listState,
                     edgePosition = historyItems.size - 1,
                     request = historyItems::requestOlder,
                 )
@@ -244,6 +338,7 @@ public fun AgentHistoryView(
 @Composable
 private fun HistoryEdgeDemandEffect(
     historyItems: HistoryItemWindow,
+    model: AgentHistoryViewModel,
     listState: LazyListState,
     edgePosition: Int,
     request: () -> Unit,
@@ -254,9 +349,13 @@ private fun HistoryEdgeDemandEffect(
         snapshotFlow {
             listState.layoutInfo.visibleItemsInfo.any { item -> item.key === edgeItem }
         }.first { visible -> visible }
+        model.reportViewport(historyItems, listState.layoutInfo.visibleHistoryItems())
         request()
     }
 }
+
+private fun LazyListLayoutInfo.visibleHistoryItems(): List<HistoryItemViewModel> =
+    visibleItemsInfo.mapNotNull { it.key as? HistoryItemViewModel }
 
 @Composable
 internal fun HistoryTurnTimeMarkerRow(duration: Duration) {

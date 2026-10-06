@@ -5,6 +5,7 @@ import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationDro
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import com.jakewharton.mosaic.focus.FocusRequester
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
@@ -33,6 +34,7 @@ import io.github.stream29.kodex.cli.components.TextInputValue
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.cli.history.AgentHistoryView
+import io.github.stream29.kodex.cli.history.AgentHistoryViewState
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
@@ -40,6 +42,8 @@ import io.github.stream29.kodex.openai.ContentItem
 /**
  * Borrows the exact Agent and its existing children. Unmounting does not close them.
  * Menu callbacks retain the original generation, storage index and actual item.
+ * [historyViewState] owns only borrowed renderer position/input; the root retains it across
+ * tab unmounts by exact History identity and discards it on binding replacement or close.
  */
 @Composable
 public fun AgentRuntimeScreen(
@@ -60,6 +64,7 @@ public fun AgentRuntimeScreen(
     onBrowseSuggestedWorkingDirectory: (String) -> Unit,
     onOpenSettings: () -> Unit,
     composerFocusRequester: FocusRequester? = null,
+    historyViewState: AgentHistoryViewState = remember(viewModel.history) { AgentHistoryViewState() },
 ) {
     val state by viewModel.state.collectAsState()
     val running by viewModel.running.collectAsState()
@@ -71,6 +76,7 @@ public fun AgentRuntimeScreen(
     val composerState by viewModel.composer.state.collectAsState()
     val notification by viewModel.notification.collectAsState()
     val activeTurnDuration by viewModel.history.activeTurnDuration.collectAsState()
+    val followsLatest by viewModel.history.followsLatest.collectAsState()
     val composerText = composerState.text
     val fullComposerLayout = TextInputLayout.create(
         value = TextInputValue(
@@ -130,6 +136,7 @@ public fun AgentRuntimeScreen(
             AgentHistoryView(
                 model = viewModel.history,
                 shellSessions = viewModel.shellSessions,
+                viewState = historyViewState,
                 onOpenEntryContextMenu = if (
                     state.canEditHistory(running)
                 ) {
@@ -175,7 +182,7 @@ public fun AgentRuntimeScreen(
         HistoryComposerSeparator(
             columns = columns,
             liveDuration = activeTurnDuration,
-            showScrollToLatest = !viewModel.history.followsLatest,
+            showScrollToLatest = !followsLatest,
             onScrollToLatest = viewModel.history::requestScrollToLatest,
         )
         // The same Agent notification covers append/steer and caught asynchronous resume errors.

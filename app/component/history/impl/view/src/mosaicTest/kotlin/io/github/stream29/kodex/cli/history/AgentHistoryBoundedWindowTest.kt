@@ -4,6 +4,7 @@ import androidx.compose.runtime.snapshotFlow
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
+import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
@@ -17,9 +18,7 @@ import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
-import io.github.stream29.kodex.cli.components.ScrollInputSource
-import io.github.stream29.kodex.cli.components.ScrollInteraction
-import io.github.stream29.kodex.cli.components.ScrollOrientation
+import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
@@ -62,6 +61,7 @@ val agentHistoryBoundedWindowTest by testSuite {
                 AgentHistorySource(runtime.storage, runtime.latestIndex, runtime.state),
                 supervisorChildScope(), kotlinx.coroutines.flow.MutableStateFlow(false),
             )
+            val viewState = AgentHistoryViewState()
             val started = TimeSource.Monotonic.markNow()
             try {
                 runMosaicTest {
@@ -69,6 +69,7 @@ val agentHistoryBoundedWindowTest by testSuite {
                         Column(modifier = Modifier.width(60).height(viewportHeight)) {
                             AgentHistoryView(
                                 model = model,
+                                viewState = viewState,
                                 shellSessions = BoundedWindowShellSessions,
                             )
                         }
@@ -81,6 +82,9 @@ val agentHistoryBoundedWindowTest by testSuite {
                         }
                     }
                     settleHistory()
+                    // Default-dispatcher payloads can finish after the first blank-row frame.
+                    // A wheel attempt with no loaded scrollable height correctly consumes zero.
+                    awaitWindowProgress(model, viewState, requireScrollable = true) { it.size > 0 }
                     val initialLoadElapsed = started.elapsedNow()
                     val initialWindowSize = model.historyItems.value.size
                     assertTrue(initialWindowSize in 1 until itemCount)
@@ -91,15 +95,14 @@ val agentHistoryBoundedWindowTest by testSuite {
 
                     var peakWindowSize = initialWindowSize
                     // Programmatic positioning alone does not express leaving follow-latest.
-                    model.scrollInteractionSource.tryEmit(
-                        ScrollInteraction(
-                            source = ScrollInputSource.Pointer,
-                            orientation = ScrollOrientation.Vertical,
-                            requestedDelta = -1,
-                            consumedDelta = -1,
-                        ),
+                    sendMouseEvent(
+                        MouseEvent(1, 1, MouseEvent.Type.Press, MouseEvent.Button.WheelUp),
                     )
-                    assertFalse(model.followsLatest)
+                    val firstScrolledOutput = awaitSnapshot()
+                    val scrolledOutput = settleHistory() ?: firstScrolledOutput
+                    assertTrue("999" !in scrolledOutput, "Real pointer scrolling must leave the newest message.")
+                    assertTrue("User" in scrolledOutput, "The scrolled viewport must render stored messages.")
+                    assertFalse(model.followsLatest.value)
                     var olderSteps = 0
                     while (model.historyItems.value.hasOlder) {
                         assertTrue(
@@ -109,9 +112,9 @@ val agentHistoryBoundedWindowTest by testSuite {
                         )
                         val window = model.historyItems.value
                         val newerMarkerCount = if (window.hasNewer) 1 else 0
-                        model.listState.scrollToItem(newerMarkerCount + window.size)
+                        viewState.listState.scrollToItem(newerMarkerCount + window.size)
                         settleHistory()
-                        awaitWindowProgress(model) { current ->
+                        awaitWindowProgress(model, viewState) { current ->
                             !current.hasOlder || current.oldestMessageIndex < window.oldestMessageIndex
                         }
                         peakWindowSize = maxOf(peakWindowSize, model.historyItems.value.size)
@@ -128,9 +131,9 @@ val agentHistoryBoundedWindowTest by testSuite {
                                 "$newerSteps newer steps; newest=${model.historyItems.value.newestMessageIndex}.",
                         )
                         val window = model.historyItems.value
-                        model.listState.scrollToItem(0)
+                        viewState.listState.scrollToItem(0)
                         settleHistory()
-                        awaitWindowProgress(model) { current ->
+                        awaitWindowProgress(model, viewState) { current ->
                             !current.hasNewer || current.newestMessageIndex > window.newestMessageIndex
                         }
                         peakWindowSize = maxOf(peakWindowSize, model.historyItems.value.size)
@@ -169,6 +172,8 @@ private val HistoryItemWindow.newestMessageIndex: Int
 
 private suspend fun TestMosaic<String>.awaitWindowProgress(
     model: AgentHistoryViewModel,
+    viewState: AgentHistoryViewState,
+    requireScrollable: Boolean = false,
     predicate: (HistoryItemWindow) -> Boolean,
 ) = coroutineScope {
     // Edge demands are driven by rendered frames, not by direct ViewModel calls from the test.
@@ -181,8 +186,11 @@ private suspend fun TestMosaic<String>.awaitWindowProgress(
                 combine(
                     model.historyItems,
                     model.loadState,
-                    snapshotFlow { model.listState.layoutInfo },
-                ) { window, loadState, layout ->
+                    snapshotFlow {
+                        viewState.listState.layoutInfo to viewState.listState.canScrollBackward
+                    },
+                ) { window, loadState, viewport ->
+                    val (layout, canScrollBackward) = viewport
                     // Publishing a window precedes the renderer's provider/anchor update.
                     // The next scroll must target the measured new provider, not yesterday's
                     // row indices. Keep exercising real viewport demand (never call requestOlder/
@@ -196,6 +204,9 @@ private suspend fun TestMosaic<String>.awaitWindowProgress(
                         loadState == AgentHistoryLoadState.Ready &&
                         layout.totalItemsCount == prefix + window.size + suffix &&
                         visibleRows.isNotEmpty() &&
+                        (!requireScrollable || (canScrollBackward && visibleRows.all { row ->
+                            (row.key as MessageHistoryItemViewModel).state.value is MessageHistoryItemState.Ready
+                        })) &&
                         visibleRows.all { row ->
                             val position = row.index - prefix
                             position in 0 until window.size && window.peek(position) === row.key
@@ -205,7 +216,7 @@ private suspend fun TestMosaic<String>.awaitWindowProgress(
         }
     } catch (failure: TimeoutCancellationException) {
         val window = model.historyItems.value
-        val layout = model.listState.layoutInfo
+        val layout = viewState.listState.layoutInfo
         throw AssertionError(
             "History did not advance/render: newest=${window.newestMessageIndex}, " +
                 "oldest=${window.oldestMessageIndex}, size=${window.size}, " +
@@ -222,15 +233,17 @@ private suspend fun TestMosaic<String>.awaitWindowProgress(
     }
 }
 
-private suspend fun TestMosaic<String>.settleHistory() {
+private suspend fun TestMosaic<String>.settleHistory(): String? {
+    var lastOutput: String? = null
     repeat(8) {
         try {
-            awaitSnapshot(100.milliseconds)
+            lastOutput = awaitSnapshot(100.milliseconds)
             yield()
         } catch (_: TimeoutCancellationException) {
-            return
+            return lastOutput
         }
     }
+    return lastOutput
 }
 
 private object BoundedWindowShellSessions :

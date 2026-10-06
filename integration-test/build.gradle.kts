@@ -48,7 +48,7 @@ kotlin {
         }
         jvmTest.dependencies {
             implementation(project(":rpc-impl-server"))
-            implementation(project(":app-view-patch"))
+            implementation(project(":app-component-history-impl-view"))
             implementation(project(":mcp-impl-composition"))
             implementation(project(":utils-patch-spec"))
             implementation(project(":utils-terminal-text-spec"))
