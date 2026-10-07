@@ -10,6 +10,11 @@ Give your coding agent this prompt:
 
 > Install and configure Kodex from https://github.com/Stream29/Kodex for this machine: inspect the latest release, choose the matching native CLI.
 
+## Development
+
+See [Gradle development and read-only package access](docs/gradle-development.md)
+for the default binary-fork build and explicit source-maintainer workflow.
+
 ## Reimplementation and Abstraction
 
 ### Storage

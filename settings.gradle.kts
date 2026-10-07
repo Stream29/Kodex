@@ -1,3 +1,5 @@
+import org.gradle.authentication.http.BasicAuthentication
+
 pluginManagement {
     repositories {
         google()
@@ -14,22 +16,34 @@ plugins {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
     repositories {
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = "kodexForkPackages"
+                    url = uri("https://maven.pkg.github.com/Stream29/Kodex")
+                    credentials {
+                        username = providers.gradleProperty("gpr.user")
+                            .orElse(providers.environmentVariable("GITHUB_ACTOR")).orNull
+                        password = providers.gradleProperty("gpr.key")
+                            .orElse(providers.environmentVariable("GITHUB_TOKEN")).orNull
+                    }
+                    authentication {
+                        create<BasicAuthentication>("basic")
+                    }
+                }
+            }
+            filter {
+                includeGroup("com.jakewharton.mosaic")
+                includeGroup("org.gnit.lucene-kmp")
+                includeGroup("io.modelcontextprotocol")
+            }
+        }
         google()
         mavenCentral()
     }
 }
 
 rootProject.name = "Kodex"
-
-includeBuild("Mosaic")
-includeBuild("LuceneKmp") {
-    dependencySubstitution {
-        substitute(module("org.gnit.lucene-kmp:lucene-kmp-core")).using(project(":core"))
-    }
-}
-includeBuild("KotlinMcpSdk") {
-    name = "kotlin-mcp-sdk"
-}
 
 fun includeModuleDir(path: String) {
     val projectPath = ":${path.replace('/', '-')}"
