@@ -25,7 +25,7 @@ val settingsViewModelTest by testSuite {
             val global = RpcGlobalSettings.open(rpc, openCliFrontendSettings(root), this, 120)
             val editor = RpcGlobalEditor(global, rpc, this)
             val view = views.open(create("initial OpenAI").sessionIndex)
-            val session = createSessionSettingsViewModel(RpcSessionSettingsSource(view, this), models, this)
+            val session = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, this), models), this)
             val defaults = RpcNewSessionSettings(global, this)
             val vm = createSettingsViewModel(SettingsPage.OpenAi, editor, session, defaults)
             try {
@@ -50,7 +50,7 @@ val settingsViewModelTest by testSuite {
             val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(root), this, 120)
             val editor = RpcGlobalEditor(global, services.global, this)
             val view = views.open(create("close order").sessionIndex)
-            val session = createSessionSettingsViewModel(RpcSessionSettingsSource(view, this), models, this)
+            val session = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, this), models), this)
             val defaults = RpcNewSessionSettings(global, this)
             val order = mutableListOf<String>()
             val globalFailure = IllegalStateException("global disposal")
@@ -86,7 +86,7 @@ val settingsViewModelTest by testSuite {
             val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(root), this, 120)
             val view = views.open(create("target").sessionIndex)
             val editor = RpcGlobalEditor(global, services.global, this)
-            val session = createSessionSettingsViewModel(RpcSessionSettingsSource(view, this), models, this)
+            val session = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, this), models), this)
             val vm = createSettingsViewModel(SettingsPage.General, editor, session, RpcNewSessionSettings(global, this))
             try {
                 vm.global.applicationPreferences.setNewLineKey(NewLineKey.Enter)
@@ -115,7 +115,7 @@ val settingsViewModelTest by testSuite {
             val global = RpcGlobalSettings.open(rpc, openCliFrontendSettings(root), this, 120)
             val editor = RpcGlobalEditor(global, rpc, this)
             val view = views.open(create("navigation").sessionIndex)
-            val session = createSessionSettingsViewModel(RpcSessionSettingsSource(view, this), models, this)
+            val session = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, this), models), this)
             val vm = createSettingsViewModel(SettingsPage.General, editor, session, RpcNewSessionSettings(global, this))
             try {
                 val sources = vm.global.contextSourceSettings
@@ -163,7 +163,7 @@ val settingsViewModelTest by testSuite {
             val a = create("A")
             val b = create("B")
             val view = views.open(a.sessionIndex)
-            val editor = createSessionSettingsViewModel(RpcSessionSettingsSource(view, this), models, this)
+            val editor = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, this), models), this)
             try {
                 val revision = assertIs<SessionSettingsState.Available>(editor.state.value).snapshot.revision
                 editor.renameSession(revision, "renamed")

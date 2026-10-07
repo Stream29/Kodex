@@ -156,19 +156,49 @@ public class RpcDraftSettingsSource(
     override suspend fun tryUpdateConfiguration(
         expectedRevision: Long,
         configuration: SessionSettingsConfiguration,
-    ): Boolean = change(expectedRevision) { it.withConfiguration(configuration) }
+    ): Boolean = change(expectedRevision) { baseline, current ->
+        val original = baseline.configuration
+        // Only requested fields participate in admission and replacement, under the draft mutation lock.
+        if ((original.model != configuration.model && current.model != original.model) ||
+            (original.workingDirectory != configuration.workingDirectory && current.cwd != original.workingDirectory) ||
+            (original.reasoningEffort != configuration.reasoningEffort && current.reasoning.effort != original.reasoningEffort) ||
+            (original.serviceTier != configuration.serviceTier && current.serviceTier != original.serviceTier) ||
+            (original.requestUserInputMode != configuration.requestUserInputMode &&
+                current.requestUserInputMode != original.requestUserInputMode)
+        ) null
+        else current.withConfiguration(current.configuration().copy(
+            model = if (original.model != configuration.model) configuration.model else current.model,
+            workingDirectory = if (original.workingDirectory != configuration.workingDirectory)
+                configuration.workingDirectory else current.cwd,
+            reasoningEffort = if (original.reasoningEffort != configuration.reasoningEffort)
+                configuration.reasoningEffort else current.reasoning.effort,
+            serviceTier = if (original.serviceTier != configuration.serviceTier) configuration.serviceTier else current.serviceTier,
+            requestUserInputMode = if (original.requestUserInputMode != configuration.requestUserInputMode)
+                configuration.requestUserInputMode else current.requestUserInputMode,
+        ))
+    }
 
     override suspend fun tryRenameSession(expectedRevision: Long, sessionName: String): Boolean {
         require(sessionName.isNotBlank())
-        return change(expectedRevision) { it.copy(threadName = sessionName) }
+        return change(expectedRevision) { baseline, current ->
+            if (current.threadName.ifBlank { "New Session" } != baseline.sessionName) null
+            else current.copy(threadName = sessionName)
+        }
     }
 
-    private suspend fun change(revision: Long, transform: (KodexAgentSettings) -> KodexAgentSettings): Boolean =
+    private suspend fun change(
+        revision: Long,
+        transform: (SessionSettingsSnapshot, KodexAgentSettings) -> KodexAgentSettings?,
+    ): Boolean =
         lock.withLock {
             if (!owner.isActive || !draft.editable.value) return false
             val before = state.value as? SessionSettingsDataState.Available ?: return false
             if (before.snapshot.revision != revision) return false
-            draft.edit(transform)
+            val accepted = draft.tryEdit { current ->
+                if (!owner.isActive) null
+                else transform(before.snapshot, current)
+            }
+            if (!accepted) return false
             val next = snapshot(revision)
             if (next != before) mutable.value = snapshot(revision + 1)
             true

@@ -106,12 +106,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
 
-/** Application shell; all mutable child state is collected by its exact renderer. */
+/**
+ * Application shell; all mutable child state is collected by its exact renderer.
+ * Throwing History/catalog actions reach [onOperationFailure] once. Its default
+ * preserves the CLI coroutine exception boundary; cancellation never enters the reporter.
+ */
 @Composable
 public fun SessionTreeCliScreen(
     viewModel: ApplicationViewModel,
     newLineKey: StateFlow<NewLineKey>,
     sidebarSettings: SidebarSettingsViewModel,
+    onOperationFailure: (Throwable) -> Unit = { throw it },
     openMcpUrl: suspend (String) -> Boolean = { url ->
         openExternalUrl(url) !is OpenExternalUrlResult.Failed
     },
@@ -133,12 +138,12 @@ public fun SessionTreeCliScreen(
     val tabStates = collectSessionTabRenderStates(navigation.tabs, navigation.selectedIndex)
     val historyRenderStates = rememberHistoryRenderStates(navigation.tabs)
     val tabIdentityCounter = remember { mutableStateOf(0) }
-    val tabIdentities = remember { mutableMapOf<SessionViewModel, SessionTabIdentity>() }
+    val tabIdentities = remember { mutableListOf<Pair<SessionViewModel, SessionTabIdentity>>() }
     pruneSessionTabIdentities(tabIdentities, navigation.tabs)
     val componentTabEntries = tabStates.map { tab ->
-        val identity = tabIdentities.getOrPut(tab.target) {
+        val identity = tabIdentities.firstOrNull { it.first === tab.target }?.second ?: run {
             tabIdentityCounter.value += 1
-            SessionTabIdentity("tab-${tabIdentityCounter.value}")
+            SessionTabIdentity("tab-${tabIdentityCounter.value}").also { tabIdentities += tab.target to it }
         }
         identity to (
             tab.target to SessionTabPresentation(
@@ -930,43 +935,33 @@ public fun SessionTreeCliScreen(
                 onDismiss = { historyMenu = null },
                 onRevert = { request ->
                     historyMenu = null
-                    try {
-                        request.agent.requestHistoryRevert(request.storageIndex + 1, request.generation)
-                    } catch (cancellation: CancellationException) {
-                        throw cancellation
-                    } catch (_: Throwable) {
-                        // The Agent reports rejected history operations.
+                    scope.launch {
+                        reportOperationFailure(onOperationFailure) {
+                            request.agent.requestHistoryRevert(request.storageIndex + 1, request.generation)
+                        }
                     }
                 },
                 onRevertAndEdit = { request, text ->
                     historyMenu = null
                     scope.launch {
-                        try {
+                        reportOperationFailure(onOperationFailure) {
                             revertAndEdit(request.agent, request.storageIndex, request.generation, text)
                             // Let the closed menu dispose before moving focus out of its restore target.
                             withFrameNanos { }
                             if (currentSelectedAgent === request.agent) {
                                 currentComposerFocusRequester.requestFocus()
                             }
-                        } catch (failure: CancellationException) {
-                            throw failure
-                        } catch (_: Throwable) {
-                            // Revert failures are reported by the Agent; the draft is left unchanged.
                         }
                     }
                 },
                 onFork = { request ->
                     historyMenu = null
                     scope.launch {
-                        try {
+                        reportOperationFailure(onOperationFailure) {
                             val index = request.session.fork(
                                 request.agent, request.storageIndex + 1, request.generation,
                             )
                             viewModel.openSession(index)
-                        } catch (failure: CancellationException) {
-                            throw failure
-                        } catch (_: Throwable) {
-                            // Fork and open each report at their owning boundary.
                         }
                     }
                 },
@@ -989,7 +984,7 @@ public fun SessionTreeCliScreen(
             when (val open = popup) {
                 ApplicationPopupState.Closed -> Unit
                 is ApplicationPopupState.SessionCatalog ->
-                    SessionCatalogPopup(open.viewModel)
+                    SessionCatalogPopup(open.viewModel, onFailure = onOperationFailure)
 
                 is ApplicationPopupState.Settings -> TuiTheme(
                     colorScheme = tuiColorSchemeFor(terminal.theme),
@@ -1032,12 +1027,22 @@ public fun SessionTreeCliScreen(
     }
 }
 
+private suspend fun reportOperationFailure(report: (Throwable) -> Unit, action: suspend () -> Unit) {
+    try {
+        action()
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (failure: Throwable) {
+        report(failure)
+    }
+}
+
 /** Renderer-local retention only; departed handles never keep a tab identity alive. */
 internal fun pruneSessionTabIdentities(
-    identities: MutableMap<SessionViewModel, SessionTabIdentity>,
+    identities: MutableList<Pair<SessionViewModel, SessionTabIdentity>>,
     openTabs: List<SessionViewModel>,
 ) {
-    identities.keys.retainAll(openTabs.toSet())
+    identities.removeAll { (previous, _) -> openTabs.none { it === previous } }
 }
 
 private data class SidebarShellSessionMenuRequest(

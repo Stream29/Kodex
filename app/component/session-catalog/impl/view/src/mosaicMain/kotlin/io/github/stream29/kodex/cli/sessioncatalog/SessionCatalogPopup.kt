@@ -55,17 +55,21 @@ import kotlinx.datetime.TimeZone
  * renders the VM's exact existing Session Delete child. Unmount cancels renderer
  * callers and dismisses its captured confirmation, not the catalog/backend.
  *
- * Open and fork failures are already reported by the host registry and do not
- * dismiss the popup; cancellation is rethrown. Other command failures escape the
- * renderer caller. No failure is rendered as a successfully loaded empty list.
+ * Open and fork failures reach [onFailure] without dismissing the popup.
+ * Its throwing default reaches the host coroutine exception boundary, like other
+ * throwing commands. Cancellation is always rethrown, never reported as failure.
+ * No failure is rendered as a successfully loaded empty list.
  */
 @Composable
-public fun BoxScope.SessionCatalogPopup(viewModel: SessionCatalogViewModel) {
-    key(viewModel) { SessionCatalogPopupContent(viewModel) }
+public fun BoxScope.SessionCatalogPopup(
+    viewModel: SessionCatalogViewModel,
+    onFailure: (Throwable) -> Unit = { throw it },
+) {
+    key(viewModel) { SessionCatalogPopupContent(viewModel, onFailure) }
 }
 
 @Composable
-private fun BoxScope.SessionCatalogPopupContent(viewModel: SessionCatalogViewModel) {
+private fun BoxScope.SessionCatalogPopupContent(viewModel: SessionCatalogViewModel, onFailure: (Throwable) -> Unit) {
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
     val deleteTarget by viewModel.deleteTarget.collectAsState()
@@ -106,8 +110,8 @@ private fun BoxScope.SessionCatalogPopupContent(viewModel: SessionCatalogViewMod
                                                 viewModel.requestOpen(entry)
                                             } catch (cancellation: CancellationException) {
                                                 throw cancellation
-                                            } catch (_: Throwable) {
-                                                // The host Session registry reports open failures.
+                                            } catch (failure: Throwable) {
+                                                onFailure(failure)
                                             }
                                         }
                                     }
@@ -159,8 +163,8 @@ private fun BoxScope.SessionCatalogPopupContent(viewModel: SessionCatalogViewMod
                             viewModel.fork(request.entry.sessionIndex)
                         } catch (cancellation: CancellationException) {
                             throw cancellation
-                        } catch (_: Throwable) {
-                            // The host registry/catalog reports fork failures.
+                        } catch (failure: Throwable) {
+                            onFailure(failure)
                         }
                     }
                 }

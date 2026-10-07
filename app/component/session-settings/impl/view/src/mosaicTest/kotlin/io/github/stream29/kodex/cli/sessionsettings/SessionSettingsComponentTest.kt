@@ -154,7 +154,7 @@ val sessionSettingsComponentTest by testSuite {
                 snapshotWith("Select directory")
                 val handle = assertNotNull(vm.directoryPicker.value)
                 val browser = browsers.single()
-                assertSame(browser, handle.viewModel)
+                assertSame(browser, handle.selection.picker)
                 sendKeyEvent(KeyboardEvent(codepoint = 'A'.code))
                 snapshotWith("Filter: A")
                 assertEquals("A", browser.state.value.filterQuery)
@@ -243,9 +243,9 @@ private suspend fun withRenderer(
     val models = MutableStateFlow(listOf(
         ModelInfo(OpenAiModelId("catalog-a"), "a"), ModelInfo(OpenAiModelId("catalog-b"), "b"),
     ))
-    val vm = createSessionSettingsViewModel(ports, models, scope, {
+    val vm = createSessionSettingsViewModel(SessionSettingsDependencies(ports, models, {
         RenderBrowser(it).also(browsers::add)
-    })
+    }), scope)
     try { action(vm, browsers) } finally { vm.close(); scope.cancel() }
 }
 private suspend fun TestMosaic<String>.snapshotWith(expected: String): String {

@@ -39,8 +39,11 @@ import io.github.stream29.kodex.cli.components.ScrollInteraction
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,6 +63,329 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 val agentHistoryRendererStateTest by testSuite {
+    for (newer in listOf(false, true)) {
+        val direction = if (newer) "newer" else "older"
+        test("delayed $direction payload has a real blank row when logical edge is consumed") {
+            coroutineScope {
+                val releasePayload = CompletableDeferred<Unit>()
+                lateinit var edge: RendererMessage
+                val payload = launch(start = CoroutineStart.LAZY) {
+                    releasePayload.await()
+                    edge.state.value = rendererMessagePayload(edge.index)
+                }
+                edge = RendererMessage(if (newer) 30 else 1, payload)
+                var demands = 0
+                val window = RendererWindow(
+                    (30 downTo 1).map { if (it == edge.index) edge else RendererMessage(it) },
+                    hasNewer = true, hasOlder = true,
+                    onOlderDemand = { if (!newer) demands++ },
+                    onNewerDemand = { if (newer) demands++ },
+                )
+                val model = RendererHistoryModel(window)
+                model.followsLatest.value = false
+                val viewState = AgentHistoryViewState()
+                try {
+                    runMosaicTest {
+                        try {
+                            setContentAndSnapshot {
+                                Column(Modifier.width(40).height(8)) {
+                                    AgentHistoryView(model, RendererShellSessions, viewState)
+                                }
+                            }
+                            settleRendererFrames()
+                            if (newer) viewState.listState.requestScrollToStart()
+                            else viewState.listState.requestScrollToEnd()
+                            settleRendererFrames()
+                            assertTrue(payload.isActive && !payload.isCompleted)
+                            assertTrue(edge in window.accessedItems, "Only renderer get may activate the lazy payload.")
+                            assertTrue(edge.state.value is MessageHistoryItemState.Loading)
+                            val blankLayout = viewState.listState.layoutInfo
+                            val blank = blankLayout.visibleItemsInfo.single { it.key === edge }
+                            // Mosaic StringTextLayout splits "" into ONE line; it is not a
+                            // zero-height message. The empty demand marker is a different item.
+                            assertEquals(1, blank.size, "The actual Loading renderer must be measured.")
+                            assertEquals(1, demands, "Visibility, not payload Ready, admits one-shot demand.")
+                            assertTrue(window.isMeasuredHistoryWindow(
+                                model, blankLayout, viewState.listState.canScrollBackward,
+                            ), "Count/key identity alone can accept a blank payload frame.")
+                            assertFalse(window.isMeasuredHistoryWindow(
+                                model, blankLayout, viewState.listState.canScrollBackward,
+                                requireReadyRows = true,
+                            ), "Every pressure handoff must reject unloaded visible rows.")
+                            assertFalse(window.isMeasuredHistoryWindow(
+                                model, blankLayout, viewState.listState.canScrollBackward,
+                                inputTarget = edge, expectedTargetHeight = 2,
+                            ))
+                            val anchor = blankLayout.visibleItemsInfo.first()
+
+                            releasePayload.complete(Unit)
+                            payload.join() // No renderer frame is pumped by the payload completion.
+                            assertTrue(edge.state.value is MessageHistoryItemState.Ready)
+                            assertSame(blankLayout, viewState.listState.layoutInfo)
+                            assertFalse(window.isMeasuredHistoryWindow(
+                                model, blankLayout, viewState.listState.canScrollBackward,
+                                inputTarget = edge, expectedTargetHeight = 2,
+                            ), "Ready cannot borrow the previously measured Loading height.")
+                            assertFalse(window.isMeasuredHistoryWindow(
+                                model, blankLayout, viewState.listState.canScrollBackward,
+                                requireReadyRows = true,
+                            ), "Visible Ready alone must not authorize a still-blank measured frame.")
+
+                            settleRendererFrames()
+                            val readyLayout = viewState.listState.layoutInfo
+                            assertTrue(window.isMeasuredHistoryWindow(
+                                model, readyLayout, viewState.listState.canScrollBackward,
+                                inputTarget = edge, expectedTargetHeight = 2,
+                            ))
+                            assertTrue(window.isMeasuredHistoryWindow(
+                                model, readyLayout, viewState.listState.canScrollBackward,
+                                requireReadyRows = true,
+                            ))
+                            val restored = readyLayout.visibleItemsInfo.first()
+                            assertSame(anchor.key, restored.key)
+                            assertEquals(anchor.offset, restored.offset)
+                            assertEquals(1, demands, "Payload height alone does not restart the one-shot effect.")
+                            assertFalse(model.followsLatest.value, "Logical positioning is not genuine input.")
+                        } finally {
+                            cancel()
+                        }
+                    }
+                } finally {
+                    releasePayload.cancel()
+                    payload.cancel()
+                    withContext(NonCancellable) { payload.join() }
+                    model.close()
+                }
+            }
+        }
+
+        for (keyboard in listOf(false, true)) {
+            val input = if (keyboard) "keyboard" else "pointer"
+            test("delayed $direction payload preserves the consumed edge anchor until real $input input") {
+                coroutineScope {
+                    val releasePayload = CompletableDeferred<Unit>()
+                    lateinit var edge: RendererMessage
+                    val payload = launch(start = CoroutineStart.LAZY) {
+                        releasePayload.await()
+                        edge.state.value = rendererMessagePayload(edge.index)
+                    }
+                    edge = RendererMessage(if (newer) 31 else 0, payload)
+                    val originalItems = (30 downTo 1).map { RendererMessage(it) }
+                    val original = RendererWindow(originalItems, hasNewer = true, hasOlder = true)
+                    val model = RendererHistoryModel(original)
+                    model.followsLatest.value = false
+                    val viewState = AgentHistoryViewState()
+                    val interactions = mutableListOf<ScrollInteraction>()
+                    var demands = 0
+                    try {
+                        runMosaicTest {
+                            val collector = launch(start = CoroutineStart.UNDISPATCHED) {
+                                viewState.scrollInteractionSource.interactions.collect { interactions += it }
+                            }
+                            try {
+                                setContentAndSnapshot {
+                                    Column(Modifier.width(40).height(8)) {
+                                        AgentHistoryView(model, RendererShellSessions, viewState)
+                                    }
+                                }
+                                settleRendererFrames()
+                                assertFalse(payload.isActive)
+                                if (newer) viewState.listState.requestScrollToStart()
+                                else viewState.listState.requestScrollToEnd()
+                                settleRendererFrames()
+                                val consumedLayout = viewState.listState.layoutInfo
+                                val anchor = consumedLayout.visibleItemsInfo.first()
+
+                                // Publication AFTER the actual logical request was consumed.
+                                // Neither a new window nor its later height may repin that request.
+                                val replacement = RendererWindow(
+                                    if (newer) listOf(edge) + originalItems.dropLast(1)
+                                    else originalItems.drop(1) + edge,
+                                    hasNewer = true, hasOlder = true,
+                                    onOlderDemand = { if (!newer) demands++ },
+                                    onNewerDemand = { if (newer) demands++ },
+                                )
+                                assertFalse(edge in replacement.accessedItems)
+                                model.historyItems.value = replacement
+                                assertSame(consumedLayout, viewState.listState.layoutInfo)
+                                settleRendererFrames()
+                                assertTrue(edge in replacement.accessedItems)
+                                assertTrue(payload.isActive && !payload.isCompleted)
+                                assertTrue(edge.state.value is MessageHistoryItemState.Loading)
+                                val loadingLayout = viewState.listState.layoutInfo
+                                assertTrue(loadingLayout.visibleItemsInfo.none { it.key === edge })
+                                assertSame(anchor.key, loadingLayout.visibleItemsInfo.first().key)
+                                assertEquals(anchor.offset, loadingLayout.visibleItemsInfo.first().offset)
+                                assertTrue(replacement.isMeasuredHistoryWindow(
+                                    model, loadingLayout, viewState.listState.canScrollBackward,
+                                ), "Provider identity does not imply edge payload/geometry readiness.")
+                                assertTrue(replacement.isMeasuredHistoryWindow(
+                                    model, loadingLayout, viewState.listState.canScrollBackward,
+                                    requireReadyRows = true,
+                                ), "Even ready visible rows do not load or reveal the offscreen edge.")
+                                assertFalse(replacement.isMeasuredHistoryWindow(
+                                    model, loadingLayout, viewState.listState.canScrollBackward,
+                                    inputTarget = edge, expectedTargetHeight = 2,
+                                ))
+                                assertEquals(0, demands, "Overscan get is not visible-edge demand.")
+
+                                releasePayload.complete(Unit)
+                                payload.join()
+                                assertTrue(edge.state.value is MessageHistoryItemState.Ready)
+                                assertSame(loadingLayout, viewState.listState.layoutInfo)
+                                assertFalse(replacement.isMeasuredHistoryWindow(
+                                    model, loadingLayout, viewState.listState.canScrollBackward,
+                                    inputTarget = edge, expectedTargetHeight = 2,
+                                ), "Ready alone is still not measured input geometry.")
+                                settleRendererFrames()
+                                val grownLayout = viewState.listState.layoutInfo
+                                assertSame(anchor.key, grownLayout.visibleItemsInfo.first().key)
+                                assertEquals(anchor.offset, grownLayout.visibleItemsInfo.first().offset)
+                                assertTrue(grownLayout.visibleItemsInfo.none { it.key === edge })
+                                assertFalse(replacement.isMeasuredHistoryWindow(
+                                    model, grownLayout, viewState.listState.canScrollBackward,
+                                    inputTarget = edge, expectedTargetHeight = 2,
+                                ), "An offscreen Ready payload must not authorize a visible-edge assertion.")
+                                assertEquals(0, demands, "Faithful anchor preservation is not a paging failure.")
+
+                                if (keyboard) {
+                                    // Real pointer focus on a fully visible stored neighbour, not
+                                    // Tab relocation onto the offscreen target or a fake key callback.
+                                    val neighbour = grownLayout.visibleItemsInfo.first { row ->
+                                        row.key is MessageHistoryItemViewModel && row.offset >= 0 &&
+                                            row.offset + row.size <= grownLayout.viewportEndOffset
+                                    }
+                                    sendMouseEvent(MouseEvent(1, neighbour.offset, MouseEvent.Type.Press, MouseEvent.Button.Left))
+                                    sendMouseEvent(MouseEvent(1, neighbour.offset, MouseEvent.Type.Release))
+                                    settleRendererFrames()
+                                    assertEquals(0, demands, "Acquiring focus must not stand in for Page input.")
+                                    assertSame(anchor.key, viewState.listState.layoutInfo.visibleItemsInfo.first().key)
+                                    assertEquals(anchor.offset, viewState.listState.layoutInfo.visibleItemsInfo.first().offset)
+                                    sendKeyEvent(KeyboardEvent(if (newer) KeyboardEvent.PageDown else KeyboardEvent.PageUp))
+                                } else {
+                                    sendMouseEvent(MouseEvent(
+                                        1, 1, MouseEvent.Type.Press,
+                                        if (newer) MouseEvent.Button.WheelDown else MouseEvent.Button.WheelUp,
+                                    ))
+                                }
+                                settleRendererFrames()
+                                assertTrue(replacement.isMeasuredHistoryWindow(
+                                    model, viewState.listState.layoutInfo, viewState.listState.canScrollBackward,
+                                    inputTarget = edge, expectedTargetHeight = 2,
+                                ), "Genuine continuation must reveal the Ready edge at its real height.")
+                                assertEquals(1, demands)
+                                assertTrue(interactions.any {
+                                    it.source == (if (keyboard) ScrollInputSource.Keyboard else ScrollInputSource.Pointer) &&
+                                        (if (newer) it.consumedDelta > 0 else it.consumedDelta < 0)
+                                }, "The actual input must consume movement, not just enqueue an event.")
+                                assertFalse(model.followsLatest.value, "This fixture still has newer stored history.")
+                                settleRendererFrames()
+                                assertEquals(1, demands, "Same mounted edge is one-shot, not a retry loop.")
+                            } finally {
+                                collector.cancel()
+                                withContext(NonCancellable) { collector.join() }
+                                cancel()
+                            }
+                        }
+                    } finally {
+                        releasePayload.cancel()
+                        payload.cancel()
+                        withContext(NonCancellable) { payload.join() }
+                        model.close()
+                    }
+                }
+            }
+        }
+    }
+
+    for (newer in listOf(false, true)) {
+        val direction = if (newer) "newer" else "older"
+        test("published $direction window cannot borrow old provider readiness before anchored edge input") {
+            var originalDemands = 0
+            var replacementDemands = 0
+            val originalItems = (30 downTo 1).map { RendererMessage(it) }
+            val original = RendererWindow(
+                originalItems, hasNewer = true, hasOlder = true,
+                onOlderDemand = { if (!newer) originalDemands++ },
+                onNewerDemand = { if (newer) originalDemands++ },
+            )
+            val model = RendererHistoryModel(original)
+            val viewState = AgentHistoryViewState()
+            try {
+                runMosaicTest {
+                    try {
+                        setContentAndSnapshot {
+                            Column(Modifier.width(40).height(8)) {
+                                AgentHistoryView(model, RendererShellSessions, viewState)
+                            }
+                        }
+                        settleRendererFrames()
+                        repeat(2) {
+                            sendMouseEvent(MouseEvent(1, 1, MouseEvent.Type.Press, MouseEvent.Button.WheelUp))
+                        }
+                        settleRendererFrames()
+                        assertFalse(model.followsLatest.value, "Genuine input must leave follow before paging.")
+                        val layout = viewState.listState.layoutInfo
+                        val anchor = layout.visibleItemsInfo.first()
+                        assertTrue(original.isMeasuredHistoryWindow(
+                            model, layout, viewState.listState.canScrollBackward,
+                        ))
+                        model.loadState.value = AgentHistoryLoadState.LoadingOlder
+                        assertFalse(original.isMeasuredHistoryWindow(
+                            model, layout, viewState.listState.canScrollBackward,
+                        ), "A lagging Ready emission cannot authorize an owner that is now loading.")
+                        model.loadState.value = AgentHistoryLoadState.Ready
+                        val demandsBefore = originalDemands
+                        val replacement = RendererWindow(
+                            if (newer) listOf(RendererMessage(31)) + originalItems.dropLast(1)
+                            else originalItems.drop(1) + RendererMessage(0),
+                            hasNewer = true, hasOlder = true,
+                            onOlderDemand = { if (!newer) replacementDemands++ },
+                            onNewerDemand = { if (newer) replacementDemands++ },
+                        )
+
+                        // Publication is deliberately before the next renderer frame. Count and
+                        // every visible key still match the OLD candidate, exactly as a lagging
+                        // combine collector can observe while the owner has already advanced.
+                        model.historyItems.value = replacement
+                        assertSame(layout, viewState.listState.layoutInfo)
+                        assertFalse(original.isMeasuredHistoryWindow(
+                            model, layout, viewState.listState.canScrollBackward,
+                        ), "An emitted old window must not authorize navigation from the new model value.")
+                        assertFalse(replacement.isMeasuredHistoryWindow(
+                            model, layout, viewState.listState.canScrollBackward,
+                        ), "Equal row counts are not provider identity.")
+
+                        settleRendererFrames()
+                        val measured = viewState.listState.layoutInfo
+                        assertTrue(replacement.isMeasuredHistoryWindow(
+                            model, measured, viewState.listState.canScrollBackward,
+                        ))
+                        val restored = measured.visibleItemsInfo.first()
+                        assertSame(anchor.key, restored.key, "Publication alone must retain the actual anchor.")
+                        assertEquals(anchor.offset, restored.offset)
+                        assertEquals(demandsBefore, originalDemands, "No obsolete edge is requested.")
+                        assertEquals(0, replacementDemands, "An anchored middle viewport is not edge demand.")
+
+                        // Logical list intent is resolved by the provider used for measurement;
+                        // never call requestOlder/requestNewer or a VM navigation command here.
+                        if (newer) viewState.listState.requestScrollToStart()
+                        else viewState.listState.requestScrollToEnd()
+                        settleRendererFrames()
+                        val edge = replacement.peek(if (newer) 0 else replacement.size - 1)
+                        assertTrue(viewState.listState.layoutInfo.visibleItemsInfo.any { it.key === edge })
+                        assertEquals(1, replacementDemands, "Only the actual rendered edge demands one page.")
+                        assertFalse(model.followsLatest.value, "Programmatic edge positioning is not user intent.")
+                    } finally {
+                        cancel()
+                    }
+                }
+            } finally {
+                model.close()
+            }
+        }
+    }
+
     test("genuine pointer and keyboard input owns follow intent, not programmatic positioning") {
         val model = RendererHistoryModel(rendererWindow())
         val viewState = AgentHistoryViewState()
@@ -325,21 +651,36 @@ private fun rendererWindow(hasNewer: Boolean = false): RendererWindow =
 private class RendererWindow(
     val items: List<HistoryItemViewModel>,
     override val hasNewer: Boolean = false,
+    override val hasOlder: Boolean = false,
+    private val onOlderDemand: () -> Unit = {},
+    private val onNewerDemand: () -> Unit = {},
 ) : HistoryItemWindow {
+    val accessedItems = mutableSetOf<HistoryItemViewModel>()
     override val generation = 0L
     override val size: Int get() = items.size
-    override val hasOlder = false
     override fun peek(index: Int): HistoryItemViewModel = items[index]
-    override fun get(index: Int): HistoryItemViewModel = items[index]
-    override fun requestOlder() = Unit
-    override fun requestNewer() = Unit
+    override fun get(index: Int): HistoryItemViewModel {
+        val item = items[index]
+        accessedItems += item
+        // The real HistoryItemWindow.get starts its child's existing lazy Job; peek never does.
+        ((item as? MessageHistoryItemViewModel)?.state?.value as? MessageHistoryItemState.Loading)
+            ?.loadingJob?.start()
+        return item
+    }
+    override fun requestOlder() = onOlderDemand()
+    override fun requestNewer() = onNewerDemand()
 }
 
-private class RendererMessage(override val index: Int) : MessageHistoryItemViewModel {
+private fun rendererMessagePayload(index: Int) = MessageHistoryItemState.Ready(
+    StableUserMessage(listOf(ContentItem.InputText("row-$index"))), Duration.ZERO,
+)
+
+private class RendererMessage(
+    override val index: Int,
+    loadingJob: Job? = null,
+) : MessageHistoryItemViewModel {
     override val state = MutableStateFlow<MessageHistoryItemState>(
-        MessageHistoryItemState.Ready(
-            StableUserMessage(listOf(ContentItem.InputText("row-$index"))), Duration.ZERO,
-        ),
+        loadingJob?.let { MessageHistoryItemState.Loading(it) } ?: rendererMessagePayload(index),
     )
     override suspend fun readTimestamp(): Instant? = null
 }

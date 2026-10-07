@@ -3,10 +3,51 @@ package io.github.stream29.kodex.cli.newsession
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.test.*
 import io.github.stream29.kodex.openai.*
+import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
+import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import kotlin.test.*
+import kotlin.time.Duration.Companion.seconds
 
 val newSessionViewModelTest by testSuite {
+    test("real frontend fixture closeAndJoin closes an unclosed factory draft before returning") {
+        withContext(Dispatchers.Default) {
+            val fixture = startRpcFrontendFixture(this)
+            val model = fixture.draft("unclosed child")
+            model.composer.update("local only")
+            val closing = async { fixture.closeAndJoin() }
+            try {
+                withTimeout(10.seconds) { closing.await() }
+                assertEquals(ComposerLifecycle.Closed, model.composer.state.value.lifecycle)
+                assertFailsWith<IllegalStateException> { model.composer.update("late") }
+                assertFailsWith<IllegalStateException> { model.updateModel(OpenAiModelId("late")) }
+            } finally {
+                model.close()
+                withContext(NonCancellable) { closing.await() }
+            }
+        }
+    }
+    test("factory parent cancellation without explicit close closes original Composer and all observers") {
+        withRpcFrontend {
+            val parent = Job(coroutineContext[Job])
+            val factory = DefaultNewSessionViewModelFactory(views, sessions, models,
+                CoroutineScope(coroutineContext + parent))
+            val model = factory.create(NewSessionViewModelArguments("Owned", testSettings("", root)))
+            model.composer.update("retained")
+            parent.cancelAndJoin() // Not model.close(); exercise the supplied factory owner.
+            assertEquals(ComposerLifecycle.Closed, model.composer.state.value.lifecycle)
+            assertTrue(parent.children.none())
+            assertFailsWith<IllegalStateException> { model.composer.update("late") }
+            assertFailsWith<IllegalStateException> { model.updateModel(OpenAiModelId("late")) }
+            assertTrue(services.global.getSessionCatalog(true).isEmpty())
+            val sibling = draft("borrowed backend still alive")
+            try {
+                sibling.composer.update("local")
+                assertEquals(ComposerLifecycle.Open, sibling.composer.state.value.lifecycle)
+            } finally { sibling.close() }
+        }
+    }
     test("draft Agent submit port cannot report persistence or consume the input") {
         withRpcFrontend {
             val draft = draft()

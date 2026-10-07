@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.app.settings
 
 import io.github.oshai.kotlinlogging.KotlinLogging
-import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.sessionrename.createSessionRenameViewModel
 import io.github.stream29.kodex.app.sessionrename.contract.SessionRenameDependencies
 import io.github.stream29.kodex.app.settings.contract.*
@@ -26,17 +25,6 @@ public fun createSessionSettingsViewModel(
     ownerScope: CoroutineScope,
 ): SessionSettingsViewModel = DefaultSessionSettingsViewModelFactory.create(dependencies, ownerScope)
 
-/** Compatibility creation seam; the same dependency-only implementation and cancel-on-close policy. */
-public fun createSessionSettingsViewModel(
-    source: SessionSettingsDataSource,
-    models: StateFlow<List<ModelInfo>>,
-    ownerScope: CoroutineScope,
-    createDirectoryPicker: (Path) -> DirectoryPickerViewModel? = { null },
-    reportUnhandledError: ((Throwable, Path) -> Unit)? = null,
-): SessionSettingsViewModel = createSessionSettingsViewModel(
-    SessionSettingsDependencies(source, models, createDirectoryPicker, reportUnhandledError), ownerScope,
-)
-
 private class SessionSettingsViewModelImpl(
     private val dependencies: SessionSettingsDependencies,
     ownerScope: CoroutineScope,
@@ -48,14 +36,12 @@ private class SessionSettingsViewModelImpl(
     private val active get() = !closed && owner.isActive
     private class Command(val cwd: Path, val execute: suspend () -> Unit)
     private val commands = Channel<Command>(Channel.UNLIMITED)
-    private val effectChannel = Channel<SessionSettingsEffect>(Channel.BUFFERED)
     private val mutableState = MutableStateFlow(project())
     private val mutableDirectoryPicker = MutableStateFlow<SessionWorkingDirectoryPicker?>(null)
     private val mutableRename = MutableStateFlow<SessionSettingsRename?>(null)
     override val state = mutableState.asStateFlow()
     override val directoryPicker = mutableDirectoryPicker.asStateFlow()
     override val rename = mutableRename.asStateFlow()
-    override val effects = effectChannel.receiveAsFlow()
 
     init {
         scope.launch {
@@ -158,7 +144,6 @@ private class SessionSettingsViewModelImpl(
         )
         hidePage()
         mutableRename.value = handle
-        effectChannel.trySend(SessionSettingsEffect.RenameSession(expectedRevision, snapshot.sessionName))
     }
     override fun dismissRename(expected: SessionSettingsRename): Boolean {
         if (!mutableRename.compareAndSet(expected, null)) return false
@@ -182,7 +167,6 @@ private class SessionSettingsViewModelImpl(
         if (closed) return
         closed = true
         hidePage()
-        effectChannel.close()
         commands.cancel()
         owner.cancel()
         source.close()

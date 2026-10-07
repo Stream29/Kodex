@@ -20,7 +20,7 @@ internal fun rememberHistoryRenderStates(
 ): MutableList<Pair<AgentHistoryViewModel, AgentHistoryViewState>> {
     val histories = buildList {
         tabs.filterIsInstance<PersistedSessionViewModel>().forEach { tab ->
-            key(tab) {
+            key(SessionRenderKey(tab)) {
                 tab.rootAgent.collectAsState().value?.history?.let(::add)
             }
         }

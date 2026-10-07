@@ -19,8 +19,6 @@ val sessionSettingsContractTest by testSuite {
         assertFailsWith<IllegalArgumentException> {
             SessionSettingsSnapshot(0, SessionSettingsTargetKind.NewSessionDraft, "  ", configuration, true)
         }
-        assertFailsWith<IllegalArgumentException> { SessionSettingsEffect.RenameSession(-1, "name") }
-        assertFailsWith<IllegalArgumentException> { SessionSettingsEffect.RenameSession(0, " ") }
     }
     test("frontend options must be unique and include exact stored model") {
         val snapshot = SessionSettingsSnapshot(0, SessionSettingsTargetKind.MaterializedSession, "name", configuration, true)

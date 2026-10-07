@@ -19,21 +19,32 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** Opening or editing this object does not allocate a backend Session. */
+/**
+ * Opening or editing this object does not allocate a backend Session.
+ * Its original local owner is a child of [ownerScope]; parent cancellation/join
+ * closes Composer and its observations. Explicit close cancels only this child.
+ * Views and the shared backend are borrowed, never closed or stopped here.
+ */
 public class RpcSessionDraft(
     initialSettings: KodexAgentSettings,
     private val views: RpcSessionViews,
+    ownerScope: CoroutineScope,
 ) : AutoCloseable {
     private val mutex = Mutex()
     private val mutableSettings = MutableStateFlow(initialSettings)
     public val settings: StateFlow<KodexAgentSettings> = mutableSettings.asStateFlow()
     private val mutableEditable = MutableStateFlow(true)
     public val editable: StateFlow<Boolean> = mutableEditable.asStateFlow()
-    private val composerScope = CoroutineScope(SupervisorJob())
+    private val owner = SupervisorJob(requireNotNull(ownerScope.coroutineContext[Job]) {
+        "A draft requires an explicit coroutine owner."
+    })
+    private val composerScope = CoroutineScope(ownerScope.coroutineContext + owner)
     public val composer: ComposerViewModel = createComposerViewModel(
         ownerId = ComposerOwnerId("session-draft"),
         dependencies = object : ComposerDependencies {
@@ -64,38 +75,61 @@ public class RpcSessionDraft(
     private var explicitlyNamed = false
     private var renameAttempted = false
 
+    init {
+        owner.invokeOnCompletion { close() }
+    }
+
     public suspend fun edit(transform: (KodexAgentSettings) -> KodexAgentSettings): Unit = mutex.withLock {
         check(!closed && createdIndex == null) { "The draft is no longer editable." }
-        val next = transform(settings.value)
+        owner.ensureActive()
+        applyEdit(transform(settings.value))
+    }
+
+    /** Source CAS rejects nonwritable/conflicting edits at the original mutation lock. */
+    internal suspend fun tryEdit(transform: (KodexAgentSettings) -> KodexAgentSettings?): Boolean = mutex.withLock {
+        if (closed || createdIndex != null) return false
+        owner.ensureActive()
+        val next = transform(settings.value) ?: return false
+        applyEdit(next)
+        true
+    }
+
+    private fun applyEdit(next: KodexAgentSettings) {
         if (next.threadName != settings.value.threadName) explicitlyNamed = true
         mutableSettings.value = next
     }
 
     public suspend fun clearExplicitThreadName(): Unit = mutex.withLock {
         check(!closed && createdIndex == null) { "The draft is no longer editable." }
+        owner.ensureActive()
         explicitlyNamed = false
         mutableSettings.value = mutableSettings.value.copy(threadName = "")
     }
 
     /** Creation and initial append are distinct commits; failure never rolls back the entity. */
     public suspend fun materialize(): RpcSessionView = mutex.withLock {
+        owner.ensureActive()
         check(!closed)
         val captured = composer.state.value
         val index = createdIndex ?: views.services.global.createSession(settings.value).also {
             createdIndex = it
             mutableEditable.value = false
         }
+        owner.ensureActive()
         check(!closed) { "The draft was closed while creating its Session." }
         val view = views.open(index)
+        owner.ensureActive()
         if (explicitlyNamed && !renameAttempted) {
             renameAttempted = true
             val current = view.current().settings
             current.editField(current.value.threadName, { it.threadName }, { it.copy(threadName = settings.value.threadName) })
         }
         if (!submitted && captured.text.isNotBlank()) {
+            owner.ensureActive()
             view.current().appendUserMessage(listOf(ContentItem.InputText(captured.text.trim())))
             submitted = true
             composer.clear(captured.revision)
+            owner.ensureActive()
             requireNotNull(view.agent.value).resume()
         }
         view

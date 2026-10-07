@@ -45,7 +45,7 @@ val settingsPopupInputTest by testSuite {
                 fixture.create("other target")
                 val view = fixture.views.open(target.sessionIndex)
                 val editor = RpcGlobalEditor(global, rpc, fixture)
-                val session = createSessionSettingsViewModel(RpcSessionSettingsSource(view, fixture), fixture.models, fixture)
+                val session = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, fixture), fixture.models), fixture)
                 val defaults = RpcNewSessionSettings(global, fixture)
                 val vm = createSettingsViewModel(SettingsPage.General, editor, session, defaults)
                 var visible by mutableStateOf(true)

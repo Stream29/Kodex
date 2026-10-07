@@ -18,16 +18,16 @@ val workingDirectoryOwnershipTest by testSuite {
         runTest {
             val source = DirectorySettingsSource()
             val browsers = mutableListOf<SettingsBrowser>()
-            val editor = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this, {
+            val editor = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), {
                 SettingsBrowser(it).also(browsers::add)
-            })
+            }), this)
             try {
                 editor.requestWorkingDirectory(7)
                 val old = assertNotNull(editor.directoryPicker.value)
                 editor.requestWorkingDirectory(7)
                 val current = assertNotNull(editor.directoryPicker.value)
                 assertNotSame(old, current)
-                assertSame(browsers[1], current.viewModel)
+                assertSame(browsers[1], current.selection.picker)
                 assertEquals(7L, current.expectedRevision)
                 assertFalse(old.selection.isActive)
                 assertEquals(1, browsers[0].closes)
@@ -43,7 +43,7 @@ val workingDirectoryOwnershipTest by testSuite {
         runTest {
             val source = DirectorySettingsSource()
             val browser = SettingsBrowser(Path("/initial"))
-            val editor = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this, { browser })
+            val editor = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), { browser }), this)
             try {
                 editor.requestWorkingDirectory(7)
                 val handle = assertNotNull(editor.directoryPicker.value)
@@ -63,7 +63,7 @@ val workingDirectoryOwnershipTest by testSuite {
     test("a revision changed after opening is consumed without a stale configuration write") {
         runTest {
             val source = DirectorySettingsSource()
-            val editor = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this, { SettingsBrowser(it) })
+            val editor = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), { SettingsBrowser(it) }), this)
             try {
                 editor.requestWorkingDirectory(7)
                 val handle = assertNotNull(editor.directoryPicker.value)
@@ -80,7 +80,7 @@ val workingDirectoryOwnershipTest by testSuite {
     test("target loss after opening closes the selected child without retargeting") {
         runTest {
             val source = DirectorySettingsSource()
-            val editor = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this, { SettingsBrowser(it) })
+            val editor = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), { SettingsBrowser(it) }), this)
             try {
                 editor.requestWorkingDirectory(7)
                 val handle = assertNotNull(editor.directoryPicker.value)
@@ -97,10 +97,10 @@ val workingDirectoryOwnershipTest by testSuite {
         runTest {
             val source = DirectorySettingsSource()
             var creations = 0
-            val editor = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this, {
+            val editor = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), {
                 creations++
                 SettingsBrowser(it)
-            })
+            }), this)
             try {
                 editor.requestWorkingDirectory(6)
                 source.publish(editable = false)
@@ -118,9 +118,9 @@ val workingDirectoryOwnershipTest by testSuite {
         runTest {
             val source = DirectorySettingsSource()
             val browsers = mutableListOf<SettingsBrowser>()
-            val editor = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this, {
+            val editor = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), {
                 SettingsBrowser(it).also(browsers::add)
-            })
+            }), this)
             editor.requestWorkingDirectory(7)
             val first = assertNotNull(editor.directoryPicker.value)
             assertTrue(editor.dismissWorkingDirectoryPicker(first))

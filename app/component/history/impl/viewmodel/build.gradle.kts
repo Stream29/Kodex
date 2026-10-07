@@ -14,6 +14,7 @@ kotlin {
             implementation(project(":utils-rpc-exception-spec"))
         }
         commonTest.dependencies {
+            implementation(libs.kotlinx.coroutines.test)
             implementation(project(":openai-spec-json-codec"))
             implementation(project(":agent-session-impl-in-memory"))
             implementation(project(":agent-session-test"))

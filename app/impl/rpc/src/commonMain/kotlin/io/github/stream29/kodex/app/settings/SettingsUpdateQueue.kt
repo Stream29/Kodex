@@ -10,7 +10,8 @@ import kotlinx.coroutines.launch
 /**
  * Serializes immediate Settings writes in a scope that outlives popup disposal.
  *
- * Closing rejects new work and drains already accepted writes.
+ * Closing rejects new work and drains accepted writes while the consumer is alive.
+ * A terminal consumer cancellation is not a successful drain and rejects later admission.
  */
 public class SettingsUpdateQueue(
     commandScope: CoroutineScope,
@@ -23,28 +24,47 @@ public class SettingsUpdateQueue(
 
     private val commands = Channel<SettingsCommand>(Channel.UNLIMITED)
     private var closed: Boolean = false
+    private var terminalFailure: Throwable? = null
+    public var drained: Boolean = false
+        private set
 
     private val worker = commandScope.launch {
-        for (command in commands) {
-            try {
-                command.block()
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (failure: Throwable) {
-                reportFailure(failure, command.reportError, "Failed to persist a Settings update.")
+        try {
+            for (command in commands) {
+                try {
+                    command.block()
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (failure: Throwable) {
+                    reportFailure(failure, command.reportError, "Failed to persist a Settings update.")
+                }
             }
+            drained = true
+        } finally {
+            // Release pending closures even if the parent survives a command-local cancellation.
+            commands.cancel()
+        }
+    }
+
+    init {
+        worker.invokeOnCompletion { failure ->
+            terminalFailure = failure
+            commands.cancel()
         }
     }
 
     public fun submit(
         reportError: ((Throwable) -> Unit)? = null,
         block: suspend () -> Unit,
-    ) {
-        if (closed) return
+    ): Boolean {
+        if (closed) return false
         val command = SettingsCommand(block, reportError)
-        commands.trySend(command).exceptionOrNull()?.let { failure ->
+        if (!worker.isActive || commands.trySend(command).isFailure) {
+            val failure = IllegalStateException("The Settings update consumer is no longer available.", terminalFailure)
             reportFailure(failure, reportError, "Failed to enqueue a Settings update.")
+            return false
         }
+        return true
     }
 
     private fun reportFailure(failure: Throwable, reportError: ((Throwable) -> Unit)?, message: String) {
@@ -56,14 +76,15 @@ public class SettingsUpdateQueue(
         }
     }
 
-    public fun close(onDrained: (() -> Unit)? = null) {
+    /** [onClosed] is cleanup, invoked even after cancellation; its flag is true only on normal drain. */
+    public fun close(onClosed: ((drained: Boolean) -> Unit)? = null) {
         if (!closed) {
             closed = true
             commands.close()
         }
-        onDrained?.let { callback ->
+        onClosed?.let { callback ->
             worker.invokeOnCompletion {
-                callback()
+                callback(drained)
             }
         }
     }

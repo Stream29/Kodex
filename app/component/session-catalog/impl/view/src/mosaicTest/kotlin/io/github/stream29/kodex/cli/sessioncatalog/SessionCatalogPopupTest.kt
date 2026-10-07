@@ -124,16 +124,24 @@ val sessionCatalogPopupTest by testSuite {
 
     test("failed row open leaves the popup and does not synthesize empty or dismiss") {
         val ports = RenderCatalogPorts().apply { openFailure = IllegalStateException("registry") }
+        val failures = mutableListOf<Throwable>()
         withCatalog(ports) { vm ->
             runMosaicTest {
                 setContentAndSnapshot {
-                    TuiPopupHost(modifier = Modifier.width(90).height(28)) { SessionCatalogPopup(vm) }
+                    TuiPopupHost(modifier = Modifier.width(90).height(28)) {
+                        SessionCatalogPopup(vm, onFailure = { failures += it })
+                    }
                 }
                 clickCatalogText(catalogSnapshot("[first]"), "[first]")
                 val remaining = catalogSnapshot("[first]")
                 assertFalse("No persisted sessions" in remaining, remaining)
                 assertEquals(listOf(7), ports.opened)
                 assertEquals(emptyList(), ports.dismissed)
+                assertEquals(1, failures.size)
+                assertSame<Throwable>(
+                    requireNotNull(ports.openFailure),
+                    generateSequence<Throwable>(failures.single()) { it.cause }.last(),
+                )
             }
         }
     }

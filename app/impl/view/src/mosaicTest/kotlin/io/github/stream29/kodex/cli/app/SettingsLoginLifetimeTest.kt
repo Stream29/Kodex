@@ -36,19 +36,19 @@ val settingsLoginLifetimeTest by testSuite {
         withSettingsApplication { app ->
             val root = app.viewModel
             val survivor = requireNotNull(root.navigation.value.selected)
-            val identities = mutableMapOf<SessionViewModel, SessionTabIdentity>()
+            val identities = mutableListOf<Pair<SessionViewModel, SessionTabIdentity>>()
             val survivorIdentity = SessionTabIdentity("survivor")
-            identities[survivor] = survivorIdentity
+            identities += survivor to survivorIdentity
             repeat(40) { index ->
                 val departed = root.createNewSessionTab()
                 val departedIdentity = SessionTabIdentity("departed-$index")
-                identities[departed] = departedIdentity
+                identities += departed to departedIdentity
                 // Retain the original exact-target callback, not the later slot or label.
                 val staleClose: suspend () -> Boolean = { root.closeTab(departed) }
                 assertTrue(root.closeTab(departed))
                 pruneSessionTabIdentities(identities, root.navigation.value.tabs)
-                assertEquals(setOf(survivor), identities.keys)
-                assertSame(survivorIdentity, identities[survivor])
+                assertSame(survivor, identities.single().first)
+                assertSame(survivorIdentity, identities.single().second)
                 val replacement = root.createNewSessionTab()
                 val before = root.navigation.value
                 assertFalse(staleClose())

@@ -1,10 +1,16 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package io.github.stream29.kodex.cli.history
 
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentsession.inmemory.InMemoryKodexSessionRepository
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableTextToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
+import io.github.stream29.kodex.agentstorage.contract.IndexVersioned
+import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
@@ -13,16 +19,25 @@ import io.github.stream29.kodex.app.history.contract.HistoryScrollEffect
 import io.github.stream29.kodex.app.history.contract.HistoryScrollTarget
 import io.github.stream29.kodex.app.history.contract.item.HistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemViewModel
+import io.github.stream29.kodex.app.history.contract.item.MessageHistoryItemState
 import io.github.stream29.kodex.app.history.contract.item.WorkGroupHistoryItemViewModel
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -31,9 +46,386 @@ import kotlin.test.assertNotSame
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
 
 val historyViewportAndScrollEffectTest by testSuite {
+    for (latest in listOf(false, true)) {
+        test("blocked original structural read plus 256 navigations retains newest ${if (latest) "latest" else "exact item"}") {
+            coroutineScope {
+                val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+                val runtime = repository.open(repository.create()).runtime
+                runtime.modify { storage ->
+                    for (index in 1..20) storage.index[index] = navigationMessage("$index")
+                }
+                val entered = CompletableDeferred<Unit>()
+                val release = CompletableDeferred<Unit>()
+                val armed = MutableStateFlow(false)
+                val original = runtime.storage
+                val storage = object : KodexAgentStorage by original {
+                    override val index = object : IndexVersioned<CleanIndexEntry> by original.index {
+                        override suspend fun getExact(index: Int): CleanIndexEntry? {
+                            if (index == 7 && armed.compareAndSet(true, false)) {
+                                entered.complete(Unit)
+                                release.await()
+                            }
+                            return original.index.getExact(index)
+                        }
+                    }
+                }
+                val model = createAgentHistoryViewModel(
+                    AgentHistorySource(storage, runtime.latestIndex, runtime.state),
+                    supervisorChildScope(), MutableStateFlow(false),
+                )
+                try {
+                    model.awaitNavigationReady()
+                    model.requestScrollToStorageIndex(5)
+                    val stale = model.awaitEffect()
+                    armed.value = true
+                    model.requestScrollToStorageIndex(7)
+                    withContext(Dispatchers.Default) { withTimeout(5.seconds) { entered.await() } }
+                    // No loop can consume while the real read is blocked. Exceeds Channel.BUFFERED.
+                    repeat(256) { number ->
+                        if (number % 2 == 0) model.requestScrollToLatest()
+                        else model.requestScrollToStorageIndex(3)
+                    }
+                    if (latest) model.requestScrollToLatest() else model.requestScrollToStorageIndex(3)
+                    assertNull(model.pendingScrollEffect.value)
+                    release.complete(Unit)
+                    val newest = model.awaitEffect()
+                    if (latest) assertEquals(HistoryScrollTarget.Latest, newest.target)
+                    else assertEquals(3, assertIs<MessageHistoryItemViewModel>(
+                        assertIs<HistoryScrollTarget.Item>(newest.target).item,
+                    ).index)
+                    model.acknowledgeScrollEffect(stale)
+                    assertSame(newest, model.pendingScrollEffect.value)
+                    model.awaitNavigationReady()
+                    assertSame(newest, model.pendingScrollEffect.value, "Late mount must still receive newest intent.")
+                } finally {
+                    release.complete(Unit)
+                    model.close()
+                    repository.cancelAndJoin()
+                }
+            }
+        }
+    }
+    test("saturated navigation followed by nonce withdrawal preserves new Latest after queued invalidation drains") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify { storage ->
+                for (index in 1..20) storage.index[index] = navigationMessage("$index")
+                // UpdateLatestTurn's duration is a FIFO barrier after Invalidate, not a transient effect probe.
+                storage.timestamp[1] = Clock.System.now()
+            }
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val armed = MutableStateFlow(false)
+            val original = runtime.storage
+            val storage = object : KodexAgentStorage by original {
+                override val index = object : IndexVersioned<CleanIndexEntry> by original.index {
+                    override suspend fun getExact(index: Int): CleanIndexEntry? {
+                        if (index == 7 && armed.compareAndSet(true, false)) {
+                            entered.complete(Unit)
+                            release.await()
+                        }
+                        return original.index.getExact(index)
+                    }
+                }
+            }
+            val nonce = MutableStateFlow(40L)
+            val running = MutableStateFlow(false)
+            val scheduler = TestCoroutineScheduler()
+            val owner = Job(coroutineContext[Job])
+            val model = createAgentHistoryViewModel(
+                AgentHistorySource(storage, runtime.latestIndex, runtime.state, nonce),
+                CoroutineScope(coroutineContext + owner + StandardTestDispatcher(scheduler) + scheduler), running,
+            )
+            suspend fun settleUntil(condition: () -> Boolean) = withContext(Dispatchers.Default) {
+                withTimeout(5.seconds) {
+                    do { scheduler.runCurrent(); yield() } while (!condition())
+                    scheduler.runCurrent()
+                }
+            }
+            try {
+                settleUntil { model.loadState.value == AgentHistoryLoadState.Ready }
+                model.requestScrollToLatest()
+                settleUntil { model.pendingScrollEffect.value != null }
+                val stale = model.pendingScrollEffect.value!!
+                val old = model.historyItems.value
+                val oldChild = assertIs<MessageHistoryItemViewModel>(old.peek(0))
+                val oldLoading = assertIs<MessageHistoryItemState.Loading>(oldChild.state.value).loadingJob
+                armed.value = true
+                model.requestScrollToStorageIndex(7)
+                settleUntil { entered.isCompleted }
+                repeat(256) { number ->
+                    if (number % 2 == 0) model.requestScrollToLatest()
+                    else model.requestScrollToStorageIndex(3)
+                }
+                nonce.value = 41
+                // The real nonce collector withdraws old navigation and suspends sending
+                // Invalidate into the full channel while getExact(7) still holds the read gate.
+                scheduler.runCurrent()
+                assertNull(model.pendingScrollEffect.value)
+                model.requestScrollToLatest()
+                running.value = true
+                scheduler.runCurrent() // Queue the turn barrier behind the suspended Invalidate sender.
+                release.complete(Unit)
+                settleUntil { model.activeTurnDuration.value != null }
+                // Every saturated wake and Invalidate preceding this FIFO barrier has been consumed.
+                running.value = false
+                settleUntil { model.activeTurnDuration.value == null }
+                assertEquals(AgentHistoryLoadState.Ready, model.loadState.value)
+                val finalWindow = model.historyItems.value
+                assertEquals(41L, finalWindow.generation)
+                val finalChild = assertIs<MessageHistoryItemViewModel>(finalWindow.peek(0))
+                assertEquals(20, finalChild.index)
+                val finalEffect = assertIs<HistoryScrollEffect>(model.pendingScrollEffect.value)
+                assertEquals(41L, finalEffect.generation)
+                assertEquals(HistoryScrollTarget.Latest, finalEffect.target)
+                assertTrue(model.followsLatest.value)
+                assertFalse(model.contains(old.generation, 20))
+                assertTrue(oldLoading.isCancelled, "Old-generation lazy payload was released, not reused.")
+                old[0] // Late access must not restart the released child.
+                assertSame(oldLoading, assertIs<MessageHistoryItemState.Loading>(oldChild.state.value).loadingJob)
+                assertFailsWith<IllegalStateException> { oldChild.readTimestamp() }
+                for (index in 0 until finalWindow.size) assertNotSame(oldChild, finalWindow.peek(index))
+                finalWindow[0]
+                settleUntil { finalChild.state.value is MessageHistoryItemState.Ready }
+                assertIs<MessageHistoryItemState.Ready>(finalChild.state.value)
+                finalChild.readTimestamp() // New child has the current load context, unlike the released one.
+                model.acknowledgeScrollEffect(stale)
+                assertSame(finalEffect, model.pendingScrollEffect.value)
+                model.acknowledgeScrollEffect(finalEffect)
+                assertNull(model.pendingScrollEffect.value)
+            } finally {
+                release.complete(Unit)
+                model.close()
+                owner.cancel()
+                settleUntil { owner.isCompleted }
+                owner.join()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+    for (rewrite in listOf(false, true)) {
+        for (appendAfterCompletion in listOf(false, true)) {
+            test("delayed ${if (rewrite) "rewrite" else "revert"} completion retains new nonce Latest${if (appendAfterCompletion) " beyond captured end" else ""}") {
+                coroutineScope {
+                    val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+                    val runtime = repository.open(repository.create()).runtime
+                    runtime.modify { storage ->
+                        for (index in 1..20) storage.index[index] = navigationMessage("$index")
+                        storage.timestamp[1] = Clock.System.now()
+                    }
+                    val entered = CompletableDeferred<Unit>()
+                    val release = CompletableDeferred<Unit>()
+                    val armed = MutableStateFlow(false)
+                    val original = runtime.storage
+                    val storage = object : KodexAgentStorage by original {
+                        override val index = object : IndexVersioned<CleanIndexEntry> by original.index {
+                            override suspend fun getExact(index: Int): CleanIndexEntry? {
+                                if (index == 7 && armed.compareAndSet(true, false)) {
+                                    entered.complete(Unit)
+                                    release.await()
+                                }
+                                return original.index.getExact(index)
+                            }
+                        }
+                    }
+                    // Control delivery, not History behavior: real storage/runtime mutation below,
+                    // actual VM nonce/state collectors and bounded command channel throughout.
+                    val latest = MutableStateFlow(20)
+                    val state = MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.UserMessage)
+                    val nonce = MutableStateFlow(40L)
+                    val running = MutableStateFlow(false)
+                    val scheduler = TestCoroutineScheduler()
+                    val owner = Job(coroutineContext[Job])
+                    val ownerScope = CoroutineScope(
+                        coroutineContext + owner + StandardTestDispatcher(scheduler) + scheduler,
+                    )
+                    val model = createAgentHistoryViewModel(
+                        AgentHistorySource(storage, latest, state, nonce), ownerScope, running,
+                    )
+                    suspend fun settleUntil(condition: () -> Boolean) = withContext(Dispatchers.Default) {
+                        withTimeout(5.seconds) {
+                            do { scheduler.runCurrent(); yield() } while (!condition())
+                            scheduler.runCurrent()
+                        }
+                    }
+                    try {
+                        settleUntil { model.loadState.value == AgentHistoryLoadState.Ready }
+                        model.requestScrollToLatest()
+                        settleUntil { model.pendingScrollEffect.value != null }
+                        val stale = model.pendingScrollEffect.value!!
+                        val old = model.historyItems.value
+                        val oldChild = assertIs<MessageHistoryItemViewModel>(old.peek(0))
+                        val oldLoading = assertIs<MessageHistoryItemState.Loading>(oldChild.state.value).loadingJob
+                        armed.value = true
+                        model.requestScrollToStorageIndex(7)
+                        settleUntil { entered.isCompleted }
+                        repeat(256) { number ->
+                            if (number % 2 == 0) model.requestScrollToLatest()
+                            else model.requestScrollToStorageIndex(3)
+                        }
+                        state.value = KodexAgentStateValue.ExternalWrite
+                        scheduler.runCurrent() // Capture the operation's start cursor, before mutation.
+                        val endIndex = if (rewrite) 20 else 3
+                        runtime.modify {
+                            it.revert(endIndex)
+                            it.index[endIndex] = navigationMessage("replacement")
+                        }
+                        assertEquals(endIndex, runtime.latestIndex.value)
+                        latest.value = endIndex
+                        nonce.value = 41
+                        scheduler.runCurrent() // Refresh/Invalidate senders wait behind saturated wakes.
+                        state.value = KodexAgentStateValue.UserMessage
+                        scheduler.runCurrent() // Actual state collector queues ExternalWriteFinished.
+                        if (appendAfterCompletion) {
+                            runtime.modify { it.index[endIndex + 1] = navigationMessage("appended") }
+                            latest.value = endIndex + 1
+                            scheduler.runCurrent() // Completion's end is now stale, nonce is still 41.
+                        }
+                        assertNull(model.pendingScrollEffect.value)
+                        model.requestScrollToLatest()
+                        val published = CompletableDeferred<Pair<HistoryScrollEffect, HistoryItemWindow>>()
+                        ownerScope.launch(UnconfinedTestDispatcher(scheduler)) {
+                            val effect = model.pendingScrollEffect.first { it?.generation == 41L }!!
+                            // Capture at publication, not after drain: a second replacement must fail
+                            // exact identity assertions even if it leaves an equivalent destination.
+                            published.complete(effect to model.historyItems.value)
+                        }
+                        running.value = true
+                        scheduler.runCurrent() // FIFO duration barrier is AFTER completion's sender.
+                        release.complete(Unit)
+                        settleUntil { model.activeTurnDuration.value != null }
+                        assertTrue(published.isCompleted, "New navigation must publish before the FIFO barrier.")
+                        val (effect, window) = published.await()
+                        val child = assertIs<MessageHistoryItemViewModel>(window.peek(0))
+                        assertSame(window, model.historyItems.value, "Completion must not replace the new window.")
+                        assertSame(child, model.historyItems.value.peek(0))
+                        assertSame(effect, model.pendingScrollEffect.value, "Completion must not withdraw the effect.")
+                        assertEquals(41L, window.generation)
+                        assertEquals(latest.value, child.index)
+                        assertEquals(HistoryScrollTarget.Latest, effect.target)
+                        assertEquals(41L, effect.generation)
+                        assertFalse(window.hasNewer, "Captured end must not regress the actual latest cursor.")
+                        assertTrue(model.followsLatest.value)
+                        assertEquals(AgentHistoryLoadState.Ready, model.loadState.value)
+                        assertTrue(oldLoading.isCancelled)
+                        assertFalse(model.contains(old.generation, 20))
+                        old[0]
+                        assertSame(oldLoading, assertIs<MessageHistoryItemState.Loading>(oldChild.state.value).loadingJob)
+                        assertFailsWith<IllegalStateException> { oldChild.readTimestamp() }
+                        assertNotSame(oldChild, child)
+                        window[0]
+                        settleUntil { child.state.value is MessageHistoryItemState.Ready }
+                        val expected = if (appendAfterCompletion) "appended" else "replacement"
+                        assertEquals(navigationMessage(expected), assertIs<MessageHistoryItemState.Ready>(child.state.value).event)
+                        child.readTimestamp()
+                        running.value = false
+                        settleUntil { model.activeTurnDuration.value == null }
+                        // No renderer was mounted, and repeated/stale acknowledgments are harmless.
+                        assertSame(window, model.historyItems.value)
+                        model.acknowledgeScrollEffect(stale)
+                        model.acknowledgeScrollEffect(stale)
+                        assertSame(effect, model.pendingScrollEffect.value)
+                        model.acknowledgeScrollEffect(effect)
+                        assertNull(model.pendingScrollEffect.value)
+                    } finally {
+                        release.complete(Unit)
+                        model.close()
+                        owner.cancel()
+                        settleUntil { owner.isCompleted }
+                        owner.join()
+                        repository.cancelAndJoin()
+                    }
+                }
+            }
+        }
+    }
+
+    test("no nonce same cursor destructive rewrite releases old child and withdraws its exact effect") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify {
+                for (index in 1..8) it.index[index] = navigationMessage("$index")
+                it.timestamp[1] = Clock.System.now()
+            }
+            val latest = MutableStateFlow(8)
+            val state = MutableStateFlow<KodexAgentStateValue>(KodexAgentStateValue.UserMessage)
+            val running = MutableStateFlow(false)
+            val scheduler = TestCoroutineScheduler()
+            val owner = Job(coroutineContext[Job])
+            val model = createAgentHistoryViewModel(
+                AgentHistorySource(runtime.storage, latest, state),
+                CoroutineScope(coroutineContext + owner + StandardTestDispatcher(scheduler) + scheduler), running,
+            )
+            suspend fun settleUntil(condition: () -> Boolean) = withContext(Dispatchers.Default) {
+                withTimeout(5.seconds) {
+                    do { scheduler.runCurrent(); yield() } while (!condition())
+                    scheduler.runCurrent()
+                }
+            }
+            try {
+                settleUntil { model.loadState.value == AgentHistoryLoadState.Ready }
+                model.requestScrollToStorageIndex(8)
+                settleUntil { model.pendingScrollEffect.value != null }
+                val effect = model.pendingScrollEffect.value!!
+                val old = model.historyItems.value
+                val oldChild = assertIs<MessageHistoryItemViewModel>(assertIs<HistoryScrollTarget.Item>(effect.target).item)
+                val oldLoading = assertIs<MessageHistoryItemState.Loading>(oldChild.state.value).loadingJob
+                state.value = KodexAgentStateValue.ExternalWrite
+                scheduler.runCurrent()
+                runtime.modify {
+                    it.revert(8)
+                    it.index[8] = navigationMessage("rewritten without nonce")
+                }
+                assertEquals(8, runtime.latestIndex.value)
+                // No cursor/nonce notification can perform this invalidation for the completion.
+                state.value = KodexAgentStateValue.UserMessage
+                scheduler.runCurrent()
+                running.value = true
+                scheduler.runCurrent()
+                settleUntil { model.activeTurnDuration.value != null }
+                val window = model.historyItems.value
+                assertEquals(old.generation + 1, window.generation)
+                assertNotSame(old, window)
+                assertNull(model.pendingScrollEffect.value)
+                model.acknowledgeScrollEffect(effect)
+                assertNull(model.pendingScrollEffect.value)
+                assertTrue(oldLoading.isCancelled)
+                old[0]
+                assertSame(oldLoading, assertIs<MessageHistoryItemState.Loading>(oldChild.state.value).loadingJob)
+                assertFailsWith<IllegalStateException> { oldChild.readTimestamp() }
+                assertFalse(model.contains(old.generation, 8))
+                val child = assertIs<MessageHistoryItemViewModel>(window[0])
+                assertNotSame(oldChild, child)
+                settleUntil { child.state.value is MessageHistoryItemState.Ready }
+                assertEquals(
+                    navigationMessage("rewritten without nonce"),
+                    assertIs<MessageHistoryItemState.Ready>(child.state.value).event,
+                )
+                model.requestScrollToLatest()
+                settleUntil { model.pendingScrollEffect.value != null }
+                val current = model.pendingScrollEffect.value!!
+                assertEquals(window.generation, current.generation)
+                model.acknowledgeScrollEffect(effect)
+                assertSame(current, model.pendingScrollEffect.value)
+                model.acknowledgeScrollEffect(current)
+                assertNull(model.pendingScrollEffect.value)
+            } finally {
+                model.close()
+                owner.cancel()
+                settleUntil { owner.isCompleted }
+                owner.join()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
     test("unmounted repeated exact targets persist and stale acknowledgments cannot consume them") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())

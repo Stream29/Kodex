@@ -18,8 +18,8 @@ val sessionRenameAdapterTest by testSuite {
         runTest {
             val source = RenameSettingsSource(7, "first")
             val other = RenameSettingsSource(9, "second")
-            val first = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this)
-            val second = createSessionSettingsViewModel(other, MutableStateFlow(emptyList()), this)
+            val first = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList())), this)
+            val second = createSessionSettingsViewModel(SessionSettingsDependencies(other, MutableStateFlow(emptyList())), this)
             try {
                 first.requestRename(7)
                 second.requestRename(9)
@@ -41,7 +41,7 @@ val sessionRenameAdapterTest by testSuite {
     test("dismissed exact rename cannot dispatch late writes or close its Settings source") {
         runTest {
             val source = RenameSettingsSource(7, "first")
-            val parent = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this)
+            val parent = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList())), this)
             try {
                 parent.requestRename(7)
                 val handle = assertNotNull(parent.rename.value)

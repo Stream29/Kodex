@@ -38,7 +38,7 @@ internal fun collectSessionTabRenderStates(
     selectedIndex: Int,
 ): List<SessionTabRenderState> = buildList(tabs.size) {
     tabs.forEachIndexed { index, target ->
-        key(target) {
+        key(SessionRenderKey(target)) {
             val name by target.name.collectAsState()
             val running = when (target) {
                 is NewSessionViewModel -> false
@@ -58,4 +58,10 @@ internal fun collectSessionTabRenderStates(
             )
         }
     }
+}
+
+/** Compose keys must follow the same referential ownership as Application commands. */
+internal class SessionRenderKey(private val target: SessionViewModel) {
+    override fun equals(other: Any?): Boolean = other is SessionRenderKey && other.target === target
+    override fun hashCode(): Int = 0
 }

@@ -97,8 +97,7 @@ public class RpcGlobalEditor(
     /** Admission only. Frozen closures drain after child close and preserve original queue order. */
     private fun acceptWrite(action: suspend () -> Unit): Boolean {
         if (!owner.isActive) return false
-        updates.submit { action(); global.dismissOperationFailure() }
-        return true
+        return updates.submit { action(); global.dismissOperationFailure() }
     }
 
     public fun createLogin(ownerScope: CoroutineScope = scope): OpenAiLoginViewModel {
@@ -123,6 +122,6 @@ public class RpcGlobalEditor(
         hookSettings.close()
         owner.cancel()
         effectsChannel.close()
-        updates.close(mcp::close)
+        updates.close { mcp.close() }
     }
 }

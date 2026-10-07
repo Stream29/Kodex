@@ -46,14 +46,18 @@ public interface HistoryItemWindow {
     /**
      * Requests one adjacent older structural chunk, without reading row payloads.
      * Duplicate in-flight, stale-window and post-close demand is ignored. Structural failures
-     * publish the owner's Failed state, not an empty page; no synchronous throws.
+     * publish the owner's Failed state, not an empty page. Demand requires Ready and an older
+     * edge; a full command buffer may reject it without changing state. A later edge demand may
+     * try again; no automatic retry or retained navigation intent is created. No synchronous throws.
      */
     public fun requestOlder()
 
     /**
      * Requests one adjacent newer structural chunk, preserving reported visible children.
      * Duplicate in-flight, stale-window and post-close demand is ignored. Structural failures
-     * publish the owner's Failed state, not an empty page; no synchronous throws.
+     * publish the owner's Failed state, not an empty page. Demand requires Ready and a newer
+     * edge; a full command buffer may reject it without changing state. A later edge demand may
+     * try again; no automatic retry or retained navigation intent is created. No synchronous throws.
      */
     public fun requestNewer()
 }
@@ -124,7 +128,11 @@ public sealed interface HistoryScrollTarget {
  * Equality is instance identity: repeated requests for the same destination publish distinct
  * instances. The renderer executes against [generation] and the exact child (if any), then
  * acknowledges this instance. Unmounting does not consume it. Superseding navigation, generation
- * invalidation, destination eviction and owner close withdraw it; no retry or journal is implied.
+ * invalidation of its generation, destination eviction and owner close withdraw it. A delayed
+ * invalidation of an older generation cannot withdraw newer navigation. When an authoritative
+ * cache nonce is supplied, delayed external-write completion for an already reconciled nonce
+ * is not a second invalidation: it cannot release the current destination or consume this effect.
+ * No retry or journal is implied.
  */
 public class HistoryScrollEffect(
     public val generation: Long,
@@ -144,6 +152,11 @@ public class HistoryScrollEffect(
  * Cache invalidation replaces the generation and releases obsolete children; late reads cannot
  * publish into the new generation. Structural failures publish [AgentHistoryLoadState.Failed];
  * cancellation is not converted into a successful or empty load.
+ * With an authoritative cache nonce, destructive replacement is reconciled before navigation
+ * for that nonce. Completion of the same external write only reconciles the actual latest
+ * cursor, not its older captured end; completion from an obsolete nonce cannot regress the
+ * window. Without a nonce, destructive external-write completion still invalidates the local
+ * generation, including a same-cursor rewrite, and withdraws its previous children/effect.
  *
  * The owner calls [close] when this Agent binding is released. Unmounting or changing tabs must
  * not close it. The renderer owns scroll state and focus/viewport presentation, and context
@@ -205,7 +218,11 @@ public interface AgentHistoryViewModel : AutoCloseable {
 
     /**
      * Restores follow intent and loads the latest bounded window before publishing a Latest
-     * effect. Accepted requests supersede pending navigation. No-op after close; load failures
+     * effect. Requests coalesce to the newest pending navigation even while reads are blocked
+     * and the bounded command buffer is full. Cache-nonce invalidation precedes navigation for
+     * that new generation, preserving a request already made for it; old-generation commands
+     * cannot revive withdrawn destinations. Delayed completion of the write that produced the
+     * same nonce must not withdraw the loaded window/effect. No-op after close; load failures
      * publish Failed, not an effect; cancellation of the owner stops loading. No synchronous throws.
      */
     public fun requestScrollToLatest()
@@ -215,7 +232,8 @@ public interface AgentHistoryViewModel : AutoCloseable {
      * needed bounded window when absent. This is a scroll command only, never revert/fork/write.
      * The renderer retains the stable row anchor when paging displaces the opposite edge.
      * Repeated targets are distinct intents; the newest accepted navigation supersedes older
-     * pending/in-flight navigation. Missing/unreadable targets publish Failed, not a successful
+     * pending/in-flight navigation, including under bounded-buffer pressure.
+     * Missing/unreadable targets publish Failed, not a successful
      * scroll. No-op after close; no synchronous throws.
      */
     public fun requestScrollToStorageIndex(storageIndex: Int)

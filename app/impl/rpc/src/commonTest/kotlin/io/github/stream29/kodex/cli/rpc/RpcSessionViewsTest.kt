@@ -50,7 +50,7 @@ import kotlin.time.Duration.Companion.seconds
 val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime }) {
     test("blank drafts and catalog construction allocate nothing") {
         frontend {
-            val draft = RpcSessionDraft(settings, views)
+            val draft = RpcSessionDraft(settings, views, this)
             draft.composer.update("draft")
             draft.edit { it.copy(instructions = "local") }
             val catalog = DefaultSessionCatalogViewModel(this, RpcSessionCatalogDependencies(services.global))
@@ -466,7 +466,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
 
     test("new draft is materialized once and returns the existing view after successful initial submission") {
         frontend {
-            val draft = RpcSessionDraft(settings, views)
+            val draft = RpcSessionDraft(settings, views, this)
             try {
                 draft.composer.update("first")
                 val view = draft.materialize()
@@ -641,7 +641,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val draft = RpcSessionDraft(settings, views)
+            val draft = RpcSessionDraft(settings, views, this)
             try {
                 draft.composer.update("keep me")
                 assertFailsWith<IllegalStateException> { draft.materialize() }

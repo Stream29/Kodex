@@ -17,7 +17,7 @@ val sessionSettingsComponentViewModelTest by testSuite {
         for (kind in SessionSettingsTargetKind.entries) runTest {
             val source = SettingsSource(kind)
             val models = MutableStateFlow(listOf(model("z"), model("a"), model("z")))
-            val vm = createSessionSettingsViewModel(source, models, this)
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, models), this)
             try {
                 val initial = assertIs<SessionSettingsState.Available>(vm.state.value)
                 assertEquals(kind, initial.snapshot.targetKind)
@@ -35,7 +35,7 @@ val sessionSettingsComponentViewModelTest by testSuite {
     test("four configuration commands freeze revision and all untouched fields in FIFO order") {
         runTest {
             val source = SettingsSource()
-            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this)
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList())), this)
             try {
                 vm.updateModel(7, OpenAiModelId("next"))
                 vm.updateReasoningEffort(7, ReasoningEffort.Max)
@@ -56,9 +56,9 @@ val sessionSettingsComponentViewModelTest by testSuite {
         runTest {
             val source = SettingsSource()
             var creations = 0
-            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this, {
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), {
                 creations++; SettingsBrowser(it)
-            })
+            }), this)
             try {
                 vm.updateModel(6, OpenAiModelId("wrong"))
                 vm.requestWorkingDirectory(6)
@@ -82,7 +82,7 @@ val sessionSettingsComponentViewModelTest by testSuite {
         runTest {
             val source = SettingsSource()
             source.publish(editable = false)
-            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this)
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList())), this)
             try {
                 vm.requestRename(7)
                 val first = assertNotNull(vm.rename.value)
@@ -110,7 +110,7 @@ val sessionSettingsComponentViewModelTest by testSuite {
     test("rename target revision is frozen even when source changes between admission and execution") {
         runTest {
             val source = SettingsSource()
-            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this)
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList())), this)
             try {
                 vm.requestRename(7)
                 val handle = assertNotNull(vm.rename.value)
@@ -130,15 +130,15 @@ val sessionSettingsComponentViewModelTest by testSuite {
         runTest {
             val source = SettingsSource()
             val browsers = mutableListOf<SettingsBrowser>()
-            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this, {
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), {
                 SettingsBrowser(it).also(browsers::add)
-            })
+            }), this)
             try {
                 vm.requestWorkingDirectory(7)
                 val first = assertNotNull(vm.directoryPicker.value)
                 vm.requestWorkingDirectory(7)
                 val next = assertNotNull(vm.directoryPicker.value)
-                assertSame(browsers[1], next.viewModel)
+                assertSame(browsers[1], next.selection.picker)
                 assertEquals(1, browsers[0].closes)
                 assertFalse(vm.selectWorkingDirectory(first, Path("/late")))
                 assertFalse(vm.dismissWorkingDirectoryPicker(first))
@@ -154,7 +154,7 @@ val sessionSettingsComponentViewModelTest by testSuite {
     test("directory boolean is exact handle consumption even when revision target or editability expires") {
         for (expired in listOf("revision", "target", "editable")) runTest {
             val source = SettingsSource()
-            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this, { SettingsBrowser(it) })
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), { SettingsBrowser(it) }), this)
             try {
                 vm.requestWorkingDirectory(7)
                 val handle = assertNotNull(vm.directoryPicker.value)
@@ -176,9 +176,9 @@ val sessionSettingsComponentViewModelTest by testSuite {
             val source = SettingsSource()
             var result: DirectoryPickerViewModel? = SettingsBrowser(Path("/initial"))
             var failure: Throwable? = null
-            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this, {
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), {
                 failure?.let { throw it }; result
-            })
+            }), this)
             try {
                 vm.requestWorkingDirectory(7)
                 val original = assertNotNull(vm.directoryPicker.value)
@@ -194,7 +194,7 @@ val sessionSettingsComponentViewModelTest by testSuite {
     test("hide disposes both types of unaccepted child but observes and preserves admitted commands") {
         runTest {
             val source = SettingsSource()
-            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this, { SettingsBrowser(it) })
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()), { SettingsBrowser(it) }), this)
             try {
                 vm.requestRename(7)
                 val rename = assertNotNull(vm.rename.value)
@@ -220,8 +220,8 @@ val sessionSettingsComponentViewModelTest by testSuite {
             val failures = mutableListOf<Pair<Throwable, Path>>()
             val expected = IllegalStateException("fake")
             source.onWrite = { throw expected }
-            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this,
-                reportUnhandledError = { error, cwd -> failures += error to cwd })
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()),
+                reportUnhandledError = { error, cwd -> failures += error to cwd }), this)
             try {
                 vm.updateServiceTier(7, ServiceTier.Fast)
                 source.publish(revision = 8, cwd = Path("/new"))
@@ -240,8 +240,8 @@ val sessionSettingsComponentViewModelTest by testSuite {
             var cancelled = false
             var reports = 0
             source.onWrite = { try { awaitCancellation() } finally { cancelled = true } }
-            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this,
-                reportUnhandledError = { _, _ -> reports++ })
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()),
+                reportUnhandledError = { _, _ -> reports++ }), this)
             vm.updateServiceTier(7, ServiceTier.Fast)
             vm.renameSession(7, "queued")
             runCurrent()
@@ -261,8 +261,8 @@ val sessionSettingsComponentViewModelTest by testSuite {
             val source = SettingsSource()
             var reports = 0
             source.result = false
-            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this,
-                reportUnhandledError = { _, _ -> reports++ })
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList()),
+                reportUnhandledError = { _, _ -> reports++ }), this)
             try {
                 vm.updateModel(7, OpenAiModelId("rejected"))
                 runCurrent()
@@ -283,7 +283,7 @@ val sessionSettingsComponentViewModelTest by testSuite {
         runTest {
             val owner = Job()
             val source = SettingsSource()
-            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()),
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList())),
                 CoroutineScope(coroutineContext + owner))
             vm.requestRename(7)
             val handle = assertNotNull(vm.rename.value)
@@ -295,15 +295,13 @@ val sessionSettingsComponentViewModelTest by testSuite {
             assertEquals(SessionSettingsState.Unavailable, vm.state.value)
         }
     }
-    test("compatibility effects do not own rename children and complete after their buffer on close") {
+    test("public close disposes the exact rename child without dispatching a rename") {
         runTest {
             val source = SettingsSource()
-            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this)
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList())), this)
             vm.requestRename(7)
             val handle = assertNotNull(vm.rename.value)
             vm.close()
-            val notifications = vm.effects.toList()
-            assertEquals(listOf(SessionSettingsEffect.RenameSession(7, "Original")), notifications)
             assertFalse(handle.viewModel.isActive)
             assertNull(vm.rename.value)
             assertTrue(source.renames.isEmpty())

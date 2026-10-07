@@ -93,10 +93,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             val dependencies = RpcHookSettingsDependencies(
                 global, global.frontend.settings.projectState { it.hooks },
             ) { action ->
-                if (!accepting) false else {
-                    queue.submit { action(); global.dismissOperationFailure() }
-                    true
-                }
+                accepting && queue.submit { action(); global.dismissOperationFailure() }
             }
             val original = NotificationHook(
                 "same", setOf(NotificationHookType.StopAssistantMessage), "echo original",
@@ -254,7 +251,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
         }) {
             val view = views.open(services.global.createSession(KodexAgentSettings(OpenAiModelId("test-model"))))
             val source = RpcSessionSettingsSource(view, this)
-            val vm = createSessionSettingsViewModel(source, MutableStateFlow(emptyList()), this)
+            val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList())), this)
             val initial = assertIs<SessionSettingsState.Available>(vm.state.value).snapshot
             vm.renameSession(initial.revision, "queued")
             calls.first { it > 0 }
@@ -575,7 +572,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
     }
     test("draft edits remain local and explicit names survive materialization") {
         frontend {
-            val draft = RpcSessionDraft(KodexAgentSettings(OpenAiModelId("test-model")), views)
+            val draft = RpcSessionDraft(KodexAgentSettings(OpenAiModelId("test-model")), views, this)
             val source = RpcDraftSettingsSource(draft, this)
             try {
                 val expected = assertIs<SessionSettingsDataState.Available>(source.state.value).snapshot

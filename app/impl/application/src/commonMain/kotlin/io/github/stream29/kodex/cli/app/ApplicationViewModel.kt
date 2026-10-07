@@ -412,10 +412,9 @@ internal class ApplicationViewModelImpl(
         }.toMutableList()
         if (remaining.isEmpty()) remaining += createDraft()
         val selectedChild = current.selected
-        val nextSelection = when {
-            selectedChild in remaining -> remaining.indexOf(selectedChild)
-            else -> current.selectedIndex.coerceAtMost(remaining.lastIndex)
-        }
+        val survivingSelection = remaining.indexOfFirst { it === selectedChild }
+        val nextSelection = survivingSelection.takeIf { it >= 0 }
+            ?: current.selectedIndex.coerceAtMost(remaining.lastIndex)
         mutableNavigation.value = ApplicationNavigationState(remaining, nextSelection)
         closeDeletePopupFor(sessionIndex)
         return true

@@ -6,7 +6,6 @@ import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryVi
 import io.github.stream29.kodex.openai.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
 
@@ -132,8 +131,6 @@ public class SessionWorkingDirectoryPicker(
     public val expectedRevision: Long,
     public val selection: WorkingDirectoryViewModel,
 ) {
-    /** Compatibility browser access; [selection] owns its lifetime. */
-    public val viewModel: DirectoryPickerViewModel get() = selection.picker
     init { require(expectedRevision >= 0) { "A working-directory picker revision must not be negative." } }
 }
 
@@ -149,28 +146,6 @@ public class SessionSettingsRename(
     public val viewModel: SessionRenameViewModel,
 ) {
     init { require(expectedRevision >= 0) { "A rename request revision must not be negative." } }
-}
-
-/**
- * Compatibility notification only, not popup authority. New renderers use [SessionSettingsViewModel.rename].
- * Never construct another rename child/draft in response to this event.
- */
-public sealed interface SessionSettingsEffect {
-    /**
-     * Best-effort, single-consumer buffered open notification, not required for rendering.
-     * An accepted notification can wait for a collector, but is consumed once rather than replayed.
-     *
-     * @throws IllegalArgumentException if revision is negative or initial name is blank.
-     */
-    public data class RenameSession(
-        public val expectedRevision: Long,
-        public val initialName: String,
-    ) : SessionSettingsEffect {
-        init {
-            require(expectedRevision >= 0) { "A rename request revision must not be negative." }
-            require(initialName.isNotBlank()) { "A rename request must contain a non-blank current name." }
-        }
-    }
 }
 
 /**
@@ -213,14 +188,6 @@ public interface SessionSettingsViewModel : AutoCloseable {
     public val state: StateFlow<SessionSettingsState>
     public val directoryPicker: StateFlow<SessionWorkingDirectoryPicker?>
     public val rename: StateFlow<SessionSettingsRename?>
-    /**
-     * Compatibility notifications only, not an instruction to construct another child. One collector
-     * consumes the bounded buffer. Close completes the stream after buffered notifications are
-     * consumed; they cannot revive a closed handle or authorize another edit.
-     * @throws CancellationException during collection if that collector is cancelled.
-     */
-    public val effects: Flow<SessionSettingsEffect>
-
     /** Admits only the current editable revision; no model capability filtering or auto-correction. */
     public fun updateModel(expectedRevision: Long, model: OpenAiModelId): Unit
     /** Same admission as updateModel; custom stored values remain displayable. */
@@ -262,7 +229,7 @@ public interface SessionSettingsViewModel : AutoCloseable {
     public fun hidePage(): Unit
 
     /**
-     * Idempotently rejects edits, disposes all children, closes source/effects, stops observations and
+     * Idempotently rejects edits, disposes all children, closes source, stops observations and
      * cancels pending CAS/retries (NOT drain). State becomes Unavailable. Does not close models or the
      * owner scope, and cannot promise rollback of operations already accepted by the backend.
      */

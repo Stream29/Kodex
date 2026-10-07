@@ -32,7 +32,7 @@ public class RpcNewSessionViewModel internal constructor(
     private val owner = Job(scope.coroutineContext[Job])
     private val local = CoroutineScope(scope.coroutineContext + owner)
     private val defaultName = arguments.defaultName
-    public val draft: RpcSessionDraft = RpcSessionDraft(arguments.initialSettings.copy(threadName = ""), views)
+    public val draft: RpcSessionDraft = RpcSessionDraft(arguments.initialSettings.copy(threadName = ""), views, local)
     override val settings: StateFlow<KodexAgentSettings> = draft.settings
     override val runtimeConfiguration: io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel =
         createBoundRuntimeConfigurationViewModel(this, local)

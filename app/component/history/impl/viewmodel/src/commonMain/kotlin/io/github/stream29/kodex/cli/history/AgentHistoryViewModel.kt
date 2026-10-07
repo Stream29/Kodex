@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.time.Clock
@@ -89,7 +90,8 @@ internal class AgentHistoryViewModelImpl(
     private val mutablePendingScrollEffect = MutableStateFlow<HistoryScrollEffect?>(null)
     override val pendingScrollEffect: StateFlow<HistoryScrollEffect?> =
         mutablePendingScrollEffect.asStateFlow()
-    private var navigationIntent: Any? = null
+    private var navigationIntent: HistoryNavigationIntent? = null
+    private val pendingNavigation = MutableStateFlow<HistoryCommand?>(null)
     private var visibleItems: List<HistoryItemViewModel> = emptyList()
 
     init {
@@ -101,9 +103,9 @@ internal class AgentHistoryViewModelImpl(
         }
         agentState.cacheNonce?.let { nonce ->
             scope.launch {
-                nonce.collect {
-                    withdrawNavigation()
-                    commands.send(HistoryCommand.Invalidate)
+                nonce.collect { generation ->
+                    withdrawNavigation(preserveGeneration = generation)
+                    commands.send(HistoryCommand.Invalidate(generation))
                 }
             }
         }
@@ -160,6 +162,7 @@ internal class AgentHistoryViewModelImpl(
                             HistoryCommand.ExternalWriteFinished(
                                 startIndex = startIndex,
                                 endIndex = agentState.latestIndex.value,
+                                generation = agentState.cacheNonce?.value,
                             ),
                         )
                     }
@@ -178,7 +181,7 @@ internal class AgentHistoryViewModelImpl(
             mutableLoadState.value == AgentHistoryLoadState.Ready &&
             olderDemandPending.compareAndSet(expect = false, update = true)
         ) {
-            if (commands.trySend(HistoryCommand.LoadOlder).isFailure) {
+            if (commands.trySend(HistoryCommand.LoadOlder(window.generation)).isFailure) {
                 olderDemandPending.value = false
             }
         }
@@ -193,7 +196,7 @@ internal class AgentHistoryViewModelImpl(
             mutableLoadState.value == AgentHistoryLoadState.Ready &&
             newerDemandPending.compareAndSet(expect = false, update = true)
         ) {
-            if (commands.trySend(HistoryCommand.LoadNewer).isFailure) {
+            if (commands.trySend(HistoryCommand.LoadNewer(window.generation)).isFailure) {
                 newerDemandPending.value = false
             }
         }
@@ -229,14 +232,24 @@ internal class AgentHistoryViewModelImpl(
         mutablePendingScrollEffect.compareAndSet(effect, null)
     }
 
-    private fun withdrawNavigation() {
-        navigationIntent = null
-        mutablePendingScrollEffect.value = null
+    private fun withdrawNavigation(preserveGeneration: Long? = null) {
+        if (preserveGeneration == null || navigationIntent?.generation != preserveGeneration) {
+            navigationIntent = null
+            pendingNavigation.value = null
+        }
+        mutablePendingScrollEffect.value?.let { effect ->
+            if (effect.generation != preserveGeneration) mutablePendingScrollEffect.compareAndSet(effect, null)
+        }
     }
 
-    private fun publishScrollEffect(intent: Any, target: HistoryScrollTarget) {
+    private fun isCurrent(intent: HistoryNavigationIntent): Boolean =
+        !closed && navigationIntent === intent &&
+            activeGeneration == intent.generation &&
+            intent.generation == (agentState.cacheNonce?.value ?: activeGeneration)
+
+    private fun publishScrollEffect(intent: HistoryNavigationIntent, target: HistoryScrollTarget) {
         val window = mutableHistoryItems.value
-        if (navigationIntent === intent && isCurrent(window)) {
+        if (isCurrent(intent) && intent.generation == window.generation && isCurrent(window)) {
             mutablePendingScrollEffect.value = HistoryScrollEffect(window.generation, target)
         }
     }
@@ -244,18 +257,20 @@ internal class AgentHistoryViewModelImpl(
     override fun requestScrollToLatest() {
         if (closed) return
         mutableFollowsLatest.value = true
-        val intent = Any()
+        val intent = HistoryNavigationIntent(agentState.cacheNonce?.value ?: activeGeneration)
         navigationIntent = intent
         mutablePendingScrollEffect.value = null
-        commands.trySend(HistoryCommand.JumpToLatest(intent))
+        pendingNavigation.value = HistoryCommand.JumpToLatest(intent)
+        commands.trySend(HistoryCommand.Navigate)
     }
 
     override fun requestScrollToStorageIndex(storageIndex: Int) {
         if (closed) return
-        val intent = Any()
+        val intent = HistoryNavigationIntent(agentState.cacheNonce?.value ?: activeGeneration)
         navigationIntent = intent
         mutablePendingScrollEffect.value = null
-        commands.trySend(HistoryCommand.SeekToStorageIndex(storageIndex, intent))
+        pendingNavigation.value = HistoryCommand.SeekToStorageIndex(storageIndex, intent)
+        commands.trySend(HistoryCommand.Navigate)
     }
 
     override fun close() {
@@ -480,7 +495,9 @@ internal class AgentHistoryViewModelImpl(
                 mutableLoadState.value = AgentHistoryLoadState.Initializing
             }
             if (invalidate) {
-                withdrawNavigation()
+                withdrawNavigation(preserveGeneration = replacementGeneration.takeIf {
+                    agentState.cacheNonce != null && it != currentGeneration
+                })
                 visibleItems = emptyList()
                 activeGeneration = replacementGeneration
                 releaseAllCachedItems()
@@ -501,6 +518,7 @@ internal class AgentHistoryViewModelImpl(
                     snapshotIndex = latestIndex,
                 )
             }
+            if (closed || agentState.cacheNonce?.value?.let { it != replacementGeneration } == true) return
             observedLatestIndex = latestIndex
             nextOlderIndex = batch.nextOlderIndex
             hasNewer = false
@@ -555,6 +573,7 @@ internal class AgentHistoryViewModelImpl(
                     snapshotIndex = latestIndex,
                 )
             }
+            if (closed || agentState.cacheNonce?.value?.let { it != activeGeneration } == true) return
             observedLatestIndex = latestIndex
             if (batch.items.isEmpty()) {
                 refreshActiveTurnStart()
@@ -605,6 +624,7 @@ internal class AgentHistoryViewModelImpl(
                         snapshotIndex = observedLatestIndex,
                     )
                 }
+                if (closed || agentState.cacheNonce?.value?.let { it != activeGeneration } == true) return
                 if (batch.items.isEmpty()) {
                     nextOlderIndex = batch.nextOlderIndex
                 } else {
@@ -647,6 +667,7 @@ internal class AgentHistoryViewModelImpl(
                         snapshotIndex = observedLatestIndex,
                     )
                 }
+                if (closed || agentState.cacheNonce?.value?.let { it != activeGeneration } == true) return
                 if (batch == null || batch.items.isEmpty()) {
                     hasNewer = false
                 } else {
@@ -683,12 +704,14 @@ internal class AgentHistoryViewModelImpl(
             mutableLoadState.value = AgentHistoryLoadState.Ready
         }
 
-        suspend fun seekToStorageIndex(storageIndex: Int, intent: Any) {
-            if (navigationIntent !== intent || closed) return
+        suspend fun seekToStorageIndex(storageIndex: Int, intent: HistoryNavigationIntent) {
+            if (!isCurrent(intent)) return
             val snapshotIndex = agentState.latestIndex.value
             val indexEntry = withContext(Dispatchers.Default) {
                 agentState.storage.index.getExact(storageIndex)
-            } ?: error("The selected History entry is no longer available.")
+            }
+            if (!isCurrent(intent)) return
+            checkNotNull(indexEntry) { "The selected History entry is no longer available." }
             val displayIndex = if (indexEntry is CleanCompactionPoint && storageIndex > 0) {
                 storageIndex + 1
             } else {
@@ -713,7 +736,7 @@ internal class AgentHistoryViewModelImpl(
                     snapshotIndex = snapshotIndex,
                 )
             } != null
-            if (navigationIntent !== intent || closed) return
+            if (!isCurrent(intent)) return
             val loaded = materializeChunk(displayIndex, batch, activeGeneration)
             observedLatestIndex = snapshotIndex
             nextOlderIndex = batch.nextOlderIndex
@@ -734,24 +757,51 @@ internal class AgentHistoryViewModelImpl(
             refreshActiveTurnStart()
         }
 
+        suspend fun synchronizeGeneration() {
+            while (!closed) {
+                val generation = agentState.cacheNonce?.value ?: return
+                if (activeGeneration == generation) return
+                replaceWindow(agentState.latestIndex.value, invalidate = true)
+            }
+        }
+
+        suspend fun navigate(command: HistoryCommand) {
+            // Retained navigation can run before the next channel receive as well.
+            synchronizeGeneration()
+            when (command) {
+                is HistoryCommand.JumpToLatest -> if (isCurrent(command.intent)) {
+                    replaceWindow(agentState.latestIndex.value, invalidate = false)
+                    publishScrollEffect(command.intent, HistoryScrollTarget.Latest)
+                }
+                is HistoryCommand.SeekToStorageIndex -> seekToStorageIndex(command.storageIndex, command.intent)
+                else -> error("Not a navigation command.")
+            }
+        }
+
         for (command in commands) {
             try {
+                // Invalidation wins over retained navigation, but only withdraws the old nonce.
+                // A late queued Invalidate must not release the already-current destination.
+                synchronizeGeneration()
                 when (command) {
-                    HistoryCommand.Invalidate -> replaceWindow(agentState.latestIndex.value, invalidate = true)
+                    is HistoryCommand.Invalidate -> {
+                        if (command.generation == agentState.cacheNonce?.value &&
+                            (!initialized || activeGeneration != command.generation)
+                        ) replaceWindow(agentState.latestIndex.value, invalidate = true)
+                    }
                     is HistoryCommand.Refresh -> refresh(
                         if (agentState.cacheNonce == null) command.latestIndex else agentState.latestIndex.value,
                     )
-                    HistoryCommand.LoadOlder -> loadOlder()
-                    HistoryCommand.LoadNewer -> loadNewer()
-                    is HistoryCommand.JumpToLatest -> {
-                        if (navigationIntent === command.intent && !closed) {
-                            replaceWindow(agentState.latestIndex.value, invalidate = false)
-                            publishScrollEffect(command.intent, HistoryScrollTarget.Latest)
-                        }
+                    is HistoryCommand.LoadOlder -> {
+                        if (command.generation == activeGeneration) loadOlder()
+                        else olderDemandPending.value = false
                     }
-
-                    is HistoryCommand.SeekToStorageIndex ->
-                        seekToStorageIndex(command.storageIndex, command.intent)
+                    is HistoryCommand.LoadNewer -> {
+                        if (command.generation == activeGeneration) loadNewer()
+                        else newerDemandPending.value = false
+                    }
+                    HistoryCommand.Navigate -> Unit
+                    is HistoryCommand.JumpToLatest, is HistoryCommand.SeekToStorageIndex -> navigate(command)
 
                     is HistoryCommand.UpdateLatestTurn -> {
                         val changed = activeTurn != command.active
@@ -760,17 +810,27 @@ internal class AgentHistoryViewModelImpl(
                     }
 
                     is HistoryCommand.ExternalWriteFinished -> {
-                        val invalidation = command.startIndex to command.endIndex
-                        if (
-                            command.endIndex <= command.startIndex &&
-                            invalidation != lastInvalidation
-                        ) {
-                            lastInvalidation = invalidation
-                            replaceWindow(command.endIndex, invalidate = true)
+                        if (command.generation != null) {
+                            // The authoritative nonce has already been reconciled above.
+                            // Completion of that same write is not another destructive change.
+                            // Its captured cursor can also precede later same-nonce appends.
+                            if (command.generation == agentState.cacheNonce?.value) {
+                                refresh(agentState.latestIndex.value)
+                            }
                         } else {
-                            refresh(command.endIndex)
+                            // Without a nonce, completion still detects same-cursor rewrites.
+                            val invalidation = command.startIndex to command.endIndex
+                            if (
+                                command.endIndex <= command.startIndex &&
+                                invalidation != lastInvalidation
+                            ) {
+                                lastInvalidation = invalidation
+                                replaceWindow(command.endIndex, invalidate = true)
+                            } else {
+                                refresh(command.endIndex)
+                            }
+                            lastInvalidation = null
                         }
-                        lastInvalidation = null
                     }
                 }
             } catch (failure: CancellationException) {
@@ -781,6 +841,17 @@ internal class AgentHistoryViewModelImpl(
                 mutableLoadState.value = AgentHistoryLoadState.Failed(
                     failure.message ?: failure.toString(),
                 )
+            }
+            // One retained intent, not a journal. A full command buffer itself guarantees
+            // another loop iteration; no successful wake admission is needed to retain the intent.
+            pendingNavigation.getAndUpdate { null }?.let { navigation ->
+                try {
+                    navigate(navigation)
+                } catch (failure: CancellationException) {
+                    throw failure
+                } catch (failure: Throwable) {
+                    mutableLoadState.value = AgentHistoryLoadState.Failed(failure.message ?: failure.toString())
+                }
             }
         }
     }
@@ -912,15 +983,22 @@ private val HistoryProjectionItem.newestStorageIndex: Int
     }
 
 private sealed interface HistoryCommand {
-    data object Invalidate : HistoryCommand
+    data class Invalidate(val generation: Long) : HistoryCommand
     data class Refresh(val latestIndex: Int) : HistoryCommand
-    data object LoadOlder : HistoryCommand
-    data object LoadNewer : HistoryCommand
-    data class JumpToLatest(val intent: Any) : HistoryCommand
-    data class SeekToStorageIndex(val storageIndex: Int, val intent: Any) : HistoryCommand
+    data class LoadOlder(val generation: Long) : HistoryCommand
+    data class LoadNewer(val generation: Long) : HistoryCommand
+    data object Navigate : HistoryCommand
+    data class JumpToLatest(val intent: HistoryNavigationIntent) : HistoryCommand
+    data class SeekToStorageIndex(val storageIndex: Int, val intent: HistoryNavigationIntent) : HistoryCommand
     data class UpdateLatestTurn(val active: Boolean) : HistoryCommand
-    data class ExternalWriteFinished(val startIndex: Int, val endIndex: Int) : HistoryCommand
+    data class ExternalWriteFinished(
+        val startIndex: Int,
+        val endIndex: Int,
+        val generation: Long?,
+    ) : HistoryCommand
 }
+
+private class HistoryNavigationIntent(val generation: Long)
 
 private class HistoryItemWindowImpl(
     override val generation: Long,

@@ -91,15 +91,23 @@ public suspend fun startRpcFrontendFixture(
                     withInMemoryRpc(backend::register) { raw ->
                         val services = RpcServices(RestoringRpcClient(raw))
                         val models = MutableStateFlow(services.global.getModels())
-                        val frontendScope = if (frontendDispatcher == null) this
-                            else CoroutineScope(coroutineContext + frontendDispatcher)
+                        // Normal completion of the connection block waits for its children.
+                        // Retained drafts must be cancelled before that wait, just as the
+                        // actual Application closes its frontend owner before RPC teardown.
+                        val frontendJob = SupervisorJob(coroutineContext[Job])
+                        val frontendScope = CoroutineScope(
+                            coroutineContext + frontendJob +
+                                (frontendDispatcher ?: Dispatchers.Default),
+                        )
                         val views = RpcSessionViews(frontendScope, services, models)
                         val sessions = DefaultPersistedSessionViewModelRegistry(views, models, frontendScope)
                         val drafts = DefaultNewSessionViewModelFactory(views, sessions, models, frontendScope)
                         try {
                             ready.complete(RpcFrontendFixture(frontendScope.coroutineContext, root, services, views, sessions, drafts, models, finish))
                             finish.await()
-                        } finally { withContext(NonCancellable) { sessions.shutdown() } }
+                        } finally { withContext(NonCancellable) {
+                            try { sessions.shutdown() } finally { frontendJob.cancelAndJoin() }
+                        } }
                     }
                 }
             } finally { withContext(NonCancellable) { home.closeAndJoin() } }

@@ -34,7 +34,7 @@ private class RpcNewSessionDefaultsDependencies(
     private val global: RpcGlobalSettings,
     applicationScope: CoroutineScope,
 ) : NewSessionDefaultsDependencies, AutoCloseable {
-    private val updates = SettingsUpdateQueue(applicationScope)
+    private val updates = SettingsUpdateQueue(applicationScope, global::reportOperationFailure)
     private var closed = false
     override val defaults = global.settings.projectState { it.newSession }
     override val models = global.models
@@ -46,7 +46,7 @@ private class RpcNewSessionDefaultsDependencies(
         replace: (KodexNewSessionSettings) -> KodexNewSessionSettings,
     ): NewSessionDefaultsAdmission {
         if (closed) return NewSessionDefaultsAdmission.Rejected
-        updates.submit {
+        val accepted = updates.submit {
             try {
                 global.settings.editField(expected, { select(it.newSession) },
                     { it.copy(newSession = replace(it.newSession)) }, global::ensureActive)
@@ -54,7 +54,7 @@ private class RpcNewSessionDefaultsDependencies(
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Throwable) { global.reportOperationFailure(failure) }
         }
-        return NewSessionDefaultsAdmission.Accepted
+        return if (accepted) NewSessionDefaultsAdmission.Accepted else NewSessionDefaultsAdmission.Rejected
     }
     override fun admitModel(expected: OpenAiModelId, requested: OpenAiModelId) =
         admit(expected, { it.model }, { it.copy(model = requested) })
