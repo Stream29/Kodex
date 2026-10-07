@@ -31,9 +31,15 @@ kotlin {
                 implementation(libs.kaml)
             }
         }
-        commonTest.dependencies {
-            implementation(libs.kotlinx.coroutines.test)
-            implementation(project(":app-settings-impl-filesystem"))
+        commonTest {
+            // Preserve this published test verbatim at its historical path. Its retired
+            // combined-store API is not a current product dependency. The complete
+            // current-store regression lives in MigrateToV047CurrentStoresTest.kt.
+            kotlin.exclude("**/v0_4_7/MigrateToV0_4_7Test.kt")
+            dependencies {
+                implementation(libs.kotlinx.coroutines.test)
+                implementation(project(":app-settings-impl-filesystem"))
+            }
         }
     }
 }
