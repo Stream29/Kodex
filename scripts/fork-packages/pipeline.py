@@ -119,6 +119,23 @@ def task_set(fork, host):
             for project in spec["modules"].values() for t in host_targets(spec, host)]
 
 
+def windows_resize_test_receipt(directory):
+    """Observe the real targeted Native test output, not merely Gradle's exit code."""
+    from xml.etree import ElementTree
+    cases = []
+    for report in directory.rglob("*.xml"):
+        cases.extend(ElementTree.fromstring(report.read_bytes()).iter("testcase"))
+    methods = {"successfulResizeDoesNotReturnStaleLastError", "failedResizeReportsActualWin32Error"}
+    require(len(cases) == 2 and all(
+        "WindowsConsoleResizeTest" in case.get("classname", "")
+        and any(method in case.get("name", "") for method in methods)
+        and not any(case.find(tag) is not None for tag in ("failure", "error", "skipped"))
+        for case in cases
+    ) and all(any(method in case.get("name", "") for case in cases) for method in methods),
+            "Missing/failed targeted Windows console-resize tests")
+    return {"task": ":mosaic-tty:mingwX64Test", "passed": 2, "methods": sorted(methods)}
+
+
 def compiler_archive_evidence(paths, kgp):
     """Read the compiler's version resource, not stdlib's embedded build version."""
     evidence = []
@@ -253,9 +270,20 @@ def build(args):
     # Dedicated fresh hosted-runner daemon: explicit Java home, no user/shared daemon takeover.
     try:
         run(command, cwd=source, capture=False)
+        resize_receipt = None
+        if args.fork == "mosaic" and args.host == "windows":
+            test_command = command[:-len(tasks)] + [
+                ":mosaic-tty:mingwX64Test", "--tests",
+                "com.jakewharton.mosaic.tty.WindowsConsoleResizeTest",
+            ]
+            run(test_command, cwd=source, capture=False)
+            resize_receipt = windows_resize_test_receipt(
+                source / "mosaic-tty/build/test-results/mingwX64Test")
     finally:
         run(wrapper + [f"-Dorg.gradle.java.home={java}", "--stop"], cwd=source, capture=False)
     toolchain = json.loads((args.output / "toolchain.json").read_bytes())
+    if resize_receipt is not None:
+        toolchain["windowsResizeRegression"] = resize_receipt
     # java -version uses stderr; collect separately without mixing secrets/environment.
     info = subprocess.run([str(jdk21 / "bin" / ("java.exe" if args.host == "windows" else "java")),
                            "-version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

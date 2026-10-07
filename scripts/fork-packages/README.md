@@ -211,9 +211,13 @@ publisher.py --fork <fork> --bundle <bundle> --receipts <three-receipt-dir>
   never PUT over a present file. Registry-generated sidecars can be skipped only
   when byte-identical. Payloads precede POM/module files; manifest is last.
   Reads retry visibility verification at most six times, 10 seconds apart.
-- Basic auth uses the repository `GITHUB_TOKEN`. Redirects fail closed rather
-  than forwarding credentials; logs never include auth headers or response bodies.
-  A registry redirect/permission failure is a concrete deployment gate to diagnose.
+- Basic auth uses the repository `GITHUB_TOKEN` only on the original Maven request.
+  GET may follow at most three redirects to the exact HTTPS host
+  `github-registry-files.githubusercontent.com` on default/443 port, with no
+  Authorization, userinfo or fragment content. Raw unsafe URL characters are
+  rejected before parsing; signed queries are not requoted. PUT and other-host
+  redirects fail closed. Status/protocol diagnostics omit credentials, signed
+  URLs and response bodies. Redirected storage404 is an error, not an absent version.
 - Maven PUT is **not atomic**, and server support for `If-None-Match` is not assumed.
   A cancellation, stale main, transport failure or final mismatch can leave a partial
   version. No completion is claimed. Keep the old consumer pin, retain the validated
@@ -228,9 +232,11 @@ publisher.py --fork <fork> --bundle <bundle> --receipts <three-receipt-dir>
 - CI artifacts expire after seven days; logs remain under repository retention.
   Package versions are not automatically deleted. Save failure evidence before
   artifact expiry. A recipe/toolchain change cannot overwrite this same version.
-- This JS delta retains the immutable version names above because the coordinator
-  confirms the initial versions are not yet published. Any existing five-target,
-  partial or different version still fails preflight; no overwrite exception was added.
+- The SDK JS closure was added before its first publication, retaining the version
+  above. The original MCP/Lucene bundles are now remotely byte-verified; rebuilding
+  that same fork version after recipe/toolchain changes is not permission to replace
+  it. Existing five-target, partial or different versions fail preflight; no
+  overwrite or automatic resume exception exists.
 - Offline JS fixtures cover payload/source loss, wrong platform/compiler,
   missing/invalid root redirects, POM/GMM dependency loss, host/task drift,
   target-bound guard identity and refusing receipts without JS compilation.

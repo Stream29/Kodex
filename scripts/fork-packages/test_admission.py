@@ -1,10 +1,11 @@
 """Trusted publication admission and workflow syntax boundaries; no package writes."""
 import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from pipeline import require_trusted_event
+from pipeline import require_trusted_event, windows_resize_test_receipt
 
 
 class AdmissionTests(unittest.TestCase):
@@ -53,6 +54,27 @@ class AdmissionTests(unittest.TestCase):
         self.assertIn("dependsOn(p.tasks.named('downloadKotlinNativeDistribution'))", init)
         self.assertIn('if args.fork != "lucene" else []',
                       (root / "pipeline.py").read_text())
+
+    def test_windows_resize_receipt_requires_both_actual_passes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            report = root / "TEST-resize.xml"
+            methods = ("successfulResizeDoesNotReturnStaleLastError", "failedResizeReportsActualWin32Error")
+            def xml(failure="", names=methods):
+                return "<testsuite>" + "".join(
+                    f'<testcase classname="com.jakewharton.mosaic.tty.WindowsConsoleResizeTest" '
+                    f'name="{name}">{failure}</testcase>' for name in names
+                ) + "</testsuite>"
+            with self.assertRaises(ValueError):
+                windows_resize_test_receipt(root)
+            report.write_text(xml())
+            self.assertEqual(windows_resize_test_receipt(root)["passed"], 2)
+            for content in (xml("<failure/>"), xml("<skipped/>"), xml(names=methods[:1]),
+                            xml(names=(methods[0], methods[0]))):
+                with self.subTest(content=content):
+                    report.write_text(content)
+                    with self.assertRaises(ValueError):
+                        windows_resize_test_receipt(root)
 
 
 if __name__ == "__main__":
