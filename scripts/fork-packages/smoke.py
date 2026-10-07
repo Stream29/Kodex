@@ -203,10 +203,10 @@ dependencyResolutionManagement {{
 """
         # KGP 2.4 EnvSpec uses Property values; do not use a Node wrapper/task replacement.
         node_configuration = f"""
-extensions.configure(org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsEnvSpec) {{
-    download.set(false)
-    command.set('{executable}')
-    version.set('{node_version}')
+extensions.configure(org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsEnvSpec) {{ spec ->
+    spec.download.set(false)
+    spec.command.set('{executable}')
+    spec.version.set('{node_version}')
 }}
 """
     dependencies = "\n".join(f"            implementation('{group}:{module}:{version}')"
@@ -281,7 +281,7 @@ tasks.register('verifyForkJvm', JavaExec) {{
         "-Dorg.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8",
         "--max-workers=1", "--no-parallel", "--no-configuration-cache", "--no-build-cache", "--no-scan",
         "-Pkotlin.compiler.execution.strategy=daemon", "-Pkotlin.daemon.useFallbackStrategy=false",
-        "-Pkotlin.daemon.jvmargs=-Xmx2g", "--console=plain", *tasks,
+        "-Pkotlin.daemon.jvmargs=-Xmx2g", "--console=plain", "--stacktrace", *tasks,
     ]
     try:
         run(command, cwd=args.output, capture=False)

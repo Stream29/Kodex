@@ -67,6 +67,33 @@ gradle.projectsEvaluated {
             }
             p.tasks.withType(Sign).configureEach { enabled = false }
         }
+        if (p.plugins.hasPlugin('co.touchlab.cklib')) {
+            // cklib 0.3.5 hardcodes user.home/.konan, ignoring KONAN_DATA_DIR.
+            // Bind it to the same real distribution that KGP downloads in the
+            // isolated runner, rather than relying on a pre-populated user cache.
+            def config = p.extensions.getByName('cklib').config
+            def os = System.getProperty('os.name')
+            def platform = os.startsWith('Windows') ? 'windows' :
+                os == 'Mac OS X' ? 'macos' : os == 'Linux' ? 'linux' : null
+            def arch = System.getProperty('os.arch')
+            def nativeArch = arch in ['aarch64', 'arm64'] ? 'aarch64' :
+                arch in ['amd64', 'x86_64'] ? 'x86_64' : null
+            if (!platform || !nativeArch || !config.kotlinVersion ||
+                !System.getenv('KONAN_DATA_DIR')) {
+                throw new GradleException('Cannot bind cklib to the isolated Native distribution')
+            }
+            def home = new File(System.getenv('KONAN_DATA_DIR'),
+                "kotlin-native-prebuilt-${platform}-${nativeArch}-${config.kotlinVersion}")
+            config.konanHome = home.canonicalPath
+            p.tasks.matching { it.class.name.contains('CompileToBitcode') }.configureEach {
+                dependsOn(p.tasks.named('downloadKotlinNativeDistribution'))
+                doFirst {
+                    if (!new File(home, 'konan/konan.properties').isFile()) {
+                        throw new GradleException('KGP Native distribution is not installed for cklib')
+                    }
+                }
+            }
+        }
     }
     def catalog = new File(gradle.rootProject.rootDir, 'gradle/libs.versions.toml').text
     def kgp = (catalog =~ /(?m)^kotlin\s*=\s*"([^"]+)"/)

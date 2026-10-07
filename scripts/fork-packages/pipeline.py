@@ -242,7 +242,11 @@ def build(args):
         "-Pkotlin.daemon.useFallbackStrategy=false", f"-Pkotlin.daemon.jvmargs=-Xmx{kotlin_heap}",
         f"-Porg.gradle.java.installations.paths={java},{jdk21}",
         "-Porg.gradle.java.installations.auto-download=false",
-        f"-Pversion={data['version']}", f"-PVERSION_NAME={data['version']}",
+        f"-Pversion={data['version']}",
+        # Lucene establishes coordinates itself; VERSION_NAME makes Vanniktech
+        # finalize its version before that callback, so do not inject a second
+        # version property into that fork.
+        *([f"-PVERSION_NAME={data['version']}"] if args.fork != "lucene" else []),
         "-PmavenCentralPublishing=false", "-PsignAllPublications=false",
         "-I", str(HERE / "publish.init.gradle"), "--console=plain", "--stacktrace", *tasks,
     ]

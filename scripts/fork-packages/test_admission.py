@@ -44,6 +44,16 @@ class AdmissionTests(unittest.TestCase):
             self.assertNotRegex(text, r"(?m)^      GRADLE_USER_HOME:")
             self.assertNotRegex(text, r"(?m)^      KONAN_DATA_DIR:")
 
+    def test_cklib_binding_and_lucene_property_are_explicit(self):
+        # Static recipe guards, not a replacement for the three-host producer.
+        root = Path(__file__).resolve().parent
+        init = (root / "publish.init.gradle").read_text()
+        self.assertIn("config.konanHome = home.canonicalPath", init)
+        self.assertIn("System.getenv('KONAN_DATA_DIR')", init)
+        self.assertIn("dependsOn(p.tasks.named('downloadKotlinNativeDistribution'))", init)
+        self.assertIn('if args.fork != "lucene" else []',
+                      (root / "pipeline.py").read_text())
+
 
 if __name__ == "__main__":
     unittest.main()
