@@ -168,6 +168,9 @@ def smoke(args):
     version = doc["identity"]["version"]
     group = FORKS[args.fork]["group"]
     kgp = doc["hosts"][args.host]["toolchain"]["kgp"]
+    java = os.environ["JAVA_HOME"]
+    jvm_launcher = (Path(java) / "bin" / ("java.exe" if args.host == "windows" else "java")).as_posix()
+    require("'" not in jvm_launcher, "Unsafe JVM launcher path")
     repo = (args.bundle / "repo").resolve().as_uri()
     settings = f"""pluginManagement {{
     repositories {{ gradlePluginPortal(); mavenCentral(); google() }}
@@ -187,6 +190,9 @@ dependencyResolutionManagement {{
     (args.output / "settings.gradle").write_text(settings)
     targets = ("jvm",) + tuple(t for t in HOSTS[args.host] if t not in ("root", "jvm"))
     declarations = "\n".join(f"    {t}()" for t in targets)
+    # The same probe must load on Java21 JNI and Java25 FFM. Compile with the
+    # provided Java21 toolchain, not Gradle's running Java25 default bytecode.
+    jvm_toolchain = "    jvmToolchain(21)\n" if args.fork == "mosaic" else ""
     js_gate = args.fork == "mcp" and args.host == "linux"
     js_configuration = ""
     node_configuration = ""
@@ -237,6 +243,7 @@ tasks.register('verifyForkJvmJni', JavaExec) {{
     id 'org.jetbrains.kotlin.multiplatform' version '{kgp}'
 }}
 kotlin {{
+{jvm_toolchain}
 {declarations}
     sourceSets.commonMain {{
         dependencies {{
@@ -255,6 +262,7 @@ tasks.register('verifyForkJvm', JavaExec) {{
     dependsOn('jvmMainClasses')
     def main = project.kotlin.targets.getByName('jvm').compilations.getByName('main')
     classpath = project.files(main.output.allOutputs, main.runtimeDependencyFiles)
+    executable = '{jvm_launcher}'
     mainClass.set('ProbeKt')
     jvmArgs('--enable-native-access=ALL-UNNAMED')
 }}
@@ -275,12 +283,13 @@ tasks.register('verifyForkJvm', JavaExec) {{
                else ["bash", str(wrapper_dir / "gradlew")])
     gates = smoke_gates(args.fork, args.host)
     tasks = gates["tasks"]
-    java = os.environ["JAVA_HOME"]
     command = wrapper + [
         "-p", str(args.output.resolve()), f"-Dorg.gradle.java.home={java}",
         "-Dorg.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8",
         "--max-workers=1", "--no-parallel", "--no-configuration-cache", "--no-build-cache", "--no-scan",
         "-Pkotlin.compiler.execution.strategy=daemon", "-Pkotlin.daemon.useFallbackStrategy=false",
+        *([f"-Porg.gradle.java.installations.paths={java},{os.environ['FORK_JDK21']}",
+           "-Porg.gradle.java.installations.auto-download=false"] if args.fork == "mosaic" else []),
         "-Pkotlin.daemon.jvmargs=-Xmx2g", "--console=plain", "--stacktrace", *tasks,
     ]
     try:

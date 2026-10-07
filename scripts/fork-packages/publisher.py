@@ -3,10 +3,12 @@
 import argparse
 import base64
 import hashlib
+import http.client
 import json
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -14,12 +16,19 @@ from contract import FORKS, HOSTS, coordinate, digest, files, require, safe_name
 from pipeline import live_main, require_trusted_event, verify_bundle
 
 ENDPOINT = "https://maven.pkg.github.com/stream29/kodex"
+STORAGE_HOST = "github-registry-files.githubusercontent.com"
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        # Never forward Basic credentials to another host or HTTP.
-        return None
+    def http_error_302(self, req, fp, code, msg, headers):
+        # Do not let urllib parse/requote a signed Location before our predicate.
+        # A malformed URL could otherwise escape with its query in a ValueError.
+        raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)
+
+    http_error_301 = http_error_302
+    http_error_303 = http_error_302
+    http_error_307 = http_error_302
+    http_error_308 = http_error_302
 
 
 class MavenHTTP:
@@ -34,22 +43,44 @@ class MavenHTTP:
         headers = dict(self.headers)
         if method == "PUT":
             headers.update({"Content-Type": "application/octet-stream", "If-None-Match": "*"})
-        request = urllib.request.Request(f"{self.endpoint}/{path}", data=data,
-                                         headers=headers, method=method)
-        try:
-            with self.opener.open(request, timeout=60) as response:
-                body = response.read(512 * 1024 * 1024 + 1)
-                require(len(body) <= 512 * 1024 * 1024, "Remote artifact exceeds bounded size")
-                return body
-        except urllib.error.HTTPError as error:
-            code = error.code
-            error.close()
-            if method == "GET" and code == 404:
-                return None
-            # Do not echo response bodies/URLs/headers or credential-bearing exception text.
-            raise RuntimeError(f"Maven {method} failed (HTTP {code}); no overwrite attempted") from None
-        except (urllib.error.URLError, TimeoutError, OSError):
-            raise RuntimeError(f"Maven {method} transport failed; remote state must be re-audited") from None
+        url = f"{self.endpoint}/{path}"
+        for hop in range(4):
+            try:
+                request = urllib.request.Request(url, data=data, headers=headers, method=method)
+                with self.opener.open(request, timeout=60) as response:
+                    body = response.read(512 * 1024 * 1024 + 1)
+                    require(len(body) <= 512 * 1024 * 1024, "Remote artifact exceeds bounded size")
+                    return body
+            except urllib.error.HTTPError as error:
+                code = error.code
+                location = error.headers.get("Location")
+                error.close()
+                if method == "GET" and code == 404 and hop == 0:
+                    return None
+                if method == "GET" and code in (301, 302, 303, 307, 308) and hop < 3:
+                    try:
+                        if not location or not all("!" <= c <= "~" for c in location):
+                            raise ValueError("Malformed storage location")
+                        target = urllib.parse.urljoin(url, location or "")
+                        parsed = urllib.parse.urlsplit(target)
+                        trusted = bool(location) and all("!" <= c <= "~" for c in target) and (
+                            parsed.scheme == "https" and parsed.hostname == STORAGE_HOST
+                            and parsed.port in (None, 443) and parsed.username is None
+                            and parsed.password is None and not parsed.fragment
+                        )
+                    except ValueError:
+                        trusted = False
+                    if not trusted:
+                        raise RuntimeError("Maven GET refused an unsafe storage redirect") from None
+                    # Storage URLs are signed by GitHub. Never forward the Maven Basic
+                    # credential, even on further redirects; PUTs never redirect.
+                    headers = {"User-Agent": self.headers["User-Agent"]}
+                    url = target
+                    continue
+                # Never echo bodies, signed URLs, headers or credential-bearing text.
+                raise RuntimeError(f"Maven {method} failed (HTTP {code}); no overwrite attempted") from None
+            except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException, ValueError):
+                raise RuntimeError(f"Maven {method} transport failed; remote state must be re-audited") from None
 
     def get(self, path):
         return self.request("GET", path)
@@ -120,33 +151,49 @@ def publish(client, expected, manifest_path, check_head, wait=time.sleep):
         return 1
     ordered = sorted(expected, key=lambda path: (rank(path), path))
     last_check = time.monotonic()
+    operation = "upload"
+    path = None
+    written = 0
     try:
         for path in ordered:
             if time.monotonic() - last_check >= 30:
+                operation = "head-check"
                 check_head()
                 last_check = time.monotonic()
+            operation = "read-before-upload"
             current = client.get(path)
             # Some Maven registries generate sidecars during the payload PUT.
             # Accept only byte-identical content; never PUT over a present file.
             if current is not None:
                 require(current == expected[path], "Version changed after preflight; stopping without overwrite")
                 continue
+            operation = "upload"
             client.put(path, expected[path])
+            written += 1
         # Allow bounded eventual visibility; verify actual remote bytes, not SHA response headers.
         for attempt in range(6):
+            operation = "head-check"
+            path = None
             check_head()
-            if all(client.get(path) == data for path, data in expected.items()):
+            operation = "verify"
+            for path, data in expected.items():
+                if client.get(path) != data:
+                    break
+            else:
+                operation = "head-check"
+                path = None
                 check_head()
                 return "complete-remote-verified"
             if attempt < 5:
                 wait(10)
         raise RuntimeError("Remote byte verification did not converge")
-    except Exception:
+    except Exception as error:
         raise RuntimeError(
-            "Publication interrupted/failed: remote version MAY BE PARTIAL. "
+            f"Publication interrupted/failed during {operation}, path={path}, "
+            f"successful PUTs={written}: remote version MAY BE PARTIAL. "
             "No deletion, resume or overwrite performed. Keep consumer pin unchanged; "
             "retain this bundle and inspect remote files before separately approved remediation."
-        ) from None
+        ) from error
 
 
 def main():

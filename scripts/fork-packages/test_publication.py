@@ -1,12 +1,17 @@
 """Offline fixtures only. No Gradle, Git, credentials or published-version tests."""
 import base64
 import hashlib
+import http.client
 import io
 import json
 import tarfile
 import tempfile
 import threading
+import traceback
 import unittest
+import urllib.error
+import urllib.request
+import urllib.response
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -18,7 +23,7 @@ from contract import (FORKS, HOSTS, TARGETS, coordinate, digest, encoded, files,
 from pipeline import (compiler_archive_evidence, extract_source, guard, identity, live_main,
                       mcp_compiler_evidence, merge, prepare_android, recipe,
                       task_set, verify_bundle, write_json)
-from publisher import MavenHTTP, classify, publish, upload_set, verify_receipts
+from publisher import MavenHTTP, NoRedirect, classify, publish, upload_set, verify_receipts
 from smoke import node_environment, smoke
 
 
@@ -723,6 +728,33 @@ class PublicationShapeTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_mosaic_probe_compiles_for_java21_but_ffm_runs_java25(self):
+        bundle = self.root / "bundle"
+        bundle.mkdir()
+        (bundle / "manifest.json").write_bytes(b"offline-manifest")
+        jdk21 = self.root / "java21"
+        (jdk21 / "bin").mkdir(parents=True)
+        (jdk21 / "bin/java").touch()
+        doc = {"identity": {"version": self.version},
+               "hosts": {"linux": {"toolchain": {"kgp": "2.3.21"}}}}
+        consumer = self.root / "consumer"
+        with patch("smoke.platform.system", return_value="Linux"), \
+                patch("smoke.isolated_environment"), \
+                patch("smoke.verify_bundle", return_value=(doc, {})), \
+                patch("smoke.run") as runner, \
+                patch.dict("os.environ", {"JAVA_HOME": "/fixture/java25", "FORK_JDK21": str(jdk21)}):
+            smoke(SimpleNamespace(root=self.root, bundle=bundle, output=consumer, fork="mosaic",
+                                  host="linux", receipt=self.root / "receipt.json", identity_sha256="fixture"))
+        build = (consumer / "build.gradle").read_text()
+        self.assertIn("jvmToolchain(21)", build)
+        self.assertIn("executable = '/fixture/java25/bin/java'", build)
+        self.assertIn(f"executable = '{jdk21.as_posix()}/bin/java'", build)
+        command = runner.call_args_list[0].args[0]
+        self.assertIn("-Porg.gradle.java.installations.auto-download=false", command)
+        self.assertIn(f"-Porg.gradle.java.installations.paths=/fixture/java25,{jdk21}", command)
+        self.assertIn("verifyForkJvmJni", command)
+        self.assertIn("verifyForkJvm", command)
+
     def test_tty_terminal_without_cinterop_or_bitcode_is_valid(self):
         validate(self.repo, self.spec, self.version)
         for target in TARGETS[1:]:
@@ -858,6 +890,7 @@ class HTTPFixture:
         self.fail_path = None
         self.corrupt_path = None
         self.redirect = False
+        self.redirect_location = "http://127.0.0.1:1/must-not-follow"
         self.automatic_checksums = False
         fixture_self = self
         authorization = "Basic " + base64.b64encode(b"fixture:nonsecret-fixture-token").decode()
@@ -872,7 +905,7 @@ class HTTPFixture:
                     return
                 if fixture_self.redirect:
                     self.send_response(302)
-                    self.send_header("Location", "http://127.0.0.1:1/must-not-follow")
+                    self.send_header("Location", fixture_self.redirect_location)
                     self.end_headers()
                     return
                 value = fixture_self.data.get(self.path.lstrip("/"))
@@ -1005,12 +1038,151 @@ class PublisherTests(unittest.TestCase):
     def test_redirect_and_bad_auth_refused(self):
         with HTTPFixture() as fixture_http:
             fixture_http.redirect = True
-            with self.assertRaisesRegex(RuntimeError, "HTTP 302"):
+            with self.assertRaisesRegex(RuntimeError, "unsafe storage redirect"):
                 fixture_http.client.get("g/a/v/file")
             fixture_http.redirect = False
             bad = MavenHTTP(f"http://127.0.0.1:{fixture_http.server.server_port}", "fixture", "wrong")
             with self.assertRaisesRegex(RuntimeError, "HTTP 401"):
                 bad.get("g/a/v/file")
+
+    def test_official_storage_get_has_no_maven_authorization(self):
+        client = MavenHTTP("https://maven.pkg.github.com/stream29/kodex", "fixture", "fixture-secret")
+        requests = []
+        def opened(request, timeout):
+            requests.append(request)
+            if len(requests) == 1:
+                raise urllib.error.HTTPError(request.full_url, 302, "Found", {
+                    "Location": "https://github-registry-files.githubusercontent.com/file?signature=fixture"
+                }, io.BytesIO())
+            return io.BytesIO(b"original-payload")
+        with patch.object(client.opener, "open", side_effect=opened):
+            self.assertEqual(client.get("g/a/v/file"), b"original-payload")
+        self.assertIn("Authorization", dict(requests[0].header_items()))
+        self.assertNotIn("Authorization", dict(requests[1].header_items()))
+        self.assertEqual(requests[1].get_method(), "GET")
+
+    def test_unsafe_redirects_puts_and_loops_do_not_forward_credentials(self):
+        client = MavenHTTP("https://maven.pkg.github.com/stream29/kodex", "fixture", "fixture-secret")
+        unsafe = (
+            "http://github-registry-files.githubusercontent.com/file",
+            "https://github-registry-files.githubusercontent.com.evil.invalid/file",
+            "https://user:password@github-registry-files.githubusercontent.com/file",
+            "https://@github-registry-files.githubusercontent.com/file",
+            "https://github-registry-files.githubusercontent.com:444/file",
+            "https://github-registry-files.githubusercontent.com/file#fragment",
+            "https://github-registry-files.githubusercontent.com/file\x00?signature=not-logged",
+            "https://127.0.0.1/file", "/relative", "",
+        )
+        for location in unsafe:
+            with self.subTest(location=location):
+                with patch.object(client.opener, "open", side_effect=urllib.error.HTTPError(
+                    "fixture", 302, "Found", {"Location": location}, io.BytesIO()
+                )) as opened:
+                    with self.assertRaisesRegex(RuntimeError, "unsafe storage redirect"):
+                        client.get("g/a/v/file")
+                    self.assertEqual(opened.call_count, 1)
+        safe = "https://github-registry-files.githubusercontent.com/file?signature=not-logged"
+        def redirected(*args, **kwargs):
+            raise urllib.error.HTTPError("fixture", 302, "Found",
+                                         {"Location": safe}, io.BytesIO())
+        for method, limit in (("GET", 4), ("PUT", 1)):
+            with self.subTest(method=method):
+                with patch.object(client.opener, "open", side_effect=redirected) as opened:
+                    with self.assertRaisesRegex(RuntimeError, "HTTP 302") as failure:
+                        client.request(method, "g/a/v/file", b"payload" if method == "PUT" else None)
+                    self.assertEqual(opened.call_count, limit)
+                    self.assertNotIn("not-logged", str(failure.exception))
+                    self.assertNotIn("fixture-secret", str(failure.exception))
+                    for call in opened.call_args_list[1:]:
+                        self.assertNotIn("Authorization", dict(call.args[0].header_items()))
+
+    def test_storage_404_is_not_registry_absence(self):
+        client = MavenHTTP("https://maven.pkg.github.com/stream29/kodex", "fixture", "fixture-secret")
+        errors = (
+            urllib.error.HTTPError("fixture", 302, "Found", {
+                "Location": "https://github-registry-files.githubusercontent.com/file"
+            }, io.BytesIO()),
+            urllib.error.HTTPError("fixture-storage", 404, "Missing", {}, io.BytesIO()),
+        )
+        with patch.object(client.opener, "open", side_effect=errors):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 404"):
+                client.get("g/a/v/file")
+
+    def test_real_redirect_handler_preserves_signed_url_and_strips_basic(self):
+        captured = []
+        class Storage(urllib.request.HTTPSHandler):
+            def https_open(self, request):
+                captured.append(request)
+                response = urllib.response.addinfourl(io.BytesIO(b"payload"), {},
+                                                     request.full_url, 200)
+                response.msg = "OK"
+                return response
+        with HTTPFixture() as registry:
+            registry.redirect = True
+            registry.redirect_location = (
+                "https://GITHUB-REGISTRY-FILES.GITHUBUSERCONTENT.COM:443/file"
+                "?signature=fixture%2F%3D+value"
+            )
+            registry.client.opener = urllib.request.build_opener(NoRedirect(), Storage())
+            self.assertEqual(registry.client.get("g/a/v/file"), b"payload")
+            self.assertEqual(captured[0].full_url, registry.redirect_location)
+            self.assertNotIn("Authorization", dict(captured[0].header_items()))
+
+    def test_real_malformed_redirect_cannot_disclose_signed_query(self):
+        reached_storage = []
+        class MustNotRequestStorage(urllib.request.HTTPSHandler):
+            def https_open(self, request):
+                reached_storage.append(request)
+                raise http.client.InvalidURL("fixture signed selector must not be requested")
+        with HTTPFixture() as registry:
+            registry.client.opener = urllib.request.build_opener(NoRedirect(), MustNotRequestStorage())
+            registry.redirect = True
+            for location in (
+                "https://[invalid?signature=fixture-signed-secret",
+                "https://github-registry-files.githubusercontent.com/file?signature=fixture-signed-secret value",
+                "https://github-registry-files.githubusercontent.com/file?signature=fixture-signed-secret\x00",
+                "https://github-registry-files.githubusercontent.com/file?signature=fixture-signed-secret\x7f",
+                "https://github-registry-files.githubusercontent.com/file?signature=fixture-signed-secret\t",
+            ):
+                with self.subTest(location=location):
+                    registry.redirect_location = location
+                    with self.assertRaises(RuntimeError) as failure:
+                        registry.client.get("g/a/v/file")
+                    rendered = "".join(traceback.format_exception(failure.exception))
+                    self.assertNotIn("fixture-signed-secret", rendered)
+                    self.assertNotIn("nonsecret-fixture-token", rendered)
+                    self.assertEqual(reached_storage, [])
+
+    def test_protocol_failure_is_sanitized_in_preflight_and_final_read(self):
+        for phase in ("preflight", "verify"):
+            with self.subTest(phase=phase), HTTPFixture() as registry:
+                original = registry.client.opener.open
+                def opened(request, **kwargs):
+                    if request.get_method() == "GET" and (
+                        phase == "preflight" or len(registry.puts) == len(self.expected())
+                    ):
+                        raise http.client.InvalidURL(
+                            "fixture invalid selector ?signature=fixture-signed-secret")
+                    return original(request, **kwargs)
+                with patch.object(registry.client.opener, "open", side_effect=opened):
+                    with self.assertRaises(RuntimeError) as failure:
+                        publish(registry.client, self.expected(), "g/a/v/a-v-kodex-manifest.json",
+                                lambda: None, wait=lambda _: None)
+                    rendered = "".join(traceback.format_exception(failure.exception))
+                    self.assertNotIn("fixture-signed-secret", rendered)
+                    self.assertNotIn("nonsecret-fixture-token", rendered)
+                    self.assertIn("transport failed", rendered)
+                    if phase == "verify":
+                        self.assertIn("during verify, path=g/a/v/a-v.jar", rendered)
+
+    def test_interrupted_upload_keeps_sanitized_operation_cause(self):
+        with HTTPFixture() as fixture_http:
+            fixture_http.fail_path = "g/a/v/a-v.module"
+            with self.assertRaisesRegex(RuntimeError, "successful PUTs=1") as failure:
+                publish(fixture_http.client, self.expected(), "g/a/v/a-v-kodex-manifest.json",
+                        lambda: None)
+            self.assertIn("HTTP 500", str(failure.exception.__cause__))
+            self.assertNotIn("nonsecret-fixture-token", str(failure.exception.__cause__))
 
     def test_path_escape_fails_before_http(self):
         with HTTPFixture() as fixture_http:
