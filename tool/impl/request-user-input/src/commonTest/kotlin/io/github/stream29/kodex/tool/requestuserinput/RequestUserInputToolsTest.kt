@@ -24,7 +24,8 @@ val requestUserInputToolsTest by testSuite {
         assertEquals(RequestUserInputTools.Name, RequestUserInputTools.spec.name)
         assertEquals(
             "Request user input for one to three short questions and wait for the response. " +
-                "Set autoResolutionMs, from 60000 to 240000 milliseconds, only when the question is useful but non-blocking and continuing with best judgment is acceptable if the user does not answer; omit it when explicit user input is required.",
+                "This host always waits for explicit user input and does not generate timeout answers. " +
+                "Omit autoResolutionMs; it is retained as wire-compatible metadata, not an implemented auto-resolution timer.",
             RequestUserInputTools.spec.description,
         )
         assertFalse(RequestUserInputTools.spec.strict)

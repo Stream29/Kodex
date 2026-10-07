@@ -8,9 +8,10 @@ import kotlinx.serialization.Serializable
 public data class RequestUserInputArgs(
     public val questions: List<RequestUserInputQuestion>,
     /**
-     * Nullable because a question may be non-blocking or require an explicit
-     * answer; `null` means the runtime must wait for the user rather than
-     * resolve the call automatically.
+     * Retained optional metadata for wire compatibility. This host does not
+     * install an auto-resolution timer or generate answers on timeout; every
+     * question waits for explicit user input even when this value is supplied.
+     * New requests should omit it.
      */
     @SerialName("autoResolutionMs")
     public val autoResolutionMs: Long? = null,

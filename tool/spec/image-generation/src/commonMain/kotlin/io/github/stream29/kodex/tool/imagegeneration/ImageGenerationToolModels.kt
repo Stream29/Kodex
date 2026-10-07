@@ -6,8 +6,9 @@ import kotlinx.serialization.Serializable
 /**
  * @property referencedImagePaths Nullable because brand-new image generation
  * has no referenced local images; `null` means use no path-based edit images.
- * @property numLastImagesToInclude Nullable because history-based edit images
- * are optional; `null` means do not select recent conversation images.
+ * @property numLastImagesToInclude Retained for wire compatibility. This host
+ * does not bind conversation image history; a non-null value is unsupported
+ * and produces an explicit tool failure. Omit it and use local reference paths.
  */
 @Serializable
 public data class ImageGenToolArguments(

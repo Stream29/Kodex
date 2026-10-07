@@ -24,16 +24,15 @@ public object ImageGenerationTools {
         "The `image_gen.imagegen` tool enables image generation from descriptions and editing of existing images based on specific instructions. Use it when:\n" +
             "\n" +
             "- The user requests an image based on a scene description, such as a diagram, portrait, comic, meme, or any other visual.\n" +
-            "- The user wants to modify an attached or previously generated image with specific changes, including adding or removing elements, altering colors, improving quality/resolution, or transforming the style (e.g., cartoon, oil painting).\n" +
+            "- The user wants to modify an image available at a local file path, including adding or removing elements, altering colors, improving quality/resolution, or transforming the style.\n" +
             "\n" +
             "Guidelines:\n" +
             "- Omit both `referenced_image_paths` and `num_last_images_to_include` when generating a brand new image.\n" +
             "- For edits, use `referenced_image_paths` when every target image has a local file path.\n" +
             "- If you have not seen a local image yet, use `view_image` to inspect it before editing.\n" +
-            "- Use `num_last_images_to_include` only when at least one target image has no local file path.\n" +
-            "- Set `num_last_images_to_include` to the smallest number of recent conversation images that includes every target image, up to 5.\n" +
+            "- Conversation-history image selection is not supported by this host. Omit `num_last_images_to_include`; that field is retained only for wire compatibility and a non-null value fails explicitly.\n" +
             "- Never provide both `referenced_image_paths` and `num_last_images_to_include`.\n" +
-            "- If neither mechanism can include every target image, ask the user to attach the missing images again.\n" +
+            "- If a target image has no accessible local file path, ask the user to provide one before editing.\n" +
             "- Directly generate the image without reconfirmation or clarification unless required images must be attached again.\n" +
             "- Always use this tool for image editing unless the user explicitly requests otherwise. Do not use the `python` tool for image editing unless specifically instructed.\n"
 

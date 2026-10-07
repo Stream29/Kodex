@@ -48,7 +48,7 @@ public val RequestUserInputParametersSchema: ObjectPropertyDefinition =
         property("autoResolutionMs") {
             number {
                 description =
-                    "Optional auto-resolution window in milliseconds, from 60000 to 240000. Include this only when the question is useful but non-blocking and continuing with best judgment is acceptable if the user does not answer; omit it when explicit user input is required before continuing. Use 60000 for lightly helpful context and up to 240000 when the answer would materially unblock better work."
+                    "Reserved metadata retained for wire compatibility. Omit this field: this host waits for explicit user input and does not implement automatic timeout answers."
             }
         }
     }
