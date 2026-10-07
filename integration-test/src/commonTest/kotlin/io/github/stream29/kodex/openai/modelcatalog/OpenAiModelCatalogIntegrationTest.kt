@@ -43,7 +43,7 @@ private fun CodexAuthJson?.toSubscriptionAuthStateOrThrow(): OpenAiSubscriptionA
 
 private class LiveCatalogFixture(
     private val client: OpenAiClient,
-    val catalog: OpenAiModelCatalog,
+    val catalog: OpenAiModelCatalogStore,
 ) : AutoCloseable {
     override fun close() {
         catalog.close()

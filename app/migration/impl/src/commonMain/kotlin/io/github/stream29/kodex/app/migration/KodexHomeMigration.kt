@@ -12,24 +12,26 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import kotlinx.io.IOException
+import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
+import kotlin.time.Duration.Companion.seconds
 
-public class KodexHomeHandle internal constructor(
-    public val home: Path,
-    public val version: MigrationVersion,
+internal class HeldLeaseKodexHomeHandle(
+    override val home: Path,
+    override val version: MigrationVersion,
     private val lease: FileSystemLease,
-) : AutoCloseable {
+) : KodexHomeHandle {
     override fun close() {
         lease.close()
     }
 
-    public suspend fun closeAndJoin() {
-        lease.close()
-        lease.coroutineContext.job.join()
+    override suspend fun closeAndJoin() {
+        lease.closeAndJoin()
     }
 }
 
@@ -37,6 +39,22 @@ public val CurrentKodexApplicationVersion: MigrationVersion by lazy {
     MigrationVersion(GeneratedKodexApplicationVersion)
 }
 
+/**
+ * Prepares [home] and returns the unique [KodexHomeHandle] contract, owned by this scope.
+ *
+ * Uses the generated [CurrentKodexApplicationVersion] and the existing migration
+ * registry. The handle contract documents accepted versions, lease lifetime and
+ * cancellation semantics. [onMigrationStarted] runs before each applicable action.
+ *
+ * @throws KodexHomeVersionException If the version file is invalid or unreadable,
+ * the stored version is newer, or the final prepared version disappears/changes.
+ * @throws KodexHomeLayoutException If baseline validation of an unversioned Home
+ * rejects its Session entries, required timelines or latest pointers.
+ * @throws IllegalStateException If migration registry targets are not unique and
+ * strictly increasing.
+ * @throws IllegalArgumentException If this scope has no owner Job.
+ * @throws CancellationException If preparation is cancelled.
+ */
 public suspend fun CoroutineScope.prepareKodexHome(
     home: Path,
     fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
@@ -62,6 +80,7 @@ internal suspend fun CoroutineScope.prepareKodexHome(
     val lockDirectory = Path(home, LocksDirectory, HomeLockDirectory)
     var readLease: FileSystemLease? =
         FileSystemReadLease(lockDirectory, fileSystem)
+    var readFailure: Throwable? = null
     try {
         val storedVersion = readVersionOrNull(home, fileSystem)
         if (storedVersion != null) {
@@ -73,20 +92,22 @@ internal suspend fun CoroutineScope.prepareKodexHome(
             }
             if (storedVersion == currentVersion) {
                 val retainedLease = checkNotNull(readLease)
+                currentCoroutineContext().ensureActive()
+                coroutineContext.ensureActive()
+                retainedLease.coroutineContext.ensureActive()
                 readLease = null
-                return KodexHomeHandle(home, currentVersion, retainedLease)
+                return HeldLeaseKodexHomeHandle(home, currentVersion, retainedLease)
             }
         }
+    } catch (failure: Throwable) {
+        readFailure = failure
+        throw failure
     } finally {
-        withContext(NonCancellable) {
-            readLease?.let { lease ->
-                lease.close()
-                lease.coroutineContext.job.join()
-            }
-        }
+        readLease?.let { closeHomeLease(it, readFailure) }
     }
 
     val writeLease = FileSystemWriteLease(lockDirectory, fileSystem)
+    var writeFailure: Throwable? = null
     try {
         prepareUnderWriteLease(
             home = home,
@@ -95,11 +116,11 @@ internal suspend fun CoroutineScope.prepareKodexHome(
             fileSystem = fileSystem,
             onMigrationStarted = onMigrationStarted,
         )
+    } catch (failure: Throwable) {
+        writeFailure = failure
+        throw failure
     } finally {
-        withContext(NonCancellable) {
-            writeLease.close()
-            writeLease.coroutineContext.job.join()
-        }
+        closeHomeLease(writeLease, writeFailure)
     }
 
     val finalReadLease = FileSystemReadLease(lockDirectory, fileSystem)
@@ -111,13 +132,29 @@ internal suspend fun CoroutineScope.prepareKodexHome(
                 "Kodex Home changed to version $preparedVersion while starting $currentVersion.",
             )
         }
-        return KodexHomeHandle(home, currentVersion, finalReadLease)
+        currentCoroutineContext().ensureActive()
+        coroutineContext.ensureActive()
+        finalReadLease.coroutineContext.ensureActive()
+        return HeldLeaseKodexHomeHandle(home, currentVersion, finalReadLease)
     } catch (failure: Throwable) {
-        withContext(NonCancellable) {
-            finalReadLease.close()
-            finalReadLease.coroutineContext.job.join()
-        }
+        closeHomeLease(finalReadLease, failure)
         throw failure
+    }
+}
+
+private suspend fun closeHomeLease(lease: FileSystemLease, primary: Throwable? = null) {
+    val cleanup = withContext(NonCancellable) {
+        withContext(Dispatchers.Default) {
+            try {
+                withTimeout(30.seconds) { runCatching { lease.closeAndJoin() } }
+            } catch (failure: Throwable) {
+                Result.failure<Unit>(failure)
+            }
+        }
+    }.exceptionOrNull() ?: return
+    if (primary == null) throw cleanup
+    if (primary !== cleanup && primary.suppressedExceptions.none { it === cleanup }) {
+        primary.addSuppressed(cleanup)
     }
 }
 
@@ -261,16 +298,6 @@ private fun String.toCanonicalIndexOrNull(): Int? {
     val index = toIntOrNull()?.takeIf { it >= 0 } ?: return null
     return index.takeIf { it.toString() == this }
 }
-
-public open class KodexHomeVersionException(
-    message: String,
-    cause: Throwable? = null,
-) : IllegalStateException(message, cause)
-
-public class KodexHomeLayoutException(
-    message: String,
-    cause: Throwable? = null,
-) : KodexHomeVersionException(message, cause)
 
 private val UnversionedBaseline: MigrationVersion = MigrationVersion("0.3.2")
 private val CurrentTimelineNames: Set<String> = setOf(

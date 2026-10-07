@@ -1,5 +1,7 @@
 package io.github.stream29.kodex.integrationtest
 
+import io.github.stream29.kodex.utils.shellclient.default
+
 import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
@@ -20,7 +22,6 @@ import io.github.stream29.kodex.agentstate.test.TestMcpService
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.cleanmodels.CleanOpenAiEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanCompactionPoint
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableRequestUserInputResult
@@ -29,7 +30,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessag
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequestUserInputToolEvent
 import io.github.stream29.kodex.agentstorage.inmemory.InMemoryKodexAgentStorage
-import io.github.stream29.kodex.hook.contract.NoOpKodexHooks
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.FunctionCallOutputBody
@@ -40,12 +40,16 @@ import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.ModelsResponse
+import io.github.stream29.kodex.openai.Reasoning
 import io.github.stream29.kodex.openai.Response
+import io.github.stream29.kodex.openai.ResponseInclude
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
 import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.SearchCommands
+import io.github.stream29.kodex.openai.ServiceTier
+import io.github.stream29.kodex.openai.TextControls
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.openai.ToolChoice
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
@@ -58,6 +62,7 @@ import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.openai.codexclistorage.CodexAuthJson
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
+import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenNamespace
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolName
@@ -98,40 +103,78 @@ private class RecordingOpenAiClient(
     val remoteCompactionV2Requests: MutableList<RecordedCodexResponse> = mutableListOf()
 
     override suspend fun createResponse(
-        request: ResponsesApiRequest,
+        model: OpenAiModelId,
+        input: List<ResponseItem>,
+        instructions: String,
+        store: Boolean,
+        previousResponseId: String?,
+        tools: List<ToolSpec>,
+        toolChoice: ToolChoice,
+        parallelToolCalls: Boolean,
+        reasoning: Reasoning,
+        include: Set<ResponseInclude>,
+        serviceTier: ServiceTier,
+        promptCacheKey: String?,
+        text: TextControls,
         installationId: String?,
-        turnMetadata: String,
-        windowId: String,
+        sessionId: String?,
+        threadId: String?,
+        turnId: String?,
+        windowId: String?,
         turnState: String?,
         onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit,
     ): Flow<ResponsesStreamEvent> {
-        requests += RecordedCodexResponse(request, installationId, turnMetadata, windowId)
+        requests += RecordedCodexResponse(
+            ResponsesApiRequest(
+                model = model,
+                input = input,
+                instructions = instructions,
+                store = store,
+                previousResponseId = previousResponseId,
+                tools = tools,
+                toolChoice = toolChoice,
+                parallelToolCalls = parallelToolCalls,
+                reasoning = reasoning,
+                include = include,
+                serviceTier = serviceTier,
+                promptCacheKey = promptCacheKey,
+                text = text,
+            ),
+        )
         return delegate.createResponse(
-            request,
-            installationId,
-            turnMetadata,
-            windowId,
-            turnState,
-            onResponseHeaders,
+            model = model,
+            input = input,
+            instructions = instructions,
+            store = store,
+            previousResponseId = previousResponseId,
+            tools = tools,
+            toolChoice = toolChoice,
+            parallelToolCalls = parallelToolCalls,
+            reasoning = reasoning,
+            include = include,
+            serviceTier = serviceTier,
+            promptCacheKey = promptCacheKey,
+            text = text,
+            installationId = installationId,
+            sessionId = sessionId,
+            threadId = threadId,
+            turnId = turnId,
+            windowId = windowId,
+            turnState = turnState,
+            onResponseHeaders = onResponseHeaders,
         )
     }
 
     override suspend fun createRemoteCompactionV2Response(
         request: ResponsesApiRequest,
-        installationId: String?,
-        turnMetadata: String,
-        windowId: String,
     ): RemoteCompactionV2Response {
-        remoteCompactionV2Requests += RecordedCodexResponse(request, installationId, turnMetadata, windowId)
-        return delegate.createRemoteCompactionV2Response(request, installationId, turnMetadata, windowId)
+        remoteCompactionV2Requests += RecordedCodexResponse(request)
+        return delegate.createRemoteCompactionV2Response(request)
     }
 }
 
 private data class RecordedCodexResponse(
     val request: ResponsesApiRequest,
-    val installationId: String?,
-    val turnMetadata: String,
-    val windowId: String,
 )
 
 private class RequestOnlyRuntime(
@@ -153,7 +196,7 @@ private class RequestOnlyRuntime(
 
 internal fun KodexAgentStateContract.integrationResumableAgent(
     client: OpenAiClient,
-    modelCatalog: OpenAiModelCatalog,
+    modelCatalog: OpenAiModelCatalogStore,
     mcpService: McpService,
 ): AgentRuntime =
     buildMasterAgentRuntime(
@@ -163,7 +206,6 @@ internal fun KodexAgentStateContract.integrationResumableAgent(
             contextSettings = TestAgentContextSettings,
             shellSettings = MutableStateFlow(IntegrationShellSettings),
             mcpService = mcpService,
-            hooks = NoOpKodexHooks,
         ),
     )
 
@@ -187,11 +229,9 @@ private fun requestInput(vararg durableItems: ResponseItem): List<ResponseItem> 
 
 private suspend fun OpenAiClient.collectResponseProbe(input: List<ResponseItem>): List<ResponsesStreamEvent> =
     createResponse(
-        ResponsesApiRequest(
-            model = testOpenAiModel(),
-            input = input,
-            store = false,
-        ),
+        model = testOpenAiModel(),
+        input = input,
+        store = false,
     ).toList()
 
 internal suspend fun realOpenAiClient(): RealOpenAiClient =
@@ -309,7 +349,7 @@ private fun userMessage(text: String): ResponseItem.Message =
         content = listOf(ContentItem.InputText(text)),
     )
 
-internal fun testModelCatalog(): OpenAiModelCatalog =
+internal fun testModelCatalog(): OpenAiModelCatalogStore =
     OpenAiModelCatalog(
         client = mockOpenAiClient {
             listModels { OpenAiResult.Success(ModelsResponse()) }
@@ -365,7 +405,7 @@ private fun scriptedConversationClient(
     requests: MutableList<ResponsesApiRequest>,
 ): OpenAiClient =
     mockOpenAiClient {
-        createResponse { request, _, _, _ ->
+        createResponse { request ->
             requests += request
 
             when (requests.size) {
@@ -996,17 +1036,15 @@ val openAiHostedWebSearchProbeTest by testSuite {
             testConfig = TestConfig.testScope(isEnabled = true, timeout = 180.seconds),
         ) { client ->
             val events = client.createResponse(
-                ResponsesApiRequest(
-                    model = testOpenAiModel(),
-                    input = listOf(
-                        userMessage(
-                            "Search the web for the current official Kotlin release, then reply with its version.",
-                        ),
+                model = testOpenAiModel(),
+                input = listOf(
+                    userMessage(
+                        "Search the web for the current official Kotlin release, then reply with its version.",
                     ),
-                    tools = listOf(ToolSpec.WebSearch(externalWebAccess = true)),
-                    toolChoice = ToolChoice.Required,
-                    store = false,
                 ),
+                tools = listOf(ToolSpec.WebSearch(externalWebAccess = true)),
+                toolChoice = ToolChoice.Required,
+                store = false,
             ).toList()
             val outputItems = events.outputItems()
 

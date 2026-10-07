@@ -5,7 +5,6 @@ import com.jakewharton.mosaic.terminal.MouseTracking
 import com.jakewharton.mosaic.terminal.TerminalScreen
 import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.utils.kodexhome.KodexHome
-import io.github.stream29.kodex.utils.logging.initializeLogging
 import kotlinx.coroutines.runBlocking
 
 public fun main() {
@@ -20,13 +19,7 @@ public fun main() {
             println("Unable to prepare Kodex Home: ${failure.message ?: failure}")
             return@runBlocking
         }
-        try {
-            initializeLogging(KodexHome)
-        } catch (failure: Throwable) {
-            homeHandle.closeAndJoin()
-            println("Unable to initialize Kodex logging: ${failure.message ?: failure}")
-            return@runBlocking
-        }
+        if (!initializeCliLogging(homeHandle)) return@runBlocking
         try {
             withKodexApplication(homeHandle) { application ->
                 try {
@@ -38,6 +31,7 @@ public fun main() {
                             viewModel = application.viewModel,
                             newLineKey = application.newLineKey,
                             sidebarSettings = application.sidebarSettings,
+                            onOperationFailure = application.reportUnhandledError,
                         )
                     }
                 } finally {

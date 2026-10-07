@@ -59,37 +59,36 @@ val openAiFunctionCallImageOutputTest by testSuite {
                     ),
                 ),
             )
-            val request =
-                ResponsesApiRequest(
-                    model = ResponsesTestModel,
-                    input = listOf(
-                        userMessage,
-                        ResponseItem.FunctionCall(
-                            name = imageInspectionTool.name,
-                            arguments = """{"path":"fixture.png"}""",
-                            callId = ImageInspectionCallId,
-                        ),
-                        ResponseItem.FunctionCallOutput(
-                            callId = ImageInspectionCallId,
-                            output = FunctionCallOutputPayload(
-                                body = FunctionCallOutputBody.ContentItems(
-                                    listOf(
-                                        FunctionCallOutputContentItem.InputImage(
-                                            imageUrl = png64x32DataUrl,
-                                            detail = ImageDetail.High,
-                                        ),
-                                    ),
+            val input = listOf(
+                userMessage,
+                ResponseItem.FunctionCall(
+                    name = imageInspectionTool.name,
+                    arguments = """{"path":"fixture.png"}""",
+                    callId = ImageInspectionCallId,
+                ),
+                ResponseItem.FunctionCallOutput(
+                    callId = ImageInspectionCallId,
+                    output = FunctionCallOutputPayload(
+                        body = FunctionCallOutputBody.ContentItems(
+                            listOf(
+                                FunctionCallOutputContentItem.InputImage(
+                                    imageUrl = png64x32DataUrl,
+                                    detail = ImageDetail.High,
                                 ),
-                                success = true,
                             ),
                         ),
+                        success = true,
                     ),
+                ),
+            )
+            val events = withContext(Dispatchers.Default) {
+                client.createResponse(
+                    model = ResponsesTestModel,
+                    input = input,
                     tools = listOf(imageInspectionTool),
                     toolChoice = ToolChoice.None,
                     store = false,
-                )
-            val events = withContext(Dispatchers.Default) {
-                client.createResponse(request).toList()
+                ).toList()
             }
             events.requireCompleted("image function output")
 

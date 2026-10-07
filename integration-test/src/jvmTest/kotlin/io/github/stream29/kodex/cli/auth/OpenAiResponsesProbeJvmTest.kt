@@ -2,9 +2,7 @@ package io.github.stream29.kodex.cli.auth
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.cli.settings.InMemoryKodexGlobalSettings
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
-import io.github.stream29.kodex.cli.settings.KodexGlobalSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.OpenAiAuthState
@@ -17,8 +15,12 @@ import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.openai.client.OpenAiClient
 import io.github.stream29.kodex.openai.client.OpenAiClientConfig
+import io.github.stream29.kodex.openai.client.OpenAiLoginClient
+import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
@@ -36,45 +38,49 @@ val openAiResponsesProbeJvmTest by testSuite(
         val home = Path(System.getProperty("user.home"))
         val dataDirectory = Path(home, ".kodex")
         val codexHome = Path(home, ".codex")
-        val settings = InMemoryKodexGlobalSettings(
-            KodexGlobalSettings(
-                authSource = KodexAuthSource.Kodex,
-            ),
-        )
-        val loader = CoroutineScope(currentCoroutineContext()).FileSystemKodexAuthStore(
-            dataDirectory = dataDirectory,
-            codexHome = codexHome,
-            globalSettings = settings,
-        )
+        val loginClient = OpenAiLoginClient()
         val auth = try {
-            (loader.state.value as? OpenAiAuthState.Authenticated)
-                ?.credentials
-                ?: error("Kodex credentials could not be loaded: ${loader.state.value}")
+            val loader = CoroutineScope(currentCoroutineContext()).BackendFileSystemAuthStore(
+                dataDirectory = dataDirectory,
+                codexHome = codexHome,
+                selectedSource = MutableStateFlow(KodexAuthSource.Kodex),
+                loginClient = loginClient,
+            )
+            try {
+                (loader.state.value as? OpenAiAuthState.Authenticated)
+                    ?.credentials
+                    ?: error("Kodex credentials could not be loaded: ${loader.state.value}")
+            } finally {
+                loader.close()
+            }
         } finally {
-            loader.close()
+            loginClient.close()
         }
+        val fixedState = MutableStateFlow<OpenAiAuthState>(
+            OpenAiAuthState.Authenticated(auth),
+        ).asStateFlow()
         val client = OpenAiClient(
-            authStore = InMemoryKodexAuthStore(auth),
+            authStore = object : OpenAiAuthStore {
+                override val state = fixedState
+            },
             config = OpenAiClientConfig(),
         )
         try {
             val events = withTimeout(180.seconds) {
                 client.createResponse(
-                    ResponsesApiRequest(
-                        model = OpenAiModelId("gpt-5.6-sol"),
-                        input = listOf(
-                            ResponseItem.Message(
-                                role = MessageRole.User,
-                                content = listOf(
-                                    ContentItem.InputText(
-                                        "Reply with exactly $ProbeMarker and no other text.",
-                                    ),
+                    model = OpenAiModelId("gpt-5.6-sol"),
+                    input = listOf(
+                        ResponseItem.Message(
+                            role = MessageRole.User,
+                            content = listOf(
+                                ContentItem.InputText(
+                                    "Reply with exactly $ProbeMarker and no other text.",
                                 ),
                             ),
                         ),
-                        reasoning = Reasoning(effort = ReasoningEffort.Max),
-                        serviceTier = ServiceTier.Fast,
                     ),
+                    reasoning = Reasoning(effort = ReasoningEffort.Max),
+                    serviceTier = ServiceTier.Fast,
                 ).toList()
             }
             val eventTypes = events.map { event -> event.javaClass.simpleName }

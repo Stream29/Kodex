@@ -671,6 +671,9 @@ private suspend fun <T> TestMosaic<T>.click(
     sendMouseEvent(MouseEvent(x, y, MouseEvent.Type.Press, MouseEvent.Button.Left))
     awaitSnapshot()
     sendMouseEvent(MouseEvent(x, y, MouseEvent.Type.Release))
+    // Match the actual Patch renderer-input suites: release commits the disclosure;
+    // the following layout frame contains its new body, not the earlier header-only draw.
+    awaitSnapshot()
     return awaitSnapshot()
 }
 

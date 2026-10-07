@@ -1,7 +1,7 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
 
 plugins {
-    id("kodex.kmp-host")
+    id("kodex.kmp-cli")
 }
 
 val generatedVersionDirectory =
@@ -23,8 +23,9 @@ kotlin {
         commonMain {
             kotlin.srcDir(generatedVersionDirectory)
             dependencies {
-                api(project(":app-migration-contract"))
-                implementation(project(":agent-storage-filesystem-layout"))
+                api(project(":app-migration-spec"))
+                implementation(project(":utils-kotlinx-io-coroutines-impl"))
+                implementation(project(":agent-storage-impl-filesystem-layout"))
                 implementation(project(":utils-filesystem-lease-impl"))
                 implementation(libs.kotlinx.serialization.json)
                 implementation(libs.kaml)
@@ -32,7 +33,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
-            implementation(project(":app-shared-settings-filesystem"))
+            implementation(project(":app-settings-impl-filesystem"))
         }
     }
 }

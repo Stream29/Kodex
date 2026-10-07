@@ -1,0 +1,145 @@
+package io.github.stream29.kodex.mcp.stdio
+
+import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSink
+import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineRawSource
+import io.github.stream29.kodex.utils.processclient.ProcessClient
+import io.github.stream29.kodex.utils.processclient.ProcessCommand
+import io.github.stream29.kodex.utils.processclient.ProcessSession
+import io.modelcontextprotocol.kotlin.sdk.client.CoroutineStdioSink
+import io.modelcontextprotocol.kotlin.sdk.client.CoroutineStdioSource
+import io.modelcontextprotocol.kotlin.sdk.client.StdioClientTransport
+import io.modelcontextprotocol.kotlin.sdk.shared.Transport
+import io.modelcontextprotocol.kotlin.sdk.shared.TransportSendOptions
+import io.modelcontextprotocol.kotlin.sdk.types.JSONRPCMessage
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.io.Buffer
+import kotlin.concurrent.atomics.AtomicBoolean
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
+import kotlin.time.Duration.Companion.seconds
+
+/**
+ * Starts an MCP server over the real direct-process contract.
+ *
+ * The transport owns the returned raw session; closing it or its delegate
+ * requests process termination exactly once. The process client retains its
+ * parent ownership. Transport construction failure awaits that exact session's
+ * bounded rollback even after caller cancellation, preserving the constructor
+ * failure with any cleanup failure suppressed.
+ *
+ * @throws io.github.stream29.kodex.utils.processclient.ProcessException when
+ * the process owner is closed or the platform rejects process creation.
+ * @throws kotlinx.coroutines.CancellationException when startup is cancelled.
+ */
+public suspend fun ProcessClient.openMcpStdioTransport(
+    configuration: McpServerConfiguration.Stdio,
+): Transport {
+    val process = start(
+        ProcessCommand(
+            executable = configuration.command,
+            arguments = configuration.args,
+            workingDirectory = configuration.workingDirectory,
+            environment = configuration.environment.mapValues { (_, secret) -> secret.value },
+        ),
+    )
+    return try {
+        ProcessOwnedTransport(
+            delegate = StdioClientTransport(
+                input = ProcessCoroutineStdioSource(process.stdout),
+                output = ProcessCoroutineStdioSink(process.stdin),
+                error = ProcessCoroutineStdioSource(process.stderr),
+            ),
+            process = process,
+        )
+    } catch (failure: Throwable) {
+        val cleanup = try {
+            withContext(NonCancellable) {
+                withTimeout(10.seconds) {
+                    // Keep a raw release failure as a value across coroutine
+                    // boundaries, rather than recovering/copying it on rethrow.
+                    runCatching { process.closeAndJoin() }.exceptionOrNull()
+                }
+            }
+        } catch (cleanup: Throwable) {
+            cleanup // Includes the constructor rollback's bounded-wait failure.
+        }
+        if (cleanup != null && cleanup !== failure && failure.suppressedExceptions.none { it === cleanup }) {
+            failure.addSuppressed(cleanup)
+        }
+        throw failure
+    }
+}
+
+private class ProcessCoroutineStdioSource(
+    private val delegate: CoroutineRawSource,
+) : CoroutineStdioSource {
+    override suspend fun readAtMostTo(sink: Buffer, byteCount: Long): Long =
+        delegate.readAtMostTo(sink, byteCount)
+
+    override suspend fun close() {
+        delegate.close()
+    }
+}
+
+private class ProcessCoroutineStdioSink(
+    private val delegate: CoroutineRawSink,
+) : CoroutineStdioSink {
+    override suspend fun write(source: Buffer, byteCount: Long) {
+        delegate.write(source, byteCount)
+    }
+
+    override suspend fun flush() {
+        delegate.flush()
+    }
+
+    override suspend fun close() {
+        delegate.close()
+    }
+}
+
+@OptIn(ExperimentalAtomicApi::class)
+private class ProcessOwnedTransport(
+    private val delegate: Transport,
+    private val process: ProcessSession,
+) : Transport {
+    private val processClosed = AtomicBoolean(false)
+
+    override suspend fun start() {
+        delegate.start()
+    }
+
+    override suspend fun send(message: JSONRPCMessage, options: TransportSendOptions?) {
+        delegate.send(message, options)
+    }
+
+    override suspend fun close() {
+        try {
+            closeProcess()
+        } finally {
+            delegate.close()
+        }
+    }
+
+    override fun onClose(block: () -> Unit) {
+        delegate.onClose {
+            closeProcess()
+            block()
+        }
+    }
+
+    override fun onError(block: (Throwable) -> Unit) {
+        delegate.onError(block)
+    }
+
+    override fun onMessage(block: suspend (JSONRPCMessage) -> Unit) {
+        delegate.onMessage(block)
+    }
+
+    private fun closeProcess() {
+        if (processClosed.compareAndSet(expectedValue = false, newValue = true)) {
+            process.close()
+        }
+    }
+}

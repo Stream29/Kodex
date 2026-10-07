@@ -4,11 +4,17 @@ plugins {
 
 kotlin {
     sourceSets {
-        mosaicMain.dependencies {
-            api(project(":app-contract-lazy-list"))
+        commonMain.dependencies {
             api(libs.mosaic.runtime)
-            implementation(project(":utils-terminal-text"))
+            api(libs.kotlinx.coroutines.core)
+        }
+        mosaicMain.dependencies {
+            api(project(":agent-storage-spec-clean-models"))
+            api(libs.mosaic.runtime)
+            api(libs.kotlinx.datetime)
+            api(project(":utils-terminal-text-spec"))
             implementation(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.io.core)
             implementation(libs.mosaic.animation)
         }
         mosaicTest.dependencies {

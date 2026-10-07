@@ -1,0 +1,40 @@
+plugins {
+    id("kodex.kmp-view")
+}
+
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            api(project(":app-component-settings-spec"))
+        }
+        mosaicMain.dependencies {
+            implementation(project(":app-component-session-settings-impl-view"))
+            implementation(project(":app-component-new-session-defaults-impl-view"))
+            implementation(project(":app-component-context-source-settings-impl-view"))
+            implementation(project(":app-component-session-title-settings-impl-view"))
+            implementation(project(":app-component-application-preferences-impl-view"))
+            implementation(project(":app-component-authentication-settings-impl-view"))
+            implementation(project(":app-component-account-usage-impl-view"))
+            implementation(project(":app-component-usage-reset-impl-view"))
+            implementation(project(":app-component-hook-settings-impl-view"))
+            implementation(project(":app-component-mcp-settings-impl-view"))
+            implementation(project(":app-component-session-rename-impl-view"))
+            implementation(project(":app-component-session-rename-impl-viewmodel"))
+            implementation(project(":app-view-components"))
+            implementation(project(":app-component-working-directory-impl-view"))
+            implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.mosaic.runtime)
+        }
+        mosaicTest.dependencies {
+            implementation(project(":app-test-support-rpc"))
+            implementation(project(":app-settings-impl-filesystem"))
+            implementation(project(":app-component-session-settings-impl-viewmodel"))
+            implementation(project(":app-component-session-title-settings-impl-viewmodel"))
+            implementation(project(":app-component-application-preferences-impl-viewmodel"))
+            implementation(project(":app-component-authentication-settings-impl-viewmodel"))
+            implementation(project(":app-component-settings-impl-viewmodel"))
+            implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.mosaic.testing)
+        }
+    }
+}

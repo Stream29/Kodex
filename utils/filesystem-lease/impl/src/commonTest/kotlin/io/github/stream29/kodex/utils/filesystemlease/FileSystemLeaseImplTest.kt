@@ -135,6 +135,5 @@ private suspend fun deleteRecursively(path: Path) {
 }
 
 private suspend fun closeLease(lease: FileSystemLease) {
-    lease.close()
-    lease.coroutineContext.job.join()
+    lease.closeAndJoin()
 }
