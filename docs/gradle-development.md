@@ -59,14 +59,27 @@ isolated validation script. CLI configuration time is not IDEA Sync or indexing
 time. Heap, target-profile and build-logic tuning are separate measured changes,
 not guarantees supplied by binary adoption.
 
+## Adding a module
+
+- Declare its real directory explicitly in `settings.gradle.kts`; placing a
+  new build script on disk no longer adds a project automatically.
+- A root `moduleTree` keeps its existing namespace project. A nested
+  `moduleTree` registers itself only if it has a build script; otherwise it
+  supplies the physical path for its declared children.
+- Use `module("name")` for a real leaf with `build.gradle.kts`.
+  Flat project IDs still join path segments with `-`.
+- Invalid names, missing leaves, duplicate physical declarations and colliding
+  flat project IDs fail configuration instead of silently replacing a project.
+
 ## Working on a fork
 
 - Use the fork's `kodex-submodule` maintenance line and its actual toolchain.
 - For an integration experiment, manually add the required source
   `includeBuild` and genuine substitutions, then restore binary settings.
   Do not commit that temporary opt-in as the default.
-- SDK source integration also needs the approved root-name repair; its old
-  source accessor collision is not evidence that a binary package is missing.
+- The pinned SDK already uses the distinct `kotlin-mcp-sdk-fork` root name.
+  Its historical source accessor collision is not evidence that a binary
+  package is missing.
   Composite compatibility is a separate gate from ordinary binary consumption.
 - A dirty fork is never automatically published by settings or normal tasks.
   Commit/review the new gitlink, run its dedicated CI, verify the entire package,
