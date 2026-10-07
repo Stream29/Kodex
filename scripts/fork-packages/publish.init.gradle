@@ -35,21 +35,6 @@ gradle.beforeProject { p ->
             }
         }
     }
-    p.pluginManager.withPlugin('maven-publish') {
-        p.extensions.getByType(PublishingExtension).repositories.maven {
-            name = 'ForkStaging'
-            url = staging.toURI()
-        }
-        p.tasks.withType(PublishToMavenRepository).configureEach {
-            doFirst {
-                if (repository.url.scheme != 'file' ||
-                    new File(repository.url).canonicalFile != staging) {
-                    throw new GradleException('Only the isolated file repository is authorized')
-                }
-            }
-        }
-        p.tasks.withType(Sign).configureEach { enabled = false }
-    }
 }
 gradle.projectsEvaluated {
     // Init scripts can also run in buildSrc/included builds. Only the fork root
@@ -58,11 +43,29 @@ gradle.projectsEvaluated {
         new File(System.getenv('FORK_SOURCE_DIR')).canonicalFile) return
     gradle.rootProject.allprojects { p ->
         if (p.plugins.hasPlugin('maven-publish')) {
-            p.extensions.getByType(PublishingExtension).publications.configureEach {
+            // Adding a repository while Vanniktech is still applying its base
+            // maven-publish plugin realizes tasks before coordinates() is set.
+            // Configure our file destination only after the fork's plugins and
+            // project scripts have established their publication identity.
+            def publishing = p.extensions.getByType(PublishingExtension)
+            publishing.publications.configureEach {
                 // Keep original group/artifact and real component; no synthetic JARs.
                 it.version = version
                 artifacts.removeAll { it.classifier == 'javadoc' || it.extension == 'asc' }
             }
+            publishing.repositories.maven {
+                name = 'ForkStaging'
+                url = staging.toURI()
+            }
+            p.tasks.withType(PublishToMavenRepository).configureEach {
+                doFirst {
+                    if (repository.url.scheme != 'file' ||
+                        new File(repository.url).canonicalFile != staging) {
+                        throw new GradleException('Only the isolated file repository is authorized')
+                    }
+                }
+            }
+            p.tasks.withType(Sign).configureEach { enabled = false }
         }
     }
     def catalog = new File(gradle.rootProject.rootDir, 'gradle/libs.versions.toml').text

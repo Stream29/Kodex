@@ -89,6 +89,12 @@ def require(condition, message):
 
 
 def encoded(value):
+    if isinstance(value, dict) and "formatVersion" in value:
+        # Gradle's streaming parser requires this first, despite JSON object
+        # ordering normally being insignificant. Remaining fields stay sorted.
+        ordered = {"formatVersion": value["formatVersion"]}
+        ordered.update({key: value[key] for key in sorted(value) if key != "formatVersion"})
+        return (json.dumps(ordered, indent=2) + "\n").encode()
     return (json.dumps(value, sort_keys=True, indent=2) + "\n").encode()
 
 
@@ -309,6 +315,8 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
                      else "compile") for d in needed), "Wrong essential POM dependency scope")
         doc = json.loads(inventory[stem + ".module"])
         require(doc.get("formatVersion") == "1.1", "Unexpected module format")
+        require(next(iter(doc), None) == "formatVersion",
+                "Gradle metadata requires formatVersion first")
         component = doc["component"]
         require(component.get("group") == spec["group"] and component.get("version") == version,
                 "Module identity mismatch")

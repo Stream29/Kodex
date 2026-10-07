@@ -244,7 +244,7 @@ def build(args):
         "-Porg.gradle.java.installations.auto-download=false",
         f"-Pversion={data['version']}", f"-PVERSION_NAME={data['version']}",
         "-PmavenCentralPublishing=false", "-PsignAllPublications=false",
-        "-I", str(HERE / "publish.init.gradle"), "--console=plain", *tasks,
+        "-I", str(HERE / "publish.init.gradle"), "--console=plain", "--stacktrace", *tasks,
     ]
     # Dedicated fresh hosted-runner daemon: explicit Java home, no user/shared daemon takeover.
     try:

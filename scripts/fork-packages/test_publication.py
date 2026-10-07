@@ -302,6 +302,7 @@ class ContractTests(unittest.TestCase):
             "group": self.spec["group"], "module": "lucene-kmp-core-js", "version": self.version,
             "url": "../../unused.module"}})
         normalized = normalize_module(encoded(doc), self.spec, self.version, True)
+        self.assertEqual(next(iter(json.loads(normalized))), "formatVersion")
         self.assertEqual(len(json.loads(normalized)["variants"]), len(doc["variants"]) - 1)
         self.assertNotIn("buildId", json.loads(normalized)["createdBy"]["gradle"])
 
@@ -311,6 +312,13 @@ class ContractTests(unittest.TestCase):
         doc["variants"][0]["attributes"]["org.jetbrains.kotlin.native.target"] = "mingw_x64"
         module.write_bytes(encoded(doc))
         with self.assertRaises(ValueError):
+            validate(self.repo, self.spec, self.version)
+
+    def test_gradle_streaming_metadata_rejects_sorted_format_version(self):
+        module = self.root_module()
+        doc = json.loads(module.read_bytes())
+        module.write_bytes((json.dumps(doc, sort_keys=True, indent=2) + "\n").encode())
+        with self.assertRaisesRegex(ValueError, "formatVersion first"):
             validate(self.repo, self.spec, self.version)
 
     def test_wrong_native_compiler(self):
