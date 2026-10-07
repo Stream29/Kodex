@@ -237,13 +237,8 @@ public class FileSystemKodexSessionRepository internal constructor(
         }
         val directory = sessionDirectory(entryIndex)
         val lease = acquireSessionLeaseAfterClose(entryIndex)
-        try {
+        lease.useAndRelease {
             deleteDirectoryContents(directory, except = LockFile)
-        } finally {
-            withContext(NonCancellable) {
-                lease.close()
-                lease.coroutineContext[Job]?.join()
-            }
         }
         fileSystem.delete(directory, mustExist = false)
         mutableEntries.value = entries.value - entryIndex
@@ -431,12 +426,20 @@ private suspend fun CoroutineScope.tryAcquireSessionLease(
 }
 
 private suspend fun <T> FileSystemLease.useAndRelease(block: suspend () -> T): T {
+    var primaryFailure: Throwable? = null
     return try {
         async(start = CoroutineStart.UNDISPATCHED) { block() }.await()
+    } catch (failure: Throwable) {
+        primaryFailure = failure
+        throw failure
     } finally {
-        withContext(NonCancellable) {
-            close()
-            this@useAndRelease.coroutineContext[Job]?.join()
+        val cleanupFailure = withContext(NonCancellable) {
+            runCatching { closeAndJoin() }.exceptionOrNull()
+        }
+        if (cleanupFailure != null) {
+            val primary = primaryFailure
+            if (primary == null) throw cleanupFailure
+            if (cleanupFailure !== primary) primary.addSuppressed(cleanupFailure)
         }
     }
 }
@@ -472,13 +475,16 @@ public suspend fun CoroutineScope.FileSystemKodexSessionRepository(
     fileSystem.createDirectories(root)
     val sessionsRoot = Path(root, SessionsDirectory)
     fileSystem.createDirectories(sessionsRoot)
+    // Scanning may fail while a lazy backend remains alive and retries. Do not
+    // attach an unreturned repository owner before that fallible acquisition.
+    val initialEntries = sessionDirectories(sessionsRoot, fileSystem).map { (index) -> index }
     return FileSystemKodexSessionRepository(
         scope = supervisorChildScope(),
         root = root,
         fileSystem = fileSystem,
         valueCacheSize = valueCacheSize,
         dependencies = dependencies,
-        initialEntries = sessionDirectories(sessionsRoot, fileSystem).map { (index) -> index },
+        initialEntries = initialEntries,
     )
 }
 

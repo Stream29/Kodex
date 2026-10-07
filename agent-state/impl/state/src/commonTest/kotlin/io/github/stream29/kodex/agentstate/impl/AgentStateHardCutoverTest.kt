@@ -107,9 +107,7 @@ val agentStateHardCutoverTest by testSuite {
             }
         }
 
-        // Characterization of a known baseline defect, not a desired permanent
-        // guarantee: migration must expose it rather than silently change policy.
-        test("known risk: compaction checkpoint overwrites settings accepted during its wait") {
+        test("compaction checkpoint preserves settings accepted during its wait") {
             val storage = InMemoryKodexAgentStorage(
                 KodexAgentSettings(OpenAiModelId("test"), threadName = "before"),
             )
@@ -140,7 +138,7 @@ val agentStateHardCutoverTest by testSuite {
                 release.complete(Unit)
                 val checkpointIndex = compaction.await()
                 assertTrue(checkpointIndex > acceptedIndex)
-                assertEquals("before", storage.settings[checkpointIndex].threadName)
+                assertEquals("during", storage.settings[checkpointIndex].threadName)
                 assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
             } finally {
                 release.complete(Unit)

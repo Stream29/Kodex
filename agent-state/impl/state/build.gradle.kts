@@ -31,6 +31,7 @@ kotlin {
         commonTest.dependencies {
             implementation(project(":agent-context-impl-prefix-render"))
             implementation(project(":agent-storage-impl-in-memory"))
+            implementation(project(":agent-storage-impl-filesystem"))
             implementation(project(":openai-impl-client-test"))
             implementation(project(":utils-kotlinx-io-coroutines-impl"))
             implementation(libs.kotlinx.coroutines.test)

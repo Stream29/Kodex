@@ -58,6 +58,7 @@ import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -68,6 +69,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlin.uuid.ExperimentalUuidApi
@@ -321,7 +324,6 @@ private class KodexAgentStateImpl(
                 ),
             )
             commitCompaction(
-                previousSettings = snapshot.settings,
                 output = StableContextCompaction(
                     id = result.compactionOutput.id,
                     encryptedContent = result.compactionOutput.encryptedContent,
@@ -447,8 +449,27 @@ private class KodexAgentStateImpl(
     private suspend fun appendSettings(settings: KodexAgentSettings): Int {
         val index = storage.latestIndex() + 1
         require(index > 0) { "Settings updates require an existing state index." }
-        storage.settings[index] = settings
-        storage.timestamp[index] = now()
+        try {
+            storage.settings[index] = settings
+            storage.timestamp[index] = now()
+        } catch (failure: Throwable) {
+            // A numbered settings record may already be durable even though a
+            // later timestamp or temporary-file cleanup failed. Publish the
+            // actual tail without reporting success or changing the phase.
+            val resync = withContext(NonCancellable) {
+                withContext(Dispatchers.Default) {
+                    try {
+                        withTimeout(30.seconds) {
+                            runCatching { latestIndex.value = storage.latestIndex() }
+                        }
+                    } catch (secondary: Throwable) {
+                        Result.failure<Unit>(secondary)
+                    }
+                }
+            }.exceptionOrNull()
+            if (resync != null && resync !== failure) failure.addSuppressed(resync)
+            throw failure
+        }
         latestIndex.value = index
         return index
     }
@@ -630,7 +651,6 @@ private class KodexAgentStateImpl(
 
     @OptIn(ExperimentalUuidApi::class)
     private suspend fun commitCompaction(
-        previousSettings: KodexAgentSettings,
         output: StableContextCompaction,
     ): Int = writeMutex.withLock {
         check(state.value == KodexAgentStateValue.Compacting) {
@@ -640,7 +660,7 @@ private class KodexAgentStateImpl(
             output = output,
             timestamp = now(),
             nextWindowId = Uuid.generateV7().toString(),
-            previousSettings = previousSettings,
+            previousSettings = storage.settings[storage.latestIndex()],
         )
         latestIndex.value = index
         index

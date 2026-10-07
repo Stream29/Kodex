@@ -39,10 +39,13 @@ public interface AgentRuntime : ResumableAgentLayer {
      *
      * The call returns `Unit`; callers inspect the inherited observable state
      * for its result. On cancellation, pending-tool cleanup is attempted
-     * before the turn slot is released.
+     * before the turn slot is released. A cleanup failure is attached to the
+     * original cancellation as a suppressed exception, not substituted for it.
      *
      * @throws ConcurrentAgentRuntimeResumeException if another resume or
      * explicit compaction currently owns this runtime's turn slot.
+     * @throws kotlinx.coroutines.CancellationException when execution is cancelled;
+     * any failed pending-tool cleanup remains available as a suppressed exception.
      */
     public override suspend fun resume()
 

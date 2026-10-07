@@ -30,13 +30,19 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.io.files.Path
+import kotlinx.io.IOException
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.random.Random
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -88,6 +94,131 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
     testFixture { temporaryRepositoryRoot() } closeWith {
         deleteRecursively(this)
     } asParameterForEach {
+        for (kind in listOf("io", "cancellation")) {
+            test("failed settings rescan after published $kind rejects stale runtime CAS until reopen") { root ->
+                val owner = SupervisorJob(coroutineContext[Job])
+                val scope = CoroutineScope(coroutineContext + owner)
+                val fileSystem = SettingsPublicationRescanFaultFileSystem()
+                val repository = try {
+                    scope.FileSystemKodexSessionRepository(root, testKodexAgentDependencies(), fileSystem)
+                } catch (failure: Throwable) {
+                    withContext(NonCancellable) { owner.cancelAndJoin() }
+                    throw failure
+                }
+                try {
+                    val index = repository.createInitialized(settings("original"))
+                    val healthyIndex = repository.createInitialized(settings("healthy"))
+                    val session = repository.open(index)
+                    val healthy = repository.open(healthyIndex)
+                    val timeline = assertIs<ObservableKodexAgentStorage>(session.storage).settings
+                    val original = timeline[0]
+                    val published = original.copy(threadName = "published")
+                    val primary = if (kind == "io") IOException("published settings cleanup")
+                    else CancellationException("published settings cleanup cancelled")
+                    val secondary = IOException("settings numbered record rescan")
+                    val nonce = timeline.cacheNonce.value
+                    val settingsDirectory = Path(root, "sessions/$index/settings")
+                    val durableRecord = Path(settingsDirectory, "1.json")
+                    fileSystem.arm(settingsDirectory, primary, secondary)
+
+                    // Catch inside the operation, including injected cancellation,
+                    // without cancelling the borrowed repository/backend owner.
+                    val observed = runCatching {
+                        session.runtime.compareAndSetSettings(original, published)
+                    }.exceptionOrNull()
+                    assertSame(primary, observed)
+                    assertTrue(primary.suppressedExceptions.any { it === secondary })
+                    val durableBytes = SystemCoroutineFileSystem.readBytes(durableRecord)
+                    assertEquals(0, timeline.latestIndex.value)
+                    assertEquals(nonce, timeline.cacheNonce.value)
+                    assertEquals(0, session.runtime.latestIndex.value)
+                    assertTrue(owner.isActive)
+                    assertTrue(repository.coroutineContext[Job]!!.isActive)
+                    assertTrue(session.coroutineContext[Job]!!.isActive)
+
+                    // Faults are one-shot and now absent: neither stale nor durable
+                    // settings may be used by this uncertain original runtime.
+                    val scanCount = fileSystem.targetListCount
+                    assertFailsWith<IllegalStateException> {
+                        session.runtime.compareAndSetSettings(original, original.copy(threadName = "replacement"))
+                    }
+                    assertFailsWith<IllegalStateException> {
+                        session.runtime.compareAndSetSettings(original, original)
+                    }
+                    assertFailsWith<IllegalStateException> {
+                        session.runtime.compareAndSetSettings(published, published.copy(threadName = "next"))
+                    }
+                    assertFailsWith<IllegalStateException> { timeline[0] }
+                    assertFailsWith<IllegalStateException> { session.storage.settings[1] = original }
+                    assertFailsWith<IllegalStateException> { session.storage.settings.revert(1) }
+                    assertEquals(scanCount, fileSystem.targetListCount, "No implicit rescan/retry is admitted.")
+                    assertContentEquals(durableBytes, SystemCoroutineFileSystem.readBytes(durableRecord))
+                    assertFalse(SystemCoroutineFileSystem.exists(Path(settingsDirectory, "2.json")))
+                    assertFalse(SystemCoroutineFileSystem.exists(Path(root, "sessions/$index/timestamp/1.json")))
+                    assertEquals(
+                        setOf("0.json", "1.json"),
+                        SystemCoroutineFileSystem.list(settingsDirectory)
+                            .map(Path::name).filter { it.firstOrNull()?.isDigit() == true }.toSet(),
+                    )
+
+                    val healthyOriginal = healthy.storage.settings[healthy.runtime.latestIndex.value]
+                    assertTrue(healthy.runtime.compareAndSetSettings(
+                        healthyOriginal, healthyOriginal.copy(threadName = "still healthy"),
+                    ))
+                    assertEquals("still healthy", healthy.storage.settings[healthy.runtime.latestIndex.value].threadName)
+                    assertTrue(owner.isActive)
+                    assertSame(session, repository.open(index))
+
+                    session.coroutineContext[Job]!!.cancelAndJoin()
+                    val reopened = repository.open(index)
+                    assertTrue(reopened !== session)
+                    assertEquals(1, reopened.runtime.latestIndex.value)
+                    assertEquals(published, reopened.storage.settings[1])
+                    assertFalse(reopened.runtime.compareAndSetSettings(original, published))
+                    val next = published.copy(threadName = "after reopen")
+                    assertTrue(reopened.runtime.compareAndSetSettings(published, next))
+                    assertEquals(2, reopened.runtime.latestIndex.value)
+                    assertEquals(next, reopened.storage.settings.getExact(2))
+                    assertContentEquals(durableBytes, SystemCoroutineFileSystem.readBytes(durableRecord))
+                    assertTrue(owner.isActive)
+                } finally {
+                    withContext(NonCancellable) {
+                        try {
+                            repository.closeAndJoin()
+                        } finally {
+                            owner.cancelAndJoin()
+                        }
+                    }
+                }
+            }
+        }
+        test("failed initial scan never attaches an unreturned repository owner") { root ->
+            val owner = SupervisorJob(coroutineContext[Job])
+            val scope = CoroutineScope(coroutineContext + owner)
+            val failure = IOException("initial entry scan")
+            val failingFileSystem = object : CoroutineFileSystem by SystemCoroutineFileSystem {
+                override suspend fun list(directory: Path): Collection<Path> {
+                    if (directory == Path(root, "sessions")) throw failure
+                    return SystemCoroutineFileSystem.list(directory)
+                }
+            }
+            try {
+                repeat(2) {
+                    assertSame(failure, assertFailsWith<IOException> {
+                        scope.FileSystemKodexSessionRepository(
+                            root, testKodexAgentDependencies(), failingFileSystem,
+                        )
+                    })
+                    assertTrue(owner.children.none(), "Failed scanning must not retain a child owner.")
+                }
+                val repository = scope.FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+                assertEquals(emptyList(), repository.list())
+                repository.coroutineContext[Job]!!.cancelAndJoin()
+                assertTrue(owner.children.none())
+            } finally {
+                owner.cancelAndJoin()
+            }
+        }
         test("settings CAS appends through cached file timelines and survives reopen") { root ->
             val repository = FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
             try {
@@ -756,6 +887,53 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
             repository.closeAndJoin()
         }
 
+    }
+}
+
+/** Real filesystem gate: publish settings 1, fail its temp delete, then fail the rescan. */
+private class SettingsPublicationRescanFaultFileSystem(
+    private val delegate: CoroutineFileSystem = SystemCoroutineFileSystem,
+) : CoroutineFileSystem by delegate {
+    private var targetDirectory: Path? = null
+    private var primary: Throwable? = null
+    private var secondary: Throwable? = null
+    private var published = false
+    var targetListCount: Int = 0
+        private set
+
+    fun arm(directory: Path, primary: Throwable, secondary: Throwable) {
+        targetDirectory = directory
+        this.primary = primary
+        this.secondary = secondary
+    }
+
+    override suspend fun atomicMove(source: Path, destination: Path) {
+        delegate.atomicMove(source, destination)
+        val directory = targetDirectory ?: return
+        if (primary != null && destination == Path(directory, "1.json")) published = true
+    }
+
+    override suspend fun delete(path: Path, mustExist: Boolean) {
+        if (published && path.parent == targetDirectory && path.name.endsWith(".tmp")) {
+            primary?.let { failure ->
+                primary = null
+                throw failure
+            }
+        }
+        delegate.delete(path, mustExist)
+    }
+
+    override suspend fun list(directory: Path): Collection<Path> {
+        if (directory == targetDirectory) {
+            targetListCount += 1
+            if (published && primary == null) {
+                secondary?.let { failure ->
+                    secondary = null
+                    throw failure
+                }
+            }
+        }
+        return delegate.list(directory)
     }
 }
 

@@ -143,9 +143,15 @@ public interface KodexAgentState : CoroutineScope {
     public val state: StateFlow<KodexAgentStateValue>
 
     /**
-     * Latest globally visible storage snapshot index.
-     * When updating [storage], this value will be updated only after the
-     * transaction completes to keep the consistent snapshot semantic.
+     * Last successfully observed globally visible storage snapshot index.
+     * Successful transitions publish their storage tail after committing.
+     * After a settings append failure, already durable records are reflected
+     * only if reconciliation succeeds. Reconciliation failure is suppressed
+     * on the original failure; this flow may retain an older observation.
+     * An unresolved filesystem cache rejects cached queries and mutations
+     * until its owning Session is reopened; its metadata flows remain last-known
+     * observations, not proof of authority. The conversation phase is unchanged.
+     * Separate timeline writes are not a filesystem transaction.
      *
      * Readers should capture this value once and use it to read [storage].
      */
@@ -225,9 +231,10 @@ public interface KodexAgentState : CoroutineScope {
      * The request and committed checkpoint retain the current persisted turn
      * identity. Runtime owns the decision to call this operation automatically.
      * Compaction retains logical ownership while releasing the write queue
-     * during its remote wait. Checkpoint creation currently uses the captured
-     * settings; concurrent settings updates are not guaranteed to survive it.
-     * This limitation is tracked separately from module migration.
+     * during its remote wait. The remote request uses its initial settings and
+     * history snapshot. Under the same write boundary, checkpoint creation
+     * reads the latest persisted settings, preserving updates accepted during
+     * the wait and advancing only the existing context-window lineage.
      * Delegate failures propagate; final state recovery is non-cancellable.
      *
      * @throws KodexAgentStateInvalidTransitionException when compaction is not legal.
@@ -303,6 +310,8 @@ public interface KodexAgentState : CoroutineScope {
      * inputs. Storage failures propagate, including partial writes.
      *
      * @throws IllegalArgumentException when no initial storage index exists.
+     * @throws IllegalStateException when storage cannot safely admit mutation
+     * after an unresolved publication/reconciliation failure.
      * @throws CancellationException when admission or writing is cancelled.
      */
     public suspend fun updateSettings(settings: KodexAgentSettings): Int
@@ -318,6 +327,8 @@ public interface KodexAgentState : CoroutineScope {
      *
      * @throws IllegalArgumentException when a distinct update would append
      * without an initial storage index.
+     * @throws IllegalStateException when storage cannot safely determine the
+     * current settings after an unresolved publication/reconciliation failure.
      * @throws CancellationException when admission or writing is cancelled.
      */
     public suspend fun compareAndSetSettings(

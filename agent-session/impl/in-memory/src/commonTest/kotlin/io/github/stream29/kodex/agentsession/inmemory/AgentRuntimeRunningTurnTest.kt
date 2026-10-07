@@ -4,10 +4,14 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
 import io.github.stream29.kodex.agentstorage.contract.TokenCountSnapshot
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
+import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentsession.test.testKodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
+import io.github.stream29.kodex.agentstate.contract.KodexAgentState
+import io.github.stream29.kodex.agentstate.contract.RequestFinish
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
 import io.github.stream29.kodex.agentstate.contract.forcedCompact
 import io.github.stream29.kodex.agentstate.impl.KodexAgentStateInvalidTransitionException
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableContextCompaction
@@ -39,6 +43,8 @@ import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
+import kotlinx.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
@@ -61,6 +67,46 @@ val agentRuntimeRunningTurnTest by testSuite {
     } closeWith {
         cancelAndJoin()
     } asContextForEach {
+        test("root resume preserves cancellation when durable pending completion fails") {
+            val arguments = RequestUserInputArgs(
+                questions = listOf(RequestUserInputQuestion("scope", "Scope", "Which scope?")),
+            )
+            val client = mockOpenAiClient {
+                createResponse {
+                    flowOf(
+                        ResponsesStreamEvent.OutputItemDone(
+                            0,
+                            ResponseItem.FunctionCall(
+                                name = "request_user_input", callId = "pending",
+                                arguments = Json.encodeToString(arguments),
+                            ),
+                        ),
+                        ResponsesStreamEvent.Completed(Response(id = "response", endTurn = false)),
+                    )
+                }
+            }
+            val root = openTurnTestSession(client)
+            root.runtime.appendUserMessage(listOf(ContentItem.InputText("Ask the host")))
+            val cancellation = CancellationException("Cancelled after pending publication")
+            val cleanup = IOException("Pending completion write failed")
+            val faultingState = object : KodexAgentState by root.runtime {
+                override suspend fun requestResponseApi(): RequestFinish {
+                    root.runtime.requestResponseApi()
+                    throw cancellation
+                }
+
+                override suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int =
+                    throw cleanup
+            }
+            val runtime = faultingState.buildMasterAgentRuntime(testKodexAgentDependencies(client))
+            val actual = assertFailsWith<CancellationException> { runtime.resume() }
+            assertSame(cancellation, actual)
+            assertEquals(listOf(cleanup), actual.suppressedExceptions)
+            assertNull(runtime.runningTurn.value)
+            val pending = root.runtime.state.value as KodexAgentStateValue.ToolPending
+            assertEquals(listOf("pending"), pending.events.map { it.callId })
+        }
+
         test("composed turns persist only real input and stop naturally without a control continuation") {
             var requests = 0
             val root = openTurnTestSession(mockOpenAiClient {

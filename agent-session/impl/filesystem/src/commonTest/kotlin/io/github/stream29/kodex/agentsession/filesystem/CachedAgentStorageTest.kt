@@ -7,6 +7,7 @@ import io.github.stream29.kodex.agentstorage.contract.CachedIndexVersioned
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemIndexVersioned
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -27,6 +28,7 @@ import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlin.random.Random
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -39,6 +41,96 @@ import kotlin.time.Duration.Companion.seconds
 private const val FirstIndex: Int = 0
 
 val cachedAgentStorageTest by testSuite {
+    for (kind in listOf("io", "cancellation")) {
+        test("failed rescan after published $kind closes cached timeline admission") {
+            withCachedTimeline { fixture ->
+                val primary = if (kind == "io") IOException("published entry cleanup")
+                else CancellationException("published entry cleanup cancelled")
+                val secondary = IOException("numbered record rescan")
+                val nonce = fixture.cached.cacheNonce.value
+                assertEquals("first", fixture.cached[0]) // Prime a value that must no longer be trusted.
+                fixture.fileSystem.failNextTemporaryDelete = primary
+                fixture.fileSystem.failNextList = secondary
+                val append = async(start = CoroutineStart.UNDISPATCHED) {
+                    runCatching { fixture.cached[5] = "published" }.exceptionOrNull()
+                }
+                fixture.fileSystem.listFailureStarted.await()
+                assertEquals("published", fixture.delegate.getUnsafe(5))
+                val record = Path(fixture.root, "timeline/5.json")
+                val durableBytes = SystemCoroutineFileSystem.readBytes(record)
+                val pendingRead = async(start = CoroutineStart.UNDISPATCHED) {
+                    assertFailsWith<IllegalStateException> { fixture.cached[0] }
+                }
+                val pendingWrite = async(start = CoroutineStart.UNDISPATCHED) {
+                    assertFailsWith<IllegalStateException> { fixture.cached[6] = "next" }
+                }
+                val pendingRevert = async(start = CoroutineStart.UNDISPATCHED) {
+                    assertFailsWith<IllegalStateException> { fixture.cached.revert(0) }
+                }
+                assertFalse(pendingRead.isCompleted)
+                assertFalse(pendingWrite.isCompleted)
+                assertFalse(pendingRevert.isCompleted)
+                fixture.fileSystem.allowListFailure.complete(Unit)
+
+                assertSame(primary, append.await())
+                assertTrue(primary.suppressedExceptions.any { it === secondary })
+                assertTrue(pendingRead.await().message.orEmpty().contains("authority is uncertain"))
+                assertTrue(pendingWrite.await().message.orEmpty().contains("authority is uncertain"))
+                assertTrue(pendingRevert.await().message.orEmpty().contains("authority is uncertain"))
+                val scanCount = fixture.fileSystem.timelineListCount
+                assertEquals(0, fixture.cached.latestIndex.value)
+                assertEquals(nonce, fixture.cached.cacheNonce.value)
+                assertFailsWith<IllegalStateException> { fixture.cached.latestIndex() }
+                assertFailsWith<IllegalStateException> { fixture.cached.getExact(0) }
+                assertFailsWith<IllegalStateException> { fixture.cached.getExact(5) }
+                assertFailsWith<IllegalStateException> { fixture.cached.floorToIndex(5) }
+                assertFailsWith<IllegalStateException> { fixture.cached.ceilToIndex(0) }
+                assertFailsWith<IllegalStateException> { fixture.cached.indexesIn(0..9) }
+                assertFailsWith<IllegalStateException> { fixture.cached.valuesIn(0..9) }
+                assertFailsWith<IllegalStateException> { fixture.cached.indexesIn(IntRange.EMPTY) }
+                assertFailsWith<IllegalStateException> { fixture.cached.valuesIn(IntRange.EMPTY) }
+                assertFailsWith<IllegalStateException> { fixture.cached[5] = "replacement" }
+                assertEquals(scanCount, fixture.fileSystem.timelineListCount, "Admission must not retry scanning.")
+                assertTrue(fixture.ownerJob.isActive)
+                assertTrue(fixture.cached.isActive)
+                assertContentEquals(durableBytes, SystemCoroutineFileSystem.readBytes(record))
+                assertFalse(SystemCoroutineFileSystem.exists(Path(fixture.root, "timeline/6.json")))
+                assertEquals(listOf(0, 5), fixture.delegate.storedIndexes())
+
+                fixture.ownerJob.cancelAndJoin()
+                val nextOwner = SupervisorJob()
+                try {
+                    val reopened = CachedIndexVersionedImpl(
+                        ownerScope = CoroutineScope(nextOwner),
+                        delegate = fixture.delegate,
+                        valueCacheSize = 1_024,
+                        indexes = fixture.delegate.storedIndexes(),
+                    )
+                    assertEquals(5, reopened.latestIndex())
+                    assertEquals("published", reopened[5])
+                    reopened[6] = "next"
+                    assertEquals(6, reopened.latestIndex())
+                    assertContentEquals(durableBytes, SystemCoroutineFileSystem.readBytes(record))
+                } finally {
+                    withContext(NonCancellable) { nextOwner.cancelAndJoin() }
+                }
+            }
+        }
+    }
+    test("published record survives cleanup failure and is not overwritten by the next append") {
+        withCachedTimeline { fixture ->
+            val cleanup = IOException("published entry temporary cleanup")
+            fixture.fileSystem.failNextTemporaryDelete = cleanup
+            assertSame(cleanup, assertFailsWith<IOException> { fixture.cached[5] = "published" })
+            assertEquals("published", fixture.delegate.getUnsafe(5))
+            assertEquals(5, fixture.cached.latestIndex.value)
+            assertEquals("published", fixture.cached.getExact(5))
+            assertFailsWith<IllegalStateException> { fixture.cached[5] = "replacement" }
+            fixture.cached[6] = "next"
+            assertEquals("published", fixture.delegate.getUnsafe(5))
+            assertEquals(6, fixture.cached.latestIndex.value)
+        }
+    }
     test("read-only view shares metadata and all original timeline queries") {
         withCachedTimeline(initialEntries = listOf(0 to "first", 5 to "fifth")) { fixture ->
             val view: CachedIndexVersioned<String> = fixture.cached
@@ -297,6 +389,7 @@ val cachedAgentStorageTest by testSuite {
 }
 
 private class CachedTimelineFixture(
+    val root: Path,
     val cached: CachedIndexVersionedImpl<String>,
     val delegate: FileSystemIndexVersioned<String>,
     val timeSource: FakeTimeSource,
@@ -339,6 +432,7 @@ private suspend inline fun <R> withCachedTimeline(
         },
     )
     val fixture = CachedTimelineFixture(
+        root = root,
         cached = cached,
         delegate = delegate,
         timeSource = timeSource,
@@ -350,6 +444,7 @@ private suspend inline fun <R> withCachedTimeline(
         block(fixture)
     } finally {
         withContext(NonCancellable) {
+            fileSystem.allowListFailure.complete(Unit)
             fileSystem.allowContentRead.complete(Unit)
             ownerJob.cancelAndJoin()
             events.close()
@@ -365,8 +460,37 @@ private class TrackingFileSystem(
         private set
     var suspendContentReads: Boolean = false
     var failNextMove: Boolean = false
+    var failNextTemporaryDelete: Throwable? = null
+    var failNextList: Throwable? = null
+    var timelineListCount: Int = 0
+        private set
+    private var publishedFaultTarget = false
+    val listFailureStarted = CompletableDeferred<Unit>()
+    val allowListFailure = CompletableDeferred<Unit>()
     val contentReadStarted = CompletableDeferred<Unit>()
     val allowContentRead = CompletableDeferred<Unit>()
+
+    override suspend fun list(directory: Path): Collection<Path> {
+        timelineListCount += 1
+        failNextList?.let { failure ->
+            failNextList = null
+            listFailureStarted.complete(Unit)
+            allowListFailure.await()
+            throw failure
+        }
+        return delegate.list(directory)
+    }
+
+    override suspend fun delete(path: Path, mustExist: Boolean) {
+        if (publishedFaultTarget && path.name.endsWith(".tmp")) {
+            failNextTemporaryDelete?.let { failure ->
+                failNextTemporaryDelete = null
+                publishedFaultTarget = false
+                throw failure
+            }
+        }
+        delegate.delete(path, mustExist)
+    }
 
     override suspend fun atomicMove(source: Path, destination: Path) {
         if (failNextMove) {
@@ -374,6 +498,9 @@ private class TrackingFileSystem(
             throw IOException("Injected metadata test failure before move")
         }
         delegate.atomicMove(source, destination)
+        if (failNextTemporaryDelete != null && destination.name == "5.json") {
+            publishedFaultTarget = true
+        }
     }
 
     override suspend fun readString(path: Path): String {

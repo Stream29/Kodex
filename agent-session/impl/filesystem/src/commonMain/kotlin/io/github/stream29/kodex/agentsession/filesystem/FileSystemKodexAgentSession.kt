@@ -57,10 +57,13 @@ internal suspend fun CoroutineScope.FileSystemKodexAgentSession(
         scope.coroutineContext[Job]?.invokeOnCompletion { lease.close() }
         return session
     } catch (failure: Throwable) {
-        withContext(NonCancellable) {
-            scope.cancelAndJoin()
-            lease.close()
+        val cleanupFailure = withContext(NonCancellable) {
+            runCatching {
+                scope.cancelAndJoin()
+                lease.closeAndJoin()
+            }.exceptionOrNull()
         }
+        if (cleanupFailure != null && cleanupFailure !== failure) failure.addSuppressed(cleanupFailure)
         throw failure
     }
 }

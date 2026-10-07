@@ -151,8 +151,11 @@ private class AgentRuntimeImpl(
             logger.logPendingHostToolCalls(delegate.state.value)
             logger.info { "Agent turn completed." }
         } catch (cancellation: CancellationException) {
-            withContext(NonCancellable) {
-                delegate.clearPending()
+            val cleanupFailure = withContext(NonCancellable) {
+                runCatching { delegate.clearPending() }.exceptionOrNull()
+            }
+            if (cleanupFailure != null && cleanupFailure !== cancellation) {
+                cancellation.addSuppressed(cleanupFailure)
             }
             logger.info { "Agent turn cancelled." }
             throw cancellation

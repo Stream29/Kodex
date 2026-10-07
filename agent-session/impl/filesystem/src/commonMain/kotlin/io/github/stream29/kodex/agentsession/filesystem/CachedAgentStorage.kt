@@ -16,6 +16,7 @@ import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.reactivecircus.cache4k.Cache
 import io.github.reactivecircus.cache4k.CacheEventListener
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlin.random.Random
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -116,6 +118,12 @@ private suspend fun <T : Any> FileSystemIndexVersioned<T>.cached(
     )
 }
 
+/**
+ * Session-owned sparse timeline. If a failed append cannot be reconciled with
+ * numbered records, cached queries and mutations reject uncertain authority
+ * until the owning Session is reopened. Metadata flows retain last-known
+ * observations; they do not certify the durable tail or continued admission.
+ */
 internal class CachedIndexVersionedImpl<T : Any>(
     ownerScope: CoroutineScope,
     private val delegate: FileSystemIndexVersioned<T>,
@@ -128,15 +136,19 @@ internal class CachedIndexVersionedImpl<T : Any>(
     private val mutableCacheNonce = MutableStateFlow(Random.nextLong())
     private val mutableLatestIndex = MutableStateFlow(indexes.lastOrNull() ?: -1)
 
-    /** In-memory cache identity; value eviction is not a timeline replacement. */
+    /** In-memory cache identity, not an authority/health signal. */
     override val cacheNonce: StateFlow<Long> = mutableCacheNonce.asStateFlow()
 
-    /** Published tail of this timeline, independent of the Agent's global storage index. */
+    /** Last-known tail of this timeline, independent of the Agent's global storage index. */
     override val latestIndex: StateFlow<Int> = mutableLatestIndex.asStateFlow()
 
     private val indexes = SafeRw<List<Int>, MutableList<Int>>(
         indexes.toMutableList(),
     )
+    // Read and written only within indexes sessions. Delegate mutations and
+    // reconciliation hold the same write session, so no stale admission can
+    // race the failure or clear uncertainty from a different operation.
+    private var unresolvedFailure: Throwable? = null
     private val values = Cache.Builder<Int, T>()
         .expireAfterAccess(CachedValueTtl)
         .maximumCacheSize(valueCacheSize.toLong())
@@ -158,43 +170,50 @@ internal class CachedIndexVersionedImpl<T : Any>(
 
     override suspend fun latestIndex(): Int {
         requireActive()
-        return indexes.readSession { it.lastOrNull() ?: -1 }
+        return indexes.readSession {
+            requireAuthority()
+            it.lastOrNull() ?: -1
+        }
     }
 
     override suspend fun get(index: Int): T {
         requireActive()
         require(index >= 0) { "Index $index must be non-negative." }
-        val storedIndex = indexes.readSession { snapshot ->
+        return indexes.readSession { snapshot ->
+            requireAuthority()
             val position = snapshot.binarySearch(index)
             val floorPosition = if (position >= 0) position else -position - 2
-            snapshot.getOrNull(floorPosition)
+            val storedIndex = snapshot.getOrNull(floorPosition)
                 ?: throw IllegalArgumentException("No value is visible at index $index.")
+            val value = values.get(storedIndex) { delegate.getUnsafe(storedIndex) }
+            if (!isActive) {
+                values.invalidate(storedIndex)
+                requireActive()
+            }
+            value
         }
-        val value = values.get(storedIndex) { delegate.getUnsafe(storedIndex) }
-        if (!isActive) {
-            values.invalidate(storedIndex)
-            requireActive()
-        }
-        return value
     }
 
     override suspend fun getExact(index: Int): T? {
         requireActive()
         require(index >= 0) { "Index $index must be non-negative." }
-        val stored = indexes.readSession { snapshot ->
-            snapshot.binarySearch(index).takeIf { it >= 0 }?.let { snapshot[it] }
-        } ?: return null
-        val value = values.get(stored) { delegate.getUnsafe(stored) }
-        if (!isActive) {
-            values.invalidate(stored)
-            requireActive()
+        return indexes.readSession { snapshot ->
+            requireAuthority()
+            val stored = snapshot.binarySearch(index).takeIf { it >= 0 }?.let { snapshot[it] }
+                ?: return@readSession null
+            val value = values.get(stored) { delegate.getUnsafe(stored) }
+            if (!isActive) {
+                values.invalidate(stored)
+                requireActive()
+            }
+            value
         }
-        return value
     }
 
     override suspend fun floorToIndex(index: Int): Int? {
         requireActive()
         return indexes.readSession { snapshot ->
+            requireAuthority()
             val position = snapshot.binarySearch(index)
             snapshot.getOrNull(if (position >= 0) position else -position - 2)
         }
@@ -203,6 +222,7 @@ internal class CachedIndexVersionedImpl<T : Any>(
     override suspend fun ceilToIndex(index: Int): Int? {
         requireActive()
         return indexes.readSession { snapshot ->
+            requireAuthority()
             val position = snapshot.binarySearch(index)
             snapshot.getOrNull(if (position >= 0) position else -position - 1)
         }
@@ -210,11 +230,12 @@ internal class CachedIndexVersionedImpl<T : Any>(
 
     override suspend fun indexesIn(range: IntRange): List<Int> {
         requireActive()
-        if (range.isEmpty()) return emptyList()
-        require(range.first >= 0) {
-            "Index lower bound ${range.first} must be non-negative."
-        }
         return indexes.readSession { snapshot ->
+            requireAuthority()
+            if (range.isEmpty()) return@readSession emptyList()
+            require(range.first >= 0) {
+                "Index lower bound ${range.first} must be non-negative."
+            }
             val firstPosition = snapshot.binarySearch(range.first).let { position ->
                 if (position >= 0) position else -position - 1
             }
@@ -231,15 +252,16 @@ internal class CachedIndexVersionedImpl<T : Any>(
 
     override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>> {
         requireActive()
-        if (range.isEmpty()) return emptyList()
-        require(range.first >= 0) {
-            "Index lower bound ${range.first} must be non-negative."
-        }
-        val storedIndexes = indexes.readSession { snapshot ->
+        return indexes.readSession { snapshot ->
+            requireAuthority()
+            if (range.isEmpty()) return@readSession emptyList()
+            require(range.first >= 0) {
+                "Index lower bound ${range.first} must be non-negative."
+            }
             val firstPosition = snapshot.binarySearch(range.first).let { position ->
                 if (position >= 0) position else -position - 1
             }
-            if (firstPosition >= snapshot.size) {
+            val storedIndexes = if (firstPosition >= snapshot.size) {
                 emptyList()
             } else {
                 val lastPosition = snapshot.binarySearch(range.last).let { position ->
@@ -247,27 +269,54 @@ internal class CachedIndexVersionedImpl<T : Any>(
                 }
                 snapshot.subList(firstPosition, lastPosition).toList()
             }
-        }
-        return storedIndexes.map { index ->
-            index to values.get(index) { delegate.getUnsafe(index) }
+            val result = storedIndexes.map { index ->
+                index to values.get(index) { delegate.getUnsafe(index) }
+            }
+            if (!isActive) {
+                values.invalidateAll()
+                requireActive()
+            }
+            result
         }
     }
 
     override suspend fun set(index: Int, value: T) {
         requireActive()
-        indexes.readSession { cache ->
+        indexes.writeSession { cache ->
+            requireAuthority()
             val latest = cache.lastOrNull() ?: -1
             check(index > latest) {
                 "Sparse append-only timeline requires index greater than $latest, got $index."
             }
-        }
-        delegate.setUnsafe(index, value)
-        withContext(NonCancellable) {
-            indexes.writeSession { cache ->
-                val latest = cache.lastOrNull() ?: -1
-                check(index > latest) {
-                    "Cached timeline changed while appending index $index."
-                }
+            try {
+                delegate.setUnsafe(index, value)
+            } catch (failure: Throwable) {
+                // Publication can precede cleanup failure. Fail closed while
+                // reconciling, and remain closed if the numbered-record scan
+                // fails. Only this successful scan restores cache authority.
+                unresolvedFailure = failure
+                val resync = withContext(NonCancellable) {
+                    withContext(Dispatchers.Default) {
+                        try {
+                            withTimeout(30.seconds) {
+                                runCatching {
+                                    val durable = delegate.indexesIn(0..Int.MAX_VALUE)
+                                    values.invalidate(index)
+                                    cache.clear()
+                                    cache.addAll(durable)
+                                    mutableLatestIndex.value = durable.lastOrNull() ?: -1
+                                    unresolvedFailure = null
+                                }
+                            }
+                        } catch (secondary: Throwable) {
+                            Result.failure<Unit>(secondary)
+                        }
+                    }
+                }.exceptionOrNull()
+                if (resync != null && resync !== failure) failure.addSuppressed(resync)
+                throw failure
+            }
+            withContext(NonCancellable) {
                 if (isActive) {
                     values.put(index, value)
                     if (!isActive) {
@@ -282,9 +331,10 @@ internal class CachedIndexVersionedImpl<T : Any>(
 
     override suspend fun revert(untilExclusive: Int) {
         requireActive()
-        delegate.revert(untilExclusive)
-        withContext(NonCancellable) {
-            indexes.writeSession { cache ->
+        indexes.writeSession { cache ->
+            requireAuthority()
+            delegate.revert(untilExclusive)
+            withContext(NonCancellable) {
                 val position = cache.binarySearch(untilExclusive)
                 val suffixStart = if (position >= 0) position else -position - 1
                 if (suffixStart < cache.size) {
@@ -299,6 +349,14 @@ internal class CachedIndexVersionedImpl<T : Any>(
                     mutableLatestIndex.value = cache.lastOrNull() ?: -1
                 }
             }
+        }
+    }
+
+    /** Caller holds an indexes read or write session. */
+    private suspend fun requireAuthority() {
+        requireActive()
+        check(unresolvedFailure == null) {
+            "Cached timeline authority is uncertain; reopen the owning AgentSession."
         }
     }
 

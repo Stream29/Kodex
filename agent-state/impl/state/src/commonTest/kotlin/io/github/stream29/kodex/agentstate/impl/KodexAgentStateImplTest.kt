@@ -836,6 +836,7 @@ val kodexAgentStateImplTest by testSuite {
                 storage.work[compactedAt],
             )
             assertEquals("After compaction", storage.settings[settingsAt].threadName)
+            assertEquals("After compaction", storage.settings[compactedAt].threadName)
             assertEquals(KodexAgentStateValue.UserMessage, agent.state.value)
         }
 

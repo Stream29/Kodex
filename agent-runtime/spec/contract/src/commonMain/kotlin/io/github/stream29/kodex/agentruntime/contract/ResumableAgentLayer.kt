@@ -6,7 +6,7 @@ import io.github.stream29.kodex.agentstate.contract.KodexAgentState
  * A [KodexAgentState] that can resume multi-step agent execution.
  *
  * Implementations may compose through Kotlin interface delegation to add tool
- * execution, hooks, skills, AGENTS.md support, or temporary context injection.
+ * execution, compaction, steering, skills, AGENTS.md support, or temporary context injection.
  * The inherited operations remain the single-step atomic API; [resume] is the
  * multi-step orchestration entry point.
  */
