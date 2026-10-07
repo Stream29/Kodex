@@ -14,8 +14,14 @@ import io.github.stream29.kodex.utils.shellclient.default
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.io.files.Path
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -28,12 +34,19 @@ import kotlin.time.Duration.Companion.seconds
  * are diagnosed locally and do not change backend execution or end the subscription.
  * Cancellation propagates after terminating and awaiting cleanup of the current process;
  * no queued notifications are drained on frontend shutdown.
+ *
+ * [unhandledErrors] contains frontend-local, non-cancellation diagnostic messages.
+ * They select the existing Unhandled error Hook and receive JSON
+ * `{"type":"unhandled_error","message":...}` on stdin. They are not backend Agent
+ * Stops and have no fabricated session index. Backend notification JSON is unchanged.
+ * Both sources share this single serial executor and the same snapshot/timeout rules.
  */
 public suspend fun collectNotificationHooks(
     notifications: Flow<Notification>,
     settings: StateFlow<CliFrontendSettings>,
     workingDirectory: Path,
-): Unit = collectNotificationHooks(notifications, settings, workingDirectory, ::runNotificationCommand) { name, failure ->
+    unhandledErrors: Flow<String?> = emptyFlow(),
+): Unit = collectNotificationHooks(notifications, settings, workingDirectory, ::runNotificationCommand, unhandledErrors) { name, failure ->
     HookLogger.warn(failure) { "Notification Hook '$name' failed." }
 }
 
@@ -42,11 +55,21 @@ internal suspend fun collectNotificationHooks(
     settings: StateFlow<CliFrontendSettings>,
     workingDirectory: Path,
     execute: suspend (ShellProcessCommand, String) -> Unit,
+    unhandledErrors: Flow<String?> = emptyFlow(),
     report: (String, Throwable) -> Unit,
 ) {
-    notifications.collect { notification ->
-        val selected = settings.value.hooks.filter { notification.type in it.types }
-        val json = Json.encodeToString<Notification>(notification)
+    merge(
+        notifications.map { notification ->
+            notification.type to Json.encodeToString<Notification>(notification)
+        },
+        unhandledErrors.map { message ->
+            NotificationHookType.StopUnhandledError to buildJsonObject {
+                put("type", JsonPrimitive("unhandled_error"))
+                put("message", message?.let(::JsonPrimitive) ?: JsonNull)
+            }.toString()
+        },
+    ).collect { (type, json) ->
+        val selected = settings.value.hooks.filter { type in it.types }
         for (hook in selected) {
             try {
                 execute(ShellProcessCommand(hook.command, workingDirectory, shell = Shell.default), json)

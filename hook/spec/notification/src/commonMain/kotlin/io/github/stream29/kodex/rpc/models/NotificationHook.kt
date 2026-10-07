@@ -38,6 +38,7 @@ public enum class NotificationHookType {
     @SerialName("stop_suggest_subagent")
     StopSuggestSubagent,
 
+    /** Matches Agent error Stops and frontend-local unhandled operation errors; stored value is retained. */
     @SerialName("stop_unhandled_error")
     StopUnhandledError,
 }

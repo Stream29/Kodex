@@ -31,6 +31,7 @@ public fun main() {
                             viewModel = application.viewModel,
                             newLineKey = application.newLineKey,
                             sidebarSettings = application.sidebarSettings,
+                            onOperationFailure = application.reportUnhandledError,
                         )
                     }
                 } finally {

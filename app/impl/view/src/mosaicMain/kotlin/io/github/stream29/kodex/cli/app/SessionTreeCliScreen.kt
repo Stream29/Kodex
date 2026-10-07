@@ -109,7 +109,8 @@ import kotlin.time.Duration.Companion.milliseconds
 /**
  * Application shell; all mutable child state is collected by its exact renderer.
  * Throwing History/catalog actions reach [onOperationFailure] once. Its default
- * preserves the CLI coroutine exception boundary; cancellation never enters the reporter.
+ * throws for an unwired caller; the real CLI supplies its Application-owned unhandled-error
+ * reporter. Cancellation never enters the reporter.
  */
 @Composable
 public fun SessionTreeCliScreen(

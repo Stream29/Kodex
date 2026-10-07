@@ -35,6 +35,7 @@ import io.github.stream29.kodex.rpc.server.withBackendServices
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.*
 import kotlinx.io.files.Path
 
@@ -43,6 +44,16 @@ public class KodexApplication internal constructor(
     public val viewModel: ApplicationViewModel,
     public val newLineKey: StateFlow<NewLineKey>,
     public val sidebarSettings: SidebarSettingsViewModel,
+    /**
+     * The actual frontend host outlet for unhandled non-cancellation operations.
+     * Logs the original failure and offers one local Hook observation to this
+     * Application's existing frontend consumer. Return is not Hook completion.
+     * Delivery is live and best-effort, with no replay and 64 buffered messages;
+     * a slow consumer drops the oldest buffered observation.
+     * Cancellation is not reported. Neither a backend Agent Stop nor a new RPC call
+     * is produced; closing the Application cancels pending local observations.
+     */
+    public val reportUnhandledError: (Throwable) -> Unit,
 )
 
 /** Fault-injection checkpoints for isolated startup/shutdown validation. */
@@ -84,6 +95,16 @@ public suspend fun <R> withKodexApplication(
                 try {
                     val services = RpcServices(RestoringRpcClient(rawClient))
                     val frontendStore = openCliFrontendSettings(homeHandle.home)
+                    val unhandledErrors = MutableSharedFlow<String?>(
+                        extraBufferCapacity = 64,
+                        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+                    )
+                    val reportUnhandledError: (Throwable) -> Unit = { error ->
+                        if (error !is CancellationException) {
+                            ApplicationLogger.error(error) { "Application operation failed (cwd=$cwd)." }
+                            unhandledErrors.tryEmit(error.message)
+                        }
+                    }
                     val settings = RpcGlobalSettings.open(services.global, frontendStore, frontendScope, applicationWidth ?: 0)
                         .also { global = it }
                     lateinit var root: ApplicationViewModelImpl
@@ -143,7 +164,15 @@ public suspend fun <R> withKodexApplication(
                     )
                     application = root
                     frontendScope.launch {
-                        try { collectNotificationHooks(services.global.getNotificationFlow(), frontendStore.settings, cwd) }
+                        try {
+                            collectNotificationHooks(
+                                services.global.getNotificationFlow().catch { error ->
+                                    if (error is CancellationException) throw error
+                                    ApplicationLogger.error(error) { "Backend notification subscription ended." }
+                                },
+                                frontendStore.settings, cwd, unhandledErrors,
+                            )
+                        }
                         catch (cancelled: CancellationException) { throw cancelled }
                         catch (error: Throwable) { ApplicationLogger.error(error) { "Notification subscription ended." } }
                     }
@@ -152,6 +181,7 @@ public suspend fun <R> withKodexApplication(
                             frontendScope, SharingStarted.Eagerly, frontendStore.settings.value.newLineKey,
                         ),
                         SidebarSettingsViewModelImpl(settings, frontendScope, applicationWidth != null),
+                        reportUnhandledError,
                     )
                     onPhase(ApplicationStartupPhase.FrontendReady)
                     onPhase(ApplicationStartupPhase.RendererStarted)
