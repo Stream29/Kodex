@@ -6,9 +6,14 @@ import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
 import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpTool
+import io.github.stream29.kodex.mcp.contract.requireUniqueMcpModelNames
 import io.github.stream29.kodex.utils.ReadWriteMutex
 import io.github.stream29.kodex.utils.coroutines.runCatchingCancellable
 import io.github.stream29.kodex.utils.logging.global
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingMcpToolEvent
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpError
 import io.modelcontextprotocol.kotlin.sdk.shared.Transport
@@ -30,6 +35,7 @@ import kotlinx.coroutines.withContext
 import io.modelcontextprotocol.kotlin.sdk.types.Tool as SdkTool
 
 internal data class McpClientCatalog(
+    val sourceClient: Client? = null,
     val instructions: String = "",
     val tools: List<SdkTool> = emptyList(),
 )
@@ -50,7 +56,6 @@ internal class McpClientImpl(
     override val state: StateFlow<McpClientState> = owner.state
 
     private val tools: List<McpTool> = catalog.tools
-        .distinctBy(SdkTool::name)
         .map { tool ->
             McpToolImpl(
                 owner = this,
@@ -73,12 +78,24 @@ internal class McpClientImpl(
 /** Logical enabled client retained while browser authentication is required. */
 internal class McpAuthenticationBlockedClient(
     override val serverName: String,
-    private val tools: List<McpTool>,
+    tools: List<McpTool>,
 ) : McpClient {
     override val state: StateFlow<McpClientState> =
         MutableStateFlow<McpClientState>(McpClientState.AuthenticationBlocked).asStateFlow()
 
-    override fun listTools(): List<McpTool> = tools
+    private val blockedTools: List<McpTool> = tools.map { tool ->
+        object : McpTool by tool {
+            override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool {
+                val captured = requireNotNull(pending as? PendingMcpToolEvent)
+                return StableMcpToolEvent(
+                    callId = captured.callId, itemId = captured.itemId, name = captured.name,
+                    namespace = captured.namespace, arguments = captured.arguments,
+                    result = failureResult("MCP server $serverName requires authentication."),
+                )
+            }
+        }
+    }
+    override fun listTools(): List<McpTool> = blockedTools
 
     /** Authentication, rather than transport reconnection, is the required next action. */
     override suspend fun reconnect(): Unit = Unit
@@ -108,6 +125,15 @@ internal class McpClientOwner(
 
     fun client(catalog: McpClientCatalog = McpClientCatalog()): McpClientImpl =
         McpClientImpl(owner = this, catalog = catalog)
+
+    /** The original connection lock admits publication for this exact SDK client. */
+    suspend fun publishIfCurrent(catalog: McpClientCatalog, publish: () -> Unit): Boolean =
+        connectionLock.reader.withLock {
+            if (activeClient !== catalog.sourceClient || activeClient == null ||
+                mutableState.value == McpClientState.Closed) return@withLock false
+            publish()
+            true
+        }
 
     suspend fun reconnect() {
         reconnectMutex.withLock reconnect@{
@@ -158,7 +184,21 @@ internal class McpClientOwner(
             if (mutableState.value != McpClientState.Healthy || client == null) {
                 return@withLock null
             }
-            runCatchingCancellable { client.readCatalog() }
+            runCatchingCancellable {
+                val catalog = client.readCatalog()
+                try {
+                    validateCatalog(catalog)
+                } catch (ambiguity: IllegalArgumentException) {
+                    // Reject while this connection's reader is still held, so
+                    // this failure cannot mark a later reconnected client failed.
+                    mutableState.compareAndSet(
+                        expect = McpClientState.Healthy,
+                        update = McpClientState.Failed(McpClientFailureReason.ToolCatalog),
+                    )
+                    throw ambiguity
+                }
+                catalog
+            }
                 .also { catalog ->
                     catalog.exceptionOrNull()
                         ?.takeIf(Throwable::isConnectionLoss)
@@ -239,7 +279,7 @@ internal class McpClientOwner(
                 return ConnectionAttempt.Failed(McpClientFailureReason.Initialization, failure)
             }
 
-            val catalog = runCatchingCancellable { client.readCatalog() }
+            val catalog = runCatchingCancellable { client.readCatalog().also(::validateCatalog) }
                 .getOrElse { failure ->
                     client.closeSafely()
                     return ConnectionAttempt.Failed(McpClientFailureReason.ToolCatalog, failure)
@@ -280,6 +320,10 @@ internal class McpClientOwner(
     }
 }
 
+private fun validateCatalog(catalog: McpClientCatalog) {
+    requireUniqueMcpModelNames(catalog.tools.map(SdkTool::name), "tool")
+}
+
 private sealed interface ConnectionAttempt {
     data class Succeeded(
         val client: Client,
@@ -294,6 +338,7 @@ private sealed interface ConnectionAttempt {
 
 private suspend fun Client.readCatalog(): McpClientCatalog =
     McpClientCatalog(
+        sourceClient = this,
         instructions = serverInstructions.orEmpty(),
         tools = listEveryTool(),
     )

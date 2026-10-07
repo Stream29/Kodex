@@ -8,6 +8,7 @@ import io.github.stream29.kodex.mcp.contract.McpOAuthTokenRefresher
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
 import io.github.stream29.kodex.mcp.contract.McpService
 import io.github.stream29.kodex.mcp.contract.McpSettings
+import io.github.stream29.kodex.mcp.contract.requireUniqueMcpModelNames
 import io.github.stream29.kodex.mcp.stdio.openMcpStdioTransport
 import io.github.stream29.kodex.mcp.streamablehttp.McpStreamableHttpClient
 import io.github.stream29.kodex.mcp.streamablehttp.openMcpStreamableHttpTransport
@@ -295,8 +296,9 @@ public class McpServiceImpl internal constructor(
     ): Boolean =
         transitionMutex.withLock {
             if (serviceState.owners[owner.serverName] !== owner) return@withLock false
-            clients.value = clients.value + (owner.serverName to owner.client(catalog))
-            true
+            owner.publishIfCurrent(catalog) {
+                clients.value = clients.value + (owner.serverName to owner.client(catalog))
+            }
         }
 
     private suspend fun releaseResources() {
@@ -314,12 +316,20 @@ public class McpServiceImpl internal constructor(
     }
 }
 
-/** Creates an independently cancellable MCP service under this scope. */
+/**
+ * Creates an independently cancellable MCP service under this scope.
+ * @throws IllegalArgumentException if the initial settings contain ambiguous
+ * server model routes, before creating any resource or lifecycle child.
+ */
 public fun CoroutineScope.McpServiceImpl(
     settings: StateFlow<McpSettings>,
     configurationStore: McpConfigurationStore? = null,
     tokenRefresher: McpOAuthTokenRefresher? = null,
 ): McpServiceImpl {
+    // Reject a persisted ambiguous snapshot synchronously, before creating any
+    // resource/lifecycle child. Never rewrite its raw names or leave a failed
+    // initialization coroutine behind an apparently usable service.
+    requireUniqueMcpModelNames(settings.value.mcpServers.keys, "server")
     val serviceScope = supervisorChildScope()
     return try {
         McpServiceImpl(

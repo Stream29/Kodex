@@ -4,10 +4,12 @@ import de.infix.testBalloon.framework.core.TestConfig
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -20,6 +22,32 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
 val channelRpcTransportTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
+    test("shutdown boundary ignores only late closed send replies and preserves live error reporting") {
+        coroutineScope {
+            val reported = mutableListOf<Throwable>()
+            val incoming = Channel<String>(1)
+            val outgoing = Channel<String>(1)
+            val transport = ChannelRpcTransport(
+                coroutineContext + CoroutineExceptionHandler { _, failure -> reported += failure },
+                incoming, outgoing,
+            )
+            try {
+                val errors = checkNotNull(transport.coroutineContext[CoroutineExceptionHandler])
+                val live = ClosedSendChannelException("live connection send failure")
+                errors.handleException(transport.coroutineContext, live)
+                assertEquals(listOf<Throwable>(live), reported)
+                transport.beginShutdown()
+                errors.handleException(transport.coroutineContext, ClosedSendChannelException("late cancellation reply"))
+                val unrelated = IllegalStateException("unrelated cleanup bug")
+                errors.handleException(transport.coroutineContext, unrelated)
+                assertEquals(listOf<Throwable>(live, unrelated), reported)
+            } finally {
+                transport.owner.cancelAndJoin()
+                incoming.cancel()
+                outgoing.cancel()
+            }
+        }
+    }
     test("full channel suspends sends and preserves FIFO messages") {
         withTimeout(15.seconds) {
             coroutineScope {

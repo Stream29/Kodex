@@ -30,7 +30,8 @@ public interface McpService : AutoCloseable {
      *
      * Each successful catalog replaces that client's published generation.
      * Failures retain the previous generation; a detected connection loss also
-     * updates that client's connection state.
+     * updates that client's connection state. Ambiguous model routes reject the
+     * candidate catalog and publish [McpClientFailureReason.ToolCatalog].
      */
     public suspend fun refresh()
 }

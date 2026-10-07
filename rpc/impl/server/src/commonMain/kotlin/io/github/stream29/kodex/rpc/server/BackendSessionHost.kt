@@ -33,7 +33,8 @@ import kotlin.time.TimeMark
 import kotlin.time.TimeSource
 
 /**
- * Owns one repository and its accepted work. The factory must create the
+ * Owns one lazily acquired repository and its accepted work. The factory runs
+ * only on actual [BackendSessionHost.repository] access and must create the
  * repository in its receiver scope; an existing frontend-owned instance is
  * not a valid factory result. Neither the host nor its bindings may escape.
  *
@@ -56,8 +57,7 @@ internal suspend fun <R> withBackendSessionHost(
     var host: BackendSessionHost? = null
     var failure: Throwable? = null
     try {
-        val repository = owner.createRepository()
-        host = BackendSessionHost(owner, repository, timeSource.markNow(), backgroundFailure)
+        host = BackendSessionHost(owner, createRepository, timeSource.markNow(), backgroundFailure)
         coroutineScope { block(host) }
     } catch (cause: Throwable) {
         failure = cause
@@ -77,14 +77,39 @@ internal suspend fun <R> withBackendSessionHost(
     }
 }
 
-/** Backend-only resource; no Job, repository or binding crosses the RPC boundary. */
+/**
+ * Backend-only resource; no Job, repository or binding crosses the RPC boundary.
+ * @property acquiredRepository Null until successful on-demand acquisition;
+ * failed/cancelled attempts leave it absent, rather than publishing a dead owner.
+ */
 public class BackendSessionHost internal constructor(
     private val owner: CoroutineScope,
-    public val repository: KodexRootSessionRepository,
+    private val createRepository: suspend CoroutineScope.() -> KodexRootSessionRepository,
     private val origin: TimeMark,
     private val backgroundFailure: CompletableDeferred<Throwable>,
 ) {
     private val lifecycle = Mutex()
+    private val acquisition = Mutex()
+    private var acquiredRepository: KodexRootSessionRepository? = null
+
+    /**
+     * Acquires the actual repository once under the original backend owner.
+     * Concurrent first accesses share one successful factory result; failure or
+     * cancellation never publishes a partial/dead owner. A factory is responsible
+     * for cleaning its failed acquisition. Accepted work outlives an RPC waiter.
+     * Closing an untouched host never invokes the factory.
+     */
+    public suspend fun repository(): KodexRootSessionRepository = inBackend {
+        acquisition.withLock {
+            owner.ensureActive()
+            acquiredRepository ?: owner.createRepository().also { repository ->
+                currentCoroutineContext().ensureActive()
+                owner.ensureActive()
+                repository.coroutineContext.ensureActive()
+                acquiredRepository = repository
+            }
+        }
+    }
 
     // Renewal metadata, not a second catalog/active flag. Session identity and
     // liveness remain the original repository instance and its actual Job.
@@ -94,6 +119,7 @@ public class BackendSessionHost internal constructor(
     public suspend fun keepSessionAlive(index: Int): Unit = inBackend {
         lifecycle.withLock {
             owner.ensureActive()
+            val repository = repository()
             if (index !in repository.entries.value) throw SessionNotFound()
             val previous = renewals[index]
             if (previous != null && !previous.binding.session.coroutineContext.job.isActive) {
@@ -147,6 +173,7 @@ public class BackendSessionHost internal constructor(
     public suspend fun deleteSession(index: Int): Boolean = inBackend {
         lifecycle.withLock {
             owner.ensureActive()
+            val repository = repository()
             if (index !in repository.entries.value) return@withLock false
             renewals[index]?.let { closeLocked(index, it) }
             repository.delete(index)
@@ -166,6 +193,7 @@ public class BackendSessionHost internal constructor(
         block: suspend (KodexAgentSession) -> T,
     ): T = inBackend {
         lifecycle.withLock {
+            val repository = repository()
             if (index !in repository.entries.value) throw SessionNotFound()
             val renewal = renewals[index]
             val active = renewal?.binding?.session?.takeIf { it.coroutineContext.job.isActive }

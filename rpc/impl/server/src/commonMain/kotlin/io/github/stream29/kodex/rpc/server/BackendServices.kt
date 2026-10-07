@@ -32,6 +32,8 @@ import kotlinx.rpc.RpcServer
  * Owns a complete backend graph without selecting a CLI or running Home migration.
  * Callers must provide a prepared Home; external client factories are test seams,
  * not frontend services. Every created client is closed after its consumers.
+ * Settings/auth/model/global initialization does not acquire the Session
+ * repository; its original host creates it on the first real Session/catalog access.
  */
 public suspend fun <R> withBackendServices(
     home: Path,

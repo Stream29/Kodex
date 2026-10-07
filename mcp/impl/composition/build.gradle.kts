@@ -22,6 +22,12 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {
+            implementation(project(":agent-runtime-impl-decorator-tool"))
+            implementation(project(":agent-state-impl-state"))
+            implementation(project(":agent-state-test"))
+            implementation(project(":tool-impl-plan"))
+            implementation(project(":agent-storage-impl-in-memory"))
+            implementation(project(":openai-impl-client-test"))
             implementation(project(":openai-spec-json-codec"))
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.ktor.client.mock)

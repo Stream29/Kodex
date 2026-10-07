@@ -77,6 +77,6 @@ public enum class McpClientFailureReason {
     /** A previously healthy transport was lost. */
     ConnectionLost,
 
-    /** The initial or reconnected tool catalog could not be loaded. */
+    /** A loaded/refreshed catalog failed, including ambiguous model routes. */
     ToolCatalog,
 }

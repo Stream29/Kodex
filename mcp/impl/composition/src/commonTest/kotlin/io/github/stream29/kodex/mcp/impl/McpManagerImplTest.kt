@@ -39,6 +39,37 @@ import kotlin.test.assertIs
 
 @OptIn(ExperimentalCoroutinesApi::class)
 val mcpManagerImplTest by testSuite {
+    test("add rename and import reject normalized server collisions before store publication") {
+        val configuration = McpServerConfiguration.Stdio("never-run", enabled = false)
+        val initial = mapOf("a-b" to configuration, "gamma" to configuration)
+        val store = TestMcpConfigurationStore(initial)
+        val manager = testScope.backgroundScope.McpManagerImpl(
+            store = store,
+            service = TestMcpService(),
+            codexImportSource = {
+                listOf(McpCodexImportCandidate.Supported(serverName = "a_b", configuration = configuration))
+            },
+            loginAttemptFactory = { error("Login is not expected.") },
+        )
+        try {
+            val draft = McpServerDraft.Stdio(
+                serverName = "a_b", enabled = false,
+                configuration = McpStdioDraft(command = "never-run"),
+            )
+            assertFailsWith<IllegalArgumentException> { manager.add(draft) }
+            assertEquals(initial, store.configurations.value)
+            assertFailsWith<IllegalArgumentException> { manager.edit("gamma", draft) }
+            assertEquals(initial, store.configurations.value)
+            val preview = manager.previewCodexImport("")
+            assertFailsWith<IllegalArgumentException> {
+                manager.applyCodexImport(preview.id, mapOf("a_b" to McpImportDecision.Import))
+            }
+            assertEquals(initial, store.configurations.value)
+        } finally {
+            manager.close()
+        }
+    }
+
     test("editsPreserveSecretsWhileRenameResetsOAuthState") {
         val initialized = initializedOAuth()
         val store = TestMcpConfigurationStore(

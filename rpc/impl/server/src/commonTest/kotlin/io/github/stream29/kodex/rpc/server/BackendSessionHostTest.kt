@@ -23,6 +23,7 @@ import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
+import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
@@ -54,18 +55,123 @@ import kotlin.time.TestTimeSource
 import kotlin.time.Duration.Companion.seconds
 
 val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
+    test("untouched host and inactive runtime reads never acquire a repository") {
+        runTest {
+            var acquisitions = 0
+            lateinit var closedHost: BackendSessionHost
+            withBackendSessionHost(testScheduler.timeSource, {
+                acquisitions++
+                InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            }) { host ->
+                closedHost = host
+                assertFailsWith<SessionNotActive> { host.session(0) }
+                assertEquals(0, acquisitions)
+            }
+            assertFailsWith<CancellationException> { closedHost.repository() }
+            assertEquals(0, acquisitions)
+        }
+    }
+
+    test("concurrent first access publishes exactly one actual repository under the original owner") {
+        runTest {
+            var acquisitions = 0
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            lateinit var repository: KodexRootSessionRepository
+            withBackendSessionHost(testScheduler.timeSource, {
+                acquisitions++
+                entered.complete(Unit)
+                release.await()
+                InMemoryKodexSessionRepository(testKodexAgentDependencies()).also { repository = it }
+            }) { host ->
+                val waiters = (1..8).map { async { host.repository() } }
+                entered.await()
+                runCurrent()
+                assertEquals(1, acquisitions)
+                waiters.first().cancelAndJoin()
+                release.complete(Unit)
+                waiters.drop(1).awaitAll().forEach { assertSame(repository, it) }
+                assertSame(repository, host.repository())
+                assertEquals(1, acquisitions)
+            }
+            assertTrue(repository.coroutineContext.job.isCompleted)
+        }
+    }
+
+    test("failed and cancelled factories do not publish a repository and can be retried") {
+        runTest {
+            var attempts = 0
+            withBackendSessionHost(testScheduler.timeSource, {
+                when (++attempts) {
+                    1 -> error("failed acquisition")
+                    2 -> throw CancellationException("cancelled acquisition")
+                    else -> InMemoryKodexSessionRepository(testKodexAgentDependencies())
+                }
+            }) { host ->
+                assertFailsWith<IllegalStateException> { host.repository() }
+                assertFailsWith<CancellationException> { host.repository() }
+                val repository = host.repository()
+                assertSame(repository, host.repository())
+                assertEquals(3, attempts)
+            }
+        }
+    }
+
+    test("owner cancellation during first acquisition waits for factory cleanup") {
+        runTest {
+            val entered = CompletableDeferred<Unit>()
+            val cleaned = CompletableDeferred<Unit>()
+            lateinit var repository: KodexRootSessionRepository
+            val hostJob = launch {
+                withBackendSessionHost(testScheduler.timeSource, {
+                    try {
+                        repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+                        entered.complete(Unit)
+                        awaitCancellation()
+                    } finally {
+                        withContext(NonCancellable) {
+                            delay(1)
+                            cleaned.complete(Unit)
+                        }
+                    }
+                }) { host -> host.repository() }
+            }
+            entered.await()
+            hostJob.cancelAndJoin()
+            assertTrue(cleaned.isCompleted)
+            assertTrue(repository.coroutineContext.job.isCompleted)
+        }
+    }
+
+    test("a factory returning an already cancelled repository cannot publish that invalid owner") {
+        runTest {
+            var attempts = 0
+            withBackendSessionHost(testScheduler.timeSource, {
+                InMemoryKodexSessionRepository(testKodexAgentDependencies()).also {
+                    if (++attempts == 1) it.cancelAndJoin()
+                }
+            }) { host ->
+                assertFailsWith<CancellationException> { host.repository() }
+                val live = host.repository()
+                assertTrue(live.coroutineContext.job.isActive)
+                assertSame(live, host.repository())
+                assertEquals(2, attempts)
+            }
+        }
+    }
+
     test("only explicit keepAlive opens and concurrent activation reuses the repository owner") {
         runTest {
             withBackendSessionHost(testScheduler.timeSource, { InMemoryKodexSessionRepository(testKodexAgentDependencies()) }) { host ->
-                val index = host.repository.create()
-                assertFalse(host.repository.getEntry(index).isActive)
+                val index = host.repository().create()
+                assertFalse(host.repository().getEntry(index).isActive)
                 assertFailsWith<SessionNotActive> { host.session(index) }
-                assertFalse(host.repository.getEntry(index).isActive)
+                assertFalse(host.repository().getEntry(index).isActive)
                 (1..8).map { async { host.keepSessionAlive(index) } }.awaitAll()
                 val binding = host.session(index)
-                assertSame(binding.session, host.repository.open(index))
-                assertTrue(host.repository.getEntry(index).isActive)
-                assertFalse(host.repository.getEntry(index).running)
+                assertSame(binding.session, host.repository().open(index))
+                assertTrue(host.repository().getEntry(index).isActive)
+                assertFalse(host.repository().getEntry(index).running)
                 assertFailsWith<SessionNotFound> { host.keepSessionAlive(index + 1) }
                 assertFalse(host.deleteSession(index + 1))
             }
@@ -75,7 +181,7 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
     test("expiry ends the old binding and reactivation creates a new owner") {
         runTest {
             withBackendSessionHost(testScheduler.timeSource, { InMemoryKodexSessionRepository(testKodexAgentDependencies()) }) { host ->
-                val index = host.repository.create()
+                val index = host.repository().create()
                 host.keepSessionAlive(index)
                 val old = host.session(index)
                 val observer = async {
@@ -90,7 +196,7 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
                 observer.await()
                 assertTrue(old.inactive.isCompleted)
                 assertTrue(old.session.coroutineContext.job.isCompleted)
-                assertFalse(host.repository.getEntry(index).isActive)
+                assertFalse(host.repository().getEntry(index).isActive)
                 assertFailsWith<SessionNotActive> { host.session(index) }
                 host.keepSessionAlive(index)
                 assertNotSame(old.session, host.session(index).session)
@@ -102,7 +208,7 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
     test("ordinary reads pending steer and subscription cancellation do not renew") {
         runTest {
             withBackendSessionHost(testScheduler.timeSource, { InMemoryKodexSessionRepository(testKodexAgentDependencies()) }) { host ->
-                val index = host.repository.create()
+                val index = host.repository().create()
                 host.keepSessionAlive(index)
                 val binding = host.session(index)
                 val observer = launch { binding.observe(binding.session.runtime.latestIndex).collect() }
@@ -114,7 +220,7 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
                     runtime.pendingSteer.value = listOf(StableUserMessage(listOf(ContentItem.InputText("queued"))))
                 }
                 host.session(index)
-                host.repository.listEntries()
+                host.repository().listEntries()
                 advanceTimeBy(10_000)
                 runCurrent()
                 assertTrue(binding.inactive.isCompleted)
@@ -126,7 +232,7 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
     test("explicit renewal extends the existing deadline without replacing the binding") {
         runTest {
             withBackendSessionHost(testScheduler.timeSource, { InMemoryKodexSessionRepository(testKodexAgentDependencies()) }) { host ->
-                val index = host.repository.create()
+                val index = host.repository().create()
                 host.keepSessionAlive(index)
                 val binding = host.session(index)
                 advanceTimeBy(50_000)
@@ -146,7 +252,6 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
         runTest {
             val loading = CompletableDeferred<Unit>()
             val release = CompletableDeferred<Unit>()
-            lateinit var repository: KodexRootSessionRepository
             withBackendSessionHost(testScheduler.timeSource, {
                 val delegate = InMemoryKodexSessionRepository(testKodexAgentDependencies())
                 object : KodexRootSessionRepository by delegate {
@@ -155,9 +260,9 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
                         release.await()
                         return delegate.open(entryIndex)
                     }
-                }.also { repository = it }
+                }
             }) { host ->
-                val index = repository.create()
+                val index = host.repository().create()
                 val waiter = async { host.keepSessionAlive(index) }
                 loading.await()
                 waiter.cancelAndJoin()
@@ -188,9 +293,9 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
                     }
                 }
             }) { host ->
-                val index = host.repository.create()
+                val index = host.repository().create()
                 assertEquals(failure.message, assertFailsWith<IllegalStateException> { host.keepSessionAlive(index) }.message)
-                assertFalse(host.repository.getEntry(index).isActive)
+                assertFalse(host.repository().getEntry(index).isActive)
                 assertFailsWith<SessionNotActive> { host.session(index) }
                 fail = false
                 host.keepSessionAlive(index)
@@ -329,11 +434,11 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
                 waiter.cancelAndJoin()
                 advanceTimeBy(120_000)
                 runCurrent()
-                assertTrue(host.repository.getEntry(index).running)
+                assertTrue(host.repository().getEntry(index).running)
                 assertFalse(binding.inactive.isCompleted)
                 finish.complete(Unit)
                 runCurrent()
-                assertFalse(host.repository.getEntry(index).running)
+                assertFalse(host.repository().getEntry(index).running)
                 advanceTimeBy(60_000)
                 runCurrent()
                 assertTrue(binding.inactive.isCompleted)
@@ -365,7 +470,7 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
                     runCurrent()
                     binding.inactive.await()
                     assertTrue(binding.session.coroutineContext.job.isCompleted)
-                    assertFalse(host.repository.getEntry(index).isActive)
+                    assertFalse(host.repository().getEntry(index).isActive)
                 }
             }.await()
         }
@@ -439,7 +544,7 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
                 waiter.await()
                 assertTrue(old.inactive.isCompleted)
                 assertFalse(host.deleteSession(index))
-                assertEquals(index, host.repository.create())
+                assertEquals(index, host.repository().create())
                 host.keepSessionAlive(index)
                 assertNotSame(old.session, host.session(index).session)
             }
@@ -484,7 +589,7 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
                         try { awaitCancellation() } finally { cleaned.complete(Unit) }
                     }
                     throw failure
-                }) { error("must not enter") }
+                }) { host -> host.repository() }
             }.message)
             assertTrue(child.isCompleted)
             assertTrue(cleaned.isCompleted)
@@ -493,7 +598,7 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
 }
 
 private suspend fun BackendSessionHost.createInitialized(): Int {
-    val index = repository.create()
+    val index = repository().create()
     keepSessionAlive(index)
     inSession(index) { runtime.modify { it.initialize(KodexAgentSettings(model = OpenAiModelId("test-model"))) } }
     return index

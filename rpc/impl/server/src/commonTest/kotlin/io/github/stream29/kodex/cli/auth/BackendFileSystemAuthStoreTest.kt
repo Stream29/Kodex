@@ -13,6 +13,7 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
@@ -27,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
+import kotlinx.io.IOException
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
 import kotlin.test.*
@@ -35,6 +37,42 @@ import kotlin.time.Duration.Companion.days
 import kotlin.time.Instant
 
 val backendFileSystemAuthStoreTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    for (source in KodexAuthSource.entries) {
+        for (cancelled in listOf(false, true)) {
+            test("$source preserves primary save ${if (cancelled) "cancellation" else "failure"} when cleanup also fails") {
+                withBackendAuth { f ->
+                    f.login(source, "old")
+                    val primary = if (cancelled) CancellationException("Save cancelled") else IOException("Save failed")
+                    val cleanup = IOException("Temporary cleanup failed")
+                    f.fs.beforeMove = { throw primary }
+                    f.fs.deleteFailure = cleanup
+                    try {
+                        val actual = assertFailsWith<Throwable> { f.login(source, "new") }
+                        assertSame(primary, actual)
+                        assertEquals(listOf(cleanup), actual.suppressedExceptions)
+                        val destination = if (source == KodexAuthSource.Codex) Path(f.codex, "auth.json")
+                            else Path(f.data, "auth.yml")
+                        assertTrue(f.fs.readString(destination).contains("access-old"))
+                    } finally {
+                        f.fs.deleteFailure = null
+                    }
+                }
+            }
+        }
+        test("$source exposes cleanup failure when the credential move succeeded") {
+            withBackendAuth { f ->
+                val cleanup = IOException("Temporary cleanup failed")
+                f.fs.deleteFailure = cleanup
+                try {
+                    val actual = assertFailsWith<IOException> { f.login(source, "new") }
+                    assertSame(cleanup, actual)
+                    assertTrue(actual.suppressedExceptions.isEmpty())
+                } finally {
+                    f.fs.deleteFailure = null
+                }
+            }
+        }
+    }
     test("bound login writes each format without changing selection or the other file") {
         withBackendAuth { f ->
             f.login(KodexAuthSource.Codex, "codex")
@@ -339,11 +377,16 @@ private class BackendAuthTestLoginClient : OpenAiLoginClient {
 }
 private class BackendAuthTestFileSystem : CoroutineFileSystem by SystemCoroutineFileSystem {
     var failMove = false
+    var deleteFailure: Throwable? = null
     var beforeMove: suspend () -> Unit = {}
     override suspend fun atomicMove(source: Path, destination: Path) {
         beforeMove()
         if (failMove) error("Synthetic credential save failure.")
         SystemCoroutineFileSystem.atomicMove(source, destination)
+    }
+    override suspend fun delete(path: Path, mustExist: Boolean) {
+        if (path.name.endsWith(".tmp")) deleteFailure?.let { throw it }
+        SystemCoroutineFileSystem.delete(path, mustExist)
     }
 }
 private fun tokens(suffix: String) =

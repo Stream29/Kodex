@@ -15,7 +15,8 @@ import kotlinx.rpc.annotations.Rpc
  *
  * This is the only frontend-writable timeline: [compareAndSet] updates the current settings
  * through the backend's business write boundary, not an arbitrary historical index.
- * This review contract has no client or server implementation.
+ * The connected backend serves this timeline; frontend clients borrow its
+ * reads/CAS capabilities without acquiring ownership of the Session.
  */
 @Rpc
 public interface SettingsTimelineRpc : TimelineRpc<KodexAgentSettings> {

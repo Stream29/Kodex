@@ -27,7 +27,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             val management = BackendSessionManagement(host, runtime) { throw it }
             assertTrue(management.deleteSession(initial))
             assertEquals(emptyList(), management.getSessionCatalog(false))
-            val index = host.repository.create()
+            val index = host.repository().create()
             val row = management.getSessionCatalog(false).single()
             assertEquals(index, row.sessionIndex)
             assertNull(row.threadName)
@@ -63,11 +63,11 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
     test("catalog ordering and timestamp zero stay distinct from later timestamps") {
         runtimeFixture { host, _, runtime ->
             val management = BackendSessionManagement(host, runtime) { throw it }
-            val a = host.repository.create()
-            val b = host.repository.create()
+            val a = host.repository().create()
+            val b = host.repository().create()
             val timestamp = Instant.parse("2099-01-01T00:00:00Z")
             for (index in listOf(a, b)) {
-                val temporary = host.repository.open(index)
+                val temporary = host.repository().open(index)
                 try {
                     temporary.runtime.modify {
                         it.settings[3] = KodexAgentSettings(model = OpenAiModelId("test-model"), threadName = "late")
@@ -136,7 +136,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             assertFailsWith<CacheNonceMismatch> { management.forkSessionHistory(index, 1, nonce xor 1) }
             assertFailsWith<IllegalArgumentException> { management.forkSessionHistory(index, 0, nonce) }
             assertFailsWith<IllegalArgumentException> { management.forkSessionHistory(index, 2, nonce) }
-            assertEquals(listOf(index), host.repository.entries.value)
+            assertEquals(listOf(index), host.repository().entries.value)
             host.session(index).session.cancelAndJoin()
             assertFailsWith<SessionNotActive> { management.forkSessionHistory(index, 1, nonce) }
             assertFailsWith<SessionNotFound> { management.forkSession(index + 999) }
@@ -230,7 +230,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
                 management.createSession(KodexAgentSettings(OpenAiModelId("test-model")))
             }
             assertEquals("load failed", failure.message)
-            assertTrue(host.repository.entries.value.isEmpty())
+            assertTrue(host.repository().entries.value.isEmpty())
         }
     }
 
@@ -256,7 +256,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             release.complete(Unit)
             session.runtime.latestIndex.first { it >= 0 }
             assertEquals("Session 0", session.storage.settings[0].threadName)
-            assertEquals(1, host.repository.entries.value.size)
+            assertEquals(1, host.repository().entries.value.size)
         }
     }
 }

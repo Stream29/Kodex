@@ -2,6 +2,7 @@ package io.github.stream29.kodex.mcp.impl
 
 import io.github.stream29.kodex.mcp.contract.McpOAuthConfiguration
 import io.github.stream29.kodex.mcp.contract.McpServerConfiguration
+import io.github.stream29.kodex.mcp.contract.requireUniqueMcpModelNames
 
 /**
  * Validates complete proposals at the persistence boundary. Unlike draft
@@ -13,6 +14,7 @@ public fun validateMcpConfigurationUpdate(
     update: Map<String, McpServerConfiguration>,
 ) {
     validateNames(update.keys, "server")
+    requireUniqueMcpModelNames(update.keys, "server")
     update.forEach { (name, configuration) ->
         if (configuration == current[name]) return@forEach
         when (configuration) {

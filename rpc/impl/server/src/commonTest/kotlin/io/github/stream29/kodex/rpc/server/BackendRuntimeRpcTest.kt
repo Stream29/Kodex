@@ -117,7 +117,7 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
                 subscription.await()
                 assertFailsWith<SessionNotActive> { rpc.getLatestIndex(index) }
                 assertFailsWith<SessionNotFound> { host.keepSessionAlive(index) }
-                val replacement = host.repository.create()
+                val replacement = host.repository().create()
                 host.keepSessionAlive(replacement)
                 assertEquals(-1, rpc.getLatestIndex(replacement))
             }
@@ -202,6 +202,52 @@ val backendRuntimeRpcTest by testSuite(compartment = { TestCompartment.RealTime 
             assertTrue(operation.await() > 1)
             assertEquals(pending, rpc.getPendingSteer(index))
             assertFalse(rpc.getRunningTurn(index))
+        }
+    }
+
+    test("real RPC settings CAS accepted during compaction survives its published checkpoint") {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val client = mockOpenAiClient {
+            createRemoteCompactionV2Response {
+                entered.complete(Unit)
+                release.await()
+                RemoteCompactionV2Response(ResponseItem.Compaction(encryptedContent = "compacted"), null)
+            }
+        }
+        runtimeFixture(client) { host, index, backendRuntime ->
+            withInMemoryRpc(registerServices = {
+                registerService(AgentRuntimeRpc::class) { backendRuntime }
+                registerService(SettingsTimelineRpc::class) { BackendSettingsTimelineRpc(host) }
+            }) { raw ->
+                val restored = RestoringRpcClient(raw)
+                val runtime = restored.withService<AgentRuntimeRpc>()
+                val settings = restored.withService<SettingsTimelineRpc>()
+                runtime.appendUserMessage(index, listOf(ContentItem.InputText("compact")))
+                val before = settings.get(index, settings.getCacheNonce(index), settings.getLatestIndex(index))
+                val operation = async { runtime.forcedCompact(index) }
+                try {
+                    entered.await()
+                    val first = before.copy(threadName = "accepted-during-compaction")
+                    assertTrue(settings.compareAndSet(index, before, first))
+                    val latest = first.copy(model = OpenAiModelId("updated-model"))
+                    assertTrue(settings.compareAndSet(index, first, latest))
+                    release.complete(Unit)
+                    val checkpoint = operation.await()
+                    val published = settings.get(index, settings.getCacheNonce(index), checkpoint)
+                    assertEquals(latest.threadName, published.threadName)
+                    assertEquals(latest.model, published.model)
+                    // The returned index is the compaction output; settings
+                    // belong to its immediately preceding compaction point.
+                    assertEquals(checkpoint - 1, settings.getLatestIndexFlow(index).first {
+                        it == checkpoint - 1
+                    })
+                    assertEquals(AgentStateValue.UserMessage, runtime.getState(index))
+                } finally {
+                    release.complete(Unit)
+                    operation.cancelAndJoin()
+                }
+            }
         }
     }
 
@@ -355,7 +401,7 @@ internal suspend fun runtimeFixture(
         withBackendSessionHost(TestTimeSource(), {
             FileSystemKodexSessionRepository(root, testKodexAgentDependencies(client))
         }) { host ->
-            val index = host.repository.create()
+            val index = host.repository().create()
             host.keepSessionAlive(index)
             host.inSession(index) {
                 runtime.modify { it.initialize(KodexAgentSettings(model = OpenAiModelId("test-model"), threadName = "Session $index")) }

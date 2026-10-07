@@ -81,6 +81,8 @@ public suspend fun <R> withInMemoryRpc(
         // Disable termination monitors before intentional shutdown. Cancel both sides before
         // awaiting either: a peer can be suspended sending to a full channel.
         monitors.forEach { it.cancel() }
+        clientTransport.beginShutdown()
+        serverTransport.beginShutdown()
         clientTransport.owner.cancel()
         serverTransport.owner.cancel()
         toServer.cancel()

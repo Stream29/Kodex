@@ -32,11 +32,11 @@ public class BackendSessionManagement(
 
     public suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry> = host.inBackend {
         commands.withLock {
-            host.repository.listEntries(includeArchived).map { entry ->
+            host.repository().listEntries(includeArchived).map { entry ->
                 SessionCatalogEntry(
                     sessionIndex = entry.entryIndex,
                     threadName = entry.threadName,
-                    createdAt = host.repository.readCreatedAt(entry.entryIndex),
+                    createdAt = host.repository().readCreatedAt(entry.entryIndex),
                     updatedAt = entry.lastActivityAt,
                     archived = entry.archived,
                     running = entry.running,
@@ -55,14 +55,14 @@ public class BackendSessionManagement(
     public suspend fun archiveSession(sessionIndex: Int): Unit = host.inBackend {
         commands.withLock {
             requireEntry(sessionIndex)
-            host.repository.getEntry(sessionIndex).archive()
+            host.repository().getEntry(sessionIndex).archive()
         }
     }
 
     public suspend fun unarchiveSession(sessionIndex: Int): Unit = host.inBackend {
         commands.withLock {
             requireEntry(sessionIndex)
-            host.repository.getEntry(sessionIndex).unarchive()
+            host.repository().getEntry(sessionIndex).unarchive()
         }
     }
 
@@ -91,9 +91,9 @@ public class BackendSessionManagement(
                     val until = boundary ?: (latest + 1)
                     require(until > 0 && until <= latest + 1) { "Invalid fork boundary." }
                     val settings = sourceStorage.settings[until - 1]
-                    val targetIndex = host.repository.createFork(sourceIndex)
+                    val targetIndex = host.repository().createFork(sourceIndex)
                     try {
-                        val target = host.repository.open(targetIndex)
+                        val target = host.repository().open(targetIndex)
                         try {
                             target.runtime.modify { storage ->
                                 if (boundary != null) storage.revert(until)
@@ -109,7 +109,7 @@ public class BackendSessionManagement(
                         targetIndex
                     } catch (failure: Throwable) {
                         withContext(NonCancellable) {
-                            runCatching { host.repository.delete(targetIndex) }.onFailure(failure::addSuppressed)
+                            runCatching { host.repository().delete(targetIndex) }.onFailure(failure::addSuppressed)
                         }
                         throw failure
                     }
@@ -146,7 +146,7 @@ public class BackendSessionManagement(
     }
 
     private suspend fun create(initialSettings: KodexAgentSettings, name: (Int) -> String): Int {
-        val index = host.repository.create()
+        val index = host.repository().create()
         try {
             host.keepSessionAlive(index)
             host.inSession(index) {
@@ -161,7 +161,7 @@ public class BackendSessionManagement(
         }
     }
 
-    private fun requireEntry(index: Int) {
-        if (index !in host.repository.entries.value) throw SessionNotFound()
+    private suspend fun requireEntry(index: Int) {
+        if (index !in host.repository().entries.value) throw SessionNotFound()
     }
 }

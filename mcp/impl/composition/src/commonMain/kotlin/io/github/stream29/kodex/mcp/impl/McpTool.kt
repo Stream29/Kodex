@@ -7,6 +7,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEve
 import io.github.stream29.kodex.mcp.contract.McpClientFailureReason
 import io.github.stream29.kodex.mcp.contract.McpClientState
 import io.github.stream29.kodex.mcp.contract.McpTool
+import io.github.stream29.kodex.mcp.contract.toModelToolName
 import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.ResponsesApiNamespace
 import io.github.stream29.kodex.openai.ResponsesApiTool
@@ -105,18 +106,6 @@ internal class McpToolImpl(
         )
 }
 
-private fun String.toModelToolName(): String =
-    map { character ->
-        when (character) {
-            in 'a'..'z',
-            in 'A'..'Z',
-            in '0'..'9',
-            '_' -> character
-
-            else -> '_'
-        }
-    }.joinToString(separator = "").ifEmpty { "_" }
-
 /**
  * Mirrors Rust's structured output schema for an MCP `CallToolResult`.
  *
@@ -145,7 +134,7 @@ private fun io.modelcontextprotocol.kotlin.sdk.types.CallToolResult.toOpenAiResu
         meta = meta,
     )
 
-private fun failureResult(message: String): CallToolResult =
+internal fun failureResult(message: String): CallToolResult =
     CallToolResult(
         content = listOf(
             buildJsonObject {

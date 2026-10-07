@@ -12,6 +12,7 @@ import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.job
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -23,9 +24,38 @@ import kotlin.time.TestTimeSource
 import kotlin.time.Duration.Companion.seconds
 import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
+import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 val backendSessionHostFileTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
+    test("concurrent first file catalog access creates sessions only once under the host owner") {
+        runTest {
+            backgroundScope.async {
+                val root = Path(SystemTemporaryDirectory, "kodex-rpc-lazy-host-${Random.nextLong()}")
+                var factories = 0
+                try {
+                    withBackendSessionHost({
+                        factories++
+                        FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
+                    }) { host ->
+                        assertNull(SystemCoroutineFileSystem.metadataOrNull(Path(root, "sessions")))
+                        assertEquals(0, factories)
+                        val repositories = (1..8).map { async { host.repository() } }.awaitAll()
+                        repositories.forEach {
+                            assertSame(repositories.first(), it)
+                            assertEquals(emptyList(), it.listEntries())
+                        }
+                        assertEquals(1, factories)
+                        assertTrue(SystemCoroutineFileSystem.metadataOrNull(Path(root, "sessions"))?.isDirectory == true)
+                    }
+                } finally {
+                    deleteTestTree(root)
+                }
+            }.await()
+        }
+    }
+
     test("expired file owner releases its lease before reopening persisted history") {
         runTest {
             // Keep the monotonic clock explicit while real filesystem work
@@ -37,7 +67,7 @@ val backendSessionHostFileTest by testSuite(testConfig = TestConfig.testScope(is
                     withBackendSessionHost(clock, {
                         FileSystemKodexSessionRepository(root, testKodexAgentDependencies())
                     }) { host ->
-                        val index = host.repository.create()
+                        val index = host.repository().create()
                         host.keepSessionAlive(index)
                         host.inSession(index) {
                             runtime.modify { it.initialize(KodexAgentSettings(model = OpenAiModelId("test-model"))) }
@@ -55,7 +85,7 @@ val backendSessionHostFileTest by testSuite(testConfig = TestConfig.testScope(is
                         assertEquals(settings, fresh.session.storage.settings[0])
                         assertTrue(host.deleteSession(index))
                         assertTrue(fresh.inactive.isCompleted)
-                        assertEquals(emptyList(), host.repository.entries.value)
+                        assertEquals(emptyList(), host.repository().entries.value)
                     }
                 } finally {
                     deleteTestTree(root)

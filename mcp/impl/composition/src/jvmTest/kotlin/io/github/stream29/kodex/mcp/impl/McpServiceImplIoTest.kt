@@ -342,7 +342,10 @@ val mcpServiceImplIoTest by testSuite(
 
             assertNotSame(authorizedClient, blocked)
             assertEquals(McpClientState.Closed, authorizedClient.state.value)
-            assertSame(originalTool, blocked.listTools().single())
+            val blockedTool = blocked.listTools().single()
+            assertSame(originalTool.spec, blockedTool.spec)
+            assertEquals(originalTool.serverInstructions, blockedTool.serverInstructions)
+            assertSame(blockedTool, blocked.listTools().single())
         } finally {
             service.close()
             service.coroutineContext[Job]?.join()

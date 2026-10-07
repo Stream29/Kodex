@@ -25,7 +25,8 @@ import kotlinx.rpc.annotations.Rpc
  * Metadata getters initialize local state; subscriptions provide subsequent values.
  * Cancelling a subscription does not close the backend or its shared services.
  * Settings contain full MCP credentials; there is no separate sanitized settings projection.
- * This review contract has no client or server implementation.
+ * The connected backend implements these capabilities; clients borrow service
+ * proxies rather than acquiring ownership of its repositories or resources.
  */
 @Rpc
 public interface GlobalRpc {

@@ -222,11 +222,22 @@ public class BackendFileSystemAuthStore internal constructor(
         }
         fileSystem.createDirectories(directory)
         val temporary = Path(directory, ".${destination.name}.${Uuid.generateV7()}.tmp")
+        var primaryFailure: Throwable? = null
         try {
             fileSystem.writePrivateString(temporary, "$text\n", mustCreate = true)
             fileSystem.atomicMove(temporary, destination)
+        } catch (failure: Throwable) {
+            primaryFailure = failure
+            throw failure
         } finally {
-            withContext(NonCancellable) { fileSystem.delete(temporary, mustExist = false) }
+            val cleanupFailure = withContext(NonCancellable) {
+                runCatching { fileSystem.delete(temporary, mustExist = false) }.exceptionOrNull()
+            }
+            if (cleanupFailure != null) {
+                val primary = primaryFailure
+                if (primary == null) throw cleanupFailure
+                if (cleanupFailure !== primary) primary.addSuppressed(cleanupFailure)
+            }
         }
     }
 

@@ -2,6 +2,7 @@ package io.github.stream29.kodex.mcp.impl
 
 import io.github.stream29.kodex.mcp.contract.toConfiguration
 import io.github.stream29.kodex.mcp.contract.validatedName
+import io.github.stream29.kodex.mcp.contract.requireUniqueMcpModelNames
 
 import io.github.stream29.kodex.mcp.contract.McpAuthenticationState
 import io.github.stream29.kodex.mcp.contract.McpClient
@@ -119,7 +120,7 @@ public class McpManagerImpl internal constructor(
             val configuration = draft.toConfiguration(existing = null, preserveOAuth = false)
             store.update { current ->
                 require(name !in current) { "An MCP server named '$name' already exists." }
-                current + (name to configuration)
+                (current + (name to configuration)).also { requireUniqueMcpModelNames(it.keys, "server") }
             }
         }
     }
@@ -150,7 +151,8 @@ public class McpManagerImpl internal constructor(
                     existing = latest,
                     preserveOAuth = !renamed,
                 )
-                (current - existingServerName) + (nextName to resolved)
+                ((current - existingServerName) + (nextName to resolved))
+                    .also { requireUniqueMcpModelNames(it.keys, "server") }
             }
             authenticationOverrides.value -= existingServerName
         }
@@ -445,7 +447,7 @@ public class McpManagerImpl internal constructor(
                         }
                     }
                 }
-                updated.toMap()
+                updated.toMap().also { requireUniqueMcpModelNames(it.keys, "server") }
             }
             authenticationOverrides.value -= decisions
                 .filterValues { decision -> decision != McpImportDecision.Skip }
