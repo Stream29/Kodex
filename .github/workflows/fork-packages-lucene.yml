@@ -1,0 +1,242 @@
+name: Fork packages - Lucene
+
+on:
+  push:
+    branches: [main]
+    paths: [LuceneKmp]
+  workflow_dispatch:
+    inputs:
+      reviewed:
+        description: "I reviewed this exact main revision and authorize the pinned Lucene publication"
+        type: boolean
+        required: true
+        default: false
+  pull_request:
+    paths:
+      - LuceneKmp
+      - .github/workflows/fork-packages-lucene.yml
+      - scripts/fork-packages/**
+
+permissions:
+  contents: read
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  FORK_PUBLICATION_REVIEWED: ${{ github.event_name == 'workflow_dispatch' && inputs.reviewed && 'true' || 'false' }}
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: core.autocrlf
+  GIT_CONFIG_VALUE_0: "false"
+
+concurrency:
+  group: fork-packages-lucene-main
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s scripts/fork-packages -p 'test_*.py' -v
+
+  gate:
+    needs: offline-tests
+    if: >-
+      github.repository == 'Stream29/Kodex' &&
+      github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'push' && github.ref_protected) ||
+       (github.event_name == 'workflow_dispatch' && inputs.reviewed))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      commit: ${{ steps.guard.outputs.commit }}
+      identity_sha256: ${{ steps.guard.outputs.identity_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+          # Public SSH-to-HTTPS conversion is supplied by checkout, without ssh-key.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: guard
+        run: python scripts/fork-packages/pipeline.py guard --fork lucene --output "$RUNNER_TEMP/identity.json"
+
+  build:
+    needs: gate
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - host: linux
+            runner: ubuntu-24.04
+          - host: mac
+            runner: macos-14
+          - host: windows
+            runner: windows-2022
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    concurrency:
+      group: lucene-build-${{ needs.gate.outputs.commit }}-${{ matrix.host }}
+      cancel-in-progress: false
+    env:
+      COPYFILE_DISABLE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: java21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: Publish real components to isolated file repository
+        env:
+          FORK_JDK21: ${{ steps.java21.outputs.path }}
+          GRADLE_USER_HOME: ${{ runner.temp }}/fork-gradle
+          KONAN_DATA_DIR: ${{ runner.temp }}/fork-konan
+        run: python scripts/fork-packages/pipeline.py build --fork lucene --host "${{ matrix.host }}" --output "$RUNNER_TEMP/sealed"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lucene-stage-${{ matrix.host }}
+          path: |
+            ${{ runner.temp }}/sealed/repo
+            ${{ runner.temp }}/sealed/stage.json
+            ${{ runner.temp }}/sealed/toolchain.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  merge:
+    needs: [gate, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: lucene-stage-*
+          path: ${{ runner.temp }}/stages
+      - run: >-
+          python scripts/fork-packages/pipeline.py merge --fork lucene
+          --input "$RUNNER_TEMP/stages" --output "$RUNNER_TEMP/bundle"
+          --identity-sha256 "${{ needs.gate.outputs.identity_sha256 }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lucene-validated-bundle
+          path: ${{ runner.temp }}/bundle
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 0
+
+  smoke:
+    needs: [gate, merge]
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - host: linux
+            runner: ubuntu-24.04
+          - host: mac
+            runner: macos-14
+          - host: windows
+            runner: windows-2022
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: actions/download-artifact@v4
+        with:
+          name: lucene-validated-bundle
+          path: ${{ runner.temp }}/bundle
+      - run: >-
+          python scripts/fork-packages/smoke.py --fork lucene --host "${{ matrix.host }}"
+          --bundle "$RUNNER_TEMP/bundle" --output "$RUNNER_TEMP/consumer"
+          --receipt "$RUNNER_TEMP/receipts/${{ matrix.host }}.json"
+          --identity-sha256 "${{ needs.gate.outputs.identity_sha256 }}"
+        env:
+          GRADLE_USER_HOME: ${{ runner.temp }}/smoke-gradle
+          KONAN_DATA_DIR: ${{ runner.temp }}/smoke-konan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lucene-smoke-${{ matrix.host }}
+          path: ${{ runner.temp }}/receipts/*.json
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    needs: [gate, merge, smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: lucene-maven-single-writer
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: lucene-validated-bundle
+          path: ${{ runner.temp }}/bundle
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: lucene-smoke-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/receipts
+      - name: Preflight, immutable upload and remote byte verification
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python scripts/fork-packages/publisher.py --fork lucene
+          --bundle "$RUNNER_TEMP/bundle" --receipts "$RUNNER_TEMP/receipts"
+          --identity-sha256 "${{ needs.gate.outputs.identity_sha256 }}"

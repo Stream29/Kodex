@@ -1,0 +1,94 @@
+import groovy.json.JsonOutput
+import org.gradle.api.publish.PublishingExtension
+import org.gradle.api.publish.maven.tasks.PublishToMavenRepository
+import org.gradle.api.tasks.bundling.AbstractArchiveTask
+import org.gradle.plugins.signing.Sign
+import org.gradle.util.GradleVersion
+import java.security.MessageDigest
+
+// This script changes publication configuration, never the fork's source files.
+def staging = new File(System.getenv('FORK_STAGING_REPO')).canonicalFile
+def version = System.getenv('FORK_VERSION')
+if (!version || !staging.isAbsolute()) throw new GradleException('Missing staging/version')
+
+gradle.settingsEvaluated { settings ->
+    if (System.getenv('FORK_NAME') == 'mcp' &&
+        settings.settingsDir.canonicalFile == new File(System.getenv('FORK_SOURCE_DIR')).canonicalFile) {
+        // Approved root-name correction: avoids getKotlinSdk() colliding with :kotlin-sdk.
+        // Only the isolated publication build's identity changes, never its pinned source tree.
+        settings.rootProject.name = 'kotlin-mcp-sdk-fork'
+    }
+}
+
+gradle.beforeProject { p ->
+    p.tasks.withType(AbstractArchiveTask).configureEach {
+        preserveFileTimestamps = false
+        reproducibleFileOrder = true
+    }
+    p.tasks.withType(Exec).configureEach {
+        if (name.endsWith('JniZigBuild')) {
+            doFirst { args('-j2') }
+            environment('ZIG_GLOBAL_CACHE_DIR', new File(staging.parentFile, 'zig-cache'))
+            // An explicit CI task environment, not an xcode-select/system mutation.
+            if (System.getenv('FORK_DEVELOPER_DIR')) {
+                environment('DEVELOPER_DIR', System.getenv('FORK_DEVELOPER_DIR'))
+            }
+        }
+    }
+    p.pluginManager.withPlugin('maven-publish') {
+        p.extensions.getByType(PublishingExtension).repositories.maven {
+            name = 'ForkStaging'
+            url = staging.toURI()
+        }
+        p.tasks.withType(PublishToMavenRepository).configureEach {
+            doFirst {
+                if (repository.url.scheme != 'file' ||
+                    new File(repository.url).canonicalFile != staging) {
+                    throw new GradleException('Only the isolated file repository is authorized')
+                }
+            }
+        }
+        p.tasks.withType(Sign).configureEach { enabled = false }
+    }
+}
+gradle.projectsEvaluated {
+    // Init scripts can also run in buildSrc/included builds. Only the fork root
+    // owns publication identity and toolchain evidence.
+    if (gradle.rootProject.rootDir.canonicalFile !=
+        new File(System.getenv('FORK_SOURCE_DIR')).canonicalFile) return
+    gradle.rootProject.allprojects { p ->
+        if (p.plugins.hasPlugin('maven-publish')) {
+            p.extensions.getByType(PublishingExtension).publications.configureEach {
+                // Keep original group/artifact and real component; no synthetic JARs.
+                it.version = version
+                artifacts.removeAll { it.classifier == 'javadoc' || it.extension == 'asc' }
+            }
+        }
+    }
+    def catalog = new File(gradle.rootProject.rootDir, 'gradle/libs.versions.toml').text
+    def kgp = (catalog =~ /(?m)^kotlin\s*=\s*"([^"]+)"/)
+    if (!kgp.find()) throw new GradleException('Cannot identify the pinned KGP')
+    def data = [
+        gradle: GradleVersion.current().version,
+        kgp: kgp.group(1),
+        javaVersion: System.getProperty('java.version'),
+        javaVendor: System.getProperty('java.vendor'),
+        os: System.getProperty('os.name'),
+        arch: System.getProperty('os.arch'),
+        compilerStrategy: 'daemon',
+        fallback: false,
+        workers: 1,
+        daemonHeapMiB: (Runtime.runtime.maxMemory() / (1024 * 1024)) as int,
+    ]
+    def plugin = gradle.rootProject.allprojects.collect {
+        it.plugins.findPlugin('org.jetbrains.kotlin.multiplatform')
+    }.find { it != null }
+    if (plugin == null) throw new GradleException('No real KMP plugin loaded')
+    def pluginJar = new File(plugin.class.protectionDomain.codeSource.location.toURI())
+    if (!pluginJar.isFile()) throw new GradleException('KMP plugin archive evidence missing')
+    data.kgpPluginArchive = [
+        filename: pluginJar.name,
+        sha256: MessageDigest.getInstance('SHA-256').digest(pluginJar.bytes).encodeHex().toString(),
+    ]
+    new File(staging.parentFile, 'toolchain.json').text = JsonOutput.toJson(data)
+}
