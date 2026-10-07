@@ -41,7 +41,7 @@ internal suspend fun CoroutineScope.startPipeProcess(
     return PipeProcessSession(process, this)
 }
 
-private class PipeProcessSession(
+internal class PipeProcessSession(
     private val process: io.github.stream29.kodex.utils.processclient.ProcessSession,
     parentScope: CoroutineScope,
 ) : ProcessSession {
@@ -58,10 +58,20 @@ private class PipeProcessSession(
     override val exitCode: Deferred<Int>
         field = CompletableDeferred()
     private val terminationRequested: CompletableDeferred<Unit> = CompletableDeferred()
+    private var primaryFailure: Throwable? = null
 
     private val cancellationGuard: Job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
         try {
             awaitCancellation()
+        } catch (failure: CancellationException) {
+            if (primaryFailure == null && !exitCode.isCompleted) {
+                // Read the cancellation admitted by the actual session Job,
+                // not its debug-recovered copy thrown by awaitCancellation.
+                @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
+                val admitted = sessionJob.getCancellationException()
+                primaryFailure = admitted
+            }
+            throw failure
         } finally {
             releaseAfterSessionEnd()
         }
@@ -102,11 +112,11 @@ private class PipeProcessSession(
 
     override fun close() {
         if (exitCode.isCompleted || !terminationRequested.complete(Unit)) return
-        scope.launch(ShellPipeIoDispatcher, start = CoroutineStart.UNDISPATCHED) {
+        scope.launch(ShellPipeIoDispatcher) {
             val cancellation = processCancellation()
             stdin.abort(cancellation)
             try {
-                process.close()
+                process.closeAndJoin()
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Throwable) {
@@ -153,6 +163,7 @@ private class PipeProcessSession(
 
     private fun fail(failure: Throwable) {
         if (exitCode.completeExceptionally(failure)) {
+            primaryFailure = failure
             sessionJob.cancel(processCancellation(failure))
         }
     }
@@ -208,25 +219,39 @@ private class PipeProcessSession(
                 fail(ProcessException("Failed to read process output.", failure))
             }
         } catch (failure: Throwable) {
-            fail(failure)
+            if (!terminationRequested.isCompleted) fail(failure)
         }
     }
 
     private suspend fun releaseAfterSessionEnd() {
         withContext(NonCancellable + ShellPipeIoDispatcher) {
+            if (primaryFailure == null && exitCode.isCompleted && exitCode.isCancelled) {
+                // Deferred completion can wake a cancelling consumer before
+                // fail() has published primaryFailure on this worker.
+                runCatching { exitCode.await() }.exceptionOrNull()?.let { primaryFailure = it }
+            }
             if (exitCode.isCompleted && !exitCode.isCancelled) {
                 stdout.finish()
                 standardOutput.finish()
                 standardError.finish()
             } else {
-                val cancellation = processCancellation()
+                val cancellation = primaryFailure as? CancellationException ?: processCancellation()
                 exitCode.completeExceptionally(cancellation)
                 stdin.abort(cancellation)
                 stdout.abort(cancellation)
                 standardOutput.abort(cancellation)
                 standardError.abort(cancellation)
             }
-            runCatching { process.close() }
+            try {
+                process.closeAndJoin()
+            } catch (cleanupFailure: Throwable) {
+                val primary = primaryFailure
+                if (primary != null) {
+                    if (cleanupFailure !== primary) primary.addSuppressed(cleanupFailure)
+                } else {
+                    throw cleanupFailure
+                }
+            }
         }
     }
 

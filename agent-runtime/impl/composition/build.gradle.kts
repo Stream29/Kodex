@@ -27,7 +27,7 @@ kotlin {
             implementation(project(":tool-impl-unified-exec"))
             implementation(project(":tool-impl-view-image"))
             implementation(project(":tool-impl-web-run"))
-            implementation(project(":utils-kodex-home-impl"))
+            implementation(project(":utils-kodex-home-spec"))
             implementation(project(":utils-logging-impl"))
             implementation(project(":utils-shell-client-impl"))
             implementation(libs.kotlin.logging)

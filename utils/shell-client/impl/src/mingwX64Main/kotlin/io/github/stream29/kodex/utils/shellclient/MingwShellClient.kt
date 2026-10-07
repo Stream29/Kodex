@@ -70,7 +70,7 @@ internal actual class PlatformShellClient actual constructor(
     private val processClient = scope.ProcessClient()
 
     actual override suspend fun start(command: ShellProcessCommand): ProcessSession =
-        withContext(WindowsProcessIoDispatcher) {
+        this@PlatformShellClient.acquireShellSession(WindowsProcessIoDispatcher) {
             this@PlatformShellClient.requireOpen()
             command.startWindowsProcess(processClient, this@PlatformShellClient)
         }

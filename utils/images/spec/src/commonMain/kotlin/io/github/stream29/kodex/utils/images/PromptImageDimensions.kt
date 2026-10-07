@@ -15,6 +15,7 @@ public object PromptImages {
         PromptImageResizeLimits(maxDimension = 6_000, maxPatches = 10_000)
 }
 
+/** @throws IllegalArgumentException if width or height is not positive. */
 public data class ImageDimensions(
     public val width: Int,
     public val height: Int,
@@ -25,6 +26,7 @@ public data class ImageDimensions(
     }
 }
 
+/** @throws IllegalArgumentException if maxDimension or maxPatches is not positive. */
 public data class PromptImageResizeLimits(
     public val maxDimension: Int,
     public val maxPatches: Int,
@@ -37,6 +39,8 @@ public data class PromptImageResizeLimits(
 
 /**
  * Fits dimensions into a bounding square while preserving aspect ratio.
+ *
+ * @throws IllegalArgumentException if [maxDimension] is not positive.
  */
 public fun ImageDimensions.fitWithinMaxDimension(maxDimension: Int): ImageDimensions {
     require(maxDimension >= 1) { "maxDimension must be positive" }

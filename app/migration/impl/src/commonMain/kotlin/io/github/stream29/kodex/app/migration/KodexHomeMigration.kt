@@ -12,10 +12,14 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
+import kotlin.time.Duration.Companion.seconds
 
 internal class HeldLeaseKodexHomeHandle(
     override val home: Path,
@@ -27,8 +31,7 @@ internal class HeldLeaseKodexHomeHandle(
     }
 
     override suspend fun closeAndJoin() {
-        lease.close()
-        lease.coroutineContext.job.join()
+        lease.closeAndJoin()
     }
 }
 
@@ -77,6 +80,7 @@ internal suspend fun CoroutineScope.prepareKodexHome(
     val lockDirectory = Path(home, LocksDirectory, HomeLockDirectory)
     var readLease: FileSystemLease? =
         FileSystemReadLease(lockDirectory, fileSystem)
+    var readFailure: Throwable? = null
     try {
         val storedVersion = readVersionOrNull(home, fileSystem)
         if (storedVersion != null) {
@@ -88,20 +92,22 @@ internal suspend fun CoroutineScope.prepareKodexHome(
             }
             if (storedVersion == currentVersion) {
                 val retainedLease = checkNotNull(readLease)
+                currentCoroutineContext().ensureActive()
+                coroutineContext.ensureActive()
+                retainedLease.coroutineContext.ensureActive()
                 readLease = null
                 return HeldLeaseKodexHomeHandle(home, currentVersion, retainedLease)
             }
         }
+    } catch (failure: Throwable) {
+        readFailure = failure
+        throw failure
     } finally {
-        withContext(NonCancellable) {
-            readLease?.let { lease ->
-                lease.close()
-                lease.coroutineContext.job.join()
-            }
-        }
+        readLease?.let { closeHomeLease(it, readFailure) }
     }
 
     val writeLease = FileSystemWriteLease(lockDirectory, fileSystem)
+    var writeFailure: Throwable? = null
     try {
         prepareUnderWriteLease(
             home = home,
@@ -110,11 +116,11 @@ internal suspend fun CoroutineScope.prepareKodexHome(
             fileSystem = fileSystem,
             onMigrationStarted = onMigrationStarted,
         )
+    } catch (failure: Throwable) {
+        writeFailure = failure
+        throw failure
     } finally {
-        withContext(NonCancellable) {
-            writeLease.close()
-            writeLease.coroutineContext.job.join()
-        }
+        closeHomeLease(writeLease, writeFailure)
     }
 
     val finalReadLease = FileSystemReadLease(lockDirectory, fileSystem)
@@ -126,13 +132,29 @@ internal suspend fun CoroutineScope.prepareKodexHome(
                 "Kodex Home changed to version $preparedVersion while starting $currentVersion.",
             )
         }
+        currentCoroutineContext().ensureActive()
+        coroutineContext.ensureActive()
+        finalReadLease.coroutineContext.ensureActive()
         return HeldLeaseKodexHomeHandle(home, currentVersion, finalReadLease)
     } catch (failure: Throwable) {
-        withContext(NonCancellable) {
-            finalReadLease.close()
-            finalReadLease.coroutineContext.job.join()
-        }
+        closeHomeLease(finalReadLease, failure)
         throw failure
+    }
+}
+
+private suspend fun closeHomeLease(lease: FileSystemLease, primary: Throwable? = null) {
+    val cleanup = withContext(NonCancellable) {
+        withContext(Dispatchers.Default) {
+            try {
+                withTimeout(30.seconds) { runCatching { lease.closeAndJoin() } }
+            } catch (failure: Throwable) {
+                Result.failure<Unit>(failure)
+            }
+        }
+    }.exceptionOrNull() ?: return
+    if (primary == null) throw cleanup
+    if (primary !== cleanup && primary.suppressedExceptions.none { it === cleanup }) {
+        primary.addSuppressed(cleanup)
     }
 }
 

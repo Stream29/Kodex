@@ -12,16 +12,22 @@ import io.modelcontextprotocol.kotlin.sdk.client.StdioClientTransport
 import io.modelcontextprotocol.kotlin.sdk.shared.Transport
 import io.modelcontextprotocol.kotlin.sdk.shared.TransportSendOptions
 import io.modelcontextprotocol.kotlin.sdk.types.JSONRPCMessage
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.io.Buffer
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Starts an MCP server over the real direct-process contract.
  *
  * The transport owns the returned raw session; closing it or its delegate
  * requests process termination exactly once. The process client retains its
- * parent ownership. Transport construction failure closes the acquired session.
+ * parent ownership. Transport construction failure awaits that exact session's
+ * bounded rollback even after caller cancellation, preserving the constructor
+ * failure with any cleanup failure suppressed.
  *
  * @throws io.github.stream29.kodex.utils.processclient.ProcessException when
  * the process owner is closed or the platform rejects process creation.
@@ -48,7 +54,20 @@ public suspend fun ProcessClient.openMcpStdioTransport(
             process = process,
         )
     } catch (failure: Throwable) {
-        process.close()
+        val cleanup = try {
+            withContext(NonCancellable) {
+                withTimeout(10.seconds) {
+                    // Keep a raw release failure as a value across coroutine
+                    // boundaries, rather than recovering/copying it on rethrow.
+                    runCatching { process.closeAndJoin() }.exceptionOrNull()
+                }
+            }
+        } catch (cleanup: Throwable) {
+            cleanup // Includes the constructor rollback's bounded-wait failure.
+        }
+        if (cleanup != null && cleanup !== failure && failure.suppressedExceptions.none { it === cleanup }) {
+            failure.addSuppressed(cleanup)
+        }
         throw failure
     }
 }

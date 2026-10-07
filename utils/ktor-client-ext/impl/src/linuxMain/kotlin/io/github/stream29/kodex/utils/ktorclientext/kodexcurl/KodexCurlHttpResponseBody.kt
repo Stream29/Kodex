@@ -32,6 +32,7 @@ internal class KodexCurlHttpResponseBody(
 
     @Volatile
     private var paused: Boolean = false
+    internal val isPausedForBackpressure: Boolean get() = paused
     private var lastNetworkActivity: TimeMark = TimeSource.Monotonic.markNow()
 
     @OptIn(ExperimentalForeignApi::class, InternalAPI::class)

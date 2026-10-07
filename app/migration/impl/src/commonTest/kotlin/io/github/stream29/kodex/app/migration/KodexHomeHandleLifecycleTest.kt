@@ -229,7 +229,7 @@ public val kodexHomeHandleLifecycleTest by testSuite {
             }
         }
 
-        test("baseline migration primary failure is not replaced by background cleanup failure") { home ->
+        test("migration primary failure retains identity and suppresses cleanup failure") { home ->
             SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"1.0.0\"")
             val primary = IOException("isolated migration primary")
             val cleanup = IOException("isolated write-owner cleanup")
@@ -252,22 +252,15 @@ public val kodexHomeHandleLifecycleTest by testSuite {
                     )
                 }
                 assertSame(primary, failure)
-                // Characterization, not a new primary/suppressed protocol guarantee:
-                // lease Job.join does not rethrow the child cleanup exception.
-                // JVM coroutine stack-trace recovery can copy an IOException and retain
-                // the original as its cause. Verify the injected failure, not copy identity.
-                val reportedCleanup = backgroundFailure.await()
-                assertTrue(
-                    generateSequence(reportedCleanup) { it.cause }.any { it === cleanup },
-                    "The background handler must receive the injected cleanup failure.",
-                )
-                assertTrue(failure.suppressedExceptions.isEmpty())
+                assertEquals(1, failure.suppressedExceptions.size)
+                assertSame(cleanup, failure.suppressedExceptions.single())
+                assertFalse(backgroundFailure.isCompleted)
                 assertEquals("\"1.0.0\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
                 assertTrue(SystemCoroutineFileSystem.list(homeLocks(home)).any { it.name.endsWith(".write.lock") })
             }
         }
 
-        test("baseline cancellation during read-owner publication strands a lock before handle handoff") { home ->
+        test("cancellation during read-owner publication releases the undelivered owner") { home ->
             val published = CompletableDeferred<Unit>()
             val fileSystem = object : CoroutineFileSystem by SystemCoroutineFileSystem {
                 override suspend fun writeString(
@@ -279,8 +272,8 @@ public val kodexHomeHandleLifecycleTest by testSuite {
                     SystemCoroutineFileSystem.writeString(path, content, append, mustCreate)
                     if (path.name.endsWith(".read.lock")) {
                         published.complete(Unit)
-                        // Actual bytes exist, but acquireRenewableFileSystemLease has
-                        // not yet constructed the owner-bound renewable lease.
+                        // Actual bytes exist, but publication has not returned.
+                        // The real resource child must already own their cleanup.
                         awaitCancellation()
                     }
                 }
@@ -292,13 +285,131 @@ public val kodexHomeHandleLifecycleTest by testSuite {
                     preparation.cancelAndJoin()
                 }
                 owner.coroutineContext.job.cancelAndJoin()
-                // Deliberately records the preexisting defect; no protocol rewrite.
-                assertEquals(1, readOwners(home).size)
+                assertTrue(readOwners(home).isEmpty())
                 assertFalse(SystemCoroutineFileSystem.exists(Path(homeLocks(home), "guard.lock")))
                 assertEquals(
                     "\"$CurrentKodexApplicationVersion\"",
                     SystemCoroutineFileSystem.readString(Path(home, "version.json")),
                 )
+            }
+        }
+
+        test("successful migration action exposes write cleanup failure instead of returning a handle") { home ->
+            SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"1.0.0\"")
+            val cleanup = IOException("successful action write cleanup")
+            var actions = 0
+            var deletions = 0
+            val fileSystem = object : CoroutineFileSystem by SystemCoroutineFileSystem {
+                override suspend fun delete(path: Path, mustExist: Boolean) {
+                    if (path.name.endsWith(".write.lock")) {
+                        deletions += 1
+                        throw cleanup
+                    }
+                    SystemCoroutineFileSystem.delete(path, mustExist)
+                }
+            }
+            withHomeOwner { owner ->
+                val failure = assertFailsWith<IOException> {
+                    owner.prepareKodexHome(
+                        home, MigrationVersion("2.0.0"),
+                        listOf(Migration(MigrationVersion("1.1.0")) { _, _ -> actions += 1 }),
+                        fileSystem,
+                    )
+                }
+                assertSame(cleanup, failure)
+                assertEquals(1, actions)
+                assertEquals(1, deletions)
+                assertEquals("\"2.0.0\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
+                assertTrue(SystemCoroutineFileSystem.list(homeLocks(home)).any { it.name.endsWith(".write.lock") })
+                assertTrue(readOwners(home).isEmpty())
+            }
+        }
+
+        test("last Home reference reports the same cleanup failure on repeated waits") { home ->
+            val cleanup = IOException("last Home reference cleanup")
+            var deletions = 0
+            val fileSystem = object : CoroutineFileSystem by SystemCoroutineFileSystem {
+                override suspend fun delete(path: Path, mustExist: Boolean) {
+                    if (path.name.endsWith(".read.lock")) {
+                        deletions += 1
+                        throw cleanup
+                    }
+                    SystemCoroutineFileSystem.delete(path, mustExist)
+                }
+            }
+            withHomeOwner { owner ->
+                val first = owner.prepareKodexHome(home, fileSystem)
+                val last = owner.prepareKodexHome(home, fileSystem)
+                first.closeAndJoin()
+                first.closeAndJoin()
+                assertEquals(0, deletions)
+                repeat(2) {
+                    assertSame(cleanup, assertFailsWith<IOException> { last.closeAndJoin() })
+                }
+                last.close()
+                assertEquals(1, deletions)
+                assertEquals(1, readOwners(home).size)
+                assertTrue(owner.coroutineContext.job.isActive)
+            }
+        }
+
+        test("version read primary retains cause and suppresses its read lease cleanup failure") { home ->
+            val primary = IOException("version read")
+            val cleanup = IOException("version read lease cleanup")
+            val fileSystem = object : CoroutineFileSystem by SystemCoroutineFileSystem {
+                override suspend fun readBytes(path: Path, maxByteCount: Long): ByteArray {
+                    if (path.name == "version.json") throw primary
+                    return SystemCoroutineFileSystem.readBytes(path, maxByteCount)
+                }
+                override suspend fun delete(path: Path, mustExist: Boolean) {
+                    if (path.name.endsWith(".read.lock")) throw cleanup
+                    SystemCoroutineFileSystem.delete(path, mustExist)
+                }
+            }
+            withHomeOwner { owner ->
+                val failure = assertFailsWith<KodexHomeVersionException> { owner.prepareKodexHome(home, fileSystem) }
+                assertSame(primary, failure.cause)
+                assertSame(cleanup, failure.suppressedExceptions.single())
+                assertEquals(1, readOwners(home).size)
+            }
+        }
+
+        test("owner cancelled during the matching-version check cannot receive a closed Home handle") { home ->
+            val readStarted = CompletableDeferred<Unit>()
+            val allowRead = CompletableDeferred<Unit>()
+            val rejected = CompletableDeferred<Unit>()
+            var returnedHandle = false
+            val fileSystem = object : CoroutineFileSystem by SystemCoroutineFileSystem {
+                override suspend fun readBytes(path: Path, maxByteCount: Long): ByteArray {
+                    if (path.name == "version.json") {
+                        readStarted.complete(Unit)
+                        allowRead.await()
+                    }
+                    return SystemCoroutineFileSystem.readBytes(path, maxByteCount)
+                }
+            }
+            try {
+                withHomeOwner { owner ->
+                    coroutineScope {
+                        val preparation = launch {
+                            try {
+                                owner.prepareKodexHome(home, fileSystem).closeAndJoin()
+                                returnedHandle = true
+                            } catch (_: CancellationException) {
+                                rejected.complete(Unit)
+                            }
+                        }
+                        readStarted.await()
+                        owner.coroutineContext.job.cancelAndJoin()
+                        assertTrue(readOwners(home).isEmpty())
+                        allowRead.complete(Unit)
+                        preparation.join()
+                        assertTrue(rejected.isCompleted)
+                        assertFalse(returnedHandle)
+                    }
+                }
+            } finally {
+                allowRead.complete(Unit)
             }
         }
     }
@@ -325,8 +436,7 @@ private suspend fun readOwners(home: Path): List<Path> =
 
 private suspend fun assertWriteAvailable(owner: CoroutineScope, home: Path) {
     val lease = owner.FileSystemWriteLease(homeLocks(home))
-    lease.close()
-    lease.coroutineContext.job.join()
+    lease.closeAndJoin()
 }
 
 private suspend fun lifecycleHome(): Path =

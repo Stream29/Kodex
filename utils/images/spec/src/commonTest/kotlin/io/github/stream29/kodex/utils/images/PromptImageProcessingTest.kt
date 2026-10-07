@@ -7,6 +7,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertSame
 
 
 
@@ -75,5 +76,42 @@ val promptImageProcessingTest by testSuite {
         assertEquals(ImageMimeType.Png, image.mimeType)
         assertEquals(ImageDimensions(64, 32), image.dimensions)
         assertContentEquals(bytes, image.bytes)
+    }
+    test("encoded images and transform requests copy input and getter arrays") {
+        val input = pngBytes(64, 32)
+        val expected = input.copyOf()
+        val plan = input.requireImageInfo().planPromptImage(PromptImageMode.ResizeToFit)
+        val image = EncodedImage(input, ImageMimeType.Png, ImageDimensions(64, 32))
+        val request = PromptImageTransformRequest(input, plan)
+        input.fill(0)
+        image.bytes.fill(1)
+        request.sourceBytes.fill(2)
+        assertContentEquals(expected, image.bytes)
+        assertContentEquals(expected, request.sourceBytes)
+    }
+    test("unneeded transformer is skipped and transformed metadata must match the plan") {
+        val small = pngBytes(64, 32)
+        val unused = PromptImageTransformer { error("No transformation is needed") }
+        assertContentEquals(small, small.toPromptImage(PromptImageMode.Original, unused).bytes)
+        val large = pngBytes(4096, 2048)
+        val wrongMime = PromptImageTransformer { request ->
+            EncodedImage(byteArrayOf(), ImageMimeType.Jpeg, request.plan.outputDimensions)
+        }
+        val wrongDimensions = PromptImageTransformer { request ->
+            EncodedImage(byteArrayOf(), request.plan.outputMimeType, ImageDimensions(1, 1))
+        }
+        assertFailsWith<IllegalArgumentException> { large.toPromptImage(PromptImageMode.ResizeToFit, wrongMime) }
+        assertFailsWith<IllegalArgumentException> { large.toPromptImage(PromptImageMode.ResizeToFit, wrongDimensions) }
+    }
+    test("transformer failures propagate unchanged from bytes and data URLs") {
+        val bytes = pngBytes(4096, 2048)
+        val failure = IllegalStateException("codec failure")
+        val failing = PromptImageTransformer { throw failure }
+        assertSame(failure, assertFailsWith<IllegalStateException> {
+            bytes.toPromptImage(PromptImageMode.ResizeToFit, failing)
+        })
+        assertSame(failure, assertFailsWith<IllegalStateException> {
+            bytes.toDataUrl(ImageMimeType.Png).toPromptImage(PromptImageMode.ResizeToFit, failing)
+        })
     }
 }

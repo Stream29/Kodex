@@ -13,7 +13,7 @@ kotlin {
             implementation(project(":app-migration-impl"))
             implementation(project(":app-impl-view"))
             implementation(project(":app-impl-application"))
-            implementation(project(":utils-kodex-home-impl"))
+            implementation(project(":utils-kodex-home-spec"))
             implementation(project(":utils-logging-impl"))
             implementation(project(":utils-os-environment-spec"))
             implementation(libs.kotlinx.coroutines.core)

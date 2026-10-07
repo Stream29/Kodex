@@ -11,17 +11,16 @@ import io.github.stream29.kodex.utils.processclient.ProcessCommand
 import io.github.stream29.kodex.utils.processclient.ProcessException
 import io.github.stream29.kodex.utils.processclient.ProcessSession
 import io.modelcontextprotocol.kotlin.sdk.types.JSONRPCNotification
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.*
 import kotlinx.io.Buffer
+import kotlinx.io.IOException
 import kotlinx.io.files.Path
 import kotlinx.io.readByteArray
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
@@ -100,13 +99,107 @@ val mcpStdioContractTest by testSuite(compartment = { TestCompartment.RealTime }
         }
         assertSame(failure, observed)
         assertEquals(1, session.closeCount)
+        assertEquals(1, session.closeAndJoinCount)
+        assertTrue(session.cleanupFinished.isCompleted)
+    }
+
+    for (kind in listOf("failure", "caller cancellation")) {
+        test("constructor $kind awaits exact raw rollback before rethrowing primary") {
+            assertConstructorRollback(cancelCaller = kind == "caller cancellation", cleanupKind = null)
+        }
+        test("constructor $kind keeps primary and one later cleanup failure") {
+            for (cleanupKind in listOf("io", "cancellation", "exact primary", "already suppressed")) {
+                assertConstructorRollback(cancelCaller = kind == "caller cancellation", cleanupKind = cleanupKind)
+            }
+        }
     }
 }
 
-private class RecordingRawSession : ProcessSession {
+private suspend fun assertConstructorRollback(cancelCaller: Boolean, cleanupKind: String?) = coroutineScope {
+    val caller = Job(coroutineContext[Job])
+    val clientOwner = Job(coroutineContext[Job])
+    val primary: Throwable = if (cancelCaller) CancellationException("constructor caller cancelled")
+        else IllegalStateException("constructor rejected raw stdout")
+    val cleanup = when (cleanupKind) {
+        null -> null
+        "exact primary" -> primary
+        "cancellation" -> CancellationException("raw cleanup cancelled")
+        "io" -> IOException("later raw cleanup failure")
+        else -> IllegalStateException("later raw cleanup failure")
+    }
+    if (cleanupKind == "already suppressed") primary.addSuppressed(checkNotNull(cleanup))
+    val release = CompletableDeferred<Unit>()
+    val session = RecordingRawSession(cleanupGate = release, cleanupFailure = cleanup)
+    val rejectedSession: ProcessSession = object : ProcessSession by session {
+        override val stdout: CoroutineRawSource
+            get() {
+                if (cancelCaller) caller.cancel(primary as CancellationException)
+                throw primary
+            }
+    }
+    val client: ProcessClient = object : ProcessClient {
+        override val coroutineContext: CoroutineContext = clientOwner
+        override suspend fun start(command: ProcessCommand): ProcessSession = rejectedSession
+        override fun close(): Unit = error("Rollback must not close the borrowed process client")
+    }
+    // Observe the exception as a value inside the original caller, avoiding
+    // cancellation/Deferred stack-recovery copies in the identity assertion.
+    val observed = CompletableDeferred<Throwable>()
+    var construction: Job? = null
+    try {
+        val operation = CoroutineScope(coroutineContext + caller).launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                client.openMcpStdioTransport(McpServerConfiguration.Stdio(command = "sentinel"))
+                observed.complete(AssertionError("Rejected constructor returned a transport"))
+            } catch (failure: Throwable) {
+                observed.complete(failure)
+            }
+        }
+        construction = operation
+        withTimeout(5.seconds) { session.closeAndJoinEntered.await() }
+        assertEquals(1, session.closeAndJoinCount, "Synchronous close is not exact-session await")
+        assertEquals(1, session.closeCount)
+        assertFalse(session.cleanupFinished.isCompleted)
+        assertFalse(observed.isCompleted, "Constructor rethrew before exact raw rollback completed")
+        assertFalse(operation.isCompleted)
+        assertEquals(!cancelCaller, caller.isActive)
+        assertTrue(clientOwner.isActive, "Rollback cancelled the borrowed client")
+
+        release.complete(Unit)
+        assertSame(primary, withTimeout(5.seconds) { observed.await() })
+        withTimeout(5.seconds) { operation.join() }
+        assertTrue(session.cleanupFinished.isCompleted)
+        assertEquals(1, session.closeAndJoinCount)
+        assertEquals(1, session.closeCount)
+        if (cleanup == null || cleanup === primary) {
+            assertTrue(primary.suppressedExceptions.isEmpty(), "Exact primary must not suppress itself")
+        } else {
+            assertEquals(1, primary.suppressedExceptions.size)
+            assertSame(cleanup, primary.suppressedExceptions.single())
+        }
+        assertTrue(clientOwner.isActive)
+    } finally {
+        release.complete(Unit)
+        withContext(NonCancellable) {
+            withTimeout(5.seconds) {
+                construction?.cancelAndJoin()
+                caller.cancelAndJoin()
+                clientOwner.cancelAndJoin()
+            }
+        }
+    }
+}
+
+private class RecordingRawSession(
+    private val cleanupGate: CompletableDeferred<Unit>? = null,
+    private val cleanupFailure: Throwable? = null,
+) : ProcessSession {
     val written = CompletableDeferred<String>()
+    val closeAndJoinEntered = CompletableDeferred<Unit>()
+    val cleanupFinished = CompletableDeferred<Unit>()
     private var pendingFrame = ""
     var closeCount = 0
+    var closeAndJoinCount = 0
     var flushCount = 0
     override val exitCode: Deferred<Int> = CompletableDeferred()
     override val stdin: CoroutineRawSink = object : CoroutineRawSink {
@@ -123,6 +216,14 @@ private class RecordingRawSession : ProcessSession {
     override val stderr: CoroutineRawSource = suspendedSource()
     override fun close() {
         closeCount++
+    }
+    override suspend fun closeAndJoin() {
+        closeAndJoinCount++
+        close()
+        closeAndJoinEntered.complete(Unit)
+        cleanupGate?.await()
+        cleanupFinished.complete(Unit)
+        cleanupFailure?.let { throw it }
     }
 }
 

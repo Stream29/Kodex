@@ -53,6 +53,9 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
             implementation(project(":utils-kotlinx-io-coroutines-impl"))
         }
+        jvmTest.dependencies {
+            implementation(project(":utils-process-client-impl"))
+        }
     }
 
     targets.withType<KotlinNativeTarget>().configureEach {

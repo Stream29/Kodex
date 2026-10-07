@@ -7,10 +7,15 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.readBytes
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.use
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.writeBytes
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.io.Buffer
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
@@ -22,6 +27,30 @@ internal expect val environmentProcessCommand: ProcessCommand
 val processClientIoTest by testSuite(
     compartment = { TestCompartment.RealTime },
 ) {
+    test("exact session closeAndJoin releases streams without joining active client or sibling") {
+        val owner = Job()
+        val client = CoroutineScope(currentCoroutineContext() + owner).ProcessClient()
+        val first = client.start(delayedProcessCommand)
+        val sibling = client.start(delayedProcessCommand)
+        try {
+            first.close()
+            withTimeout(10.seconds) { first.closeAndJoin(); first.closeAndJoin() }
+            assertTrue(first.exitCode.isCompleted, "Exact session returned before its exit observer")
+            assertTrue(runCatching { first.stdout.readAtMostTo(Buffer(), 1) }.isFailure)
+            assertTrue(runCatching { first.stderr.readAtMostTo(Buffer(), 1) }.isFailure)
+            assertTrue(client.coroutineContext[Job]!!.isActive)
+            assertTrue(owner.isActive)
+            assertTrue(!sibling.exitCode.isCompleted, "Exact-session wait terminated an active sibling")
+        } finally {
+            withContext(NonCancellable) {
+                first.closeAndJoin()
+                sibling.closeAndJoin()
+                client.close()
+                owner.cancelAndJoin()
+            }
+        }
+    }
+
     test("exchanges raw bytes with a real direct child process") {
         val client: ProcessClient = CoroutineScope(currentCoroutineContext()).ProcessClient()
         val process = client.start(interactiveProcessCommand)
@@ -66,6 +95,22 @@ val processClientIoTest by testSuite(
         } finally {
             process.close()
             client.close()
+        }
+    }
+
+    test("parent only cancel and join includes real child exit and raw stream release") {
+        val owner = Job()
+        val client = CoroutineScope(currentCoroutineContext() + owner).ProcessClient()
+        try {
+            val process = client.start(delayedProcessCommand)
+            withTimeout(10.seconds) { owner.cancelAndJoin() }
+            assertTrue(process.exitCode.isCompleted, "Owner finished before its exit observer")
+            assertTrue(client.coroutineContext[Job]!!.children.none())
+            assertTrue(runCatching { process.stdout.readAtMostTo(Buffer(), 1) }.isFailure)
+            assertTrue(runCatching { process.stderr.readAtMostTo(Buffer(), 1) }.isFailure)
+        } finally {
+            client.close()
+            withContext(NonCancellable) { owner.cancelAndJoin() }
         }
     }
 }

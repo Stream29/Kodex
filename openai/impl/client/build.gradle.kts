@@ -21,7 +21,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(project(":openai-impl-client-test"))
             implementation(project(":openai-spec-json-codec"))
-            implementation(project(":utils-host-test-support-impl"))
+            implementation(libs.ktor.client.mock)
         }
     }
 }

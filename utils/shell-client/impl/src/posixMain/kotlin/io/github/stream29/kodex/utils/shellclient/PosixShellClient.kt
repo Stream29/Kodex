@@ -63,7 +63,7 @@ internal actual class PlatformShellClient actual constructor(
     private val processClient = scope.ProcessClient()
 
     actual override suspend fun start(command: ShellProcessCommand): ProcessSession =
-        withContext(PosixProcessIoDispatcher) {
+        this@PlatformShellClient.acquireShellSession(PosixProcessIoDispatcher) {
             this@PlatformShellClient.requireOpen()
             command.startPosixProcess(processClient, this@PlatformShellClient)
         }
@@ -135,6 +135,12 @@ private fun startPosixPtyProcess(
                 )
             } catch (failure: Throwable) {
                 close(descriptor)
+                // Acquisition has not produced a session owner yet.
+                if (kill(-pid.value, SIGKILL) != 0) kill(pid.value, SIGKILL)
+                val status = alloc<IntVar>()
+                while (waitpid(pid.value, status.ptr, 0) < 0 && errno == platform.posix.EINTR) {
+                    // Retry interrupted reaping before exposing startup failure.
+                }
                 throw failure
             }
         }

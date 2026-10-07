@@ -24,12 +24,16 @@ import kotlinx.cinterop.value
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.io.Buffer
 import kotlinx.io.IOException
 import kotlinx.io.RawSink
@@ -65,6 +69,7 @@ import platform.windows.WaitForSingleObject
 import platform.windows.WriteFile
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
+import kotlin.time.Duration.Companion.seconds
 
 internal actual class PlatformProcessClient actual constructor(
     scope: CoroutineScope,
@@ -73,7 +78,7 @@ internal actual class PlatformProcessClient actual constructor(
     ProcessClient {
 
     actual override suspend fun start(command: ProcessCommand): ProcessSession =
-        withContext(WindowsProcessIoDispatcher) {
+        this@PlatformProcessClient.acquireProcessSession(WindowsProcessIoDispatcher) {
             this@PlatformProcessClient.requireOpen()
             command.startWindowsProcess(this@PlatformProcessClient)
         }
@@ -221,7 +226,7 @@ private fun <T> withWindowsPipe(
     }
 }
 
-@OptIn(ExperimentalAtomicApi::class)
+@OptIn(ExperimentalAtomicApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.DelicateCoroutinesApi::class)
 private class WindowsProcessSession(
     private val process: WindowsHandle,
     private val job: WindowsHandle,
@@ -248,33 +253,75 @@ private class WindowsProcessSession(
     override val exitCode: Deferred<Int>
         field = CompletableDeferred()
     private val closed = AtomicBoolean(false)
-    private val cancellationGuard = ownerScope.lazyProcessCancellationGuard(::close)
+    private val releaseResult = CompletableDeferred<Result<Unit>>()
+    private val observerReleaseResult = CompletableDeferred<Result<Unit>>()
+    private var cancellationGuard: Job? = null
+    private val exitObserver: Job
 
     init {
-        cancellationGuard.start()
-        ownerScope.launch(WindowsProcessIoDispatcher) {
+        cancellationGuard = ownerScope.launchProcessCancellationGuard(WindowsProcessIoDispatcher) { runCatching { close() } }
+        exitObserver = ownerScope.launch(WindowsProcessIoDispatcher, start = CoroutineStart.ATOMIC) {
             try {
                 exitCode.complete(awaitExitCode())
             } catch (failure: Throwable) {
                 exitCode.completeExceptionally(failure)
             } finally {
-                process.close()
-                job.close()
+                var cleanup: Throwable? = null
+                try { process.close() } catch (failure: Throwable) { cleanup = failure }
+                try { job.close() } catch (failure: Throwable) {
+                    val first = cleanup
+                    if (first == null) cleanup = failure else if (first !== failure) first.addSuppressed(failure)
+                }
+                observerReleaseResult.complete(cleanup?.let { Result.failure(it) } ?: Result.success(Unit))
             }
-        }.invokeOnCompletion { failure ->
-            if (failure != null) close()
         }
+        exitObserver.invokeOnCompletion { failure -> if (failure != null) runCatching { close() } }
     }
 
     override fun close() {
         if (!closed.compareAndSet(expectedValue = false, newValue = true)) return
-        cancellationGuard.cancel()
-        if (!exitCode.isCompleted) {
-            TerminateJobObject(job.value, 1u)
+        cancellationGuard?.cancel()
+        var cleanup: Throwable? = null
+        fun attempt(block: () -> Unit) {
+            try { block() } catch (failure: Throwable) {
+                val first = cleanup
+                if (first == null) cleanup = failure else if (first !== failure) first.addSuppressed(failure)
+            }
         }
-        processStdin.closeImmediately()
-        processStdout.closeImmediately()
-        processStderr.closeImmediately()
+        if (!exitCode.isCompleted) {
+            attempt { TerminateJobObject(job.value, 1u) }
+        }
+        attempt { processStdin.closeImmediately() }
+        attempt { processStdout.closeImmediately() }
+        attempt { processStderr.closeImmediately() }
+        val failure = cleanup
+        releaseResult.complete(failure?.let { Result.failure(it) } ?: Result.success(Unit))
+        failure?.let { throw it }
+    }
+
+    override suspend fun closeAndJoin(): Unit = withContext(NonCancellable + WindowsProcessIoDispatcher) {
+        var primary: Throwable? = null
+        try {
+            withTimeout(7.seconds) {
+                runCatching { close() }
+                primary = releaseResult.await().exceptionOrNull()
+                cancellationGuard?.join()
+                exitObserver.join()
+                val cleanup = observerReleaseResult.await().exceptionOrNull()
+                val first = primary
+                if (first != null) {
+                    if (cleanup != null && cleanup !== first && first.suppressedExceptions.none { it === cleanup }) {
+                        first.addSuppressed(cleanup)
+                    }
+                    throw first
+                }
+                cleanup?.let { throw it }
+            }
+        } catch (waiting: Throwable) {
+            val first = primary
+            if (first != null && first !== waiting) { first.addSuppressed(waiting); throw first }
+            throw waiting
+        }
     }
 
     private fun awaitExitCode(): Int {

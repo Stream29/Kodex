@@ -14,9 +14,12 @@ public class InvalidImageException(
 
 /**
  * Detects image format and dimensions from common image container headers.
+ * This inspects headers only; it does not certify that a codec can decode the whole image.
  *
  * @return The detected image info, or `null` when this byte array does not
  * match a supported prompt-image container signature.
+ * @throws InvalidImageException if a recognized header is truncated, lacks required
+ * size fields, or declares dimensions outside the positive Int range.
  */
 public fun ByteArray.detectImageInfo(): ImageInfo? {
     val mimeType = detectImageMimeType() ?: return null
@@ -32,6 +35,9 @@ public fun ByteArray.detectImageInfo(): ImageInfo? {
 
 /**
  * Detects image format and dimensions or fails when the bytes are unsupported.
+ *
+ * @throws UnsupportedImageFormatException if no supported container signature matches.
+ * @throws InvalidImageException if a recognized container has invalid dimension headers.
  */
 public fun ByteArray.requireImageInfo(): ImageInfo =
     detectImageInfo() ?: throw UnsupportedImageFormatException()

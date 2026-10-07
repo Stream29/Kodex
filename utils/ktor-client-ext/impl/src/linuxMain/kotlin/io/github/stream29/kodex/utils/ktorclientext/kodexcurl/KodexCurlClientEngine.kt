@@ -24,6 +24,7 @@ internal class KodexCurlClientEngine(
     override val supportedCapabilities = setOf(HttpTimeoutCapability, WebSocketCapability, SSECapability)
 
     private val curlProcessor = KodexCurlProcessor(coroutineContext)
+    internal val cleanupCompleted get() = curlProcessor.cleanupCompleted
 
     @OptIn(InternalAPI::class)
     override suspend fun execute(data: HttpRequestData): HttpResponseData {

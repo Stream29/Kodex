@@ -30,6 +30,8 @@ public fun ByteArray.detectImageMimeType(): ImageMimeType? =
 
 /**
  * Detects the image MIME type or fails when the bytes are unsupported.
+ *
+ * @throws UnsupportedImageFormatException if no supported container signature matches.
  */
 public fun ByteArray.requireImageMimeType(): ImageMimeType =
     detectImageMimeType() ?: throw UnsupportedImageFormatException()

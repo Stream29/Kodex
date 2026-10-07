@@ -4,11 +4,12 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.osenvironment.processId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -20,9 +21,29 @@ import kotlin.time.Instant
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
-internal suspend fun FileSystemLease.closeAndJoin() {
-    close()
-    coroutineContext.job.join()
+/** The only masked work is finite resource release, never normal acquisition/use. */
+internal suspend fun leaseCleanup(
+    primary: Throwable? = null,
+    timeout: Duration = 30.seconds,
+    block: suspend () -> Unit,
+) {
+    // Release deadlines must run on the resource dispatcher, not an inherited
+    // virtual/UI dispatcher whose timeout can race a real filesystem operation.
+    val cleanup = withContext(NonCancellable) {
+        // Keep the dispatcher return inside the masked context too: otherwise
+        // prompt cancellation can discard a successfully obtained cleanup result.
+        withContext(Dispatchers.Default) {
+            try {
+                withTimeout(timeout) { runCatching { block() } }
+            } catch (failure: Throwable) {
+                Result.failure<Unit>(failure)
+            }
+        }
+    }.exceptionOrNull() ?: return
+    if (primary == null) throw cleanup
+    if (primary !== cleanup && primary.suppressedExceptions.none { it === cleanup }) {
+        primary.addSuppressed(cleanup)
+    }
 }
 
 internal fun CoroutineScope.requireOwnerJob(): Job =
@@ -34,9 +55,10 @@ internal suspend fun <T> withAcquisitionGuard(
     directory: Path,
     fileSystem: CoroutineFileSystem,
     block: suspend () -> T,
-): T = coroutineScope {
+): T {
+    val operationScope = CoroutineScope(currentCoroutineContext())
     val guard = try {
-        acquireRenewableFileSystemLease(
+        operationScope.acquireRenewableFileSystemLease(
             lockPath = Path(directory, GuardFileName),
             fileSystem = fileSystem,
             duration = GuardDuration,
@@ -46,12 +68,14 @@ internal suspend fun <T> withAcquisitionGuard(
             "Filesystem lease acquisition is already in progress for $directory.",
         )
     }
+    var primary: Throwable? = null
     try {
-        block()
+        return block()
+    } catch (failure: Throwable) {
+        primary = failure
+        throw failure
     } finally {
-        withContext(NonCancellable) {
-            guard.closeAndJoin()
-        }
+        leaseCleanup(primary) { guard.closeAndJoin() }
     }
 }
 
@@ -89,6 +113,7 @@ internal suspend fun writeHeartbeat(
     heartbeat: FileSystemLeaseHeartbeat,
 ) {
     val temporary = Path(lockPath.parent!!, ".lock-${Uuid.generateV7()}.tmp")
+    var primary: Throwable? = null
     try {
         fileSystem.writeString(
             temporary,
@@ -96,8 +121,11 @@ internal suspend fun writeHeartbeat(
             mustCreate = true,
         )
         fileSystem.atomicMove(temporary, lockPath)
+    } catch (failure: Throwable) {
+        primary = failure
+        throw failure
     } finally {
-        withContext(NonCancellable) {
+        leaseCleanup(primary, timeout = LeaseCleanupTimeout) {
             fileSystem.delete(temporary, mustExist = false)
         }
     }
@@ -159,6 +187,7 @@ internal val LeaseJson: Json = Json
 internal val DefaultOwnerDuration: Duration = 30.seconds
 internal val GuardDuration: Duration = 10.seconds
 internal val ReaderPollInterval: Duration = 25.milliseconds
+internal val LeaseCleanupTimeout: Duration = 10.seconds
 internal const val GuardFileName: String = "guard.lock"
 internal const val ReadOwnerSuffix: String = ".read.lock"
 internal const val WriteOwnerSuffix: String = ".write.lock"

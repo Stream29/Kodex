@@ -38,6 +38,11 @@ public fun ByteArray.toDataUrl(mimeType: ImageMimeType): String =
  * This mirrors Codex's Rust behavior: the `data:` prefix and `base64` metadata
  * marker are matched case-insensitively, and metadata MIME is not trusted for
  * image format detection.
+ *
+ * @throws IllegalArgumentException if [maxInputBytes] is negative.
+ * @throws InvalidImageDataUrlException if the prefix, separator, base64 marker or payload is invalid.
+ * @throws ImageInputTooLargeException if the base64 payload length or decoded byte count
+ * exceeds [maxInputBytes]. Header/codec validity is not checked here.
  */
 public fun String.decodePromptImageDataUrlBytes(
     maxInputBytes: Long = PromptImages.MaxInputBytes,

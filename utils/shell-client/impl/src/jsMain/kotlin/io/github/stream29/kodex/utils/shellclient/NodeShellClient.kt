@@ -104,6 +104,8 @@ internal actual class PlatformShellClient actual constructor(
                     command = command,
                 )
             }
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
         } catch (error: Throwable) {
             throw ProcessException("Failed to start Node.js child process.", error)
         }

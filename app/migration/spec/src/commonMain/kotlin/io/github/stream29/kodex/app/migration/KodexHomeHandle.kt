@@ -29,8 +29,10 @@ import kotlinx.io.files.Path
  * succeeded if the filesystem failed.
  *
  * Closing one handle does not release other handles' shared lease references.
- * Neither close operation promises to surface a background lease-cleanup
- * failure or to attach it as a suppressed exception.
+ * [closeAndJoin] observes this reference's saved release result. Preparation
+ * failure/cancellation awaits undelivered lease cleanup, retaining the primary
+ * error and suppressing a distinct cleanup error. Successful preparation steps
+ * whose temporary lease cleanup fails report that cleanup failure.
  *
  * @throws KodexHomeVersionException The actual preparation factory rejects
  * an invalid/unreadable, newer, missing or changed Home version.
@@ -41,7 +43,7 @@ import kotlinx.io.files.Path
  * @throws IllegalArgumentException The actual preparation factory requires
  * its receiver scope to have an owner Job.
  * @throws CancellationException The actual preparation factory is cancellable;
- * it provides no atomic resource-return handoff guarantee.
+ * undelivered owner publication is cleaned up before failure returns.
  */
 public interface KodexHomeHandle : AutoCloseable {
     /** Structured data root supplied to preparation; not necessarily the default Home. */
@@ -65,9 +67,13 @@ public interface KodexHomeHandle : AutoCloseable {
      * cancellation of the caller does not undo the close request, but can stop
      * the wait before cleanup finishes. Call from an appropriate cleanup context
      * when completion must be awaited despite caller cancellation.
+     * Repeated waits observe the same release result. A filesystem cleanup failure
+     * is observable and may leave the owner file on disk; it is not retried by
+     * another close. A non-final reference does not wait for other handles.
      *
      * @throws CancellationException If the calling coroutine is cancelled while
      * waiting, including when it is already cancelled at the join.
+     * @throws Throwable If the retained lease's renewal or cleanup failed.
      */
     public suspend fun closeAndJoin()
 }

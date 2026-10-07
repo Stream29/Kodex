@@ -35,8 +35,26 @@ public interface ProcessSession : AutoCloseable {
      * Requests process-tree termination and releases its streams. This operation
      * is idempotent; it can wait synchronously on some platforms. Await [exitCode]
      * for the resulting final status, not a synthetic cancellation status.
+     * Explicit close invalidates the raw streams, including retained output
+     * after natural exit; natural exit alone still permits output draining.
+     * [closeAndJoin] waits for this session's termination and stream cleanup.
+     * Joining the client's Job also waits for its owned cleanup; exit status
+     * alone is not that barrier.
      */
     override fun close()
+
+    /**
+     * Requests [close] and waits for this exact session's terminal resource
+     * cleanup, including its raw streams and process-close/exit observer.
+     * Does not join or cancel the still-active client or its other sessions.
+     * Repeated calls observe the saved cleanup outcome. Necessary cleanup is
+     * performed even if the caller is cancelled; platform cleanup waits are
+     * bounded, but synchronous host calls cannot be made interruptible here.
+     *
+     * @throws Throwable when termination, stream release or bounded cleanup
+     * waiting fails; secondary cleanup failures are suppressed on the first.
+     */
+    public suspend fun closeAndJoin()
 }
 
 /** Failure raised by a direct process implementation. */

@@ -31,14 +31,14 @@ internal actual class PlatformShellClient actual constructor(
     private val processClient = scope.ProcessClient()
 
     actual override suspend fun start(command: ShellProcessCommand): ProcessSession =
-        withContext(Dispatchers.IO) {
+        this@PlatformShellClient.acquireShellSession(Dispatchers.IO) {
             this@PlatformShellClient.requireOpen()
             if (command.command.isBlank()) {
                 throw ProcessException("Process command must not be blank.")
             }
             val invocation = command.shell.invocation(command.command, command.login)
             if (!command.tty) {
-                return@withContext this@PlatformShellClient.startPipeProcess(
+                return@acquireShellSession this@PlatformShellClient.startPipeProcess(
                     client = processClient,
                     invocation = invocation,
                     command = command,

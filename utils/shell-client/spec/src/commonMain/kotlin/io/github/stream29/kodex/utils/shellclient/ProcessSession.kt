@@ -47,7 +47,7 @@ private val EnvironmentVariableName: Regex = Regex("[A-Za-z_][A-Za-z0-9_]*")
  * [scope] is a child of the [ShellClient] that created it. Cancelling that
  * scope aborts the session. [close] instead requests termination of the
  * child-process tree while preserving the platform observer until it reports
- * the resulting [exitCode]. [SendChannel.send] on [stdin] completes after the
+ * the resulting [exitCode] or the session fails. [SendChannel.send] on [stdin] completes after the
  * corresponding platform write settles.
  */
 public interface ProcessSession : AutoCloseable {
@@ -59,12 +59,16 @@ public interface ProcessSession : AutoCloseable {
      * platform write, not merely enqueueing. Closing input requests EOF on pipes;
      * it does not close a PTY master (terminal EOF is explicit input).
      *
-     * `send` throws `ClosedSendChannelException` after input is closed.
+     * `send` throws `ClosedSendChannelException` after normal input closure;
+     * failed or aborted input propagates its failure or cancellation instead.
      * `onSend` is unsupported and throws `UnsupportedOperationException`.
      * Owner cancellation aborts pending sends with cancellation.
      *
-     * @throws kotlinx.coroutines.channels.ClosedSendChannelException when sending after input closes.
+     * @throws kotlinx.coroutines.channels.ClosedSendChannelException when sending after normal input closure.
      * @throws UnsupportedOperationException when accessing `onSend`.
+     * @throws kotlinx.io.IOException when a platform input write fails.
+     * @throws ProcessException when the session reports a platform input failure.
+     * @throws kotlinx.coroutines.CancellationException when the owner aborts input.
      */
     public val stdin: SendChannel<String>
 
@@ -87,15 +91,25 @@ public interface ProcessSession : AutoCloseable {
 
     /**
      * Completes with the final child-process exit code, including after
-     * [close] requests termination. It fails only when the exit status cannot
-     * be observed, such as after an external cancellation of [scope].
+     * [close] requests termination, unless a session I/O or observer failure
+     * completes it exceptionally first. An input/output failure can win even
+     * when the platform exit status is known or could subsequently be observed.
+     * Cancelling [scope] before completion also fails this deferred.
+     *
+     * Awaiting propagates the original platform/session failure; the exception
+     * families below are not an exhaustive list of platform failures.
+     *
+     * @throws ProcessException when a process observation or session I/O operation fails.
+     * @throws kotlinx.io.IOException when a platform I/O failure is forwarded.
+     * @throws kotlinx.coroutines.CancellationException when the session or awaiting caller is cancelled.
      */
     public val exitCode: Deferred<Int>
 
     /**
      * Requests termination of the child process tree and returns without
      * waiting for it to exit. The request may take time to settle; await
-     * [exitCode] for the resulting platform exit code.
+     * [exitCode] for the resulting platform exit code or session failure.
+     * Joining [scope]'s Job waits for owned cleanup, not just exit observation.
      */
     override fun close()
 }

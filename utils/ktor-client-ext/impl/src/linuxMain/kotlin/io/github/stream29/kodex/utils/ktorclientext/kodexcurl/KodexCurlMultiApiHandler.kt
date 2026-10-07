@@ -25,6 +25,45 @@ import libcurl.*
 import platform.posix.getenv
 import platform.posix.size_tVar
 
+// Local to Curl release. Identity traversal is bounded even for a supplied
+// exception graph that already contains a cycle.
+private fun curlFailureGraph(root: Throwable): List<Throwable> {
+    val visited = mutableListOf<Throwable>()
+    val pending = mutableListOf(root)
+    while (pending.isNotEmpty()) {
+        val current = pending.removeAt(pending.lastIndex)
+        if (visited.any { it === current }) continue
+        visited += current
+        current.cause?.let { pending += it }
+        pending.addAll(current.suppressedExceptions)
+    }
+    return visited
+}
+
+private fun attachCurlCleanup(
+    primary: Throwable,
+    cleanup: Throwable,
+    recorded: MutableList<Pair<Throwable, Throwable>>,
+    parent: Throwable = primary,
+): Throwable {
+    val existing = curlFailureGraph(primary)
+    if (existing.any { it === cleanup }) return cleanup
+    val remembered = recorded.firstOrNull { it.first === cleanup }?.second
+    if (remembered != null && existing.any { it === remembered }) return remembered
+    val candidate = remembered ?: cleanup
+    val incoming = curlFailureGraph(candidate)
+    // An exception whose cause already reaches the primary cannot be attached
+    // by identity without a cycle. Preserve its diagnostic context without
+    // linking that unsafe graph (or duplicating an already-reachable secondary).
+    val secondary = if (incoming.any { node -> existing.any { it === node } }) {
+        IOException("Curl cleanup graph overlaps the primary: $cleanup")
+    } else candidate
+    recorded.removeAll { it.first === cleanup }
+    recorded += cleanup to secondary
+    parent.addSuppressed(secondary)
+    return secondary
+}
+
 @OptIn(ExperimentalForeignApi::class)
 private class RequestHolder(
     val token: Any,
@@ -36,12 +75,22 @@ private class RequestHolder(
 ) {
     var cancellationHandler: DisposableHandle? = null
 
-    fun dispose() {
-        cancellationHandler?.dispose()
-        curl_slist_free_all(requestHeaders)
-        responseDataRef.dispose()
-        requestWrapper.dispose()
-        responseWrapper.dispose()
+    fun dispose(
+        afterRelease: ((String) -> Unit)? = null,
+        onFailure: (Throwable) -> Unit,
+    ) {
+        fun attempt(block: () -> Unit) {
+            try {
+                block()
+            } catch (failure: Throwable) {
+                onFailure(failure)
+            }
+        }
+        attempt { cancellationHandler?.dispose(); afterRelease?.invoke("cancellationHandler") }
+        attempt { curl_slist_free_all(requestHeaders); afterRelease?.invoke("requestHeaders") }
+        attempt { responseDataRef.dispose(); afterRelease?.invoke("responseDataRef") }
+        attempt { requestWrapper.dispose(); afterRelease?.invoke("requestWrapper") }
+        attempt { responseWrapper.dispose(); afterRelease?.invoke("responseWrapper") }
     }
 }
 
@@ -51,47 +100,80 @@ internal class KodexCurlRequestHandle(
     val token: Any,
 )
 
+// Per-handler test seam. Native operations still execute, and injected release
+// faults occur afterwards so the fixture never intentionally leaks a pointer.
+internal class KodexCurlNativeTestHooks {
+    var afterOperation: ((String) -> Unit)? = null
+    var publishHeaders: Boolean = true
+    var beforeNativeWakeup: (() -> Unit)? = null
+    var nativeWakeup: (() -> Unit)? = null
+    var onScheduled: ((KodexCurlRequestHandle, (KodexCurlRequestHandle) -> Unit) -> Unit)? = null
+}
+
 @OptIn(InternalAPI::class, ExperimentalForeignApi::class)
-internal class KodexCurlMultiApiHandler : Closeable {
+internal class KodexCurlMultiApiHandler(
+    private val testHooks: KodexCurlNativeTestHooks? = null,
+) : Closeable {
     private val activeHandles: MutableMap<EasyHandle, RequestHolder> = mutableMapOf()
     private val cancelledHandles: MutableSet<Pair<EasyHandle, Throwable>> = mutableSetOf()
     private val closed = atomic(false)
+    private val nativeLifecycleLock = SynchronizedObject()
 
     private val multiHandle: MultiHandle = curl_multi_init()
         ?: error("Could not initialize a Curl multi handle")
 
     init {
         // Keep long-lived streams on separate connections and failure domains.
-        curl_multi_setopt(multiHandle, CURLMOPT_PIPELINING, CURLPIPE_NOTHING).verify()
+        try {
+            curl_multi_setopt(multiHandle, CURLMOPT_PIPELINING, CURLPIPE_NOTHING).verify()
+        } catch (primary: Throwable) {
+            try {
+                curl_multi_cleanup(multiHandle).verify()
+            } catch (cleanup: Throwable) {
+                attachCurlCleanup(primary, cleanup, mutableListOf())
+            }
+            throw primary
+        }
     }
 
     private val easyHandlesToUnpauseLock = SynchronizedObject()
-    private val easyHandlesToUnpause: MutableList<EasyHandle> = mutableListOf()
+    private val easyHandlesToUnpause: MutableList<KodexCurlRequestHandle> = mutableListOf()
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
-        if (activeHandles.isNotEmpty() || cancelledHandles.isNotEmpty()) handleCompleted()
-
         val closeCause = CancellationException("Kodex Curl client engine closed")
         var firstFailure: Throwable? = null
-        for ((handle, holder) in activeHandles) {
+        val recorded = mutableListOf<Pair<Throwable, Throwable>>()
+        var holderCleanup: Throwable? = null
+        fun attempt(block: () -> Unit) {
             try {
-                closeResponse(holder.responseDataRef.get(), closeCause)
-                cleanupEasyHandle(handle)
+                block()
             } catch (cause: Throwable) {
-                if (firstFailure == null) firstFailure = cause
-            } finally {
-                holder.responseCompletable.completeExceptionally(closeCause)
-                holder.dispose()
+                val first = firstFailure
+                if (first == null) firstFailure = cause
+                else attachCurlCleanup(first, cause, recorded)
+            }
+        }
+        attempt {
+            if (activeHandles.isNotEmpty() || cancelledHandles.isNotEmpty()) handleCompleted()
+        }
+        for ((handle, holder) in activeHandles.toList()) {
+            attempt {
+                finishRequest(
+                    handle, holder, null, closeCause,
+                    forbidReuse = true, recorded = recorded, cleanupRoot = holderCleanup,
+                )?.let { holderCleanup = it; throw it }
             }
         }
 
         activeHandles.clear()
         cancelledHandles.clear()
-        try {
-            curl_multi_cleanup(multiHandle).verify()
-        } catch (cause: Throwable) {
-            if (firstFailure == null) firstFailure = cause
+        attempt { testHooks?.afterOperation?.invoke("beforeMultiCleanup") }
+        attempt {
+            synchronized(nativeLifecycleLock) {
+                curl_multi_cleanup(multiHandle).verify()
+                testHooks?.afterOperation?.invoke("multiCleanup")
+            }
         }
         firstFailure?.let { throw it }
     }
@@ -107,17 +189,28 @@ internal class KodexCurlMultiApiHandler : Closeable {
             error("Could not initialize a Curl easy handle")
         }
         val bodyStartedReceiving = CompletableDeferred<Unit>()
-        val responseBody = if (request.isUpgradeRequest) {
-            val webSocketConfig = request.attributes[WEBSOCKETS_KEY]
-            KodexCurlWebSocketResponseBody(
-                easyHandle = easyHandle,
-                incomingFramesConfig = webSocketConfig.channelsConfig.incoming,
-                maxFrameSize = webSocketConfig.maxFrameSize,
-            )
-        } else {
-            KodexCurlHttpResponseBody(request.callContext) {
-                unpauseEasyHandle(easyHandle)
+        val requestHandle = KodexCurlRequestHandle(easyHandle, Any())
+        val responseBody = try {
+            if (request.isUpgradeRequest) {
+                val webSocketConfig = request.attributes[WEBSOCKETS_KEY]
+                KodexCurlWebSocketResponseBody(
+                    easyHandle = easyHandle,
+                    incomingFramesConfig = webSocketConfig.channelsConfig.incoming,
+                    maxFrameSize = webSocketConfig.maxFrameSize,
+                )
+            } else {
+                KodexCurlHttpResponseBody(request.callContext) {
+                    unpauseEasyHandle(requestHandle)
+                }
             }
+        } catch (primary: Throwable) {
+            curl_easy_cleanup(easyHandle)
+            try {
+                request.dispose()
+            } catch (cleanup: Throwable) {
+                attachCurlCleanup(primary, cleanup, mutableListOf())
+            }
+            throw primary
         }
         val responseData = KodexCurlResponseBuilder(request, bodyStartedReceiving, responseBody)
         var responseDataRef: StableRef<KodexCurlResponseBuilder>? = null
@@ -126,7 +219,6 @@ internal class KodexCurlMultiApiHandler : Closeable {
         var requestHeaders: CPointer<curl_slist>? = null
         var requestHolder: RequestHolder? = null
         var addedToMulti = false
-        val requestHandle = KodexCurlRequestHandle(easyHandle, Any())
 
         try {
             responseDataRef = StableRef.create(responseData)
@@ -136,7 +228,7 @@ internal class KodexCurlMultiApiHandler : Closeable {
             val requestBody = KodexCurlRequestBodyData(
                 body = request.content,
                 callContext = request.callContext,
-                onUnpause = { unpauseEasyHandle(easyHandle) },
+                onUnpause = { unpauseEasyHandle(requestHandle) },
                 onNetworkActivity = responseBody::onNetworkActivity,
             )
             requestWrapperRef = StableRef.create(requestBody)
@@ -158,6 +250,7 @@ internal class KodexCurlMultiApiHandler : Closeable {
             requestHeaders = null
 
             bodyStartedReceiving.invokeOnCompletion {
+                if (testHooks?.publishHeaders == false) return@invokeOnCompletion
                 val activeHolder = activeHandles[easyHandle] ?: return@invokeOnCompletion
                 val result = collectSuccessResponse(easyHandle, responseData) ?: return@invokeOnCompletion
                 activeHolder.responseCompletable.complete(result)
@@ -198,25 +291,30 @@ internal class KodexCurlMultiApiHandler : Closeable {
             }
             curl_multi_add_handle(multiHandle, easyHandle).verify()
             addedToMulti = true
+            testHooks?.onScheduled?.invoke(requestHandle, ::unpauseEasyHandle)
         } catch (cause: Throwable) {
             activeHandles.remove(easyHandle)
-            try {
-                closeResponse(responseData, cause)
-            } finally {
+            val recorded = mutableListOf<Pair<Throwable, Throwable>>()
+            fun release(block: () -> Unit) {
                 try {
-                    if (addedToMulti) cleanupEasyHandle(easyHandle) else curl_easy_cleanup(easyHandle)
-                } finally {
-                    val holder = requestHolder
-                    if (holder != null) {
-                        holder.dispose()
-                    } else {
-                        requestHeaders?.let(::curl_slist_free_all)
-                        request.dispose()
-                        responseDataRef?.dispose()
-                        requestWrapperRef?.dispose()
-                        responseWrapperRef?.dispose()
-                    }
+                    block()
+                } catch (cleanup: Throwable) {
+                    attachCurlCleanup(cause, cleanup, recorded)
                 }
+            }
+            release { closeResponse(responseData, cause) }
+            release { if (addedToMulti) cleanupEasyHandle(easyHandle) else curl_easy_cleanup(easyHandle) }
+            val holder = requestHolder
+            if (holder != null) {
+                release {
+                    holder.dispose(onFailure = { cleanup -> attachCurlCleanup(cause, cleanup, recorded) })
+                }
+            } else {
+                release { requestHeaders?.let(::curl_slist_free_all) }
+                release { request.dispose() }
+                release { responseDataRef?.dispose() }
+                release { requestWrapperRef?.dispose() }
+                release { responseWrapperRef?.dispose() }
             }
             throw cause
         }
@@ -244,7 +342,13 @@ internal class KodexCurlMultiApiHandler : Closeable {
         synchronized(easyHandlesToUnpauseLock) {
             var handle = easyHandlesToUnpause.removeFirstOrNull()
             while (handle != null) {
-                if (handle in activeHandles) curl_easy_pause(handle, CURLPAUSE_CONT)
+                val holder = activeHandles[handle.easyHandle]
+                if (holder?.token === handle.token) {
+                    curl_easy_pause(handle.easyHandle, CURLPAUSE_CONT)
+                    testHooks?.afterOperation?.invoke("easyUnpause")
+                } else {
+                    testHooks?.afterOperation?.invoke("staleUnpauseDiscarded")
+                }
                 handle = easyHandlesToUnpause.removeFirstOrNull()
             }
         }
@@ -262,8 +366,19 @@ internal class KodexCurlMultiApiHandler : Closeable {
     fun hasHandlers(): Boolean = activeHandles.isNotEmpty()
 
     fun wakeup() {
-        if (closed.value) return
-        curl_multi_wakeup(multiHandle)
+        synchronized(nativeLifecycleLock) {
+            if (!closed.value) {
+                // Gate the actual check/use boundary, not an earlier queue
+                // check: a second atomic check cannot exclude native release.
+                testHooks?.beforeNativeWakeup?.invoke()
+                nativeWakeup()
+            }
+        }
+    }
+
+    private fun nativeWakeup() {
+        val intercepted = testHooks?.nativeWakeup
+        if (intercepted == null) curl_multi_wakeup(multiHandle) else intercepted()
     }
 
     fun sendWebSocketFrame(
@@ -323,51 +438,87 @@ internal class KodexCurlMultiApiHandler : Closeable {
                 val message = curl_multi_info_read(multiHandle, messagesLeft.ptr)?.pointed ?: continue
                 val easyHandle = message.easy_handle ?: error("Curl completed a null easy handle")
                 val holder = activeHandles[easyHandle] ?: continue
-                try {
-                    val result = processCompletedEasyHandle(
-                        message = message.msg,
-                        easyHandle = easyHandle,
-                        result = message.data.result,
-                        holder = holder,
-                    )
-                    if (!holder.responseCompletable.isCompleted) {
-                        when (result) {
-                            is KodexCurlSuccess -> holder.responseCompletable.complete(result)
-                            is KodexCurlFail -> holder.responseCompletable.completeExceptionally(result.cause)
-                        }
-                    }
-                } finally {
-                    activeHandles.remove(easyHandle)?.dispose()
-                }
+                val result = processCompletedEasyHandle(
+                    message = message.msg,
+                    easyHandle = easyHandle,
+                    result = message.data.result,
+                    holder = holder,
+                )
+                finishRequest(easyHandle, holder, result, (result as? KodexCurlFail)?.cause)
             } while (messagesLeft.value != 0)
         }
     }
 
     private fun removeEasyHandle(easyHandle: EasyHandle, cause: Throwable) {
-        val holder = activeHandles.remove(easyHandle) ?: return
-        try {
-            processCancelledEasyHandle(easyHandle, holder, cause)
-        } finally {
-            holder.responseCompletable.completeExceptionally(cause)
-            holder.dispose()
-        }
+        val holder = activeHandles[easyHandle] ?: return
+        finishRequest(easyHandle, holder, null, cause, forbidReuse = true)
     }
 
-    private fun processCancelledEasyHandle(
+    private fun finishRequest(
         easyHandle: EasyHandle,
         holder: RequestHolder,
-        cause: Throwable,
-    ) {
-        try {
-            closeResponse(holder.responseDataRef.get(), cause)
-        } finally {
-            try {
-                // A cancelled transfer can leave its connection half-open.
-                easyHandle.option(CURLOPT_FORBID_REUSE, 1L)
-            } finally {
-                cleanupEasyHandle(easyHandle)
+        result: KodexCurlResponseData?,
+        cause: Throwable?,
+        forbidReuse: Boolean = false,
+        recorded: MutableList<Pair<Throwable, Throwable>> = mutableListOf(),
+        cleanupRoot: Throwable? = null,
+    ): Throwable? {
+        // Keep this actual holder reachable until its promise has a terminal
+        // outcome. A returned CurlFail is just as primary as a thrown getInfo.
+        var primary = cause
+        var cleanupFailed = false
+        var firstCleanup = cleanupRoot
+        fun recordCleanup(cleanup: Throwable) {
+            cleanupFailed = true
+            val original = primary
+            if (original == null) {
+                primary = cleanup
+                firstCleanup = cleanup
+            } else {
+                val attached = attachCurlCleanup(original, cleanup, recorded, firstCleanup ?: original)
+                if (firstCleanup == null) firstCleanup = attached
             }
         }
+        fun attempt(operation: String, block: () -> Unit) {
+            try {
+                block()
+                testHooks?.afterOperation?.invoke(operation)
+            } catch (cleanup: Throwable) {
+                recordCleanup(cleanup)
+            }
+        }
+        val builder = holder.responseDataRef.get()
+        if (forbidReuse) attempt("forbidReuse") { easyHandle.option(CURLOPT_FORBID_REUSE, 1L) }
+        attempt("multiRemove") { curl_multi_remove_handle(multiHandle, easyHandle).verify() }
+        attempt("easyCleanup") { curl_easy_cleanup(easyHandle) }
+        attempt("responseHeaders") { builder.headersBytes.close() }
+        // StableRefs and request headers remain alive through easy cleanup.
+        attempt("holderDispose") { holder.dispose(testHooks?.afterOperation, ::recordCleanup) }
+        // Do not publish successful EOF before a native release failure is known.
+        // A synthetic body-close fault still performs the real close with it.
+        attempt("beforeBodyClose") {}
+        attempt("bodyClose") { builder.responseBody.close(primary) }
+        try {
+            val failure = primary
+            if (failure != null) holder.responseCompletable.completeExceptionally(failure)
+            else holder.responseCompletable.complete(checkNotNull(result) as KodexCurlSuccess)
+        } catch (completionFailure: Throwable) {
+            // Completion handlers can throw after the Deferred has settled.
+            // Do not leave disposed references reachable for a second release.
+            recordCleanup(completionFailure)
+            if (!holder.responseCompletable.isCompleted) {
+                holder.responseCompletable.completeExceptionally(checkNotNull(primary))
+            }
+        } finally {
+            activeHandles.remove(easyHandle)
+        }
+        val failure = primary
+        // Failure results/cancellation belong to this request, not the loop.
+        // A previously successful operation's cleanup must remain observable.
+        if (cause == null && failure != null) throw failure
+        // One cleanup subtree is shared with API close. Later failures attach
+        // only there, never both there and directly on the admitted primary.
+        return if (cleanupFailed) firstCleanup else null
     }
 
     private fun processCompletedEasyHandle(
@@ -378,13 +529,14 @@ internal class KodexCurlMultiApiHandler : Closeable {
     ): KodexCurlResponseData {
         val responseBuilder = holder.responseDataRef.get()
         try {
-            return memScoped {
+            val completed = memScoped {
                 val httpStatusCode = alloc<LongVar>()
                 val proxyCode = alloc<CURLproxycode.Var>()
                 easyHandle.apply {
                     getInfo(CURLINFO_RESPONSE_CODE, httpStatusCode.ptr)
                     getInfo(CURLINFO_PROXY_ERROR, proxyCode.ptr)
                 }
+                testHooks?.afterOperation?.invoke("completedGetInfo")
                 collectFailedResponse(
                     message = message,
                     request = responseBuilder.request,
@@ -393,12 +545,9 @@ internal class KodexCurlMultiApiHandler : Closeable {
                     proxyCode = proxyCode.value,
                 ) ?: checkNotNull(collectSuccessResponse(easyHandle, responseBuilder))
             }
-        } finally {
-            try {
-                closeResponse(responseBuilder)
-            } finally {
-                cleanupEasyHandle(easyHandle)
-            }
+            return completed
+        } catch (failure: Throwable) {
+            return KodexCurlFail(failure)
         }
     }
 
@@ -412,9 +561,16 @@ internal class KodexCurlMultiApiHandler : Closeable {
         if (message != CURLMSG.CURLMSG_DONE) {
             return KodexCurlFail(IllegalStateException("Request $request failed: $message"))
         }
-        if (httpStatusCode != 0L) return null
+        if (result == CURLE_OK) return null
         if (result == CURLE_OPERATION_TIMEDOUT) {
-            return KodexCurlFail(ConnectTimeoutException(request.url, request.connectTimeout))
+            return KodexCurlFail(if (httpStatusCode == 0L) {
+                ConnectTimeoutException(request.url, request.connectTimeout)
+            } else {
+                SocketTimeoutException(
+                    message = "Socket timeout has expired [url=${request.url}, socket_timeout=${request.socketTimeout} ms]",
+                    cause = null,
+                )
+            })
         }
 
         val errorMessage = result.errorMessage
@@ -509,17 +665,20 @@ internal class KodexCurlMultiApiHandler : Closeable {
         }
     }
 
-    private fun unpauseEasyHandle(easyHandle: EasyHandle) {
+    private fun unpauseEasyHandle(request: KodexCurlRequestHandle) {
         if (closed.value) return
         synchronized(easyHandlesToUnpauseLock) {
-            if (!closed.value) easyHandlesToUnpause.add(easyHandle)
+            if (!closed.value) easyHandlesToUnpause.add(request)
         }
-        if (!closed.value) curl_multi_wakeup(multiHandle)
+        wakeup()
     }
 
     private fun cleanupEasyHandle(easyHandle: EasyHandle) {
-        curl_multi_remove_handle(multiHandle, easyHandle).verify()
-        curl_easy_cleanup(easyHandle)
+        try {
+            curl_multi_remove_handle(multiHandle, easyHandle).verify()
+        } finally {
+            curl_easy_cleanup(easyHandle)
+        }
     }
 
     private companion object {

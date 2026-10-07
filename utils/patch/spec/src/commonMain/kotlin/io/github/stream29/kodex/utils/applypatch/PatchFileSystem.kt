@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.utils.applypatch
 
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
 
 /**
@@ -19,7 +18,7 @@ import kotlinx.io.files.Path
  */
 public suspend fun Patch.applyToFileSystem(
     root: Path = Path("."),
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    fileSystem: CoroutineFileSystem,
 ): PatchApplyResult =
     applyHunksToFileSystem(root, fileSystem)
 

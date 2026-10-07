@@ -22,12 +22,16 @@ import kotlinx.cinterop.value
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.io.Buffer
 import kotlinx.io.IOException
 import kotlinx.io.RawSink
@@ -49,6 +53,7 @@ import platform.posix.read
 import platform.posix.waitpid
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
+import kotlin.time.Duration.Companion.seconds
 
 internal actual class PlatformProcessClient actual constructor(
     scope: CoroutineScope,
@@ -57,7 +62,7 @@ internal actual class PlatformProcessClient actual constructor(
     ProcessClient {
 
     actual override suspend fun start(command: ProcessCommand): ProcessSession =
-        withContext(PosixProcessIoDispatcher) {
+        this@PlatformProcessClient.acquireProcessSession(PosixProcessIoDispatcher) {
             this@PlatformProcessClient.requireOpen()
             command.startPosixProcess(this@PlatformProcessClient)
         }
@@ -161,7 +166,7 @@ private fun <T> withPosixPipe(block: (read: Int, write: Int) -> PosixPipeTransfe
     }
 }
 
-@OptIn(ExperimentalAtomicApi::class)
+@OptIn(ExperimentalAtomicApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.DelicateCoroutinesApi::class)
 private class PosixProcessSession(
     private val pid: Int,
     private val ownsProcessGroup: Boolean,
@@ -188,36 +193,64 @@ private class PosixProcessSession(
     override val exitCode: Deferred<Int>
         field = CompletableDeferred()
     private val closed = AtomicBoolean(false)
-    private val cancellationGuard = ownerScope.lazyProcessCancellationGuard(::close)
+    private val releaseResult = CompletableDeferred<Result<Unit>>()
+    private var cancellationGuard: Job? = null
+    private val exitObserver: Job
 
     init {
-        cancellationGuard.start()
-        ownerScope.launch(PosixProcessIoDispatcher) {
+        cancellationGuard = ownerScope.launchProcessCancellationGuard(PosixProcessIoDispatcher) { runCatching { close() } }
+        exitObserver = ownerScope.launch(PosixProcessIoDispatcher, start = CoroutineStart.ATOMIC) {
             try {
                 exitCode.complete(awaitExitCode())
             } catch (failure: Throwable) {
                 exitCode.completeExceptionally(failure)
             }
-        }.invokeOnCompletion { failure ->
-            if (failure != null) close()
         }
+        exitObserver.invokeOnCompletion { failure -> if (failure != null) runCatching { close() } }
     }
 
     override fun close() {
         if (!closed.compareAndSet(expectedValue = false, newValue = true)) return
-        cancellationGuard.cancel()
+        cancellationGuard?.cancel()
+        var cleanup: Throwable? = null
+        fun attempt(block: () -> Unit) {
+            try { block() } catch (failure: Throwable) {
+                val first = cleanup
+                if (first == null) cleanup = failure else if (first !== failure) first.addSuppressed(failure)
+            }
+        }
         if (!exitCode.isCompleted) {
             if (!ownsProcessGroup || (kill(-pid, SIGKILL) != 0 && errno != ESRCH)) {
                 if (kill(pid, SIGKILL) != 0 && errno != ESRCH) {
-                    exitCode.completeExceptionally(
-                        ProcessException("Failed to terminate process $pid: errno $errno."),
-                    )
+                    val failure = ProcessException("Failed to terminate process $pid: errno $errno.")
+                    cleanup = failure
+                    exitCode.completeExceptionally(failure)
                 }
             }
         }
-        processStdin.closeImmediately()
-        processStdout.closeImmediately()
-        processStderr.closeImmediately()
+        attempt { processStdin.closeImmediately() }
+        attempt { processStdout.closeImmediately() }
+        attempt { processStderr.closeImmediately() }
+        val failure = cleanup
+        releaseResult.complete(failure?.let { Result.failure(it) } ?: Result.success(Unit))
+        failure?.let { throw it }
+    }
+
+    override suspend fun closeAndJoin(): Unit = withContext(NonCancellable + PosixProcessIoDispatcher) {
+        var primary: Throwable? = null
+        try {
+            withTimeout(7.seconds) {
+                runCatching { close() }
+                primary = releaseResult.await().exceptionOrNull()
+                cancellationGuard?.join()
+                exitObserver.join()
+                primary?.let { throw it }
+            }
+        } catch (waiting: Throwable) {
+            val first = primary
+            if (first != null && first !== waiting) { first.addSuppressed(waiting); throw first }
+            throw waiting
+        }
     }
 
     private fun awaitExitCode(): Int = memScoped {
