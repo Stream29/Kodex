@@ -1,6 +1,8 @@
 package io.github.stream29.kodex.rpc.client
 
 import io.github.stream29.kodex.utils.rpcexception.restoreRemoteException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.catch
@@ -12,7 +14,9 @@ import kotlinx.rpc.RpcClient
  *
  * Create service proxies from this client, not from [delegate]. Existing proxies are unaffected.
  * Streaming calls cover both immediate Flow creation failures and later upstream failures.
- * Cancellation, unknown failures and downstream consumers' own exceptions are not reclassified.
+ * Unknown failures and downstream consumers' own exceptions are not reclassified.
+ * If an upstream failure arrives after the subscriber was cancelled, its cancellation wins
+ * before the buffer child can fail the subscriber's still-live owner.
  *
  * This adapter neither owns the connection nor retries calls, reconnects or restores state.
  * It does not start collecting a Flow until a caller collects the returned Flow.
@@ -29,8 +33,9 @@ public class RestoringRpcClient(
         restoreRemoteException {
             delegate.callServerStreaming<T>(call)
         }
-            .buffer(0)
             .catch { cause ->
+                currentCoroutineContext().ensureActive()
                 restoreRemoteException { throw cause }
             }
+            .buffer(0)
 }
