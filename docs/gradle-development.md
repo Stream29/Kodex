@@ -56,8 +56,9 @@ From the Kodex checkout, for example:
 
 Keep the actual existing Gradle Daemon JVM explicit when using an agent or an
 isolated validation script. CLI configuration time is not IDEA Sync or indexing
-time. Heap, target-profile and build-logic tuning are separate measured changes,
-not guarantees supplied by binary adoption.
+time. Resource and build-logic changes require separate measurements, not
+guarantees supplied by binary adoption. Keep the existing full target model;
+there is no target-profile switch.
 
 ## Adding a module
 
@@ -70,6 +71,20 @@ not guarantees supplied by binary adoption.
   Flat project IDs still join path segments with `-`.
 - Invalid names, missing leaves, duplicate physical declarations and colliding
   flat project IDs fail configuration instead of silently replacing a project.
+
+## Adding tests
+
+- Modules with tests explicitly apply `id("kodex.kmp-tests")` alongside their
+  existing KMP convention. This applies the existing TestBalloon plugin and
+  common test dependencies together; platform-specific tests inherit them too.
+- Add the convention before adding ordinary or generated test sources, even
+  if `commonTest` itself is empty. View, ViewModel, JVM, JS, Native and custom
+  test source sets follow the same rule.
+- Base conventions still declare their complete targets and test source sets.
+  Empty modules do not load the test framework/compiler plugin merely because
+  they use KMP. This does not disable test tasks or remove platform support.
+- Run the module's actual test task after opting in. A cached or `NO-SOURCE`
+  task is not evidence that newly added tests execute.
 
 ## Working on a fork
 
