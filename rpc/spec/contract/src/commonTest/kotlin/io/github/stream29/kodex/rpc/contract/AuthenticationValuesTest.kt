@@ -6,6 +6,7 @@ import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiSubscriptionPlan
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -44,6 +45,15 @@ val authenticationValuesTest by testSuite {
             val encoded = json.encodeToString(SettingsAuthenticationState.serializer(), state)
             assertEquals(state, json.decodeFromString(SettingsAuthenticationState.serializer(), encoded))
         }
+    }
+    test("ProMax summary uses the existing enum wire convention and exposes no credentials") {
+        val state = SettingsAuthenticationState.Authenticated(
+            accountId = "test-account", planType = OpenAiSubscriptionPlan.ProMax,
+        )
+        val encoded = json.encodeToJsonElement(SettingsAuthenticationState.serializer(), state).jsonObject
+        assertEquals(JsonPrimitive("ProMax"), encoded["planType"])
+        assertEquals(setOf("type", "accountId", "planType", "email"), encoded.keys)
+        assertEquals(state, json.decodeFromJsonElement(SettingsAuthenticationState.serializer(), encoded))
     }
 
     test("both authentication sources retain their existing wire names") {

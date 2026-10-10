@@ -21,7 +21,8 @@ public data class ModelsResponse(
  * the backend. An empty list means the backend did not expose discrete choices
  * for this model.
  * @property serviceTiers Ordered service tiers advertised by the backend. An
- * empty list means the model supports only standard routing.
+ * empty list advertises only standard routing. Metadata is not proof of
+ * account entitlement or the tier actually used by a response.
  * @property contextWindow Nullable because older or provider-defined models may
  * omit their nominal context window; `null` means only
  * [maxContextWindow] may describe the available window.
@@ -82,6 +83,11 @@ public data class ModelServiceTier(
  * [ServiceTier.Default] is always present and means standard routing. Unknown
  * backend tier ids remain represented in [serviceTiers], but cannot be sent by
  * the typed Responses API until a corresponding [ServiceTier] is added.
+ * Results follow [ServiceTier.entries] order and contain each known tier once,
+ * even if the metadata repeats it. [ServiceTier.Ultrafast] is included only
+ * when this model metadata advertises its exact request value; model names
+ * alone do not enable it. This projection does not change a saved selection
+ * or check account entitlement.
  */
 public fun ModelInfo.availableServiceTiers(): List<ServiceTier> =
     ServiceTier.entries.filter { tier ->

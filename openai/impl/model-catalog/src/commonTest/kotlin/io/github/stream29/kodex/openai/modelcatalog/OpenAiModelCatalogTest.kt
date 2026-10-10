@@ -1,6 +1,7 @@
 package io.github.stream29.kodex.openai.modelcatalog
 
 import de.infix.testBalloon.framework.core.TestConfig
+import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testScope
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.openai.ModelInfo
@@ -9,6 +10,8 @@ import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.ReasoningEffortPreset
+import io.github.stream29.kodex.openai.ServiceTier
+import io.github.stream29.kodex.openai.availableServiceTiers
 import io.github.stream29.kodex.openai.contextWindowTokenStatus
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import kotlinx.coroutines.CompletableDeferred
@@ -33,6 +36,25 @@ private fun model(
         autoCompactionTokenLimit = autoCompactionTokenLimit,
         effectiveContextWindowPercent = effectiveContextWindowPercent,
     )
+
+val ultrafastModelCatalogTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("Ultrafast fallback is explicit for two models and never merged into remote metadata") {
+        assertEquals(
+            listOf("gpt-6-astra", "gpt-6.1-sol"),
+            BuiltInModelCatalog.filter { ServiceTier.Ultrafast in it.availableServiceTiers() }.map { it.slug.value },
+        )
+        val remote = model("gpt-6-astra")
+        val catalog = OpenAiModelCatalog(
+            client = mockOpenAiClient { listModels { OpenAiResult.Success(ModelsResponse(listOf(remote))) } },
+        )
+        try {
+            val refreshed = withTimeout(10.seconds) { catalog.models.first { it == listOf(remote) } }
+            assertEquals(listOf(ServiceTier.Default), refreshed.single().availableServiceTiers())
+        } finally {
+            catalog.close()
+        }
+    }
+}
 
 val openAiModelCatalogTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
     test("starts with the bundled Codex model catalog") {

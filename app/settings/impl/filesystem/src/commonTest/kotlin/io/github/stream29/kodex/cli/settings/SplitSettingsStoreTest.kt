@@ -59,6 +59,28 @@ val splitSettingsStoreTest by testSuite(
         }
     }
 
+    for ((wire, tier) in listOf(
+        "default" to ServiceTier.Default, "fast" to ServiceTier.Fast,
+        "priority" to ServiceTier.Fast, "flex" to ServiceTier.Flex,
+        "ultrafast" to ServiceTier.Ultrafast,
+    )) {
+        test("backend service tier $wire loads without rewriting and survives a real update") {
+            withSplitSettingsDirectory { directory ->
+                val path = Path(directory, "settings.backend.yml")
+                val text = "new_session: {service_tier: $wire}\n"
+                writeFixture(path, text)
+                val store = openBackendSettings(directory, backendDefaults())
+                assertEquals(tier, store.settings.value.newSession.serviceTier)
+                assertEquals(text, SystemCoroutineFileSystem.readString(path))
+                store.update { it.copy(newSession = it.newSession.copy(model = OpenAiModelId("changed"))) }
+                val reopened = openBackendSettings(directory, backendDefaults()).settings.value
+                assertEquals(tier, reopened.newSession.serviceTier)
+                assertEquals(OpenAiModelId("changed"), reopened.newSession.model)
+                assertTrue("service_tier: ${tier.requestValue}" in SystemCoroutineFileSystem.readString(path))
+            }
+        }
+    }
+
     test("each side ignores legacy and opposite files and writes only its own file") {
         withSplitSettingsDirectory { directory ->
             val old = Path(directory, "settings.yml")

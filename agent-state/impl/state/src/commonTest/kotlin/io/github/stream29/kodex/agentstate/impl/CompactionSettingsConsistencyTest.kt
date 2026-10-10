@@ -49,7 +49,7 @@ val compactionSettingsConsistencyTest by testSuite {
         for (forced in listOf(false, true)) {
             test("latest full settings survive multiple writes with forced=$forced and request stays fixed") {
                 val storage = InMemoryKodexAgentStorage(
-                    KodexAgentSettings(OpenAiModelId("initial"), threadName = "before"),
+                    KodexAgentSettings(OpenAiModelId("initial"), threadName = "before", serviceTier = ServiceTier.Ultrafast),
                 )
                 val entered = CompletableDeferred<Unit>()
                 val release = CompletableDeferred<Unit>()

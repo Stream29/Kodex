@@ -76,6 +76,41 @@ val modelCatalogModelsSerializationTest by testSuite {
         )
     }
 
+    test("ultrafast uses exact advertised metadata and canonical order without duplicates") {
+        val model = json.decodeFromString<ModelInfo>(
+            """
+            {
+              "slug": "custom-model",
+              "display_name": "Custom Model",
+              "service_tiers": [
+                {"id": "ultrafast", "name": "Ultrafast", "description": "Higher usage"},
+                {"id": "future", "name": "Future", "description": "Unknown tier"},
+                {"id": "priority", "name": "Fast", "description": "Fast routing"},
+                {"id": "ultrafast", "name": "Duplicate", "description": "Repeated metadata"}
+              ]
+            }
+            """.trimIndent(),
+        )
+        assertEquals(
+            listOf(ServiceTier.Default, ServiceTier.Fast, ServiceTier.Ultrafast),
+            model.availableServiceTiers(),
+        )
+        assertEquals(4, model.serviceTiers.size)
+        assertEquals("future", model.serviceTiers[1].id)
+        assertEquals(model, json.decodeFromString<ModelInfo>(json.encodeToString(model)))
+    }
+
+    test("model names and unknown tier ids do not enable ultrafast") {
+        val model = ModelInfo(OpenAiModelId("gpt-6-astra"), "GPT-6 Astra")
+        assertEquals(listOf(ServiceTier.Default), model.availableServiceTiers())
+        assertEquals(
+            listOf(ServiceTier.Default),
+            model.copy(
+                serviceTiers = listOf(ModelServiceTier("ultra-fast", "Ultrafast", "Unknown id")),
+            ).availableServiceTiers(),
+        )
+    }
+
     test("round trips custom reasoning metadata as primitive wire values") {
         val model = ModelInfo(
             slug = OpenAiModelId("gpt-test"),

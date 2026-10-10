@@ -64,6 +64,7 @@ public fun NewSessionDefaultsPanel(
             )
             SettingsDropdownField(
                 "Service tier", state.settings.serviceTier.label(), dropdowns.serviceTier, enabled = state.active,
+                supportingText = "Ultrafast: higher usage; account access and model support required.",
             )
             SettingsDropdownField(
                 "Questions", state.settings.requestUserInputMode.label(), dropdowns.questions,
@@ -117,6 +118,7 @@ private fun ServiceTier.label(): String = when (this) {
     ServiceTier.Default -> "default"
     ServiceTier.Fast -> "fast"
     ServiceTier.Flex -> "flex"
+    ServiceTier.Ultrafast -> "ultrafast"
 }
 private fun RequestUserInputMode.label(): String = when (this) {
     RequestUserInputMode.AskUser -> "ask user"

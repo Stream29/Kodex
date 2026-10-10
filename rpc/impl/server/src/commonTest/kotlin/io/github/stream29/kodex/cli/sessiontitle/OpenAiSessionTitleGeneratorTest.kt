@@ -11,11 +11,13 @@ import io.github.stream29.kodex.openai.Response
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.github.stream29.kodex.openai.ServiceTier
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -71,6 +73,9 @@ val openAiSessionTitleGeneratorTest by testSuite {
         assertTrue(captured.tools.isEmpty())
         assertEquals(false, captured.parallelToolCalls)
         assertEquals(ReasoningEffort.High, captured.reasoning.effort)
+        assertEquals(ServiceTier.Default, captured.serviceTier)
+        assertFalse("service_tier" in io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
+            .encodeToJsonElement(ResponsesApiRequest.serializer(), captured).jsonObject)
         val input = assertIs<ResponseItem.Message>(captured.input.single())
         assertEquals(MessageRole.User, input.role)
         assertEquals(

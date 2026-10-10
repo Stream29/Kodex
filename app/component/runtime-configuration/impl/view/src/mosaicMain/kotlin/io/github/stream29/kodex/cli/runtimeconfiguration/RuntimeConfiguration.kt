@@ -10,6 +10,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import com.jakewharton.mosaic.layout.background
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.BoxScope
+import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationState
@@ -186,7 +187,17 @@ public fun BoxScope.RuntimeConfigurationMenus(
                                         selected = model == configuration.model &&
                                             effort == configuration.reasoning && tier == configuration.tier,
                                         onClick = { onConfigurationSelected(model, effort, tier) },
-                                    ) { Text(runtimeServiceTierLabel(tier)) }
+                                    ) {
+                                        if (tier == ServiceTier.Ultrafast) {
+                                            Column {
+                                                Text("ultrafast")
+                                                Text("higher usage")
+                                                Text("access/model")
+                                                Text("support")
+                                                Text("required")
+                                            }
+                                        } else Text(runtimeServiceTierLabel(tier))
+                                    }
                                 }
                             },
                         ) { Text(effort.wireName) }
@@ -230,4 +241,5 @@ private fun runtimeServiceTierLabel(tier: ServiceTier): String = when (tier) {
     ServiceTier.Default -> "default"
     ServiceTier.Fast -> "fast"
     ServiceTier.Flex -> "flex"
+    ServiceTier.Ultrafast -> "ultrafast"
 }

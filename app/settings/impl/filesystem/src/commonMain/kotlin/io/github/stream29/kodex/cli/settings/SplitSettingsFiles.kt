@@ -128,6 +128,7 @@ private fun decodeServiceTier(value: String): ServiceTier = when (value) {
     "default" -> ServiceTier.Default
     "fast", "priority" -> ServiceTier.Fast
     "flex" -> ServiceTier.Flex
+    "ultrafast" -> ServiceTier.Ultrafast
     else -> throw IllegalArgumentException("Unsupported service tier '$value'.")
 }
 

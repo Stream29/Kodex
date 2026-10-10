@@ -87,6 +87,7 @@ val runtimeConfigurationViewModelTest by testSuite {
                         ModelServiceTier(ServiceTier.Flex.requestValue, "Flex", ""),
                         ModelServiceTier(ServiceTier.Fast.requestValue, "Fast", ""),
                         ModelServiceTier(ServiceTier.Fast.requestValue, "Duplicate", ""),
+                        ModelServiceTier(ServiceTier.Ultrafast.requestValue, "Ultrafast", "Higher usage"),
                     ),
                 ),
             )

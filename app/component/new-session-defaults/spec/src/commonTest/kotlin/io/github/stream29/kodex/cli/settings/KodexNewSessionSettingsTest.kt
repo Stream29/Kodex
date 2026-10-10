@@ -28,6 +28,21 @@ val kodexNewSessionSettingsTest by testSuite {
         assertEquals(defaults, json.decodeFromString(serializer, "{}"))
     }
 
+    test("ultrafast defaults round trip without changing the existing default") {
+        val serializer = KodexNewSessionSettings.serializer()
+        val configured = KodexNewSessionSettings(
+            model = OpenAiModelId("gpt-6-astra"),
+            serviceTier = ServiceTier.Ultrafast,
+        )
+        val golden = """{"model":"gpt-6-astra","reasoningEffort":"medium","serviceTier":"ultrafast","requestUserInputMode":"ask_user"}"""
+        assertEquals(golden, json.encodeToString(serializer, configured))
+        assertEquals(configured, json.decodeFromString(serializer, golden))
+        assertEquals(
+            ServiceTier.Default,
+            json.decodeFromString(serializer, """{"model":"gpt-6-astra"}""").serviceTier,
+        )
+    }
+
     test("configured values and missing question mode retain the original behavior") {
         val serializer = KodexNewSessionSettings.serializer()
         val configured = KodexNewSessionSettings(

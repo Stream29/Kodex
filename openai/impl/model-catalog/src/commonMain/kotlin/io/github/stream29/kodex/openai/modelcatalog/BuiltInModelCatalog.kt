@@ -41,14 +41,25 @@ private val fastTwoXServiceTier: List<ModelServiceTier> = listOf(
     ),
 )
 
-/** Relevant model metadata mirrored from Codex's bundled `models.json`. */
+private val ultrafastServiceTier: ModelServiceTier = ModelServiceTier(
+    id = ServiceTier.Ultrafast.requestValue,
+    name = "Ultrafast",
+    description = "Higher usage; account access and model support required",
+)
+
+/**
+ * Relevant metadata mirrored from Codex's bundled `models.json`, supplemented
+ * with the documented Ultrafast capability of Astra and Sol 6.1.
+ * This fallback describes model capability, not account entitlement. A remote
+ * catalog replaces it in full; the supplement is never merged into remote data.
+ */
 internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
     ModelInfo(
         slug = OpenAiModelId("gpt-6-astra"),
         displayName = "GPT-6-Astra",
         defaultReasoningLevel = ReasoningEffort.Low,
         supportedReasoningLevels = maxReasoningLevels,
-        serviceTiers = fastTwoXServiceTier,
+        serviceTiers = fastTwoXServiceTier + ultrafastServiceTier,
         contextWindow = 272_000L,
         maxContextWindow = 872_000L,
         compHash = "3000",
@@ -58,7 +69,7 @@ internal val BuiltInModelCatalog: List<ModelInfo> = listOf(
         displayName = "GPT-6.1-Sol",
         defaultReasoningLevel = ReasoningEffort.Low,
         supportedReasoningLevels = maxReasoningLevels,
-        serviceTiers = fastTwoXServiceTier,
+        serviceTiers = fastTwoXServiceTier + ultrafastServiceTier,
         contextWindow = 272_000L,
         maxContextWindow = 872_000L,
         compHash = "3000",

@@ -44,6 +44,7 @@ val newSessionDefaultsComponentTest by testSuite {
                     previous = next
                 }
                 assertFalse("Working directory" in snapshot, snapshot)
+                assertTrue("higher usage" in snapshot, snapshot)
                 assertTrue(ports.admissions.isEmpty())
             }
         }
@@ -70,9 +71,9 @@ val newSessionDefaultsComponentTest by testSuite {
                 snapshot = defaultsSnapshot("Reasoning [max]")
                 clickDefaults(snapshot, "Service tier [default]", "Service tier [".length)
                 snapshot = defaultsSnapshot("[flex")
-                for (tier in listOf("default", "fast", "flex")) assertTrue("[$tier" in snapshot, snapshot)
-                clickDefaults(snapshot, "[flex")
-                snapshot = defaultsSnapshot("Service tier [flex]")
+                for (tier in listOf("default", "fast", "flex", "ultrafast")) assertTrue("[$tier" in snapshot, snapshot)
+                clickDefaults(snapshot, "[ultrafast")
+                snapshot = defaultsSnapshot("Service tier [ultrafast]")
                 clickDefaults(snapshot, "Questions [ask user]", "Questions [".length)
                 snapshot = defaultsSnapshot("[no question")
                 assertTrue("[ask user" in snapshot, snapshot)
@@ -80,7 +81,7 @@ val newSessionDefaultsComponentTest by testSuite {
                 defaultsSnapshot("Questions [no question]")
                 assertEquals(listOf("model", "effort", "tier", "questions"), ports.admissions)
                 assertEquals(KodexNewSessionSettings(OpenAiModelId("catalog-b"), ReasoningEffort.Max,
-                    ServiceTier.Flex, RequestUserInputMode.NoQuestion), ports.defaults.value)
+                    ServiceTier.Ultrafast, RequestUserInputMode.NoQuestion), ports.defaults.value)
                 assertEquals(4L, vm.state.value.revision)
             }
         }

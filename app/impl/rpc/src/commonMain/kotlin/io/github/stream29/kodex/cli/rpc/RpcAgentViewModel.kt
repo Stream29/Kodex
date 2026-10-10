@@ -49,6 +49,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -88,6 +89,11 @@ private class RpcAgentViewModel(
     private val mutableNotification = MutableStateFlow<AgentNotification?>(null)
     override val notification = mutableNotification.asStateFlow()
     private var notificationId = 0L
+    private val tierWarnings = UltrafastTierWarnings(
+        binding.storage.tokenCount.cacheNonce.value,
+        minOf(binding.latestIndex.value, binding.storage.tokenCount.latestIndex.value),
+        binding.tokenCount.value?.diagnostics?.responseId,
+    )
     override val composer: ComposerViewModel = createRpcComposerViewModel(
         binding = binding,
         ownerScope = local,
@@ -184,6 +190,27 @@ private class RpcAgentViewModel(
         local.launch {
             binding.shellSessions.collect(::updateShells)
         }
+        local.launch {
+            val timeline = binding.storage.tokenCount
+            combine(binding.latestIndex, timeline.cacheNonce, timeline.latestIndex) { position, nonce, _ ->
+                position to nonce
+            }.collect { (position, nonce) ->
+                try {
+                    val index = timeline.floorToIndex(position) ?: -1
+                    val snapshot = if (index >= 0) timeline.getExact(index) else null
+                    // A revert while reading must not associate an old record with a new epoch.
+                    if (nonce == timeline.cacheNonce.value && position == binding.latestIndex.value) {
+                        tierWarnings.observe(index, nonce, snapshot)?.let(::warnServiceTier)
+                    }
+                } catch (_: CacheNonceMismatch) {
+                    // The existing nonce flow will publish the replacement epoch.
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Throwable) {
+                    report(error)
+                }
+            }
+        }
     }
 
     private fun updateShells(snapshot: Map<Int, ShellSessionState>) {
@@ -258,6 +285,16 @@ private class RpcAgentViewModel(
         if (!owner.isActive) return
         mutableNotification.value = AgentNotification(
             ++notificationId, AgentNotificationLevel.Error, "Session operation failed.", error.message,
+        )
+    }
+
+    private fun warnServiceTier(detail: String) {
+        if (!owner.isActive) return
+        val current = mutableNotification.value
+        if (current?.level == AgentNotificationLevel.Error) return
+        mutableNotification.compareAndSet(
+            current,
+            AgentNotification(++notificationId, AgentNotificationLevel.Warning, "Ultrafast was not reported.", detail),
         )
     }
 
