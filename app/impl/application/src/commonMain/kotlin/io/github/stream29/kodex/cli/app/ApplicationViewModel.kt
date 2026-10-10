@@ -47,6 +47,27 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.io.files.Path
 
 /**
+ * Creates the navigation/popup owner using the same typed ports as the CLI host.
+ * The caller owns [ownerScope] and must close and shut down the returned owner.
+ * No renderer, RPC transport or backend lifetime is created here.
+ */
+public fun createApplicationViewModel(
+    sessions: PersistedSessionViewModelRegistry,
+    newSessionFactory: NewSessionViewModelFactory,
+    catalogFactory: SessionCatalogViewModelFactory,
+    catalogDependencies: SessionCatalogDependencies,
+    settingsFactory: SettingsViewModelFactory,
+    loginFactory: OpenAiLoginViewModelFactory,
+    createDirectoryPicker: (Path) -> DirectoryPickerViewModel,
+    newSessionArguments: (ordinal: Int) -> NewSessionViewModelArguments,
+    ownerScope: CoroutineScope,
+): ApplicationViewModel = ApplicationViewModelImpl(
+    sessions, newSessionFactory, catalogFactory, catalogDependencies,
+    settingsFactory, loginFactory, createDirectoryPicker, newSessionArguments,
+    ownerScope,
+)
+
+/**
  * Owns only application navigation, popup identity, and child lifetimes.
  *
  * Every suspending command is serialized. Child work may suspend while the

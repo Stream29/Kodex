@@ -8,6 +8,13 @@ import io.github.stream29.kodex.cli.settings.SidebarSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
 
+/** Binds sidebar presentation to the existing settings and caller-owned scope. */
+public fun createSidebarSettingsViewModel(
+    global: RpcGlobalSettings,
+    scope: CoroutineScope,
+    initialized: Boolean,
+): SidebarSettingsViewModel = SidebarSettingsViewModelImpl(global, scope, initialized)
+
 /** Contents persist locally; widths belong to this frontend invocation only. */
 internal class SidebarSettingsViewModelImpl(
     private val global: RpcGlobalSettings,

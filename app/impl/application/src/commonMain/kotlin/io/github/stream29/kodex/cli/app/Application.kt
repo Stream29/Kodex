@@ -107,7 +107,7 @@ public suspend fun <R> withKodexApplication(
                     }
                     val settings = RpcGlobalSettings.open(services.global, frontendStore, frontendScope, applicationWidth ?: 0)
                         .also { global = it }
-                    lateinit var root: ApplicationViewModelImpl
+                    lateinit var root: ApplicationViewModel
                     val sessionViews = RpcSessionViews(frontendScope, services, settings.models) { created ->
                         frontendScope.launch {
                             try { root.openCreatedSessions(created.map { it.sessionIndex }) }
@@ -118,7 +118,7 @@ public suspend fun <R> withKodexApplication(
                     val sessions = DefaultPersistedSessionViewModelRegistry(sessionViews, settings.models, frontendScope)
                     val draftFactory = DefaultNewSessionViewModelFactory(sessionViews, sessions, settings.models, frontendScope)
                     val directoryPicker = { path: Path -> createDirectoryPickerViewModel(path, frontendScope) }
-                    root = ApplicationViewModelImpl(
+                    root = createApplicationViewModel(
                         sessions, draftFactory,
                         SessionCatalogViewModelFactory { dependencies, interactions ->
                             DefaultSessionCatalogViewModel(frontendScope, dependencies, interactions)
@@ -180,7 +180,7 @@ public suspend fun <R> withKodexApplication(
                         root, frontendStore.settings.map { it.newLineKey }.stateIn(
                             frontendScope, SharingStarted.Eagerly, frontendStore.settings.value.newLineKey,
                         ),
-                        SidebarSettingsViewModelImpl(settings, frontendScope, applicationWidth != null),
+                        createSidebarSettingsViewModel(settings, frontendScope, applicationWidth != null),
                         reportUnhandledError,
                     )
                     onPhase(ApplicationStartupPhase.FrontendReady)

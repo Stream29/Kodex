@@ -1,21 +1,11 @@
 plugins {
     id("kodex.kmp-viewmodel")
-    // JVM boundary tests mount the real root renderer; its @Composable lambdas
-    // require compiler lowering, although production ownership stays UI-free.
-    id("org.jetbrains.kotlin.plugin.compose")
     id("kodex.kmp-tests")
 }
 
 kotlin {
     sourceSets {
-        jvmTest.dependencies {
-            implementation(project(":app-impl-view"))
-            implementation(libs.mosaic.testing)
-        }
         commonMain.dependencies {
-            // Compiler-only runtime symbols for lowering JVM test lambdas.
-            // Production sources do not import or own Mosaic widget state.
-            compileOnly(libs.mosaic.runtime)
             implementation(project(":app-component-session-settings-impl-viewmodel"))
             implementation(project(":app-component-working-directory-impl-viewmodel"))
             implementation(project(":app-component-session-rename-impl-viewmodel"))

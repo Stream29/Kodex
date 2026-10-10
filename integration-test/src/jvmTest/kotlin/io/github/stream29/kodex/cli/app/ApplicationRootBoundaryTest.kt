@@ -10,6 +10,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
+import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.app.session.contract.*
 import io.github.stream29.kodex.app.sessioncatalog.DefaultSessionCatalogViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModelFactory
@@ -231,13 +232,13 @@ private class BoundarySession(
 private class BoundaryRoot(
     val root: Path,
     val services: RpcServices,
-    val application: ApplicationViewModelImpl,
+    val application: ApplicationViewModel,
     val global: RpcGlobalSettings,
     scope: CoroutineScope,
     val historyIndex: Int,
 ) {
     val newLineKey = MutableStateFlow(NewLineKey.ShiftEnter)
-    val sidebar = SidebarSettingsViewModelImpl(global, scope, initialized = true)
+    val sidebar = createSidebarSettingsViewModel(global, scope, initialized = true)
 }
 
 private suspend fun withBoundaryRoot(
@@ -285,7 +286,7 @@ private suspend fun withBoundaryRoot(
                         actualSessions.delete(sessionIndex).also { if (it) handles.remove(sessionIndex) }
                 }
                 val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(root), local, 120)
-                val app = ApplicationViewModelImpl(
+                val app = createApplicationViewModel(
                     sessions, DefaultNewSessionViewModelFactory(views, sessions, models, local),
                     SessionCatalogViewModelFactory { dependencies, interactions ->
                         DefaultSessionCatalogViewModel(local, dependencies, interactions)
