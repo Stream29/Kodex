@@ -252,6 +252,7 @@ public class OpenAiClient(
             request.clientMetadata?.turnMetadata?.let { headers[HeaderCodexTurnMetadata] = it }
             request.clientMetadata?.windowId?.let { headers[HeaderCodexWindowId] = it }
             turnState?.let { headers[HeaderCodexTurnState] = it }
+            ultrafastRouting(request)
             setBody(request)
         }
     }
@@ -275,6 +276,7 @@ public class OpenAiClient(
                 request.clientMetadata?.installationId?.let { headers[HeaderCodexInstallationId] = it }
                 request.clientMetadata?.turnMetadata?.let { headers[HeaderCodexTurnMetadata] = it }
                 request.clientMetadata?.windowId?.let { headers[HeaderCodexWindowId] = it }
+                ultrafastRouting(request)
                 setBody(request)
             }.collectRemoteCompactionV2Response()
         }
@@ -361,6 +363,13 @@ private fun OpenAiAuthState.Unavailable.requestFailureMessage(): String =
         }
 
 private const val RemoteCompactionV2Feature: String = "remote_compaction_v2"
+/** Request-local routing from the exact body snapshot, never from live settings. */
+private fun HttpRequestBuilder.ultrafastRouting(request: ResponsesApiRequest) {
+    if (request.serviceTier == ServiceTier.Ultrafast) {
+        headers["x-codex-routing-hint"] = "model=${request.model.value};tier=${request.serviceTier.requestValue}"
+    }
+}
+
 private const val HeaderCodexBetaFeatures: String = "x-codex-beta-features"
 private const val HeaderCodexInstallationId: String = "x-codex-installation-id"
 private const val HeaderCodexTurnMetadata: String = "x-codex-turn-metadata"

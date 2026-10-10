@@ -23,6 +23,11 @@ public value class OpenAiModelId(public val value: String) {
  * [Default] is the request/config sentinel for explicit standard routing. It is
  * not a catalog service tier id.
  *
+ * A selection records requested routing, not account entitlement or the tier
+ * actually reported by the provider. [Ultrafast] is an explicit opt-in to
+ * higher usage and requires model and account access; it is independent of
+ * [ReasoningEffort].
+ *
  * @property requestValue Wire value accepted by the Responses API.
  */
 @Serializable
@@ -35,4 +40,7 @@ public enum class ServiceTier(public val requestValue: String) {
 
     @SerialName("flex")
     Flex("flex"),
+
+    @SerialName("ultrafast")
+    Ultrafast("ultrafast"),
 }

@@ -8,7 +8,12 @@ import io.github.stream29.kodex.openai.ServiceTier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
-/** Four runtime-editable values, not a complete settings snapshot or a writable settings store. */
+/**
+ * Four runtime-editable values, not a complete settings snapshot or a writable settings store.
+ *
+ * [tier] is the owner's requested configuration, not the provider-reported
+ * tier or proof that the current account can use it.
+ */
 public data class RuntimeConfiguration(
     public val model: OpenAiModelId,
     public val reasoning: ReasoningEffort,
@@ -63,6 +68,7 @@ public interface RuntimeConfigurationDependencies {
  * absent/empty they contain only the CURRENT configuration's effort. Tiers use the canonical
  * ModelInfo.availableServiceTiers order, always including Default; missing metadata gives Default.
  * Capability choices never correct the saved configuration, even when it is not among them.
+ * Ultrafast requires its exact id in the metadata; a menu capability is not account entitlement.
  */
 public data class RuntimeConfigurationModelOption(
     public val model: OpenAiModelId,
@@ -85,6 +91,8 @@ public data class RuntimeConfigurationModelOption(
  * otherwise the first effort; initial tier focus is the saved tier for the current model/effort if
  * available, otherwise Default. Questions uses enum order and sends only mode. Focus, anchors and
  * open menus belong to the renderer; Escape dismisses a menu level without any write.
+ * An Ultrafast leaf explains its higher usage and required model/account access before submission;
+ * the trigger still displays the requested configuration rather than claiming actual execution.
  * [closed] freezes the last projection and renders nothing, including no host-level menus.
  */
 public data class RuntimeConfigurationState(

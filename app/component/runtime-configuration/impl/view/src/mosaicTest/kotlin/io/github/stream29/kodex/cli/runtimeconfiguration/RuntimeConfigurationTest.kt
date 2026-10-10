@@ -45,6 +45,8 @@ val runtimeConfigurationRendererTest by testSuite {
         assertEquals("gpt-5.6-sol max fast", runtimeConfigurationLabel(model, ReasoningEffort.Max, ServiceTier.Fast))
         assertEquals("gpt-5.6-sol custom flex",
             runtimeConfigurationLabel(model, ReasoningEffort.Custom("custom"), ServiceTier.Flex))
+        assertEquals("gpt-5.6-sol max ultrafast",
+            runtimeConfigurationLabel(model, ReasoningEffort.Max, ServiceTier.Ultrafast))
         assertEquals("ask user", runtimeRequestUserInputModeLabel(RequestUserInputMode.AskUser))
         assertEquals("no question", runtimeRequestUserInputModeLabel(RequestUserInputMode.NoQuestion))
     }
@@ -98,6 +100,36 @@ val runtimeConfigurationRendererTest by testSuite {
         }
         assertEquals(listOf(RequestUserInputMode.NoQuestion), vm.modes)
         assertTrue(vm.tuples.isEmpty())
+    }
+    test("Ultrafast advertises usage and access before opt-in on a narrow menu") {
+        val vm = RuntimeFakeViewModel()
+        vm.state.value = vm.state.value.copy(modelOptions = listOf(
+            RuntimeConfigurationModelOption(
+                OpenAiModelId("test-model"), listOf(ReasoningEffort.Max), ServiceTier.entries.toList(),
+            ),
+        ))
+        runMosaicTest {
+            val initial = setContentAndSnapshot {
+                val dropdowns = RuntimeConfigurationDropdowns.remember(vm)
+                TuiPopupHost(modifier = Modifier.width(32).height(14)) {
+                    RuntimeConfigurationTriggers(vm, dropdowns)
+                    RuntimeConfigurationMenus(vm, dropdowns)
+                }
+            }
+            click(initial.indexOf("[test-model max]") + 1)
+            awaitSnapshotContaining("[test-model >]")
+            sendKeyEvent(KeyboardEvent(KeyboardEvent.Right))
+            awaitSnapshotContaining("[max >]")
+            sendKeyEvent(KeyboardEvent(KeyboardEvent.Right))
+            val menu = awaitSnapshotContaining("higher usage")
+            assertTrue("access/model support" in menu, menu)
+            assertTrue("required" in menu, menu)
+            assertTrue(vm.tuples.isEmpty())
+            repeat(3) { sendKeyEvent(KeyboardEvent(KeyboardEvent.Down)) }
+            sendKeyEvent(KeyboardEvent(codepoint = 13))
+            awaitSnapshotContaining("[test-model max ultrafast]")
+            assertEquals(listOf(MenuTuple(OpenAiModelId("test-model"), ReasoningEffort.Max, ServiceTier.Ultrafast)), vm.tuples)
+        }
     }
     test("selected model effort and tier focus bypass first descendant options and Escape never writes") {
         val vm = RuntimeFakeViewModel()

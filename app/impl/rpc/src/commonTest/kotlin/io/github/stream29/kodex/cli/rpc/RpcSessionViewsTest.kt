@@ -902,6 +902,7 @@ internal suspend fun frontend(
     response: suspend FlowCollector<ResponsesStreamEvent>.() -> Unit = { answer() },
     decorate: (RpcClient) -> RpcClient = { it },
     login: OpenAiLoginClient = FixtureLoginClient(),
+    onRequest: (ResponsesApiRequest) -> Unit = {},
     block: suspend FrontendFixture.() -> Unit,
 ) = withContext(Dispatchers.Default.limitedParallelism(1)) { withTimeout(40.seconds) {
     // Interaction commands and child observations share a serialized owner dispatcher,
@@ -911,7 +912,7 @@ internal suspend fun frontend(
         listModels { OpenAiResult.Success(ModelsResponse(listOf(ModelInfo(
             OpenAiModelId("test-model"), "Test Model", contextWindow = 100_000, maxContextWindow = 100_000,
         )))) }
-        createResponse { flow { response() } }
+        createResponse { request -> onRequest(request); flow { response() } }
     }
     try {
         withBackendServices(

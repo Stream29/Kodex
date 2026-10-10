@@ -220,7 +220,16 @@ public fun BoxScope.SuggestSubagentTaskConfigurationMenus(
                                                 state.callId, model, effort, tier,
                                             )
                                         },
-                                    ) { Text(tier.displayName()) }
+                                    ) {
+                                        if (tier == ServiceTier.Ultrafast) {
+                                            Column {
+                                                Text("ultrafast")
+                                                Text("higher usage")
+                                                Text("access/model support")
+                                                Text("required")
+                                            }
+                                        } else Text(tier.displayName())
+                                    }
                                 }
                             },
                         ) { Text(effort.displayName()) }
@@ -338,6 +347,7 @@ private fun ServiceTier.displayName(): String = when (this) {
     ServiceTier.Default -> "default"
     ServiceTier.Fast -> "fast"
     ServiceTier.Flex -> "flex"
+    ServiceTier.Ultrafast -> "ultrafast"
 }
 
 private fun RequestUserInputMode.displayName(): String = when (this) {

@@ -19,8 +19,9 @@ import kotlinx.serialization.json.JsonObject
  * response chain; `null` means no previous response is referenced.
  * @property reasoning Reasoning controls. The default value is omitted from
  * the wire.
- * @property serviceTier Service tier selection. [ServiceTier.Default] is
- * omitted from the wire.
+ * @property serviceTier Requested service tier. [ServiceTier.Default] is
+ * omitted from the wire; [ServiceTier.Ultrafast] is encoded as `ultrafast`.
+ * Transport routing headers are derived by the client, not stored in this DTO.
  * @property promptCacheKey Nullable because prompt cache affinity is optional;
  * `null` means no cache key is sent.
  * @property text Text controls. The default value is omitted from the wire.
@@ -60,6 +61,9 @@ public data class ResponsesApiRequest(
 /**
  * @property usage Nullable because providers may omit token usage; `null`
  * means usage was not reported.
+ * @property serviceTier Provider-reported service tier, independent of the
+ * requested tier. Nullable because the provider may omit it; `null` means
+ * unknown, not that the requested tier was used. Unknown strings are retained.
  * @property outputText Nullable because not every response includes flattened
  * output text; `null` means only structured output is available.
  * @property endTurn Nullable because the provider may omit turn-end metadata;

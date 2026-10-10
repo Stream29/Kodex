@@ -14,6 +14,9 @@ import kotlinx.serialization.Serializable
  * the request-facing fields into a [ResponsesApiRequest].
  *
  * @property model Model identifier used for the next Responses API request.
+ * @property serviceTier Requested routing for ordinary Responses and remote
+ * compaction built from this snapshot. It is not provider-reported routing or
+ * account entitlement. Missing values retain [ServiceTier.Default].
  * @property cwd Session working directory used to resolve project context and
  * relative paths for local tools. `Path(".")` is retained only as the
  * compatibility fallback for settings written before this field existed.

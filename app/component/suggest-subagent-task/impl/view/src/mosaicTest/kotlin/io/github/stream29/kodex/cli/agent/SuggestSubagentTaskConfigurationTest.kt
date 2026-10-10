@@ -16,6 +16,8 @@ import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskSubmission
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskViewModel
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.openai.ModelInfo
+import io.github.stream29.kodex.openai.ModelServiceTier
+import io.github.stream29.kodex.openai.ReasoningEffortPreset
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.openai.RequestUserInputMode
@@ -136,6 +138,41 @@ val suggestSubagentTaskConfigurationTest by testSuite {
             assertFalse(dropdowns.requestUserInputMode.expanded)
             assertTrue(model.modeEdits.isEmpty())
             assertTrue(model.modelEdits.isEmpty())
+        }
+    }
+
+    test("Ultrafast capability is an explicit child tuple with a usage and access hint") {
+        val model = ConfigurationRendererModel(rendererConfiguration())
+        model.models.value = listOf(ModelInfo(
+            OpenAiModelId("test"), "Test",
+            supportedReasoningLevels = listOf(ReasoningEffortPreset(ReasoningEffort.Low, "Low")),
+            serviceTiers = listOf(ModelServiceTier("ultrafast", "Ultrafast", "Higher usage")),
+        ))
+        lateinit var dropdowns: SuggestSubagentTaskDropdowns
+        runMosaicTest {
+            setContentAndSnapshot {
+                dropdowns = SuggestSubagentTaskDropdowns.remember(model, "suggestion")
+                TuiPopupHost(Modifier.width(90).height(18)) {
+                    val pending = model.state.value as SuggestSubagentTaskState.Pending
+                    SuggestSubagentTaskPanel(model, pending, 90, 12, dropdowns, {})
+                    SuggestSubagentTaskConfigurationMenus(model, pending, dropdowns)
+                }
+            }
+            dropdowns.model.expand()
+            awaitSnapshot()
+            sendKeyEvent(KeyboardEvent(codepoint = 57351))
+            awaitSnapshot()
+            sendKeyEvent(KeyboardEvent(codepoint = 57351))
+            val menu = awaitSnapshot()
+            assertTrue("higher usage" in menu, menu)
+            assertTrue("access/model support" in menu, menu)
+            assertTrue(model.modelEdits.isEmpty())
+            sendKeyEvent(KeyboardEvent(codepoint = 57353))
+            sendKeyEvent(KeyboardEvent(codepoint = 13))
+            awaitSnapshot()
+            val chosen = rendererConfiguration().copy(serviceTier = ServiceTier.Ultrafast)
+            assertEquals(listOf("suggestion" to chosen), model.modelEdits)
+            assertEquals("test low ultrafast", suggestionConfigurationLabel(chosen))
         }
     }
 }

@@ -43,6 +43,7 @@ val sessionSettingsComponentTest by testSuite {
                     }
                     assertTrue("[Rename]" in snapshot, snapshot)
                     assertTrue("[Browse]" in snapshot, snapshot)
+                    assertTrue("higher usage" in snapshot, snapshot)
                     assertTrue(ports.writes.isEmpty())
                     assertTrue(ports.renames.isEmpty())
                 }
@@ -72,9 +73,9 @@ val sessionSettingsComponentTest by testSuite {
                 snapshot = snapshotWith("Reasoning [max]")
                 clickText(snapshot, "Service tier [default]", "Service tier [".length)
                 snapshot = snapshotWith("[flex")
-                for (tier in listOf("default", "fast", "flex")) assertTrue("[$tier" in snapshot, snapshot)
-                clickText(snapshot, "[flex")
-                snapshot = snapshotWith("Service tier [flex]")
+                for (tier in listOf("default", "fast", "flex", "ultrafast")) assertTrue("[$tier" in snapshot, snapshot)
+                clickText(snapshot, "[ultrafast")
+                snapshot = snapshotWith("Service tier [ultrafast]")
                 clickText(snapshot, "Questions [ask user]", "Questions [".length)
                 snapshot = snapshotWith("[no question")
                 assertTrue("[ask user" in snapshot, snapshot)
@@ -84,7 +85,7 @@ val sessionSettingsComponentTest by testSuite {
                 val settings = assertIs<SessionSettingsDataState.Available>(ports.state.value).snapshot.configuration
                 assertEquals(OpenAiModelId("catalog-a"), settings.model)
                 assertEquals(ReasoningEffort.Max, settings.reasoningEffort)
-                assertEquals(ServiceTier.Flex, settings.serviceTier)
+                assertEquals(ServiceTier.Ultrafast, settings.serviceTier)
                 assertEquals(RequestUserInputMode.NoQuestion, settings.requestUserInputMode)
                 assertEquals(Path("/original"), settings.workingDirectory)
             }

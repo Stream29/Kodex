@@ -31,7 +31,7 @@ val suggestedSessionCreationValuesTest by testSuite {
             cwd = Path("/fixture/project"),
             threadName = "input title",
             reasoning = Reasoning(effort = ReasoningEffort.Low),
-            serviceTier = ServiceTier.Default,
+            serviceTier = ServiceTier.Ultrafast,
             requestUserInputMode = RequestUserInputMode.AskUser,
             autoCompactionTokenLimit = 12345,
             instructions = "Additional settings stay in the original model.",

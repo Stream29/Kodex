@@ -37,6 +37,15 @@ import kotlinx.coroutines.flow.Flow
  * responses; authentication, transport, decoding, and cancellation failures
  * propagate instead of becoming a successful payload. Responses operations
  * expose protocol events as a [Flow], not a synthesized response object.
+ *
+ * Responses operations preserve the explicitly requested service tier rather
+ * than substituting another tier or omitting a non-default selection. For
+ * [ServiceTier.Ultrafast] on the Codex backend, ordinary generation and remote
+ * compaction send `service_tier="ultrafast"` and
+ * `x-codex-routing-hint: model=<request model>;tier=ultrafast`, derived from
+ * the same request snapshot. This Ultrafast routing header is request-local:
+ * other tiers and unrelated operations do not inherit it. The Codex backend
+ * path does not add the API-specific `OpenAI-Service-Tier` header.
  */
 public interface OpenAiClient : AutoCloseable {
     /**
@@ -118,7 +127,9 @@ public interface OpenAiClient : AutoCloseable {
      * @param parallelToolCalls Whether parallel tool calls are allowed.
      * @param reasoning Reasoning effort and summary controls.
      * @param include Optional response expansions.
-     * @param serviceTier Requested service tier.
+     * @param serviceTier Requested service tier, preserved for this operation
+     * without a client-side downgrade. It does not prove model/account access
+     * or the tier actually reported in a response.
      * @param promptCacheKey Optional prompt-cache affinity key.
      * @param text Text output controls.
      * @param installationId Optional Codex installation identity.
@@ -162,9 +173,11 @@ public interface OpenAiClient : AutoCloseable {
      * Runs a remote compaction request and returns its completed output.
      * Unlike ordinary Responses, this operation collects the stream within
      * the call and does not return a partial result on protocol failure.
-     * Request-specific Codex headers for this operation are derived
-     * exclusively from [request.clientMetadata]; the remote-compaction beta
-     * header remains owned by the client implementation.
+     * Codex identity headers are derived exclusively from
+     * [request.clientMetadata]. Ultrafast routing is derived from
+     * [request.model] and [request.serviceTier] using the same rule as ordinary
+     * generation; neither is reread from live settings. The remote-compaction
+     * beta header remains owned by the client implementation.
      *
      * @throws IllegalStateException if authentication is unavailable.
      * @throws OpenAiRemoteCompactionV2ProtocolException if the stream contains

@@ -87,6 +87,7 @@ public fun SessionSettingsPanel(
                 )
                 SettingsDropdownField(
                     "Service tier", configuration.serviceTier.label(), dropdowns.serviceTier, enabled = snapshot.editable,
+                    supportingText = "Ultrafast: higher usage; account access and model support required.",
                 )
                 SettingsDropdownField(
                     "Questions", configuration.requestUserInputMode.label(), dropdowns.questions,
@@ -174,6 +175,7 @@ private fun ServiceTier.label(): String = when (this) {
     ServiceTier.Default -> "default"
     ServiceTier.Fast -> "fast"
     ServiceTier.Flex -> "flex"
+    ServiceTier.Ultrafast -> "ultrafast"
 }
 private fun RequestUserInputMode.label(): String = when (this) {
     RequestUserInputMode.AskUser -> "ask user"
