@@ -1,7 +1,6 @@
 plugins {
     kotlin("multiplatform")
     `maven-publish`
-    id("de.infix.testBalloon")
 }
 
 configureCoordinates()
@@ -9,7 +8,6 @@ configureCoordinates()
 kotlin {
     configureCompiler()
     configureHostTargets()
-    configureCommonTests(project)
 
     js {
         nodejs {

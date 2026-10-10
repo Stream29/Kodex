@@ -4,6 +4,7 @@ import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
 
 plugins {
     id("kodex.kmp-host")
+    id("kodex.kmp-tests")
 }
 
 kotlin {

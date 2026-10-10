@@ -1,4 +1,4 @@
-plugins { id("kodex.kmp-viewmodel") }
+plugins { id("kodex.kmp-viewmodel"); id("kodex.kmp-tests") }
 
 kotlin {
     sourceSets {

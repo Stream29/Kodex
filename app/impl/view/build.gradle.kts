@@ -1,5 +1,6 @@
 plugins {
     id("kodex.kmp-view")
+    id("kodex.kmp-tests")
 }
 
 kotlin {

@@ -6,6 +6,7 @@ import org.jetbrains.kotlin.konan.target.Family
 
 plugins {
     id("kodex.kmp-host")
+    id("kodex.kmp-tests")
 }
 
 kotlin {

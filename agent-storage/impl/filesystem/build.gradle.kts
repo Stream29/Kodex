@@ -5,6 +5,7 @@ import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
 plugins {
     id("kodex.kmp-host")
     alias(libs.plugins.kotlin.serialization)
+    id("kodex.kmp-tests")
 }
 
 kotlin {

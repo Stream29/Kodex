@@ -3,6 +3,7 @@ plugins {
     // JVM boundary tests mount the real root renderer; its @Composable lambdas
     // require compiler lowering, although production ownership stays UI-free.
     id("org.jetbrains.kotlin.plugin.compose")
+    id("kodex.kmp-tests")
 }
 
 kotlin {

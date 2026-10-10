@@ -2,6 +2,7 @@ plugins {
     id("kodex.kmp-cli")
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.kotlinx.rpc)
+    id("kodex.kmp-tests")
 }
 
 kotlin {

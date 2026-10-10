@@ -2,6 +2,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
 
 plugins {
     id("kodex.kmp-cli")
+    id("kodex.kmp-tests")
 }
 
 val generatedVersionDirectory =

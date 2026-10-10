@@ -1,6 +1,7 @@
 plugins {
     id("kodex.kmp-shared")
     alias(libs.plugins.kotlin.serialization)
+    id("kodex.kmp-tests")
 }
 
 kotlin {
