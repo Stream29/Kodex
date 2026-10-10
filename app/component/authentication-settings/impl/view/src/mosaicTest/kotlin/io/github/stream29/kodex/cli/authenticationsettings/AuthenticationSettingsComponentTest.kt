@@ -61,6 +61,9 @@ val authenticationSettingsComponentTest by testSuite {
         SettingsAuthenticationState.Authenticated(
             email = "safe@example.test", accountId = "hidden-account", planType = OpenAiSubscriptionPlan.Pro,
         ) to "Signed in as safe@example.test",
+        SettingsAuthenticationState.Authenticated(
+            email = "promax@example.test", accountId = "hidden-account", planType = OpenAiSubscriptionPlan.ProMax,
+        ) to "Signed in as promax@example.test",
         SettingsAuthenticationState.Authenticated(accountId = "account") to "Signed in as account account",
         SettingsAuthenticationState.Authenticated() to "Signed in",
     )) {
@@ -79,7 +82,11 @@ val authenticationSettingsComponentTest by testSuite {
                 assertTrue("[Log out]" in snapshot, snapshot)
                 assertTrue("Maintained by the backend" in snapshot, snapshot)
                 assertFalse("hidden-account" in snapshot, snapshot)
-                if (auth.planType != null) assertTrue("Plan: pro" in snapshot, snapshot)
+                if (auth.planType != null) {
+                    assertTrue("Plan: ${auth.planType.rawValue}" in snapshot, snapshot)
+                } else {
+                    assertFalse("Plan:" in snapshot, snapshot)
+                }
             }
         }
     }

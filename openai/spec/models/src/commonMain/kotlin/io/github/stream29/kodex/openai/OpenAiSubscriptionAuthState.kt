@@ -40,6 +40,14 @@ public data class OpenAiSubscriptionAuthState(
     public val email: String? = null,
 )
 
+/**
+ * Known subscription claims, corresponding to Codex protocol's `KnownPlan`.
+ * [rawValue] is the backend/JWT spelling; enum serialization retains the
+ * existing Kotlin names used by authentication-summary RPC values.
+ * [ProMax] recognizes `promax` without asserting model or service-tier access.
+ * Unknown raw claims remain nullable through [fromRawValue] and do not make
+ * otherwise usable subscription credentials unavailable.
+ */
 @Serializable
 public enum class OpenAiSubscriptionPlan(public val rawValue: String) {
     Free("free"),
@@ -53,6 +61,7 @@ public enum class OpenAiSubscriptionPlan(public val rawValue: String) {
     EnterpriseCbpUsageBased("enterprise_cbp_usage_based"),
     Enterprise("enterprise"),
     Edu("edu"),
+    ProMax("promax"),
     ;
 
     public companion object {
