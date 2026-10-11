@@ -3,7 +3,6 @@ import org.gradle.authentication.http.BasicAuthentication
 
 pluginManagement {
     includeBuild("build-logic")
-
     repositories {
         google()
         mavenCentral()

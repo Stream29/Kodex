@@ -1,4 +1,5 @@
 plugins {
+    id("kodex.krpc-utils-patch")
     id("kodex.kmp-cli")
     alias(libs.plugins.kotlin.serialization)
     id("kodex.kmp-tests")

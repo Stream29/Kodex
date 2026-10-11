@@ -1,4 +1,4 @@
-plugins { id("kodex.kmp-cli"); id("kodex.kmp-tests") }
+plugins { id("kodex.kmp-cli"); id("kodex.kmp-tests"); id("kodex.krpc-utils-patch") }
 
 kotlin {
     sourceSets {

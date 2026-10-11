@@ -1,4 +1,5 @@
 plugins {
+    id("kodex.krpc-utils-patch")
     id("kodex.kmp-view")
     id("kodex.kmp-tests")
 }
