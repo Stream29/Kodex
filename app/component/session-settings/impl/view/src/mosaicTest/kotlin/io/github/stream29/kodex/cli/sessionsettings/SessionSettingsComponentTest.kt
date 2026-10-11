@@ -43,7 +43,9 @@ val sessionSettingsComponentTest by testSuite {
                     }
                     assertTrue("[Rename]" in snapshot, snapshot)
                     assertTrue("[Browse]" in snapshot, snapshot)
-                    assertTrue("higher usage" in snapshot, snapshot)
+                    assertFalse("Ultrafast:" in snapshot, snapshot)
+                    assertFalse("higher usage" in snapshot, snapshot)
+                    assertFalse("account access" in snapshot, snapshot)
                     assertTrue(ports.writes.isEmpty())
                     assertTrue(ports.renames.isEmpty())
                 }
@@ -76,6 +78,8 @@ val sessionSettingsComponentTest by testSuite {
                 for (tier in listOf("default", "fast", "flex", "ultrafast")) assertTrue("[$tier" in snapshot, snapshot)
                 clickText(snapshot, "[ultrafast")
                 snapshot = snapshotWith("Service tier [ultrafast]")
+                assertFalse("higher usage" in snapshot, snapshot)
+                assertFalse("account access" in snapshot, snapshot)
                 clickText(snapshot, "Questions [ask user]", "Questions [".length)
                 snapshot = snapshotWith("[no question")
                 assertTrue("[ask user" in snapshot, snapshot)

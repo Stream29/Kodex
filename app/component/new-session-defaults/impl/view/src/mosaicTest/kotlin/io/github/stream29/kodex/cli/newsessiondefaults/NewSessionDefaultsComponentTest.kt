@@ -44,7 +44,9 @@ val newSessionDefaultsComponentTest by testSuite {
                     previous = next
                 }
                 assertFalse("Working directory" in snapshot, snapshot)
-                assertTrue("higher usage" in snapshot, snapshot)
+                assertFalse("Ultrafast:" in snapshot, snapshot)
+                assertFalse("higher usage" in snapshot, snapshot)
+                assertFalse("account access" in snapshot, snapshot)
                 assertTrue(ports.admissions.isEmpty())
             }
         }
@@ -74,6 +76,8 @@ val newSessionDefaultsComponentTest by testSuite {
                 for (tier in listOf("default", "fast", "flex", "ultrafast")) assertTrue("[$tier" in snapshot, snapshot)
                 clickDefaults(snapshot, "[ultrafast")
                 snapshot = defaultsSnapshot("Service tier [ultrafast]")
+                assertFalse("higher usage" in snapshot, snapshot)
+                assertFalse("account access" in snapshot, snapshot)
                 clickDefaults(snapshot, "Questions [ask user]", "Questions [".length)
                 snapshot = defaultsSnapshot("[no question")
                 assertTrue("[ask user" in snapshot, snapshot)

@@ -221,14 +221,7 @@ public fun BoxScope.SuggestSubagentTaskConfigurationMenus(
                                             )
                                         },
                                     ) {
-                                        if (tier == ServiceTier.Ultrafast) {
-                                            Column {
-                                                Text("ultrafast")
-                                                Text("higher usage")
-                                                Text("access/model support")
-                                                Text("required")
-                                            }
-                                        } else Text(tier.displayName())
+                                        Text(tier.displayName())
                                     }
                                 }
                             },

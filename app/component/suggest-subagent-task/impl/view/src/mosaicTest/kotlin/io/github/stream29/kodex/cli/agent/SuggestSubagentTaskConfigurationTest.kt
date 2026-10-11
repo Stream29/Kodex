@@ -141,7 +141,7 @@ val suggestSubagentTaskConfigurationTest by testSuite {
         }
     }
 
-    test("Ultrafast capability is an explicit child tuple with a usage and access hint") {
+    test("Ultrafast capability uses a name-only leaf and submits an explicit child tuple") {
         val model = ConfigurationRendererModel(rendererConfiguration())
         model.models.value = listOf(ModelInfo(
             OpenAiModelId("test"), "Test",
@@ -164,8 +164,10 @@ val suggestSubagentTaskConfigurationTest by testSuite {
             awaitSnapshot()
             sendKeyEvent(KeyboardEvent(codepoint = 57351))
             val menu = awaitSnapshot()
-            assertTrue("higher usage" in menu, menu)
-            assertTrue("access/model support" in menu, menu)
+            assertTrue(Regex("""\[ultrafast *]""").containsMatchIn(menu), menu)
+            assertFalse("higher usage" in menu, menu)
+            assertFalse("access/model support" in menu, menu)
+            assertFalse("required" in menu, menu)
             assertTrue(model.modelEdits.isEmpty())
             sendKeyEvent(KeyboardEvent(codepoint = 57353))
             sendKeyEvent(KeyboardEvent(codepoint = 13))

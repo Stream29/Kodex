@@ -188,15 +188,7 @@ public fun BoxScope.RuntimeConfigurationMenus(
                                             effort == configuration.reasoning && tier == configuration.tier,
                                         onClick = { onConfigurationSelected(model, effort, tier) },
                                     ) {
-                                        if (tier == ServiceTier.Ultrafast) {
-                                            Column {
-                                                Text("ultrafast")
-                                                Text("higher usage")
-                                                Text("access/model")
-                                                Text("support")
-                                                Text("required")
-                                            }
-                                        } else Text(runtimeServiceTierLabel(tier))
+                                        Text(runtimeServiceTierLabel(tier))
                                     }
                                 }
                             },

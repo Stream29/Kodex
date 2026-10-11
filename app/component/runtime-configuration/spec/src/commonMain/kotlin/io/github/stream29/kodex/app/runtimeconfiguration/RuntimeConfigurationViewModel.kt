@@ -91,8 +91,8 @@ public data class RuntimeConfigurationModelOption(
  * otherwise the first effort; initial tier focus is the saved tier for the current model/effort if
  * available, otherwise Default. Questions uses enum order and sends only mode. Focus, anchors and
  * open menus belong to the renderer; Escape dismisses a menu level without any write.
- * An Ultrafast leaf explains its higher usage and required model/account access before submission;
- * the trigger still displays the requested configuration rather than claiming actual execution.
+ * Tier leaves display only their names, including Ultrafast; the trigger displays the requested
+ * configuration rather than claiming actual execution.
  * [closed] freezes the last projection and renders nothing, including no host-level menus.
  */
 public data class RuntimeConfigurationState(

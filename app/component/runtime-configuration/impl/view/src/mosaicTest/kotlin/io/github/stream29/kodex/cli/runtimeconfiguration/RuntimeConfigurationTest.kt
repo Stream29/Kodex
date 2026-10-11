@@ -101,7 +101,7 @@ val runtimeConfigurationRendererTest by testSuite {
         assertEquals(listOf(RequestUserInputMode.NoQuestion), vm.modes)
         assertTrue(vm.tuples.isEmpty())
     }
-    test("Ultrafast advertises usage and access before opt-in on a narrow menu") {
+    test("Ultrafast uses a name-only leaf and submits its tuple on a narrow menu") {
         val vm = RuntimeFakeViewModel()
         vm.state.value = vm.state.value.copy(modelOptions = listOf(
             RuntimeConfigurationModelOption(
@@ -121,10 +121,11 @@ val runtimeConfigurationRendererTest by testSuite {
             sendKeyEvent(KeyboardEvent(KeyboardEvent.Right))
             awaitSnapshotContaining("[max >]")
             sendKeyEvent(KeyboardEvent(KeyboardEvent.Right))
-            val menu = awaitSnapshotContaining("higher usage")
-            assertTrue("access/model" in menu, menu)
-            assertTrue("support" in menu, menu)
-            assertTrue("required" in menu, menu)
+            val menu = awaitSnapshotContaining("[ultrafast")
+            assertTrue(Regex("""\[ultrafast *]""").containsMatchIn(menu), menu)
+            assertFalse("higher usage" in menu, menu)
+            assertFalse("access/model" in menu, menu)
+            assertFalse("required" in menu, menu)
             assertTrue(vm.tuples.isEmpty())
             repeat(3) { sendKeyEvent(KeyboardEvent(KeyboardEvent.Down)) }
             sendKeyEvent(KeyboardEvent(codepoint = 13))
