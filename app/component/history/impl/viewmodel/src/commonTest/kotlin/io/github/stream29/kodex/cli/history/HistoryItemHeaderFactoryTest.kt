@@ -5,6 +5,9 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExe
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationResult
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationToolEvent
+import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableToolSearchEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableMcpToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StablePatchToolExecutionResult
@@ -17,6 +20,10 @@ import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemHeader
 import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
 import io.github.stream29.kodex.openai.ResponseItem
+import io.github.stream29.kodex.tool.imagegeneration.GeneratedImageOutput
+import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
+import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
+import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecOutput
 import io.github.stream29.kodex.utils.applypatch.Patch
@@ -31,6 +38,28 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 
 val historyItemHeaderFactoryTest by testSuite {
+    test("imageHeaderUsesTheRecordedFilenameOrTheNoPathFallback") {
+        fun title(path: String?): String = assertIs<ToolHistoryItemHeader.Summary>(
+            StableImageGenerationToolEvent(
+                callId = "image",
+                arguments = ImageGenToolArguments("not the filename"),
+                result = StableImageGenerationResult.Success(GeneratedImageOutput("encoded"), path),
+            ).toHistoryHeader(1.milliseconds),
+        ).summary
+        assertEquals("Generate image", title(null))
+        assertEquals("Generate image", title("/"))
+        assertEquals("Generate picture.png", title("/images/picture.png"))
+        assertEquals("Generate picture.png", title("C:\\images\\picture.png"))
+    }
+
+    test("localSearchHeaderOwnsItsInputSummary") {
+        val header = assertIs<ToolHistoryItemHeader.Summary>(
+            StableToolSearchEvent("search", arguments = SearchToolCallParams("calendar", 0),
+                result = ToolSearchResult.Success(emptyList())).toHistoryHeader(1.milliseconds),
+        )
+        assertEquals("tool_search; query=calendar; limit=0", header.summary)
+    }
+
     test("commandHeaderRetainsOnlyBoundedPresentationAndOutcomeDiscriminators") {
         val event = StableCommandExecutionToolEvent(
             callId = "command",
@@ -86,7 +115,7 @@ val historyItemHeaderFactoryTest by testSuite {
         val header = assertIs<ToolHistoryItemHeader.Summary>(
             event.toHistoryHeader(3.milliseconds),
         )
-        assertEquals("Search cloud tools: crm, billing", header.summary)
+        assertEquals("""server_tool_search; paths=["crm","billing"]""", header.summary)
     }
 
     test("customWebHeaderIncludesTheSearchQuery") {

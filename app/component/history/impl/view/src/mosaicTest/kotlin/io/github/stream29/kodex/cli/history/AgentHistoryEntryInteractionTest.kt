@@ -1,5 +1,8 @@
 package io.github.stream29.kodex.cli.history
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemViewModel
 import io.github.stream29.kodex.app.history.contract.item.SuggestSubagentTaskHistoryItemState
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableSuggestSubagentTaskToolEvent
@@ -281,12 +284,13 @@ val agentHistoryEntryInteractionTest by testSuite {
         }
     }
 
-    test("collapsed command header follows its live terminal session") {
+    test("collapsed command header ignores live terminal session changes") {
         val session = FakeShellSession(
             sessionId = 7,
             arguments = ExecCommandArguments(command = "tail -f build.log"),
         )
         val sessions = FakeShellSessions(mapOf(session.sessionId to session))
+        var width by mutableIntStateOf(60)
         val item = FakeTool(
             index = 33,
             header = ToolHistoryItemHeader.CommandExecution(
@@ -301,7 +305,7 @@ val agentHistoryEntryInteractionTest by testSuite {
 
         runMosaicTest(snapshotStrategy = ansiSnapshots) {
             val running = setContentAndSnapshot {
-                Column(modifier = Modifier.width(60)) {
+                Column(modifier = Modifier.width(width)) {
                     StoredHistoryEntry(
                         item = item,
                         generation = 10,
@@ -310,13 +314,14 @@ val agentHistoryEntryInteractionTest by testSuite {
                     )
                 }
             }
-            assertTrue("> Wait for tail -f build.log" in running, running)
-            assertTrue("38;2;0;255;0" in running, running)
+            assertTrue("> Poll terminal output" in running, running)
+            assertFalse("38;2;0;255;0" in running, running)
+            assertFalse("tail -f build.log" in running)
 
             session.completed.value = true
+            width = 61
             val completed = awaitSnapshot()
-            assertTrue("> Wait for tail -f build.log" in completed, completed)
-            assertTrue("38;2;0;255;0" !in completed, completed)
+            assertEquals(running, completed)
         }
     }
 }

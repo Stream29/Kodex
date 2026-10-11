@@ -26,8 +26,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessa
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionResult
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCustomToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageGenerationResult
@@ -82,18 +80,13 @@ import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.FunctionCallOutputBody
 import io.github.stream29.kodex.openai.FunctionCallOutputContentItem
 import io.github.stream29.kodex.openai.FunctionCallOutputPayload
-import io.github.stream29.kodex.openai.LoadableToolSpec
-import io.github.stream29.kodex.openai.ResponsesApiNamespace
-import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.openai.SearchCommands
-import io.github.stream29.kodex.openai.WebSearchAction
 import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
 import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
-import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecOutput
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
 import io.github.stream29.kodex.tool.viewimage.ViewImageToolArguments
 import kotlinx.serialization.json.Json
@@ -140,7 +133,7 @@ internal fun StableCleanEvent.render(
                 headerTrailingText = elapsed?.historyElapsedSuffix(),
             )
 
-            is StableCommandExecutionToolEvent -> renderCommandExecution(shellSessions)
+            is StableCommandExecutionToolEvent -> renderRecordedCommand()
             is StableJsonToolEvent -> renderJsonTool()
             is StableTextToolEvent -> renderTextTool()
             is StableCustomToolEvent -> renderCustomTool()
@@ -316,6 +309,22 @@ private fun StableReasoning.renderReasoning() {
 
 @Composable
 private fun StableInvalidToolCall.renderInvalidToolCall() {
+    if (isRedesignedInternalCall(invocation.displayName())) {
+        BuiltInToolEvent(
+            summary = "Model emitted an invalid tool call",
+            firstLine = invocation.displayName(),
+            status = "failed",
+            expansionKey = callId,
+        ) {
+            when (val input = invocation) {
+                is InvalidToolInvocation.Function -> RecordedField("arguments", input.arguments)
+                is InvalidToolInvocation.Custom -> RecordedField("input", input.input)
+                is InvalidToolInvocation.ToolSearch -> RecordedField("arguments", input.arguments.toString())
+            }
+            RecordedField("error", message)
+        }
+        return
+    }
     ToolEvent(
         summary = "Model emitted an invalid tool call",
         rawName = invocation.displayName(),
@@ -329,85 +338,44 @@ private fun StableInvalidToolCall.renderInvalidToolCall() {
 
 @Composable
 private fun StableServerToolSearch.renderServerToolSearch() {
-    ToolEvent(
-        summary = call.arguments.serverToolSearchSummary(failed = output.status == "failed"),
-        rawName = "server_tool_search",
+    BuiltInToolEvent(
+        summary = call.arguments.toolSearchTitle("server_tool_search"),
+        firstLine = "server_tool_search",
         status = output.status,
         expansionKey = call.id?.value ?: "server_tool_search",
     ) {
-        section("Arguments") { JsonDetail("Arguments", call.arguments) }
-        section("Tools") { LoadableTools("Tools", output.tools) }
+        DiscoveredTools(output.tools)
     }
 }
 
 @Composable
 private fun StableWebSearchCall.renderHostedWebSearch() {
-    ToolEvent(
-        summary = item.action?.toolSummary(failed = item.status == "failed")
-            ?: if (item.status == "failed") "Failed to search the web" else "Search the web",
-        rawName = "hosted_web_search",
+    val titles = item.action.operationTitles()
+    BuiltInToolEvent(
+        summary = titles.firstOrNull() ?: "Search the web",
+        expandedSummary = titles.joinToString("\n").ifEmpty { "Search the web" },
+        firstLine = "hosted_web_search",
         status = item.status ?: "completed",
         expansionKey = item.id?.value ?: "hosted_web_search",
-    ) {
-        section("Arguments") {
-            item.action?.renderDetails() ?: Detail("Request", "hosted web search")
-        }
-    }
+    )
 }
 
 @Composable
 private fun StableImageGenerationCall.renderHostedImageGeneration() {
-    ToolEvent(
-        summary = item.revisedPrompt?.imageGenerationSummary(failed = item.status == "failed")
-            ?: if (item.status == "failed") "Failed to generate an image" else "Generate an image",
-        rawName = "hosted_image_generation",
+    BuiltInToolEvent(
+        summary = "Generate image",
+        firstLine = "hosted_image_generation",
         status = item.status,
         expansionKey = item.id?.value ?: "hosted_image_generation",
     ) {
-        section("Result") {
-            item.revisedPrompt?.takeIf(String::isNotBlank)?.let { Detail("Revised prompt", it) }
-            // Hosted image output is provider-owned binary or an opaque reference.
-            // It belongs to the image surface, not the terminal transcript.
-            Detail("Image", "[generated image]")
-        }
+        item.revisedPrompt?.takeIf(String::isNotEmpty)?.let { RecordedField("revised_prompt", it) }
+        item.result.readableHostedImageReference()?.let { RecordedField("result", it) }
     }
 }
 
 @Composable
 private fun ContextCompactionEvent() {
     Header("Context compacted", TextStyle.Dim)
-}
-
-@Composable
-private fun StableCommandExecutionToolEvent.renderCommandExecution(
-    shellSessions: AgentShellSessionRegistry?,
-) {
-    val session = activeAgentShellSession(shellSessions, activeSessionId())
-    renderCommandExecution(session)
-}
-
-@Composable
-internal fun StableCommandExecutionToolEvent.renderCommandExecution(
-    session: AgentShellSession?,
-) {
-    val completed = session.completedForPresentation()
-    ToolEvent(
-        summary = action.toolSummary(
-            sourceArguments = session?.arguments,
-            failed = result is StableCommandExecutionResult.Failure,
-        ),
-        rawName = action.toolName(),
-        status = result.status(session, completed),
-        expansionKey = callId,
-    ) {
-        section("Arguments") {
-            action.renderDetails(sourceArguments = session?.arguments)
-        }
-        session?.let {
-            section("Process") { it.renderProcessStatus(completed) }
-        }
-        section("Result") { result.renderDetails() }
-    }
 }
 
 @Composable
@@ -433,6 +401,14 @@ private fun PendingCommandExecutionToolEvent.renderCommandExecution(
 
 @Composable
 private fun StableJsonToolEvent.renderJsonTool() {
+    val toolName = qualifiedName(name, namespace)
+    if (isReadOnlyUtility(toolName)) {
+        BuiltInToolEvent(functionToolSummary(name, namespace), toolName, success.completedStatus(), callId) {
+            val text = (result as? JsonPrimitive)?.contentOrNull ?: result.toString()
+            WrappedHistoryText(text)
+        }
+        return
+    }
     ToolEvent(
         summary = functionToolSummary(name, namespace, failed = success == false),
         rawName = qualifiedName(name, namespace),
@@ -446,6 +422,13 @@ private fun StableJsonToolEvent.renderJsonTool() {
 
 @Composable
 private fun StableTextToolEvent.renderTextTool() {
+    val toolName = qualifiedName(name, namespace)
+    if (isReadOnlyUtility(toolName)) {
+        BuiltInToolEvent(functionToolSummary(name, namespace), toolName, success.completedStatus(), callId) {
+            WrappedHistoryText(result)
+        }
+        return
+    }
     ToolEvent(
         summary = functionToolSummary(name, namespace, failed = success == false),
         rawName = qualifiedName(name, namespace),
@@ -472,49 +455,49 @@ private fun StableCustomToolEvent.renderCustomTool() {
 
 @Composable
 private fun StableImageGenerationToolEvent.renderImageGeneration() {
-    ToolEvent(
-        summary = arguments.toolSummary(failed = result is StableImageGenerationResult.Failure),
-        rawName = "image_gen.imagegen",
+    val outcome = result
+    BuiltInToolEvent(
+        summary = recordedImageTitle((outcome as? StableImageGenerationResult.Success)?.savedPath),
+        firstLine = compactToolLine(
+            "image_gen.imagegen",
+            "referenced_image_paths" to arguments.referencedImagePaths
+                ?.takeIf { it.isNotEmpty() }?.joinToString(),
+            "num_last_images_to_include" to arguments.numLastImagesToInclude,
+        ),
         status = result.status(),
         expansionKey = callId,
     ) {
-        section("Arguments") { arguments.renderDetails() }
-        section("Result") {
-            when (val result = result) {
-                is StableImageGenerationResult.Success -> {
-                    Detail("Image", "[generated inline image]")
-                    result.output.outputHint
-                        ?.takeIf(String::isNotBlank)
-                        ?.let { Detail("Hint", it) }
-                    result.savedPath
-                        ?.takeIf(String::isNotBlank)
-                        ?.let { Detail("Saved", it) }
-                }
-
-                is StableImageGenerationResult.Failure -> Detail("Error", result.message)
+        RecordedField("prompt", arguments.prompt)
+        when (outcome) {
+            is StableImageGenerationResult.Success -> {
+                outcome.savedPath?.takeIf(String::isNotEmpty)?.let { RecordedField("saved_path", it) }
+                outcome.output.outputHint?.takeIf(String::isNotEmpty)?.let { RecordedField("output_hint", it) }
             }
+            is StableImageGenerationResult.Failure -> RecordedField("error", outcome.message)
         }
     }
 }
 
 @Composable
 private fun StableImageViewToolEvent.renderImageView() {
-    ToolEvent(
-        summary = arguments.toolSummary(failed = result is StableImageViewResult.Failure),
-        rawName = "view_image",
+    BuiltInToolEvent(
+        summary = "View image: ${arguments.path}",
+        firstLine = compactToolLine(
+            "view_image",
+            "detail" to arguments.detail?.takeUnless { it == io.github.stream29.kodex.tool.viewimage.ViewImageDetail.High }
+                ?.name?.lowercase(),
+        ),
         status = result.status(),
         expansionKey = callId,
     ) {
-        section("Arguments") { arguments.renderDetails() }
-        section("Result") {
-            when (val result = result) {
-                is StableImageViewResult.Success -> {
-                    Detail("Image", result.output.imageUrl.safeMediaReference())
-                    Detail("Output detail", result.output.detail.name.lowercase())
+        when (val outcome = result) {
+            is StableImageViewResult.Success -> {
+                val requested = arguments.detail ?: io.github.stream29.kodex.tool.viewimage.ViewImageDetail.High
+                if (outcome.output.detail != requested) {
+                    RecordedField("output_detail", outcome.output.detail.name.lowercase())
                 }
-
-                is StableImageViewResult.Failure -> Detail("Error", result.message)
             }
+            is StableImageViewResult.Failure -> RecordedField("error", outcome.message)
         }
     }
 }
@@ -534,42 +517,53 @@ private fun StableMcpToolEvent.renderMcpTool() {
 
 @Composable
 private fun StableToolSearchEvent.renderToolSearch() {
-    ToolEvent(
-        summary = arguments.toolSummary(failed = result.status() == "failed"),
-        rawName = "tool_search",
+    BuiltInToolEvent(
+        summary = compactToolLine("tool_search", "query" to arguments.query, "limit" to arguments.limit),
+        firstLine = "tool_search",
         status = result.status(),
         expansionKey = callId,
     ) {
-        section("Arguments") { arguments.renderDetails() }
-        section("Result") {
-            when (val result = result) {
-                is ToolSearchResult.Success -> LoadableTools("Tools", result.tools)
-                is ToolSearchResult.InvalidArguments -> Detail("Error", result.message)
-            }
+        when (val result = result) {
+            is ToolSearchResult.Success -> DiscoveredTools(result.tools)
+            is ToolSearchResult.InvalidArguments -> RecordedField("error", result.message)
         }
     }
 }
 
 @Composable
 private fun StableWebSearchToolEvent.renderWebSearch() {
-    ToolEvent(
+    BuiltInToolEvent(
         summary = commands.toolSummary(failed = result.status() == "failed"),
-        rawName = "web.run",
+        firstLine = compactToolLine("web.run", "response_length" to commands.responseLength?.name?.lowercase()),
         status = result.status(),
         expansionKey = callId,
     ) {
-        section("Arguments") { commands.renderDetails() }
-        section("Result") {
-            when (val result = result) {
-                is StableWebSearchResult.Success -> Detail("Output", result.response.output)
-                is StableWebSearchResult.Failure -> Detail("Error", result.message)
-            }
+        commands.operationTitles().forEach { WrappedHistoryText(it) }
+        when (val result = result) {
+            is StableWebSearchResult.Success -> RecordedField("output", result.response.output)
+            is StableWebSearchResult.Failure -> RecordedField("error", result.message)
         }
     }
 }
 
 @Composable
 private fun PendingInvalidToolCall.renderInvalidToolCall() {
+    if (isRedesignedInternalCall(invocation.displayName())) {
+        BuiltInToolEvent(
+            summary = "Model emitted an invalid tool call",
+            firstLine = invocation.displayName(),
+            status = "failed",
+            expansionKey = callId,
+        ) {
+            when (val input = invocation) {
+                is PendingInvalidToolInvocation.Function -> RecordedField("arguments", input.arguments)
+                is PendingInvalidToolInvocation.Custom -> RecordedField("input", input.input)
+                is PendingInvalidToolInvocation.ToolSearch -> RecordedField("arguments", input.arguments.toString())
+            }
+            RecordedField("error", message)
+        }
+        return
+    }
     ToolEvent(
         summary = "Model emitted an invalid tool call",
         rawName = invocation.displayName(),
@@ -601,6 +595,7 @@ internal fun ToolEvent(
     status: String,
     expansionKey: Any,
     detailStyle: TextStyle = TextStyle.Unspecified,
+    expandedSummary: String? = null,
     content: @Composable ToolEventDetailsScope.() -> Unit,
 ) {
     var localExpanded by remember(expansionKey) { mutableStateOf(false) }
@@ -619,15 +614,22 @@ internal fun ToolEvent(
             },
             modifier = Modifier.fillMaxWidth(),
         ) { _, isHovered, isPressed ->
-            HistoryItemHeader(
-                value = "${if (expanded) "v" else ">"} $summary",
-                modifier = Modifier.fillMaxWidth(),
-                color = headerColor,
-                textStyle = tuiInteractionTextStyle(
-                    hovered = isHovered,
-                    pressed = isPressed,
-                ),
-            )
+            val style = tuiInteractionTextStyle(hovered = isHovered, pressed = isPressed)
+            if (expanded && expandedSummary != null) {
+                WrappedHistoryText(
+                    value = "v $expandedSummary" +
+                        LocalHistoryElapsed.current?.historyElapsedSuffix().orEmpty(),
+                    color = headerColor,
+                    textStyle = style,
+                )
+            } else {
+                HistoryItemHeader(
+                    value = "${if (expanded) "v" else ">"} $summary",
+                    modifier = Modifier.fillMaxWidth(),
+                    color = headerColor,
+                    textStyle = style,
+                )
+            }
         }
 
         if (expanded) {
@@ -858,17 +860,6 @@ private fun PendingInvalidToolInvocation.renderDetails(
 }
 
 @Composable
-private fun StableCommandExecutionAction.renderDetails(
-    sourceArguments: ExecCommandArguments? = null,
-    textStyle: TextStyle = TextStyle.Unspecified,
-) {
-    when (this) {
-        is StableCommandExecutionAction.ExecCommand -> arguments.renderDetails(textStyle)
-        is StableCommandExecutionAction.WriteStdin -> arguments.renderDetails(sourceArguments, textStyle)
-    }
-}
-
-@Composable
 private fun PendingCommandExecutionAction.renderDetails(
     sourceArguments: ExecCommandArguments? = null,
     textStyle: TextStyle = TextStyle.Unspecified,
@@ -901,24 +892,6 @@ private fun WriteStdinArguments.renderDetails(
     Detail("Input", chars.displayStdin(), textStyle)
     Detail("Yield", "${yieldTimeMillis}ms", textStyle)
     Detail("Output limit", "$maxOutputTokens tokens", textStyle)
-}
-
-@Composable
-private fun StableCommandExecutionResult.renderDetails() {
-    when (this) {
-        is StableCommandExecutionResult.Output -> value.renderDetails()
-        is StableCommandExecutionResult.Failure -> Detail("Error", message)
-    }
-}
-
-@Composable
-private fun UnifiedExecOutput.renderDetails() {
-    Detail("Chunk", chunkId)
-    Detail("Elapsed", "${wallTimeSeconds}s")
-    exitCode?.let { Detail("Exit code", it.toString()) }
-    sessionId?.let { Detail("Session", it.toString()) }
-    Detail("Original output", "$originalTokenCount tokens")
-    Detail("Output", output)
 }
 
 @Composable
@@ -1066,60 +1039,6 @@ private fun SearchCommands.renderDetails(
     if (!hasOperation) Detail("Request", "web search", textStyle)
 }
 
-@Composable
-private fun WebSearchAction.renderDetails() {
-    when (this) {
-        is WebSearchAction.Search -> {
-            query?.takeIf(String::isNotBlank)?.let { Detail("Search", it) }
-            queries?.takeIf { it.isNotEmpty() }?.let { Detail("Search", it.joinToString()) }
-            if (query.isNullOrBlank() && queries.isNullOrEmpty()) Detail("Search", "")
-        }
-
-        is WebSearchAction.OpenPage -> Detail("Open", url ?: "page")
-        is WebSearchAction.FindInPage -> Detail(
-            "Find",
-            listOfNotNull(pattern, url).joinToString(" in ").ifBlank { "page" },
-        )
-
-        WebSearchAction.Other -> Detail("Request", "hosted web search")
-    }
-}
-
-@Composable
-private fun LoadableTools(
-    label: String,
-    tools: List<LoadableToolSpec>,
-    textStyle: TextStyle = TextStyle.Unspecified,
-) {
-    if (tools.isEmpty()) {
-        Detail(label, "none", textStyle)
-    } else {
-        tools.forEach { Detail(label, it.displayName(), textStyle) }
-    }
-}
-
-private fun StableCommandExecutionAction.toolName(): String = when (this) {
-    is StableCommandExecutionAction.ExecCommand -> "exec_command"
-    is StableCommandExecutionAction.WriteStdin -> "write_stdin"
-}
-
-private fun StableCommandExecutionResult.status(
-    session: AgentShellSession?,
-    processCompleted: Boolean,
-): String = when (this) {
-    is StableCommandExecutionResult.Output -> value.exitCode?.completedStatus()
-        ?: if (session == null || processCompleted) "finished" else "running"
-
-    is StableCommandExecutionResult.Failure -> "failed"
-}
-
-private fun StableCommandExecutionToolEvent.activeSessionId(): Int? = when (val action = action) {
-    is StableCommandExecutionAction.ExecCommand ->
-        (result as? StableCommandExecutionResult.Output)?.value?.sessionId
-
-    is StableCommandExecutionAction.WriteStdin -> action.arguments.sessionId
-}
-
 private fun PendingCommandExecutionAction.activeSessionId(): Int? = when (this) {
     is PendingCommandExecutionAction.ExecCommand -> null
     is PendingCommandExecutionAction.WriteStdin -> arguments.sessionId
@@ -1176,12 +1095,6 @@ private fun Boolean?.completedStatus(): String = when (this) {
     null -> "completed"
 }
 
-private fun Int?.completedStatus(): String = when (this) {
-    null -> "running"
-    0 -> "succeeded"
-    else -> "failed"
-}
-
 private fun CallToolResult.completedStatus(): String = when (isError) {
     true -> "failed"
     false -> "succeeded"
@@ -1198,11 +1111,6 @@ private fun PendingInvalidToolInvocation.displayName(): String = when (this) {
     is PendingInvalidToolInvocation.Function -> qualifiedName(name, namespace)
     is PendingInvalidToolInvocation.Custom -> qualifiedName(name, namespace)
     is PendingInvalidToolInvocation.ToolSearch -> "tool_search"
-}
-
-private fun LoadableToolSpec.displayName(): String = when (this) {
-    is ResponsesApiTool -> name
-    is ResponsesApiNamespace -> name
 }
 
 private fun qualifiedName(
@@ -1395,94 +1303,6 @@ private fun customToolSummary(
     return commands?.toolSummary(failed) ?: if (failed) "Failed to search the web" else "Search the web"
 }
 
-private fun StableCommandExecutionAction.toolSummary(
-    sourceArguments: ExecCommandArguments? = null,
-    failed: Boolean = false,
-): String = when (this) {
-    is StableCommandExecutionAction.ExecCommand -> arguments.toolSummary(failed)
-    is StableCommandExecutionAction.WriteStdin -> arguments.toolSummary(sourceArguments, failed)
-}
-
-private fun PendingCommandExecutionAction.toolSummary(
-    sourceArguments: ExecCommandArguments? = null,
-): String = when (this) {
-    is PendingCommandExecutionAction.ExecCommand -> arguments.toolSummary()
-    is PendingCommandExecutionAction.WriteStdin -> arguments.toolSummary(sourceArguments)
-}
-
-private fun ExecCommandArguments.toolSummary(failed: Boolean = false): String =
-    command.singleLineSummary()
-        .takeIf(String::isNotBlank)
-        ?.let { command -> if (failed) "Failed to run: $command" else "Run: $command" }
-        ?: if (failed) "Failed to run" else "Run"
-
-private fun WriteStdinArguments.toolSummary(
-    sourceArguments: ExecCommandArguments? = null,
-    failed: Boolean = false,
-): String {
-    val command = sourceArguments
-        ?.command
-        ?.singleLineSummary()
-        ?.takeIf(String::isNotBlank)
-    return when {
-        command == null && chars.isEmpty() ->
-            if (failed) "Failed to wait for terminal session $sessionId" else "Wait for terminal session $sessionId"
-
-        command == null ->
-            if (failed) "Failed to interact with terminal session $sessionId" else "Interact with terminal session $sessionId"
-
-        chars.isEmpty() -> if (failed) "Failed to wait for $command" else "Wait for $command"
-        else -> if (failed) "Failed to interact with $command" else "Interact with $command"
-    }
-}
-
-private fun ImageGenToolArguments.toolSummary(failed: Boolean = false): String =
-    prompt.imageGenerationSummary(failed)
-
-private fun String.imageGenerationSummary(failed: Boolean = false): String =
-    singleLineSummary()
-        .takeIf(String::isNotBlank)
-        ?.let { prompt ->
-            if (failed) "Failed to generate an image: $prompt" else "Generate an image: $prompt"
-        }
-        ?: if (failed) "Failed to generate an image" else "Generate an image"
-
-private fun ViewImageToolArguments.toolSummary(failed: Boolean = false): String =
-    path.singleLineSummary()
-        .takeIf(String::isNotBlank)
-        ?.let { path -> if (failed) "Failed to view image: $path" else "View image: $path" }
-        ?: if (failed) "Failed to view an image" else "View an image"
-
-private fun RequestUserInputArgs.toolSummary(failed: Boolean = false): String =
-    questions.firstOrNull()
-        ?.question
-        ?.singleLineSummary()
-        ?.takeIf(String::isNotBlank)
-        ?.let { question ->
-            if (failed) "Failed to collect user input: $question" else "Ask the user: $question"
-        }
-        ?: if (failed) "Failed to collect user input" else "Ask the user for input"
-
-private fun SearchToolCallParams.toolSummary(failed: Boolean = false): String =
-    query.singleLineSummary()
-        .takeIf(String::isNotBlank)
-        ?.let { query ->
-            if (failed) "Failed to search available tools: $query" else "Search available tools: $query"
-        }
-        ?: if (failed) "Failed to search available tools" else "Search available tools"
-
-internal fun JsonElement.serverToolSearchSummary(failed: Boolean = false): String {
-    val paths = ((this as? JsonObject)?.get("paths") as? JsonArray)
-        ?.mapNotNull { value -> (value as? JsonPrimitive)?.contentOrNull }
-        ?.map(String::singleLineSummary)
-        ?.filter(String::isNotBlank)
-        .orEmpty()
-    val prefix = if (failed) "Failed to search cloud tools: " else "Search cloud tools: "
-    return paths.takeIf(List<String>::isNotEmpty)
-        ?.joinToString(prefix = prefix)
-        ?: if (failed) "Failed to search cloud tools" else "Search cloud tools"
-}
-
 private fun SearchCommands.toolSummary(failed: Boolean = false): String = when {
     !searchQuery.isNullOrEmpty() -> searchQuery.orEmpty().first().q.singleLineSummary()
         .takeIf(String::isNotBlank)
@@ -1503,20 +1323,6 @@ private fun SearchCommands.toolSummary(failed: Boolean = false): String = when {
     !sports.isNullOrEmpty() -> if (failed) "Failed to check sports information" else "Check sports information"
     !time.isNullOrEmpty() -> if (failed) "Failed to check the time" else "Check the time"
     else -> if (failed) "Failed to use web search" else "Use web search"
-}
-
-private fun WebSearchAction.toolSummary(failed: Boolean = false): String = when (this) {
-    is WebSearchAction.Search -> (query ?: queries?.firstOrNull())
-        ?.singleLineSummary()
-        ?.takeIf(String::isNotBlank)
-        ?.let { query -> if (failed) "Failed to search the web: $query" else "Search the web: $query" }
-        ?: if (failed) "Failed to search the web" else "Search the web"
-
-    is WebSearchAction.OpenPage -> if (failed) "Failed to open a web page" else "Open a web page"
-    is WebSearchAction.FindInPage ->
-        if (failed) "Failed to search a web page for text" else "Search a web page for text"
-
-    WebSearchAction.Other -> if (failed) "Failed to use web search" else "Use web search"
 }
 
 private fun String.stableToolSummary(failed: Boolean): String =

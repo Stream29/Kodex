@@ -34,17 +34,12 @@ import io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemTarget
 import io.github.stream29.kodex.app.history.contract.item.ToolHistoryItemHeader
 import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.WebSearchAction
-import io.github.stream29.kodex.tool.imagegeneration.ImageGenToolArguments
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
-import io.github.stream29.kodex.tool.toolsearch.SearchToolCallParams
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
 import io.github.stream29.kodex.tool.viewimage.ViewImageToolArguments
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 import kotlin.time.Duration
 
 internal fun StablePatchToolEvent.toHistoryHeader(elapsed: Duration): PatchHistoryItemHeader {
@@ -113,13 +108,11 @@ internal fun StableCleanEvent.CompletedTool.toHistoryHeader(
 
 private fun StableCleanEvent.CompletedTool.historyToolSummary(failed: Boolean): String = when (this) {
     is StableInvalidToolCall -> "Model emitted an invalid tool call"
-    is StableServerToolSearch -> call.arguments.serverToolSearchSummary(failed)
+    is StableServerToolSearch -> call.arguments.serverToolSearchSummary()
     is StableWebSearchCall ->
         item.action?.historySummary(failed) ?: if (failed) "Failed to search the web" else "Search the web"
 
-    is StableImageGenerationCall ->
-        item.revisedPrompt?.imageGenerationSummary(failed)
-            ?: if (failed) "Failed to generate an image" else "Generate an image"
+    is StableImageGenerationCall -> "Generate image"
 
     is StableCommandExecutionToolEvent ->
         error("Command execution uses a specialized history header.")
@@ -128,12 +121,17 @@ private fun StableCleanEvent.CompletedTool.historyToolSummary(failed: Boolean): 
     is StableJsonToolEvent -> functionToolSummary(name, namespace, failed)
     is StableTextToolEvent -> functionToolSummary(name, namespace, failed)
     is StableCustomToolEvent -> customToolSummary(name, namespace, input, failed)
-    is StableImageGenerationToolEvent -> arguments.historySummary(failed)
+    is StableImageGenerationToolEvent -> (result as? StableImageGenerationResult.Success)?.savedPath
+        ?.takeIf(String::isNotBlank)?.substringAfterLast('/')?.substringAfterLast('\\')
+        ?.takeIf(String::isNotBlank)?.let { "Generate $it" } ?: "Generate image"
     is StableImageViewToolEvent -> arguments.historySummary(failed)
     is StableMcpToolEvent -> qualifiedToolName(name, namespace).stableToolSummary(failed)
     is StablePlanUpdate -> if (failed) "Failed to update the plan" else "Update the plan"
     is StableRequestUserInputToolEvent -> arguments.historySummary(failed)
-    is StableToolSearchEvent -> arguments.historySummary(failed)
+    is StableToolSearchEvent -> buildString {
+        append("tool_search; query=${arguments.query}")
+        arguments.limit?.let { append("; limit=$it") }
+    }.historyPreview()
     is StableWebSearchToolEvent -> commands.historySummary(failed)
     is StableSuggestSubagentTaskToolEvent -> "Suggested Sessions"
 }
@@ -175,15 +173,11 @@ private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (t
     }
 }
 
-private fun JsonElement.serverToolSearchSummary(failed: Boolean): String {
-    val paths = ((this as? JsonObject)?.get("paths") as? JsonArray)
-        ?.mapNotNull { value -> (value as? JsonPrimitive)?.contentOrNull }
-        ?.map(String::historyPreview)
-        ?.filter(String::isNotBlank)
-        .orEmpty()
-    val detail = paths.takeIf(List<String>::isNotEmpty)?.joinToString()
-    val prefix = if (failed) "Failed to search cloud tools" else "Search cloud tools"
-    return detail?.let { "$prefix: $it" } ?: prefix
+private fun JsonElement.serverToolSearchSummary(): String {
+    val fields = (this as? JsonObject)?.entries
+        ?.joinToString("") { (key, value) -> "; $key=$value" }
+        ?: "; arguments=$this"
+    return "server_tool_search$fields".historyPreview()
 }
 
 private fun functionToolSummary(name: String, namespace: String?, failed: Boolean): String {
@@ -243,13 +237,6 @@ private fun customToolSummary(
     return commands?.historySummary(failed) ?: if (failed) "Failed to search the web" else "Search the web"
 }
 
-private fun ImageGenToolArguments.historySummary(failed: Boolean): String = prompt.imageGenerationSummary(failed)
-
-private fun String.imageGenerationSummary(failed: Boolean): String =
-    historyPreview().takeIf(String::isNotBlank)
-        ?.let { prompt -> if (failed) "Failed to generate an image: $prompt" else "Generate an image: $prompt" }
-        ?: if (failed) "Failed to generate an image" else "Generate an image"
-
 private fun ViewImageToolArguments.historySummary(failed: Boolean): String =
     path.historyPreview().takeIf(String::isNotBlank)
         ?.let { path -> if (failed) "Failed to view image: $path" else "View image: $path" }
@@ -260,11 +247,6 @@ private fun RequestUserInputArgs.historySummary(failed: Boolean): String =
         ?.takeIf(String::isNotBlank)
         ?.let { question -> if (failed) "Failed to collect user input: $question" else "Ask the user: $question" }
         ?: if (failed) "Failed to collect user input" else "Ask the user for input"
-
-private fun SearchToolCallParams.historySummary(failed: Boolean): String =
-    query.historyPreview().takeIf(String::isNotBlank)
-        ?.let { query -> if (failed) "Failed to search available tools: $query" else "Search available tools: $query" }
-        ?: if (failed) "Failed to search available tools" else "Search available tools"
 
 private fun SearchCommands.historySummary(failed: Boolean): String = when {
     !searchQuery.isNullOrEmpty() -> searchQuery.orEmpty().first().q.historyPreview()

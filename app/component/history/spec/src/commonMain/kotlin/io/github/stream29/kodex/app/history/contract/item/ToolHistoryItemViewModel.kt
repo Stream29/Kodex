@@ -101,10 +101,11 @@ public sealed interface ToolHistoryItemHeader {
     }
 
     /**
-     * A command interaction whose title and color may still depend on a live terminal session.
+     * A recorded command interaction whose title and color are independent of live processes.
      *
      * Only the command/session identity and small outcome discriminators are retained. Process
-     * output remains exclusive to [ToolHistoryItemState.Expanded].
+     * output remains exclusive to [ToolHistoryItemState.Expanded]. Session ids are retained
+     * as recorded identity only, not shown or used to supplement the completed row.
      * @throws IllegalArgumentException if [elapsed] is negative or infinite.
      */
     public data class CommandExecution(

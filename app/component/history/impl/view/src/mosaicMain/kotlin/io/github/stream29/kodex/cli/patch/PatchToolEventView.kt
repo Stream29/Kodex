@@ -40,13 +40,11 @@ public fun PendingPatchToolEventView(diff: Patch) {
         diff.toPendingPatchPresentation()
     }
     val expanded = remember(diff) { mutableStateOf(false) }
-    val changesExpanded = remember(diff) { mutableStateOf(false) }
     val visibleLineCount = remember(diff) { mutableStateOf(DefaultPatchLinePageSize) }
     PatchToolEventView(
         presentation = presentation,
         expanded = expanded.value,
         onToggleExpanded = { expanded.value = !expanded.value },
-        changesExpandedState = changesExpanded,
         visibleLineCountState = visibleLineCount,
     )
 }
@@ -66,7 +64,6 @@ public fun StablePatchToolEventView(
         event.toStablePatchPresentation()
     }
     val localExpanded = remember(event) { mutableStateOf(false) }
-    val changesExpanded = remember(event) { mutableStateOf(false) }
     val visibleLineCount = remember(event) { mutableStateOf(DefaultPatchLinePageSize) }
     PatchToolEventView(
         presentation = presentation,
@@ -74,7 +71,6 @@ public fun StablePatchToolEventView(
         onToggleExpanded = onToggleExpanded ?: {
             localExpanded.value = !localExpanded.value
         },
-        changesExpandedState = changesExpanded,
         visibleLineCountState = visibleLineCount,
         headerTrailingText = headerTrailingText,
     )
@@ -85,7 +81,6 @@ private fun PatchToolEventView(
     presentation: PatchPresentation,
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
-    changesExpandedState: MutableState<Boolean>,
     visibleLineCountState: MutableState<Int>,
     headerTrailingText: String? = null,
 ) {
@@ -122,63 +117,26 @@ private fun PatchToolEventView(
 
         if (expanded) {
             WrappedPatchText(
-                value = "Tool: ${presentation.rawToolName}",
+                value = presentation.rawToolName,
                 textStyle = TextStyle.Dim,
             )
-            PatchChangeDetails(
+            PatchBody(
                 presentation = presentation,
-                expandedState = changesExpandedState,
                 visibleLineCountState = visibleLineCountState,
             )
+            PatchShowMore(presentation, visibleLineCountState)
         }
     }
-}
-
-@Composable
-private fun PatchChangeDetails(
-    presentation: PatchPresentation,
-    expandedState: MutableState<Boolean>,
-    visibleLineCountState: MutableState<Int>,
-) {
-    val expanded by expandedState
-    val visibleLineCount by visibleLineCountState
-    TuiPressable(
-        onClick = { expandedState.value = !expanded },
-        modifier = Modifier.fillMaxWidth(),
-    ) { _, isHovered, isPressed ->
-        WrappedPatchText(
-            value = "${if (expanded) "v" else ">"} Changes",
-            textStyle = tuiInteractionTextStyle(
-                hovered = isHovered,
-                pressed = isPressed,
-            ),
-        )
-    }
-    PatchBody(
-        presentation = presentation,
-        expandedState = expandedState,
-        visibleLineCountState = visibleLineCountState,
-    )
-    PatchShowMore(
-        presentation = presentation,
-        expandedState = expandedState,
-        visibleLineCountState = visibleLineCountState,
-    )
 }
 
 @Composable
 private fun PatchShowMore(
     presentation: PatchPresentation,
-    expandedState: State<Boolean>,
     visibleLineCountState: MutableState<Int>,
 ) {
     SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
         val visibleLineCount = visibleLineCountState.value
-        val remainingLineCount = if (expandedState.value) {
-            presentation.lines.size - presentation.lines.take(visibleLineCount).size
-        } else {
-            0
-        }
+        val remainingLineCount = (presentation.lines.size - visibleLineCount).coerceAtLeast(0)
         val placeable = subcompose(PatchShowMoreSlot(remainingLineCount)) {
             TuiPressable(
                 onClick = {
@@ -227,7 +185,6 @@ private fun PatchShowMore(
 @Composable
 private fun PatchBody(
     presentation: PatchPresentation,
-    expandedState: State<Boolean>,
     visibleLineCountState: State<Int>,
 ) {
     val colorScheme = TuiTheme.colorScheme
@@ -235,11 +192,7 @@ private fun PatchBody(
         check(constraints.hasBoundedWidth) {
             "Patch text must be measured with a finite maximum width."
         }
-        val lines = if (expandedState.value) {
-            presentation.lines.take(visibleLineCountState.value)
-        } else {
-            emptyList()
-        }
+        val lines = presentation.lines.take(visibleLineCountState.value)
         val styledLines = lines.map { line ->
             StyledPatchLine(
                 text = line.text,

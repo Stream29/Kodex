@@ -30,6 +30,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingCustomT
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPlanUpdate
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
+import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.CallToolResult
 import io.github.stream29.kodex.openai.ContentItem
@@ -299,12 +300,11 @@ val cleanEventViewTest by testSuite {
             assertFalse("exec_command" in collapsed)
 
             val expanded = clickFirstRow()
-            assertTrue("Tool: exec_command" in expanded)
-            assertTrue("> Arguments" in expanded)
+            assertTrue("\nexec_command\n" in expanded)
+            assertFalse("> Arguments" in expanded)
             assertFalse("Command: pwd" in expanded)
-
-            val arguments = clickRow(2)
-            assertTrue("Command: pwd" in arguments)
+            assertTrue("output(exit_code=0; wall_time=0.1s;" in expanded)
+            assertTrue("/workspace" in expanded)
         }
     }
 
@@ -337,7 +337,7 @@ val cleanEventViewTest by testSuite {
         }
     }
 
-    test("runningCommandReflectsItsLiveProcessCompletion") {
+    test("recordedCommandDoesNotObserveLiveProcessCompletionOrRegistryRemoval") {
         val session = TestUnifiedExecProcessSession(
             sessionId = 7,
             arguments = ExecCommandArguments(command = "sleep 5"),
@@ -355,24 +355,30 @@ val cleanEventViewTest by testSuite {
                 ),
             ),
         )
+        val registry = object : AgentShellSessionRegistry {
+            override val activeSessions = MutableStateFlow(mapOf<Int, AgentShellSession>(7 to session))
+        }
+        var width by mutableIntStateOf(80)
 
         runMosaicTest {
             assertEquals(
                 "> Run: sleep 5",
                 setContentAndSnapshot {
-                    Box(Modifier.width(60)) { event.renderCommandExecution(session) }
+                    Box(Modifier.width(width)) { event.render(registry) }
                 },
             )
 
             session.completed.value = true
+            width = 81 // Request a draw without relying on a forbidden live-state subscription.
             assertEquals("> Run: sleep 5", awaitSnapshot())
 
             val expanded = clickFirstRow()
-            assertTrue("> Process" in expanded)
-            assertFalse("Process: finished; final output is ready" in expanded)
-
-            val process = clickRow(3)
-            assertTrue("Process: finished; final output is ready" in process)
+            assertTrue("output(wall_time=0.1s; original_token_count=0):" in expanded)
+            assertFalse("Process" in expanded)
+            assertFalse("session" in expanded)
+            registry.activeSessions.value = emptyMap()
+            width = 82
+            assertEquals(expanded, awaitSnapshot())
         }
     }
 
@@ -397,13 +403,13 @@ val cleanEventViewTest by testSuite {
             assertEquals(
                 "> Run: sleep 5",
                 setContentAndSnapshot {
-                    Box(Modifier.width(60)) { event.renderCommandExecution(session = null) }
+                    Box(Modifier.width(60)) { event.render() }
                 },
             )
         }
     }
 
-    test("writeStdinNamesTheCommandBehindItsActiveSession") {
+    test("writeStdinUsesOnlyItsOwnRecordedPoll") {
         val session = TestUnifiedExecProcessSession(
             sessionId = 7,
             arguments = ExecCommandArguments(command = "tail -f build.log"),
@@ -426,18 +432,16 @@ val cleanEventViewTest by testSuite {
 
         runMosaicTest {
             val collapsed = setContentAndSnapshot {
-                Box(Modifier.width(60)) { event.renderCommandExecution(session) }
+                Box(Modifier.width(60)) { event.render() }
             }
-            assertEquals("> Wait for tail -f build.log", collapsed)
+            assertEquals("> Poll terminal output", collapsed)
             assertFalse("write_stdin" in collapsed)
 
             val expanded = clickFirstRow()
-            assertTrue("Tool: write_stdin" in expanded)
-            assertTrue("> Arguments" in expanded)
-            assertFalse("Command: tail -f build.log" in expanded)
-
-            val arguments = clickRow(2)
-            assertTrue("Command: tail -f build.log" in arguments)
+            assertTrue("\nwrite_stdin\n" in expanded)
+            assertFalse("> Arguments" in expanded)
+            assertFalse("tail -f build.log" in expanded)
+            assertFalse("session" in expanded)
         }
     }
 
@@ -676,14 +680,11 @@ val cleanEventViewTest by testSuite {
             assertFalse("apply_patch" in collapsed)
 
             val expanded = clickFirstRow()
-            assertTrue("Tool: apply_patch" in expanded)
-            assertTrue("> Changes" in expanded)
-            assertFalse("M file.txt" in expanded)
-
-            val changes = clickRow(2)
-            assertTrue("M file.txt" in changes)
-            assertTrue("- old" in changes)
-            assertTrue("+ new" in changes)
+            assertTrue("\napply_patch\n" in expanded)
+            assertFalse("> Changes" in expanded)
+            assertTrue("M file.txt" in expanded)
+            assertTrue("- old" in expanded)
+            assertTrue("+ new" in expanded)
         }
     }
 

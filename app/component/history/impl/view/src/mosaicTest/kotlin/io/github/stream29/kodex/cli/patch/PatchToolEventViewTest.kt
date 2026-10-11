@@ -44,14 +44,11 @@ val patchToolEventViewTest by testSuite {
             assertEquals("> Editing file.txt", collapsed)
 
             val expanded = click()
-            assertTrue("Tool: apply_patch" in expanded)
-            assertTrue("> Changes" in expanded)
-            assertTrue("M file.txt" !in expanded)
-
-            val changes = click(y = 2)
-            assertTrue("M file.txt" in changes)
-            assertTrue("- old" in changes)
-            assertTrue("+ new" in changes)
+            assertTrue("\napply_patch\n" in expanded)
+            assertTrue("Changes" !in expanded)
+            assertTrue("M file.txt" in expanded)
+            assertTrue("- old" in expanded)
+            assertTrue("+ new" in expanded)
         }
     }
 
@@ -72,19 +69,16 @@ val patchToolEventViewTest by testSuite {
                     PendingPatchToolEventView(patch)
                 }
             }
-            click()
             assertEquals(
                 listOf(
                     "v Editing ver...",
-                    "Tool: apply_patc",
-                    "  h",
-                    "v Changes",
+                    "apply_patch",
                     "A src/very-long-",
                     "  name.kt",
                     "+ 界界界界界界ab",
                     "  cdefghi",
                 ).joinToString("\n"),
-                click(y = 3),
+                click(),
             )
         }
     }
@@ -115,8 +109,7 @@ val patchToolEventViewTest by testSuite {
                     PendingPatchToolEventView(patch)
                 }
             }
-            click()
-            val rendered = click(y = 2)
+            val rendered = click()
                 .draw()
                 .render(AnsiLevel.TRUECOLOR, supportsKittyUnderlines = false)
 
@@ -155,6 +148,37 @@ val patchToolEventViewTest by testSuite {
 
             assertTrue("38;2;255;0;0" in rendered)
             assertTrue("failed" !in rendered)
+        }
+    }
+
+    test("firstExpansionKeepsMetadataFailureAndMoveContext") {
+        val event = StablePatchToolEvent(
+            callId = "patch",
+            diff = Patch(
+                patch = "",
+                workdir = "/workspace",
+                environmentId = "env-1",
+                hunks = listOf(UpdateFileHunk(
+                    path = "old.kt",
+                    movePath = "new.kt",
+                    chunks = listOf(UpdateFileChunk(oldLines = listOf("old"), newLines = listOf("new"))),
+                )),
+            ),
+            result = StablePatchToolExecutionResult.Failure("context did not match"),
+        )
+        runMosaicTest {
+            val text = setContentAndSnapshot {
+                Box(Modifier.width(80)) {
+                    StablePatchToolEventView(event, expanded = true, onToggleExpanded = {})
+                }
+            }
+            assertTrue("Working directory: /workspace" in text)
+            assertTrue("Environment: env-1" in text)
+            assertTrue("Error: context did not match" in text)
+            assertTrue("R old.kt -> new.kt" in text)
+            assertTrue("- old" in text)
+            assertTrue("+ new" in text)
+            assertTrue("Changes" !in text)
         }
     }
 
@@ -222,13 +246,12 @@ val patchToolEventViewTest by testSuite {
                     PendingPatchToolEventView(patch)
                 }
             }
-            click()
-            val mosaic = click(y = 2)
+            val mosaic = click()
             val rendered = mosaic.draw().render(
                 ansiLevel = AnsiLevel.NONE,
                 supportsKittyUnderlines = false,
             )
-            assertEquals(204, rendered.lineSequence().count())
+            assertEquals(203, rendered.lineSequence().count())
             assertTrue("1801 remaining" in rendered)
 
             val nodeDump = mosaic.dumpNodes()
@@ -241,11 +264,11 @@ val patchToolEventViewTest by testSuite {
                 message = "Expected at most five Text nodes, found $textNodeCount",
             )
 
-            val afterSecondClick = click(x = 1, y = 203).draw().render(
+            val afterSecondClick = click(x = 1, y = 202).draw().render(
                 ansiLevel = AnsiLevel.NONE,
                 supportsKittyUnderlines = false,
             )
-            assertEquals(404, afterSecondClick.lineSequence().count())
+            assertEquals(403, afterSecondClick.lineSequence().count())
             assertTrue("1601 remaining" in afterSecondClick)
         }
     }

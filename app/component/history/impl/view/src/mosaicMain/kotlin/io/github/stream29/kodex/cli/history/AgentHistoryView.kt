@@ -27,7 +27,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingPatchTo
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingServerToolSearch
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanEvent
-import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
@@ -585,9 +584,9 @@ private fun StoredHistoryContent(
                 is ToolHistoryItemState.Loading -> Text("")
                 ToolHistoryItemState.Failed -> HistoryErrorRow()
                 is ToolHistoryItemState.Collapsed ->
-                    CollapsedToolHistoryRow(currentState.header, shellSessions, item::expand)
+                    CollapsedToolHistoryRow(currentState.header, item::expand)
                 is ToolHistoryItemState.Expanding ->
-                    CollapsedToolHistoryRow(currentState.header, shellSessions, item::collapse)
+                    CollapsedToolHistoryRow(currentState.header, item::collapse)
                 is ToolHistoryItemState.Expanded -> currentState.event.render(
                     shellSessions, HistoryExpansionBinding({ true }, item::collapse),
                     currentState.header.elapsed,
@@ -631,7 +630,6 @@ private fun HistoryErrorRow() {
 @Composable
 private fun CollapsedToolHistoryRow(
     header: ToolHistoryItemHeader,
-    shellSessions: AgentShellSessionRegistry,
     onClick: () -> Unit,
 ) {
     when (header) {
@@ -643,11 +641,9 @@ private fun CollapsedToolHistoryRow(
         )
 
         is ToolHistoryItemHeader.CommandExecution -> {
-            val session = header.activeSession(shellSessions)
-            val processCompleted = session.completedForHistoryPresentation()
             CollapsedToolHistoryRow(
-                summary = header.summary(session),
-                status = header.status(session, processCompleted),
+                summary = header.summary(),
+                status = header.status(),
                 elapsed = header.elapsed,
                 onClick = onClick,
             )
@@ -685,77 +681,21 @@ private fun CollapsedToolHistoryRow(
     }
 }
 
-@Composable
-private fun ToolHistoryItemHeader.CommandExecution.activeSession(
-    registry: AgentShellSessionRegistry,
-): AgentShellSession? {
-    val sessionId = when (val action = action) {
-        is CommandExecutionHistoryAction.Run ->
-            (result as? CommandExecutionHistoryResult.Output)?.sessionId
-
-        is CommandExecutionHistoryAction.Interact -> action.sessionId
-        is CommandExecutionHistoryAction.Wait -> action.sessionId
-    } ?: return null
-    val sessions by registry.activeSessions.collectAsState()
-    return sessions[sessionId]
-}
-
-@Composable
-private fun AgentShellSession?.completedForHistoryPresentation(): Boolean {
-    if (this == null) return false
-    val completed by completed.collectAsState()
-    return completed
-}
-
-private fun ToolHistoryItemHeader.CommandExecution.summary(
-    session: AgentShellSession?,
-): String = when (val action = action) {
+private fun ToolHistoryItemHeader.CommandExecution.summary(): String = when (val action = action) {
     is CommandExecutionHistoryAction.Run ->
         action.command.takeIf(String::isNotBlank)?.let { command ->
             if (result == CommandExecutionHistoryResult.Failure) "Failed to run: $command" else "Run: $command"
         } ?: if (result == CommandExecutionHistoryResult.Failure) "Failed to run" else "Run"
 
-    is CommandExecutionHistoryAction.Interact ->
-        session?.arguments?.command?.historyCommandPreview()
-            ?.takeIf(String::isNotBlank)
-            ?.let { command ->
-                if (result == CommandExecutionHistoryResult.Failure) {
-                    "Failed to interact with $command"
-                } else {
-                    "Interact with $command"
-                }
-            }
-            ?: if (result == CommandExecutionHistoryResult.Failure) {
-                "Failed to interact with terminal session ${action.sessionId}"
-            } else {
-                "Interact with terminal session ${action.sessionId}"
-            }
-
-    is CommandExecutionHistoryAction.Wait ->
-        session?.arguments?.command?.historyCommandPreview()
-            ?.takeIf(String::isNotBlank)
-            ?.let { command ->
-                if (result == CommandExecutionHistoryResult.Failure) {
-                    "Failed to wait for $command"
-                } else {
-                    "Wait for $command"
-                }
-            }
-            ?: if (result == CommandExecutionHistoryResult.Failure) {
-                "Failed to wait for terminal session ${action.sessionId}"
-            } else {
-                "Wait for terminal session ${action.sessionId}"
-            }
+    is CommandExecutionHistoryAction.Interact -> "Write to terminal"
+    is CommandExecutionHistoryAction.Wait -> "Poll terminal output"
 }
 
-private fun ToolHistoryItemHeader.CommandExecution.status(
-    session: AgentShellSession?,
-    processCompleted: Boolean,
-): String = when (val result = result) {
+private fun ToolHistoryItemHeader.CommandExecution.status(): String = when (val result = result) {
     CommandExecutionHistoryResult.Failure -> "failed"
     is CommandExecutionHistoryResult.Output -> when (result.exitCode) {
         0 -> "succeeded"
-        null -> if (session == null || processCompleted) "finished" else "running"
+        null -> "completed"
         else -> "failed"
     }
 }
@@ -775,18 +715,6 @@ private fun io.github.stream29.kodex.app.history.contract.item.PatchHistoryItemH
 private fun PatchHistoryItemStatus.historyStatus(): String = when (this) {
     PatchHistoryItemStatus.Completed -> "completed"
     PatchHistoryItemStatus.Failed -> "failed"
-}
-
-private fun String.historyCommandPreview(): String {
-    val singleLine = lineSequence()
-        .map(String::trim)
-        .filter(String::isNotEmpty)
-        .joinToString(" ")
-    return if (singleLine.length <= MaximumHistoryCommandPreviewLength) {
-        singleLine
-    } else {
-        singleLine.take(MaximumHistoryCommandPreviewLength - 3).trimEnd() + "..."
-    }
 }
 
 private fun HistoryItemViewModel.storageIndex(): Int = when (this) {
@@ -890,7 +818,6 @@ private enum class HistoryContentType {
 private data object StreamingStartedHistoryKey
 private data object CompactingHistoryKey
 
-private const val MaximumHistoryCommandPreviewLength: Int = 240
 
 @Composable
 private fun HistoryMarkerText(value: String) {
