@@ -86,6 +86,26 @@ there is no target-profile switch.
 - Run the module's actual test task after opting in. A cached or `NO-SOURCE`
   task is not evidence that newly added tests execute.
 
+## Build conventions
+
+- Conventions and `GenerateKodexVersion` live in `build-logic`, explicitly
+  included by `pluginManagement`. It reads the root version catalog; KGP and
+  Koin implementation dependencies no longer repeat version strings.
+- Keep the root Kotlin multiplatform, serialization and Compose declarations
+  with `apply false`. They anchor the shared plugin classpath; removing them
+  has reproduced duplicate KGP loading in the composite.
+- Actual kRPC consumers, including test-only consumers, explicitly apply
+  `id("kodex.krpc-utils-patch")`. It retains the existing Native utility patch
+  without attaching substitution rules to unrelated projects. When adding a
+  consumer, check the reverse project-dependency closure and apply the same
+  convention to downstream consumers; the current list is not permanent.
+- `kotlin.daemon.useFallbackStrategy=false` makes a failed Kotlin daemon
+  connection/startup fail the build instead of silently compiling in the
+  Gradle process. Diagnose the daemon failure rather than removing the policy.
+  The existing Gradle/Kotlin maximum heaps and full targets are unchanged.
+- These changes do not certify an IDEA OOM fix or faster Sync. Complete IDE
+  import and actual source navigation remain separate validation gates.
+
 ## Working on a fork
 
 - Use the fork's `kodex-submodule` maintenance line and its actual toolchain.
