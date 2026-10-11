@@ -13,8 +13,8 @@ repositories {
 }
 
 dependencies {
-    implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")
+    implementation(libs.kotlin.gradle.plugin)
     implementation(libs.kotlin.compose.compiler.gradle.plugin)
-    implementation("io.insert-koin:koin-compiler-gradle-plugin:1.0.1")
+    implementation(libs.koin.compiler.gradle.plugin)
     implementation(libs.test.balloon.gradle.plugin)
 }
