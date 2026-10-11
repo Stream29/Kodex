@@ -36,8 +36,8 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
             SessionTitleGenerationResult.Generated("Keep backend naming alive")
         }
         withTitleFrontend(generator) { services, home ->
-            val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()))
-            val otherViews = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()))
+            val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()), { throw it })
+            val otherViews = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()), { throw it })
             val globalSettings = RpcGlobalSettings.open(
                 services.global, openCliFrontendSettings(home), this, 80,
             )
@@ -103,7 +103,7 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
             release.await()
             SessionTitleGenerationResult.Generated("Late automatic title")
         }) { services, _ ->
-            val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()))
+            val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()), { throw it })
             try {
                 val index = services.global.createSession(KodexAgentSettings(OpenAiModelId("test-model")))
                 val view = views.open(index)
@@ -146,7 +146,7 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
                 SessionTitleGenerationResult.Generated("Name replacement history")
             }
         }) { services, _ ->
-            val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()))
+            val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()), { throw it })
             try {
                 val index = services.global.createSession(KodexAgentSettings(OpenAiModelId("test-model")))
                 val view = views.open(index)

@@ -268,7 +268,7 @@ private suspend fun withBoundaryRoot(
                 val local = CoroutineScope(coroutineContext + owner)
                 val services = RpcServices(decorate(RestoringRpcClient(raw)))
                 val models = MutableStateFlow(services.global.getModels())
-                val views = RpcSessionViews(local, services, models)
+                val views = RpcSessionViews(local, services, models, reportUnhandledError = { throw it })
                 val actualSessions = DefaultPersistedSessionViewModelRegistry(views, models, local)
                 val handles = mutableMapOf<Int, BoundarySession>()
                 val sessions = object : PersistedSessionViewModelRegistry by actualSessions {

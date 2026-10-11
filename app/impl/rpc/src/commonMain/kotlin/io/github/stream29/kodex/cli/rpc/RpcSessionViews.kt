@@ -35,11 +35,16 @@ public sealed interface SessionViewStatus {
     public data object Closed : SessionViewStatus
 }
 
-/** One view/heartbeat per opened tab index; a directory lookup does not create a view. */
+/**
+ * One view/heartbeat per opened tab index; a directory lookup does not create a view.
+ * [reportUnhandledError] is the application-owned local error outlet, retained across rebinding.
+ * Backend-reported run failures and cancellation never enter it.
+ */
 public class RpcSessionViews(
     scope: CoroutineScope,
     public val services: RpcServices,
     private val models: StateFlow<List<ModelInfo>>,
+    private val reportUnhandledError: (Throwable) -> Unit,
     private val onCreated: (List<CreatedSuggestedSession>) -> Unit = {},
 ) : AutoCloseable {
     private val owner = SupervisorJob(scope.coroutineContext[Job])
@@ -50,7 +55,7 @@ public class RpcSessionViews(
     public suspend fun open(index: Int): RpcSessionView {
         val view = mutex.withLock {
             owner.ensureActive()
-            views.getOrPut(index) { RpcSessionView(index, services, localScope, models, onCreated) }
+            views.getOrPut(index) { RpcSessionView(index, services, localScope, models, onCreated, reportUnhandledError) }
         }
         try {
             view.awaitReady()
@@ -103,6 +108,7 @@ public class RpcSessionView internal constructor(
     scope: CoroutineScope,
     private val models: StateFlow<List<ModelInfo>>,
     private val onCreated: (List<CreatedSuggestedSession>) -> Unit,
+    private val reportUnhandledError: (Throwable) -> Unit,
 ) : AutoCloseable {
     private val owner = SupervisorJob(scope.coroutineContext[Job])
     private val localScope = CoroutineScope(scope.coroutineContext + owner)
@@ -175,6 +181,7 @@ public class RpcSessionView internal constructor(
                     services,
                     models,
                     onCreated,
+                    reportUnhandledError,
                 )
                 mutableAgent.value = nextAgent
                 mutableStatus.value = SessionViewStatus.Ready

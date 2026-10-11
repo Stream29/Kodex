@@ -272,7 +272,7 @@ private suspend fun sessionFrontend(
                 val models = MutableStateFlow(services.global.getModels())
                 val owner = SupervisorJob(coroutineContext[Job])
                 val local = CoroutineScope(coroutineContext + owner)
-                val views = RpcSessionViews(local, services, models)
+                val views = RpcSessionViews(local, services, models, reportUnhandledError = { throw it })
                 val sessions = DefaultPersistedSessionViewModelRegistry(views, models, local)
                 try {
                     SessionFrontendFixture(coroutineContext, owner, services, views, sessions, home).block()

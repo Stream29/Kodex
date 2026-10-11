@@ -20,6 +20,16 @@ private fun nonLocalReturn(): Int {
 }
 
 val restoreRemoteExceptionTest by testSuite {
+    test("reported Agent failure survives the wire without losing its diagnostic") {
+        for (diagnostic in listOf(null, "literal failure with \"quotes\"")) {
+            val source = AgentRunFailureReported(diagnostic)
+            val restored = assertFailsWith<AgentRunFailureReported> {
+                restoreRemoteException { throw Throwable(source.message) }
+            }
+            assertEquals(diagnostic, restored.diagnostic)
+        }
+    }
+
     test("success preserves the return value and invokes the block once") {
         val value = Any()
         var calls = 0

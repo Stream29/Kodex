@@ -34,6 +34,7 @@ public class RpcFrontendFixture internal constructor(
     public val sessions: DefaultPersistedSessionViewModelRegistry,
     public val drafts: DefaultNewSessionViewModelFactory,
     public val models: StateFlow<List<ModelInfo>>,
+    public val failures: StateFlow<List<Throwable>>,
     private val finish: CompletableDeferred<Unit>,
 ) : CoroutineScope {
     internal lateinit var completion: Deferred<Unit>
@@ -99,11 +100,13 @@ public suspend fun startRpcFrontendFixture(
                             coroutineContext + frontendJob +
                                 (frontendDispatcher ?: Dispatchers.Default),
                         )
-                        val views = RpcSessionViews(frontendScope, services, models)
+                        val failures = MutableStateFlow<List<Throwable>>(emptyList())
+                        val views = RpcSessionViews(frontendScope, services, models,
+                            reportUnhandledError = { error -> failures.update { it + error } })
                         val sessions = DefaultPersistedSessionViewModelRegistry(views, models, frontendScope)
                         val drafts = DefaultNewSessionViewModelFactory(views, sessions, models, frontendScope)
                         try {
-                            ready.complete(RpcFrontendFixture(frontendScope.coroutineContext, root, services, views, sessions, drafts, models, finish))
+                            ready.complete(RpcFrontendFixture(frontendScope.coroutineContext, root, services, views, sessions, drafts, models, failures, finish))
                             finish.await()
                         } finally { withContext(NonCancellable) {
                             try { sessions.shutdown() } finally { frontendJob.cancelAndJoin() }

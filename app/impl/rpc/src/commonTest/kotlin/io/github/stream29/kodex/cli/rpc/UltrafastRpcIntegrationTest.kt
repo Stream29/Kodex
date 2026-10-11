@@ -100,7 +100,7 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
             }
         }
     }
-    test("a response tier warning does not replace an unacknowledged operation Error") {
+    test("a reported operation error does not hide the next response tier warning") {
         val started = CompletableDeferred<Unit>()
         val finish = CompletableDeferred<Unit>()
         frontend(
@@ -123,12 +123,14 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 agent.submit(listOf(ContentItem.InputText("test")))
                 started.await()
                 agent.clearPending()
-                val error = agent.notification.filterNotNull().first { it.level == AgentNotificationLevel.Error }
+                assertEquals("fixture operation failed", failures.first { it.size == 1 }.single().message)
+                assertNull(agent.notification.value)
                 finish.complete(Unit)
                 binding.tokenCount.first { it?.kind == TokenCountKind.Response }
                 binding.running.first { !it }
                 yield(); yield()
-                assertEquals(error, agent.notification.value)
+                val warning = agent.notification.filterNotNull().first { it.level == AgentNotificationLevel.Warning }
+                assertEquals("Ultrafast was not reported.", warning.message)
                 assertEquals(ServiceTier.Ultrafast, binding.settings.value.serviceTier)
             } finally {
                 finish.complete(Unit)

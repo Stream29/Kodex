@@ -87,10 +87,13 @@ val backendNotificationsTest by testSuite(compartment = { TestCompartment.RealTi
             assertFailsWith<Throwable> { rpc.appendUserMessage(index, listOf(ContentItem.InputText("illegal"))) }
             assertFalse(event.isCompleted)
             fail.complete(Unit)
-            assertTrue(run.await().isFailure)
+            val failure = assertIs<io.github.stream29.kodex.utils.rpcexception.AgentRunFailureReported>(
+                run.await().exceptionOrNull(),
+            )
             val stop = assertIs<Notification.Stop.UnhandledError>(event.await())
             assertEquals(index, stop.sessionIndex)
             assertNotNull(stop.message)
+            assertEquals(stop.message, failure.diagnostic)
         }
         runtimeFixture(mockOpenAiClient { createResponse { flow { awaitCancellation() } } }) { _, index, rpc ->
             val unexpected = async(start = CoroutineStart.UNDISPATCHED) { rpc.notifications.flow.first() }

@@ -27,7 +27,7 @@ import kotlinx.coroutines.flow.SharingStarted
 /**
  * Creates the Composer child bound to one exact RPC Session binding.
  * Command callbacks must belong to that binding's presentation owner: resume/cancel admit
- * work through its caught command boundary, and failures use its existing Agent failure sink.
+ * work through its caught command boundary, and failures use the Application's error outlet.
  * No callback may resolve the currently selected Session or silently discard a failure.
  */
 public fun createRpcComposerViewModel(

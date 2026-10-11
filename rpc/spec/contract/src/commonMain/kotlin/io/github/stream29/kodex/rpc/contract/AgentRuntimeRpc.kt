@@ -109,6 +109,8 @@ public interface AgentRuntimeRpc {
      * concurrent execution is rejected rather than queued.
      * The backend renews Session TTL while the running-turn slot is occupied, through cleanup.
      * Entire CLI host shutdown still cleans up both sides.
+     * A failed accepted run that offered an UnhandledError Stop throws
+     * AgentRunFailureReported; clients must not also send a local error notification.
      */
     public suspend fun resume(sessionIndex: Int): Unit
 

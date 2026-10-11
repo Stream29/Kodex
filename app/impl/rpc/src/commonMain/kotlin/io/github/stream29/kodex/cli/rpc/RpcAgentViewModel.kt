@@ -40,6 +40,7 @@ import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
 import io.github.stream29.kodex.rpc.models.ShellSessionState
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
+import io.github.stream29.kodex.utils.rpcexception.AgentRunFailureReported
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -63,7 +64,8 @@ public fun createRpcAgentViewModel(
     services: RpcServices,
     models: StateFlow<List<ModelInfo>>,
     onCreated: (List<CreatedSuggestedSession>) -> Unit,
-): AgentViewModel = RpcAgentViewModel(binding, scope, services, models, onCreated)
+    reportUnhandledError: (Throwable) -> Unit,
+): AgentViewModel = RpcAgentViewModel(binding, scope, services, models, onCreated, reportUnhandledError)
 
 /** Original Agent behavior and children share one disposable, binding-scoped owner. */
 private class RpcAgentViewModel(
@@ -72,6 +74,7 @@ private class RpcAgentViewModel(
     private val services: RpcServices,
     override val models: StateFlow<List<ModelInfo>>,
     private val onCreated: (List<CreatedSuggestedSession>) -> Unit,
+    private val reportUnhandledError: (Throwable) -> Unit,
 ) : AgentViewModel {
     private val owner = Job(scope.coroutineContext[Job])
     private val local = CoroutineScope(scope.coroutineContext + owner)
@@ -100,7 +103,7 @@ private class RpcAgentViewModel(
         resumePort = ComposerResumePort { resume() },
         cancellationPort = ComposerCancellationPort { cancel() },
         failureReporter = ComposerFailureReporter { _, failure ->
-            // Composer retains its typed summary; the existing Agent notification is the host outlet.
+            // Retain the failed draft, but report through the Application's local Hook outlet.
             if (owner.isActive) report(IllegalStateException(failure.message))
         },
     )
@@ -282,16 +285,13 @@ private class RpcAgentViewModel(
     }
 
     private fun report(error: Throwable) {
-        if (!owner.isActive) return
-        mutableNotification.value = AgentNotification(
-            ++notificationId, AgentNotificationLevel.Error, "Session operation failed.", error.message,
-        )
+        if (!owner.isActive || error is CancellationException || error is AgentRunFailureReported) return
+        reportUnhandledError(error)
     }
 
     private fun warnServiceTier(detail: String) {
         if (!owner.isActive) return
         val current = mutableNotification.value
-        if (current?.level == AgentNotificationLevel.Error) return
         mutableNotification.compareAndSet(
             current,
             AgentNotification(++notificationId, AgentNotificationLevel.Warning, "Ultrafast was not reported.", detail),

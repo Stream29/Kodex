@@ -387,10 +387,8 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                     ComposerSubmissionResult.Failed("accepted append reply lost"),
                     agent.composer.submit(revision),
                 )
-                val notification = agent.notification.filterNotNull().first()
-                assertEquals(1L, notification.id)
-                assertEquals("Session operation failed.", notification.message)
-                assertEquals("accepted append reply lost", notification.detail)
+                assertEquals("accepted append reply lost", failures.first { it.size == 1 }.single().message)
+                assertNull(agent.notification.value)
                 assertEquals("  persisted but retained  ", agent.composer.state.value.text)
                 assertEquals(6, agent.composer.state.value.cursorOffset)
                 assertEquals(revision + 1, agent.composer.state.value.revision)
@@ -418,15 +416,14 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             val agent = requireNotNull(view.agent.value)
             try {
                 agent.cancel() // Actual root Stop command, not the Composer cancel port.
-                val first = agent.notification.filterNotNull().first()
-                assertEquals("ordinary stop failure", first.detail)
+                assertEquals("ordinary stop failure", failures.first { it.size == 1 }.single().message)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertSame(binding, view.current())
-                agent.dismissNotification(first.id)
                 assertNull(agent.notification.value)
                 // The bound Composer callback also uses the caught Agent command boundary.
                 agent.composer.cancel()
-                agent.notification.filterNotNull().first { it.id > first.id }
+                failures.first { it.size == 2 }
+                assertTrue(failures.value.all { it.message == "ordinary stop failure" })
                 assertEquals(2, stops)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertSame(binding, view.current())
@@ -753,7 +750,8 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             binding.storage.index.cacheNonce.first { it != nonce }
             binding.state.first { it == AgentStateValue.Empty }
             agent.confirmHistoryRevert(request)
-            agent.notification.filterNotNull().first()
+            failures.first { it.size == 1 }
+            assertNull(agent.notification.value)
             assertEquals(AgentStateValue.Empty, binding.state.value)
             assertEquals(request, assertIs<io.github.stream29.kodex.app.agent.contract.AgentHistoryActionState.ConfirmRevert>(
                 agent.historyAction.value,
@@ -896,6 +894,7 @@ internal class FrontendFixture(
     val services: RpcServices,
     val views: RpcSessionViews,
     val home: Path,
+    val failures: StateFlow<List<Throwable>>,
 ) : CoroutineScope
 
 internal suspend fun frontend(
@@ -923,8 +922,10 @@ internal suspend fun frontend(
         ) { backend ->
             withInMemoryRpc(backend::register) { raw ->
                 val services = RpcServices(decorate(RestoringRpcClient(raw)))
-                val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()))
-                try { FrontendFixture(coroutineContext, services, views, root).block() }
+                val failures = MutableStateFlow<List<Throwable>>(emptyList())
+                val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()),
+                    reportUnhandledError = { error -> failures.update { it + error } })
+                try { FrontendFixture(coroutineContext, services, views, root, failures).block() }
                 finally { views.close(); withContext(NonCancellable) { views.join() } }
             }
         }

@@ -22,6 +22,7 @@ import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.models.ShellSessionState
 import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.utils.rpcexception.CacheNonceMismatch
+import io.github.stream29.kodex.utils.rpcexception.AgentRunFailureReported
 import io.github.stream29.kodex.utils.rpcexception.NoMatchException
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import kotlinx.coroutines.CancellationException
@@ -116,7 +117,10 @@ public class BackendAgentRuntimeRpc(
             } catch (rejected: ConcurrentAgentRuntimeResumeException) {
                 throw rejected
             } catch (failure: Throwable) {
-                if (acceptedState) notifications.publish(Notification.Stop.UnhandledError(sessionIndex, failure.message))
+                if (acceptedState) {
+                    notifications.publish(Notification.Stop.UnhandledError(sessionIndex, failure.message))
+                    throw AgentRunFailureReported(failure.message).also { it.addSuppressed(failure) }
+                }
                 throw failure
             }
             try {

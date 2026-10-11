@@ -68,9 +68,15 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
             }
             assertFalse(Fs.exists(Path(home, "unwanted")))
             assertSame(session, app.viewModel.navigation.value.selected)
+            // Exercise the real Agent callback, not only the exposed Application reporter.
+            agent.confirmHistoryRevert(Long.MAX_VALUE)
+            val agentError = Json.parseToJsonElement(lines(4).last()).jsonObject
+            assertEquals("unhandled_error", agentError.getValue("type").jsonPrimitive.content)
+            assertEquals("No history confirmation is pending.", agentError.getValue("message").jsonPrimitive.content)
+            assertNull(agent.notification.value)
             agent.submit(listOf(ContentItem.InputText("after local errors")))
-            val resumed = lines(4)
-            assertEquals(4, resumed.size, "Local errors and failed Hooks must not kill or recursively notify the host.")
+            val resumed = lines(5)
+            assertEquals(5, resumed.size, "Local errors and failed Hooks must not kill or recursively notify the host.")
             assertTrue(resumed.last().contains("stop_assistant_message"))
         }
     }
@@ -110,6 +116,21 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
             assertEquals(2, both.size)
             assertTrue(both.last().contains("unhandled"))
             assertTrue(both.last().contains("test provider failure"))
+            agent.running.first { !it }
+            agent.submit(listOf(ContentItem.InputText("same failure in a different run")))
+            val repeated = lines(3)
+            assertTrue(repeated.last().contains("stop_unhandled_error"),
+                "Separate failed runs must each notify, even when their diagnostics match.")
+            agent.running.first { !it }
+            fail = false
+            agent.submit(listOf(ContentItem.InputText("after failed run")))
+            val after = lines(4)
+            assertTrue(after.last().contains("stop_assistant_message"),
+                "The failed run must not also emit a local unhandled_error before the next Stop.")
+            // Also catch a delayed duplicate after the success notification.
+            delay(200)
+            assertEquals(4, Fs.readString(output).lineSequence().filter(String::isNotBlank).count())
+            assertNull(agent.notification.value)
         }
     }
 }

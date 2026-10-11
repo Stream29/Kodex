@@ -58,6 +58,25 @@ import kotlin.time.Duration.Companion.seconds
 private val composerHostDispatcher = Dispatchers.Default.limitedParallelism(1)
 
 val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("host preserves non-error notices without rendering an inline error") {
+        composerHost {
+            val agent = requireNotNull(session.rootAgent.value)
+            val notices = MutableStateFlow<AgentNotification?>(
+                AgentNotification(1, AgentNotificationLevel.Warning, "Ultrafast was not reported.", "Default was used."),
+            )
+            val presented = object : AgentViewModel by agent {
+                override val notification: StateFlow<AgentNotification?> = notices
+            }
+            runComposerHostMosaicTest {
+                setContentAndSnapshot { RepairHost(presented, FocusRequester()) }
+                assertContains(snapshotContaining("Ultrafast was not reported."), "Default was used.")
+                notices.value = AgentNotification(2, AgentNotificationLevel.Error, "hidden operation error", null)
+                val snapshot = snapshotMatching { "Ultrafast was not reported." !in it }
+                assertFalse("hidden operation error" in snapshot, snapshot)
+            }
+        }
+    }
+
     test("real host Enter reports append failure once and retains exact draft and cursor") {
         val entered = CompletableDeferred<Unit>()
         val proceed = CompletableDeferred<Unit>()
@@ -91,18 +110,18 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 entered.await()
                 assertContains(snapshotContaining("Submitting…"), "Submitting…")
                 proceed.complete(Unit)
-                agent.notification.first { it != null }
-                val snapshot = snapshotContaining("injected append failure")
-                assertEquals(1, Regex("injected append failure").findAll(snapshot).count(), snapshot)
-                assertContains(snapshot, "Session operation failed.")
+                failures.first { it.size == 1 }
+                val snapshot = snapshotMatching { "Submitting…" !in it }
+                assertFalse("injected append failure" in snapshot, snapshot)
+                assertFalse("Session operation failed." in snapshot, snapshot)
                 assertFalse("Unable to submit:" in snapshot, snapshot)
                 assertEquals("  keep this draft  ", agent.composer.state.value.text)
                 assertEquals(5, agent.composer.state.value.cursorOffset)
                 // Existing failure transition advances revision; it does not edit the failed draft.
                 assertEquals(revision + 1, agent.composer.state.value.revision)
                 assertIs<ComposerSubmissionState.Failed>(agent.composer.state.value.submission)
-                assertEquals(AgentNotificationLevel.Error, agent.notification.value?.level)
-                assertEquals(1L, agent.notification.value?.id)
+                assertNull(agent.notification.value)
+                assertEquals("injected append failure", failures.value.single().message)
                 assertEquals(1, appends)
                 assertEquals(0, resumes)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
@@ -113,7 +132,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
         }
     }
 
-    test("real host Enter ordinary resume failure uses original Agent policy and keeps Session Ready") {
+    test("real host Enter reports resume failure without an inline error and keeps Session Ready") {
         var appends = 0
         var resumes = 0
         composerHost(decorate = { delegate ->
@@ -134,11 +153,11 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 assertTrue(focus.requestFocus())
                 sendKeyEvent(KeyboardEvent(13))
                 awaitSnapshot()
-                val notification = agent.notification.filterNotNull().first()
-                assertEquals("Session operation failed.", notification.message)
-                assertEquals("injected resume failure", notification.detail)
-                val snapshot = snapshotContaining("injected resume failure")
-                assertEquals(1, Regex("injected resume failure").findAll(snapshot).count(), snapshot)
+                failures.first { it.size == 1 }
+                assertEquals("injected resume failure", failures.value.single().message)
+                val snapshot = snapshotMatching { "Submitting…" !in it }
+                assertFalse("injected resume failure" in snapshot, snapshot)
+                assertFalse("Session operation failed." in snapshot, snapshot)
                 assertFalse("Unable to submit:" in snapshot, snapshot)
                 assertEquals("", agent.composer.state.value.text)
                 assertEquals(revision + 1, agent.composer.state.value.revision)
@@ -146,7 +165,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 assertEquals(AgentStateValue.UserMessage, services.runtime.getState(view.index))
                 assertEquals(1, appends)
                 assertEquals(1, resumes)
-                assertEquals(1L, notification.id)
+                assertNull(agent.notification.value)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
                 assertSame(binding, view.current())
                 assertSame(agent, view.agent.value)
@@ -155,10 +174,6 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 // The binding is still usable, not merely a transient Ready snapshot.
                 agent.renameThread("usable after failure")
                 agent.settings.first { it.threadName == "usable after failure" }
-                agent.dismissNotification(notification.id)
-                agent.notification.first { it == null }
-                val dismissed = snapshotMatching { "injected resume failure" !in it }
-                assertFalse("injected resume failure" in dismissed, dismissed)
                 assertEquals(1, appends) // No retry or compensating append.
             }
         }
@@ -261,6 +276,7 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                 val snapshot = awaitSnapshot()
                 assertFalse("Session operation failed." in snapshot, snapshot)
                 assertNull(agent.notification.value)
+                assertTrue(failures.value.isEmpty(), "Cancellation must not enter the error outlet.")
                 assertSame(agent, view.agent.value)
                 assertEquals("", agent.composer.state.value.text)
                 assertEquals(SessionViewStatus.Ready, view.status.value)
@@ -403,6 +419,7 @@ private class ComposerHostFixture(
     val services: RpcServices,
     val session: PersistedSessionViewModel,
     val view: RpcSessionView,
+    val failures: StateFlow<List<Throwable>>,
 )
 
 /**
@@ -432,12 +449,14 @@ private suspend fun composerHost(
             withInMemoryRpc(backend::register) { raw ->
                 val services = RpcServices(decorate(RestoringRpcClient(raw)))
                 val models = MutableStateFlow(services.global.getModels())
-                val views = RpcSessionViews(this, services, models)
+                val failures = MutableStateFlow<List<Throwable>>(emptyList())
+                val views = RpcSessionViews(this, services, models,
+                    reportUnhandledError = { error -> failures.update { it + error } })
                 val sessions = DefaultPersistedSessionViewModelRegistry(views, models, this)
                 try {
                     val index = services.global.createSession(testSettings(cwd = root))
                     val session = sessions.open(index)
-                    ComposerHostFixture(services, session, views.open(index)).block()
+                    ComposerHostFixture(services, session, views.open(index), failures).block()
                 } finally { withContext(NonCancellable) { sessions.shutdown() } }
             }
         }

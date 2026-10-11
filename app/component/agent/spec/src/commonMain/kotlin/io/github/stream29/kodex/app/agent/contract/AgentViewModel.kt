@@ -91,9 +91,10 @@ public interface AgentSettingsViewModel {
  *
  * Stable identity and mutable Agent-owned state are direct properties. Production
  * assembly uses the existing RPC factory
- * `createRpcAgentViewModel(binding, scope, services, models, onCreated)`: the exact
+ * `createRpcAgentViewModel(binding, scope, services, models, onCreated, reportUnhandledError)`: the exact
  * binding/services and model catalog are borrowed; scope owns the local Agent child;
- * onCreated receives accepted suggested-session results for navigation. Those inputs
+ * onCreated receives accepted suggested-session results for navigation; reportUnhandledError
+ * uses the Application's local error Hook outlet. Those inputs
  * are not renderer inputs or spec dependencies, and close does not close the shared
  * services/catalog/parent scope.
  * This owner belongs to one live binding, not to the currently selected tab.
@@ -107,7 +108,8 @@ public interface AgentSettingsViewModel {
  * aggregate. Show one pending-steer preview, the exact pending-tool child, and one
  * [notification] outlet. [tokenCount] null omits the counter. History context menus
  * capture the real item, index and generation. Ordinary asynchronous command failures
- * become Agent notifications; cancellation is not an ordinary failure. Session
+ * use the Application error reporter, not [notification]. Backend-notified run failures
+ * are not reported twice, and cancellation is not an ordinary failure. Session
  * inactivity restores observations, never replays accepted writes or creates.
  *
  * Primary control is Stop whenever running (including manual compaction), otherwise
@@ -154,8 +156,8 @@ public interface AgentViewModel :
     /**
      * Starts waiting for a backend-owned continuation; closing this view only cancels the wait.
      * Closed owners ignore the intent; an inactive binding does not retarget another Agent.
-     * Ordinary failures are reported
-     * through [notification], while cancellation is not reported as an operation failure.
+     * Ordinary failures use the Application error reporter unless the backend already
+     * offered their Stop notification. Cancellation is not reported as an operation failure.
      * @throws CancellationException when the captured binding is already closed at admission.
      */
     public fun resume(): Unit
@@ -224,7 +226,7 @@ public interface AgentViewModel :
      * The accepted operation executes in this ViewModel's lifetime and this
      * command returns after that ownership transfer. A missing/stale request is rejected
      * without consuming a different request; rejection and ordinary execution failures
-     * use [notification]. A closed owner does not start another operation.
+     * use the Application error reporter. A closed owner does not start another operation.
      */
     public fun confirmHistoryRevert(requestId: Long): Unit
 

@@ -21,6 +21,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperM
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
+import io.github.stream29.kodex.app.agent.contract.AgentNotificationLevel
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
 import io.github.stream29.kodex.cli.agent.RequestUserInputPanel
@@ -89,14 +90,14 @@ public fun AgentRuntimeScreen(
         softWrap = true,
     )
     val composerStatus = composerStatusLine(composerState, showFailure = false)
-    val failureLine = notification?.let {
+    val notificationLine = notification?.takeUnless { it.level == AgentNotificationLevel.Error }?.let {
         listOfNotNull(it.message, it.detail).joinToString(" ").ellipsizeToTerminalWidth(columns)
     }
     val pendingRequest = requestUserInput as? RequestUserInputState.Pending
     val pendingSuggestion = suggestSubagentTask as? SuggestSubagentTaskState.Pending
     val hostInteractionPending = pendingRequest != null || pendingSuggestion != null
     val composerStatusRows = if (composerStatus == null) 0 else 1
-    val failureRows = if (failureLine == null) 0 else 1
+    val notificationRows = if (notificationLine == null) 0 else 1
     val statusBarRows = agentRuntimeStatusBarRows(
         columns = columns,
         state = state,
@@ -105,7 +106,7 @@ public fun AgentRuntimeScreen(
         tokenCount = tokenCount,
     )
     val flexibleRows =
-        (rows - HistoryComposerSeparatorRows - statusBarRows - composerStatusRows - failureRows).coerceAtLeast(0)
+        (rows - HistoryComposerSeparatorRows - statusBarRows - composerStatusRows - notificationRows).coerceAtLeast(0)
     val minimumComposerRows = minOf(1, flexibleRows)
     val requestUserInputRows = if (!hostInteractionPending) {
         0
@@ -185,9 +186,8 @@ public fun AgentRuntimeScreen(
             showScrollToLatest = !followsLatest,
             onScrollToLatest = viewModel.history::requestScrollToLatest,
         )
-        // The same Agent notification covers append/steer and caught asynchronous resume errors.
-        // Composer keeps its failure state, but this host renders that failure only here.
-        failureLine?.let { Text(it, textStyle = TextStyle.Dim) }
+        // Errors use the Application Hook outlet; only non-error Agent notices belong here.
+        notificationLine?.let { Text(it, textStyle = TextStyle.Dim) }
         ComposerView(
             viewModel = viewModel.composer,
             columns = columns,
