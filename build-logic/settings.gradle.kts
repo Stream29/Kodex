@@ -6,6 +6,8 @@ pluginManagement {
     }
 }
 
+rootProject.name = "kodex-build-logic"
+
 dependencyResolutionManagement {
     repositories {
         google()

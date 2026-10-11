@@ -1,3 +1,9 @@
+plugins {
+    alias(libs.plugins.kotlin.multiplatform) apply false
+    alias(libs.plugins.kotlin.serialization) apply false
+    alias(libs.plugins.kotlin.compose) apply false
+}
+
 // Replace only the affected kRPC 0.10.3 utils module. Keep the compiler, core,
 // transport, and wire protocol at the upstream version.
 subprojects {
