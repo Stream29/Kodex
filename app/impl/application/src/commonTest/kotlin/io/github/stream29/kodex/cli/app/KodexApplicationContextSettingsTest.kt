@@ -60,7 +60,7 @@ val kodexApplicationContextSettingsTest by testSuite(compartment = { TestCompart
                     "rendered"
                 }
                 assertEquals("rendered", value)
-                assertEquals("\"$CurrentKodexApplicationVersion\"", Fs.readString(Path(home, "version.json")))
+                assertEquals("\"0.4.7\"", Fs.readString(Path(home, "version.json")))
                 assertHomeReleased(home)
             } finally { deleteTestDirectory(home) }
         }
@@ -96,9 +96,38 @@ val kodexApplicationContextSettingsTest by testSuite(compartment = { TestCompart
                     assertTrue(session.sessionIndex >= 0)
                     assertTrue(Fs.exists(Path(home, "sessions")))
                 }
-                assertEquals("\"$CurrentKodexApplicationVersion\"", Fs.readString(Path(home, "version.json")))
+                assertEquals("\"0.4.7\"", Fs.readString(Path(home, "version.json")))
                 assertHomeReleased(home)
             } finally { withContext(NonCancellable) { deleteTestDirectory(home) } }
+        }
+    }
+    for (checkpoint in listOf("0.4.7", "0.4.10")) {
+        test("renderer accepts prepared checkpoint $checkpoint while another Home reader stays alive") {
+            coroutineScope {
+                val home = Path(SystemTemporaryDirectory, "kodex-cutover-checkpoint-${Random.nextLong()}")
+                try {
+                    Fs.createDirectories(home)
+                    Fs.writeString(Path(home, "version.json"), "\"$checkpoint\"")
+                    val otherReader = prepareKodexHome(home)
+                    try {
+                        val handle = prepareKodexHome(home)
+                        assertEquals(MigrationVersion(checkpoint), handle.version)
+                        val value = withKodexApplication(
+                            handle, home, Path(home, "codex"), Path(home, "agents"),
+                            createClient = { applicationClient() },
+                            createLoginClient = { ApplicationLoginClient },
+                        ) { "rendered" }
+                        assertEquals("rendered", value)
+                        assertEquals("\"$checkpoint\"", Fs.readString(Path(home, "version.json")))
+                        assertTrue(Fs.list(Path(home, ".locks/home")).any { it.name.endsWith(".read.lock") })
+                    } finally {
+                        otherReader.closeAndJoin()
+                    }
+                    assertHomeReleased(home)
+                } finally {
+                    withContext(NonCancellable) { deleteTestDirectory(home) }
+                }
+            }
         }
     }
     test("cancelling the renderer releases Home before the host job completes") {

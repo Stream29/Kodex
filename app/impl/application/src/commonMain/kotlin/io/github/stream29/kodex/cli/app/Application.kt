@@ -2,7 +2,6 @@ package io.github.stream29.kodex.cli.app
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.app.application.contract.*
-import io.github.stream29.kodex.app.migration.CurrentKodexApplicationVersion
 import io.github.stream29.kodex.app.migration.KodexHomeHandle
 import io.github.stream29.kodex.app.pathpicker.createDirectoryPickerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
@@ -61,6 +60,8 @@ public enum class ApplicationStartupPhase { HomePrepared, BackendReady, Services
 
 /**
  * One structured CLI host. The supplied prepared Home is consumed and released last.
+ * Prepare it for this application before calling; its persisted migration
+ * checkpoint need not equal the application version.
  * Factories are composition-root test seams, never dependencies of a frontend ViewModel.
  */
 public suspend fun <R> withKodexApplication(
@@ -76,7 +77,6 @@ public suspend fun <R> withKodexApplication(
 ): R {
     var primary: Throwable? = null
     try {
-        require(homeHandle.version == CurrentKodexApplicationVersion) { "The Home was not prepared for this application version." }
         onPhase(ApplicationStartupPhase.HomePrepared)
         val cwd = SystemCoroutineFileSystem.resolve(workingDirectory)
         return withBackendServices(
