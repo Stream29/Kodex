@@ -245,7 +245,7 @@ val migrateToV047CurrentStoresTest by testSuite(compartment = { TestCompartment.
             prepareKodexHome(home, MigrationVersion("0.4.6"), KodexHomeMigrations, fs).closeAndJoin()
             assertEquals(LegacySettingsFixture, fs.readString(Path(home, "settings.yml")))
             assertFalse(fs.exists(Path(home, "settings.backend.yml")))
-            assertEquals("\"0.4.6\"", fs.readString(Path(home, "version.json")))
+            assertEquals("\"0.4.5\"", fs.readString(Path(home, "version.json")))
         }
         test("multi-version upgrade applies the frozen registry before opening the new stores") { home ->
             fs.writeString(Path(home, "version.json"), "\"0.3.2\"")

@@ -6,6 +6,7 @@ import io.github.stream29.kodex.agentstorage.filesystemlayout.requireStorageLayo
 import io.github.stream29.kodex.agentstorage.filesystemlayout.storedRecordIndexes
 import io.github.stream29.kodex.agentstorage.filesystemlayout.timelineDirectory
 import io.github.stream29.kodex.utils.filesystemlease.FileSystemLease
+import io.github.stream29.kodex.utils.filesystemlease.FileSystemLeaseInUseException
 import io.github.stream29.kodex.utils.filesystemlease.FileSystemReadLease
 import io.github.stream29.kodex.utils.filesystemlease.FileSystemWriteLease
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
@@ -47,9 +48,12 @@ public val CurrentKodexApplicationVersion: MigrationVersion by lazy {
  * cancellation semantics. [onMigrationStarted] runs before each applicable action.
  *
  * @throws KodexHomeVersionException If the version file is invalid or unreadable,
- * the stored version is newer, or the final prepared version disappears/changes.
+ * the stored version is newer, or the final prepared version is missing or
+ * still requires migration.
  * @throws KodexHomeLayoutException If baseline validation of an unversioned Home
  * rejects its Session entries, required timelines or latest pointers.
+ * @throws KodexHomeInUseException If initialization or data migration cannot
+ * obtain exclusive access because another instance is using the Home.
  * @throws IllegalStateException If migration registry targets are not unique and
  * strictly increasing.
  * @throws IllegalArgumentException If this scope has no owner Job.
@@ -81,24 +85,20 @@ internal suspend fun CoroutineScope.prepareKodexHome(
     var readLease: FileSystemLease? =
         FileSystemReadLease(lockDirectory, fileSystem)
     var readFailure: Throwable? = null
-    try {
+    val storedVersion = try {
         val storedVersion = readVersionOrNull(home, fileSystem)
         if (storedVersion != null) {
-            if (storedVersion > currentVersion) {
-                throw KodexHomeVersionException(
-                    "Kodex Home version $storedVersion is newer than this application " +
-                        "version $currentVersion.",
-                )
-            }
-            if (storedVersion == currentVersion) {
+            requireSupportedHomeVersion(storedVersion, currentVersion)
+            if (!hasPendingMigrations(storedVersion, currentVersion, migrations)) {
                 val retainedLease = checkNotNull(readLease)
                 currentCoroutineContext().ensureActive()
                 coroutineContext.ensureActive()
                 retainedLease.coroutineContext.ensureActive()
                 readLease = null
-                return HeldLeaseKodexHomeHandle(home, currentVersion, retainedLease)
+                return HeldLeaseKodexHomeHandle(home, storedVersion, retainedLease)
             }
         }
+        storedVersion
     } catch (failure: Throwable) {
         readFailure = failure
         throw failure
@@ -106,7 +106,31 @@ internal suspend fun CoroutineScope.prepareKodexHome(
         readLease?.let { closeHomeLease(it, readFailure) }
     }
 
-    val writeLease = FileSystemWriteLease(lockDirectory, fileSystem)
+    val writeLease = try {
+        FileSystemWriteLease(lockDirectory, fileSystem)
+    } catch (failure: FileSystemLeaseInUseException) {
+        val pendingMigrations = migrations.filter {
+            (storedVersion ?: UnversionedBaseline) < it.toVersion && it.toVersion <= currentVersion
+        }
+        val update = if (storedVersion == null) {
+            "Kodex Home at $home needs initialization."
+        } else {
+            "Kodex Home at $home needs data migration from $storedVersion " +
+                "to ${pendingMigrations.last().toVersion}."
+        }
+        val work = if (pendingMigrations.isNotEmpty()) {
+            "Required data migration targets: ${pendingMigrations.joinToString { it.toVersion.toString() }}."
+        } else {
+            "The existing Home layout must be validated and its baseline version registered."
+        }
+        throw KodexHomeInUseException(
+            "$update\n$work\n" +
+                "This requires exclusive access, but another Kodex instance is using this Home. " +
+                "Close all other Kodex instances using this Home, then retry.\n" +
+                "Lease details: ${failure.message}",
+            failure,
+        )
+    }
     var writeFailure: Throwable? = null
     try {
         prepareUnderWriteLease(
@@ -127,20 +151,39 @@ internal suspend fun CoroutineScope.prepareKodexHome(
     try {
         val preparedVersion = readVersionOrNull(home, fileSystem)
             ?: throw KodexHomeVersionException("Kodex Home version disappeared after preparation.")
-        if (preparedVersion != currentVersion) {
+        requireSupportedHomeVersion(preparedVersion, currentVersion)
+        if (hasPendingMigrations(preparedVersion, currentVersion, migrations)) {
             throw KodexHomeVersionException(
-                "Kodex Home changed to version $preparedVersion while starting $currentVersion.",
+                "Kodex Home version $preparedVersion still requires data migration " +
+                    "for application version $currentVersion after preparation.",
             )
         }
         currentCoroutineContext().ensureActive()
         coroutineContext.ensureActive()
         finalReadLease.coroutineContext.ensureActive()
-        return HeldLeaseKodexHomeHandle(home, currentVersion, finalReadLease)
+        return HeldLeaseKodexHomeHandle(home, preparedVersion, finalReadLease)
     } catch (failure: Throwable) {
         closeHomeLease(finalReadLease, failure)
         throw failure
     }
 }
+
+private fun requireSupportedHomeVersion(
+    storedVersion: MigrationVersion,
+    currentVersion: MigrationVersion,
+) {
+    if (storedVersion > currentVersion) {
+        throw KodexHomeVersionException(
+            "Kodex Home version $storedVersion is newer than this application version $currentVersion.",
+        )
+    }
+}
+
+private fun hasPendingMigrations(
+    storedVersion: MigrationVersion,
+    currentVersion: MigrationVersion,
+    migrations: List<Migration>,
+): Boolean = migrations.any { storedVersion < it.toVersion && it.toVersion <= currentVersion }
 
 private suspend fun closeHomeLease(lease: FileSystemLease, primary: Throwable? = null) {
     val cleanup = withContext(NonCancellable) {
@@ -166,15 +209,11 @@ private suspend fun prepareUnderWriteLease(
     onMigrationStarted: (fromVersion: MigrationVersion, toVersion: MigrationVersion) -> Unit,
 ) {
     val existingVersion = readVersionOrNull(home, fileSystem)
-    val wasUnversioned = existingVersion == null
-    var storedVersion = existingVersion ?: run {
+    var storedVersion = existingVersion ?: UnversionedBaseline
+    requireSupportedHomeVersion(storedVersion, currentVersion)
+    if (existingVersion == null) {
         validateUnversionedHome(home, fileSystem)
-        UnversionedBaseline
-    }
-    if (storedVersion > currentVersion) {
-        throw KodexHomeVersionException(
-            "Kodex Home version $storedVersion is newer than this application version $currentVersion.",
-        )
+        writeVersion(home, storedVersion, fileSystem)
     }
     for (migration in migrations) {
         if (storedVersion >= migration.toVersion || migration.toVersion > currentVersion) continue
@@ -182,9 +221,6 @@ private suspend fun prepareUnderWriteLease(
         migration.action(home, fileSystem)
         writeVersion(home, migration.toVersion, fileSystem)
         storedVersion = migration.toVersion
-    }
-    if (wasUnversioned || storedVersion != currentVersion) {
-        writeVersion(home, currentVersion, fileSystem)
     }
 }
 

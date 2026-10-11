@@ -9,17 +9,25 @@ import kotlinx.io.files.Path
  * The actual `CoroutineScope.prepareKodexHome` factory lives in migration impl.
  * It returns this contract only after checking the stored version and, when
  * necessary, preparing the Home under an exclusive write lease and reacquiring
- * a read lease. [version] is the running application version accepted at
- * preparation, not a live view of `version.json`. A matching version does not
- * cause Session-layout scanning.
+ * a read lease. [version] is the persisted migration checkpoint accepted at
+ * preparation, not a live view of `version.json` or the running application
+ * version. A versioned Home with no applicable migrations retains its read
+ * lease without rewriting the version or scanning Session layout, even when
+ * the application version differs.
  *
  * Preparation rejects an unreadable or malformed version file, a stored version
- * newer than the application, or a version that disappears or changes during
- * the final read check with [KodexHomeVersionException]. Invalid unversioned
- * Session layout is rejected with [KodexHomeLayoutException]. Registry ordering
- * failures are [IllegalStateException]; filesystem, lease acquisition, migration
- * action and migration-start callback failures propagate from those operations.
- * Preparation is cancellable and does not roll back completed filesystem changes.
+ * newer than the application, or a version that is missing or still requires
+ * migration at the final read check with [KodexHomeVersionException]. Invalid
+ * unversioned Session layout is rejected with [KodexHomeLayoutException]. Registry ordering
+ * failures are [IllegalStateException]. Exclusive lease conflicts during
+ * initialization or data migration throw [KodexHomeInUseException] with
+ * preparation context and the underlying cause. Other filesystem, lease,
+ * migration action and migration-start callback failures propagate.
+ * Preparation registers a validated unversioned baseline before migrating and
+ * records each completed migration target without advancing to releases that
+ * require no migration. Legacy application-version checkpoints are accepted
+ * without normalization when supported. Preparation is cancellable and does
+ * not roll back completed filesystem changes.
  *
  * The receiver scope of the factory owns the lease as a structured child;
  * cancelling that owner initiates release even if this handle is not closed.
@@ -35,9 +43,12 @@ import kotlinx.io.files.Path
  * whose temporary lease cleanup fails report that cleanup failure.
  *
  * @throws KodexHomeVersionException The actual preparation factory rejects
- * an invalid/unreadable, newer, missing or changed Home version.
+ * an invalid/unreadable, newer or missing Home version, or remaining migrations
+ * at its final read check.
  * @throws KodexHomeLayoutException The actual preparation factory rejects
  * an unversioned Home's Session layout or latest pointers.
+ * @throws KodexHomeInUseException Initialization or data migration cannot
+ * acquire the exclusive Home lease.
  * @throws IllegalStateException The actual preparation factory rejects
  * duplicate or non-increasing registry targets.
  * @throws IllegalArgumentException The actual preparation factory requires
@@ -49,7 +60,7 @@ public interface KodexHomeHandle : AutoCloseable {
     /** Structured data root supplied to preparation; not necessarily the default Home. */
     public val home: Path
 
-    /** Application version accepted during preparation. */
+    /** Persisted migration checkpoint accepted during preparation. */
     public val version: MigrationVersion
 
     /**

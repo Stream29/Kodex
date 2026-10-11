@@ -319,7 +319,7 @@ public val kodexHomeHandleLifecycleTest by testSuite {
                 assertSame(cleanup, failure)
                 assertEquals(1, actions)
                 assertEquals(1, deletions)
-                assertEquals("\"2.0.0\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
+                assertEquals("\"1.1.0\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
                 assertTrue(SystemCoroutineFileSystem.list(homeLocks(home)).any { it.name.endsWith(".write.lock") })
                 assertTrue(readOwners(home).isEmpty())
             }

@@ -5,7 +5,8 @@ package io.github.stream29.kodex.app.migration
  *
  * The preparation factory throws this for a non-regular, unreadable or malformed
  * `version.json`, a non-canonical version, a version newer than the running
- * application, or a missing/changed version at its final post-preparation check.
+ * application, or a missing version or remaining migrations at its final
+ * post-preparation check.
  * Version read and parse failures retain their underlying [cause] when available.
  * Filesystem metadata failures and migration action failures are not universally
  * wrapped in this exception.
