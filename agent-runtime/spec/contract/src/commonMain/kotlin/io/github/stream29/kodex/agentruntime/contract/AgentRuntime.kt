@@ -19,8 +19,8 @@ public class ConcurrentAgentRuntimeResumeException : IllegalStateException(
  *
  * It retains the [ResumableAgentLayer] state operations while coordinating
  * one outer turn at a time. Pending steer is host-visible input for the
- * current logical turn; a composed steer layer claims it only when the state
- * permits another user message. The unified-exec client belongs to the
+ * current logical turn; responding runtime layers claim it only at their own
+ * legal insertion boundaries. The unified-exec client belongs to the
  * Session and is shared by both shell tools and observers.
  *
  * @property pendingSteer Pending clean input for the current logical turn. An

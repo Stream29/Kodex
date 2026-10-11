@@ -389,17 +389,17 @@ moduleTree("agent-context") {
 moduleTree("agent-runtime") {
     moduleTree("impl") {
         module("composition")
+        module("steer")
         moduleTree("decorator") {
             module("compact")
-            module("steer")
             module("tool")
         }
     }
     moduleTree("spec") {
         module("contract")
+        module("steer")
         moduleTree("decorator") {
             module("compact")
-            module("steer")
             module("tool")
         }
     }

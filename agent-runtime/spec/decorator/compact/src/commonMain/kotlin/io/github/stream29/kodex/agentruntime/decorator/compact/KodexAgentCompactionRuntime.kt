@@ -23,8 +23,24 @@ public interface KodexAgentCompactionRuntime : ResumableAgentLayer {
      * consecutive retry count. A retryable result may also be sampled again;
      * the retry budget itself belongs to the implementation.
      *
+     * Pending Steer is claimed only when state permits another user message,
+     * before context preparation, before sampling, and at restored response
+     * boundaries. A claimed batch is persisted in order before further work;
+     * cancellation after claim does not abandon that delivery. Storage
+     * failures propagate without rolling back committed input.
+     *
+     * During sampling, a non-consuming wait can preempt only the current
+     * request. Its state cleanup completes before input is claimed: completed
+     * output remains persisted, uncommitted deltas are discarded, and a
+     * pending tool call leaves Steer queued for a later legal boundary.
+     * Preemption is not a failed response retry or an outer-turn Stop.
+     * A finished response with newly delivered input continues sampling.
+     * Waiting is scoped to sampling; automatic compaction is not preempted.
+     *
      * @throws AgentResponseRetryLimitExceededException when another retryable
      * response arrives after the implementation's retry limit is exhausted.
+     * @throws kotlinx.coroutines.CancellationException when the caller cancels
+     * execution; request cleanup and any already claimed delivery finish first.
      */
     public override suspend fun resume()
 

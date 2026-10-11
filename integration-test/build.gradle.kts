@@ -19,6 +19,7 @@ kotlin {
             implementation(project(":agent-context-impl-prefix-render"))
             implementation(project(":agent-runtime-impl-decorator-compact"))
             implementation(project(":agent-runtime-impl-composition"))
+            implementation(project(":agent-runtime-impl-steer"))
             implementation(project(":agent-session-impl-filesystem"))
             implementation(project(":agent-state-impl-state"))
             implementation(project(":agent-state-test"))

@@ -6,8 +6,8 @@ import io.github.stream29.kodex.agentruntime.decorator.compact.compactionRuntime
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.ConcurrentAgentRuntimeResumeException
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
-import io.github.stream29.kodex.agentruntime.decorator.steer.steerRuntime
 import io.github.stream29.kodex.agentruntime.decorator.tool.toolRuntime
+import io.github.stream29.kodex.agentruntime.steer.StateFlowSteerProvider
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -32,7 +32,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
@@ -78,10 +77,8 @@ private fun KodexAgentState.masterRuntimeLayer(
             delegate = compactionRuntime(
                 modelCatalog = dependencies.modelCatalog,
                 logger = logger,
+                steerProvider = StateFlowSteerProvider(pendingSteer),
             )
-                .steerRuntime(logger = logger) {
-                    pendingSteer.getAndUpdate { emptyList() }
-                }
                 .toolRuntime(
                     fixedTools = fixedTools.tools,
                     dynamicTools = mcpTools,

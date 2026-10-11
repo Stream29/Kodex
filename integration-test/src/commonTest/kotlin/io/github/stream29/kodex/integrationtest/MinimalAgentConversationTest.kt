@@ -9,6 +9,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.decorator.compact.compactionRuntime
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
+import io.github.stream29.kodex.agentruntime.steer.StateFlowSteerProvider
 import io.github.stream29.kodex.agentruntime.impl.buildMasterAgentRuntime
 import io.github.stream29.kodex.agentsession.contract.KodexAgentDependencies
 import io.github.stream29.kodex.agentcontext.prefix.render.renderPlanningInstructions
@@ -459,6 +460,7 @@ val minimalAgentConversationTest by testSuite {
             val runtime = agent.compactionRuntime(
                 modelCatalog = testModelCatalog(),
                 logger = KotlinLogging.logger {},
+                steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
             )
             val user = userMessage("Answer with a short greeting.")
         }

@@ -5,8 +5,8 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-runtime-spec-contract"))
             api(project(":agent-storage-spec-clean-models"))
+            api(libs.kotlinx.coroutines.core)
         }
     }
 }

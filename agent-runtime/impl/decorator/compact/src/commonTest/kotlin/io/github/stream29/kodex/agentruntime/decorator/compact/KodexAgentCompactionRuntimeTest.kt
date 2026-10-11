@@ -4,6 +4,7 @@ package io.github.stream29.kodex.agentruntime.decorator.compact
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
+import io.github.stream29.kodex.agentruntime.steer.StateFlowSteerProvider
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
 import io.github.stream29.kodex.agentstate.impl.KodexAgentState
@@ -40,6 +41,7 @@ import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -65,6 +67,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         val runtime: KodexAgentCompactionRuntime = state.compactionRuntime(
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
+            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
         val agentState: KodexAgentStateContract = runtime
 
@@ -88,6 +91,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
                 delegate = state,
                 modelCatalog = testModelCatalog(),
                 logger = TestLogger,
+                steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
             ),
         )
 
@@ -124,6 +128,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
+            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
 
         state.appendUserMessage(userMessage("Start."))
@@ -179,6 +184,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
+            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
         val user = userMessage("Answer briefly.")
 
@@ -215,6 +221,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
+            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
 
         state.appendUserMessage(userMessage("Retry failed responses."))
@@ -259,6 +266,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
+            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
 
         state.appendUserMessage(userMessage("Continue after a recovered request."))
@@ -303,6 +311,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
+            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
         val user = userMessage("Keep this context.")
 
@@ -350,6 +359,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
+            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
         state.appendUserMessage(userMessage("Compact this."))
         val persistedTurnId = storage.settings[storage.latestIndex()].turnId
@@ -408,6 +418,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
+            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
         state.appendUserMessage(userMessage("Compact once."), tokenCount = 90)
 
@@ -475,6 +486,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
+            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
 
         state.appendUserMessage(user, tokenCount = 1)
@@ -517,6 +529,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             delegate = state,
             modelCatalog = testModelCatalog(),
             logger = TestLogger,
+            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
         )
         val pending = PendingCommandExecutionToolEvent(
             callId = "call_1",

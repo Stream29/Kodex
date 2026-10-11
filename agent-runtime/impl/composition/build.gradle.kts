@@ -9,7 +9,7 @@ kotlin {
             api(project(":agent-session-spec-contract"))
             api(project(":agent-state-spec-contract"))
             implementation(project(":agent-runtime-impl-decorator-compact"))
-            implementation(project(":agent-runtime-impl-decorator-steer"))
+            implementation(project(":agent-runtime-impl-steer"))
             implementation(project(":agent-runtime-impl-decorator-tool"))
             implementation(project(":agent-state-impl-state"))
             implementation(project(":agent-storage-spec-contract"))

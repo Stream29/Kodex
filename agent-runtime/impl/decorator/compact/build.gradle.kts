@@ -8,12 +8,15 @@ kotlin {
         commonMain.dependencies {
             api(project(":agent-runtime-spec-decorator-compact"))
             api(project(":agent-runtime-spec-contract"))
+            api(project(":agent-runtime-spec-steer"))
             api(project(":openai-spec-model-catalog"))
             api(libs.kotlin.logging)
             api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-state-spec-context-window"))
         }
         commonTest.dependencies {
+            implementation(project(":agent-runtime-impl-decorator-tool"))
+            implementation(project(":agent-runtime-impl-steer"))
             implementation(project(":agent-state-impl-state"))
             implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-impl-in-memory"))

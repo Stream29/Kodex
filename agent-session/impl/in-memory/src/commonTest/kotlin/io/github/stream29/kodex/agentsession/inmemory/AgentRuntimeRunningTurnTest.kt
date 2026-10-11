@@ -100,7 +100,9 @@ val agentRuntimeRunningTurnTest by testSuite {
             }
             val runtime = faultingState.buildMasterAgentRuntime(testKodexAgentDependencies(client))
             val actual = assertFailsWith<CancellationException> { runtime.resume() }
-            assertSame(cancellation, actual)
+            // Crossing the request child can copy exceptions for JVM stack
+            // recovery; preserve cancellation and cleanup, not object identity.
+            assertEquals(cancellation.message, actual.message)
             assertEquals(listOf(cleanup), actual.suppressedExceptions)
             assertNull(runtime.runningTurn.value)
             val pending = root.runtime.state.value as KodexAgentStateValue.ToolPending
