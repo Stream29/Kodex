@@ -53,6 +53,13 @@ public class KodexApplication internal constructor(
      * is produced; closing the Application cancels pending local observations.
      */
     public val reportUnhandledError: (Throwable) -> Unit,
+    /**
+     * Reports an actual frontend warning through the same Error Hook selection and
+     * `{"type":"unhandled_error","message":...}` input as [reportUnhandledError].
+     * Logs at warning severity, without creating an inline notice or a backend Stop.
+     * Shares the same live, best-effort buffer and single consumer.
+     */
+    public val reportWarning: (String) -> Unit,
 )
 
 /** Fault-injection checkpoints for isolated startup/shutdown validation. */
@@ -104,6 +111,10 @@ public suspend fun <R> withKodexApplication(
                             ApplicationLogger.error(error) { "Application operation failed (cwd=$cwd)." }
                             unhandledErrors.tryEmit(error.message)
                         }
+                    }
+                    val reportWarning: (String) -> Unit = { message ->
+                        ApplicationLogger.warn { "Application warning (cwd=$cwd): $message" }
+                        unhandledErrors.tryEmit(message)
                     }
                     val settings = RpcGlobalSettings.open(services.global, frontendStore, frontendScope, applicationWidth ?: 0)
                         .also { global = it }
@@ -184,6 +195,7 @@ public suspend fun <R> withKodexApplication(
                         ),
                         createSidebarSettingsViewModel(settings, frontendScope, applicationWidth != null),
                         reportUnhandledError,
+                        reportWarning,
                     )
                     onPhase(ApplicationStartupPhase.FrontendReady)
                     onPhase(ApplicationStartupPhase.RendererStarted)

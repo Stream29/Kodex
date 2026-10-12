@@ -68,8 +68,9 @@ public enum class AgentNotificationLevel {
 /**
  * Latest Agent-scoped operation result, isolated from other Agents.
  *
- * Render the message and optional detail once at the Agent host. Composer retains
- * its typed submission state; that is not a second notification to render alongside it.
+ * Only information is rendered at the Agent host. Actual errors and warnings are
+ * reported through the Application's existing Error Hook outlet, not this presentation
+ * state. Composer retains its typed submission state without a second inline error.
  *
  * @throws IllegalArgumentException when [id] is not positive or [message] is blank.
  */

@@ -58,21 +58,27 @@ import kotlin.time.Duration.Companion.seconds
 private val composerHostDispatcher = Dispatchers.Default.limitedParallelism(1)
 
 val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime }) {
-    test("host preserves non-error notices without rendering an inline error") {
+    test("host renders information only and never renders warnings or errors above the composer") {
         composerHost {
             val agent = requireNotNull(session.rootAgent.value)
             val notices = MutableStateFlow<AgentNotification?>(
-                AgentNotification(1, AgentNotificationLevel.Warning, "Ultrafast was not reported.", "Default was used."),
+                AgentNotification(1, AgentNotificationLevel.Information, "Information notice.", "Information detail."),
             )
             val presented = object : AgentViewModel by agent {
                 override val notification: StateFlow<AgentNotification?> = notices
             }
             runComposerHostMosaicTest {
                 setContentAndSnapshot { RepairHost(presented, FocusRequester()) }
-                assertContains(snapshotContaining("Ultrafast was not reported."), "Default was used.")
-                notices.value = AgentNotification(2, AgentNotificationLevel.Error, "hidden operation error", null)
-                val snapshot = snapshotMatching { "Ultrafast was not reported." !in it }
-                assertFalse("hidden operation error" in snapshot, snapshot)
+                assertContains(snapshotContaining("Information notice."), "Information detail.")
+                notices.value = AgentNotification(2, AgentNotificationLevel.Warning, "hidden warning", "hidden detail")
+                val warningSnapshot = snapshotMatching { "Information notice." !in it }
+                assertFalse("hidden warning" in warningSnapshot, warningSnapshot)
+                assertFalse("hidden detail" in warningSnapshot, warningSnapshot)
+                notices.value = AgentNotification(3, AgentNotificationLevel.Information, "Next information.", null)
+                snapshotContaining("Next information.")
+                notices.value = AgentNotification(4, AgentNotificationLevel.Error, "hidden operation error", null)
+                val errorSnapshot = snapshotMatching { "Next information." !in it }
+                assertFalse("hidden operation error" in errorSnapshot, errorSnapshot)
             }
         }
     }

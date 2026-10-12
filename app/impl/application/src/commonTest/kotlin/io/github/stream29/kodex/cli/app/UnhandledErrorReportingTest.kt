@@ -7,7 +7,7 @@ import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.hooksettings.HookEditorDraft
 import io.github.stream29.kodex.app.hooksettings.HookSettingsDialog
 import io.github.stream29.kodex.app.test.testAnswer
-import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.rpc.models.*
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem as Fs
 import kotlinx.coroutines.*
@@ -21,8 +21,16 @@ import kotlin.test.*
 import kotlin.time.Duration.Companion.seconds
 
 val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.RealTime }) {
-    test("frontend unhandled errors use the one Hook consumer without inventing an Agent Stop") {
-        applicationFixture { app, home ->
+    test("frontend errors and warnings use the same Error Hook consumer without inventing an Agent Stop") {
+        applicationFixture(response = {
+            emit(ResponsesStreamEvent.OutputItemDone(0, ResponseItem.Message(
+                id = ResponseItemId("answer"), role = MessageRole.Assistant,
+                content = listOf(ContentItem.OutputText("test answer")),
+            )))
+            emit(ResponsesStreamEvent.Completed(Response(
+                id = "response", endTurn = true, serviceTier = "default", usage = TokenUsage(20, 3, 23),
+            )))
+        }) { app, home ->
             val session = assertNotNull(app.viewModel.materializeNewSession(
                 assertIs<NewSessionViewModel>(app.viewModel.navigation.value.selected),
             ))
@@ -42,6 +50,8 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
             }
             app.viewModel.dismissPopup(popup)
             val agent = assertNotNull(session.rootAgent.value)
+            agent.updateServiceTier(ServiceTier.Ultrafast)
+            agent.settings.first { it.serviceTier == ServiceTier.Ultrafast }
             val output = Path(home, "host-errors.jsonl")
             suspend fun lines(count: Int): List<String> = withTimeout(15.seconds) {
                 while (true) {
@@ -56,6 +66,7 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
             agent.submit(listOf(ContentItem.InputText("before local errors")))
             assertEquals(1, lines(1).size)
             agent.running.first { !it }
+            assertNull(agent.notification.value, "A successful response reporting default is not a tier warning.")
             app.reportUnhandledError(CancellationException("do not notify cancellation"))
             repeat(2) { app.reportUnhandledError(IOException("literal $(touch unwanted) \"failure\"")) }
             val observed = lines(3)
@@ -66,17 +77,26 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
                 assertEquals("unhandled_error", payload.getValue("type").jsonPrimitive.content)
                 assertEquals("literal $(touch unwanted) \"failure\"", payload.getValue("message").jsonPrimitive.content)
             }
+            repeat(2) { app.reportWarning("literal $(touch unwanted) \"warning\"") }
+            val warnings = lines(5).drop(3)
+            assertEquals(2, warnings.size)
+            for (line in warnings) {
+                val payload = Json.parseToJsonElement(line).jsonObject
+                assertEquals(setOf("type", "message"), payload.keys)
+                assertEquals("unhandled_error", payload.getValue("type").jsonPrimitive.content)
+                assertEquals("literal $(touch unwanted) \"warning\"", payload.getValue("message").jsonPrimitive.content)
+            }
             assertFalse(Fs.exists(Path(home, "unwanted")))
             assertSame(session, app.viewModel.navigation.value.selected)
             // Exercise the real Agent callback, not only the exposed Application reporter.
             agent.confirmHistoryRevert(Long.MAX_VALUE)
-            val agentError = Json.parseToJsonElement(lines(4).last()).jsonObject
+            val agentError = Json.parseToJsonElement(lines(6).last()).jsonObject
             assertEquals("unhandled_error", agentError.getValue("type").jsonPrimitive.content)
             assertEquals("No history confirmation is pending.", agentError.getValue("message").jsonPrimitive.content)
             assertNull(agent.notification.value)
             agent.submit(listOf(ContentItem.InputText("after local errors")))
-            val resumed = lines(5)
-            assertEquals(5, resumed.size, "Local errors and failed Hooks must not kill or recursively notify the host.")
+            val resumed = lines(7)
+            assertEquals(7, resumed.size, "Local errors, warnings and failed Hooks must not kill or recursively notify the host.")
             assertTrue(resumed.last().contains("stop_assistant_message"))
         }
     }

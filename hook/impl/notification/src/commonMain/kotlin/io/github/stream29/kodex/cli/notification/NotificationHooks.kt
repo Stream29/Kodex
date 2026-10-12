@@ -35,7 +35,8 @@ import kotlin.time.Duration.Companion.seconds
  * Cancellation propagates after terminating and awaiting cleanup of the current process;
  * no queued notifications are drained on frontend shutdown.
  *
- * [unhandledErrors] contains frontend-local, non-cancellation diagnostic messages.
+ * [unhandledErrors] contains frontend-local errors and actual warning messages.
+ * Cancellation is excluded by the reporter.
  * They select the existing Unhandled error Hook and receive JSON
  * `{"type":"unhandled_error","message":...}` on stdin. They are not backend Agent
  * Stops and have no fabricated session index. Backend notification JSON is unchanged.

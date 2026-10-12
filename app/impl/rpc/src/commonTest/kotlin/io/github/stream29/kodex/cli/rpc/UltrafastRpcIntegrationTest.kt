@@ -2,14 +2,12 @@ package io.github.stream29.kodex.cli.rpc
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.stream29.kodex.app.agent.contract.AgentNotificationLevel
 import io.github.stream29.kodex.agentstorage.contract.TokenCountKind
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.rpc.RpcCall
 import kotlinx.rpc.RpcClient
@@ -61,7 +59,7 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
             }
         }
     }
-    test("actual tier warning belongs to the captured request after settings change and is not replayed on reopen") {
+    test("returned tier remains captured diagnostics after settings change without warning or error on reopen") {
         val started = CompletableDeferred<Unit>()
         val finish = CompletableDeferred<Unit>()
         frontend(response = {
@@ -80,27 +78,27 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 agent.updateServiceTier(ServiceTier.Default)
                 binding.settings.first { it.serviceTier == ServiceTier.Default }
                 finish.complete(Unit)
-                val warning = agent.notification.filterNotNull().first { it.level == AgentNotificationLevel.Warning }
-                assertContains(assertNotNull(warning.detail), "Requested model: captured")
-                assertContains(assertNotNull(warning.detail), "Response: different")
                 binding.state.first { it == AgentStateValue.AssistantMessage }
                 binding.running.first { !it }
                 val snapshot = assertNotNull(binding.tokenCount.first { it?.kind == TokenCountKind.Response })
                 assertEquals("ultrafast", snapshot.diagnostics?.requestedServiceTier)
                 assertEquals("default", snapshot.diagnostics?.serviceTier)
+                assertEquals("captured", snapshot.diagnostics?.requestedModel)
+                assertEquals("different", snapshot.diagnostics?.responseId)
                 assertEquals(ServiceTier.Default, binding.settings.value.serviceTier)
-                agent.dismissNotification(warning.id)
                 assertNull(agent.notification.value)
+                assertTrue(failures.value.isEmpty())
                 views.release(view)
                 val reopened = views.open(view.index)
                 yield(); yield()
                 assertNull(requireNotNull(reopened.agent.value).notification.value)
+                assertTrue(failures.value.isEmpty())
             } finally {
                 finish.complete(Unit)
             }
         }
     }
-    test("a reported operation error does not hide the next response tier warning") {
+    test("a real operation error is reported once and a subsequent successful tier mismatch adds no warning") {
         val started = CompletableDeferred<Unit>()
         val finish = CompletableDeferred<Unit>()
         frontend(
@@ -129,17 +127,40 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 binding.tokenCount.first { it?.kind == TokenCountKind.Response }
                 binding.running.first { !it }
                 yield(); yield()
-                val warning = agent.notification.filterNotNull().first { it.level == AgentNotificationLevel.Warning }
-                assertEquals("Ultrafast was not reported.", warning.message)
+                assertNull(agent.notification.value)
+                assertEquals(1, failures.value.size)
+                assertEquals("priority", binding.tokenCount.value?.diagnostics?.serviceTier)
                 assertEquals(ServiceTier.Ultrafast, binding.settings.value.serviceTier)
             } finally {
                 finish.complete(Unit)
             }
         }
     }
+    for (actual in listOf(null, "", "default", "priority", "future-tier", "ultrafast")) {
+        test("successful Ultrafast response with reported tier '$actual' is diagnostics only") {
+            val requests = mutableListOf<ResponsesApiRequest>()
+            frontend(onRequest = requests::add, response = { tierAnswer("successful", actual) }) {
+                val view = views.open(services.global.createSession(
+                    KodexAgentSettings(OpenAiModelId("captured"), serviceTier = ServiceTier.Ultrafast),
+                ))
+                val binding = view.current()
+                val agent = requireNotNull(view.agent.value)
+                agent.submit(listOf(ContentItem.InputText("test response")))
+                binding.state.first { it == AgentStateValue.AssistantMessage }
+                binding.running.first { !it }
+                val snapshot = assertNotNull(binding.tokenCount.first { it?.kind == TokenCountKind.Response })
+                assertEquals(ServiceTier.Ultrafast, requests.single().serviceTier)
+                assertEquals(ServiceTier.Ultrafast, binding.settings.value.serviceTier)
+                assertEquals("ultrafast", snapshot.diagnostics?.requestedServiceTier)
+                assertEquals(actual, snapshot.diagnostics?.serviceTier)
+                assertNull(agent.notification.value)
+                assertTrue(failures.value.isEmpty())
+            }
+        }
+    }
 }
 
-private suspend fun FlowCollector<ResponsesStreamEvent>.tierAnswer(id: String, actual: String) {
+private suspend fun FlowCollector<ResponsesStreamEvent>.tierAnswer(id: String, actual: String?) {
     emit(ResponsesStreamEvent.OutputItemDone(0, ResponseItem.Message(
         id = ResponseItemId("answer-$id"), role = MessageRole.Assistant,
         content = listOf(ContentItem.OutputText("answer")),

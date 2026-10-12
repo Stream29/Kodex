@@ -90,7 +90,7 @@ public fun AgentRuntimeScreen(
         softWrap = true,
     )
     val composerStatus = composerStatusLine(composerState, showFailure = false)
-    val notificationLine = notification?.takeUnless { it.level == AgentNotificationLevel.Error }?.let {
+    val notificationLine = notification?.takeIf { it.level == AgentNotificationLevel.Information }?.let {
         listOfNotNull(it.message, it.detail).joinToString(" ").ellipsizeToTerminalWidth(columns)
     }
     val pendingRequest = requestUserInput as? RequestUserInputState.Pending
