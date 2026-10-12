@@ -53,6 +53,7 @@ internal class AgentHistoryViewModelImpl(
     private val commands = Channel<HistoryCommand>(capacity = Channel.BUFFERED)
     private val olderDemandPending = MutableStateFlow(false)
     private val newerDemandPending = MutableStateFlow(false)
+    private val accessedItem = MutableStateFlow<HistoryItemViewModel?>(null)
     private val turnDurationResolver = HistoryTurnDurationResolver(agentState.storage)
     private var activeGeneration: Long = agentState.cacheNonce?.value ?: 0
     private var closed = false
@@ -67,6 +68,7 @@ internal class AgentHistoryViewModelImpl(
             hasNewer = false,
             onOlderDemand = ::registerOlderDemand,
             onNewerDemand = ::registerNewerDemand,
+            onAccess = ::registerAccess,
         ),
     )
     private val mutableLoadState =
@@ -174,6 +176,7 @@ internal class AgentHistoryViewModelImpl(
 
     private fun registerOlderDemand(
         window: HistoryItemWindowImpl,
+        explicit: Boolean = true,
     ) {
         if (
             !closed && mutableHistoryItems.value === window &&
@@ -181,7 +184,7 @@ internal class AgentHistoryViewModelImpl(
             mutableLoadState.value == AgentHistoryLoadState.Ready &&
             olderDemandPending.compareAndSet(expect = false, update = true)
         ) {
-            if (commands.trySend(HistoryCommand.LoadOlder(window.generation)).isFailure) {
+            if (commands.trySend(HistoryCommand.LoadOlder(window, explicit)).isFailure) {
                 olderDemandPending.value = false
             }
         }
@@ -189,6 +192,7 @@ internal class AgentHistoryViewModelImpl(
 
     private fun registerNewerDemand(
         window: HistoryItemWindowImpl,
+        explicit: Boolean = true,
     ) {
         if (
             !closed && mutableHistoryItems.value === window &&
@@ -196,10 +200,36 @@ internal class AgentHistoryViewModelImpl(
             mutableLoadState.value == AgentHistoryLoadState.Ready &&
             newerDemandPending.compareAndSet(expect = false, update = true)
         ) {
-            if (commands.trySend(HistoryCommand.LoadNewer(window.generation)).isFailure) {
+            if (commands.trySend(HistoryCommand.LoadNewer(window, explicit)).isFailure) {
                 newerDemandPending.value = false
             }
         }
+    }
+
+    private fun registerAccess(window: HistoryItemWindowImpl, index: Int) {
+        if (!isCurrent(window)) return
+        accessedItem.value = window.items[index]
+        scheduleAccessDemand()
+    }
+
+    private fun accessRange(items: List<HistoryItemViewModel>): IntRange? {
+        val accessed = accessedItem.value
+        val positions = items.indices.filter { position ->
+            items[position] === accessed || visibleItems.any { it === items[position] }
+        }
+        return if (positions.isEmpty()) null else positions.first()..positions.last()
+    }
+
+    private fun needsOlder(window: HistoryItemWindowImpl): Boolean =
+        accessRange(window.items)?.let { window.size - 1 - it.last < HistoryPaging.PrefetchDistance } == true
+
+    private fun needsNewer(window: HistoryItemWindowImpl): Boolean =
+        accessRange(window.items)?.let { it.first < HistoryPaging.PrefetchDistance } == true
+
+    private fun scheduleAccessDemand() {
+        val window = mutableHistoryItems.value
+        if (needsOlder(window)) registerOlderDemand(window, explicit = false)
+        if (needsNewer(window)) registerNewerDemand(window, explicit = false)
     }
 
     override fun contains(generation: Long, storageIndex: Int): Boolean {
@@ -221,6 +251,9 @@ internal class AgentHistoryViewModelImpl(
         val current = mutableHistoryItems.value.items
         if (visibleItems.any { visible -> current.none { it === visible } }) return
         this.visibleItems = visibleItems.toList()
+        // A measured viewport supersedes speculative composition/prefetch accesses.
+        accessedItem.value = visibleItems.lastOrNull()
+        scheduleAccessDemand()
     }
 
     override fun setFollowsLatest(window: HistoryItemWindow, followsLatest: Boolean) {
@@ -277,6 +310,7 @@ internal class AgentHistoryViewModelImpl(
         closed = true
         withdrawNavigation()
         visibleItems = emptyList()
+        accessedItem.value = null
         commands.close()
         releaseAllCachedItems()
         scope.cancel()
@@ -419,11 +453,52 @@ internal class AgentHistoryViewModelImpl(
         items = chunk.items.map { item -> materializeProjection(item, generation) },
     )
 
-    private fun visibleChunks(chunks: List<HistoryWindowChunk>): Set<HistoryWindowChunk> {
-        if (visibleItems.isEmpty()) return emptySet()
-        return chunks.filterTo(mutableSetOf()) { chunk ->
-            chunk.items.any { item -> visibleItems.any { visible -> visible === item } }
+    private fun materializePages(
+        fromInclusive: Int,
+        page: LoadedHistoryChunk,
+        generation: Long,
+    ): List<HistoryWindowChunk> = page.items.chunked(HistoryPaging.PageSize).mapIndexed { index, items ->
+        materializeChunk(
+            if (index == 0) fromInclusive else items.first().newestStorageIndex,
+            LoadedHistoryChunk(items, null),
+            generation,
+        )
+    }
+
+    /** Clip overlap at item boundaries; a new sealed group may replace an open-work suffix. */
+    private fun List<HistoryWindowChunk>.olderThan(index: Int): List<HistoryWindowChunk> = mapNotNull { chunk ->
+        val start = chunk.projections.indexOfFirst { it.newestStorageIndex < index }
+        when {
+            start < 0 -> null
+            start == 0 -> chunk
+            else -> HistoryWindowChunk(
+                chunk.projections[start].newestStorageIndex,
+                chunk.projections.drop(start),
+                chunk.items.drop(start),
+            )
         }
+    }
+
+    /** Best-effort budget: never drop the viewport or its two-sided prefetch window. */
+    private fun trimPages(
+        pages: List<HistoryWindowChunk>,
+        dropNewer: Boolean,
+    ): List<HistoryWindowChunk> {
+        var retained = pages
+        while (retained.size > 2 && retained.sumOf { it.items.size } > HistoryPaging.MaxSize) {
+            val items = retained.flatMap { it.items }
+            val access = accessRange(items)
+            val protected = access?.let {
+                (it.first - HistoryPaging.PrefetchDistance).coerceAtLeast(0)..
+                    (it.last + HistoryPaging.PrefetchDistance).coerceAtMost(items.lastIndex)
+            }
+            val edge = if (dropNewer) retained.first() else retained.last()
+            val edgeRange = if (dropNewer) 0 until edge.items.size
+                else items.size - edge.items.size until items.size
+            if (protected != null && edgeRange.any { it in protected }) break
+            retained = if (dropNewer) retained.drop(1) else retained.dropLast(1)
+        }
+        return retained
     }
 
     private fun releaseAllCachedItems() {
@@ -482,6 +557,8 @@ internal class AgentHistoryViewModelImpl(
             latestIndex: Int,
             invalidate: Boolean,
         ) {
+            accessedItem.value = null
+            visibleItems = emptyList()
             val currentGeneration = mutableHistoryItems.value.generation
             val replacementGeneration = agentState.cacheNonce?.value ?: if (invalidate) {
                 check(currentGeneration < Long.MAX_VALUE) {
@@ -513,9 +590,10 @@ internal class AgentHistoryViewModelImpl(
             }
 
             val batch = withContext(Dispatchers.Default) {
-                agentState.storage.readHistoryChunk(
+                agentState.storage.readHistoryPage(
                     fromInclusive = latestIndex,
                     snapshotIndex = latestIndex,
+                    size = HistoryPaging.InitialLoadSize,
                 )
             }
             if (closed || agentState.cacheNonce?.value?.let { it != replacementGeneration } == true) return
@@ -523,11 +601,7 @@ internal class AgentHistoryViewModelImpl(
             nextOlderIndex = batch.nextOlderIndex
             hasNewer = false
             initialized = true
-            chunks = if (batch.items.isEmpty()) {
-                emptyList()
-            } else {
-                listOf(materializeChunk(latestIndex, batch, replacementGeneration))
-            }
+            chunks = materializePages(latestIndex, batch, replacementGeneration)
             pruneCaches(chunks.flatMap { chunk -> chunk.projections })
             publishHistoryItems(
                 chunks = chunks,
@@ -568,9 +642,11 @@ internal class AgentHistoryViewModelImpl(
                 return
             }
             val batch = withContext(Dispatchers.Default) {
-                agentState.storage.readHistoryChunk(
+                agentState.storage.readHistoryPage(
                     fromInclusive = latestIndex,
                     snapshotIndex = latestIndex,
+                    newerThan = chunks.first().newestStorageIndex,
+                    size = HistoryPaging.InitialLoadSize,
                 )
             }
             if (closed || agentState.cacheNonce?.value?.let { it != activeGeneration } == true) return
@@ -579,20 +655,15 @@ internal class AgentHistoryViewModelImpl(
                 refreshActiveTurnStart()
                 return
             }
-            val newChunk = materializeChunk(latestIndex, batch, activeGeneration)
-            val retained = chunks.dropWhile { chunk ->
-                chunk.newestStorageIndex >= newChunk.oldestStorageIndex
-            }
-            val visibleChunks = visibleChunks(chunks)
-            var combined = listOf(newChunk) + retained
-            val lastVisibleChunk = combined.indexOfLast(visibleChunks::contains)
-            val keepCount = if (lastVisibleChunk < 0) {
-                1
-            } else {
-                (lastVisibleChunk + 2).coerceAtMost(combined.size)
-            }
-            val removedOlder = combined.drop(keepCount)
-            combined = combined.take(keepCount)
+            val newPages = materializePages(latestIndex, batch, activeGeneration)
+            // A burst can publish more than a page. Do not join two disjoint ranges:
+            // the missing interval must remain reachable through the older cursor.
+            val retained = if (batch.nextOlderIndex != null &&
+                batch.nextOlderIndex > chunks.first().newestStorageIndex
+            ) emptyList() else chunks.olderThan(newPages.last().oldestStorageIndex)
+            val all = newPages + retained
+            val combined = trimPages(all, dropNewer = false)
+            val removedOlder = all.drop(combined.size)
             chunks = combined
             if (removedOlder.isNotEmpty()) {
                 nextOlderIndex = removedOlder.first().fromInclusive
@@ -619,7 +690,7 @@ internal class AgentHistoryViewModelImpl(
                 }
                 mutableLoadState.value = AgentHistoryLoadState.LoadingOlder
                 val batch = withContext(Dispatchers.Default) {
-                    agentState.storage.readHistoryChunk(
+                    agentState.storage.readHistoryPage(
                         fromInclusive = fromInclusive,
                         snapshotIndex = observedLatestIndex,
                     )
@@ -628,15 +699,10 @@ internal class AgentHistoryViewModelImpl(
                 if (batch.items.isEmpty()) {
                     nextOlderIndex = batch.nextOlderIndex
                 } else {
-                    val loaded = materializeChunk(fromInclusive, batch, activeGeneration)
-                    var combined = chunks + loaded
-                    val visibleChunks = visibleChunks(chunks)
-                    val firstVisibleChunk = combined.indexOfFirst(visibleChunks::contains)
-                    val removeCount = (firstVisibleChunk - 1).coerceAtLeast(0)
-                    if (removeCount > 0) {
-                        combined = combined.drop(removeCount)
-                        hasNewer = true
-                    }
+                    val loaded = materializePages(fromInclusive, batch, activeGeneration)
+                    val all = chunks + loaded
+                    val combined = trimPages(all, dropNewer = true)
+                    if (combined.size < all.size) hasNewer = true
                     chunks = combined
                     nextOlderIndex = batch.nextOlderIndex
                 }
@@ -662,7 +728,7 @@ internal class AgentHistoryViewModelImpl(
                 }
                 mutableLoadState.value = AgentHistoryLoadState.LoadingNewer
                 val batch = withContext(Dispatchers.Default) {
-                    agentState.storage.readNewerHistoryChunk(
+                    agentState.storage.readNewerHistoryPage(
                         afterExclusive = head.newestStorageIndex,
                         snapshotIndex = observedLatestIndex,
                     )
@@ -672,25 +738,16 @@ internal class AgentHistoryViewModelImpl(
                     hasNewer = false
                 } else {
                     val fromInclusive = batch.items.maxOf { item -> item.newestStorageIndex }
-                    val loaded = materializeChunk(fromInclusive, batch, activeGeneration)
-                    val retained = chunks.dropWhile { chunk ->
-                        chunk.newestStorageIndex >= loaded.oldestStorageIndex
-                    }
-                    val visibleChunks = visibleChunks(chunks)
-                    var combined = listOf(loaded) + retained
-                    val lastVisibleChunk = combined.indexOfLast(visibleChunks::contains)
-                    val keepCount = if (lastVisibleChunk < 0) {
-                        1
-                    } else {
-                        (lastVisibleChunk + 2).coerceAtMost(combined.size)
-                    }
-                    val removedOlder = combined.drop(keepCount)
-                    combined = combined.take(keepCount)
+                    val loaded = materializePages(fromInclusive, batch, activeGeneration)
+                    val retained = chunks.olderThan(loaded.last().oldestStorageIndex)
+                    val all = loaded + retained
+                    val combined = trimPages(all, dropNewer = false)
+                    val removedOlder = all.drop(combined.size)
                     if (removedOlder.isNotEmpty()) {
                         nextOlderIndex = removedOlder.first().fromInclusive
                     }
                     chunks = combined
-                    hasNewer = loaded.newestStorageIndex < observedLatestIndex
+                    hasNewer = loaded.first().newestStorageIndex < observedLatestIndex
                 }
                 pruneCaches(chunks.flatMap { chunk -> chunk.projections })
                 publishHistoryItems(
@@ -722,7 +779,7 @@ internal class AgentHistoryViewModelImpl(
             }
             mutableLoadState.value = AgentHistoryLoadState.Initializing
             val batch = withContext(Dispatchers.Default) {
-                agentState.storage.readHistoryChunk(
+                agentState.storage.readHistoryPage(
                     fromInclusive = displayIndex,
                     snapshotIndex = snapshotIndex,
                 )
@@ -737,12 +794,14 @@ internal class AgentHistoryViewModelImpl(
                 )
             } != null
             if (!isCurrent(intent)) return
-            val loaded = materializeChunk(displayIndex, batch, activeGeneration)
+            accessedItem.value = null
+            visibleItems = emptyList()
+            val loaded = materializePages(displayIndex, batch, activeGeneration)
             observedLatestIndex = snapshotIndex
             nextOlderIndex = batch.nextOlderIndex
             hasNewer = newer
             initialized = true
-            chunks = listOf(loaded)
+            chunks = loaded
             if (navigationIntent === intent) mutableFollowsLatest.value = !newer
             pruneCaches(chunks.flatMap { chunk -> chunk.projections })
             publishHistoryItems(
@@ -750,8 +809,8 @@ internal class AgentHistoryViewModelImpl(
                 hasOlder = nextOlderIndex != null,
                 hasNewer = newer,
             )
-            val target = loaded.items.firstOrNull { it.storageIndex == displayIndex }
-                ?: loaded.items.first()
+            val target = loaded.flatMap { it.items }.firstOrNull { it.storageIndex == displayIndex }
+                ?: loaded.first().items.first()
             publishScrollEffect(intent, HistoryScrollTarget.Item(target))
             mutableLoadState.value = AgentHistoryLoadState.Ready
             refreshActiveTurnStart()
@@ -793,11 +852,11 @@ internal class AgentHistoryViewModelImpl(
                         if (agentState.cacheNonce == null) command.latestIndex else agentState.latestIndex.value,
                     )
                     is HistoryCommand.LoadOlder -> {
-                        if (command.generation == activeGeneration) loadOlder()
+                        if (isCurrent(command.window) && (command.explicit || needsOlder(command.window))) loadOlder()
                         else olderDemandPending.value = false
                     }
                     is HistoryCommand.LoadNewer -> {
-                        if (command.generation == activeGeneration) loadNewer()
+                        if (isCurrent(command.window) && (command.explicit || needsNewer(command.window))) loadNewer()
                         else newerDemandPending.value = false
                     }
                     HistoryCommand.Navigate -> Unit
@@ -853,6 +912,8 @@ internal class AgentHistoryViewModelImpl(
                     mutableLoadState.value = AgentHistoryLoadState.Failed(failure.message ?: failure.toString())
                 }
             }
+            // Accesses made while a read was suspended are retained, not lost at Ready.
+            scheduleAccessDemand()
         }
     }
 
@@ -893,8 +954,12 @@ internal class AgentHistoryViewModelImpl(
             hasNewer = hasNewer,
             onOlderDemand = ::registerOlderDemand,
             onNewerDemand = ::registerNewerDemand,
+            onAccess = ::registerAccess,
         )
         visibleItems = visibleItems.filter { visible -> items.any { it === visible } }
+        accessedItem.value?.let { accessed ->
+            if (items.none { it === accessed }) accessedItem.compareAndSet(accessed, null)
+        }
         mutablePendingScrollEffect.value?.let { effect ->
             val target = effect.target
             if (effect.generation != generation ||
@@ -970,23 +1035,11 @@ private data class GroupKey(
     val newestIndex: Int,
 )
 
-private val HistoryProjectionItem.oldestStorageIndex: Int
-    get() = when (this) {
-        is HistoryProjectionItem.Stable -> descriptor.index
-        is HistoryProjectionItem.WorkGroup -> indexRange.first
-    }
-
-private val HistoryProjectionItem.newestStorageIndex: Int
-    get() = when (this) {
-        is HistoryProjectionItem.Stable -> descriptor.index
-        is HistoryProjectionItem.WorkGroup -> indexRange.last
-    }
-
 private sealed interface HistoryCommand {
     data class Invalidate(val generation: Long) : HistoryCommand
     data class Refresh(val latestIndex: Int) : HistoryCommand
-    data class LoadOlder(val generation: Long) : HistoryCommand
-    data class LoadNewer(val generation: Long) : HistoryCommand
+    data class LoadOlder(val window: HistoryItemWindowImpl, val explicit: Boolean) : HistoryCommand
+    data class LoadNewer(val window: HistoryItemWindowImpl, val explicit: Boolean) : HistoryCommand
     data object Navigate : HistoryCommand
     data class JumpToLatest(val intent: HistoryNavigationIntent) : HistoryCommand
     data class SeekToStorageIndex(val storageIndex: Int, val intent: HistoryNavigationIntent) : HistoryCommand
@@ -1007,6 +1060,7 @@ private class HistoryItemWindowImpl(
     override val hasNewer: Boolean,
     private val onOlderDemand: (HistoryItemWindowImpl) -> Unit,
     private val onNewerDemand: (HistoryItemWindowImpl) -> Unit,
+    private val onAccess: (HistoryItemWindowImpl, Int) -> Unit,
 ) : HistoryItemWindow {
     override val size: Int = items.size
 
@@ -1015,6 +1069,7 @@ private class HistoryItemWindowImpl(
     override fun get(index: Int): HistoryItemViewModel {
         val item = items[index]
         item.ensureLoaded()
+        onAccess(this, index)
         return item
     }
 

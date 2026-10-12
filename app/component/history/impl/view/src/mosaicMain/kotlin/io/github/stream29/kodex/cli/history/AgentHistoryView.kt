@@ -30,7 +30,6 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.UnstableCleanE
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.history.contract.AgentHistoryLoadState
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
-import io.github.stream29.kodex.app.history.contract.HistoryItemWindow
 import io.github.stream29.kodex.app.history.contract.HistoryScrollTarget
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingItem
 import io.github.stream29.kodex.app.history.contract.HistoryStreamingKind
@@ -74,8 +73,8 @@ import kotlin.time.Duration
 /**
  * Renders the one real History owner for an Agent, not a projection into another page ViewModel.
  *
- * Rows borrow the bounded newest-first window and its exact item state machines. Viewport edges
- * request adjacent chunks; focus and popup anchors remain renderer-local. Loading, pending tools,
+ * Rows borrow the bounded newest-first window and submit access hints through get. Focus and
+ * popup anchors remain renderer-local. Loading, pending tools,
  * streaming and turn markers retain their own original presentation branches.
  *
  * [onOpenEntryContextMenu] receives the displayed generation, storage index and actual child,
@@ -233,15 +232,7 @@ public fun AgentHistoryView(
         }
 
         if (historyItems.hasNewer && loadState == AgentHistoryLoadState.Ready) {
-            item(key = NewerHistoryDemandKey) {
-                HistoryEdgeDemandEffect(
-                    historyItems = historyItems,
-                    model = model,
-                    listState = listState,
-                    edgePosition = 0,
-                    request = historyItems::requestNewer,
-                )
-            }
+            item(key = NewerHistoryDemandKey) {}
         } else if (loadState is AgentHistoryLoadState.LoadingNewer) {
             item(key = NewerHistoryLoadingKey) {}
         }
@@ -281,15 +272,7 @@ public fun AgentHistoryView(
         }
 
         if (historyItems.hasOlder && loadState == AgentHistoryLoadState.Ready) {
-            item(key = OlderHistoryDemandKey) {
-                HistoryEdgeDemandEffect(
-                    historyItems = historyItems,
-                    model = model,
-                    listState = listState,
-                    edgePosition = historyItems.size - 1,
-                    request = historyItems::requestOlder,
-                )
-            }
+            item(key = OlderHistoryDemandKey) {}
         }
 
         when (val state = loadState) {
@@ -331,25 +314,6 @@ public fun AgentHistoryView(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun HistoryEdgeDemandEffect(
-    historyItems: HistoryItemWindow,
-    model: AgentHistoryViewModel,
-    listState: LazyListState,
-    edgePosition: Int,
-    request: () -> Unit,
-) {
-    if (edgePosition !in 0 until historyItems.size) return
-    val edgeItem = historyItems.peek(edgePosition)
-    LaunchedEffect(historyItems, edgeItem, listState) {
-        snapshotFlow {
-            listState.layoutInfo.visibleItemsInfo.any { item -> item.key === edgeItem }
-        }.first { visible -> visible }
-        model.reportViewport(historyItems, listState.layoutInfo.visibleHistoryItems())
-        request()
     }
 }
 

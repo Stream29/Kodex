@@ -7,6 +7,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.agentstorage.contract.KodexAgentStorage
 import io.github.stream29.kodex.agentstorage.contract.indexesDescending
+import io.github.stream29.kodex.agentstorage.contract.indexes
 import io.github.stream29.kodex.agentstorage.contract.valuesDescending
 import io.github.stream29.kodex.openai.MessagePhase
 import kotlinx.coroutines.flow.firstOrNull
@@ -20,7 +21,7 @@ import kotlin.time.Instant
  * One first-level History item.
  *
  * The index timeline defines the structure. A sealed work interval is represented by one
- * [WorkGroup] regardless of its work-item count; work payloads are not decoded here.
+ * [WorkGroup] regardless of its work-item count; sealed work payloads are not decoded here.
  */
 internal sealed interface HistoryProjectionItem {
     data class Stable(
@@ -48,13 +49,15 @@ internal data class LoadedHistoryChunk(
 /**
  * Reads the next structural History chunk at or before [fromInclusive].
  *
- * One chunk is either one open work item, or one index anchor together with its preceding sealed
- * work group. LazyColumn demand decides how many chunks are read; this function has no page size.
+ * One chunk is either a bounded open-work prefix, or one index anchor together with its preceding
+ * sealed work group. The page reader supplies [maxOpenItems]; direct callers default to one.
  */
 internal suspend fun KodexAgentStorage.readHistoryChunk(
     fromInclusive: Int,
     snapshotIndex: Int = fromInclusive,
+    maxOpenItems: Int = 1,
 ): LoadedHistoryChunk {
+    require(maxOpenItems > 0)
     if (fromInclusive < 0) return LoadedHistoryChunk(emptyList(), null)
     require(snapshotIndex >= fromInclusive) {
         "History snapshot $snapshotIndex cannot precede cursor $fromInclusive."
@@ -74,13 +77,14 @@ internal suspend fun KodexAgentStorage.readHistoryChunk(
     val openLowerBound = current?.normalWorkLowerBound() ?: 0
     val openIndexes = work.indexesDescending(fromInclusive)
         .takeWhile { workIndex -> workIndex >= openLowerBound }
-        .take(2)
+        .take(maxOpenItems + 1)
         .toList()
-    openIndexes.firstOrNull()?.let { openIndex ->
-        val predecessorIndex = openIndexes.getOrNull(1)
+    openIndexes.firstOrNull()?.let {
+        val selected = openIndexes.take(maxOpenItems)
+        val predecessorIndex = openIndexes.getOrNull(selected.size)
             ?: currentRepresentation?.displayIndex
         result += individualWorkItems(
-            indexesNewestFirst = listOf(openIndex),
+            indexesNewestFirst = selected,
             oldestPredecessorIndex = predecessorIndex,
         )
         return LoadedHistoryChunk(
@@ -129,12 +133,14 @@ internal suspend fun KodexAgentStorage.readHistoryChunk(
  *
  * The index timeline seals every preceding work interval, so seeking to the next index anchor
  * returns that anchor and its whole collapsed work group without walking through the interval.
- * When there is no newer index anchor, the open work suffix remains one item per chunk.
+ * When there is no newer index anchor, at most [maxOpenItems] newer open-work items are returned.
  */
 internal suspend fun KodexAgentStorage.readNewerHistoryChunk(
     afterExclusive: Int,
     snapshotIndex: Int,
+    maxOpenItems: Int = 1,
 ): LoadedHistoryChunk? {
+    require(maxOpenItems > 0)
     if (afterExclusive >= snapshotIndex) return null
     val nextIndexAnchor = index.ceilToIndex(afterExclusive + 1)
         ?.takeIf { it <= snapshotIndex }
@@ -144,12 +150,15 @@ internal suspend fun KodexAgentStorage.readNewerHistoryChunk(
             snapshotIndex = snapshotIndex,
         )
     }
-    val nextOpenWork = work.ceilToIndex(afterExclusive + 1)
-        ?.takeIf { it <= snapshotIndex }
-        ?: return null
+    val nextOpenWork = work.indexes(afterExclusive + 1)
+        .takeWhile { it <= snapshotIndex }
+        .take(maxOpenItems)
+        .toList()
+    val lastOpenIndex = nextOpenWork.lastOrNull() ?: return null
     return readHistoryChunk(
-        fromInclusive = nextOpenWork,
+        fromInclusive = lastOpenIndex,
         snapshotIndex = snapshotIndex,
+        maxOpenItems = nextOpenWork.size,
     )
 }
 
@@ -336,6 +345,11 @@ private suspend fun KodexAgentStorage.individualWorkItems(
     val valuesByIndex = work.valuesIn(
         indexesNewestFirst.last()..indexesNewestFirst.first(),
     ).associate { (index, event) -> index to event }
+    val timestamps = if (indexesNewestFirst.size > 1) {
+        timestamp.valuesIn(
+            (oldestPredecessorIndex ?: indexesNewestFirst.last())..indexesNewestFirst.first(),
+        ).associate { (index, value) -> index to value }
+    } else null
     return indexesNewestFirst.mapIndexed { position, index ->
         val event = requireNotNull(valuesByIndex[index]) {
             "Work entry $index disappeared while reading History."
@@ -346,7 +360,12 @@ private suspend fun KodexAgentStorage.individualWorkItems(
             event.toHistoryItemDescriptor(
                 index = index,
                 source = HistoryItemSource.Work,
-                elapsed = elapsedBetween(predecessorIndex, index),
+                elapsed = if (timestamps == null) elapsedBetween(predecessorIndex, index) else {
+                    val current = timestamps[index]
+                    val previous = timestamps[predecessorIndex]
+                    if (current == null || previous == null) Duration.ZERO
+                    else (current - previous).takeIf { it >= Duration.ZERO && it.isFinite() } ?: Duration.ZERO
+                },
             ),
         )
     }

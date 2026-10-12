@@ -10,9 +10,10 @@ import kotlin.time.Duration
 /**
  * One immutable newest-first snapshot of the materialized history-item window.
  *
- * The window is the only first-level collection exposed to the View. The renderer requests
- * adjacent storage chunks when either edge enters the viewport. The implementation may evict the
- * opposite edge, including its item ViewModels, after protecting reported visible children.
+ * The window is the only first-level collection exposed to the View. Item access submits an
+ * asynchronous prefetch hint; it never performs storage IO in composition/measurement.
+ * The implementation loads pages before reaching either edge and evicts only over-budget pages
+ * outside the reported viewport and its two-sided prefetch region.
  * Old snapshots remain structurally readable after replacement, but their released children
  * cannot start new reads. Paging commands on an obsolete snapshot are ignored.
  */
@@ -23,7 +24,7 @@ public interface HistoryItemWindow {
     /** Number of top-level rows; an expanded Work Group still occupies one row. */
     public val size: Int
 
-    /** An adjacent older structural chunk may be requested. */
+    /** An adjacent older page may be requested. */
     public val hasOlder: Boolean
 
     /** Newer stored history is outside this bounded window, not necessarily in the viewport. */
@@ -37,14 +38,16 @@ public interface HistoryItemWindow {
 
     /**
      * Returns that same child and starts its lazy payload read once. Repeated viewport access
-     * does not create another state machine. Read failure is published by the child, not as empty
-     * content. This index addresses the bounded window, not a storage timeline.
+     * does not create another state machine. Also submits an access hint for two-sided prefetch.
+     * Hints during a load are retained and rechecked against the new window; stale-window hints
+     * are ignored. Read failure is published by the child, not as empty content.
+     * This index addresses the bounded window, not a storage timeline.
      * @throws IndexOutOfBoundsException if [index] is outside this snapshot's visible rows.
      */
     public operator fun get(index: Int): HistoryItemViewModel
 
     /**
-     * Requests one adjacent older structural chunk, without reading row payloads.
+     * Explicitly requests one adjacent older page using the same retention policy as prefetch.
      * Duplicate in-flight, stale-window and post-close demand is ignored. Structural failures
      * publish the owner's Failed state, not an empty page. Demand requires Ready and an older
      * edge; a full command buffer may reject it without changing state. A later edge demand may
@@ -53,7 +56,7 @@ public interface HistoryItemWindow {
     public fun requestOlder()
 
     /**
-     * Requests one adjacent newer structural chunk, preserving reported visible children.
+     * Explicitly requests one adjacent newer page using the same retention policy as prefetch.
      * Duplicate in-flight, stale-window and post-close demand is ignored. Structural failures
      * publish the owner's Failed state, not an empty page. Demand requires Ready and a newer
      * edge; a full command buffer may reject it without changing state. A later edge demand may
@@ -67,7 +70,7 @@ public sealed interface AgentHistoryLoadState {
     /** Render initial/replacement loading independently of pending and streaming content. */
     public data object Initializing : AgentHistoryLoadState
 
-    /** Render rows and enable visible-edge demands, including an empty-history marker. */
+    /** Render rows and enable paging, including an empty-history marker. */
     public data object Ready : AgentHistoryLoadState
 
     /** Keep existing rows and render the older-edge loading marker. */
@@ -146,8 +149,11 @@ public class HistoryScrollEffect(
  * renders their state and sends scroll/explicit expansion commands; it never reads storage.
  * This is Agent history across index/work/unstable timelines, not one timeline or one Session.
  *
- * Initial loading reads the tail; edge demand loads one adjacent structural chunk and bounds the
- * window by evicting the opposite edge. Expensive payloads belong to cached item ViewModels.
+ * Initial loading reads a bounded tail. Access hints load adjacent pages, not single structural
+ * chunks. The implementation uses 64-item pages, a 192-item initial load, a 64-item two-sided
+ * prefetch distance and a soft 256-item budget. All counts address top-level items.
+ * Whole-page eviction happens only over budget, outside the viewport plus prefetch region;
+ * unusually large viewports can temporarily exceed that budget. Expensive payloads belong to cached item ViewModels.
  * Work Groups own their exact newest-first children while expanded and release them on collapse.
  * Cache invalidation replaces the generation and releases obsolete children; late reads cannot
  * publish into the new generation. Structural failures publish [AgentHistoryLoadState.Failed];
@@ -192,7 +198,8 @@ public interface AgentHistoryViewModel : AutoCloseable {
     /**
      * Reports actual visible top-level children from the exact captured [window].
      * Work Group nested content reports its owning top-level group. The latest valid report
-     * protects original visible chunks during opposite-edge eviction. Stale/released windows or
+     * protects visible items and their two-sided prefetch region during opposite-edge eviction.
+     * It also refreshes the access hint. Stale/released windows or
      * foreign children are ignored; no payload read is started. The list is copied on acceptance.
      * An empty valid report clears retention, including when the renderer unmounts.
      * This operation is harmless after close and does not throw.
