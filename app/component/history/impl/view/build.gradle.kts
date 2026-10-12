@@ -7,12 +7,12 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":app-component-agent-spec"))
-            api(project(":app-component-history-spec"))
+            api(project(":app-component-history-impl-viewmodel"))
             api(project(":agent-storage-spec-clean-models"))
             api(project(":utils-patch-spec"))
         }
         commonTest.dependencies {
-            implementation(project(":agent-storage-impl-in-memory"))
+            implementation(project(":agent-storage-core"))
         }
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))

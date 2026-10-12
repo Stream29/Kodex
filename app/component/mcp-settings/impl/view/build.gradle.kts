@@ -2,7 +2,7 @@ plugins { id("kodex.kmp-view"); id("kodex.kmp-tests") }
 
 kotlin {
     sourceSets {
-        commonMain.dependencies { api(project(":app-component-mcp-settings-spec")) }
+        commonMain.dependencies { api(project(":app-component-mcp-settings-impl-viewmodel")) }
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))
             implementation(libs.mosaic.runtime)

@@ -28,7 +28,7 @@ kotlin {
                 api(project(":app-migration-spec"))
                 implementation(project(":utils-kotlinx-io-coroutines-impl"))
                 implementation(project(":agent-storage-impl-filesystem-layout"))
-                implementation(project(":utils-filesystem-lease-impl"))
+                implementation(project(":utils-filesystem-lease"))
                 implementation(libs.kotlinx.serialization.json)
                 implementation(libs.kaml)
             }

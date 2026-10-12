@@ -6,7 +6,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":app-component-suggest-subagent-task-spec"))
+            api(project(":app-component-suggest-subagent-task-impl-viewmodel"))
         }
         mosaicMain.dependencies {
             api(project(":app-view-components"))

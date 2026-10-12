@@ -1,8 +1,17 @@
-plugins { id("kodex.kmp-viewmodel"); id("kodex.kmp-tests") }
+plugins {
+    id("kodex.kmp-spec-impl")
+    id("kodex.kmp-viewmodel")
+    id("kodex.kmp-tests")
+    alias(libs.plugins.kotlin.serialization)
+}
 
 kotlin {
     sourceSets {
-        commonMain.dependencies { api(project(":app-component-account-usage-spec")) }
+        named("specMain").dependencies {
+            api(project(":openai-account-usage"))
+            api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.serialization.core)
+        }
         commonTest.dependencies { implementation(libs.kotlinx.coroutines.test) }
     }
 }

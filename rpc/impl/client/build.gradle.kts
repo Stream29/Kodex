@@ -13,7 +13,7 @@ kotlin {
             api(libs.kotlinx.coroutines.core)
             api(project(":utils-rpc-exception-spec"))
             api(project(":rpc-spec-contract"))
-            api(project(":agent-storage-spec-contract"))
+            api(project(":agent-storage-core"))
             implementation(libs.cache4k)
         }
         commonTest.dependencies {

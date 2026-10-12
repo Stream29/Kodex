@@ -1,4 +1,5 @@
 plugins {
+    id("kodex.kmp-spec-impl")
     id("kodex.krpc-utils-patch")
     id("kodex.kmp-cli")
     alias(libs.plugins.kotlin.serialization)
@@ -8,18 +9,20 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
-            api(project(":rpc-spec-models"))
-            api(project(":app-component-authentication-settings-spec"))
-            api(project(":app-component-account-usage-spec"))
-            api(project(":app-component-session-catalog-spec"))
-            api(project(":mcp-spec-contract"))
-            api(project(":agent-storage-spec-clean-models"))
-            api(project(":agent-storage-spec-contract"))
-            api(project(":openai-spec-models"))
-            api(libs.kotlinx.coroutines.core)
-            api(libs.kotlinx.rpc.core)
-            api(libs.kotlinx.serialization.core)
+        named("specMain") {
+            dependencies {
+                api(project(":rpc-spec-models"))
+                api(project(":app-component-authentication-settings-impl-viewmodel"))
+                api(project(":app-component-account-usage-impl-viewmodel"))
+                api(project(":app-component-session-catalog-impl-viewmodel"))
+                api(project(":mcp-spec-contract"))
+                api(project(":agent-storage-spec-clean-models"))
+                api(project(":agent-storage-core"))
+                api(project(":openai-spec-models"))
+                api(libs.kotlinx.coroutines.core)
+                api(libs.kotlinx.rpc.core)
+                api(libs.kotlinx.serialization.core)
+            }
         }
         commonTest.dependencies {
             implementation(project(":utils-rpc-exception-spec"))

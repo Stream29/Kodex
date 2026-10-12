@@ -11,7 +11,7 @@ kotlin {
         }
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))
-            implementation(project(":app-component-application-preferences-spec"))
+            implementation(project(":app-component-application-preferences-impl-viewmodel"))
             api(project(":app-component-runtime-configuration-impl-view"))
             api(project(":app-component-suggest-subagent-task-impl-view"))
             implementation(project(":app-component-request-user-input-impl-view"))

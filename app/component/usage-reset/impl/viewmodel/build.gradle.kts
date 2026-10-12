@@ -1,9 +1,15 @@
-plugins { id("kodex.kmp-viewmodel"); id("kodex.kmp-tests") }
+plugins {
+    id("kodex.kmp-spec-impl")
+    id("kodex.kmp-viewmodel")
+    id("kodex.kmp-tests")
+}
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
-            api(project(":app-component-usage-reset-spec"))
+        named("specMain").dependencies {
+            api(project(":app-component-account-usage-impl-viewmodel"))
+            api(project(":openai-account-usage"))
+            api(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)

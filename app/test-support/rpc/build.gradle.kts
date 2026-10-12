@@ -9,7 +9,7 @@ kotlin {
         api(project(":app-impl-rpc"))
         api(project(":app-impl-session"))
         api(project(":app-component-new-session-impl-viewmodel"))
-        api(project(":openai-impl-client-test"))
+        api(project(":openai-client-test"))
         implementation(project(":rpc-impl-server"))
         implementation(project(":rpc-impl-in-memory"))
         implementation(project(":app-migration-impl"))

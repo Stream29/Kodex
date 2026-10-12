@@ -3,7 +3,7 @@ plugins { id("kodex.kmp-view"); id("kodex.kmp-tests") }
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":app-component-usage-reset-spec"))
+            api(project(":app-component-usage-reset-impl-viewmodel"))
         }
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))

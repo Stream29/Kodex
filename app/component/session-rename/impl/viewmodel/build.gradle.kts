@@ -1,12 +1,13 @@
 plugins {
+    id("kodex.kmp-spec-impl")
     id("kodex.kmp-viewmodel")
     id("kodex.kmp-tests")
 }
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
-            api(project(":app-component-session-rename-spec"))
+        named("specMain").dependencies {
+            api(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)

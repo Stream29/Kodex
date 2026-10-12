@@ -7,7 +7,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":app-component-settings-spec"))
+            api(project(":app-component-settings-impl-viewmodel"))
         }
         mosaicMain.dependencies {
             implementation(project(":app-component-session-settings-impl-view"))

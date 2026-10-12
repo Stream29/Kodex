@@ -1,11 +1,14 @@
 plugins {
+    id("kodex.kmp-spec-impl")
     id("kodex.kmp-host")
 }
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
-            api(libs.kotlinx.io.core)
+        named("specMain") {
+            dependencies {
+                api(libs.kotlinx.io.core)
+            }
         }
     }
 }

@@ -1,4 +1,5 @@
 plugins {
+    id("kodex.kmp-spec-impl")
     id("kodex.kmp-host")
     id("kodex.kmp-tests")
 }
@@ -6,10 +7,10 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":agent-storage-spec-contract"))
+            api(project(":agent-storage-core"))
         }
         commonTest.dependencies {
-            implementation(project(":agent-storage-impl-in-memory"))
+            implementation(project(":agent-storage-core"))
         }
     }
 }

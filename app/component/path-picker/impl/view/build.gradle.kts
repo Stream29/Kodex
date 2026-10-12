@@ -6,7 +6,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":app-component-path-picker-spec"))
+            api(project(":app-component-path-picker-impl-viewmodel"))
         }
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))

@@ -3,13 +3,6 @@ package io.github.stream29.kodex.utils.terminaltext
 import io.github.kotlinmania.unicodesegmentation.graphemeIndices
 import io.github.kotlinmania.unicodewidth.unicodeWidth
 
-/** One grapheme-preserving terminal-cell segment with UTF-16 source offsets. */
-public data class TerminalCellSegment(
-    public val sourceStart: Int,
-    public val sourceEnd: Int,
-    public val cellWidth: Int,
-)
-
 private data class TerminalTextWidthBoundary(
     val sourceIndex: Int,
     val cellWidth: Int,

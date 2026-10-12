@@ -102,7 +102,6 @@ moduleTree("app") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("agent") {
             moduleTree("impl") {
@@ -115,173 +114,148 @@ moduleTree("app") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("authentication-settings") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("composer") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("context-source-settings") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("history-index") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("history") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("hook-settings") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("mcp-settings") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("new-session-defaults") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("new-session") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("openai-login") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("path-picker") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("request-user-input") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("runtime-configuration") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("session-catalog") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("session-delete") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("session-rename") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("session-settings") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("session-sidebar") {
             moduleTree("impl") {
                 module("view")
             }
-            module("spec")
         }
         moduleTree("session-tab-bar") {
             moduleTree("impl") {
                 module("view")
             }
-            module("spec")
         }
         moduleTree("session-title-settings") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("settings") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("suggest-subagent-task") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("usage-reset") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
         moduleTree("working-directory") {
             moduleTree("impl") {
                 module("view")
                 module("viewmodel")
             }
-            module("spec")
         }
     }
     moduleTree("impl") {
@@ -298,12 +272,8 @@ moduleTree("app") {
         moduleTree("impl") {
             module("filesystem")
         }
-        moduleTree("spec") {
-            module("persistence")
-        }
     }
     moduleTree("spec") {
-        module("application")
         module("session")
     }
     moduleTree("test-support") {
@@ -339,20 +309,13 @@ moduleTree("mcp") {
 }
 
 moduleTree("openai") {
-    moduleTree("impl") {
-        module("account-usage")
-        module("client")
-        module("client-test")
-        module("codex-cli-storage")
-        module("model-catalog")
-    }
+    module("account-usage")
+    module("client")
+    module("client-test")
+    module("codex-cli-storage")
+    module("model-catalog")
     moduleTree("spec") {
-        module("account-usage")
-        module("client")
-        module("client-test")
-        module("codex-cli-storage")
         module("json-codec")
-        module("model-catalog")
         module("models")
     }
 }
@@ -369,39 +332,27 @@ moduleTree("agent-state") {
 }
 
 moduleTree("agent-context") {
-    moduleTree("impl") {
-        module("agents-md-filesystem")
-        module("prefix")
-        module("prefix-render")
-        module("skill-filesystem")
-        module("skill-render")
-    }
+    module("agents-md")
+    module("prefix")
+    module("skill")
     moduleTree("spec") {
-        module("agents-md")
         module("available-skill")
         module("contract")
-        module("prefix")
         module("prompt-dsl")
-        module("skill")
     }
 }
 
 moduleTree("agent-runtime") {
     moduleTree("impl") {
         module("composition")
-        module("steer")
-        moduleTree("decorator") {
-            module("compact")
-            module("tool")
-        }
     }
     moduleTree("spec") {
         module("contract")
-        module("steer")
-        moduleTree("decorator") {
-            module("compact")
-            module("tool")
-        }
+    }
+    module("steer")
+    moduleTree("decorator") {
+        module("compact")
+        module("tool")
     }
 }
 
@@ -417,14 +368,12 @@ moduleTree("agent-session") {
 }
 
 moduleTree("agent-storage") {
+    module("core")
     moduleTree("impl") {
-        module("filesystem")
         module("filesystem-layout")
-        module("in-memory")
     }
     moduleTree("spec") {
         module("clean-models")
-        module("contract")
         module("contract-ext")
     }
 }
@@ -439,34 +388,25 @@ moduleTree("hook") {
 }
 
 moduleTree("tool") {
+    module("apply-patch")
+    module("builder")
+    module("current-time")
+    module("get-context-remaining")
+    module("multi-agent")
+    module("plan")
+    module("request-user-input")
+    module("tool-search")
+    module("web-run")
     moduleTree("impl") {
-        module("apply-patch")
-        module("builder")
-        module("current-time")
-        module("get-context-remaining")
         module("image-generation")
-        module("multi-agent")
-        module("plan")
-        module("request-user-input")
-        module("tool-search")
         module("unified-exec")
         module("view-image")
-        module("web-run")
     }
     moduleTree("spec") {
-        module("apply-patch")
-        module("builder")
         module("contract")
-        module("current-time")
-        module("get-context-remaining")
         module("image-generation")
-        module("multi-agent")
-        module("plan")
-        module("request-user-input")
-        module("tool-search")
         module("unified-exec")
         module("view-image")
-        module("web-run")
     }
 }
 
@@ -478,10 +418,7 @@ moduleTree("utils") {
         module("impl")
         module("spec")
     }
-    moduleTree("filesystem-lease") {
-        module("impl")
-        module("spec")
-    }
+    module("filesystem-lease")
     moduleTree("images-codec") {
         module("impl")
         module("spec")
@@ -518,10 +455,7 @@ moduleTree("utils") {
         module("impl")
         module("spec")
     }
-    moduleTree("read-write-mutex") {
-        module("impl")
-        module("spec")
-    }
+    module("read-write-mutex")
     moduleTree("rpc-exception") {
         module("spec")
     }

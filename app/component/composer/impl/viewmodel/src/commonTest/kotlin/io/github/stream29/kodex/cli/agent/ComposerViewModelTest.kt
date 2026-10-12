@@ -220,7 +220,7 @@ val composerViewModelTest by testSuite {
             assertIs<ComposerRequestInputPresentation.Pending>(state.requestInput)
             assertEquals(io.github.stream29.kodex.app.agent.contract.ComposerMode.RequestInput,
                 state.mode)
-            assertEquals("call-1", (state.requestInput as ComposerRequestInputPresentation.Pending).callId)
+            assertEquals("call-1", state.requestInput.callId)
             model.close()
         }
     }

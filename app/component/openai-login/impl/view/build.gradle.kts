@@ -6,7 +6,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":app-component-openai-login-spec"))
+            api(project(":app-component-openai-login-impl-viewmodel"))
         }
         mosaicMain.dependencies {
             api(project(":utils-external-url-spec"))

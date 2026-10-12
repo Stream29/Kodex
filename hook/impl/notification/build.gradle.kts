@@ -16,7 +16,7 @@ kotlin {
             implementation(project(":rpc-impl-in-memory"))
             implementation(project(":rpc-impl-client"))
             implementation(project(":rpc-impl-server"))
-            implementation(project(":openai-impl-client-test"))
+            implementation(project(":openai-client-test"))
         }
     }
 }

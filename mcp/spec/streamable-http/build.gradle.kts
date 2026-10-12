@@ -1,10 +1,12 @@
 plugins {
+    id("kodex.kmp-spec-impl")
     id("kodex.kmp-host")
     id("kodex.kmp-tests")
 }
 
 kotlin {
     sourceSets {
+        // HTTP/SSE construction and authorization interception are implementation.
         commonMain.dependencies {
             api(project(":mcp-spec-contract"))
             api(libs.ktor.client.core)

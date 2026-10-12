@@ -9,7 +9,7 @@ kotlin {
         commonMain.dependencies {
             implementation(project(":app-impl-rpc"))
             implementation(project(":app-spec-session"))
-            implementation(project(":app-component-session-catalog-spec"))
+            implementation(project(":app-component-session-catalog-impl-viewmodel"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(project(":utils-coroutines-spec"))
         }
@@ -24,7 +24,7 @@ kotlin {
             implementation(project(":app-component-history-impl-viewmodel"))
             implementation(project(":agent-session-impl-in-memory"))
             implementation(project(":agent-session-test"))
-            implementation(project(":openai-impl-client-test"))
+            implementation(project(":openai-client-test"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

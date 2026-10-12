@@ -29,7 +29,7 @@ kotlin {
             implementation(libs.kotlin.wrappers.node)
         }
         commonTest.dependencies {
-            implementation(project(":tool-impl-builder"))
+            implementation(project(":tool-builder"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
         }

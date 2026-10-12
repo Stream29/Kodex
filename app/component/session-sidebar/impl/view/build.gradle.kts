@@ -7,7 +7,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":app-component-session-sidebar-spec"))
+            api(project(":app-impl-application"))
             api(project(":app-component-agent-spec"))
         }
         mosaicMain.dependencies {

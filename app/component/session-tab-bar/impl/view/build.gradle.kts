@@ -1,12 +1,17 @@
 plugins {
+    id("kodex.kmp-spec-impl")
     id("kodex.kmp-view")
     id("kodex.kmp-tests")
 }
 
 kotlin {
     sourceSets {
+        named("specMain").dependencies {
+            api(libs.kotlinx.coroutines.core)
+        }
         commonMain.dependencies {
-            api(project(":app-component-session-tab-bar-spec"))
+            // Compose-generated stability code participates in shared compilations.
+            implementation(libs.mosaic.runtime)
         }
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))

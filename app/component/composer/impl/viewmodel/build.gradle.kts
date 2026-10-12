@@ -1,9 +1,17 @@
-plugins { id("kodex.kmp-viewmodel"); id("kodex.kmp-tests") }
+plugins {
+    id("kodex.kmp-spec-impl")
+    id("kodex.kmp-viewmodel")
+    id("kodex.kmp-tests")
+}
 
 kotlin {
     sourceSets {
+        named("specMain").dependencies {
+            api(project(":agent-storage-spec-clean-models"))
+            api(project(":openai-spec-models"))
+            api(libs.kotlinx.coroutines.core)
+        }
         commonMain.dependencies {
-            api(project(":app-component-composer-spec"))
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {

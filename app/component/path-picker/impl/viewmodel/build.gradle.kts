@@ -1,12 +1,16 @@
 plugins {
+    id("kodex.kmp-spec-impl")
     id("kodex.kmp-viewmodel")
     id("kodex.kmp-tests")
 }
 
 kotlin {
     sourceSets {
+        named("specMain").dependencies {
+            api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.io.core)
+        }
         commonMain.dependencies {
-            api(project(":app-component-path-picker-spec"))
             implementation(project(":utils-coroutines-spec"))
             implementation(project(":utils-kotlinx-io-coroutines-impl"))
             implementation(project(":utils-os-environment-spec"))

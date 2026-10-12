@@ -6,7 +6,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":app-component-session-delete-spec"))
+            api(project(":app-component-session-delete-impl-viewmodel"))
         }
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))

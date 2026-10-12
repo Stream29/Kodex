@@ -6,7 +6,7 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api(project(":app-component-request-user-input-spec"))
+            api(project(":app-component-request-user-input-impl-viewmodel"))
         }
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))
