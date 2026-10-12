@@ -26,6 +26,64 @@ import kotlin.time.Instant
 import kotlin.time.TimeSource
 
 val indexHistoryReadTest by testSuite {
+    test("multi-page projection matches structural reads in both directions across sealed groups") {
+        val storage = historyStorage()
+        for (position in 1..700) {
+            val index = position * 3
+            if (position == 1 || position % 7 == 0) storage.index[index] = historyUser("$position")
+            else storage.work[index] = historyWork(index)
+        }
+        val expected = storage.readAllHistory(2_100).items
+        val backward = mutableListOf<HistoryProjectionItem>()
+        var cursor: Int? = 2_100
+        while (cursor != null) {
+            val page = storage.readHistoryPage(cursor, 2_100)
+            backward += page.items
+            cursor = page.nextOlderIndex
+        }
+        assertEquals(expected, backward)
+
+        var forward = emptyList<HistoryProjectionItem>()
+        var after = 0
+        while (after < 2_100) {
+            val page = storage.readNewerHistoryPage(after, 2_100) ?: break
+            assertTrue(page.items.first().newestStorageIndex > after)
+            forward = page.items + forward.filter { it.newestStorageIndex < page.items.last().oldestStorageIndex }
+            after = page.items.first().newestStorageIndex
+        }
+        assertEquals(expected, forward)
+    }
+
+    test("open work page batches payloads and timestamps without crossing its cursor") {
+        val mutable = historyStorage()
+        mutable.index[1] = historyUser("prompt")
+        for (index in 2..200) {
+            mutable.work[index] = historyWork(index)
+            mutable.timestamp[index] = Instant.fromEpochSeconds(index.toLong())
+        }
+        val counted = CountingHistoryStorage(mutable)
+        val page = counted.readHistoryPage(fromInclusive = 200, snapshotIndex = 200)
+        assertEquals(HistoryPaging.PageSize, page.items.size)
+        assertEquals(200, page.items.first().newestStorageIndex)
+        assertEquals(137, page.items.last().oldestStorageIndex)
+        assertEquals(136, page.nextOlderIndex)
+        assertEquals(HistoryPaging.PageSize, counted.workTimeline.valuesReturned)
+        assertEquals(1, counted.workTimeline.valueReads)
+        assertEquals(0, counted.workTimeline.exactReads)
+        page.items.forEach { assertEquals(1.seconds, assertIs<HistoryProjectionItem.Stable>(it).descriptor.elapsed) }
+
+        val newer = counted.readNewerHistoryPage(afterExclusive = 100, snapshotIndex = 200)!!
+        assertEquals(HistoryPaging.PageSize, newer.items.size)
+        assertEquals(164, newer.items.first().newestStorageIndex)
+        assertEquals(101, newer.items.last().oldestStorageIndex)
+        assertEquals(2, counted.workTimeline.valueReads)
+
+        val tail = counted.readNewerHistoryPage(afterExclusive = 180, snapshotIndex = 200)!!
+        assertEquals(20, tail.items.size, "A short newer page must not reread the already loaded suffix.")
+        assertEquals(181, tail.items.last().oldestStorageIndex)
+        assertEquals(180, tail.nextOlderIndex)
+    }
+
     test("a singleton sealed work interval is still one work group") {
         val mutable = historyStorage()
         mutable.index[1] = historyUser("prompt")
@@ -210,6 +268,7 @@ private class CountingHistoryTimeline<T>(
 ) : IndexVersioned<T> {
     var exactReads: Int = 0
     var valuesReturned: Int = 0
+    var valueReads: Int = 0
 
     override suspend fun latestIndex(): Int = delegate.latestIndex()
 
@@ -230,7 +289,7 @@ private class CountingHistoryTimeline<T>(
         delegate.indexesIn(range)
 
     override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>> =
-        delegate.valuesIn(range).also { values -> valuesReturned += values.size }
+        delegate.valuesIn(range).also { values -> valuesReturned += values.size; valueReads++ }
 }
 
 private class CountingHistoryStorage(

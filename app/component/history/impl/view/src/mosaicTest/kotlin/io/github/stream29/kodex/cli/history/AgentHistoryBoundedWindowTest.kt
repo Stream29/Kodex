@@ -42,13 +42,13 @@ import kotlin.time.TimeSource
 
 val agentHistoryBoundedWindowTest by testSuite {
     test(
-        "long History navigation keeps only a viewport-derived local window",
+        "long History navigation keeps a bounded prefetch-protected window",
         testConfig = TestConfig.testScope(isEnabled = true, timeout = 360.seconds),
     ) {
         coroutineScope {
             val itemCount = 1_000
             val viewportHeight = 12
-            // A round trip renders about 2,000 one-item steps. This is a
+            // A round trip visits 2,000 rows across multi-item pages. This is a
             // hang guard, not a platform-independent throughput benchmark.
             val navigationBudget = 300.seconds
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
@@ -156,7 +156,7 @@ val agentHistoryBoundedWindowTest by testSuite {
                         }
                         assertFalse(renderedWindow.hasNewer)
                         assertTrue(
-                            peakWindowSize <= viewportHeight * 4,
+                            peakWindowSize <= 256,
                             "A $viewportHeight-row History viewport retained " +
                                 "$peakWindowSize of $itemCount items.",
                         )

@@ -24,7 +24,7 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration
 
 val agentHistoryInvalidationTest by testSuite {
-    test("LazyColumn requests older History only when its demand marker is measured") {
+    test("LazyColumn submits older access hints without a demand marker effect") {
         var olderRequests = 0
         val window = TestHistoryItemWindow(
             generation = 0,
@@ -57,7 +57,7 @@ val agentHistoryInvalidationTest by testSuite {
         }
     }
 
-    test("LazyColumn requests newer History only when its demand marker is measured") {
+    test("LazyColumn submits newer access hints without a demand marker effect") {
         var newerRequests = 0
         val window = TestHistoryItemWindow(
             generation = 0,
@@ -192,10 +192,22 @@ private class TestHistoryItemWindow(
     private val onRequestNewer: () -> Unit = {},
 ) : HistoryItemWindow {
     override val size: Int = items.size
+    private var olderRequested = false
+    private var newerRequested = false
 
     override fun peek(index: Int): HistoryItemViewModel = items[index]
 
-    override fun get(index: Int): HistoryItemViewModel = items[index]
+    override fun get(index: Int): HistoryItemViewModel {
+        if (hasOlder && index >= size - 16 && !olderRequested) {
+            olderRequested = true
+            onRequestOlder()
+        }
+        if (hasNewer && index < 16 && !newerRequested) {
+            newerRequested = true
+            onRequestNewer()
+        }
+        return items[index]
+    }
 
     override fun requestOlder() {
         onRequestOlder()

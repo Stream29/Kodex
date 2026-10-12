@@ -24,7 +24,7 @@ val historyPagingReadinessTest by testSuite {
         val direction = if (newer) "newer" else "older"
         test("accepts immediate $direction demand after publishing Ready") {
             coroutineScope {
-                val itemCount = 20
+                val itemCount = 400
                 val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
                 val runtime = repository.open(repository.create()).runtime
                 runtime.modify { storage ->

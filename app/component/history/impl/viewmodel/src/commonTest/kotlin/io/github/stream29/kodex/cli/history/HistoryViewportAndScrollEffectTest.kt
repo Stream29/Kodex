@@ -566,20 +566,16 @@ val historyViewportAndScrollEffectTest by testSuite {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
-                for (index in 1..40) storage.index[index * 3] = navigationMessage("$index")
+                for (index in 1..400) storage.index[index * 3] = navigationMessage("$index")
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
                 model.awaitNavigationReady()
                 val stale = model.historyItems.value
-                repeat(7) {
-                    val window = model.historyItems.value
-                    model.reportViewport(window, listOf(window.peek(0)))
-                    model.page(window, newer = false)
-                }
+                model.page(stale, newer = false)
                 val wide = model.historyItems.value
-                assertEquals((120 downTo 99 step 3).toList(), wide.messageIndexes())
-                val visible = wide.peek(6) // 102, not an ordinal storage cursor.
+                assertEquals(HistoryPaging.MaxSize, wide.size)
+                val visible = wide.peek(170) // Sparse storage index, not an ordinal cursor.
                 val callerList = mutableListOf(visible)
                 model.reportViewport(wide, callerList)
                 callerList.clear() // Accepted reports must not borrow a mutable caller list.
@@ -592,19 +588,19 @@ val historyViewportAndScrollEffectTest by testSuite {
                 model.setFollowsLatest(wide, false)
                 model.page(wide, newer = false)
                 val older = model.historyItems.value
-                assertEquals(listOf(105, 102, 99, 96), older.messageIndexes())
+                assertTrue(older.size <= HistoryPaging.MaxSize)
                 assertTrue(older.hasNewer)
-                assertSame(visible, older.peek(1))
+                assertTrue((0 until older.size).any { older.peek(it) === visible })
+                assertTrue(older.messageIndexes().zipWithNext().all { (a, b) -> a - b == 3 })
                 model.setFollowsLatest(older, true)
                 assertFalse(model.followsLatest.value, "Newest viewport is not newest storage.")
 
                 model.reportViewport(older, listOf(visible))
                 model.page(older, newer = true)
                 val newer = model.historyItems.value
-                assertEquals(listOf(108, 105, 102, 99), newer.messageIndexes())
-                assertSame(visible, newer.peek(2))
+                assertTrue((0 until newer.size).any { newer.peek(it) === visible })
+                assertTrue(newer.messageIndexes().zipWithNext().all { (a, b) -> a - b == 3 })
                 assertTrue(newer.hasOlder)
-                assertTrue(newer.hasNewer)
             } finally {
                 model.close()
                 repository.cancelAndJoin()
@@ -628,22 +624,16 @@ val historyViewportAndScrollEffectTest by testSuite {
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
                 model.awaitNavigationReady()
-                repeat(9) {
-                    val window = model.historyItems.value
-                    model.reportViewport(window, listOf(window.peek(0)))
-                    model.page(window, newer = false)
-                }
                 val wide = model.historyItems.value
-                val group = assertIs<WorkGroupHistoryItemViewModel>(wide.peek(wide.size - 1))
+                val group = assertIs<WorkGroupHistoryItemViewModel>(wide.peek(wide.size - 2))
                 assertEquals(19, group.itemCount)
                 assertEquals(2..20, group.indexRange)
                 model.reportViewport(wide, listOf(group))
-                model.page(wide, newer = false)
                 val bounded = model.historyItems.value
-                assertEquals(4, bounded.size, "One neighboring chunk, group chunk and older chunk.")
-                assertSame(group, bounded.peek(2))
-                assertEquals(21, assertIs<MessageHistoryItemViewModel>(bounded.peek(1)).index)
-                assertEquals(1, assertIs<MessageHistoryItemViewModel>(bounded.peek(3)).index)
+                assertEquals(12, bounded.size, "Nineteen children are one top-level item.")
+                assertSame(group, bounded.peek(10))
+                assertEquals(21, assertIs<MessageHistoryItemViewModel>(bounded.peek(9)).index)
+                assertEquals(1, assertIs<MessageHistoryItemViewModel>(bounded.peek(11)).index)
             } finally {
                 model.close()
                 repository.cancelAndJoin()

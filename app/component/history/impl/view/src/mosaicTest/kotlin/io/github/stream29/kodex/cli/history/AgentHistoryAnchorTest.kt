@@ -39,7 +39,7 @@ val agentHistoryAnchorTest by testSuite {
                 val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
                 val runtime = repository.open(repository.create()).runtime
                 runtime.modify { storage ->
-                    repeat(20) { position ->
+                    repeat(1_000) { position ->
                         storage.index[position + 1] = StableUserMessage(
                             listOf(ContentItem.InputText("$position")),
                         )
@@ -54,15 +54,14 @@ val agentHistoryAnchorTest by testSuite {
                     withContext(Dispatchers.Default) {
                         withTimeout(5.seconds) {
                             model.loadState.first { it == AgentHistoryLoadState.Ready }
-                            model.requestScrollToStorageIndex(10)
+                            model.requestScrollToStorageIndex(500)
                             model.historyItems.first { window ->
-                                window.size == 1 &&
-                                    (window.peek(0) as MessageHistoryItemViewModel).index == 10
+                                window.size == 64 &&
+                                    (window.peek(0) as MessageHistoryItemViewModel).index == 500
                             }
-                            repeat(7) {
+                            repeat(3) {
                                 model.loadState.first { it == AgentHistoryLoadState.Ready }
                                 val window = model.historyItems.value
-                                model.reportViewport(window, listOf(window.peek(0)))
                                 window.requestOlder()
                                 model.historyItems.first { it !== window }
                             }
@@ -70,7 +69,7 @@ val agentHistoryAnchorTest by testSuite {
                         }
                     }
                     val original = model.historyItems.value
-                    assertEquals(8, original.size)
+                    assertEquals(256, original.size)
                     assertFalse(model.followsLatest.value)
                     var displayedWindow by mutableStateOf(original)
                     runMosaicTest {
@@ -90,10 +89,10 @@ val agentHistoryAnchorTest by testSuite {
                                 if (window.hasOlder) item(key = "older") {}
                             }
                         }
-                        viewState.listState.scrollToItem(index = 6, scrollOffset = scrollOffset)
+                        viewState.listState.scrollToItem(index = 100, scrollOffset = scrollOffset)
                         settleAnchorFrames()
                         val anchor = viewState.listState.layoutInfo.visibleItemsInfo.first()
-                        assertEquals(5, (anchor.key as MessageHistoryItemViewModel).index)
+                        assertEquals(401, (anchor.key as MessageHistoryItemViewModel).index)
                         assertEquals(-scrollOffset, anchor.offset)
 
                         model.reportViewport(

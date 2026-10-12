@@ -104,7 +104,7 @@ val agentHistoryRendererStateTest by testSuite {
                             // Mosaic StringTextLayout splits "" into ONE line; it is not a
                             // zero-height message. The empty demand marker is a different item.
                             assertEquals(1, blank.size, "The actual Loading renderer must be measured.")
-                            assertEquals(1, demands, "Visibility, not payload Ready, admits one-shot demand.")
+                            assertEquals(0, demands, "Renderer markers do not issue paging commands; get owns access hints.")
                             assertTrue(window.isMeasuredHistoryWindow(
                                 model, blankLayout, viewState.listState.canScrollBackward,
                             ), "Count/key identity alone can accept a blank payload frame.")
@@ -144,7 +144,7 @@ val agentHistoryRendererStateTest by testSuite {
                             val restored = readyLayout.visibleItemsInfo.first()
                             assertSame(anchor.key, restored.key)
                             assertEquals(anchor.offset, restored.offset)
-                            assertEquals(1, demands, "Payload height alone does not restart the one-shot effect.")
+                            assertEquals(0, demands, "Payload height does not introduce marker-driven paging.")
                             assertFalse(model.followsLatest.value, "Logical positioning is not genuine input.")
                         } finally {
                             cancel()
@@ -227,7 +227,7 @@ val agentHistoryRendererStateTest by testSuite {
                                     model, loadingLayout, viewState.listState.canScrollBackward,
                                     inputTarget = edge, expectedTargetHeight = 2,
                                 ))
-                                assertEquals(0, demands, "Overscan get is not visible-edge demand.")
+                                assertEquals(0, demands, "The fake get tracks access but does not implement owner prefetch.")
 
                                 releasePayload.complete(Unit)
                                 payload.join()
@@ -273,14 +273,14 @@ val agentHistoryRendererStateTest by testSuite {
                                     model, viewState.listState.layoutInfo, viewState.listState.canScrollBackward,
                                     inputTarget = edge, expectedTargetHeight = 2,
                                 ), "Genuine continuation must reveal the Ready edge at its real height.")
-                                assertEquals(1, demands)
+                                assertEquals(0, demands, "Even edge input uses get, not a marker paging effect.")
                                 assertTrue(interactions.any {
                                     it.source == (if (keyboard) ScrollInputSource.Keyboard else ScrollInputSource.Pointer) &&
                                         (if (newer) it.consumedDelta > 0 else it.consumedDelta < 0)
                                 }, "The actual input must consume movement, not just enqueue an event.")
                                 assertFalse(model.followsLatest.value, "This fixture still has newer stored history.")
                                 settleRendererFrames()
-                                assertEquals(1, demands, "Same mounted edge is one-shot, not a retry loop.")
+                                assertEquals(0, demands, "No marker-driven retry loop.")
                             } finally {
                                 collector.cancel()
                                 withContext(NonCancellable) { collector.join() }
@@ -374,7 +374,8 @@ val agentHistoryRendererStateTest by testSuite {
                         settleRendererFrames()
                         val edge = replacement.peek(if (newer) 0 else replacement.size - 1)
                         assertTrue(viewState.listState.layoutInfo.visibleItemsInfo.any { it.key === edge })
-                        assertEquals(1, replacementDemands, "Only the actual rendered edge demands one page.")
+                        assertEquals(0, replacementDemands, "Paging belongs to owner access hints, not renderer markers.")
+                        assertTrue(edge in replacement.accessedItems)
                         assertFalse(model.followsLatest.value, "Programmatic edge positioning is not user intent.")
                     } finally {
                         cancel()

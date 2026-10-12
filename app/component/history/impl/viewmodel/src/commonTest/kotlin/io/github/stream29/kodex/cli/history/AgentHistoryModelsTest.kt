@@ -353,7 +353,7 @@ val agentHistoryModelsTest by testSuite {
         }
     }
 
-    test("unmeasured History does not retain obsolete latest chunks") {
+    test("unmeasured History retains recent pages only up to its budget") {
         coroutineScope {
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
@@ -364,7 +364,7 @@ val agentHistoryModelsTest by testSuite {
             try {
                 model.awaitReady(itemCount = 0, hasOlder = false)
 
-                repeat(20) { position ->
+                repeat(300) { position ->
                     val index = position + 1
                     runtime.modify { storage ->
                         storage.index[index] = userMessage("$index")
@@ -372,7 +372,8 @@ val agentHistoryModelsTest by testSuite {
                     val window = model.awaitHistoryItems { history ->
                         history.size > 0 && history.peek(0).storageIndex == index
                     }
-                    assertEquals(1, window.size)
+                    assertTrue(window.size <= HistoryPaging.MaxSize)
+                    assertTrue(window.size >= minOf(index, HistoryPaging.PageSize))
                 }
             } finally {
                 model.close()
@@ -400,8 +401,41 @@ val agentHistoryModelsTest by testSuite {
                 val window = model.awaitHistoryItems { history ->
                     history.size > 0 && history.peek(0) is ToolHistoryItemViewModel
                 }
-                assertEquals(1, window.size)
+                assertEquals(2, window.size)
+                assertFalse(window.hasOlder)
+            } finally {
+                model.close()
+                repository.cancelAndJoin()
+            }
+        }
+    }
+
+    test("a large append never joins ranges across unread history") {
+        coroutineScope {
+            val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            val runtime = repository.open(repository.create()).runtime
+            runtime.modify { storage ->
+                for (index in 1..20) storage.index[index] = userMessage("$index")
+            }
+            val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
+            try {
+                model.awaitReady(20, hasOlder = false)
+                runtime.modify { storage ->
+                    for (index in 21..400) storage.index[index] = userMessage("$index")
+                }
+                val window = model.awaitHistoryItems { it.size > 0 && it.peek(0).storageIndex == 400 }
+                assertEquals(HistoryPaging.InitialLoadSize, window.size)
                 assertTrue(window.hasOlder)
+                assertEquals(
+                    (400 downTo 400 - window.size + 1).toList(),
+                    List(window.size) { window.peek(it).storageIndex },
+                )
+                model.reportViewport(window, listOf(window.peek(window.size - 1)))
+                val next = model.awaitHistoryItems { it !== window }
+                assertTrue(
+                    List(next.size) { next.peek(it).storageIndex }
+                        .zipWithNext().all { (newer, older) -> newer - older == 1 },
+                )
             } finally {
                 model.close()
                 repository.cancelAndJoin()
@@ -572,7 +606,7 @@ val agentHistoryModelsTest by testSuite {
 
     test("retains stable item identity while portable viewport demands older items") {
         coroutineScope {
-            val itemCount = 3
+            val itemCount = 320
             val repository = InMemoryKodexSessionRepository(testKodexAgentDependencies())
             val runtime = repository.open(repository.create()).runtime
             runtime.modify { storage ->
@@ -582,11 +616,11 @@ val agentHistoryModelsTest by testSuite {
             }
             val model = createAgentHistoryViewModel(runtime, supervisorChildScope())
             try {
-                model.awaitReady(itemCount = 1, hasOlder = true)
+                model.awaitReady(itemCount = HistoryPaging.InitialLoadSize, hasOlder = true)
                 val newest = model.historyItems.value.peek(0)
                 model.reportViewport(model.historyItems.value, listOf(newest))
                 model.historyItems.value.requestOlder()
-                model.awaitReady(itemCount = 2, hasOlder = true)
+                model.awaitReady(itemCount = HistoryPaging.InitialLoadSize + HistoryPaging.PageSize, hasOlder = true)
                 assertSame(newest, model.historyItems.value.peek(0))
 
                 val secondOldest = model.historyItems.value.peek(1)
@@ -595,8 +629,8 @@ val agentHistoryModelsTest by testSuite {
                 model.awaitReady(itemCount = itemCount, hasOlder = false)
                 assertSame(newest, model.historyItems.value.peek(0))
                 assertSame(secondOldest, model.historyItems.value.peek(1))
-                assertEquals(3, model.historyItems.value.peek(0).storageIndex)
-                assertEquals(1, model.historyItems.value.peek(2).storageIndex)
+                assertEquals(itemCount, model.historyItems.value.peek(0).storageIndex)
+                assertEquals(1, model.historyItems.value.peek(itemCount - 1).storageIndex)
             } finally {
                 model.close()
                 repository.cancelAndJoin()
