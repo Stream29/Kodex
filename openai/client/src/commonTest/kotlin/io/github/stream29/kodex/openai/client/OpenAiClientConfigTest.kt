@@ -14,6 +14,7 @@ val openAiClientConfigTest by testSuite {
             config.userAgent,
         )
         assertEquals(90_000, config.requestTimeoutMillis)
+        assertEquals(600_000, config.imageRequestTimeoutMillis)
         assertEquals(600_000, config.sseSocketTimeoutMillis)
         assertEquals(20, config.remoteCompactionMaxRetries)
     }
@@ -24,6 +25,22 @@ val openAiClientConfigTest by testSuite {
         }
         assertFailsWith<IllegalArgumentException> {
             OpenAiClientConfig(remoteCompactionMaxRetries = -1)
+        }
+    }
+
+    test("image timeout is independent of ordinary and streaming timeouts") {
+        val config = OpenAiClientConfig(imageRequestTimeoutMillis = 120_000)
+        assertEquals(120_000, config.imageRequestTimeoutMillis)
+        assertEquals(90_000, config.requestTimeoutMillis)
+        assertEquals(600_000, config.sseSocketTimeoutMillis)
+        assertEquals(OpenAiClientRetryConfig(), config.retry)
+    }
+
+    test("rejects non-positive image timeout configuration") {
+        for (timeout in listOf(0L, -1L)) {
+            assertFailsWith<IllegalArgumentException> {
+                OpenAiClientConfig(imageRequestTimeoutMillis = timeout)
+            }
         }
     }
 }

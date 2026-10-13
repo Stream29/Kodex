@@ -47,6 +47,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.HttpRequestRetry
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.cookies.AcceptAllCookiesStorage
 import io.ktor.client.plugins.cookies.HttpCookies
@@ -283,6 +284,7 @@ public class OpenAiClient(
 
     override suspend fun generateImage(request: ImageGenerationRequest): OpenAiResponseResult<ImageResponse> {
         val response = httpClient.post {
+            imageRequestTimeout()
             authenticate()
             url {
                 appendPathSegments("images", "generations")
@@ -296,6 +298,7 @@ public class OpenAiClient(
 
     override suspend fun editImage(request: ImageEditRequest): OpenAiResponseResult<ImageResponse> {
         val response = httpClient.post {
+            imageRequestTimeout()
             authenticate()
             url {
                 appendPathSegments("images", "edits")
@@ -327,6 +330,13 @@ public class OpenAiClient(
 
     private fun accountEndpoint(path: String): String =
         "${config.accountBaseUrl.trimEnd('/')}/${path.trimStart('/')}"
+
+    private fun HttpRequestBuilder.imageRequestTimeout() {
+        timeout {
+            requestTimeoutMillis = config.imageRequestTimeoutMillis
+            socketTimeoutMillis = config.imageRequestTimeoutMillis
+        }
+    }
 
     private fun HttpRequestBuilder.authenticate(
         expectedAccount: OpenAiSubscriptionAuthState? = null,

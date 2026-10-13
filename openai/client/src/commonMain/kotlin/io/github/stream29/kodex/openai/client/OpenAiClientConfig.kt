@@ -11,6 +11,8 @@ public data class OpenAiClientConfig(
     public val retry: OpenAiClientRetryConfig = OpenAiClientRetryConfig(),
     public val sseSocketTimeoutMillis: Long = 600_000,
     public val remoteCompactionMaxRetries: Int = 20,
+    /** Per-attempt total and socket idle timeout for image generation and editing. */
+    public val imageRequestTimeoutMillis: Long = 600_000,
 ) {
     init {
         require(requestTimeoutMillis > 0) {
@@ -21,6 +23,9 @@ public data class OpenAiClientConfig(
         }
         require(remoteCompactionMaxRetries >= 0) {
             "remoteCompactionMaxRetries must be non-negative."
+        }
+        require(imageRequestTimeoutMillis > 0) {
+            "imageRequestTimeoutMillis must be positive."
         }
     }
 }
