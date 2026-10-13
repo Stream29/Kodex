@@ -38,8 +38,6 @@ import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputArgs
 import io.github.stream29.kodex.tool.toolsearch.ToolSearchResult
 import io.github.stream29.kodex.tool.viewimage.ViewImageToolArguments
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 import kotlin.time.Duration
 
 internal fun StablePatchToolEvent.toHistoryHeader(elapsed: Duration): PatchHistoryItemHeader {
@@ -108,7 +106,7 @@ internal fun StableCleanEvent.CompletedTool.toHistoryHeader(
 
 private fun StableCleanEvent.CompletedTool.historyToolSummary(failed: Boolean): String = when (this) {
     is StableInvalidToolCall -> "Model emitted an invalid tool call"
-    is StableServerToolSearch -> call.arguments.serverToolSearchSummary()
+    is StableServerToolSearch -> functionToolSummary("server_tool_search", null, failed)
     is StableWebSearchCall ->
         item.action?.historySummary(failed) ?: if (failed) "Failed to search the web" else "Search the web"
 
@@ -128,10 +126,7 @@ private fun StableCleanEvent.CompletedTool.historyToolSummary(failed: Boolean): 
     is StableMcpToolEvent -> qualifiedToolName(name, namespace).stableToolSummary(failed)
     is StablePlanUpdate -> if (failed) "Failed to update the plan" else "Update the plan"
     is StableRequestUserInputToolEvent -> arguments.historySummary(failed)
-    is StableToolSearchEvent -> buildString {
-        append("tool_search; query=${arguments.query}")
-        arguments.limit?.let { append("; limit=$it") }
-    }.historyPreview()
+    is StableToolSearchEvent -> functionToolSummary("tool_search", null, failed)
     is StableWebSearchToolEvent -> commands.historySummary(failed)
     is StableSuggestSubagentTaskToolEvent -> "Suggested Sessions"
 }
@@ -171,13 +166,6 @@ private fun StableCleanEvent.CompletedTool.historyToolStatus(): String = when (t
         is StableSuggestSubagentTaskResult.Completed -> "completed"
         is StableSuggestSubagentTaskResult.Failure -> "failed"
     }
-}
-
-private fun JsonElement.serverToolSearchSummary(): String {
-    val fields = (this as? JsonObject)?.entries
-        ?.joinToString("") { (key, value) -> "; $key=$value" }
-        ?: "; arguments=$this"
-    return "server_tool_search$fields".historyPreview()
 }
 
 private fun functionToolSummary(name: String, namespace: String?, failed: Boolean): String {

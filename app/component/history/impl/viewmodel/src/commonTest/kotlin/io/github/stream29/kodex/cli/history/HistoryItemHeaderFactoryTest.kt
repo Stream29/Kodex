@@ -52,12 +52,22 @@ val historyItemHeaderFactoryTest by testSuite {
         assertEquals("Generate picture.png", title("C:\\images\\picture.png"))
     }
 
-    test("localSearchHeaderOwnsItsInputSummary") {
+    test("localSearchHeaderDoesNotContainBodyInputs") {
         val header = assertIs<ToolHistoryItemHeader.Summary>(
             StableToolSearchEvent("search", arguments = SearchToolCallParams("calendar", 0),
                 result = ToolSearchResult.Success(emptyList())).toHistoryHeader(1.milliseconds),
         )
-        assertEquals("tool_search; query=calendar; limit=0", header.summary)
+        assertEquals("Search available tools", header.summary)
+    }
+
+    test("invalidSearchHeaderRetainsFailureSummaryWithoutInputs") {
+        val header = assertIs<ToolHistoryItemHeader.Summary>(
+            StableToolSearchEvent("search", arguments = SearchToolCallParams("", 0),
+                result = ToolSearchResult.InvalidArguments("query must not be empty"))
+                .toHistoryHeader(1.milliseconds),
+        )
+        assertEquals("Failed to search available tools", header.summary)
+        assertEquals("failed", header.status)
     }
 
     test("commandHeaderRetainsOnlyBoundedPresentationAndOutcomeDiscriminators") {
@@ -94,7 +104,7 @@ val historyItemHeaderFactoryTest by testSuite {
         assertEquals(12.milliseconds, header.elapsed)
     }
 
-    test("serverToolSearchHeaderUsesItsStructuredPaths") {
+    test("serverToolSearchHeaderDoesNotContainBodyInputs") {
         val event = StableServerToolSearch(
             call = ResponseItem.ServerToolSearchCall(
                 status = "completed",
@@ -115,7 +125,7 @@ val historyItemHeaderFactoryTest by testSuite {
         val header = assertIs<ToolHistoryItemHeader.Summary>(
             event.toHistoryHeader(3.milliseconds),
         )
-        assertEquals("""server_tool_search; paths=["crm","billing"]""", header.summary)
+        assertEquals("Search available tools", header.summary)
     }
 
     test("customWebHeaderIncludesTheSearchQuery") {

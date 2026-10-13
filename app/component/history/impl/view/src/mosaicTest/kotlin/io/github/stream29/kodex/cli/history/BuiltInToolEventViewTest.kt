@@ -131,7 +131,7 @@ val builtInToolEventViewTest by testSuite {
             result = ToolSearchResult.Success(tools))
         runMosaicTest {
             val text = setContentAndSnapshot { ExpandedEvent(event) }
-            assertTrue("v tool_search; query=calendar; limit=4" in text)
+            assertTrue(text.startsWith("v Search available tools\ntool_search; query=calendar; limit=4"))
             assertTrue("> calendar.create" in text)
             assertTrue("> calendar.delete" in text)
             assertTrue("> independent" in text)
@@ -162,9 +162,40 @@ val builtInToolEventViewTest by testSuite {
         runMosaicTest {
             val text = setContentAndSnapshot { ExpandedEvent(event, 120) }
             assertTrue("""query="custom"; limit=0; nested={"flag":false}""" in text)
-            assertTrue("\nserver_tool_search" in text)
+            assertTrue(text.startsWith("v Search available tools\nserver_tool_search; "))
             assertFalse("Arguments" in text)
             assertFalse("Result" in text)
+        }
+    }
+
+    test("searchInputsStayInBodyAndPreserveLongMultilineQueries") {
+        val query = "first\n  " + "x".repeat(290) + "\nlast"
+        val event = StableToolSearchEvent("search", arguments = SearchToolCallParams(query, 0),
+            result = ToolSearchResult.Success(emptyList()))
+        runMosaicTest {
+            val text = setContentAndSnapshot { Box(Modifier.width(100)) { event.render() } }
+            assertTrue(text.startsWith("> Search available tools"))
+            assertFalse("first" in text)
+            assertFalse("limit=" in text)
+        }
+        runMosaicTest {
+            val text = setContentAndSnapshot { ExpandedEvent(event, 20) }
+            assertTrue(text.startsWith("v Search available"))
+            assertTrue("tool_search;" in text)
+            assertEquals(290, text.count { it == 'x' })
+            assertTrue("last; limit=0" in text.replace("\n", ""))
+            assertFalse("..." in text)
+        }
+    }
+
+    test("invalidSearchKeepsInputsAndErrorInBody") {
+        val event = StableToolSearchEvent("search", arguments = SearchToolCallParams("", 0),
+            result = ToolSearchResult.InvalidArguments("query must not be empty"))
+        runMosaicTest {
+            val text = setContentAndSnapshot { ExpandedEvent(event) }
+            assertTrue(text.startsWith("v Failed to search available tools\n"))
+            assertTrue("tool_search; query=; limit=0" in text)
+            assertTrue("error: query must not be empty" in text)
         }
     }
 

@@ -181,7 +181,7 @@ internal fun WebSearchAction?.operationTitles(): List<String> = when (this) {
     WebSearchAction.Other, null -> emptyList()
 }
 
-internal fun JsonElement.toolSearchTitle(name: String): String =
+internal fun JsonElement.toolSearchContext(name: String): String =
     if (this is JsonObject) compactToolLine(
         name,
         *entries.filter { (_, value) -> value != JsonNull }

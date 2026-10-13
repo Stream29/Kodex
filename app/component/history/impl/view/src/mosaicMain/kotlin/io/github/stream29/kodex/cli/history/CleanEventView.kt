@@ -339,8 +339,8 @@ private fun StableInvalidToolCall.renderInvalidToolCall() {
 @Composable
 private fun StableServerToolSearch.renderServerToolSearch() {
     BuiltInToolEvent(
-        summary = call.arguments.toolSearchTitle("server_tool_search"),
-        firstLine = "server_tool_search",
+        summary = functionToolSummary("server_tool_search", null, failed = output.status == "failed"),
+        firstLine = call.arguments.toolSearchContext("server_tool_search"),
         status = output.status,
         expansionKey = call.id?.value ?: "server_tool_search",
     ) {
@@ -518,8 +518,8 @@ private fun StableMcpToolEvent.renderMcpTool() {
 @Composable
 private fun StableToolSearchEvent.renderToolSearch() {
     BuiltInToolEvent(
-        summary = compactToolLine("tool_search", "query" to arguments.query, "limit" to arguments.limit),
-        firstLine = "tool_search",
+        summary = functionToolSummary("tool_search", null, failed = result is ToolSearchResult.InvalidArguments),
+        firstLine = compactToolLine("tool_search", "query" to arguments.query, "limit" to arguments.limit),
         status = result.status(),
         expansionKey = callId,
     ) {
