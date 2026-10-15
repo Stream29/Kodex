@@ -50,6 +50,8 @@ public class RpcSessionBinding private constructor(
     private val invalidate: (Throwable) -> Unit,
 ) {
     public fun ensureActive(): Unit = owner.ensureActive()
+    /** Reports against this exact binding generation, not whichever tab binding comes later. */
+    internal fun failRecovery(failure: Throwable) { if (owner.isActive) invalidate(failure) }
 
     private suspend fun <R> command(action: suspend () -> R): R {
         ensureActive()

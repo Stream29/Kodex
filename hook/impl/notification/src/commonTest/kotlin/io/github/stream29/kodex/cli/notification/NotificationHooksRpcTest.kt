@@ -41,7 +41,7 @@ val notificationHooksRpcTest by testSuite(compartment = { TestCompartment.RealTi
                 NotificationHook("capture", setOf(NotificationHookType.StopAssistantMessage), captureCommand()),
             )))
             val collected = async(start = CoroutineStart.UNDISPATCHED) {
-                collectNotificationHooks(notifications.take(1), settings, root)
+                collectNotificationHooks(notifications.take(1), { settings.value.hooks }, root)
             }
             try {
                 awaitSubscription()
@@ -74,7 +74,7 @@ val notificationHooksRpcTest by testSuite(compartment = { TestCompartment.RealTi
                 NotificationHook("capture", setOf(NotificationHookType.StopAssistantMessage), captureCommand()),
             )))
             val collected = async(start = CoroutineStart.UNDISPATCHED) {
-                collectNotificationHooks(notifications.take(1), settings, root)
+                collectNotificationHooks(notifications.take(1), { settings.value.hooks }, root)
             }
             try {
                 awaitSubscription()
@@ -125,7 +125,7 @@ val notificationHooksRpcTest by testSuite(compartment = { TestCompartment.RealTi
                 captureCommand(append = true),
             ))))
             val collected = async(start = CoroutineStart.UNDISPATCHED) {
-                collectNotificationHooks(notifications.take(2), settings, root)
+                collectNotificationHooks(notifications.take(2), { settings.value.hooks }, root)
             }
             try {
                 awaitSubscription()

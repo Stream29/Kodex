@@ -27,6 +27,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.io.files.Path
 import kotlinx.rpc.RpcServer
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Owns a complete backend graph without selecting a CLI or running Home migration.
@@ -43,6 +45,9 @@ public suspend fun <R> withBackendServices(
     createLoginClient: () -> LoginClient = { OpenAiLoginClient() },
     createClient: (OpenAiAuthStore) -> Client = { OpenAiClient(it) },
     createTitleGenerator: (Client) -> SessionTitleGenerator = { OpenAiSessionTitleGenerator(it) },
+    renewBackend: suspend () -> Unit = {},
+    backendRenewalInterval: () -> Duration = { 20.seconds },
+    checkAdmission: () -> Unit = {},
     block: suspend CoroutineScope.(BackendServices) -> R,
 ): R = coroutineScope {
     val owner = supervisorChildScope()
@@ -51,14 +56,15 @@ public suspend fun <R> withBackendServices(
     var client: Client? = null
     var failure: Throwable? = null
     try {
-        val store = openBackendSettings(home, defaults)
+        val unified = UnifiedSettingsStore.open(home, defaults)
+        val store = unified.backendStore
         val source = store.settings.map { it.authSource }.stateIn(owner, SharingStarted.Eagerly, store.settings.value.authSource)
         val loginClient = createLoginClient().also { login = it }
         val auth = owner.BackendFileSystemAuthStore(home, codexHome, source, loginClient).also { credentials = it }
         val api = createClient(auth).also { client = it }
         val mcpOAuth = owner.DefaultMcpOAuthClient()
         withBackendGlobalState(
-            store, agentsHome, home, codexHome, api, mcpOAuth, BackendMcpOAuthBridge(mcpOAuth::prepare),
+            store, unified, agentsHome, home, codexHome, api, mcpOAuth, BackendMcpOAuthBridge(mcpOAuth::prepare),
         ) { global ->
             val account = BackendAccountState(owner, auth, api)
             val oauth = BackendOAuth(owner, auth, loginClient, global.mcpManager)
@@ -70,13 +76,13 @@ public suspend fun <R> withBackendServices(
                 )
                 withBackendSessionHost({
                     FileSystemKodexSessionRepository(home, dependencies)
-                }) { host ->
+                }, renewBackend, backendRenewalInterval, checkAdmission) { host ->
                     val runtime = BackendAgentRuntimeRpc(host, { store.settings.value.sessionTitle }, createTitleGenerator(api))
                     val management = BackendSessionManagement(host, runtime) {
                         BackendLogger.error(it) { "Suggested Session operation failed." }
                     }
                     val service = BackendGlobalRpc(host, global, account, oauth, management, runtime.notifications)
-                    block(BackendServices(service, runtime, host))
+                    block(BackendServices(service, runtime, host, global, runtime.notifications.flow))
                 }
             } catch (error: Throwable) {
                 operationFailure = error
@@ -104,6 +110,8 @@ public class BackendServices internal constructor(
     public val global: GlobalRpc,
     public val runtime: AgentRuntimeRpc,
     private val host: BackendSessionHost,
+    public val settings: BackendGlobalState,
+    public val notifications: kotlinx.coroutines.flow.Flow<io.github.stream29.kodex.rpc.models.Notification>,
 ) {
     public fun register(server: RpcServer) {
         server.registerService(GlobalRpc::class) { global }

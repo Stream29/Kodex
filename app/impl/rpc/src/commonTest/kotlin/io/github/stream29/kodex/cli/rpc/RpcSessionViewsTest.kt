@@ -48,6 +48,42 @@ import kotlin.test.*
 import kotlin.time.Duration.Companion.seconds
 
 val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("a live-transport reactivation failure affects only its captured Session owner") {
+        lateinit var client: RpcClient
+        frontend(decorate = { delegate -> client = delegate; delegate }) {
+            val bad = views.open(services.global.createSession(settings))
+            val healthy = views.open(services.global.createSession(settings))
+            val retainedAgent = healthy.agent.value
+            var activations = 0
+            val replacement = RpcServices(object : RpcClient by client {
+                override suspend fun <T> call(call: RpcCall): T {
+                    if (call.callableName == "keepSessionAlive" && ++activations == 1) {
+                        throw Throwable("damaged Session fixture")
+                    }
+                    return client.call(call)
+                }
+            })
+            views.reactivate(replacement) { true }
+            val failed = bad.status.filterIsInstance<SessionViewStatus.Failed>().first()
+            assertEquals("damaged Session fixture", failed.cause.message)
+            assertEquals(2, activations)
+            assertEquals(SessionViewStatus.Ready, healthy.status.value)
+            assertSame(retainedAgent, healthy.agent.value)
+        }
+    }
+    test("a lost replacement transport is not recorded as a Session business failure") {
+        lateinit var client: RpcClient
+        frontend(decorate = { delegate -> client = delegate; delegate }) {
+            val view = views.open(services.global.createSession(settings))
+            val retained = view.agent.value
+            val replacement = RpcServices(object : RpcClient by client {
+                override suspend fun <T> call(call: RpcCall): T = error("fixture socket ended")
+            })
+            assertFailsWith<IllegalStateException> { views.reactivate(replacement) { false } }
+            assertEquals(SessionViewStatus.Ready, view.status.value)
+            assertSame(retained, view.agent.value)
+        }
+    }
     test("blank drafts and catalog construction allocate nothing") {
         frontend {
             val draft = RpcSessionDraft(settings, views, this)

@@ -58,6 +58,7 @@ public fun BoxScope.HookSettingsDialogs(viewModel: HookSettingsViewModel) {
         )
         is HookSettingsDialog.Editing -> HookEditorDialog(
             editor = dialog,
+            supportedTypes = state.supportedTypes,
             onDraftChange = { viewModel.updateDraft(dialog.token, it) },
             onDismiss = { viewModel.dismiss(dialog.token) },
             onSave = { viewModel.save(dialog.token) },

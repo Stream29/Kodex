@@ -207,7 +207,7 @@ val splitSettingsStoreTest by testSuite(
             assertFalse("access-token" in expected.toString())
             assertFalse("new_line_key:" in text)
             assertFalse("sidebars:" in text)
-            assertFalse("hooks:" in text)
+            assertTrue("hooks:" in text) // Business notifications now belong to the backend projection.
         }
     }
 

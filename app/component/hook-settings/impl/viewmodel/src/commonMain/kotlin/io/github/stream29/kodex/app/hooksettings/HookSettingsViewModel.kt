@@ -29,6 +29,7 @@ private class DefaultHookSettingsViewModel(
     private val mutable = MutableStateFlow(HookSettingsState(
         hooks = dependencies.hooks.value,
         operationFailure = dependencies.operationFailure.value,
+        supportedTypes = dependencies.supportedTypes,
     ))
     override val state: StateFlow<HookSettingsState> = mutable.asStateFlow()
     private var editor: HookEditHandle? = null
@@ -72,7 +73,8 @@ private class DefaultHookSettingsViewModel(
         val original = handle.original
         mutable.value = mutable.value.copy(dialog = HookSettingsDialog.Editing(
             HookDialogToken(), original?.name,
-            original?.let { HookEditorDraft(it.name, it.command, it.types) } ?: HookEditorDraft(),
+            original?.let { HookEditorDraft(it.name, it.command, it.types) }
+                ?: HookEditorDraft(types = dependencies.supportedTypes),
         ))
     }
     override fun requestDelete(token: HookDialogToken) {
@@ -94,6 +96,7 @@ private class DefaultHookSettingsViewModel(
             val name = draft.name.trim()
             require(name.isNotEmpty()) { "Hook name is required." }
             require(draft.command.isNotBlank()) { "Command is required." }
+            require(draft.types.all { it in dependencies.supportedTypes }) { "Unsupported Hook type for this owner." }
             NotificationHook(name, draft.types, draft.command)
         } catch (failure: IllegalArgumentException) {
             mutable.value = mutable.value.copy(dialog = current.copy(error = failure.message))

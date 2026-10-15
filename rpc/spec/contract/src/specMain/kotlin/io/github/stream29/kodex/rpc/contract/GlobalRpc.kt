@@ -10,6 +10,7 @@ import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.accountusage.CodexRateLimitResetOutcome
 import io.github.stream29.kodex.rpc.models.BackendSettings
+import io.github.stream29.kodex.rpc.models.CliFrontendSettings
 import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
 import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
@@ -30,6 +31,12 @@ import kotlinx.rpc.annotations.Rpc
  */
 @Rpc
 public interface GlobalRpc {
+    /** Backend-managed frontend projection; consumers never read/write its file themselves. */
+    public suspend fun getFrontendSettings(): CliFrontendSettings
+    public fun getFrontendSettingsFlow(): Flow<CliFrontendSettings>
+    /** Full projection CAS; other sections in the shared file are preserved. No implicit renewal. */
+    public suspend fun compareAndSetFrontendSettings(expect: CliFrontendSettings, update: CliFrontendSettings): Boolean
+
     /** Reads the initial editable settings snapshot; later reads and CAS retries use the flow. */
     public suspend fun getSettings(): BackendSettings
 

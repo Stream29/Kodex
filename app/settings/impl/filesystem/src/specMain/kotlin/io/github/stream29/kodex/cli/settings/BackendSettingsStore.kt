@@ -7,7 +7,8 @@ import kotlinx.io.IOException
 import kotlinx.io.files.Path
 
 /**
- * Backend-owned settings.backend.yml, independent of frontend and legacy settings.
+ * Backend-owned settings projection. Daemon storage is the unified settings.yml authority;
+ * the retained split-file implementation is a legacy filesystem/testing adapter.
  *
  * Each store serializes its operations, including reads and callbacks, under its own
  * lock. Separate instances/processes are not coordinated. This is file persistence,
@@ -16,15 +17,17 @@ import kotlinx.io.files.Path
  *
  * Reads resolve missing files/fields against backend-supplied defaults. Unknown keys
  * are ignored; invalid known values fail rather than falling back to defaults.
- * Reads never create or rewrite a file. Writes atomically replace only this side's
+ * Reads never create or rewrite a file. Writes atomically replace the authority's
  * file using a private same-directory temporary, then publish the complete snapshot.
  * Writes need not preserve unknown keys or sparse formatting.
  *
  * Failure or cancellation, including lost completion after replacement, does not
  * imply rollback: the file may already be persisted while [settings] remains older.
  * Temporary cleanup is attempted even on cancellation; cleanup failure is suppressed
- * on a primary failure, or propagated if it is the only failure. The two files are
- * independent, with no cross-file transaction or rollback guarantee.
+ * on a primary failure, or propagated if it is the only failure. Runtime resource
+ * validation/coordination is not performed by this low-level persistence contract.
+ * Unified saves use accepted runtime state; the legacy split adapter reads the file
+ * at its write boundary. Management reload must use the backend service coordinator.
  */
 public interface BackendSettingsStore {
     /**
@@ -34,7 +37,7 @@ public interface BackendSettingsStore {
      */
     public val settings: StateFlow<BackendSettings>
 
-    /** Path to this store's settings.backend.yml; never a frontend or legacy file. */
+    /** The actual owning file, either unified settings.yml or the legacy split backend file. */
     public val settingsPath: Path
 
     /**
@@ -50,7 +53,7 @@ public interface BackendSettingsStore {
     public suspend fun reload(): BackendSettings
 
     /**
-     * Reads the latest file and runs [transform] exactly once under the same lock,
+     * Runs [transform] exactly once on the current authoritative snapshot under the same lock,
      * persists its result even if equal, then publishes and returns that result.
      * The callback must not reenter this store. Callback failures propagate unchanged.
      * Failed persistence does not publish the proposal, but may have replaced the file.
@@ -65,7 +68,7 @@ public interface BackendSettingsStore {
     public suspend fun update(transform: (BackendSettings) -> BackendSettings): BackendSettings
 
     /**
-     * Reads and publishes the actual file value, then compares complete values using
+     * Compares complete authoritative values using
      * equality under the same lock as [reload] and [update]. A stale [expect] returns
      * false without writing; a matching proposal equal to the current value returns
      * true without creating or rewriting the file. Both cases skip [validate].

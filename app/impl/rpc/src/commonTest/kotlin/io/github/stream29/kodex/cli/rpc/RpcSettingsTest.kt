@@ -24,8 +24,8 @@ import kotlinx.rpc.RpcCall
 import kotlin.test.*
 import kotlin.time.Instant
 
-private fun queueHook(page: RpcGlobalEditor, hook: NotificationHook) {
-    val child = page.hookSettings
+private fun queueHook(page: RpcGlobalEditor, hook: NotificationHook, frontend: Boolean = false) {
+    val child = if (frontend) page.frontendErrorHooks else page.hookSettings
     child.add()
     val editing = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Editing>(
         child.state.value.dialog,
@@ -52,7 +52,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 }
                 val task = async {
                     coroutineScope {
-                        val global = RpcGlobalSettings.open(rpc, openCliFrontendSettings(home), this, 80)
+                        val global = RpcGlobalSettings.open(rpc, this, 80)
                         try {
                             ready.complete(global)
                             awaitCancellation()
@@ -81,8 +81,8 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
     }
     test("real Hook adapter keeps stale and same-name queued writes unchanged after release") {
         frontend {
-            val store = openCliFrontendSettings(home)
-            val global = RpcGlobalSettings.open(services.global, store, this, 80)
+            val global = RpcGlobalSettings.open(services.global, this, 80)
+            val store = global.frontend
             val queue = io.github.stream29.kodex.app.settings.SettingsUpdateQueue(
                 this, defaultReportError = global::reportOperationFailure,
             )
@@ -96,7 +96,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 accepting && queue.submit { action(); global.dismissOperationFailure() }
             }
             val original = NotificationHook(
-                "same", setOf(NotificationHookType.StopAssistantMessage), "echo original",
+                "same", setOf(NotificationHookType.StopUnhandledError), "echo original",
             )
             val replacement = original.copy(command = "echo replacement")
             val added = original.copy(name = "admitted", command = "echo admitted")
@@ -121,16 +121,16 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 assertIs<io.github.stream29.kodex.app.hooksettings.HookWriteAdmission.Rejected>(
                     admittedAdd.save(added.copy(command = "echo too late")),
                 )
-                // Mutate the real frontend store before the admitted closures execute.
+                // Mutate the backend-managed frontend projection before queued closures execute.
                 global.updateHooks(listOf(replacement))
                 accepting = false
                 queue.close { drained.complete(Unit) }
-                assertEquals(listOf(replacement), store.settings.value.hooks)
+                store.settings.first { it.hooks == listOf(replacement) }
                 global.reportOperationFailure(IllegalStateException("safe test failure"))
                 proceed.complete(Unit)
                 drained.await()
-                assertEquals(listOf(replacement, added), store.settings.value.hooks)
-                assertEquals(listOf(replacement, added), openCliFrontendSettings(home).settings.value.hooks)
+                store.settings.first { it.hooks == listOf(replacement, added) }
+                assertEquals(listOf(replacement, added), services.global.getFrontendSettings().hooks)
                 assertFalse(global.operationFailure.value)
             } finally {
                 proceed.complete(Unit)
@@ -188,20 +188,23 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             assertEquals(1, calls)
         }
     }
-    test("global observations and frontend-only settings have separate persistence") {
+    test("backend and frontend preferences share persistence but widths stay local") {
         frontend {
-            val store = openCliFrontendSettings(home)
-            val global = RpcGlobalSettings.open(services.global, store, this, 120)
+            val global = RpcGlobalSettings.open(services.global, this, 120)
+            val store = global.frontend
             try {
                 assertEquals(30 to 30, global.sidebarWidths.value)
                 global.resizeSidebars(17, 29)
-                global.updateHooks(listOf(NotificationHook("notify", setOf(NotificationHookType.StopAssistantMessage), "echo local")))
-                assertNotNull(SystemCoroutineFileSystem.metadataOrNull(Path(home, "settings.frontend.cli.yml")))
+                val hooks = listOf(NotificationHook("notify", setOf(NotificationHookType.StopUnhandledError), "echo local"))
+                global.updateHooks(hooks)
+                assertNotNull(SystemCoroutineFileSystem.metadataOrNull(Path(home, "settings.yml")))
+                assertNull(SystemCoroutineFileSystem.metadataOrNull(Path(home, "settings.frontend.cli.yml")))
                 assertNull(SystemCoroutineFileSystem.metadataOrNull(Path(home, "settings.backend.yml")))
                 val initial = global.settings.value.sessionTitle
                 assertTrue(global.edit(initial, { it.sessionTitle }, { it.copy(sessionTitle = initial.copy(enabled = true)) }))
                 global.settings.first { it.sessionTitle.enabled }
-                assertEquals(store.settings.value, openCliFrontendSettings(home).settings.value)
+                store.settings.first { it.hooks == hooks }
+                assertEquals(store.settings.value, services.global.getFrontendSettings())
                 assertEquals(17 to 29, global.sidebarWidths.value)
                 assertTrue(global.models.value.isNotEmpty())
             } finally { global.close(); global.join() }
@@ -212,12 +215,11 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
     }
     test("failed initial Get is not replaced with frontend defaults") {
         frontend {
-            val store = openCliFrontendSettings(home)
             val rpc = object : GlobalRpc by services.global {
                 override suspend fun getSettings(): BackendSettings = error("unavailable")
             }
-            assertFailsWith<IllegalStateException> { RpcGlobalSettings.open(rpc, store, this, 120) }
-            assertNull(SystemCoroutineFileSystem.metadataOrNull(store.settingsPath))
+            assertFailsWith<IllegalStateException> { RpcGlobalSettings.open(rpc, this, 120) }
+            assertNull(SystemCoroutineFileSystem.metadataOrNull(Path(home, "settings.yml")))
         }
     }
     test("Session editor uses real CAS and becomes unavailable after its binding closes") {
@@ -264,7 +266,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
     }
     test("defaults editor observes CAS changes and rejects delayed local revisions") {
         frontend {
-            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
+            val global = RpcGlobalSettings.open(services.global, this, 80)
             val vm = RpcNewSessionSettings(global, this)
             try {
                 val initial = vm.state.value
@@ -278,9 +280,9 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             } finally { vm.close(); global.close(); global.join() }
         }
     }
-    test("global page uses separate local preferences and preserves unrelated concurrent fields") {
+    test("global page uses backend-managed frontend preferences and preserves unrelated concurrent fields") {
         frontend {
-            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 120)
+            val global = RpcGlobalSettings.open(services.global, this, 120)
             val page = RpcGlobalEditor(global, services.global, this)
             try {
                 page.sessionTitleSettings.setEnabled(true)
@@ -292,11 +294,11 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 }
                 page.applicationPreferences.state.first { it.newLineKey == NewLineKey.Enter && it.leftWidth == 19 }
                 val hook = NotificationHook("local", setOf(NotificationHookType.StopUnhandledError), "echo error")
-                queueHook(page, hook)
+                queueHook(page, hook, frontend = true)
                 global.frontend.settings.first { it.hooks == listOf(hook) }
-                val loaded = openCliFrontendSettings(home)
-                assertEquals(NewLineKey.Enter, loaded.settings.value.newLineKey)
-                assertEquals(listOf(hook), loaded.settings.value.hooks)
+                val loaded = UnifiedSettingsStore.open(home, services.global.getSettings())
+                assertEquals(NewLineKey.Enter, loaded.current.frontend.newLineKey)
+                assertEquals(listOf(hook), loaded.current.frontend.hooks)
                 assertEquals(OpenAiModelId("title-model"), services.global.getSettings().sessionTitle.model)
                 page.close()
                 page.sessionTitleSettings.setEnabled(false)
@@ -320,7 +322,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 }
             }
         }) {
-            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
+            val global = RpcGlobalSettings.open(services.global, this, 80)
             val page = RpcGlobalEditor(global, services.global, this)
             try {
                 page.sessionTitleSettings.setEnabled(true)
@@ -335,8 +337,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
     }
     test("component width writes preserve nonnegative runtime values without creating a preferences file") {
         frontend {
-            val store = openCliFrontendSettings(home)
-            val global = RpcGlobalSettings.open(services.global, store, this, 120)
+            val global = RpcGlobalSettings.open(services.global, this, 120)
             val page = RpcGlobalEditor(global, services.global, this)
             try {
                 page.applicationPreferences.setLeftWidth(0)
@@ -345,7 +346,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 page.applicationPreferences.setLeftWidth(1)
                 assertEquals(1 to 2, global.sidebarWidths.value)
                 page.applicationPreferences.state.first { it.leftWidth == MinimumSidebarWidthColumns }
-                assertNull(SystemCoroutineFileSystem.metadataOrNull(store.settingsPath))
+                assertNull(SystemCoroutineFileSystem.metadataOrNull(Path(home, "settings.yml")))
                 page.close()
                 page.applicationPreferences.setLeftWidth(-1) // a closed child is a no-op.
                 assertEquals(1 to 2, global.sidebarWidths.value)
@@ -366,7 +367,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 }
             }
         }) {
-            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
+            val global = RpcGlobalSettings.open(services.global, this, 80)
             val page = RpcNewSessionSettings(global, this)
             try {
                 page.updateModel(page.state.value.revision, OpenAiModelId("after-close"))
@@ -392,7 +393,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 }
             }
         }) {
-            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
+            val global = RpcGlobalSettings.open(services.global, this, 80)
             val page = RpcGlobalEditor(global, services.global, this)
             try {
                 page.mcpSettings.add()
@@ -425,7 +426,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                     return services.global.compareAndSetSettings(expect, update)
                 }
             }
-            val global = RpcGlobalSettings.open(rpc, openCliFrontendSettings(home), this, 80)
+            val global = RpcGlobalSettings.open(rpc, this, 80)
             val page = RpcGlobalEditor(global, rpc, this)
             try {
                 val child = page.mcpSettings
@@ -456,8 +457,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                     return services.global.compareAndSetSettings(expect, update)
                 }
             }
-            val store = openCliFrontendSettings(home)
-            val global = RpcGlobalSettings.open(rpc, store, this, 80)
+            val global = RpcGlobalSettings.open(rpc, this, 80)
             val page = RpcGlobalEditor(global, rpc, this)
             val hook = NotificationHook("queued-after-mcp", setOf(NotificationHookType.StopAssistantMessage), "echo ordered")
             try {
@@ -474,9 +474,9 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 queueHook(page, hook)
                 page.close()
                 // A per-component queue would write Hook while the earlier MCP CAS is blocked.
-                assertTrue(store.settings.value.hooks.isEmpty())
+                assertTrue(global.settings.value.hooks.isEmpty())
                 proceed.complete(Unit)
-                store.settings.first { it.hooks == listOf(hook) }
+                global.settings.first { it.hooks == listOf(hook) }
                 global.settings.first { "ordered" in it.mcpServers }
                 assertFalse(global.operationFailure.value)
             } finally { proceed.complete(Unit); page.close(); global.close(); global.join() }
@@ -484,15 +484,14 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
     }
     test("accepted frontend Hook edit drains after popup close") {
         frontend {
-            val store = openCliFrontendSettings(home)
-            val global = RpcGlobalSettings.open(services.global, store, this, 80)
+            val global = RpcGlobalSettings.open(services.global, this, 80)
             val page = RpcGlobalEditor(global, services.global, this)
-            val hook = NotificationHook("after-close", setOf(NotificationHookType.StopAssistantMessage), "echo kept")
+            val hook = NotificationHook("after-close", setOf(NotificationHookType.StopUnhandledError), "echo kept")
             try {
-                queueHook(page, hook)
+                queueHook(page, hook, frontend = true)
                 page.close()
-                store.settings.first { it.hooks == listOf(hook) }
-                assertEquals(listOf(hook), openCliFrontendSettings(home).settings.value.hooks)
+                global.frontend.settings.first { it.hooks == listOf(hook) }
+                assertEquals(listOf(hook), UnifiedSettingsStore.open(home, services.global.getSettings()).current.frontend.hooks)
             } finally { page.close(); global.close(); global.join() }
         }
     }
@@ -513,7 +512,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 }
             }
         }) {
-            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
+            val global = RpcGlobalSettings.open(services.global, this, 80)
             val page = RpcGlobalEditor(global, services.global, this)
             try {
                 page.sessionTitleSettings.setEnabled(true)
@@ -543,7 +542,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 }
             }
         }) {
-            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(home), this, 80)
+            val global = RpcGlobalSettings.open(services.global, this, 80)
             val page = RpcNewSessionSettings(global, this)
             try {
                 val originalModel = services.global.getSettings().newSession.model
@@ -596,7 +595,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                     listOf(McpCodexImportCandidate.Supported("remote", existing))
                 override suspend fun reconnectMcpServer(serverName: String) { reconnects++ }
             }
-            val global = RpcGlobalSettings.open(rpc, openCliFrontendSettings(home), this, 80)
+            val global = RpcGlobalSettings.open(rpc, this, 80)
             val mcp = RpcMcpSettings(global, rpc, this)
             try {
                 var write: (suspend () -> Unit)? = null

@@ -55,6 +55,23 @@ import kotlin.time.TestTimeSource
 import kotlin.time.Duration.Companion.seconds
 
 val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
+    test("closed backend admission rejects existing callers before owner cancellation") {
+        runTest {
+            var ready = true
+            var acquisitions = 0
+            withBackendSessionHost(testScheduler.timeSource, {
+                acquisitions++
+                InMemoryKodexSessionRepository(testKodexAgentDependencies())
+            }, checkAdmission = { check(ready) { "Backend is stopping." } }) { host ->
+                assertEquals("accepted", host.inBackend { "accepted" })
+                ready = false
+                assertTrue(coroutineContext[Job]!!.isActive)
+                assertFailsWith<IllegalStateException> { host.inBackend { error("must not run") } }
+                assertFailsWith<IllegalStateException> { host.repository() }
+                assertEquals(0, acquisitions)
+            }
+        }
+    }
     test("untouched host and inactive runtime reads never acquire a repository") {
         runTest {
             var acquisitions = 0

@@ -261,6 +261,7 @@ moduleTree("app") {
     moduleTree("impl") {
         module("application")
         module("backend-daemon")
+        module("backend-host")
         module("rpc")
         module("session")
         module("view")

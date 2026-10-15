@@ -22,7 +22,7 @@ val settingsViewModelTest by testSuite {
             val rpc = object : io.github.stream29.kodex.rpc.contract.GlobalRpc by services.global {
                 override suspend fun refreshAccountUsage() { refreshes.value++ }
             }
-            val global = RpcGlobalSettings.open(rpc, openCliFrontendSettings(root), this, 120)
+            val global = RpcGlobalSettings.open(rpc, this, 120)
             val editor = RpcGlobalEditor(global, rpc, this)
             val view = views.open(create("initial OpenAI").sessionIndex)
             val session = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, this), models), this)
@@ -47,7 +47,7 @@ val settingsViewModelTest by testSuite {
     }
     test("close attempts real children in original order and propagates the last disposal failure") {
         withRpcFrontend {
-            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(root), this, 120)
+            val global = RpcGlobalSettings.open(services.global, this, 120)
             val editor = RpcGlobalEditor(global, services.global, this)
             val view = views.open(create("close order").sessionIndex)
             val session = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, this), models), this)
@@ -83,7 +83,7 @@ val settingsViewModelTest by testSuite {
     }
     test("settings root observes independent authorities and closes only its children") {
         withRpcFrontend {
-            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(root), this, 120)
+            val global = RpcGlobalSettings.open(services.global, this, 120)
             val view = views.open(create("target").sessionIndex)
             val editor = RpcGlobalEditor(global, services.global, this)
             val session = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, this), models), this)
@@ -112,7 +112,7 @@ val settingsViewModelTest by testSuite {
             val rpc = object : io.github.stream29.kodex.rpc.contract.GlobalRpc by services.global {
                 override suspend fun refreshAccountUsage() { refreshes.value++ }
             }
-            val global = RpcGlobalSettings.open(rpc, openCliFrontendSettings(root), this, 120)
+            val global = RpcGlobalSettings.open(rpc, this, 120)
             val editor = RpcGlobalEditor(global, rpc, this)
             val view = views.open(create("navigation").sessionIndex)
             val session = createSessionSettingsViewModel(SessionSettingsDependencies(RpcSessionSettingsSource(view, this), models), this)
@@ -177,9 +177,9 @@ val settingsViewModelTest by testSuite {
             } finally { editor.close() }
         }
     }
-    test("context sources and notification hooks use their respective stores") {
+    test("context sources and business hooks use their backend-owned settings projection") {
         withRpcFrontend {
-            val global = RpcGlobalSettings.open(services.global, openCliFrontendSettings(root), this, 120)
+            val global = RpcGlobalSettings.open(services.global, this, 120)
             val editor = RpcGlobalEditor(global, services.global, this)
             try {
                 val contextPath = SystemCoroutineFileSystem.resolve(root).toString()
@@ -201,6 +201,8 @@ val settingsViewModelTest by testSuite {
                 ) }
                 child.save(adding.token)
                 child.state.first { it.hooks == listOf(hook) }
+                assertEquals(listOf(hook), services.global.getSettings().hooks)
+                assertTrue(services.global.getFrontendSettings().hooks.isEmpty())
                 child.details("notify")
                 val details = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Details>(child.state.value.dialog)
                 child.requestDelete(details.token)
@@ -221,6 +223,7 @@ val settingsViewModelTest by testSuite {
                 val deletion = assertIs<io.github.stream29.kodex.app.hooksettings.HookSettingsDialog.Deleting>(child.state.value.dialog)
                 child.confirmDelete(deletion.token)
                 child.state.first { it.hooks.isEmpty() }
+                assertTrue(services.global.getSettings().hooks.isEmpty())
                 sources.removeCustom(contextPath)
                 global.settings.first { it.contextSources.customSources.isEmpty() }
             } finally { editor.close(); global.close(); global.join() }

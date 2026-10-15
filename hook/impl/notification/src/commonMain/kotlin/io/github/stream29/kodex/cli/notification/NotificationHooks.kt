@@ -1,7 +1,7 @@
 package io.github.stream29.kodex.cli.notification
 
 import io.github.oshai.kotlinlogging.KotlinLogging
-import io.github.stream29.kodex.rpc.models.CliFrontendSettings
+import io.github.stream29.kodex.rpc.models.NotificationHook
 import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.NotificationHookType
 import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
@@ -13,8 +13,6 @@ import io.github.stream29.kodex.utils.shellclient.Shell
 import io.github.stream29.kodex.utils.shellclient.default
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.io.files.Path
@@ -25,15 +23,16 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * One serial frontend consumer. The caller owns this collection, supplies the
- * resolved startup cwd, and must not create one consumer per tab.
+ * One serial consumer per execution owner. The backend supplies its Home cwd
+ * for business notifications; the frontend supplies its startup cwd for local
+ * errors. Neither owner creates a consumer per tab.
  *
  * Each received notification captures one settings snapshot and runs matching commands
- * in list order with the notification JSON on stdin. The real frontend Shell is used,
+ * in list order with the notification JSON on stdin. The platform default Shell is used,
  * not backend shell settings. Each command has a ten-second input/exit budget; failures
  * are diagnosed locally and do not change backend execution or end the subscription.
  * Cancellation propagates after terminating and awaiting cleanup of the current process;
- * no queued notifications are drained on frontend shutdown.
+ * no queued notifications are drained when the execution owner shuts down.
  *
  * [unhandledErrors] contains frontend-local errors and actual warning messages.
  * Cancellation is excluded by the reporter.
@@ -44,33 +43,37 @@ import kotlin.time.Duration.Companion.seconds
  */
 public suspend fun collectNotificationHooks(
     notifications: Flow<Notification>,
-    settings: StateFlow<CliFrontendSettings>,
+    hooks: () -> List<NotificationHook>,
     workingDirectory: Path,
-    unhandledErrors: Flow<String?> = emptyFlow(),
-): Unit = collectNotificationHooks(notifications, settings, workingDirectory, ::runNotificationCommand, unhandledErrors) { name, failure ->
+    unhandledErrors: Flow<String?>? = null,
+): Unit = collectNotificationHooks(notifications, hooks, workingDirectory, ::runNotificationCommand, unhandledErrors) { name, failure ->
     HookLogger.warn(failure) { "Notification Hook '$name' failed." }
 }
 
 internal suspend fun collectNotificationHooks(
     notifications: Flow<Notification>,
-    settings: StateFlow<CliFrontendSettings>,
+    hooks: () -> List<NotificationHook>,
     workingDirectory: Path,
     execute: suspend (ShellProcessCommand, String) -> Unit,
-    unhandledErrors: Flow<String?> = emptyFlow(),
+    unhandledErrors: Flow<String?>? = null,
     report: (String, Throwable) -> Unit,
 ) {
-    merge(
-        notifications.map { notification ->
-            notification.type to Json.encodeToString<Notification>(notification)
-        },
+    val stops = notifications.map { notification ->
+        notification.type to Json.encodeToString<Notification>(notification)
+    }
+    // With no local-error source, subscribe directly. An UNDISPATCHED backend
+    // owner must register before publishing Ready, not enqueue merge children.
+    val events = if (unhandledErrors == null) stops else merge(
+        stops,
         unhandledErrors.map { message ->
             NotificationHookType.StopUnhandledError to buildJsonObject {
                 put("type", JsonPrimitive("unhandled_error"))
                 put("message", message?.let(::JsonPrimitive) ?: JsonNull)
             }.toString()
         },
-    ).collect { (type, json) ->
-        val selected = settings.value.hooks.filter { type in it.types }
+    )
+    events.collect { (type, json) ->
+        val selected = hooks().filter { type in it.types }
         for (hook in selected) {
             try {
                 execute(ShellProcessCommand(hook.command, workingDirectory, shell = Shell.default), json)
