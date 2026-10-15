@@ -3,7 +3,7 @@ package io.github.stream29.kodex.cli.rpc
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
-import io.github.stream29.kodex.cli.settings.CliFrontendSettingsStore
+import io.github.stream29.kodex.rpc.client.FrontendSettingsAccess
 import io.github.stream29.kodex.mcp.contract.McpManagedServerState
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.rpc.client.asSuspendMutableStateFlow
@@ -51,7 +51,7 @@ public class RpcGlobalSettings private constructor(
     public val authentication: StateFlow<SettingsAuthenticationState>,
     public val usage: StateFlow<SettingsAccountUsageState>,
     public val mcp: StateFlow<List<McpManagedServerState>>,
-    public val frontend: CliFrontendSettingsStore,
+    public val frontend: FrontendSettingsAccess,
     public val sidebarWidths: StateFlow<Pair<Int, Int>>,
     private val widths: MutableStateFlow<Pair<Int, Int>>,
     private val owner: Job,
@@ -89,7 +89,6 @@ public class RpcGlobalSettings private constructor(
     public companion object {
         public suspend fun open(
             rpc: GlobalRpc,
-            frontend: CliFrontendSettingsStore,
             scope: CoroutineScope,
             applicationWidth: Int,
         ): RpcGlobalSettings {
@@ -109,7 +108,7 @@ public class RpcGlobalSettings private constructor(
                     settings.asSuspendMutableStateFlow { expect, update ->
                         owner.ensureActive()
                         rpc.compareAndSetSettings(expect, update)
-                    }, models, auth, usage, mcp, frontend, widths, widths, owner,
+                    }, models, auth, usage, mcp, RpcFrontendSettings.open(rpc, local), widths, widths, owner,
                 )
             } catch (error: Throwable) {
                 owner.cancel()

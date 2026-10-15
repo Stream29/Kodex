@@ -9,10 +9,11 @@ import io.github.stream29.kodex.utils.shellclient.Shell
 import kotlinx.serialization.Serializable
 
 /**
- * Backend-owned settings for settings.backend.yml and the GlobalRpc settings methods.
+ * Backend section of settings.yml and the GlobalRpc backend settings projection.
  *
  * The complete value crosses RPC, including credentials embedded in MCP configurations.
- * This is not a sanitized projection. Frontend preferences and notification hooks are absent.
+ * This is not a sanitized projection. Frontend preferences and local-error Hooks are separate.
+ * Business notification Hooks and the daemon idle TTL belong to this section.
  * Nested values reuse their existing domain types.
  *
  * All fields are required so clients do not substitute local defaults for backend values.
@@ -34,4 +35,11 @@ public data class BackendSettings(
     public val newSession: KodexNewSessionSettings,
     public val sessionTitle: SessionTitleSettings,
     public val mcpServers: Map<String, McpServerConfiguration>,
-)
+    public val hooks: List<NotificationHook> = emptyList(),
+    public val daemonTtlSeconds: Long = 300,
+) {
+    init {
+        require(daemonTtlSeconds == -1L || daemonTtlSeconds > 0) { "Daemon TTL must be positive or -1." }
+        require(hooks.map { it.name }.distinct().size == hooks.size) { "Backend Hook names must be unique." }
+    }
+}

@@ -260,7 +260,7 @@ private suspend fun withOAuth(block: suspend CoroutineScope.(OAuthFixture) -> Un
         coroutineScope {
             val credentials = BackendFileSystemAuthStore(root, Path(root, "codex"), selected, login)
             try {
-                val settings = openBackendSettings(root, BackendSettings(
+                val unified = io.github.stream29.kodex.cli.settings.UnifiedSettingsStore.open(root, BackendSettings(
                     KodexAuthSource.Codex, Shell(ShellType.Sh, Path("/bin/sh")), AgentContextSourceSettings(),
                     KodexNewSessionSettings(), SessionTitleSettings(),
                     mapOf("server" to McpServerConfiguration.StreamableHttp(
@@ -268,6 +268,7 @@ private suspend fun withOAuth(block: suspend CoroutineScope.(OAuthFixture) -> Un
                             McpOAuthClient(redirectUri = McpRedirect)), enabled = false,
                     )),
                 ))
+                val settings = unified.backendStore
                 lateinit var fixture: OAuthFixture
                 val bridge = BackendMcpOAuthBridge { config ->
                     fixture.mcpPreparations++
@@ -283,7 +284,7 @@ private suspend fun withOAuth(block: suspend CoroutineScope.(OAuthFixture) -> Un
                     }
                 }
                 withBackendGlobalState(
-                    settings, root, root, Path(root, "codex"),
+                    settings, unified, root, root, Path(root, "codex"),
                     mockOpenAiClient { listModels { awaitCancellation() } }, bridge,
                     serviceFactory = { _, _ -> OAuthTestMcpService() },
                 ) { global ->

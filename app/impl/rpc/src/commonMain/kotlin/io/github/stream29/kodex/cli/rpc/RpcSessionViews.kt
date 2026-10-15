@@ -45,6 +45,7 @@ public class RpcSessionViews(
     public val services: RpcServices,
     private val models: StateFlow<List<ModelInfo>>,
     private val reportUnhandledError: (Throwable) -> Unit,
+    private val connectionAvailable: () -> Boolean = { true },
     private val onCreated: (List<CreatedSuggestedSession>) -> Unit = {},
 ) : AutoCloseable {
     private val owner = SupervisorJob(scope.coroutineContext[Job])
@@ -55,7 +56,7 @@ public class RpcSessionViews(
     public suspend fun open(index: Int): RpcSessionView {
         val view = mutex.withLock {
             owner.ensureActive()
-            views.getOrPut(index) { RpcSessionView(index, services, localScope, models, onCreated, reportUnhandledError) }
+            views.getOrPut(index) { RpcSessionView(index, services, localScope, models, onCreated, reportUnhandledError, connectionAvailable) }
         }
         try {
             view.awaitReady()
@@ -94,6 +95,25 @@ public class RpcSessionViews(
         view?.join()
     }
 
+    /** Reconnect activates still-open frontend tabs before publishing the new connection. */
+    public suspend fun reactivate(replacement: RpcServices, isConnected: () -> Boolean) {
+        val targets = mutex.withLock {
+            owner.ensureActive()
+            views.values.filter { it.status.value != SessionViewStatus.Closed }
+                .map { it.index to it.binding.value }
+        }
+        targets.forEach { (index, binding) ->
+            try { replacement.global.keepSessionAlive(index) }
+            catch (failure: Throwable) {
+                currentCoroutineContext().ensureActive()
+                if (!isConnected()) throw failure
+                // Business failures belong to the captured Session owner. A bad tab
+                // does not prevent healthy tabs/global subscriptions reconnecting.
+                binding?.failRecovery(failure)
+            }
+        }
+    }
+
     override fun close() { owner.cancel() }
     public suspend fun join(): Unit = owner.join()
 }
@@ -109,6 +129,7 @@ public class RpcSessionView internal constructor(
     private val models: StateFlow<List<ModelInfo>>,
     private val onCreated: (List<CreatedSuggestedSession>) -> Unit,
     private val reportUnhandledError: (Throwable) -> Unit,
+    private val connectionAvailable: () -> Boolean,
 ) : AutoCloseable {
     private val owner = SupervisorJob(scope.coroutineContext[Job])
     private val localScope = CoroutineScope(scope.coroutineContext + owner)
@@ -162,7 +183,13 @@ public class RpcSessionView internal constructor(
                     bindingScope.launch {
                         while (true) {
                             delay(20_000)
-                            services.global.keepSessionAlive(index)
+                            if (connectionAvailable()) {
+                                try { services.global.keepSessionAlive(index) }
+                                catch (failure: Throwable) {
+                                    currentCoroutineContext().ensureActive()
+                                    if (connectionAvailable()) throw failure
+                                }
+                            }
                         }
                     }
                     val result = RpcSessionBinding.create(index, services, bindingScope) { error ->

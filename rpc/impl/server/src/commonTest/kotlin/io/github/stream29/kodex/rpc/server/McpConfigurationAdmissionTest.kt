@@ -32,7 +32,7 @@ val mcpConfigurationAdmissionTest by testSuite(compartment = { TestCompartment.R
     test("persisted colliding settings fail backend startup honestly without rewriting bytes or acquiring sessions") {
         val home = Path(SystemTemporaryDirectory, "kodex-mcp-old-admission-${Random.nextLong()}")
         try {
-            val store = openBackendSettings(home, defaultBackendSettings())
+            val store = io.github.stream29.kodex.cli.settings.UnifiedSettingsStore.open(home, defaultBackendSettings()).backendStore
             val configuration = McpServerConfiguration.Stdio("never-run", enabled = false)
             // Deliberately emulate an old file written before route admission.
             store.update { it.copy(mcpServers = mapOf("a-b" to configuration, "a_b" to configuration)) }

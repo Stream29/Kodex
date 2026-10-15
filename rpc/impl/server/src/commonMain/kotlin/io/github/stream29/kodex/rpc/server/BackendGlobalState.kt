@@ -2,6 +2,7 @@ package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
 import io.github.stream29.kodex.cli.settings.BackendSettingsStore
+import io.github.stream29.kodex.cli.settings.UnifiedSettingsStore
 import io.github.stream29.kodex.mcp.contract.McpCodexImportCandidate
 import io.github.stream29.kodex.mcp.contract.McpManagedServerState
 import io.github.stream29.kodex.mcp.contract.McpConfigurationStore
@@ -35,6 +36,7 @@ import kotlinx.io.files.Path
  */
 public suspend fun <R> withBackendGlobalState(
     store: BackendSettingsStore,
+    unified: UnifiedSettingsStore,
     agentsHome: Path,
     kodexHome: Path,
     codexHome: Path,
@@ -43,7 +45,7 @@ public suspend fun <R> withBackendGlobalState(
     loginAttemptFactory: McpOAuthLoginAttemptFactory,
     block: suspend CoroutineScope.(BackendGlobalState) -> R,
 ): R = withBackendGlobalState(
-    store, agentsHome, kodexHome, codexHome, client, loginAttemptFactory,
+    store, unified, agentsHome, kodexHome, codexHome, client, loginAttemptFactory,
     serviceFactory = { settings, configurations ->
         McpServiceImpl(settings, configurations, tokenRefresher)
     },
@@ -52,6 +54,7 @@ public suspend fun <R> withBackendGlobalState(
 
 internal suspend fun <R> withBackendGlobalState(
     store: BackendSettingsStore,
+    unified: UnifiedSettingsStore,
     agentsHome: Path,
     kodexHome: Path,
     codexHome: Path,
@@ -79,7 +82,7 @@ internal suspend fun <R> withBackendGlobalState(
         )
         models = owner.ownedOpenAiModelCatalog(client)
         coroutineScope {
-            block(BackendGlobalState(store, configurations, context, service, manager, models, codexHome))
+            block(BackendGlobalState(store, configurations, context, service, manager, models, codexHome, unified))
         }
     } catch (error: Throwable) {
         failure = error
@@ -103,6 +106,7 @@ public class BackendGlobalState internal constructor(
     public val mcpManager: McpManagerImpl,
     public val modelCatalog: OpenAiModelCatalogStore,
     private val codexHome: Path,
+    public val unified: UnifiedSettingsStore,
 ) {
     public val settings: StateFlow<BackendSettings> get() = store.settings
     public val models: StateFlow<List<ModelInfo>> get() = modelCatalog.models
@@ -116,6 +120,17 @@ public class BackendGlobalState internal constructor(
         }
 
     public suspend fun reconnectMcpServer(name: String): Unit = mcpManager.reconnect(name)
+
+    public suspend fun reloadSettings() {
+        val expected = unified.current
+        val candidate = unified.readCandidate()
+        val accepted = mcpManager.commitConfigurationChange(expected.backend.mcpServers, candidate.backend.mcpServers) {
+            unified.acceptReload(expected, candidate) { before, after ->
+                validateMcpConfigurationUpdate(before.mcpServers, after.mcpServers)
+            }
+        }
+        check(accepted) { "Settings changed during reload; retry the explicit reload." }
+    }
 
     public suspend fun getCodexMcpSettings(): List<McpCodexImportCandidate> =
         readBackendCodexMcpSettings(codexHome)

@@ -91,7 +91,7 @@ public val kodexHomeMigrationTest by testSuite {
                         prepareKodexHome(
                             home = home,
                             currentVersion = MigrationVersion("0.4.11"),
-                            migrations = KodexHomeMigrations + Migration(MigrationVersion("0.4.12")) { _, _ ->
+                            migrations = KodexHomeMigrations + Migration(MigrationVersion("99.0.0")) { _, _ ->
                                 error("Future migration must not run")
                             },
                             fileSystem = SystemCoroutineFileSystem,
@@ -105,7 +105,7 @@ public val kodexHomeMigrationTest by testSuite {
                     assertTrue(failure.cause is FileSystemLeaseInUseException)
                     assertTrue(message.contains(checkNotNull(failure.cause?.message)))
                     assertTrue(message.contains(readOwners.single().toString()))
-                    assertFalse(message.contains("0.4.12"))
+                    assertFalse(message.contains("99.0.0"))
                     when (storedVersion) {
                         "0.4.3" -> {
                             assertTrue(message.contains("needs data migration from 0.4.3 to 0.4.7"))

@@ -43,12 +43,18 @@ import kotlin.time.TimeSource
  */
 public suspend fun <R> withBackendSessionHost(
     createRepository: suspend CoroutineScope.() -> KodexRootSessionRepository,
+    renewBackend: suspend () -> Unit = {},
+    backendRenewalInterval: () -> Duration = { 20.seconds },
+    checkAdmission: () -> Unit = {},
     block: suspend CoroutineScope.(BackendSessionHost) -> R,
-): R = withBackendSessionHost(TimeSource.Monotonic, createRepository, block)
+): R = withBackendSessionHost(TimeSource.Monotonic, createRepository, renewBackend, backendRenewalInterval, checkAdmission, block)
 
 internal suspend fun <R> withBackendSessionHost(
     timeSource: TimeSource,
     createRepository: suspend CoroutineScope.() -> KodexRootSessionRepository,
+    renewBackend: suspend () -> Unit = {},
+    backendRenewalInterval: () -> Duration = { 20.seconds },
+    checkAdmission: () -> Unit = {},
     block: suspend CoroutineScope.(BackendSessionHost) -> R,
 ): R = coroutineScope {
     val owner = supervisorChildScope()
@@ -57,7 +63,7 @@ internal suspend fun <R> withBackendSessionHost(
     var host: BackendSessionHost? = null
     var failure: Throwable? = null
     try {
-        host = BackendSessionHost(owner, createRepository, timeSource.markNow(), backgroundFailure)
+        host = BackendSessionHost(owner, createRepository, timeSource.markNow(), backgroundFailure, renewBackend, backendRenewalInterval, checkAdmission)
         coroutineScope { block(host) }
     } catch (cause: Throwable) {
         failure = cause
@@ -87,6 +93,9 @@ public class BackendSessionHost internal constructor(
     private val createRepository: suspend CoroutineScope.() -> KodexRootSessionRepository,
     private val origin: TimeMark,
     private val backgroundFailure: CompletableDeferred<Throwable>,
+    private val renewBackend: suspend () -> Unit,
+    private val backendRenewalInterval: () -> Duration,
+    private val checkAdmission: () -> Unit,
 ) {
     private val lifecycle = Mutex()
     private val acquisition = Mutex()
@@ -114,6 +123,11 @@ public class BackendSessionHost internal constructor(
     // Renewal metadata, not a second catalog/active flag. Session identity and
     // liveness remain the original repository instance and its actual Job.
     private val renewals = mutableMapOf<Int, Renewal>()
+    /** One service-graph admission check shared by commands and newly requested observations. */
+    public fun ensureAdmission() {
+        owner.ensureActive()
+        checkAdmission()
+    }
 
     /** Explicit activation; a successful return grants a full TTL after loading. */
     public suspend fun keepSessionAlive(index: Int): Unit = inBackend {
@@ -135,6 +149,7 @@ public class BackendSessionHost internal constructor(
 
     /** Resolves a live binding without loading or extending its lifetime. */
     public suspend fun session(index: Int): BackendSessionBinding = lifecycle.withLock {
+        ensureAdmission()
         activeLocked(index).binding
     }
 
@@ -165,8 +180,11 @@ public class BackendSessionHost internal constructor(
     /** Global accepted work belongs to the host, not its RPC waiter. */
     public suspend fun <R> inBackend(block: suspend () -> R): R {
         currentCoroutineContext().ensureActive()
-        owner.ensureActive()
-        return owner.async { block() }.await()
+        ensureAdmission()
+        return owner.async {
+            ensureAdmission()
+            block()
+        }.await()
     }
 
     /** Coordinates delete with activation/expiry; missing entries remain false. */
@@ -240,7 +258,8 @@ public class BackendSessionHost internal constructor(
                             }
                         }
                         if (!renewed) return@collectLatest
-                        delay(RenewalInterval)
+                        renewBackend()
+                        delay(minOf(RenewalInterval, backendRenewalInterval()))
                     }
                 }
             }

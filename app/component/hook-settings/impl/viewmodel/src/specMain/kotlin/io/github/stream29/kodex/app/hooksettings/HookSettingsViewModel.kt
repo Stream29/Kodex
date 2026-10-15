@@ -40,6 +40,7 @@ public interface HookEditHandle {
  * All methods run on the owner/UI dispatcher. No method executes the configured shell command.
  */
 public interface HookSettingsDependencies {
+    public val supportedTypes: Set<NotificationHookType> get() = NotificationHookType.entries.toSet()
     public val hooks: StateFlow<List<NotificationHook>>
     public val operationFailure: StateFlow<Boolean>
     /**
@@ -105,6 +106,7 @@ public data class HookSettingsState(
     public val dialog: HookSettingsDialog = HookSettingsDialog.Hidden,
     public val operationFailure: Boolean = false,
     public val closed: Boolean = false,
+    public val supportedTypes: Set<NotificationHookType> = NotificationHookType.entries.toSet(),
 )
 
 /**

@@ -12,7 +12,7 @@ import kotlin.time.Duration.Companion.seconds
 /** Startup failure occurs before Application takes ownership of the Home handle. */
 internal suspend fun initializeCliLogging(
     home: KodexHomeHandle,
-    initialize: suspend (Path) -> Unit = ::initializeLogging,
+    initialize: suspend (Path) -> Unit = { initializeLogging(it) },
     report: (Throwable) -> Unit = {
         println("Unable to initialize Kodex logging: ${it.message ?: it}")
     },

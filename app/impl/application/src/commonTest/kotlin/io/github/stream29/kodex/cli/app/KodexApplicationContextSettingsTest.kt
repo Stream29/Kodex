@@ -60,7 +60,7 @@ val kodexApplicationContextSettingsTest by testSuite(compartment = { TestCompart
                     "rendered"
                 }
                 assertEquals("rendered", value)
-                assertEquals("\"0.4.7\"", Fs.readString(Path(home, "version.json")))
+                assertEquals("\"0.4.15\"", Fs.readString(Path(home, "version.json")))
                 assertHomeReleased(home)
             } finally { deleteTestDirectory(home) }
         }
@@ -83,26 +83,28 @@ val kodexApplicationContextSettingsTest by testSuite(compartment = { TestCompart
                     handle, home, Path(home, "codex"), Path(home, "agents"), applicationWidth = 120,
                     createClient = { applicationClient() }, createLoginClient = { ApplicationLoginClient },
                 ) {
-                    assertFalse(Fs.exists(Path(home, "settings.yml")))
+                    assertTrue(Fs.exists(Path(home, "settings.yml")))
+                    assertFalse(Fs.exists(Path(home, "settings.backend.yml")))
+                    assertFalse(Fs.exists(Path(home, "settings.frontend.cli.yml")))
                     assertEquals("fixture-migrated-model", it.viewModel.navigation.value.selected.settings.value.model.value)
                     assertEquals(NewLineKey.Enter, it.newLineKey.value)
                     assertEquals(SidebarContent.None, it.sidebarSettings.state.value.left)
                     assertEquals(SidebarContent.HistoryIndex, it.sidebarSettings.state.value.right)
                     assertEquals(30, it.sidebarSettings.state.value.leftWidth)
-                    val encoded = Fs.readString(Path(home, "settings.frontend.cli.yml"))
+                    val encoded = Fs.readString(Path(home, "settings.yml"))
                     assertFalse("should-never-run" in encoded)
                     assertFalse("left_width" in encoded)
                     val session = assertNotNull(it.viewModel.materializeNewSession(assertIs<NewSessionViewModel>(it.viewModel.navigation.value.selected)))
                     assertTrue(session.sessionIndex >= 0)
                     assertTrue(Fs.exists(Path(home, "sessions")))
                 }
-                assertEquals("\"0.4.7\"", Fs.readString(Path(home, "version.json")))
+                assertEquals("\"0.4.15\"", Fs.readString(Path(home, "version.json")))
                 assertHomeReleased(home)
             } finally { withContext(NonCancellable) { deleteTestDirectory(home) } }
         }
     }
     for (checkpoint in listOf("0.4.7", "0.4.10")) {
-        test("renderer accepts prepared checkpoint $checkpoint while another Home reader stays alive") {
+        test("legacy checkpoint $checkpoint migrates before another prepared Home reader stays alive") {
             coroutineScope {
                 val home = Path(SystemTemporaryDirectory, "kodex-cutover-checkpoint-${Random.nextLong()}")
                 try {
@@ -111,14 +113,14 @@ val kodexApplicationContextSettingsTest by testSuite(compartment = { TestCompart
                     val otherReader = prepareKodexHome(home)
                     try {
                         val handle = prepareKodexHome(home)
-                        assertEquals(MigrationVersion(checkpoint), handle.version)
+                        assertEquals(MigrationVersion("0.4.15"), handle.version)
                         val value = withKodexApplication(
                             handle, home, Path(home, "codex"), Path(home, "agents"),
                             createClient = { applicationClient() },
                             createLoginClient = { ApplicationLoginClient },
                         ) { "rendered" }
                         assertEquals("rendered", value)
-                        assertEquals("\"$checkpoint\"", Fs.readString(Path(home, "version.json")))
+                        assertEquals("\"0.4.15\"", Fs.readString(Path(home, "version.json")))
                         assertTrue(Fs.list(Path(home, ".locks/home")).any { it.name.endsWith(".read.lock") })
                     } finally {
                         otherReader.closeAndJoin()

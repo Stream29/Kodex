@@ -36,6 +36,22 @@ private fun hook(name: String, command: String = name) = NotificationHook(
 )
 
 val notificationHookControlTest by testSuite(testConfig = TestConfig.testScope(isEnabled = false)) {
+    test("an undispatched business consumer subscribes before readiness publication") {
+        runTest {
+            val notifications = MutableSharedFlow<Notification>(extraBufferCapacity = 1)
+            val settings = MutableStateFlow(CliFrontendSettings(hooks = listOf(hook("business"))))
+            val received = CompletableDeferred<Unit>()
+            val consumer = launch(start = CoroutineStart.UNDISPATCHED) {
+                collectNotificationHooks(notifications, { settings.value.hooks }, Path("."), { _, _ ->
+                    received.complete(Unit)
+                }) { _, failure -> throw failure }
+            }
+            assertEquals(1, notifications.subscriptionCount.value)
+            assertTrue(notifications.tryEmit(event))
+            received.await()
+            consumer.cancelAndJoin()
+        }
+    }
     test("each concrete stop branch selects exactly its explicit type without interpreting payload text") {
         runTest {
             val events = listOf(
@@ -56,7 +72,7 @@ val notificationHookControlTest by testSuite(testConfig = TestConfig.testScope(i
                 NotificationHook(it.name, setOf(it), it.name)
             }))
             val seen = mutableListOf<Pair<String, String>>()
-            collectNotificationHooks(events.asFlow(), settings, Path("."), { command, input ->
+            collectNotificationHooks(events.asFlow(), { settings.value.hooks }, Path("."), { command, input ->
                 seen += command.command to input
             }) { _, failure -> throw failure }
             assertEquals(
@@ -72,7 +88,7 @@ val notificationHookControlTest by testSuite(testConfig = TestConfig.testScope(i
             val settings = MutableStateFlow(CliFrontendSettings(hooks = listOf(hook("first"), hook("second"))))
             val commands = mutableListOf<ShellProcessCommand>()
             val inputs = mutableListOf<String>()
-            collectNotificationHooks(flowOf(event, event), settings, Path("/frontend"), { command, input ->
+            collectNotificationHooks(flowOf(event, event), { settings.value.hooks }, Path("/frontend"), { command, input ->
                 commands += command
                 inputs += input
                 settings.value = CliFrontendSettings(hooks = listOf(hook("next")))
@@ -91,7 +107,7 @@ val notificationHookControlTest by testSuite(testConfig = TestConfig.testScope(i
             )))
             val commands = mutableListOf<String>()
             val failures = mutableListOf<String>()
-            collectNotificationHooks(flowOf(event), settings, Path("."), { command, _ ->
+            collectNotificationHooks(flowOf(event), { settings.value.hooks }, Path("."), { command, _ ->
                 commands += command.command
                 if (command.command == "bad") error("failed")
             }) { name, _ -> failures += name }
@@ -105,7 +121,7 @@ val notificationHookControlTest by testSuite(testConfig = TestConfig.testScope(i
             val entered = CompletableDeferred<Unit>()
             val seen = mutableListOf<String>()
             val work = launch {
-                collectNotificationHooks(flowOf(event), settings, Path("."), { command, _ ->
+                collectNotificationHooks(flowOf(event), { settings.value.hooks }, Path("."), { command, _ ->
                     seen += command.command
                     entered.complete(Unit)
                     awaitCancellation()
@@ -172,7 +188,7 @@ val notificationHookControlTest by testSuite(testConfig = TestConfig.testScope(i
             val settings = MutableStateFlow(CliFrontendSettings(hooks = listOf(hook("slow"), hook("next"))))
             val seen = mutableListOf<String>()
             val failed = mutableListOf<String>()
-            collectNotificationHooks(flowOf(event), settings, Path("."), { command, input ->
+            collectNotificationHooks(flowOf(event), { settings.value.hooks }, Path("."), { command, input ->
                 seen += command.command
                 if (command.command == "slow") {
                     executeNotificationProcess(command, input) { FakeNotificationProcess(backgroundScope, false) }
@@ -190,7 +206,7 @@ val notificationHookProcessTest by testSuite(compartment = { TestCompartment.Rea
         SystemCoroutineFileSystem.createDirectories(root)
         try {
             val settings = MutableStateFlow(CliFrontendSettings(hooks = listOf(hook("capture", "cat > received.json"))))
-            collectNotificationHooks(flowOf(event), settings, root)
+            collectNotificationHooks(flowOf(event), { settings.value.hooks }, root)
             assertEquals(
                 Json.encodeToString<Notification>(event),
                 SystemCoroutineFileSystem.readString(Path(root, "received.json")),

@@ -30,7 +30,6 @@ kotlin {
             api(project(":app-component-agent-spec"))
             api(project(":agent-state-spec-contract"))
             api(project(":app-component-settings-impl-viewmodel"))
-            api(project(":app-settings-impl-filesystem"))
             implementation(libs.kotlin.logging)
             implementation(project(":utils-logging-impl"))
             implementation(libs.kotlinx.coroutines.core)

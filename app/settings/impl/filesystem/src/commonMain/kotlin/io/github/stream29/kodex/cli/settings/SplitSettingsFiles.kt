@@ -27,8 +27,10 @@ import kotlinx.serialization.Serializable
  * absence. Only nullable domain fields (such as session_title.model) accept null.
  * File codecs retain snake_case names; RPC serializers are not changed.
  */
-internal fun decodeBackendSettingsFile(text: String, defaults: BackendSettings): BackendSettings {
-    val root = settingsMap(text)
+internal fun decodeBackendSettingsFile(text: String, defaults: BackendSettings): BackendSettings =
+    decodeBackendSettingsFile(settingsMap(text), defaults)
+
+internal fun decodeBackendSettingsFile(root: YamlMap, defaults: BackendSettings): BackendSettings {
     return BackendSettings(
         authSource = root.value("auth_source", defaults.authSource),
         shell = root.value("shell", defaults.shell),
@@ -61,11 +63,15 @@ internal fun decodeBackendSettingsFile(text: String, defaults: BackendSettings):
             )
         } ?: defaults.sessionTitle,
         mcpServers = root.value("mcp_servers", defaults.mcpServers),
+        hooks = root.value("hooks", defaults.hooks),
+        daemonTtlSeconds = root.value("daemon_ttl_seconds", defaults.daemonTtlSeconds),
     )
 }
 
-internal fun decodeCliFrontendSettingsFile(text: String, defaults: CliFrontendSettings): CliFrontendSettings {
-    val root = settingsMap(text)
+internal fun decodeCliFrontendSettingsFile(text: String, defaults: CliFrontendSettings): CliFrontendSettings =
+    decodeCliFrontendSettingsFile(settingsMap(text), defaults)
+
+internal fun decodeCliFrontendSettingsFile(root: YamlMap, defaults: CliFrontendSettings): CliFrontendSettings {
     return CliFrontendSettings(
         newLineKey = root.value("new_line_key", defaults.newLineKey),
         sidebars = root.get<YamlMap>("sidebars")?.let { sidebars ->
@@ -104,6 +110,8 @@ internal fun encodeBackendSettingsFile(value: BackendSettings): String =
                 reasoningEffort = value.sessionTitle.reasoningEffort,
             ),
             mcpServers = value.mcpServers,
+            hooks = value.hooks,
+            daemonTtlSeconds = value.daemonTtlSeconds,
         ),
     )
 
@@ -140,6 +148,8 @@ private data class BackendFile(
     @SerialName("new_session") val newSession: NewSessionDefaultsFile,
     @SerialName("session_title") val sessionTitle: TitleDefaultsFile,
     @SerialName("mcp_servers") val mcpServers: Map<String, McpServerConfiguration>,
+    val hooks: List<NotificationHook> = emptyList(),
+    @SerialName("daemon_ttl_seconds") val daemonTtlSeconds: Long = 300,
 )
 
 @Serializable

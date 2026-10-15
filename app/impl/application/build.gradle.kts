@@ -24,14 +24,12 @@ kotlin {
             api(libs.kotlinx.io.core)
         }
         commonMain.dependencies {
+            api(project(":rpc-impl-local"))
             implementation(project(":app-component-session-settings-impl-viewmodel"))
             implementation(project(":app-component-working-directory-impl-viewmodel"))
             implementation(project(":app-component-session-rename-impl-viewmodel"))
             implementation(project(":app-component-session-delete-impl-viewmodel"))
             implementation(project(":app-component-openai-login-impl-viewmodel"))
-            implementation(project(":app-migration-impl"))
-            implementation(project(":rpc-impl-server"))
-            implementation(project(":rpc-impl-in-memory"))
             implementation(project(":app-impl-rpc"))
             implementation(project(":hook-impl-notification"))
             implementation(project(":app-spec-session"))
@@ -42,10 +40,8 @@ kotlin {
             implementation(project(":mcp-spec-contract"))
             implementation(project(":openai-account-usage"))
             implementation(project(":openai-spec-models"))
-            implementation(project(":app-settings-impl-filesystem"))
             implementation(project(":app-component-settings-impl-viewmodel"))
             implementation(project(":app-component-path-picker-impl-viewmodel"))
-            implementation(project(":openai-client"))
             implementation(project(":utils-kodex-home-spec"))
             implementation(project(":utils-coroutines-spec"))
             implementation(project(":utils-kotlinx-io-coroutines-impl"))
@@ -57,6 +53,10 @@ kotlin {
             implementation(libs.kotlinx.io.core)
         }
         commonTest.dependencies {
+            implementation(project(":rpc-impl-server"))
+            implementation(project(":app-migration-impl"))
+            implementation(project(":app-settings-impl-filesystem"))
+            implementation(project(":openai-client"))
             implementation(project(":app-test-support-rpc"))
             implementation(project(":agent-storage-spec-contract-ext"))
             implementation(project(":agent-session-impl-in-memory"))

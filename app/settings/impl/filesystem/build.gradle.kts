@@ -17,5 +17,8 @@ kotlin {
             implementation(libs.kaml)
             implementation(libs.kotlinx.serialization.core)
         }
+        commonTest.dependencies {
+            implementation(libs.kotlinx.coroutines.test)
+        }
     }
 }

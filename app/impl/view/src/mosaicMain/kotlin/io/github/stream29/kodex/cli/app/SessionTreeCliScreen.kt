@@ -118,6 +118,7 @@ public fun SessionTreeCliScreen(
     newLineKey: StateFlow<NewLineKey>,
     sidebarSettings: SidebarSettingsViewModel,
     onOperationFailure: (Throwable) -> Unit = { throw it },
+    reservedRows: Int = 0,
     openMcpUrl: suspend (String) -> Boolean = { url ->
         openExternalUrl(url) !is OpenExternalUrlResult.Failed
     },
@@ -169,7 +170,7 @@ public fun SessionTreeCliScreen(
     TerminalTitleEffect(sessionSummary.sessionCount, sessionSummary.runningSessionCount)
 
     val columns = (terminal.size.columns - 1).coerceAtLeast(1)
-    val rows = (terminal.size.rows - 1).coerceAtLeast(1)
+    val rows = (terminal.size.rows - 1 - reservedRows.coerceAtLeast(0)).coerceAtLeast(1)
     LaunchedEffect(sidebarSettings, columns) { sidebarSettings.initializeViewport(columns) }
     val scope = rememberCoroutineScope()
     var leftSidebarPinnedExpanded by remember { mutableStateOf(false) }

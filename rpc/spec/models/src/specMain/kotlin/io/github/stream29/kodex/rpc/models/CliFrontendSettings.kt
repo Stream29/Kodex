@@ -4,11 +4,11 @@ import io.github.stream29.kodex.cli.settings.NewLineKey
 import kotlinx.serialization.Serializable
 
 /**
- * CLI-owned settings for settings.frontend.cli.yml, not a GlobalRpc value.
+ * Backend-managed frontend section of settings.yml and its GlobalRpc projection.
  *
- * Sidebar widths are transient. Notification Hooks are configured and executed locally;
+ * Sidebar widths are transient. Error Hooks are configured by the backend and executed locally;
  * neither file persistence nor command execution is implemented by this model.
- * Sharing this model module with RPC values does not make these preferences backend-owned.
+ * TUI clients subscribe and submit CAS edits; they never persist this section themselves.
  *
  * @property newLineKey Local input preference; the matching submit key is derived from it.
  * @property sidebars Local sidebar content preferences, not Session data or viewport state.

@@ -91,7 +91,10 @@ public class RpcGlobalEditor(
         RpcMcpSettingsDependencies(global, rpc, mcp, ::acceptWrite), scope,
     )
     override val hookSettings: HookSettingsViewModel = createHookSettingsViewModel(
-        RpcHookSettingsDependencies(global, global.frontend.settings.projectState { it.hooks }, ::acceptWrite), scope,
+        RpcHookSettingsDependencies(global, global.settings.projectState { it.hooks }, backend = true, accept = ::acceptWrite), scope,
+    )
+    override val frontendErrorHooks: HookSettingsViewModel = createHookSettingsViewModel(
+        RpcHookSettingsDependencies(global, global.frontend.settings.projectState { it.hooks }, backend = false, accept = ::acceptWrite), scope,
     )
 
     /** Admission only. Frozen closures drain after child close and preserve original queue order. */
@@ -120,6 +123,7 @@ public class RpcGlobalEditor(
         usageReset.close()
         mcpSettings.close()
         hookSettings.close()
+        frontendErrorHooks.close()
         owner.cancel()
         effectsChannel.close()
         updates.close { mcp.close() }

@@ -1,4 +1,5 @@
 plugins {
+    id("kodex.kmp-spec-impl")
     id("kodex.krpc-utils-patch")
     id("kodex.kmp-cli")
     alias(libs.plugins.kotlin.serialization)
@@ -8,6 +9,10 @@ plugins {
 
 kotlin {
     sourceSets {
+        named("specMain").dependencies {
+            api(project(":rpc-spec-models"))
+            api(libs.kotlinx.coroutines.core)
+        }
         commonMain.dependencies {
             api(libs.kotlinx.rpc.core)
             api(libs.kotlinx.coroutines.core)

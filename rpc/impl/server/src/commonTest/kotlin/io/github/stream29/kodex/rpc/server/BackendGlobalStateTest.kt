@@ -71,7 +71,9 @@ val backendGlobalStateTest by testSuite(testConfig = TestConfig.testScope(isEnab
             assertEquals(KodexAuthSource.Codex, global.settings.value.authSource)
             val current = global.settings.value
             assertTrue(global.compareAndSetSettings(current, current.copy(authSource = KodexAuthSource.Kodex)))
-            val saved = openBackendSettings(Path(global.store.settingsPath.parent!!.toString()), old).settings.value
+            val saved = io.github.stream29.kodex.cli.settings.UnifiedSettingsStore.open(
+                Path(global.store.settingsPath.parent!!.toString()), old,
+            ).current.backend
             assertEquals(global.settings.value, saved)
         }
     }
@@ -232,9 +234,10 @@ val backendGlobalStateTest by testSuite(testConfig = TestConfig.testScope(isEnab
             ),
         ))
         try {
-            val store = openBackendSettings(root, initial)
+            val unified = io.github.stream29.kodex.cli.settings.UnifiedSettingsStore.open(root, initial)
+            val store = unified.backendStore
             withBackendGlobalState(
-                store, root, root, root, mockOpenAiClient { listModels { awaitCancellation() } },
+                store, unified, root, root, root, mockOpenAiClient { listModels { awaitCancellation() } },
                 tokenRefresher = { error("No initialized credentials in this test.") },
                 loginAttemptFactory = { error("No login in this test.") },
             ) { global ->
@@ -269,9 +272,10 @@ private suspend fun withGlobalFixture(
     val fs = GlobalTestFileSystem()
     val service = GlobalTestMcpService()
     try {
-        val store = openBackendSettings(root, globalDefaults(), fs)
+        val unified = io.github.stream29.kodex.cli.settings.UnifiedSettingsStore.open(root, globalDefaults(), fs)
+        val store = unified.backendStore
         withBackendGlobalState(
-            store, Path(root, "agents"), root, Path(root, "codex"), client,
+            store, unified, Path(root, "agents"), root, Path(root, "codex"), client,
             loginAttemptFactory = { error("No browser login in this fixture.") },
             serviceFactory = { _, _ -> service },
         ) { global -> block(global, service, fs, root) }

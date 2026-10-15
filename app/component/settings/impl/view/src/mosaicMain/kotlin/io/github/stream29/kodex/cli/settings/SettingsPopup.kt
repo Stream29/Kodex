@@ -96,7 +96,12 @@ public fun BoxScope.SettingsPopup(
                             AccountUsageComponent(viewModel.global.accountUsage, showOperationFailure = false)
                         }
                         SettingsPage.Mcp -> McpSettingsPanel(viewModel.global.mcpSettings, showOperationFailure = false)
-                        SettingsPage.Hooks -> HookSettingsPanel(viewModel.global.hookSettings, showOperationFailure = false)
+                        SettingsPage.Hooks -> Column {
+                            Text("Backend notifications", color = SettingsForeground)
+                            HookSettingsPanel(viewModel.global.hookSettings, showOperationFailure = false)
+                            Text("TUI local errors", color = SettingsForeground)
+                            HookSettingsPanel(viewModel.global.frontendErrorHooks, showOperationFailure = false)
+                        }
                         SettingsPage.CurrentSession -> SessionSettingsPanel(viewModel.session, sessionDropdowns)
                         SettingsPage.NewSession -> {
                             NewSessionDefaultsPanel(viewModel.newSession, defaultsDropdowns, showOperationFailure = false)
@@ -128,6 +133,7 @@ public fun BoxScope.SettingsPopup(
     }
     McpSettingsDialogs(viewModel.global.mcpSettings)
     HookSettingsDialogs(viewModel.global.hookSettings)
+    HookSettingsDialogs(viewModel.global.frontendErrorHooks)
 }
 
 @Composable

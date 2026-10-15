@@ -3,7 +3,7 @@ package io.github.stream29.kodex.cli.app
 import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.app.test.deleteTestDirectory
 import io.github.stream29.kodex.app.test.testAnswer
-import io.github.stream29.kodex.cli.settings.openBackendSettings
+import io.github.stream29.kodex.cli.settings.UnifiedSettingsStore
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
@@ -24,7 +24,7 @@ internal suspend fun applicationFixture(
     try {
         val handle = prepareKodexHome(home)
         try {
-            openBackendSettings(home, defaultBackendSettings()).update {
+            UnifiedSettingsStore.open(home, defaultBackendSettings()).backendStore.update {
                 it.copy(sessionTitle = it.sessionTitle.copy(enabled = false))
             }
             withKodexApplication(

@@ -56,6 +56,7 @@ public interface GlobalSettingsViewModel : AutoCloseable {
     public val mcpSettings: McpSettingsViewModel
     /** Local notification configuration; does not execute Hook commands. */
     public val hookSettings: HookSettingsViewModel
+    public val frontendErrorHooks: HookSettingsViewModel
 
     /**
      * Single Settings-host consumer for buffered overlay intents; never broadcasts credentials

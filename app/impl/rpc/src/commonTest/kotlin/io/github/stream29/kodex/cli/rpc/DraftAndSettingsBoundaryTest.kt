@@ -7,7 +7,6 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
 import io.github.stream29.kodex.app.settings.contract.*
 import io.github.stream29.kodex.app.settings.createSessionSettingsViewModel
-import io.github.stream29.kodex.cli.settings.openCliFrontendSettings
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.models.BackendSettings
@@ -136,7 +135,7 @@ val draftAndSettingsBoundaryTest by testSuite(compartment = { TestCompartment.Re
                         throw CancellationException("one command cancelled")
                     }
                 }
-                val global = RpcGlobalSettings.open(rpc, openCliFrontendSettings(home), this, 80)
+                val global = RpcGlobalSettings.open(rpc, this, 80)
                 val page = if (defaults) null else RpcGlobalEditor(global, rpc, this)
                 val defaultPage = if (defaults) RpcNewSessionSettings(global, this) else null
                 try {

@@ -40,7 +40,7 @@ val settingsPopupInputTest by testSuite {
                 val rpc = object : io.github.stream29.kodex.rpc.contract.GlobalRpc by fixture.services.global {
                     override suspend fun refreshAccountUsage() { refreshes.value++ }
                 }
-                val global = RpcGlobalSettings.open(rpc, openCliFrontendSettings(fixture.root), fixture, 120)
+                val global = RpcGlobalSettings.open(rpc, fixture, 120)
                 val target = fixture.create("captured Settings target")
                 fixture.create("other target")
                 val view = fixture.views.open(target.sessionIndex)

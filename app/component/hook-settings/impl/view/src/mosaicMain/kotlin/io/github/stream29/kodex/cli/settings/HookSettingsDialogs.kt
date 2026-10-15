@@ -29,6 +29,7 @@ import io.github.stream29.kodex.rpc.models.NotificationHookType
 @Composable
 internal fun BoxScope.HookEditorDialog(
     editor: HookSettingsDialog.Editing,
+    supportedTypes: Set<NotificationHookType> = NotificationHookType.entries.toSet(),
     onDraftChange: ((HookEditorDraft) -> HookEditorDraft) -> Unit,
     onDismiss: () -> Unit,
     onSave: () -> Unit,
@@ -54,7 +55,7 @@ internal fun BoxScope.HookEditorDialog(
                 onDraftChange { it.copy(name = name) }
             }
             Text("Types:", color = SettingsForeground)
-            NotificationHookType.entries.forEach { type ->
+            NotificationHookType.entries.filter { it in supportedTypes }.forEach { type ->
                 SettingsContentButton(
                     label = "${if (type in draft.types) "[x]" else "[ ]"} ${type.settingsLabel()}",
                     onClick = { onDraftChange { current -> current.copy(types =

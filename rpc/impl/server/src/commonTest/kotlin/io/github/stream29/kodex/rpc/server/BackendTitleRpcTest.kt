@@ -9,7 +9,6 @@ import io.github.stream29.kodex.cli.rpc.RpcSessionViews
 import io.github.stream29.kodex.cli.rpc.SessionViewStatus
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerationResult
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
-import io.github.stream29.kodex.cli.settings.openCliFrontendSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -39,7 +38,7 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
             val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()), { throw it })
             val otherViews = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()), { throw it })
             val globalSettings = RpcGlobalSettings.open(
-                services.global, openCliFrontendSettings(home), this, 80,
+                services.global, this, 80,
             )
             val popup = RpcGlobalEditor(globalSettings, services.global, this)
             try {

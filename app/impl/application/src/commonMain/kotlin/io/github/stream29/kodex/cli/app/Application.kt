@@ -2,7 +2,6 @@ package io.github.stream29.kodex.cli.app
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.stream29.kodex.app.application.contract.*
-import io.github.stream29.kodex.app.migration.KodexHomeHandle
 import io.github.stream29.kodex.app.pathpicker.createDirectoryPickerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
 import io.github.stream29.kodex.app.sessioncatalog.DefaultSessionCatalogViewModel
@@ -19,20 +18,13 @@ import io.github.stream29.kodex.cli.rpc.*
 import io.github.stream29.kodex.cli.session.DefaultPersistedSessionViewModelRegistry
 import io.github.stream29.kodex.cli.session.RpcPersistedSessionViewModel
 import io.github.stream29.kodex.cli.settings.NewLineKey
-import io.github.stream29.kodex.cli.settings.openCliFrontendSettings
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.Reasoning
-import io.github.stream29.kodex.openai.client.OpenAiClient
-import io.github.stream29.kodex.openai.client.OpenAiLoginClient
-import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
-import io.github.stream29.kodex.openai.client.contract.OpenAiClient as ModelClient
-import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient as LoginClient
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
-import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import io.github.stream29.kodex.rpc.models.OAuthTarget
-import io.github.stream29.kodex.rpc.server.withBackendServices
+import io.github.stream29.kodex.rpc.local.FrontendRpcConnection
+import io.github.stream29.kodex.rpc.local.BackendConnectionState
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.*
@@ -60,39 +52,18 @@ public class KodexApplication internal constructor(
      * Shares the same live, best-effort buffer and single consumer.
      */
     public val reportWarning: (String) -> Unit,
+    public val connectionState: StateFlow<BackendConnectionState>,
+    public val connectionFailureReason: StateFlow<String?>,
 )
 
-/** Fault-injection checkpoints for isolated startup/shutdown validation. */
-public enum class ApplicationStartupPhase { HomePrepared, BackendReady, ServicesRegistered, FrontendReady, RendererStarted }
-
-/**
- * One structured CLI host. The supplied prepared Home is consumed and released last.
- * Prepare it for this application before calling; its persisted migration
- * checkpoint need not equal the application version.
- * Factories are composition-root test seams, never dependencies of a frontend ViewModel.
- */
-public suspend fun <R> withKodexApplication(
-    homeHandle: KodexHomeHandle,
-    workingDirectory: Path = Path("."),
-    codexDirectory: Path = Path(requireUserHomeDirectory(), ".codex"),
-    agentsDirectory: Path = Path(requireUserHomeDirectory(), ".agents"),
+/** Actual production frontend assembly; no prepared Home handle or backend resource is owned here. */
+public suspend fun <R> withFrontendApplication(
+    connection: FrontendRpcConnection,
+    workingDirectory: Path,
     applicationWidth: Int? = null,
-    createClient: (OpenAiAuthStore) -> ModelClient = { OpenAiClient(it) },
-    createLoginClient: () -> LoginClient = { OpenAiLoginClient() },
-    onPhase: suspend (ApplicationStartupPhase) -> Unit = {},
     render: suspend CoroutineScope.(KodexApplication) -> R,
-): R {
-    var primary: Throwable? = null
-    try {
-        onPhase(ApplicationStartupPhase.HomePrepared)
-        val cwd = SystemCoroutineFileSystem.resolve(workingDirectory)
-        return withBackendServices(
-            homeHandle.home, resolveAllowingMissing(codexDirectory), resolveAllowingMissing(agentsDirectory),
-            createClient = createClient, createLoginClient = createLoginClient,
-        ) { backend ->
-            onPhase(ApplicationStartupPhase.BackendReady)
-            withInMemoryRpc(registerServices = { backend.register(this) }) { rawClient ->
-                onPhase(ApplicationStartupPhase.ServicesRegistered)
+): R = coroutineScope {
+                val cwd = SystemCoroutineFileSystem.resolve(workingDirectory)
                 val owner = Job(coroutineContext[Job])
                 val frontendScope = CoroutineScope(coroutineContext + owner)
                 var application: ApplicationViewModel? = null
@@ -100,8 +71,7 @@ public suspend fun <R> withKodexApplication(
                 var global: RpcGlobalSettings? = null
                 var failure: Throwable? = null
                 try {
-                    val services = RpcServices(RestoringRpcClient(rawClient))
-                    val frontendStore = openCliFrontendSettings(homeHandle.home)
+                    val services = RpcServices(RestoringRpcClient(connection))
                     val unhandledErrors = MutableSharedFlow<String?>(
                         extraBufferCapacity = 64,
                         onBufferOverflow = BufferOverflow.DROP_OLDEST,
@@ -116,18 +86,23 @@ public suspend fun <R> withKodexApplication(
                         ApplicationLogger.warn { "Application warning (cwd=$cwd): $message" }
                         unhandledErrors.tryEmit(message)
                     }
-                    val settings = RpcGlobalSettings.open(services.global, frontendStore, frontendScope, applicationWidth ?: 0)
+                    val settings = RpcGlobalSettings.open(services.global, frontendScope, applicationWidth ?: 0)
                         .also { global = it }
                     lateinit var root: ApplicationViewModel
                     val sessionViews = RpcSessionViews(
                         frontendScope, services, settings.models, reportUnhandledError,
-                    ) { created ->
+                        onCreated = { created ->
                         frontendScope.launch {
                             try { root.openCreatedSessions(created.map { it.sessionIndex }) }
                             catch (cancelled: CancellationException) { throw cancelled }
                             catch (error: Throwable) { ApplicationLogger.error(error) { "Unable to open created Session tabs." } }
                         }
-                    }.also { views = it }
+                        },
+                        connectionAvailable = { connection.available },
+                    ).also { views = it }
+                    connection.onReconnection { client, isConnected ->
+                        sessionViews.reactivate(RpcServices(RestoringRpcClient(client)), isConnected)
+                    }
                     val sessions = DefaultPersistedSessionViewModelRegistry(sessionViews, settings.models, frontendScope)
                     val draftFactory = DefaultNewSessionViewModelFactory(sessionViews, sessions, settings.models, frontendScope)
                     val directoryPicker = { path: Path -> createDirectoryPickerViewModel(path, frontendScope) }
@@ -179,26 +154,23 @@ public suspend fun <R> withKodexApplication(
                     frontendScope.launch {
                         try {
                             collectNotificationHooks(
-                                services.global.getNotificationFlow().catch { error ->
-                                    if (error is CancellationException) throw error
-                                    ApplicationLogger.error(error) { "Backend notification subscription ended." }
-                                },
-                                frontendStore.settings, cwd, unhandledErrors,
+                                emptyFlow(),
+                                { settings.frontend.settings.value.hooks }, cwd, unhandledErrors,
                             )
                         }
                         catch (cancelled: CancellationException) { throw cancelled }
                         catch (error: Throwable) { ApplicationLogger.error(error) { "Notification subscription ended." } }
                     }
                     val result = KodexApplication(
-                        root, frontendStore.settings.map { it.newLineKey }.stateIn(
-                            frontendScope, SharingStarted.Eagerly, frontendStore.settings.value.newLineKey,
+                        root, settings.frontend.settings.map { it.newLineKey }.stateIn(
+                            frontendScope, SharingStarted.Eagerly, settings.frontend.settings.value.newLineKey,
                         ),
                         createSidebarSettingsViewModel(settings, frontendScope, applicationWidth != null),
                         reportUnhandledError,
                         reportWarning,
+                        connection.state,
+                        connection.failureReason,
                     )
-                    onPhase(ApplicationStartupPhase.FrontendReady)
-                    onPhase(ApplicationStartupPhase.RendererStarted)
                     render(result)
                 } catch (error: Throwable) {
                     failure = error
@@ -219,20 +191,6 @@ public suspend fun <R> withKodexApplication(
                         if (original == null) failure?.let { throw it }
                     }
                 }
-            }
-        }
-    } catch (error: Throwable) {
-        primary = error
-        throw error
-    } finally {
-        try { withContext(NonCancellable) { homeHandle.closeAndJoin() } }
-        catch (error: Throwable) { if (primary == null) throw error else primary.addSuppressed(error) }
-    }
 }
 
-private suspend fun resolveAllowingMissing(path: Path): Path {
-    if (SystemCoroutineFileSystem.metadataOrNull(path) != null) return SystemCoroutineFileSystem.resolve(path)
-    val parent = path.parent
-    return Path(if (parent == null) SystemCoroutineFileSystem.resolve(Path(".")) else resolveAllowingMissing(parent), path.name)
-}
 private val ApplicationLogger = KotlinLogging.logger {}

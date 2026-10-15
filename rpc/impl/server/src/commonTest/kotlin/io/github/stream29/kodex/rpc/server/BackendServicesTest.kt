@@ -31,6 +31,30 @@ import kotlin.test.*
 import kotlin.time.Duration.Companion.seconds
 
 val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("an existing RPC connection cannot create or write after business admission closes") {
+        var admitted = true
+        var rejected = 0
+        withServices(checkAdmission = {
+            if (!admitted) { rejected++; error("Backend is stopping.") }
+        }) { services, _ ->
+            withInMemoryRpc(services::register) { raw ->
+                val global = RestoringRpcClient(raw).withService<GlobalRpc>()
+                val before = global.getSettings()
+                val front = global.getFrontendSettings()
+                val index = global.createSession(KodexAgentSettings(OpenAiModelId("test-model")))
+                admitted = false // The graph/transport are deliberately still alive.
+                assertTrue(coroutineContext[Job]!!.isActive)
+                // Unknown RPC failures do not promise a concrete Exception type on Native.
+                assertTrue(runCatching { global.createSession(KodexAgentSettings(OpenAiModelId("test-model"))) }.isFailure)
+                assertTrue(runCatching { global.keepSessionAlive(index) }.isFailure)
+                assertTrue(runCatching { global.compareAndSetSettings(before, before.copy(daemonTtlSeconds = -1)) }.isFailure)
+                assertTrue(runCatching { global.compareAndSetFrontendSettings(front, front.copy(newLineKey = io.github.stream29.kodex.cli.settings.NewLineKey.Enter)) }.isFailure)
+                assertEquals(4, rejected)
+                assertEquals(before, services.settings.unified.current.backend)
+                assertEquals(front, services.settings.unified.current.frontend)
+            }
+        }
+    }
     test("the complete backend registers all eight real services and retains independent views") {
         withServices { services, _ ->
             withInMemoryRpc(services::register) { raw ->
@@ -137,6 +161,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
 
 internal suspend fun withServices(
     titleGenerator: SessionTitleGenerator? = null,
+    checkAdmission: () -> Unit = {},
     block: suspend CoroutineScope.(BackendServices, ServicesTestLogin) -> Unit,
 ) = withTimeout(30.seconds) {
     val root = Path(SystemTemporaryDirectory, "kodex-rpc-services-${Random.nextLong()}")
@@ -170,6 +195,7 @@ internal suspend fun withServices(
             defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(titleGenerator != null)),
             createLoginClient = { login }, createClient = { client },
             createTitleGenerator = { titleGenerator ?: OpenAiSessionTitleGenerator(it) },
+            checkAdmission = checkAdmission,
         ) { services ->
             services.global.getModelsFlow().first { models -> models.any { it.slug == OpenAiModelId("test-model") } }
             block(services, login)

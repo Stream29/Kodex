@@ -26,7 +26,10 @@ private class SettingsViewModelImpl(
         if (closed || this.page.value == page) return
         if (this.page.value == SettingsPage.CurrentSession) session.hidePage()
         if (this.page.value == SettingsPage.Mcp) global.mcpSettings.hidePage()
-        if (this.page.value == SettingsPage.Hooks) global.hookSettings.hidePage()
+        if (this.page.value == SettingsPage.Hooks) {
+            global.hookSettings.hidePage()
+            global.frontendErrorHooks.hidePage()
+        }
         if (this.page.value == SettingsPage.ContextSources) global.contextSourceSettings.hidePage()
         if (this.page.value == SettingsPage.General) global.applicationPreferences.hidePage()
         if (this.page.value == SettingsPage.NewSession) global.sessionTitleSettings.hidePage()

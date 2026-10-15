@@ -12,6 +12,11 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
         }
         mosaicMain.dependencies {
+            implementation(project(":app-impl-backend-host"))
+            implementation(project(":rpc-impl-local"))
+            implementation(project(":rpc-impl-backend-control-client"))
+            implementation(project(":app-impl-backend-daemon"))
+            implementation(libs.kotlinx.serialization.json)
             implementation(project(":app-migration-impl"))
             implementation(project(":app-impl-view"))
             implementation(project(":app-impl-application"))

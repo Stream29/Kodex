@@ -1,0 +1,144 @@
+package = io.github.stream29.kodex.backend.cinterop
+---
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <signal.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <bcrypt.h>
+#include <direct.h>
+#include <wchar.h>
+static inline int kodex_backend_wide(const char *input, WCHAR *output, int size) {
+    return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, input, -1, output, size);
+}
+static inline int64_t kodex_backend_lock(const char *path) {
+    WCHAR wide[32768];
+    if (!kodex_backend_wide(path, wide, 32768)) return -2;
+    HANDLE h = CreateFileW(wide, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
+        NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+        DWORD error = GetLastError();
+        return error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION ? -1 : -2;
+    }
+    return (int64_t)(intptr_t)h;
+}
+static inline int kodex_backend_unlock(int64_t h) { return CloseHandle((HANDLE)(intptr_t)h) ? 0 : -1; }
+static inline int kodex_backend_random(void *data, int count) {
+    return BCryptGenRandom(NULL, (PUCHAR)data, (ULONG)count, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 ? 0 : -1;
+}
+static inline int kodex_backend_chdir(const char *path) {
+    WCHAR wide[32768]; return kodex_backend_wide(path, wide, 32768) ? _wchdir(wide) : -1;
+}
+static inline int kodex_backend_alive(int64_t pid) {
+    HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)pid);
+    if (h == NULL) return GetLastError() == ERROR_ACCESS_DENIED;
+    int alive = WaitForSingleObject(h, 0) == WAIT_TIMEOUT;
+    CloseHandle(h); return alive;
+}
+static inline int64_t kodex_backend_spawn(const char *home) {
+    WCHAR executable[32768], working[32768], command[33000];
+    if (GetModuleFileNameW(NULL, executable, 32768) == 0 ||
+        !kodex_backend_wide(home, working, 32768)) return -1;
+    _snwprintf(command, 33000, L"\"%ls\" backend start", executable);
+    STARTUPINFOW startup; PROCESS_INFORMATION process;
+    memset(&startup, 0, sizeof(startup)); memset(&process, 0, sizeof(process));
+    startup.cb = sizeof(startup);
+    if (!CreateProcessW(executable, command, NULL, NULL, FALSE,
+        DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB,
+        NULL, working, &startup, &process)) return -1;
+    int64_t pid = process.dwProcessId;
+    CloseHandle(process.hThread); CloseHandle(process.hProcess);
+    return pid;
+}
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+static inline int64_t kodex_backend_lock(const char *path) {
+    int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (fd < 0) return -2;
+    if (fchmod(fd, 0600) != 0) { close(fd); return -2; }
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+        int busy = errno == EWOULDBLOCK || errno == EAGAIN;
+        close(fd); return busy ? -1 : -2;
+    }
+    return fd;
+}
+static inline int kodex_backend_unlock(int64_t fd) { return close((int)fd); }
+static inline int kodex_backend_random(void *data, int count) {
+    int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    int total = 0;
+    while (total < count) {
+        ssize_t n = read(fd, (char *)data + total, count - total);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) { close(fd); return -1; }
+        total += (int)n;
+    }
+    close(fd); return 0;
+}
+static inline int kodex_backend_chdir(const char *path) { return chdir(path); }
+static inline int kodex_backend_alive(int64_t pid) { return kill((pid_t)pid, 0) == 0 || errno == EPERM; }
+static inline int64_t kodex_backend_spawn(const char *home) {
+    char executable[32768];
+#ifdef __APPLE__
+    uint32_t size = sizeof(executable);
+    if (_NSGetExecutablePath(executable, &size) != 0) return -1;
+#else
+    ssize_t n = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
+    if (n <= 0) return -1;
+    executable[n] = 0;
+#endif
+    char resolved[32768];
+    if (realpath(executable, resolved) == NULL) return -1;
+    char output[32768];
+    snprintf(output, sizeof(output), "%s/log/backend-startup.log", home);
+    int input = open("/dev/null", O_RDONLY | O_CLOEXEC);
+    int log = open(output, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
+    if (input < 0 || log < 0) {
+        if (input >= 0) close(input); if (log >= 0) close(log); return -1;
+    }
+    int handshake[2];
+    if (pipe(handshake) != 0) { close(input); close(log); return -1; }
+    pid_t child = fork();
+    if (child == 0) {
+        close(handshake[0]);
+        if (setsid() < 0) _exit(127);
+        pid_t detached = fork();
+        if (detached < 0) _exit(127);
+        if (detached > 0) {
+            write(handshake[1], &detached, sizeof(detached));
+            _exit(0);
+        }
+        close(handshake[1]);
+        if (chdir(home) != 0 ||
+            dup2(input, 0) < 0 || dup2(log, 1) < 0 || dup2(log, 2) < 0) _exit(127);
+        if (input > 2) close(input); if (log > 2) close(log);
+        char *argv[] = { resolved, "backend", "start", NULL };
+        execv(resolved, argv);
+        _exit(127);
+    }
+    close(input); close(log);
+    close(handshake[1]);
+    pid_t detached = -1;
+    ssize_t received = read(handshake[0], &detached, sizeof(detached));
+    close(handshake[0]);
+    if (child > 0) { int status; while (waitpid(child, &status, 0) < 0 && errno == EINTR) {} }
+    return received == sizeof(detached) ? detached : -1;
+}
+#endif
+static volatile sig_atomic_t kodex_backend_signal_value = 0;
+static void kodex_backend_signal_handler(int value) { kodex_backend_signal_value = value; }
+static inline void kodex_backend_install_signals(void) {
+    signal(SIGINT, kodex_backend_signal_handler);
+    signal(SIGTERM, kodex_backend_signal_handler);
+}
+static inline int kodex_backend_stop_signal(void) { return kodex_backend_signal_value != 0; }

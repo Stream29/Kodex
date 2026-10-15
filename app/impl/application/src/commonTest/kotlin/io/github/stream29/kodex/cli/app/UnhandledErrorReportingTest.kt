@@ -35,18 +35,22 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
                 assertIs<NewSessionViewModel>(app.viewModel.navigation.value.selected),
             ))
             val popup = app.viewModel.openSettingsPopup(session, SettingsPage.Hooks)
-            val hooks = popup.viewModel.global.hookSettings
             val configured = listOf(
                 NotificationHook("failed-local-hook", setOf(NotificationHookType.StopUnhandledError), "exit 17"),
                 NotificationHook("capture", NotificationHookType.entries.toSet(),
                     "cat >> host-errors.jsonl; printf '\\n' >> host-errors.jsonl"),
             )
-            for (hook in configured) {
-                hooks.add()
-                val editor = assertIs<HookSettingsDialog.Editing>(hooks.state.value.dialog)
-                hooks.updateDraft(editor.token) { HookEditorDraft(hook.name, hook.command, hook.types) }
-                hooks.save(editor.token)
-                hooks.state.first { state -> state.hooks.any { it.name == hook.name } }
+            for (hooks in listOf(popup.viewModel.global.hookSettings, popup.viewModel.global.frontendErrorHooks)) {
+                for (configuredHook in configured) {
+                    val hook = if (hooks === popup.viewModel.global.frontendErrorHooks) configuredHook.copy(
+                        types = setOf(NotificationHookType.StopUnhandledError),
+                    ) else configuredHook
+                    hooks.add()
+                    val editor = assertIs<HookSettingsDialog.Editing>(hooks.state.value.dialog)
+                    hooks.updateDraft(editor.token) { HookEditorDraft(hook.name, hook.command, hook.types) }
+                    hooks.save(editor.token)
+                    hooks.state.first { state -> state.hooks.any { it.name == hook.name } }
+                }
             }
             app.viewModel.dismissPopup(popup)
             val agent = assertNotNull(session.rootAgent.value)
@@ -62,7 +66,7 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
                 }
                 @Suppress("UNREACHABLE_CODE") emptyList()
             }
-            // A real backend Stop primes the actual shared subscriber, not a test-only sink.
+            // A business Stop is handled by the backend; local errors use the separate frontend owner.
             agent.submit(listOf(ContentItem.InputText("before local errors")))
             assertEquals(1, lines(1).size)
             agent.running.first { !it }
@@ -101,7 +105,7 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
         }
     }
 
-    test("one application subscriber dispatches Stop JSON to a local multi-type Hook") {
+    test("one backend consumer dispatches business Stops without duplicate frontend errors") {
         var fail = false
         applicationFixture(response = { if (fail) error("test provider failure") else testAnswer() }) { app, home ->
             val session = assertNotNull(app.viewModel.materializeNewSession(assertIs<NewSessionViewModel>(app.viewModel.navigation.value.selected)))
@@ -114,6 +118,14 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
             hooks.updateDraft(editor.token) { HookEditorDraft(hook.name, hook.command, hook.types) }
             hooks.save(editor.token)
             hooks.state.first { it.hooks == listOf(hook) }
+            val local = popup.viewModel.global.frontendErrorHooks
+            local.add()
+            val localEditor = local.state.value.dialog as HookSettingsDialog.Editing
+            local.updateDraft(localEditor.token) {
+                HookEditorDraft("local-errors", hook.command, setOf(NotificationHookType.StopUnhandledError))
+            }
+            local.save(localEditor.token)
+            local.state.first { it.hooks.size == 1 }
             app.viewModel.dismissPopup(popup) // The single application consumer outlives the editor.
             val agent = requireNotNull(session.rootAgent.value)
             agent.submit(listOf(ContentItem.InputText("first")))

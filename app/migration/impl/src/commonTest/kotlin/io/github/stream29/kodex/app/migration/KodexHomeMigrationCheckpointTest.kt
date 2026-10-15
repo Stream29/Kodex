@@ -39,7 +39,7 @@ public val kodexHomeMigrationCheckpointTest by testSuite {
                         }
                     }
                     val migrations = KodexHomeMigrations +
-                        Migration(MigrationVersion("0.4.12")) { _, _ -> error("Future migration ran") }
+                        Migration(MigrationVersion("99.0.0")) { _, _ -> error("Future migration ran") }
                     var migrationStarted = false
                     val first = prepareKodexHome(
                         home, MigrationVersion(applications[0]), migrations, fileSystem,
