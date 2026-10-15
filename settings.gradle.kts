@@ -38,6 +38,11 @@ dependencyResolutionManagement {
                 includeGroup("com.jakewharton.mosaic")
                 includeGroup("org.gnit.lucene-kmp")
                 includeGroup("io.modelcontextprotocol")
+                includeVersionByRegex(
+                    "io\\.ktor",
+                    "ktor-network-(linuxx64|linuxarm64|macosarm64|mingwx64)",
+                    "[0-9]+\\.[0-9]+\\.[0-9]+-kodex\\.[0-9a-f]{12}",
+                )
             }
         }
         google()
