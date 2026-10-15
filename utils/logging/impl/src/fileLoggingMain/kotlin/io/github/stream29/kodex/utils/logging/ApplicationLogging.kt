@@ -13,11 +13,11 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSys
 import kotlinx.io.files.Path
 
 /** Configures process-wide logging before application services are created. */
-public suspend fun initializeLogging(kodexHome: Path) {
+public suspend fun initializeLogging(kodexHome: Path, processName: String = LogFileBaseName) {
     val logDirectory = Path(kodexHome, LogDirectoryName)
     SystemCoroutineFileSystem.createDirectories(logDirectory)
     val appender = KermitAppender(
-        RollingFileLogWriter(rollingFileLogWriterConfig(logDirectory)),
+        RollingFileLogWriter(rollingFileLogWriterConfig(logDirectory, processName)),
     )
 
     KotlinLoggingConfiguration.logStartupMessage = false
@@ -26,9 +26,9 @@ public suspend fun initializeLogging(kodexHome: Path) {
     KotlinLoggingConfiguration.direct.appender = appender
 }
 
-internal fun rollingFileLogWriterConfig(logDirectory: Path): RollingFileLogWriterConfig =
+internal fun rollingFileLogWriterConfig(logDirectory: Path, processName: String = LogFileBaseName): RollingFileLogWriterConfig =
     RollingFileLogWriterConfig(
-        logFileName = LogFileBaseName,
+        logFileName = processName,
         logFilePath = logDirectory,
         rollOnSize = RollOnSizeBytes,
         maxLogFiles = MaxLogFiles,

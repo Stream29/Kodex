@@ -260,6 +260,7 @@ moduleTree("app") {
     }
     moduleTree("impl") {
         module("application")
+        module("backend-daemon")
         module("rpc")
         module("session")
         module("view")
@@ -288,6 +289,10 @@ moduleTree("rpc") {
     moduleTree("impl") {
         module("client")
         module("in-memory")
+        module("local")
+        module("local-server")
+        module("backend-control-client")
+        module("websocket")
         module("krpc-utils-patch")
         module("server")
     }
