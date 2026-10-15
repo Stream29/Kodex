@@ -254,8 +254,8 @@ def build(args):
         java = jdk21
         os.environ["JAVA_HOME"] = str(java)
         # Official local-build switch; this closure publishes no Android Native artifacts.
-        with (source / "gradle.properties").open("a") as properties:
-            properties.write("\ntarget.androidNative=false\n")
+        with (source / "gradle.properties").open("ab") as properties:
+            properties.write(b"\ntarget.androidNative=false\n")
     tasks = task_set(args.fork, args.host)
     wrapper = ["cmd", "/c", "gradlew.bat"] if args.host == "windows" else ["bash", "gradlew"]
     # Native compiler work can live in the Gradle JVM. Preserve the proven

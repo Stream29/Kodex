@@ -87,6 +87,11 @@ class KtorNativePublicationTests(unittest.TestCase):
         pipeline = (Path(__file__).parent / "pipeline.py").read_text()
         self.assertIn('Path(name).name == f"{artifact}-{data[\'version\']}-javadoc.jar"', pipeline)
 
+    def test_desktop_scope_preserves_cross_host_input_bytes(self):
+        text = (Path(__file__).parent / "pipeline.py").read_text()
+        self.assertIn('(source / "gradle.properties").open("ab")', text)
+        self.assertIn('properties.write(b"\\ntarget.androidNative=false\\n")', text)
+
     def test_official_utils_cannot_be_replaced_by_fork_version(self):
         for path in self.repo.rglob("*.module"):
             doc = json.loads(path.read_bytes())
