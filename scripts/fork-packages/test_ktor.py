@@ -54,6 +54,15 @@ class KtorNativePublicationTests(unittest.TestCase):
         self.assertIn("p.path == ':ktor-network'", hook)
         self.assertIn("p.afterEvaluate", hook)
         self.assertIn("configurePublication(p)", hook)
+        self.assertIn("if (System.getenv('FORK_NAME') != 'ktor')", text)
+
+    def test_ktor_metadata_toolchain_is_explicit(self):
+        workflow = (Path(__file__).resolve().parents[2] /
+                    ".github/workflows/fork-packages-ktor.yml").read_text()
+        self.assertIn('java-version: "8"', workflow)
+        self.assertIn('distribution: zulu', workflow)
+        self.assertIn("FORK_JDK8: ${{ steps.java8.outputs.path }}", workflow)
+        self.assertLess(workflow.index("- id: java8"), workflow.index("- id: java21"))
 
     def test_standalone_component_has_no_unpublished_root_url(self):
         path = next(self.repo.rglob("*linuxx64*.module"))

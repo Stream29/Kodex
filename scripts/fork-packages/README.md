@@ -10,7 +10,8 @@
   The unchanged official `ktor-utils:3.5.0` dependency is explicitly validated.
 - The four Native publications retain the existing three-host build/runtime gates
   and single CI writer. Only this producer uses the upstream-required JDK21 and
-  module-local version override; it never turns other `io.ktor` dependencies into
+  provides JDK8 for Ktor's JVM variant attributes during metadata generation.
+  It uses a module-local version override and never turns other `io.ktor` dependencies into
   unpublished fork versions. Android Native is disabled via Ktor's local-build knob.
 - Binary probes resolve the official root/JVM, pin only four Native coordinates,
   assert the actual selected versions, and exchange real loopback TCP messages.

@@ -16,7 +16,11 @@ def configurePublication = { p ->
     def publishing = p.extensions.getByType(PublishingExtension)
     publishing.publications.configureEach {
         it.version = version
-        artifacts.removeAll { it.classifier == 'javadoc' || it.extension == 'asc' }
+        // Ktor's Native publications have neither attachment; querying this collection
+        // here would realize KGP componentArtifacts before its FinaliseDsl stage.
+        if (System.getenv('FORK_NAME') != 'ktor') {
+            artifacts.removeAll { it.classifier == 'javadoc' || it.extension == 'asc' }
+        }
     }
     publishing.repositories.maven {
         name = 'ForkStaging'

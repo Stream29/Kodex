@@ -248,6 +248,7 @@ def build(args):
     os.environ["FORK_NAME"] = args.fork
     java = Path(os.environ["JAVA_HOME"])
     jdk21 = Path(os.environ["FORK_JDK21"])
+    jdk8 = Path(os.environ["FORK_JDK8"]) if args.fork == "ktor" else None
     android = prepare_android(args.host) if args.fork == "lucene" else None
     if args.fork == "ktor":
         java = jdk21
@@ -266,7 +267,7 @@ def build(args):
         "--max-workers=1", "--no-parallel", "--no-configuration-cache", "--no-build-cache", "--no-scan",
         "-Pkotlin.compiler.execution.strategy=daemon",
         "-Pkotlin.daemon.useFallbackStrategy=false", f"-Pkotlin.daemon.jvmargs=-Xmx{kotlin_heap}",
-        f"-Porg.gradle.java.installations.paths={java},{jdk21}",
+        f"-Porg.gradle.java.installations.paths={java},{jdk21}" + (f",{jdk8}" if jdk8 else ""),
         "-Porg.gradle.java.installations.auto-download=false",
         *([f"-Pversion={data['version']}"] if args.fork != "ktor" else []),
         # Lucene establishes coordinates itself; VERSION_NAME makes Vanniktech
@@ -297,6 +298,10 @@ def build(args):
     info = subprocess.run([str(jdk21 / "bin" / ("java.exe" if args.host == "windows" else "java")),
                            "-version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     toolchain["java21"] = info.stderr.decode().strip()
+    if jdk8:
+        info8 = subprocess.run([str(jdk8 / "bin" / ("java.exe" if args.host == "windows" else "java")),
+                                "-version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        toolchain["java8"] = info8.stderr.decode().strip()
     toolchain["compilerArchives"] = {"native": native_compiler_evidence(toolchain["kgp"])}
     toolchain["nativeCompiler"] = toolchain["compilerArchives"]["native"]["version"]
     if args.fork == "mcp":
