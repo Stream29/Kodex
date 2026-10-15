@@ -11,6 +11,27 @@ def staging = new File(System.getenv('FORK_STAGING_REPO')).canonicalFile
 def version = System.getenv('FORK_VERSION')
 if (!version || !staging.isAbsolute()) throw new GradleException('Missing staging/version')
 
+// Run only after the owning project's plugins/scripts have established coordinates.
+def configurePublication = { p ->
+    def publishing = p.extensions.getByType(PublishingExtension)
+    publishing.publications.configureEach {
+        it.version = version
+        artifacts.removeAll { it.classifier == 'javadoc' || it.extension == 'asc' }
+    }
+    publishing.repositories.maven {
+        name = 'ForkStaging'
+        url = staging.toURI()
+    }
+    p.tasks.withType(PublishToMavenRepository).configureEach {
+        doFirst {
+            if (repository.url.scheme != 'file' || new File(repository.url).canonicalFile != staging) {
+                throw new GradleException('Only the isolated file repository is authorized')
+            }
+        }
+    }
+    p.tasks.withType(Sign).configureEach { enabled = false }
+}
+
 gradle.settingsEvaluated { settings ->
     if (System.getenv('FORK_NAME') == 'mcp' &&
         settings.settingsDir.canonicalFile == new File(System.getenv('FORK_SOURCE_DIR')).canonicalFile) {
@@ -21,9 +42,16 @@ gradle.settingsEvaluated { settings ->
 }
 
 gradle.beforeProject { p ->
-    if (System.getenv('FORK_NAME') == 'ktor' && p.path == ':ktor-network') {
+    if (System.getenv('FORK_NAME') == 'ktor' && p.path == ':ktor-network' &&
+        p.rootProject.rootDir.canonicalFile == new File(System.getenv('FORK_SOURCE_DIR')).canonicalFile) {
         // Other io.ktor modules remain official dependencies, not unpublished fork coordinates.
-        p.afterEvaluate { p.version = version }
+        // Ktor uses configuration-on-demand: projectsEvaluated precedes this project's evaluation.
+        p.pluginManager.withPlugin('com.vanniktech.maven.publish') {
+            p.afterEvaluate {
+                p.version = version
+                configurePublication(p)
+            }
+        }
     }
     p.tasks.withType(AbstractArchiveTask).configureEach {
         preserveFileTimestamps = false
@@ -46,31 +74,12 @@ gradle.projectsEvaluated {
     if (gradle.rootProject.rootDir.canonicalFile !=
         new File(System.getenv('FORK_SOURCE_DIR')).canonicalFile) return
     gradle.rootProject.allprojects { p ->
-        if (p.plugins.hasPlugin('maven-publish') &&
-            (System.getenv('FORK_NAME') != 'ktor' || p.path == ':ktor-network')) {
+        if (p.plugins.hasPlugin('maven-publish') && System.getenv('FORK_NAME') != 'ktor') {
             // Adding a repository while Vanniktech is still applying its base
             // maven-publish plugin realizes tasks before coordinates() is set.
             // Configure our file destination only after the fork's plugins and
             // project scripts have established their publication identity.
-            def publishing = p.extensions.getByType(PublishingExtension)
-            publishing.publications.configureEach {
-                // Keep original group/artifact and real component; no synthetic JARs.
-                it.version = version
-                artifacts.removeAll { it.classifier == 'javadoc' || it.extension == 'asc' }
-            }
-            publishing.repositories.maven {
-                name = 'ForkStaging'
-                url = staging.toURI()
-            }
-            p.tasks.withType(PublishToMavenRepository).configureEach {
-                doFirst {
-                    if (repository.url.scheme != 'file' ||
-                        new File(repository.url).canonicalFile != staging) {
-                        throw new GradleException('Only the isolated file repository is authorized')
-                    }
-                }
-            }
-            p.tasks.withType(Sign).configureEach { enabled = false }
+            configurePublication(p)
         }
         if (p.plugins.hasPlugin('co.touchlab.cklib')) {
             // cklib 0.3.5 hardcodes user.home/.konan, ignoring KONAN_DATA_DIR.

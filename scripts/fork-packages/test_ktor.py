@@ -47,6 +47,14 @@ class KtorNativePublicationTests(unittest.TestCase):
             actual = identity("ktor", self.repo)
         self.assertEqual(actual["version"], self.version)
 
+    def test_ktor_repository_hook_supports_configuration_on_demand(self):
+        text = (Path(__file__).parent / "publish.init.gradle").read_text()
+        hook = text.split("gradle.beforeProject { p ->", 1)[1].split(
+            "p.tasks.withType(AbstractArchiveTask)", 1)[0]
+        self.assertIn("p.path == ':ktor-network'", hook)
+        self.assertIn("p.afterEvaluate", hook)
+        self.assertIn("configurePublication(p)", hook)
+
     def test_standalone_component_has_no_unpublished_root_url(self):
         path = next(self.repo.rglob("*linuxx64*.module"))
         doc = json.loads(path.read_bytes())
