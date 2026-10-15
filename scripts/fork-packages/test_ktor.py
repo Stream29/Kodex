@@ -78,6 +78,15 @@ class KtorNativePublicationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate(self.repo, self.spec, self.version)
 
+    def test_dokka_attachment_does_not_expand_the_native_payload(self):
+        artifact = "ktor-network-macosarm64"
+        directory = self.repo / "io/ktor" / artifact / self.version
+        (directory / f"{artifact}-{self.version}-javadoc.jar").write_bytes(b"documentation")
+        with self.assertRaisesRegex(ValueError, "Unexpected publication attachment"):
+            validate(self.repo, self.spec, self.version)
+        pipeline = (Path(__file__).parent / "pipeline.py").read_text()
+        self.assertIn('Path(name).name == f"{artifact}-{data[\'version\']}-javadoc.jar"', pipeline)
+
     def test_official_utils_cannot_be_replaced_by_fork_version(self):
         for path in self.repo.rglob("*.module"):
             doc = json.loads(path.read_bytes())

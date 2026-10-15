@@ -341,6 +341,9 @@ def build(args):
             continue
         artifact = Path(name).parts[-3]
         require(artifact in allowed, "Unexpected host publication")
+        # Ktor adds a Dokka jar late. Filter staging bytes, not KGP's lazy artifacts.
+        if args.fork == "ktor" and Path(name).name == f"{artifact}-{data['version']}-javadoc.jar":
+            continue
         if name.endswith(".module"):
             content = normalize_module(content, FORKS[args.fork], data["version"],
                                        allowed[artifact] == "root", artifact)
