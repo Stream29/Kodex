@@ -61,11 +61,14 @@ def identity(fork, root):
     dirty = git("submodule", "foreach", "--quiet", "--recursive",
                 "git status --porcelain --untracked-files=all", cwd=source)
     require(not dirty, "Dirty nested submodule")
-    props = git("show", f"{commit}:gradle.properties", cwd=source)
-    key = "VERSION_NAME" if fork == "mosaic" else "version"
-    match = re.search(rf"(?m)^{key}=(.+)$", props)
-    require(match is not None, "Missing upstream version")
-    upstream = match.group(1).strip()
+    if "versionFile" in spec:
+        upstream = git("show", f"{commit}:{spec['versionFile']}", cwd=source).strip()
+    else:
+        props = git("show", f"{commit}:gradle.properties", cwd=source)
+        key = "VERSION_NAME" if fork == "mosaic" else "version"
+        match = re.search(rf"(?m)^{key}=(.+)$", props)
+        require(match is not None, "Missing upstream version")
+        upstream = match.group(1).strip()
     require(re.fullmatch(r"[A-Za-z0-9._-]+", upstream), "Unsafe upstream version")
     return {
         "fork": fork, "repository": spec["repository"], "branch": "kodex-submodule",
@@ -319,6 +322,7 @@ def build(args):
         name: digest((source / name).read_bytes()) for name in
         ("gradle.properties", "gradle/libs.versions.toml", "gradle/wrapper/gradle-wrapper.properties",
          "gradle/wrapper/gradle-wrapper.jar")
+        + (("VERSION",) if args.fork == "ktor" else ())
     }
     write_json(args.output / "toolchain.json", toolchain)
     # Stage only each host's authoritative publications. Never merge host-specific root lists.

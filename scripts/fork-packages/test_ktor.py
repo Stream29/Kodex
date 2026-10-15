@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from contract import FORKS, expected_artifacts, normalize_module, validate
-from pipeline import task_set
+from pipeline import identity, task_set
 from publisher import upload_set
 from test_publication import fixture
 
@@ -27,6 +27,25 @@ class KtorNativePublicationTests(unittest.TestCase):
                          [":ktor-network:publish" + t + "PublicationToForkStagingRepository"
                           for t in ("LinuxX64", "LinuxArm64", "MacosArm64", "MingwX64")])
         validate(self.repo, self.spec, self.version)
+
+    def test_identity_reads_upstream_version_file(self):
+        commit = "64cf7fdbcf65eac0186df0954a03a98b922a52e3"
+
+        def git(*args, **kwargs):
+            if args[0] == "ls-tree":
+                return f"160000 commit {commit}\tKtor"
+            if args[0] == "rev-parse":
+                return commit
+            if "get-url" in args:
+                return "https://github.com/Stream29/ktor.git"
+            if args[0] == "show":
+                self.assertEqual(args[1], commit + ":VERSION")
+                return "3.5.0"
+            return ""
+
+        with patch("pipeline.git", side_effect=git), patch("pipeline.run", return_value=""):
+            actual = identity("ktor", self.repo)
+        self.assertEqual(actual["version"], self.version)
 
     def test_standalone_component_has_no_unpublished_root_url(self):
         path = next(self.repo.rglob("*linuxx64*.module"))

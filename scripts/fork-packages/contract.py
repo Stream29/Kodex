@@ -36,6 +36,7 @@ FORKS = {
     "ktor": {
         "path": "Ktor", "repository": "Stream29/ktor", "group": "io.ktor",
         "modules": {"ktor-network": ":ktor-network"},
+        "versionFile": "VERSION",
         "targets": ("linuxX64", "linuxArm64", "macosArm64", "mingwX64"),
         "hosts": {"linux": ("linuxX64", "linuxArm64"),
                   "mac": ("macosArm64",), "windows": ("mingwX64",)},
