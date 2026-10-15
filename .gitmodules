@@ -7,3 +7,7 @@
 [submodule "LuceneKmp"]
 	path = LuceneKmp
 	url = git@github.com:Stream29/lucene-kmp.git
+[submodule "Ktor"]
+	path = Ktor
+	url = git@github.com:Stream29/ktor.git
+	branch = kodex-submodule

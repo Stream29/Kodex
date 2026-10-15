@@ -33,6 +33,17 @@ FORKS = {
         "path": "LuceneKmp", "repository": "Stream29/lucene-kmp",
         "group": "org.gnit.lucene-kmp", "modules": {"lucene-kmp-core": ":core"},
     },
+    "ktor": {
+        "path": "Ktor", "repository": "Stream29/ktor", "group": "io.ktor",
+        "modules": {"ktor-network": ":ktor-network"},
+        "targets": ("linuxX64", "linuxArm64", "macosArm64", "mingwX64"),
+        "hosts": {"linux": ("linuxX64", "linuxArm64"),
+                  "mac": ("macosArm64",), "windows": ("mingwX64",)},
+        "publishRoot": False,
+        "externalModules": {"ktor-utils": "3.5.0"},
+        "cinterops": {"linuxX64": ("network",), "linuxArm64": ("network",),
+                     "macosArm64": ("network", "un"), "mingwX64": ("afunix",)},
+    },
 }
 NS = {"m": "http://maven.apache.org/POM/4.0.0"}
 NATIVE_NAMES = {"linuxX64": "linux_x64", "linuxArm64": "linux_arm64",
@@ -80,6 +91,8 @@ def smoke_gates(fork, host):
     if fork == "mcp" and host == "linux":
         tasks += ["compileKotlinJs", "jsNodeDevelopmentRun"]
         runtime.append("js")
+    if fork == "ktor":
+        tasks.append("verifyNativeNetworkRepair")
     return {"tasks": tasks, "runtime": runtime, "compileOnly": compile_only}
 
 
@@ -132,7 +145,7 @@ def coordinate(spec, artifact, version):
 
 def expected_artifacts(spec, targets=None):
     if targets is None:
-        targets = ("root",) + target_set(spec)
+        targets = (("root",) if spec.get("publishRoot", True) else ()) + target_set(spec)
     return {base if target == "root" else f"{base}-{target.lower()}": target
             for base in spec["modules"] for target in targets}
 
@@ -146,11 +159,16 @@ def local_reference(parent, relative):
     return result
 
 
-def normalize_module(data, spec, version, root):
+def normalize_module(data, spec, version, root, artifact=None):
     doc = json.loads(data)
     require(doc.get("formatVersion") == "1.1", "Unexpected Gradle metadata format")
     # Gradle's per-invocation buildId isn't artifact identity.
     doc.get("createdBy", {}).get("gradle", {}).pop("buildId", None)
+    if not spec.get("publishRoot", True):
+        require(artifact in expected_artifacts(spec), "Unknown standalone publication")
+        # Native-only publications must not reference an unpublished fork root.
+        doc["component"] = {**doc["component"], "module": artifact}
+        doc["component"].pop("url", None)
     if root:
         allowed = set(expected_artifacts(spec))
         kept = []
@@ -164,6 +182,15 @@ def normalize_module(data, spec, version, root):
             kept.append(variant)
         doc["variants"] = kept
     return encoded(doc)
+
+
+def external_dependency(spec, module, version, target):
+    """Explicit unchanged upstream edges, never a blanket same-group exemption."""
+    for base, wanted in spec.get("externalModules", {}).items():
+        if module in (base, f"{base}-{target.lower()}"):
+            require(version == wanted, "Upstream dependency version changed")
+            return True
+    return False
 
 
 def variant_role(attributes, target):
@@ -253,6 +280,8 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
         base = artifact if target == "root" else artifact.removesuffix("-" + target.lower())
         stem = f"{artifact}-{version}"
         extension = ".jar" if artifacts[artifact] in ("root", "jvm") else ".klib"
+        cinterops = {stem + f"-cinterop-{name}.klib"
+                     for name in spec.get("cinterops", {}).get(target, ())}
         require(filename.startswith(stem + ".") or filename.startswith(stem + "-"),
                 "Unexpected filename")
         require(filename in {stem + ext for ext in
@@ -260,7 +289,8 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
                 (base == "mosaic-tty" and target in NATIVE_NAMES and
                  filename == stem + "-cinterop-mosaic.klib") or
                 (target == "root" and filename == stem + "-kotlin-tooling-metadata.json") or
-                (target in NATIVE_NAMES and filename == stem + "-metadata.jar"),
+                (target in NATIVE_NAMES and filename == stem + "-metadata.jar") or
+                filename in cinterops,
                 "Unexpected publication attachment")
         require(data, "Empty artifact")
         if filename == stem + "-kotlin-tooling-metadata.json":
@@ -294,6 +324,8 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
         for dep in pom.findall("m:dependencies/m:dependency", NS):
             if dep.findtext("m:groupId", namespaces=NS) == spec["group"]:
                 module = dep.findtext("m:artifactId", namespaces=NS)
+                if external_dependency(spec, module, dep.findtext("m:version", namespaces=NS), target):
+                    continue
                 require(module in artifacts and
                         dep.findtext("m:version", namespaces=NS) == version,
                         "POM fork dependency outside closure")
@@ -363,6 +395,9 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
                         else "Missing essential module fork dependency")
             for dep in variant.get("dependencies", []) + variant.get("dependencyConstraints", []):
                 if dep.get("group") == spec["group"]:
+                    if external_dependency(spec, dep.get("module"),
+                                           dep.get("version", {}).get("requires"), target):
+                        continue
                     require(dep.get("module") in artifacts and
                             dep.get("version", {}).get("requires") == version,
                             "Module fork dependency outside closure")
@@ -395,6 +430,13 @@ def validate(repo, spec, version, targets=None, compiler_version=None, js_compil
                 allowed = {stem + attachment}
                 if base == "mosaic-tty" and target in NATIVE_NAMES and role == "api":
                     allowed.add(stem + "-cinterop-mosaic.klib")
+                if role == "api":
+                    allowed.update(stem + f"-cinterop-{name}.klib"
+                                   for name in spec.get("cinterops", {}).get(target, ()))
+                    if spec.get("cinterops"):
+                        require(allowed <= {local_reference(parent, e["url"])
+                                            for e in variant.get("files", [])},
+                                "Missing required cinterop payload")
                 require(all(local_reference(parent, e["url"]) in allowed
                             for e in variant.get("files", [])), "Payload assigned to wrong variant role")
             for entry in variant.get("files", []):

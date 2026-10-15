@@ -21,6 +21,10 @@ gradle.settingsEvaluated { settings ->
 }
 
 gradle.beforeProject { p ->
+    if (System.getenv('FORK_NAME') == 'ktor' && p.path == ':ktor-network') {
+        // Other io.ktor modules remain official dependencies, not unpublished fork coordinates.
+        p.afterEvaluate { p.version = version }
+    }
     p.tasks.withType(AbstractArchiveTask).configureEach {
         preserveFileTimestamps = false
         reproducibleFileOrder = true
@@ -42,7 +46,8 @@ gradle.projectsEvaluated {
     if (gradle.rootProject.rootDir.canonicalFile !=
         new File(System.getenv('FORK_SOURCE_DIR')).canonicalFile) return
     gradle.rootProject.allprojects { p ->
-        if (p.plugins.hasPlugin('maven-publish')) {
+        if (p.plugins.hasPlugin('maven-publish') &&
+            (System.getenv('FORK_NAME') != 'ktor' || p.path == ':ktor-network')) {
             // Adding a repository while Vanniktech is still applying its base
             // maven-publish plugin realizes tasks before coordinates() is set.
             // Configure our file destination only after the fork's plugins and

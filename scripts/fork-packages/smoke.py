@@ -11,6 +11,48 @@ from contract import FORKS, HOSTS, digest, encoded, require, smoke_gates
 from pipeline import isolated_environment, run, verify_bundle, write_json
 
 PROBES = {
+    "ktor": """import io.ktor.network.selector.SelectorManager
+import io.ktor.network.sockets.*
+import io.ktor.utils.io.*
+import kotlinx.coroutines.*
+
+fun main() = runBlocking {
+    SelectorManager(Dispatchers.IO).use { selector ->
+        val tcp = aSocket(selector).tcp()
+        val server = tcp.bind("127.0.0.1", port = 0)
+        try {
+            coroutineScope {
+                val worker = async {
+                    val socket = server.accept()
+                    try {
+                        val input = socket.openReadChannel()
+                        val output = socket.openWriteChannel(autoFlush = true)
+                        repeat(16) {
+                            check(input.readUTF8Line() == "ping")
+                            output.writeStringUtf8("po")
+                            output.flush()
+                            output.writeStringUtf8("ng\\n")
+                            output.flush()
+                        }
+                    } finally { socket.close(); socket.awaitClosed() }
+                }
+                val client = tcp.connect(server.localAddress)
+                try {
+                    val input = client.openReadChannel()
+                    val output = client.openWriteChannel(autoFlush = true)
+                    repeat(16) {
+                        output.writeStringUtf8("ping\\n")
+                        output.flush()
+                        check(input.readUTF8Line() == "pong")
+                    }
+                } finally { client.close(); client.awaitClosed() }
+                worker.await()
+            }
+        } finally { server.close(); server.awaitClosed() }
+    }
+    println("Ktor binary TCP exchange and cleanup passed")
+}
+""",
     "mosaic": """import com.jakewharton.mosaic.focus.FocusRequester
 import com.jakewharton.mosaic.tty.TestTerminal
 
@@ -172,6 +214,9 @@ def smoke(args):
     jvm_launcher = (Path(java) / "bin" / ("java.exe" if args.host == "windows" else "java")).as_posix()
     require("'" not in jvm_launcher, "Unsafe JVM launcher path")
     repo = (args.bundle / "repo").resolve().as_uri()
+    repo_filter = (f"includeGroup('{group}')" if args.fork != "ktor" else "\n".join(
+        f"includeVersion('io.ktor', 'ktor-network-{t.lower()}', '{version}')"
+        for t in FORKS["ktor"]["targets"]))
     settings = f"""pluginManagement {{
     repositories {{ gradlePluginPortal(); mavenCentral(); google() }}
 }}
@@ -180,7 +225,7 @@ dependencyResolutionManagement {{
     repositories {{
         exclusiveContent {{
             forRepository {{ maven {{ url = uri('{repo}') }} }}
-            filter {{ includeGroup('{group}') }}
+            filter {{ {repo_filter} }}
         }}
         mavenCentral()
         google()
@@ -215,7 +260,8 @@ extensions.configure(org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsEnvSpec
     spec.version.set('{node_version}')
 }}
 """
-    dependencies = "\n".join(f"            implementation('{group}:{module}:{version}')"
+    dependency_version = doc["identity"]["upstreamVersion"] if args.fork == "ktor" else version
+    dependencies = "\n".join(f"            implementation('{group}:{module}:{dependency_version}')"
                              for module in FORKS[args.fork]["modules"])
     if args.fork == "mcp":
         dependencies += "\n            implementation('org.jetbrains.kotlinx:kotlinx-io-core:0.9.1')"
@@ -223,6 +269,28 @@ extensions.configure(org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsEnvSpec
         dependencies += "\n            implementation('io.github.oshai:kotlin-logging:8.0.4')"
     dependencies += "\n            implementation('org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0')"
     jni_task = ""
+    network_rule = ""
+    if args.fork == "ktor":
+        coordinates = ", ".join(f"'io.ktor:ktor-network-{t.lower()}:{version}'"
+                                for t in FORKS["ktor"]["targets"])
+        network_rule = f"""
+configurations.configureEach {{ resolutionStrategy.force({coordinates}) }}
+tasks.register('verifyNativeNetworkRepair') {{
+    doLast {{
+        kotlin.targets.findAll {{ it.platformType.name() == 'native' }}.each {{ target ->
+            def artifacts = configurations.getByName(target.name + 'CompileKlibraries')
+                .resolvedConfiguration.resolvedArtifacts.findAll {{
+                    it.moduleVersion.id.group == 'io.ktor' &&
+                    it.moduleVersion.id.name == 'ktor-network-' + target.name.toLowerCase()
+                }}
+            assert !artifacts.empty && artifacts.every {{ it.moduleVersion.id.version == '{version}' }}
+        }}
+        def jvm = configurations.jvmCompileClasspath.resolvedConfiguration.resolvedArtifacts
+            .findAll {{ it.moduleVersion.id.name == 'ktor-network-jvm' }}
+        assert !jvm.empty && jvm.every {{ it.moduleVersion.id.version == '{dependency_version}' }}
+    }}
+}}
+"""
     if args.fork == "mosaic":
         jdk21 = Path(os.environ["FORK_JDK21"])
         jni_java = jdk21 / "bin" / ("java.exe" if args.host == "windows" else "java")
@@ -267,6 +335,7 @@ tasks.register('verifyForkJvm', JavaExec) {{
     jvmArgs('--enable-native-access=ALL-UNNAMED')
 }}
 {jni_task}
+{network_rule}
 """
     (args.output / "build.gradle").write_text(build)
     probe_sets = [t + "Main" for t in targets] if js_gate else ["commonMain"]

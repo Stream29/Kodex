@@ -52,7 +52,7 @@ class AdmissionTests(unittest.TestCase):
         self.assertIn("config.konanHome = home.canonicalPath", init)
         self.assertIn("System.getenv('KONAN_DATA_DIR')", init)
         self.assertIn("dependsOn(p.tasks.named('downloadKotlinNativeDistribution'))", init)
-        self.assertIn('if args.fork != "lucene" else []',
+        self.assertIn('if args.fork not in ("lucene", "ktor") else []',
                       (root / "pipeline.py").read_text())
 
     def test_windows_resize_receipt_requires_both_actual_passes(self):

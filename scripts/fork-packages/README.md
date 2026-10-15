@@ -1,5 +1,21 @@
 # Fork package CI handoff
 
+## Ktor Native-only repair
+
+- `Ktor` pins the independent `Stream29/ktor` maintenance commit, not the upstream
+  contribution branch. Only `ktor-network-{linuxx64,linuxarm64,macosarm64,mingwx64}`
+  are published; official root/JVM and all other Ktor modules remain unchanged.
+- Native GMM is normalized to a self-contained component, not a redirect to an
+  unpublished fork root. Real network/un/afunix cinterop payloads are preserved.
+  The unchanged official `ktor-utils:3.5.0` dependency is explicitly validated.
+- The four Native publications retain the existing three-host build/runtime gates
+  and single CI writer. Only this producer uses the upstream-required JDK21 and
+  module-local version override; it never turns other `io.ktor` dependencies into
+  unpublished fork versions. Android Native is disabled via Ktor's local-build knob.
+- Binary probes resolve the official root/JVM, pin only four Native coordinates,
+  assert the actual selected versions, and exchange real loopback TCP messages.
+  No new package is consumed before complete immutable upload and byte verification.
+
 - **IMPLEMENTATION READY / VALIDATION PENDING.**
 - Worker scope: these scripts and the three `fork-packages-*.yml` workflows.
 - SDK JS closure delta (Session 552): only these scripts and the MCP workflow;

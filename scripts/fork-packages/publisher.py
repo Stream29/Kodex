@@ -12,7 +12,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from contract import FORKS, HOSTS, coordinate, digest, files, require, safe_name, smoke_gates
+from contract import FORKS, HOSTS, coordinate, digest, expected_artifacts, files, require, safe_name, smoke_gates
 from pipeline import live_main, require_trusted_event, verify_bundle
 
 ENDPOINT = "https://maven.pkg.github.com/stream29/kodex"
@@ -96,7 +96,7 @@ def upload_set(bundle, fork, identity_sha256=None):
     for path, data in raw.items():
         for algorithm in ("sha1", "sha256", "sha512", "md5"):
             result[path + "." + algorithm] = hashlib.new(algorithm, data).hexdigest().encode()
-    anchor = sorted(FORKS[fork]["modules"])[0]
+    anchor = sorted(expected_artifacts(FORKS[fork]))[0]
     version = doc["identity"]["version"]
     manifest_path = (coordinate(FORKS[fork], anchor, version) +
                      f"/{anchor}-{version}-kodex-manifest.json")

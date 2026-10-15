@@ -75,11 +75,16 @@ def fixture(repo, spec, version):
 
     for base in spec["modules"]:
         api, implementation = edges.get(base, ([], []))
-        for target in ("root",) + target_set(spec):
+        for target in (("root",) if spec.get("publishRoot", True) else ()) + target_set(spec):
             artifact = base if target == "root" else f"{base}-{target.lower()}"
             parent = coordinate(spec, artifact, version)
             stem = f"{artifact}-{version}"
-            dependency = "<dependencies>" + "".join(
+            external = "".join(
+                "<dependency>" + f"<groupId>{spec['group']}</groupId>"
+                f"<artifactId>{d}-{target.lower()}</artifactId><version>{v}</version>"
+                "<scope>compile</scope></dependency>"
+                for d, v in spec.get("externalModules", {}).items())
+            dependency = "<dependencies>" + external + "".join(
                 "<dependency>" + f"<groupId>{spec['group']}</groupId>"
                 f"<artifactId>{d if target == 'root' else d + '-' + target.lower()}</artifactId>"
                 f"<version>{version}</version><scope>"
@@ -139,8 +144,14 @@ def fixture(repo, spec, version):
                     "default/manifest": (f"native_targets={native_names[target]}\ncompiler_version=2.4.0\n"
                                          "builtins_platform=NATIVE\ninterop=true\n"),
                     "default/linkdata/module": b"offline cinterop metadata model"})
+            for interop in spec.get("cinterops", {}).get(target, ()):
+                result[f"{parent}/{stem}-cinterop-{interop}.klib"] = archive({
+                    "default/manifest": f"native_targets={native_names[target]}\ncompiler_version=2.4.0\n",
+                    "default/linkdata/module": b"offline cinterop model"})
             component = {"group": spec["group"], "module": base, "version": version}
-            if target != "root":
+            if not spec.get("publishRoot", True):
+                component["module"] = artifact
+            elif target != "root":
                 component["url"] = f"../../{base}/{version}/{base}-{version}.module"
             variants = []
             for role in roles(target):
@@ -148,6 +159,9 @@ def fixture(repo, spec, version):
                 filenames = [stem + extension]
                 if base == "mosaic-tty" and target in native_names and role == "api":
                     filenames.append(stem + "-cinterop-mosaic.klib")
+                if role == "api":
+                    filenames += [stem + f"-cinterop-{i}.klib"
+                                  for i in spec.get("cinterops", {}).get(target, ())]
                 entries = []
                 for filename in filenames:
                     payload = result[parent + "/" + filename]
@@ -158,6 +172,9 @@ def fixture(repo, spec, version):
                     deps = api + (implementation if target not in ("jvm", "js") or role == "runtime" else [])
                     variant["dependencies"] = [{"group": spec["group"], "module": d,
                                                "version": {"requires": version}} for d in deps]
+                    variant["dependencies"] += [
+                        {"group": spec["group"], "module": d, "version": {"requires": v}}
+                        for d, v in spec.get("externalModules", {}).items()]
                 variants.append(variant)
             if target == "root":
                 variants += [{"name": t if role == "api" else t + role,
@@ -1211,6 +1228,8 @@ class TaskTests(unittest.TestCase):
                            "windows": ("MingwX64",)}[host]
                 if fork == "mcp" and host == "mac":
                     targets += ("Js",)
+                if fork == "ktor" and host == "mac":
+                    targets = ("MacosArm64",)
                 self.assertEqual(task_set(fork, host), [
                     f"{project}:publish{t}PublicationToForkStagingRepository"
                     for project in spec["modules"].values() for t in targets])
@@ -1223,6 +1242,8 @@ class TaskTests(unittest.TestCase):
                     expected += ["compileKotlinLinuxArm64"]
                 if fork == "mcp" and host == "linux":
                     expected += ["compileKotlinJs", "jsNodeDevelopmentRun"]
+                if fork == "ktor":
+                    expected += ["verifyNativeNetworkRepair"]
                 self.assertEqual(smoke_gates(fork, host)["tasks"], expected)
 
 

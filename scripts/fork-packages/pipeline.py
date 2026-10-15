@@ -246,11 +246,17 @@ def build(args):
     java = Path(os.environ["JAVA_HOME"])
     jdk21 = Path(os.environ["FORK_JDK21"])
     android = prepare_android(args.host) if args.fork == "lucene" else None
+    if args.fork == "ktor":
+        java = jdk21
+        os.environ["JAVA_HOME"] = str(java)
+        # Official local-build switch; this closure publishes no Android Native artifacts.
+        with (source / "gradle.properties").open("a") as properties:
+            properties.write("\ntarget.androidNative=false\n")
     tasks = task_set(args.fork, args.host)
     wrapper = ["cmd", "/c", "gradlew.bat"] if args.host == "windows" else ["bash", "gradlew"]
     # Native compiler work can live in the Gradle JVM. Preserve the proven
     # Lucene 4g/one-worker publication budget instead of moving it to a JVM-only daemon.
-    gradle_heap, kotlin_heap = ("4g", "2g") if args.fork == "lucene" else ("2g", "2g")
+    gradle_heap, kotlin_heap = ("4g", "2g") if args.fork in ("lucene", "ktor") else ("2g", "2g")
     command = wrapper + [
         f"-Dorg.gradle.java.home={java}",
         f"-Dorg.gradle.jvmargs=-Xmx{gradle_heap} -Dfile.encoding=UTF-8",
@@ -259,11 +265,11 @@ def build(args):
         "-Pkotlin.daemon.useFallbackStrategy=false", f"-Pkotlin.daemon.jvmargs=-Xmx{kotlin_heap}",
         f"-Porg.gradle.java.installations.paths={java},{jdk21}",
         "-Porg.gradle.java.installations.auto-download=false",
-        f"-Pversion={data['version']}",
+        *([f"-Pversion={data['version']}"] if args.fork != "ktor" else []),
         # Lucene establishes coordinates itself; VERSION_NAME makes Vanniktech
         # finalize its version before that callback, so do not inject a second
         # version property into that fork.
-        *([f"-PVERSION_NAME={data['version']}"] if args.fork != "lucene" else []),
+        *([f"-PVERSION_NAME={data['version']}"] if args.fork not in ("lucene", "ktor") else []),
         "-PmavenCentralPublishing=false", "-PsignAllPublications=false",
         "-I", str(HERE / "publish.init.gradle"), "--console=plain", "--stacktrace", *tasks,
     ]
@@ -328,7 +334,7 @@ def build(args):
         require(artifact in allowed, "Unexpected host publication")
         if name.endswith(".module"):
             content = normalize_module(content, FORKS[args.fork], data["version"],
-                                       allowed[artifact] == "root")
+                                       allowed[artifact] == "root", artifact)
         selected[name] = content
         destination = out_repo / name
         destination.parent.mkdir(parents=True, exist_ok=True)
