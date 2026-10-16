@@ -8,7 +8,7 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
-                api(project(":agent-storage-spec-clean-models"))
+                api(project(":agent-storage-clean-models"))
                 api(libs.kotlinx.coroutines.core)
             }
         }
@@ -16,7 +16,7 @@ kotlin {
             api(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
-            implementation(project(":utils-coroutines-spec"))
+            implementation(project(":utils-coroutines"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

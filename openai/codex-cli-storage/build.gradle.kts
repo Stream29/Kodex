@@ -9,16 +9,16 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
-                api(project(":openai-spec-models"))
+                api(project(":openai-models"))
                 api(libs.kotlinx.serialization.json)
                 api(libs.tomlkt)
             }
         }
         commonMain.dependencies {
-            api(project(":utils-kotlinx-io-coroutines-impl"))
+            api(project(":utils-kotlinx-io-coroutines-system"))
             api(libs.kotlinx.io.core)
             api(libs.tomlkt)
-            implementation(project(":openai-spec-json-codec"))
+            implementation(project(":openai-json-codec"))
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)

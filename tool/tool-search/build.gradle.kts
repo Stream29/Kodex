@@ -9,13 +9,13 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
-                api(project(":openai-spec-models"))
+                api(project(":openai-models"))
                 api(libs.kotlinx.serialization.core)
                 api(libs.kotlinx.schema.json)
             }
         }
         commonMain.dependencies {
-            implementation(project(":utils-search-index-impl"))
+            implementation(project(":utils-search-index"))
             implementation(libs.kotlinx.coroutines.core)
         }
     }

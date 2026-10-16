@@ -8,26 +8,26 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
-                api(project(":agent-runtime-spec-contract"))
+                api(project(":agent-runtime-contract"))
             }
         }
         commonMain.dependencies {
-            api(project(":agent-runtime-spec-contract"))
+            api(project(":agent-runtime-contract"))
             api(project(":agent-runtime-steer"))
             api(project(":openai-model-catalog"))
             api(libs.kotlin.logging)
             api(libs.kotlinx.coroutines.core)
-            implementation(project(":agent-state-spec-context-window"))
+            implementation(project(":agent-state-context-window"))
         }
         commonTest.dependencies {
             implementation(project(":agent-runtime-decorator-tool"))
             implementation(project(":agent-runtime-steer"))
-            implementation(project(":agent-state-impl-state"))
+            implementation(project(":agent-state-core"))
             implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-core"))
             implementation(project(":openai-client-test"))
             implementation(project(":openai-model-catalog"))
-            implementation(project(":utils-coroutines-spec"))
+            implementation(project(":utils-coroutines"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

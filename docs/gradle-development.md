@@ -48,8 +48,8 @@ From the Kodex checkout, for example:
 
 ```sh
 ./gradlew help
-./gradlew :mcp-spec-stdio:jvmTest
-./gradlew :app-component-history-impl-view:jvmTest
+./gradlew :mcp:jvmTest
+./gradlew :app-component-history-view:jvmTest
 # Linux x64 host:
 ./gradlew :app-cli:linkReleaseExecutableLinuxX64
 ```
@@ -69,6 +69,9 @@ there is no target-profile switch.
   supplies the physical path for its declared children.
 - Use `module("name")` for a real leaf with `build.gradle.kts`.
   Flat project IDs still join path segments with `-`.
+- Use business directory names, not `spec`/`impl` grouping segments.
+  Use `contract` only for necessary cycle-breaking projects; actual system
+  adapters keep their business platform boundary.
 - Invalid names, missing leaves, duplicate physical declarations and colliding
   flat project IDs fail configuration instead of silently replacing a project.
 
@@ -88,6 +91,15 @@ there is no target-profile switch.
 
 ## Build conventions
 
+- Business KMP modules apply `kodex.kmp-spec-impl` before their target/renderer
+  convention. Contracts live in `specMain`; `commonMain` depends on it.
+  Implementation-only modules may leave `specMain` empty.
+- A widened business module keeps narrow implementation inputs in the applicable
+  intermediate source sets. `kodex.kmp-cli-host-layer` creates `cliHostMain/Test`
+  for JVM and four desktop Native targets, with `desktopNativeMain/Test` below it;
+  it does not add targets or expose CLI factories on JS, Wasm or iOS.
+- `kodex.ktor-native-network-override` preserves the existing four desktop Native
+  network pins independently of the enclosing module's target convention.
 - Conventions and `GenerateKodexVersion` live in `build-logic`, explicitly
   included by `pluginManagement`. It reads the root version catalog; KGP and
   Koin implementation dependencies no longer repeat version strings.

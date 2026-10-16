@@ -24,19 +24,18 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(libs.kotlinx.coroutines.core)
-                api(project(":agent-storage-spec-clean-models"))
-                api(project(":openai-spec-models"))
+                api(project(":agent-storage-clean-models"))
+                api(project(":openai-models"))
             }
         }
         commonMain.dependencies {
-            api(project(":utils-kotlinx-io-coroutines-impl"))
+            api(project(":utils-kotlinx-io-coroutines-system"))
             api(libs.kotlinx.serialization.json)
-            implementation(project(":openai-spec-json-codec"))
+            implementation(project(":openai-json-codec"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(project(":utils-read-write-mutex"))
         }
         commonTest.dependencies {
-            implementation(project(":agent-storage-spec-contract-ext"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

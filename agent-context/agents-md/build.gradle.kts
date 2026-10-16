@@ -12,12 +12,12 @@ kotlin {
             }
         }
         commonMain.dependencies {
-            api(project(":agent-context-spec-contract"))
-            api(project(":utils-kotlinx-io-coroutines-impl"))
+            api(project(":agent-context-settings"))
+            api(project(":utils-kotlinx-io-coroutines-system"))
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
-            implementation(project(":utils-kotlinx-io-coroutines-impl"))
+            implementation(project(":utils-kotlinx-io-coroutines-system"))
         }
     }
 }

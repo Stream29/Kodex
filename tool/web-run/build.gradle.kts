@@ -13,13 +13,13 @@ kotlin {
         }
         commonMain.dependencies {
             api(project(":openai-client"))
-            api(project(":openai-spec-models"))
-            api(project(":tool-spec-contract"))
+            api(project(":openai-models"))
+            api(project(":tool-core"))
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.core)
             implementation(project(":openai-client-test"))
-            implementation(project(":openai-spec-json-codec"))
+            implementation(project(":openai-json-codec"))
         }
     }
 }

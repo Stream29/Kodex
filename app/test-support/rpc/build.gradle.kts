@@ -1,4 +1,5 @@
 plugins {
+    id("kodex.kmp-spec-impl")
     id("kodex.krpc-utils-patch")
     id("kodex.kmp-cli")
 }
@@ -6,22 +7,22 @@ plugins {
 // Test fixtures only. No production module may depend on this module.
 kotlin {
     sourceSets.commonMain.dependencies {
-        api(project(":app-impl-application"))
-        api(project(":rpc-impl-local"))
-        implementation(project(":hook-impl-notification"))
+        api(project(":app-application"))
+        api(project(":rpc-local"))
+        implementation(project(":hook-notification"))
         implementation(project(":openai-client"))
-        api(project(":app-impl-rpc"))
-        api(project(":app-impl-session"))
-        api(project(":app-component-new-session-impl-viewmodel"))
+        api(project(":app-rpc"))
+        api(project(":app-session"))
+        api(project(":app-component-new-session-viewmodel"))
         api(project(":openai-client-test"))
-        implementation(project(":rpc-impl-server"))
-        implementation(project(":rpc-impl-in-memory"))
-        implementation(project(":app-migration-impl"))
-        implementation(project(":utils-kotlinx-io-coroutines-impl"))
-        implementation(project(":utils-coroutines-spec"))
-        implementation(project(":utils-os-environment-spec"))
-        implementation(project(":agent-session-impl-filesystem"))
+        implementation(project(":rpc-server"))
+        implementation(project(":rpc-in-memory"))
+        implementation(project(":app-migration"))
+        implementation(project(":utils-kotlinx-io-coroutines-system"))
+        implementation(project(":utils-coroutines"))
+        implementation(project(":utils-os-environment"))
+        implementation(project(":agent-session-filesystem"))
         implementation(project(":agent-session-test"))
-        implementation(project(":agent-storage-spec-contract-ext"))
+        implementation(project(":agent-storage-core"))
     }
 }

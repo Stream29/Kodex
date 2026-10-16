@@ -15,7 +15,7 @@ kotlin {
         }
         commonMain.dependencies {
             api(project(":openai-client"))
-            implementation(project(":openai-spec-models"))
+            implementation(project(":openai-models"))
             implementation(libs.kotlinx.coroutines.core)
         }
     }

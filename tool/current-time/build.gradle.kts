@@ -8,14 +8,14 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
-                api(project(":openai-spec-models"))
-                api(project(":tool-spec-contract"))
+                api(project(":openai-models"))
+                api(project(":tool-core"))
                 api(libs.kotlinx.schema.json)
             }
         }
         commonMain.dependencies {
             api(libs.kotlinx.datetime)
-            implementation(project(":tool-builder"))
+            implementation(project(":tool-core"))
             implementation(libs.kotlinx.serialization.core)
         }
         commonTest.dependencies {

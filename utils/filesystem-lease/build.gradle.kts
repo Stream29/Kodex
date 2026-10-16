@@ -13,9 +13,9 @@ kotlin {
             }
         }
         commonMain.dependencies {
-            api(project(":utils-kotlinx-io-coroutines-impl"))
-            implementation(project(":utils-coroutines-spec"))
-            implementation(project(":utils-os-environment-spec"))
+            api(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":utils-coroutines"))
+            implementation(project(":utils-os-environment"))
             implementation(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {

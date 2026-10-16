@@ -8,23 +8,23 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
-                api(project(":openai-spec-models"))
-                api(project(":tool-spec-contract"))
+                api(project(":openai-models"))
+                api(project(":tool-core"))
                 api(libs.kotlinx.schema.json)
             }
         }
         commonMain.dependencies {
-            api(project(":agent-state-spec-contract"))
-            implementation(project(":tool-builder"))
+            api(project(":agent-state-contract"))
+            implementation(project(":tool-core"))
             implementation(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {
-            implementation(project(":agent-state-impl-state"))
+            implementation(project(":agent-state-core"))
             implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-core"))
             implementation(project(":openai-client-test"))
-            implementation(project(":openai-spec-json-codec"))
-            implementation(project(":utils-coroutines-spec"))
+            implementation(project(":openai-json-codec"))
+            implementation(project(":utils-coroutines"))
         }
     }
 }

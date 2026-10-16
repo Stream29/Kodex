@@ -11,15 +11,15 @@ kotlin {
             dependencies {
                 api(libs.kotlinx.coroutines.core)
                 api(libs.kotlinx.io.core)
-                api(project(":openai-spec-models"))
+                api(project(":openai-models"))
             }
         }
         commonMain.dependencies {
             api(libs.kotlinx.coroutines.core)
-            api(project(":openai-spec-models"))
-            implementation(project(":openai-spec-json-codec"))
-            implementation(project(":utils-ktor-client-ext-impl"))
-            implementation(project(":utils-os-environment-spec"))
+            api(project(":openai-models"))
+            implementation(project(":openai-json-codec"))
+            implementation(project(":utils-ktor-client-ext"))
+            implementation(project(":utils-os-environment"))
             implementation(libs.kotlin.logging)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
@@ -28,7 +28,7 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
             implementation(project(":openai-client-test"))
-            implementation(project(":openai-spec-json-codec"))
+            implementation(project(":openai-json-codec"))
             implementation(libs.ktor.client.mock)
         }
     }

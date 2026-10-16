@@ -65,6 +65,9 @@ class ModuleTreeScope(
         require(segments.isNotEmpty() && segments.all { it.matches(Regex("[a-z0-9]+(?:-[a-z0-9]+)*")) }) {
             "Invalid module path: $path"
         }
+        require(segments.none { it == "spec" || it == "impl" }) {
+            "Use business module names (contract only for cycle-breaking boundaries): $path"
+        }
         val directory = settings.settingsDir.resolve(path)
         require(directory.isDirectory) { "Missing module directory: $path" }
         require(declaredPaths.add(path)) { "Duplicate declared module path: $path" }
@@ -96,192 +99,164 @@ fun Settings.moduleTree(name: String, block: ModuleTreeScope.() -> Unit) {
     ModuleTreeScope(this, listOf(name), declaredModulePaths).block()
 }
 
-moduleTree("integration-test") {
+moduleTree("agent-context") {
+    module("agents-md")
+    module("prefix")
+    module("prompt-dsl")
+    module("settings")
+    module("skill")
+}
+
+moduleTree("agent-runtime") {
+    module("composition")
+    module("contract")
+    moduleTree("decorator") {
+        module("compact")
+        module("tool")
+    }
+    module("steer")
+}
+
+moduleTree("agent-session") {
+    module("contract")
+    module("filesystem")
+    module("in-memory")
+    module("test")
+}
+
+moduleTree("agent-state") {
+    module("context-window")
+    module("contract")
+    module("core")
+    module("test")
+}
+
+moduleTree("agent-storage") {
+    module("clean-models")
+    module("core")
+    module("filesystem-layout")
 }
 
 moduleTree("app") {
+    module("application")
+    module("backend-daemon")
+    module("backend-host")
     module("cli")
     moduleTree("component") {
         moduleTree("account-usage") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("agent") {
-            moduleTree("impl") {
-                module("view")
-            }
-            module("spec")
+            module("contract")
+            module("view")
         }
         moduleTree("application-preferences") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("authentication-settings") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("composer") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("context-source-settings") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
-        }
-        moduleTree("history-index") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("history") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
+        }
+        moduleTree("history-index") {
+            module("view")
+            module("viewmodel")
         }
         moduleTree("hook-settings") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("mcp-settings") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
-        }
-        moduleTree("new-session-defaults") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("new-session") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
+        }
+        moduleTree("new-session-defaults") {
+            module("view")
+            module("viewmodel")
         }
         moduleTree("openai-login") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("path-picker") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("request-user-input") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("runtime-configuration") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("session-catalog") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("session-delete") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("session-rename") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("session-settings") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("session-sidebar") {
-            moduleTree("impl") {
-                module("view")
-            }
+            module("view")
         }
         moduleTree("session-tab-bar") {
-            moduleTree("impl") {
-                module("view")
-            }
+            module("view")
         }
         moduleTree("session-title-settings") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("settings") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("suggest-subagent-task") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("usage-reset") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
         moduleTree("working-directory") {
-            moduleTree("impl") {
-                module("view")
-                module("viewmodel")
-            }
+            module("view")
+            module("viewmodel")
         }
     }
-    moduleTree("impl") {
-        module("application")
-        module("backend-daemon")
-        module("backend-host")
-        module("rpc")
-        module("session")
-        module("view")
-    }
-    moduleTree("migration") {
-        module("impl")
-        module("spec")
+    module("migration")
+    module("rpc")
+    moduleTree("session") {
+        module("contract")
     }
     moduleTree("settings") {
-        moduleTree("impl") {
-            module("filesystem")
-        }
-    }
-    moduleTree("spec") {
-        module("session")
+        module("filesystem")
     }
     moduleTree("test-support") {
         module("rpc")
@@ -291,32 +266,14 @@ moduleTree("app") {
     }
 }
 
-moduleTree("rpc") {
-    moduleTree("impl") {
-        module("client")
-        module("in-memory")
-        module("local")
-        module("local-server")
-        module("backend-control-client")
-        module("websocket")
-        module("krpc-utils-patch")
-        module("server")
-    }
-    moduleTree("spec") {
-        module("contract")
-        module("models")
-    }
+moduleTree("hook") {
+    module("notification")
+}
+
+moduleTree("integration-test") {
 }
 
 moduleTree("mcp") {
-    moduleTree("impl") {
-        module("composition")
-    }
-    moduleTree("spec") {
-        module("contract")
-        module("stdio")
-        module("streamable-http")
-    }
 }
 
 moduleTree("openai") {
@@ -324,161 +281,67 @@ moduleTree("openai") {
     module("client")
     module("client-test")
     module("codex-cli-storage")
+    module("json-codec")
     module("model-catalog")
-    moduleTree("spec") {
-        module("json-codec")
-        module("models")
-    }
+    module("models")
 }
 
-moduleTree("agent-state") {
-    moduleTree("impl") {
-        module("state")
-    }
-    moduleTree("spec") {
-        module("context-window")
-        module("contract")
-    }
-    module("test")
-}
-
-moduleTree("agent-context") {
-    module("agents-md")
-    module("prefix")
-    module("skill")
-    moduleTree("spec") {
-        module("available-skill")
-        module("contract")
-        module("prompt-dsl")
-    }
-}
-
-moduleTree("agent-runtime") {
-    moduleTree("impl") {
-        module("composition")
-    }
-    moduleTree("spec") {
-        module("contract")
-    }
-    module("steer")
-    moduleTree("decorator") {
-        module("compact")
-        module("tool")
-    }
-}
-
-moduleTree("agent-session") {
-    moduleTree("impl") {
-        module("filesystem")
-        module("in-memory")
-    }
-    moduleTree("spec") {
-        module("contract")
-    }
-    module("test")
-}
-
-moduleTree("agent-storage") {
-    module("core")
-    moduleTree("impl") {
-        module("filesystem-layout")
-    }
-    moduleTree("spec") {
-        module("clean-models")
-        module("contract-ext")
-    }
-}
-
-moduleTree("hook") {
-    moduleTree("impl") {
-        module("notification")
-    }
-    moduleTree("spec") {
-        module("notification")
-    }
+moduleTree("rpc") {
+    module("backend-control-client")
+    module("client")
+    module("in-memory")
+    module("krpc-utils-patch")
+    module("local")
+    module("local-server")
+    module("models")
+    module("server")
+    module("websocket")
 }
 
 moduleTree("tool") {
     module("apply-patch")
-    module("builder")
+    module("core")
     module("current-time")
     module("get-context-remaining")
+    moduleTree("image-generation") {
+        module("contract")
+    }
     module("multi-agent")
     module("plan")
     module("request-user-input")
     module("tool-search")
-    module("web-run")
-    moduleTree("impl") {
-        module("image-generation")
-        module("unified-exec")
-        module("view-image")
-    }
-    moduleTree("spec") {
+    moduleTree("unified-exec") {
         module("contract")
-        module("image-generation")
-        module("unified-exec")
-        module("view-image")
     }
+    moduleTree("view-image") {
+        module("contract")
+    }
+    module("web-run")
 }
 
 moduleTree("utils") {
-    moduleTree("coroutines") {
-        module("spec")
-    }
-    moduleTree("external-url") {
-        module("impl")
-        module("spec")
-    }
+    module("coroutines")
+    module("external-url")
     module("filesystem-lease")
-    moduleTree("images-codec") {
-        module("impl")
-        module("spec")
-    }
-    moduleTree("images") {
-        module("spec")
-    }
-    moduleTree("kodex-home") {
-        module("spec")
-    }
+    module("images")
+    module("images-codec")
+    module("kodex-home")
     moduleTree("kotlinx-io-coroutines") {
-        module("impl")
-        module("spec")
+        module("system")
     }
-    moduleTree("kotlinx-io-serialization") {
-        module("spec")
-    }
-    moduleTree("ktor-client-ext") {
-        module("impl")
-        module("spec")
-    }
-    moduleTree("logging") {
-        module("impl")
-        module("spec")
-    }
-    moduleTree("os-environment") {
-        module("spec")
-    }
-    moduleTree("patch") {
-        module("impl")
-        module("spec")
-    }
+    module("kotlinx-io-serialization")
+    module("ktor-client-ext")
+    module("logging")
+    module("os-environment")
+    module("patch")
     moduleTree("process-client") {
-        module("impl")
-        module("spec")
+        module("system")
     }
     module("read-write-mutex")
-    moduleTree("rpc-exception") {
-        module("spec")
-    }
-    moduleTree("search-index") {
-        module("impl")
-        module("spec")
-    }
+    module("rpc-exception")
+    module("search-index")
     moduleTree("shell-client") {
-        module("impl")
-        module("spec")
+        module("system")
     }
-    moduleTree("terminal-text") {
-        module("spec")
-    }
+    module("terminal-text")
 }

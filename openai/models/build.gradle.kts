@@ -1,0 +1,23 @@
+plugins {
+    id("kodex.kmp-spec-impl")
+    id("kodex.kmp-host")
+    alias(libs.plugins.kotlin.serialization)
+    id("kodex.kmp-tests")
+}
+
+kotlin {
+    sourceSets {
+        named("specMain") {
+            dependencies {
+                api(project(":utils-kotlinx-io-serialization"))
+                api(libs.kotlinx.coroutines.core)
+                api(libs.kotlinx.io.core)
+                api(libs.kotlinx.serialization.json)
+                api(libs.kotlinx.schema.json)
+            }
+        }
+        commonTest.dependencies {
+            implementation(project(":openai-json-codec"))
+        }
+    }
+}

@@ -8,12 +8,12 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
-                api(project(":tool-spec-contract"))
+                api(project(":tool-core"))
             }
         }
         commonMain.dependencies {
-            api(project(":utils-kotlinx-io-coroutines-impl"))
-            api(project(":utils-patch-impl"))
+            api(project(":utils-kotlinx-io-coroutines-system"))
+            api(project(":utils-patch"))
         }
     }
 }

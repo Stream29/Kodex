@@ -9,25 +9,25 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(project(":agent-context-agents-md"))
-                api(project(":agent-context-spec-available-skill"))
-                api(project(":utils-shell-client-spec"))
+                api(project(":agent-context-skill"))
+                api(project(":utils-shell-client"))
                 api(libs.kotlinx.io.core)
             }
         }
         commonMain.dependencies {
-            api(project(":agent-context-spec-contract"))
-            api(project(":openai-spec-models"))
+            api(project(":agent-context-settings"))
+            api(project(":openai-models"))
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
             implementation(project(":agent-context-agents-md"))
             implementation(project(":agent-context-skill"))
-            implementation(project(":utils-os-environment-spec"))
-            api(project(":agent-context-spec-available-skill"))
-            implementation(project(":agent-context-spec-prompt-dsl"))
+            implementation(project(":utils-os-environment"))
+            api(project(":agent-context-skill"))
+            implementation(project(":agent-context-prompt-dsl"))
             implementation(libs.kotlinx.datetime)
         }
         commonTest.dependencies {
-            implementation(project(":utils-kotlinx-io-coroutines-impl"))
+            implementation(project(":utils-kotlinx-io-coroutines-system"))
         }
     }
 }

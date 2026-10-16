@@ -8,7 +8,7 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
-                api(project(":openai-spec-models"))
+                api(project(":openai-models"))
                 api(libs.kotlinx.coroutines.core)
             }
         }
