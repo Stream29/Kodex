@@ -64,7 +64,7 @@ public suspend fun <R> withBackendServices(
         val api = createClient(auth).also { client = it }
         val mcpOAuth = owner.DefaultMcpOAuthClient()
         withBackendGlobalState(
-            store, unified, agentsHome, home, codexHome, api, mcpOAuth, BackendMcpOAuthBridge(mcpOAuth::prepare),
+            store, unified, agentsHome, home, codexHome, api, auth, mcpOAuth, BackendMcpOAuthBridge(mcpOAuth::prepare),
         ) { global ->
             val account = BackendAccountState(owner, auth, api)
             val oauth = BackendOAuth(owner, auth, loginClient, global.mcpManager)

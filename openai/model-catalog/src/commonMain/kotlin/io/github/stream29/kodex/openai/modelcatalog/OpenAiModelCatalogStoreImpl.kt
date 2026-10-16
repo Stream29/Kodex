@@ -2,8 +2,9 @@ package io.github.stream29.kodex.openai.modelcatalog
 
 import io.github.stream29.kodex.openai.DefaultEffectiveContextWindowPercent
 import io.github.stream29.kodex.openai.ModelInfo
-import io.github.stream29.kodex.openai.OpenAiResult
+import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiModelId
+import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.getOrThrow
 import kotlinx.coroutines.CancellationException
@@ -11,19 +12,30 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.launch
 
 /**
  * In-memory model metadata catalog backed by Codex `/models` responses.
  *
  * The initial [models] value is [BuiltInModelCatalog]. A catalog-owned
- * background scope then attempts a remote refresh. A failed refresh leaves the
- * built-in snapshot intact.
+ * background scope refreshes on authentication changes when an auth store is
+ * supplied, or once at startup for a fixed client.
+ *
+ * @property authStore Nullable for the fixed-client factory; `null` means there
+ * is no authentication subscription and only the startup refresh runs automatically.
  */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 internal class OpenAiModelCatalogStoreImpl(
     private val client: OpenAiClient,
+    private val authStore: OpenAiAuthStore? = null,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) : OpenAiModelCatalogStore {
 
@@ -36,13 +48,45 @@ internal class OpenAiModelCatalogStoreImpl(
 
     init {
         scope.launch {
-            tryBootstrap { refreshAtStartup() }
+            var accountKey: String? = null
+            (authStore?.state ?: flowOf(null))
+                .mapLatest { auth ->
+                    val nextKey = auth.accountKey()
+                    if (nextKey != accountKey) {
+                        models.value = BuiltInModelCatalog
+                        accountKey = nextKey
+                    }
+                    val refreshed = if (authStore == null || auth is OpenAiAuthState.Authenticated) {
+                        try {
+                            fetchModels()
+                        } catch (failure: CancellationException) {
+                            throw failure
+                        } catch (_: Exception) {
+                            // Retain only this account's snapshot (or the bundled fallback).
+                            models.value
+                        }
+                    } else {
+                        BuiltInModelCatalog
+                    }
+                    auth to refreshed
+                }
+                .buffer(0)
+                .collect { (auth, refreshed) ->
+                    if (authStore == null || authStore.state.value == auth) {
+                        models.value = refreshed
+                    }
+                }
         }
     }
 
     /** Fetches `/models` and returns the atomically published catalog snapshot. */
     override suspend fun refresh(): List<ModelInfo> {
-        val refreshed = client.listModels().getOrThrow().models.normalizeReasoningPresets()
+        val auth = authStore?.state?.value
+        val refreshed = fetchModels()
+        currentCoroutineContext().ensureActive()
+        if (authStore != null && authStore.state.value != auth) {
+            throw CancellationException("Authentication changed during model catalog refresh.")
+        }
         models.value = refreshed
         return refreshed
     }
@@ -65,33 +109,45 @@ internal class OpenAiModelCatalogStoreImpl(
         return matchingModel?.copy(slug = model) ?: fallbackModelInfo(model)
     }
 
-    private suspend fun refreshAtStartup(): Unit =
-        when (val result = client.listModels()) {
-            is OpenAiResult.Success -> models.value = result.value.models.normalizeReasoningPresets()
-            is OpenAiResult.Failure -> Unit
-        }
-
-    private suspend fun tryBootstrap(block: suspend () -> Unit) {
-        try {
-            block()
-        } catch (failure: CancellationException) {
-            throw failure
-        } catch (_: Exception) {
-            // The built-in or preceding snapshot remains usable after startup failures.
-        }
-    }
+    private suspend fun fetchModels(): List<ModelInfo> =
+        client.listModels().getOrThrow().models.normalizeReasoningPresets()
 }
 
-/** Creates a live model catalog backed by built-in metadata and OpenAI `/models`. */
-public fun OpenAiModelCatalog(client: OpenAiClient): OpenAiModelCatalogStore =
-    OpenAiModelCatalogStoreImpl(client = client)
+/**
+ * Creates a live catalog. Supply the client's [authStore] to refresh on authentication
+ * changes and discard remote metadata belonging to a previous account.
+ * Omitting it retains the fixed-client, one-time startup refresh behavior.
+ *
+ * @param authStore Nullable for a fixed client; `null` disables authentication
+ * observation, not authentication within the client itself.
+ */
+public fun OpenAiModelCatalog(
+    client: OpenAiClient,
+    authStore: OpenAiAuthStore? = null,
+): OpenAiModelCatalogStore =
+    OpenAiModelCatalogStoreImpl(client = client, authStore = authStore)
 
 /** Backend-owned variant: background refresh is joined by the supplied owner. */
-public fun CoroutineScope.ownedOpenAiModelCatalog(client: OpenAiClient): OpenAiModelCatalogStore =
+public fun CoroutineScope.ownedOpenAiModelCatalog(
+    client: OpenAiClient,
+    authStore: OpenAiAuthStore,
+): OpenAiModelCatalogStore =
     OpenAiModelCatalogStoreImpl(
         client = client,
+        authStore = authStore,
         scope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[kotlinx.coroutines.Job])),
     )
+
+/**
+ * @receiver Nullable for a fixed client without an authentication subscription.
+ * @return An account identity for invalidation, or `null` when no account is available.
+ */
+private fun OpenAiAuthState?.accountKey(): String? =
+    (this as? OpenAiAuthState.Authenticated)?.credentials?.let {
+        it.accountId?.takeIf(String::isNotBlank)
+            ?: it.email?.takeIf(String::isNotBlank)
+            ?: it.accessToken
+    }
 
 private fun List<ModelInfo>.normalizeReasoningPresets(): List<ModelInfo> =
     map { model ->

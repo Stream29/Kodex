@@ -12,6 +12,12 @@ import kotlinx.coroutines.flow.StateFlow
  * replace it. Callers may explicitly [refresh] it or [resolve] a requested
  * model against it. Catalog refresh work is owned by this component, while
  * the injected client remains owned by its caller.
+ *
+ * An authentication-aware catalog refreshes when authentication changes and
+ * cancels obsolete automatic requests. Changing accounts or becoming unavailable
+ * discards the previous account's remote metadata before fetching a new catalog.
+ * A failed refresh may retain a snapshot only for the same account; otherwise
+ * the implementation's initial fallback remains available.
  */
 public interface OpenAiModelCatalogStore : AutoCloseable {
     /** Latest atomically published model snapshot in provider order. */
@@ -24,6 +30,8 @@ public interface OpenAiModelCatalogStore : AutoCloseable {
      *
      * @throws OpenAiResponseResultException if the provider returns a
      * structured error instead of a model list.
+     * @throws kotlinx.coroutines.CancellationException if authentication changes
+     * during an authentication-aware refresh; its result is not published.
      */
     public suspend fun refresh(): List<ModelInfo>
 

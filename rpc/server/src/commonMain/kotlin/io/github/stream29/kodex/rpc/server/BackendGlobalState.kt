@@ -15,6 +15,7 @@ import io.github.stream29.kodex.mcp.impl.McpManagerImpl
 import io.github.stream29.kodex.mcp.impl.McpServiceImpl
 import io.github.stream29.kodex.mcp.impl.validateMcpConfigurationUpdate
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
+import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 import io.github.stream29.kodex.openai.modelcatalog.ownedOpenAiModelCatalog
@@ -41,11 +42,12 @@ public suspend fun <R> withBackendGlobalState(
     kodexHome: Path,
     codexHome: Path,
     client: OpenAiClient,
+    authStore: OpenAiAuthStore,
     tokenRefresher: McpOAuthTokenRefresher,
     loginAttemptFactory: McpOAuthLoginAttemptFactory,
     block: suspend CoroutineScope.(BackendGlobalState) -> R,
 ): R = withBackendGlobalState(
-    store, unified, agentsHome, kodexHome, codexHome, client, loginAttemptFactory,
+    store, unified, agentsHome, kodexHome, codexHome, client, authStore, loginAttemptFactory,
     serviceFactory = { settings, configurations ->
         McpServiceImpl(settings, configurations, tokenRefresher)
     },
@@ -59,6 +61,7 @@ internal suspend fun <R> withBackendGlobalState(
     kodexHome: Path,
     codexHome: Path,
     client: OpenAiClient,
+    authStore: OpenAiAuthStore,
     loginAttemptFactory: McpOAuthLoginAttemptFactory,
     serviceFactory: CoroutineScope.(StateFlow<McpSettings>, McpConfigurationStore) -> McpService,
     block: suspend CoroutineScope.(BackendGlobalState) -> R,
@@ -80,7 +83,7 @@ internal suspend fun <R> withBackendGlobalState(
             codexImportSource = { readBackendCodexMcpSettings(codexHome) },
             loginAttemptFactory = loginAttemptFactory,
         )
-        models = owner.ownedOpenAiModelCatalog(client)
+        models = owner.ownedOpenAiModelCatalog(client, authStore)
         coroutineScope {
             block(BackendGlobalState(store, configurations, context, service, manager, models, codexHome, unified))
         }

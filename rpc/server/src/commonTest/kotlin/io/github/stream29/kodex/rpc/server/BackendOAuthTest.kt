@@ -285,7 +285,7 @@ private suspend fun withOAuth(block: suspend CoroutineScope.(OAuthFixture) -> Un
                 }
                 withBackendGlobalState(
                     settings, unified, root, root, Path(root, "codex"),
-                    mockOpenAiClient { listModels { awaitCancellation() } }, bridge,
+                    mockOpenAiClient { listModels { awaitCancellation() } }, credentials, bridge,
                     serviceFactory = { _, _ -> OAuthTestMcpService() },
                 ) { global ->
                     val oauth = BackendOAuth(this, credentials, login, global.mcpManager) { duration ->

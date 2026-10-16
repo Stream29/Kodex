@@ -15,6 +15,8 @@ import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ModelsResponse
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiResult
+import io.github.stream29.kodex.openai.OpenAiSubscriptionAuthState
+import io.github.stream29.kodex.openai.client.test.InMemoryOpenAiAuthStore
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.rpc.models.BackendSettings
@@ -238,6 +240,7 @@ val backendGlobalStateTest by testSuite(testConfig = TestConfig.testScope(isEnab
             val store = unified.backendStore
             withBackendGlobalState(
                 store, unified, root, root, root, mockOpenAiClient { listModels { awaitCancellation() } },
+                InMemoryOpenAiAuthStore(OpenAiSubscriptionAuthState("test-token")),
                 tokenRefresher = { error("No initialized credentials in this test.") },
                 loginAttemptFactory = { error("No login in this test.") },
             ) { global ->
@@ -276,6 +279,7 @@ private suspend fun withGlobalFixture(
         val store = unified.backendStore
         withBackendGlobalState(
             store, unified, Path(root, "agents"), root, Path(root, "codex"), client,
+            InMemoryOpenAiAuthStore(OpenAiSubscriptionAuthState("test-token")),
             loginAttemptFactory = { error("No browser login in this fixture.") },
             serviceFactory = { _, _ -> service },
         ) { global -> block(global, service, fs, root) }

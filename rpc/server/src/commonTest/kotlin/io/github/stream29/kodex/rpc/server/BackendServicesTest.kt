@@ -111,6 +111,8 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 val summary = global.getAuthenticationFlow().filterIsInstance<SettingsAuthenticationState.Authenticated>().first()
                 assertEquals("account", summary.accountId)
                 assertEquals(1, login.exchanges)
+                // Login must refresh the catalog without recreating the backend or RPC client.
+                global.getModelsFlow().first { models -> models.any { it.slug == OpenAiModelId("test-model") } }
                 global.getAccountUsageFlow().filterIsInstance<SettingsAccountUsageState.Available>().first()
                 global.refreshAccountUsage()
                 assertEquals(CodexRateLimitResetOutcome.NoCredit, global.consumeUsageReset("specific"))
@@ -197,7 +199,6 @@ internal suspend fun withServices(
             createTitleGenerator = { titleGenerator ?: OpenAiSessionTitleGenerator(it) },
             checkAdmission = checkAdmission,
         ) { services ->
-            services.global.getModelsFlow().first { models -> models.any { it.slug == OpenAiModelId("test-model") } }
             block(services, login)
         }
         assertTrue(login.closed)
