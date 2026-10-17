@@ -31,7 +31,7 @@ public sealed interface AgentsMdWarning {
     /** Candidate path involved in the problem. */
     public val source: Path
 
-    /** The selected source could not be read. */
+    /** An ordinary read exception prevented loading the source; cancellation and Error propagate instead. */
     public data class ReadFailed(
         override val source: Path,
         public val message: String,

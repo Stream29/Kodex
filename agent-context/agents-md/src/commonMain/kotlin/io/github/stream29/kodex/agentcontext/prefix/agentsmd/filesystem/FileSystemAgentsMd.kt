@@ -7,13 +7,21 @@ import io.github.stream29.kodex.agentcontext.prefix.agentsmd.contract.AgentsMdWa
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourcePlan
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.io.Buffer
 import kotlinx.io.files.Path
 import kotlinx.io.readByteArray
 
-/** Loads a fresh AGENTS.md discovery snapshot from the current filesystem state. */
+/**
+ * Loads a fresh AGENTS.md discovery snapshot from the current filesystem state.
+ * Ordinary source-read exceptions become warnings; discovery failures still propagate.
+ *
+ * @throws IllegalArgumentException if [projectDocMaxBytes] is negative.
+ * @throws CancellationException if a filesystem operation or the caller is cancelled.
+ * @throws Error if the filesystem raises a non-recoverable error.
+ */
 public suspend fun loadAgentsMd(
     agentsHome: Path,
     kodexHome: Path,
@@ -39,7 +47,14 @@ public suspend fun loadAgentsMd(
     )
 }
 
-/** Loads a fresh snapshot from one shared, already deduplicated source plan. */
+/**
+ * Loads a fresh snapshot from one shared, already deduplicated source plan.
+ * Ordinary source-read exceptions become warnings; discovery failures still propagate.
+ *
+ * @throws IllegalArgumentException if [projectDocMaxBytes] is negative.
+ * @throws CancellationException if a filesystem operation or the caller is cancelled.
+ * @throws Error if the filesystem raises a non-recoverable error.
+ */
 public suspend fun loadAgentsMd(
     plan: AgentContextSourcePlan,
     projectDocMaxBytes: Int = DefaultProjectDocMaxBytes,
@@ -136,7 +151,9 @@ private suspend fun readBytes(
         }
     }
     ReadBytesResult.Success(bytes)
-} catch (failure: Throwable) {
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (failure: Exception) {
     currentCoroutineContext().ensureActive()
     ReadBytesResult.Failure(AgentsMdWarning.ReadFailed(source, failure.toString()))
 }

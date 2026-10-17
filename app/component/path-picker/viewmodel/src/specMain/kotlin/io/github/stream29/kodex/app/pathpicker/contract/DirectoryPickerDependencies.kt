@@ -18,8 +18,8 @@ public interface DirectoryPickerDependencies {
  * Platform-independent directory capability consumed by the picker state
  * machine.
  *
- * Implementations must convert filesystem failures into result values and
- * propagate cancellation rather than treating it as a filesystem failure.
+ * Implementations convert ordinary filesystem exceptions into result values.
+ * Cancellation and non-recoverable [Error]s propagate rather than becoming filesystem failures.
  * Resolve relative paths and a leading `~` using the backend's current
  * directory and home, returning the resolved directory on success. The
  * dependency never owns picker state and must support overlapping requests.
@@ -33,7 +33,8 @@ public interface DirectoryPickerBrowser {
      * A `~` target without an available home returns
      * [DirectoryPickerFailure.HomeDirectoryUnavailable].
      *
-     * @throws CancellationException when the owner scope is cancelled.
+     * @throws CancellationException when the operation or owner scope is cancelled.
+     * @throws Error if the filesystem raises a non-recoverable error.
      */
     public suspend fun validate(directory: Path): DirectoryPickerValidationResult
 
@@ -43,7 +44,8 @@ public interface DirectoryPickerBrowser {
      * name, then full path to break ties. A listing failure returns a failure
      * result, not a successful partial list.
      *
-     * @throws CancellationException when the owner scope is cancelled.
+     * @throws CancellationException when the operation or owner scope is cancelled.
+     * @throws Error if the filesystem raises a non-recoverable error.
      */
     public suspend fun load(directory: Path): DirectoryPickerLoadResult
 }

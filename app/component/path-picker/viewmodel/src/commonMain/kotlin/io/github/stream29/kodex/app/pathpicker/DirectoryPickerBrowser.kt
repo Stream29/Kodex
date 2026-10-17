@@ -12,7 +12,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemPathSeparator
 
-/** Resolves and lists directory choices without depending on a frontend renderer. */
+/**
+ * Resolves and lists directory choices without depending on a frontend renderer.
+ *
+ * @property userHome Null when the current user's home is unavailable; a `~` path then fails validation.
+ */
 internal class SystemDirectoryPickerBrowser(
     private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
     private val userHome: Path? = userHomeDirectory(),
@@ -32,7 +36,7 @@ internal class SystemDirectoryPickerBrowser(
             DirectoryPickerValidationResult.Success(resolved)
         } catch (failure: CancellationException) {
             throw failure
-        } catch (failure: Throwable) {
+        } catch (failure: Exception) {
             DirectoryPickerValidationResult.Failure(
                 DirectoryPickerFailure.FileSystem(
                     detail = failure.toString().ifBlank { "Unknown filesystem failure" },
@@ -62,7 +66,7 @@ internal class SystemDirectoryPickerBrowser(
             )
         } catch (failure: CancellationException) {
             throw failure
-        } catch (failure: Throwable) {
+        } catch (failure: Exception) {
             DirectoryPickerLoadResult.Failure(
                 DirectoryPickerFailure.FileSystem(
                     detail = failure.toString().ifBlank { "Unknown filesystem failure" },
