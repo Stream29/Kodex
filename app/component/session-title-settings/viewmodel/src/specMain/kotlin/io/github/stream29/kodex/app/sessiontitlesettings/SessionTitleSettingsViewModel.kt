@@ -4,7 +4,6 @@ import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -72,6 +71,8 @@ public data class SessionTitleSettingsState(
  * report the shared generic failure once; cancellation propagates unchanged without reporting or
  * retry. Close/owner completion stops only observations, freezes state and rejects future commands;
  * accepted queue entries survive. Hide has no business draft to discard; menu/focus is renderer-only.
+ * Creation only projects sources and starts child observations under the supplied owner scope;
+ * the injected defaultModel is never copied into this component as a literal.
  */
 public interface SessionTitleSettingsViewModel : AutoCloseable {
     public val state: StateFlow<SessionTitleSettingsState>
@@ -89,11 +90,4 @@ public interface SessionTitleSettingsViewModel : AutoCloseable {
     /** Acknowledge shared failure; no-op when closed. */
     public fun dismissFailure(): Unit
     public override fun close(): Unit
-}
-
-/** Pure source projection and child observation jobs only; defaultModel is never copied as a literal. */
-public fun interface SessionTitleSettingsViewModelFactory {
-    public fun create(
-        dependencies: SessionTitleSettingsDependencies, ownerScope: CoroutineScope,
-    ): SessionTitleSettingsViewModel
 }

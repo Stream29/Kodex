@@ -15,7 +15,6 @@ kotlin {
             api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-context-prefix"))
             api(project(":tool-tool-search"))
-            implementation(project(":tool-tool-search"))
             implementation(project(":tool-apply-patch"))
             implementation(project(":tool-current-time"))
             implementation(project(":tool-image-generation"))

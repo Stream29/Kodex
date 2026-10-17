@@ -24,7 +24,6 @@ kotlin {
             implementation(project(":app-component-hook-settings-viewmodel"))
             implementation(project(":app-component-mcp-settings-viewmodel"))
             api(project(":app-component-openai-login-viewmodel"))
-            implementation(project(":app-component-openai-login-viewmodel"))
             implementation(project(":app-component-session-catalog-viewmodel"))
             api(project(":rpc-client"))
             api(project(":app-component-history-viewmodel"))

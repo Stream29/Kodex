@@ -2,7 +2,6 @@ package io.github.stream29.kodex.app.hooksettings
 
 import io.github.stream29.kodex.rpc.models.NotificationHook
 import io.github.stream29.kodex.rpc.models.NotificationHookType
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -110,12 +109,14 @@ public data class HookSettingsState(
 )
 
 /**
- * Complete Hook list/detail/editor/delete owner, dispatcher-confined to the factory owner scope.
+ * Complete Hook list/detail/editor/delete owner, dispatcher-confined to the supplied owner scope.
  * Methods are synchronous, nonthrowing except CancellationException from dependency capture/admission,
  * which propagates unchanged (never reported as business failure). Unexpected port failures are
  * reported exactly once and shown generically. Close is idempotent, stops only child observations
  * and rejects all future commands; it never closes application stores or cancels admitted writes.
  * Owner termination performs the same cleanup. Page hiding discards only unaccepted interaction.
+ * Creation starts child observations without creating a store or write queue. The owner scope
+ * owns those observations, not admitted application writes.
  */
 public interface HookSettingsViewModel : AutoCloseable {
     public val state: StateFlow<HookSettingsState>
@@ -157,12 +158,4 @@ public interface HookSettingsViewModel : AutoCloseable {
     public fun hidePage(): Unit
     public fun dismissFailure(): Unit
     public override fun close(): Unit
-}
-
-/** Factory never creates a store/queue; owner scope owns observations, not admitted writes. */
-public fun interface HookSettingsViewModelFactory {
-    public fun create(
-        dependencies: HookSettingsDependencies,
-        ownerScope: CoroutineScope,
-    ): HookSettingsViewModel
 }

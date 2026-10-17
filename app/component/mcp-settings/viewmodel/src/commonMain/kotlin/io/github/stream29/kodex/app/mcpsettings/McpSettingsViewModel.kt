@@ -17,15 +17,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
-public object DefaultMcpSettingsViewModelFactory : McpSettingsViewModelFactory {
-    override fun create(dependencies: McpSettingsDependencies, ownerScope: CoroutineScope): McpSettingsViewModel =
-        DefaultMcpSettingsViewModel(dependencies, ownerScope)
-}
-
+/** Creates an [McpSettingsViewModel] without constructing a backend or shared client. */
 public fun createMcpSettingsViewModel(
     dependencies: McpSettingsDependencies,
     ownerScope: CoroutineScope,
-): McpSettingsViewModel = DefaultMcpSettingsViewModelFactory.create(dependencies, ownerScope)
+): McpSettingsViewModel = DefaultMcpSettingsViewModel(dependencies, ownerScope)
 
 private class DefaultMcpSettingsViewModel(
     private val dependencies: McpSettingsDependencies,

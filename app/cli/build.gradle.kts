@@ -2,7 +2,6 @@ plugins {
     id("kodex.kmp-spec-impl")
     id("kodex.krpc-utils-patch")
     id("kodex.kmp-cli-executable")
-    id("kodex.kmp-tests")
 }
 
 kotlin {
@@ -18,7 +17,6 @@ kotlin {
             implementation(project(":rpc-backend-control-client"))
             implementation(project(":app-backend-daemon"))
             implementation(libs.kotlinx.serialization.json)
-            implementation(project(":app-migration"))
             implementation(project(":app-view"))
             implementation(project(":app-application"))
             implementation(project(":utils-kodex-home"))

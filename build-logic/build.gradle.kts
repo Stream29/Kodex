@@ -15,6 +15,5 @@ repositories {
 dependencies {
     implementation(libs.kotlin.gradle.plugin)
     implementation(libs.kotlin.compose.compiler.gradle.plugin)
-    implementation(libs.koin.compiler.gradle.plugin)
     implementation(libs.test.balloon.gradle.plugin)
 }

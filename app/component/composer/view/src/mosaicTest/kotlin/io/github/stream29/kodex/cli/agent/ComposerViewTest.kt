@@ -20,6 +20,7 @@ import io.github.stream29.kodex.openai.RequestUserInputMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 val composerViewTest by testSuite {
@@ -151,6 +152,21 @@ val composerViewTest by testSuite {
                 ComposerView(model, columns = 10, rows = 2, newLineKey = NewLineKey.ShiftEnter)
             }
             assertEquals(2, snapshot.lines().size)
+        }
+    }
+
+    for (desiredRows in listOf(0, -1)) {
+        test("shared sizing rejects nonpositive composer content rows=$desiredRows") {
+            assertFailsWith<IllegalArgumentException> {
+                boundedComposerRows(availableRows = 3, desiredRows = desiredRows)
+            }
+        }
+    }
+
+    for (maximumRows in listOf(0, -1)) {
+        test("shared pending preview is empty with no available rows=$maximumRows") {
+            val pending = listOf(StableUserMessage(listOf(ContentItem.InputText("queued"))))
+            assertEquals(emptyList(), pendingSteerPreviewLines(pending, columns = 0, maximumRows = maximumRows))
         }
     }
 

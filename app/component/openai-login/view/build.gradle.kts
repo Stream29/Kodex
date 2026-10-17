@@ -12,7 +12,6 @@ kotlin {
         mosaicMain.dependencies {
             api(project(":utils-external-url"))
             implementation(project(":app-view-components"))
-            implementation(project(":utils-external-url"))
             implementation(libs.mosaic.runtime)
         }
         mosaicTest.dependencies {

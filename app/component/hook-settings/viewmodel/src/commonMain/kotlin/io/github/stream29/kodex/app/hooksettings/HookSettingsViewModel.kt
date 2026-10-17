@@ -10,15 +10,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-public object DefaultHookSettingsViewModelFactory : HookSettingsViewModelFactory {
-    override fun create(dependencies: HookSettingsDependencies, ownerScope: CoroutineScope): HookSettingsViewModel =
-        DefaultHookSettingsViewModel(dependencies, ownerScope)
-}
-
+/** Creates a [HookSettingsViewModel] using host-owned list and write ports. */
 public fun createHookSettingsViewModel(
     dependencies: HookSettingsDependencies,
     ownerScope: CoroutineScope,
-): HookSettingsViewModel = DefaultHookSettingsViewModelFactory.create(dependencies, ownerScope)
+): HookSettingsViewModel = DefaultHookSettingsViewModel(dependencies, ownerScope)
 
 private class DefaultHookSettingsViewModel(
     private val dependencies: HookSettingsDependencies,

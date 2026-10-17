@@ -38,7 +38,6 @@ import io.github.stream29.kodex.tool.webrun.WebRunNamespace
 import io.github.stream29.kodex.tool.webrun.WebRunToolName
 import io.github.stream29.kodex.utils.applypatch.parsePatch
 import kotlinx.serialization.DeserializationStrategy
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonElement
 
 /** Converts one provider-issued local tool call at the AgentState boundary. */
@@ -194,8 +193,6 @@ private fun ResponseItem.ClientToolSearchCall.toPendingToolEvent(): PendingToolE
                 arguments,
             ),
         )
-    } catch (_: SerializationException) {
-        invalidToolSearch()
     } catch (_: IllegalArgumentException) {
         invalidToolSearch()
     }
@@ -226,8 +223,6 @@ private fun ResponseItem.FunctionCall.qualifiedName(): String =
 private fun ResponseItem.FunctionCall.parsedJson(): JsonElement? =
     try {
         OpenAiJsonCodec.parseToJsonElement(arguments)
-    } catch (_: SerializationException) {
-        null
     } catch (_: IllegalArgumentException) {
         null
     }
@@ -237,8 +232,6 @@ private fun <Arguments> ResponseItem.FunctionCall.decodeArguments(
 ): Arguments? =
     try {
         OpenAiJsonCodec.decodeFromString(deserializer, arguments)
-    } catch (_: SerializationException) {
-        null
     } catch (_: IllegalArgumentException) {
         null
     }

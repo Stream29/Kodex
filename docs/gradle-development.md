@@ -101,8 +101,9 @@ there is no target-profile switch.
 - `kodex.ktor-native-network-override` preserves the existing four desktop Native
   network pins independently of the enclosing module's target convention.
 - Conventions and `GenerateKodexVersion` live in `build-logic`, explicitly
-  included by `pluginManagement`. It reads the root version catalog; KGP and
-  Koin implementation dependencies no longer repeat version strings.
+  included by `pluginManagement`. It reads KGP and compiler-plugin versions from
+  the root version catalog. `kodex.kmp-viewmodel` keeps the CLI target convention
+  without injecting a DI compiler plugin or container dependencies.
 - Keep the root Kotlin multiplatform, serialization and Compose declarations
   with `apply false`. They anchor the shared plugin classpath; removing them
   has reproduced duplicate KGP loading in the composite.

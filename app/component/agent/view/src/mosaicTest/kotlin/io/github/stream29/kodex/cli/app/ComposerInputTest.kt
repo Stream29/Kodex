@@ -9,6 +9,8 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
+import io.github.stream29.kodex.cli.agent.boundedComposerRows
+import io.github.stream29.kodex.cli.agent.pendingSteerPreviewLines
 import io.github.stream29.kodex.cli.components.TextInputLayout
 import io.github.stream29.kodex.cli.components.TextInputState
 import io.github.stream29.kodex.cli.components.TextInputValue

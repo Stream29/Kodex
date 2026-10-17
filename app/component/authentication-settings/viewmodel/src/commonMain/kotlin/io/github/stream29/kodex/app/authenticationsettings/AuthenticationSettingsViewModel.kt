@@ -12,19 +12,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** Dependency-only factory; owner cancellation closes only this child. */
-public object DefaultAuthenticationSettingsViewModelFactory : AuthenticationSettingsViewModelFactory {
-    override fun create(
-        dependencies: AuthenticationSettingsDependencies,
-        ownerScope: CoroutineScope,
-    ): AuthenticationSettingsViewModel = DefaultAuthenticationSettingsViewModel(dependencies, ownerScope)
-}
-
 /** Observe shared summaries without creating an OAuth client or executing an initial command. */
 public fun createAuthenticationSettingsViewModel(
     dependencies: AuthenticationSettingsDependencies,
     ownerScope: CoroutineScope,
-): AuthenticationSettingsViewModel = DefaultAuthenticationSettingsViewModelFactory.create(dependencies, ownerScope)
+): AuthenticationSettingsViewModel = DefaultAuthenticationSettingsViewModel(dependencies, ownerScope)
 
 private class DefaultAuthenticationSettingsViewModel(
     private val dependencies: AuthenticationSettingsDependencies,

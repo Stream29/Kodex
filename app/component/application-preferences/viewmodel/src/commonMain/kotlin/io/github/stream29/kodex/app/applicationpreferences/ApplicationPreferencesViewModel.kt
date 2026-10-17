@@ -12,15 +12,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
-public object DefaultApplicationPreferencesViewModelFactory : ApplicationPreferencesViewModelFactory {
-    override fun create(
-        dependencies: ApplicationPreferencesDependencies, ownerScope: CoroutineScope,
-    ): ApplicationPreferencesViewModel = DefaultApplicationPreferencesViewModel(dependencies, ownerScope)
-}
-
+/** Creates an observing [ApplicationPreferencesViewModel] without initializing application widths. */
 public fun createApplicationPreferencesViewModel(
     dependencies: ApplicationPreferencesDependencies, ownerScope: CoroutineScope,
-): ApplicationPreferencesViewModel = DefaultApplicationPreferencesViewModelFactory.create(dependencies, ownerScope)
+): ApplicationPreferencesViewModel = DefaultApplicationPreferencesViewModel(dependencies, ownerScope)
 
 private class DefaultApplicationPreferencesViewModel(
     private val dependencies: ApplicationPreferencesDependencies,

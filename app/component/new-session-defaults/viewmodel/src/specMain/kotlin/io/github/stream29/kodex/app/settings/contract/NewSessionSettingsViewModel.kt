@@ -3,7 +3,6 @@ package io.github.stream29.kodex.app.settings.contract
 import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.openai.*
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -87,15 +86,6 @@ public interface NewSessionDefaultsDependencies {
     public fun dismissFailure(): Unit
 }
 
-/** Creates a stable defaults child. Owner cancellation releases observations, not accepted writes. */
-public fun interface NewSessionDefaultsViewModelFactory {
-    /** Synchronously projects borrowed sources, then observes them in a supervised child scope. */
-    public fun create(
-        dependencies: NewSessionDefaultsDependencies,
-        ownerScope: CoroutineScope,
-    ): NewSessionSettingsViewModel
-}
-
 /**
  * Defaults state owner. All four legacy Unit commands check active/current revision before invoking
  * their typed field port with a frozen field baseline; stale/closed commands are no-ops.
@@ -103,6 +93,8 @@ public fun interface NewSessionDefaultsViewModelFactory {
  * are reported once through dependencies; asynchronous outcomes belong to the host queue.
  * Hiding only disposes renderer menus; it does not stop observations or edit persisted defaults.
  * Title is an independent sibling component, not a fifth defaults field.
+ * Creation synchronously projects borrowed sources, then observes them in a supervised child
+ * of the supplied owner scope. Owner cancellation releases observations, not accepted writes.
  */
 public interface NewSessionSettingsViewModel : AutoCloseable {
     public val state: StateFlow<NewSessionSettingsState>

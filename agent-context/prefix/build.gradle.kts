@@ -20,7 +20,6 @@ kotlin {
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
             implementation(project(":agent-context-agents-md"))
-            implementation(project(":agent-context-skill"))
             implementation(project(":utils-os-environment"))
             api(project(":agent-context-skill"))
             implementation(project(":agent-context-prompt-dsl"))

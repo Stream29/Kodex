@@ -5,7 +5,6 @@ import io.github.stream29.kodex.app.sessionrename.contract.SessionRenameViewMode
 import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryViewModel
 import io.github.stream29.kodex.openai.*
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
 
@@ -149,7 +148,7 @@ public class SessionSettingsRename(
 }
 
 /**
- * Narrow dependencies, not a full RPC/global store. Factory takes ownership of [source] only.
+ * Narrow dependencies, not a full RPC/global store. The ViewModel takes ownership of [source] only.
  * [models] is borrowed. Directory factory creates a fresh owned browser or returns null without
  * replacing an existing child. Reporter receives the cwd frozen at command admission, never a
  * newly selected Session's cwd. A null reporter preserves the legacy generic local logging fallback,
@@ -162,19 +161,6 @@ public data class SessionSettingsDependencies(
     public val reportUnhandledError: ((Throwable, Path) -> Unit)? = null,
 )
 
-/** Dependency-only creation seam; owner cancellation has the same cleanup policy as close. */
-public fun interface SessionSettingsViewModelFactory {
-    /**
-     * Creates one stable child with a supervised observation/serial command lifetime.
-     * Initial state is projected synchronously; mounting a renderer does not acquire another source.
-     * Cancelling [ownerScope] closes children/source and cancels queued CAS/retries, never drains.
-     */
-    public fun create(
-        dependencies: SessionSettingsDependencies,
-        ownerScope: CoroutineScope,
-    ): SessionSettingsViewModel
-}
-
 /**
  * Settings > Session owner, bound to one exact target.
  * Commands are dispatcher-confined and non-suspending admission; closed/stale/unavailable commands
@@ -183,6 +169,9 @@ public fun interface SessionSettingsViewModelFactory {
  * Cancellation is not reported and stops local pending work, releasing source/children and publishing
  * Unavailable. No optimistic persisted state.
  * Synchronous browser creation failures propagate. Injected reporters must not throw.
+ * Creation synchronously projects the initial state and starts one supervised observation/serial
+ * command lifetime under the supplied owner scope. Mounting a renderer acquires no second source.
+ * Owner cancellation follows close: close children/source and cancel queued CAS/retries, never drain.
  */
 public interface SessionSettingsViewModel : AutoCloseable {
     public val state: StateFlow<SessionSettingsState>

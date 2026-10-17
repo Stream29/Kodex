@@ -2,7 +2,6 @@ package io.github.stream29.kodex.app.applicationpreferences
 
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SubmitKey
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
 /** Accepted freezes the canonical key in the application queue, not a persistence receipt. */
@@ -64,6 +63,8 @@ public data class ApplicationPreferencesState(
  * and rejected key admission report the shared failure once; cancellation propagates without reporting
  * or retry. close is idempotent, freezes state, stops child observation and rejects future commands,
  * but never resets application widths or cancels queued keys; owner completion does the same.
+ * Creation starts only child observation jobs under the supplied owner scope; it creates no
+ * store or write queue and performs no width initialization or resize.
  */
 public interface ApplicationPreferencesViewModel : AutoCloseable {
     public val state: StateFlow<ApplicationPreferencesState>
@@ -86,11 +87,4 @@ public interface ApplicationPreferencesViewModel : AutoCloseable {
     public fun hidePage(): Unit
     public fun dismissFailure(): Unit
     public override fun close(): Unit
-}
-
-/** Creates observation jobs only; no store, queue, width initialization or resize at construction. */
-public fun interface ApplicationPreferencesViewModelFactory {
-    public fun create(
-        dependencies: ApplicationPreferencesDependencies, ownerScope: CoroutineScope,
-    ): ApplicationPreferencesViewModel
 }

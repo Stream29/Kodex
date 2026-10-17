@@ -147,12 +147,23 @@ public fun composerStatusLine(state: ComposerState, showFailure: Boolean = true)
 internal fun submitToSteerHint(running: Boolean, draft: String): String? =
     "Submit to steer".takeIf { running && draft.isNotBlank() }
 
-internal fun boundedComposerRows(availableRows: Int, desiredRows: Int): Int {
+/**
+ * Caps composer content at the available rows, reserving one row even when the host has no space.
+ *
+ * @throws IllegalArgumentException if [desiredRows] is not positive.
+ */
+public fun boundedComposerRows(availableRows: Int, desiredRows: Int): Int {
     require(desiredRows > 0) { "Composer content must contain at least one row." }
     return minOf(desiredRows, availableRows.coerceAtLeast(1))
 }
 
-internal fun pendingSteerPreviewLines(
+/**
+ * Builds the shared host/Composer pending preview in queue order without claiming its inputs.
+ *
+ * Returns no rows for an empty queue or nonpositive [maximumRows]. Width is at least one column.
+ * When truncation and capacity allow, a final row reports the omitted count.
+ */
+public fun pendingSteerPreviewLines(
     pending: List<StableIndexEvent.Steerable>,
     columns: Int,
     maximumRows: Int,

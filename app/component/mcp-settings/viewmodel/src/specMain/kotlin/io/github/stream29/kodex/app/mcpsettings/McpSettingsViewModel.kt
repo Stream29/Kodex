@@ -221,6 +221,8 @@ public sealed interface McpSettingsEffect {
  * Hide clears drafts/import only, NOT OAuth. Close/owner termination stops child observations and
  * short-lived login/read/command waits, but NEVER admitted application writes or shared clients.
  * No automatic read/retry/login/reconnect is performed.
+ * Creation receives dependency ports and an explicit owner scope; it creates no backend or
+ * service locator and does not take ownership of shared clients.
  */
 public interface McpSettingsViewModel : AutoCloseable {
     public val state: StateFlow<McpSettingsState>
@@ -292,12 +294,4 @@ public interface McpSettingsViewModel : AutoCloseable {
     public fun dismissFailure(): Unit
     /** Idempotently release local observations/interactions, never application queue/shared clients. */
     public override fun close(): Unit
-}
-
-/** Inject ports and explicit owner scope; no backend/service locator is created by the factory. */
-public fun interface McpSettingsViewModelFactory {
-    public fun create(
-        dependencies: McpSettingsDependencies,
-        ownerScope: CoroutineScope,
-    ): McpSettingsViewModel
 }

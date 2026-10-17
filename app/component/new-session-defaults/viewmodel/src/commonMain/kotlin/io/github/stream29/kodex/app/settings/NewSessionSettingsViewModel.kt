@@ -6,17 +6,11 @@ import io.github.stream29.kodex.openai.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
-public object DefaultNewSessionDefaultsViewModelFactory : NewSessionDefaultsViewModelFactory {
-    override fun create(
-        dependencies: NewSessionDefaultsDependencies,
-        ownerScope: CoroutineScope,
-    ): NewSessionSettingsViewModel = DefaultNewSessionSettingsViewModel(dependencies, ownerScope)
-}
-
+/** Creates a [NewSessionSettingsViewModel] with synchronously projected borrowed sources. */
 public fun createNewSessionDefaultsViewModel(
     dependencies: NewSessionDefaultsDependencies,
     ownerScope: CoroutineScope,
-): NewSessionSettingsViewModel = DefaultNewSessionDefaultsViewModelFactory.create(dependencies, ownerScope)
+): NewSessionSettingsViewModel = DefaultNewSessionSettingsViewModel(dependencies, ownerScope)
 
 private class DefaultNewSessionSettingsViewModel(
     private val dependencies: NewSessionDefaultsDependencies,

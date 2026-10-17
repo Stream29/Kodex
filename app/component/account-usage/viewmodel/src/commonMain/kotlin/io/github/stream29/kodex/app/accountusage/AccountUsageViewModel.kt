@@ -9,17 +9,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** Observes host-owned state, with no reset/store/RPC dependency or startup refresh. */
-public object DefaultAccountUsageViewModelFactory : AccountUsageViewModelFactory {
-    override fun create(dependencies: AccountUsageDependencies, ownerScope: CoroutineScope): AccountUsageViewModel =
-        DefaultAccountUsageViewModel(dependencies, ownerScope)
-}
-
 /** Create one short-lived observing child; the host retains navigation refresh responsibility. */
 public fun createAccountUsageViewModel(
     dependencies: AccountUsageDependencies,
     ownerScope: CoroutineScope,
-): AccountUsageViewModel = DefaultAccountUsageViewModelFactory.create(dependencies, ownerScope)
+): AccountUsageViewModel = DefaultAccountUsageViewModel(dependencies, ownerScope)
 
 private class DefaultAccountUsageViewModel(
     private val dependencies: AccountUsageDependencies,

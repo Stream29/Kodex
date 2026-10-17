@@ -2,7 +2,6 @@ package io.github.stream29.kodex.app.accountusage
 
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.app.settings.contract.snapshotOrNull
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -73,6 +72,8 @@ public data class AccountUsageState(
  * Construction only observes; initial/re-entry refresh remains the Settings host's job.
  * No local fallback caching, auth inference, automatic retry or reset dialog exists here.
  * Commands after close are no-ops; ordinary errors report once to the shared authority.
+ * Creation subscribes to the supplied dependencies under an explicit owner scope without a
+ * service locator, constructor refresh or command dispatch. Dependency lifecycles remain borrowed.
  */
 public interface AccountUsageViewModel : AutoCloseable {
     /** Read-only original source state plus derived presentation rules and lifecycle. */
@@ -97,10 +98,4 @@ public interface AccountUsageViewModel : AutoCloseable {
      * Does not close shared sources, cancel a host-owned reset, or undo accepted backend work.
      */
     override fun close(): Unit
-}
-
-/** Typed factory with explicit owner lifecycle, no service locator or constructor refresh. */
-public fun interface AccountUsageViewModelFactory {
-    /** Subscribe to dependencies; no command is dispatched during creation. */
-    public fun create(dependencies: AccountUsageDependencies, ownerScope: CoroutineScope): AccountUsageViewModel
 }

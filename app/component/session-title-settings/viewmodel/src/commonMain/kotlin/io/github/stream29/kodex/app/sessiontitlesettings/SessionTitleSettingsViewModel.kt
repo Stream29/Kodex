@@ -11,15 +11,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
-public object DefaultSessionTitleSettingsViewModelFactory : SessionTitleSettingsViewModelFactory {
-    override fun create(
-        dependencies: SessionTitleSettingsDependencies, ownerScope: CoroutineScope,
-    ): SessionTitleSettingsViewModel = DefaultSessionTitleSettingsViewModel(dependencies, ownerScope)
-}
-
+/** Creates a [SessionTitleSettingsViewModel] using the host's default model and admission ports. */
 public fun createSessionTitleSettingsViewModel(
     dependencies: SessionTitleSettingsDependencies, ownerScope: CoroutineScope,
-): SessionTitleSettingsViewModel = DefaultSessionTitleSettingsViewModelFactory.create(dependencies, ownerScope)
+): SessionTitleSettingsViewModel = DefaultSessionTitleSettingsViewModel(dependencies, ownerScope)
 
 private class DefaultSessionTitleSettingsViewModel(
     private val dependencies: SessionTitleSettingsDependencies,

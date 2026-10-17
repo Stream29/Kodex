@@ -14,7 +14,6 @@ kotlin {
             api(libs.kotlinx.coroutines.core)
             implementation(project(":utils-coroutines"))
             api(project(":app-settings-filesystem"))
-            implementation(project(":app-settings-filesystem"))
             api(project(":mcp"))
             api(project(":openai-model-catalog"))
             implementation(project(":openai-codex-cli-storage"))

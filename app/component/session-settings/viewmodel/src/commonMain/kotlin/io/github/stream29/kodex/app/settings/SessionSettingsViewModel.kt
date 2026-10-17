@@ -13,17 +13,11 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.io.files.Path
 
-public object DefaultSessionSettingsViewModelFactory : SessionSettingsViewModelFactory {
-    override fun create(
-        dependencies: SessionSettingsDependencies,
-        ownerScope: CoroutineScope,
-    ): SessionSettingsViewModel = SessionSettingsViewModelImpl(dependencies, ownerScope)
-}
-
+/** Creates a [SessionSettingsViewModel] that owns [SessionSettingsDependencies.source]. */
 public fun createSessionSettingsViewModel(
     dependencies: SessionSettingsDependencies,
     ownerScope: CoroutineScope,
-): SessionSettingsViewModel = DefaultSessionSettingsViewModelFactory.create(dependencies, ownerScope)
+): SessionSettingsViewModel = SessionSettingsViewModelImpl(dependencies, ownerScope)
 
 private class SessionSettingsViewModelImpl(
     private val dependencies: SessionSettingsDependencies,

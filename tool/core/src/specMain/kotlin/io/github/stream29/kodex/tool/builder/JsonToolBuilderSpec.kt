@@ -23,6 +23,3 @@ public fun <Output> jsonToolSuccess(
     success: Boolean = true,
 ): JsonToolHandlerResult<Output> =
     JsonToolHandlerResult.Success(value, success)
-
-public fun jsonToolFailure(message: String): JsonToolHandlerResult<Nothing> =
-    JsonToolHandlerResult.Failure(message)

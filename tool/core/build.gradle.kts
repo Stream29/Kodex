@@ -9,6 +9,7 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
+                api(project(":agent-storage-clean-models"))
                 api(project(":openai-models"))
                 api(libs.kotlinx.serialization.core)
             }
@@ -18,18 +19,6 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
-        }
-    }
-}
-
-kotlin {
-    sourceSets {
-        named("specMain") {
-            dependencies {
-                api(project(":agent-storage-clean-models"))
-                api(project(":openai-models"))
-                api(libs.kotlinx.serialization.core)
-            }
         }
     }
 }

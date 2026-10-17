@@ -3,7 +3,6 @@ package io.github.stream29.kodex.app.contextsourcesettings
 import io.github.stream29.kodex.agentcontext.contract.AgentContextCustomSource
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourceSettings
 import io.github.stream29.kodex.app.settings.contract.BuiltInContextSource
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -106,6 +105,8 @@ public data class ContextSourceSettingsState(
  * unchanged, never reports failure or automatically retries. No optimistic sources publication.
  * Close is idempotent/nonthrowing: stop child observations, discard draft, reject future commands;
  * owner completion has identical cleanup. Neither cancels/owns admitted application writes.
+ * Creation starts only child observation jobs under the supplied owner scope; it creates no
+ * stores or write queue and does not look up environment values.
  */
 public interface ContextSourceSettingsViewModel : AutoCloseable {
     public val state: StateFlow<ContextSourceSettingsState>
@@ -138,11 +139,4 @@ public interface ContextSourceSettingsViewModel : AutoCloseable {
     /** Acknowledge the shared failure source, no-op after close. */
     public fun dismissFailure(): Unit
     public override fun close(): Unit
-}
-
-/** Creates only child observation jobs in ownerScope; no stores, environment lookup or write queue. */
-public fun interface ContextSourceSettingsViewModelFactory {
-    public fun create(
-        dependencies: ContextSourceSettingsDependencies, ownerScope: CoroutineScope,
-    ): ContextSourceSettingsViewModel
 }

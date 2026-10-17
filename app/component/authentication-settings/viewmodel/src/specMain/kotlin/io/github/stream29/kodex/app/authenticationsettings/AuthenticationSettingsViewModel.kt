@@ -3,7 +3,6 @@ package io.github.stream29.kodex.app.authenticationsettings
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationOperationState
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -84,6 +83,8 @@ public data class AuthenticationSettingsState(
  *
  * UI disables source/login/logout during SigningOut. This is NOT a global source or login
  * command lock: existing programmatic source writes and login intents remain admitted.
+ * Creation attaches one observing child to the supplied owner scope, never logs in or dispatches
+ * another command, and does not assume ownership of dependency lifecycles.
  */
 public interface AuthenticationSettingsViewModel : AutoCloseable {
     /** Safe summary, VM-owned confirmation and operation; no parent mirroring. */
@@ -124,13 +125,4 @@ public interface AuthenticationSettingsViewModel : AutoCloseable {
      * Does not close shared stores, drain/cancel accepted source writes, or roll back backend work.
      */
     override fun close(): Unit
-}
-
-/** Construct one child attached to an explicit owner scope; construction observes, never logs in. */
-public fun interface AuthenticationSettingsViewModelFactory {
-    /** Does not assume ownership of dependency lifecycles or trigger a command. */
-    public fun create(
-        dependencies: AuthenticationSettingsDependencies,
-        ownerScope: CoroutineScope,
-    ): AuthenticationSettingsViewModel
 }

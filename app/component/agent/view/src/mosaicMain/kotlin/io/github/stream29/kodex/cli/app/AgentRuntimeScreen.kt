@@ -15,19 +15,16 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAgentMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableAssistantMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableDeveloperMessage
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableIndexEvent
-import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentNotificationLevel
 import io.github.stream29.kodex.app.agent.contract.RequestUserInputState
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
 import io.github.stream29.kodex.cli.agent.RequestUserInputPanel
 import io.github.stream29.kodex.cli.agent.ComposerView
+import io.github.stream29.kodex.cli.agent.boundedComposerRows
 import io.github.stream29.kodex.cli.agent.composerStatusLine
 import io.github.stream29.kodex.cli.agent.canEditHistory
+import io.github.stream29.kodex.cli.agent.pendingSteerPreviewLines
 import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskPanel
 import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns
 import io.github.stream29.kodex.cli.components.TextInputLayout
@@ -37,8 +34,6 @@ import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.cli.history.AgentHistoryView
 import io.github.stream29.kodex.cli.history.AgentHistoryViewState
 import io.github.stream29.kodex.cli.settings.NewLineKey
-import io.github.stream29.kodex.openai.AgentMessageInputContent
-import io.github.stream29.kodex.openai.ContentItem
 
 /**
  * Borrows the exact Agent and its existing children. Unmounting does not close them.
@@ -224,61 +219,6 @@ private fun PendingSteerPreview(lines: List<String>, columns: Int) {
 
 internal fun submitToSteerHint(running: Boolean, draft: String): String? =
     SubmitToSteerHint.takeIf { running && draft.isNotBlank() }
-
-internal fun boundedComposerRows(availableRows: Int, desiredRows: Int): Int {
-    require(desiredRows > 0) { "Composer content must contain at least one row." }
-    return minOf(desiredRows, availableRows.coerceAtLeast(1))
-}
-
-internal fun pendingSteerPreviewLines(
-    pending: List<StableIndexEvent.Steerable>,
-    columns: Int,
-    maximumRows: Int,
-): List<String> {
-    if (pending.isEmpty() || maximumRows <= 0) return emptyList()
-    val width = columns.coerceAtLeast(1)
-    val header = "Pending steer (${pending.size})".ellipsizeToTerminalWidth(width)
-    if (maximumRows == 1) return listOf(header)
-    val detailCapacity = maximumRows - 1
-    val visibleCount =
-        if (pending.size > detailCapacity && detailCapacity > 1) detailCapacity - 1 else detailCapacity
-    return buildList {
-        add(header)
-        pending.take(visibleCount).forEach { steer ->
-            add(("  ↳ " + steer.previewText()).ellipsizeToTerminalWidth(width))
-        }
-        if (pending.size > visibleCount && detailCapacity > 1) {
-            add("  … ${pending.size - visibleCount} more".ellipsizeToTerminalWidth(width))
-        }
-    }
-}
-
-private fun StableIndexEvent.Steerable.previewText(): String = when (this) {
-    is StableUserMessage -> content.previewContentText()
-    is StableAssistantMessage -> "Assistant: ${content.previewContentText()}"
-    is StableDeveloperMessage -> "Developer: ${content.previewContentText()}"
-    is StableAgentMessage -> "$author → $recipient: ${content.previewAgentMessageText()}"
-}.ifBlank { "[empty message]" }
-
-private fun List<ContentItem>.previewContentText(): String =
-    joinToString(" ") { part ->
-        when (part) {
-            is ContentItem.InputText -> part.text.singleLine()
-            is ContentItem.OutputText -> part.text.singleLine()
-            is ContentItem.InputImage -> "[image]"
-        }
-    }.trim()
-
-private fun List<AgentMessageInputContent>.previewAgentMessageText(): String =
-    joinToString(" ") { part ->
-        when (part) {
-            is AgentMessageInputContent.InputText -> part.text.singleLine()
-            is AgentMessageInputContent.EncryptedContent -> "[encrypted content]"
-        }
-    }.trim()
-
-private fun String.singleLine(): String =
-    lineSequence().joinToString(" ") { line -> line.trim() }.trim()
 
 private const val RequestUserInputMaximumRows: Int = 12
 private const val PendingSteerMaximumRows: Int = 6
