@@ -113,8 +113,8 @@ public fun ComposerView(
             newLineKey = newLineKey,
             autoFocus = autoFocus && state.mode != ComposerMode.RequestInput,
             enabled = enabled &&
-                state.mode != ComposerMode.RequestInput &&
-                state.submission !is ComposerSubmissionState.Submitting,
+                state.mode != ComposerMode.RequestInput,
+            readOnly = state.submission is ComposerSubmissionState.Submitting,
             focusRequester = focusRequester,
             onSubmit = {
                 val expectedRevision = state.revision

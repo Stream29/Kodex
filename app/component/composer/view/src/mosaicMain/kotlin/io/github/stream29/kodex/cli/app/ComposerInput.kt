@@ -23,6 +23,7 @@ import io.github.stream29.kodex.cli.settings.SubmitKey
  * edits to the real Composer child; [onSubmit] is the captured owner's intent. This primitive
  * does not allocate a ViewModel, submit/persist a message, or own the borrowed child lifecycle.
  * Newline edits remain one undo transaction and configured submit keys never insert a newline.
+ * [readOnly] blocks edits and submission without removing the input's focus target.
  */
 @Composable
 public fun ComposerInput(
@@ -35,6 +36,7 @@ public fun ComposerInput(
     onSubmit: () -> Unit,
     onValueChanged: ((TextInputValue) -> Unit)? = null,
     focusRequester: FocusRequester? = null,
+    readOnly: Boolean = false,
 ) {
     Column {
         TextInput(
@@ -43,6 +45,7 @@ public fun ComposerInput(
             modifier = Modifier.fillMaxWidth(),
             autoFocus = autoFocus,
             enabled = enabled,
+            readOnly = readOnly,
             focusRequester = focusRequester,
             onValueChanged = onValueChanged,
             onKeyEvent = { event ->

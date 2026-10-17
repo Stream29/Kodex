@@ -22,6 +22,48 @@ private val ansiSnapshots = SnapshotStrategy { mosaic ->
 }
 
 val textInputTest by testSuite {
+    test("read-only input keeps focus and navigation but rejects editing and custom actions") {
+        val state = TextInputState(TextInputValue("draft", cursorOffset = 5))
+        state.edit(TextInputEdit.Insert("x"))
+        state.edit(TextInputEdit.Insert("y"))
+        state.undo()
+        var focused = false
+        var customActions = 0
+        runMosaicTest {
+            setContentAndSnapshot {
+                Column {
+                    Text("Sessions", modifier = Modifier.focusable())
+                    TextInput(
+                        state = state,
+                        layout = TextInputLayout.create(state.value, width = 40),
+                        modifier = Modifier.onFocusChanged { focused = it.isFocused },
+                        autoFocus = true,
+                        readOnly = true,
+                        onKeyEvent = { customActions++; true },
+                    )
+                }
+            }
+            assertTrue(focused)
+            sendKeyEvent(KeyboardEvent('x'.code))
+            sendKeyEvent(KeyboardEvent(127))
+            sendKeyEvent(KeyboardEvent(13))
+            sendKeyEvent(KeyboardEvent('y'.code, modifiers = KeyboardEvent.ModifierCtrl))
+            sendPasteEvent(PasteEvent("pasted"))
+            sendKeyEvent(KeyboardEvent(KeyboardEvent.Left))
+            awaitSnapshot()
+            assertEquals(TextInputValue("draftx", cursorOffset = 5), state.value)
+            sendKeyEvent(KeyboardEvent('z'.code, modifiers = KeyboardEvent.ModifierCtrl))
+            sendKeyEvent(KeyboardEvent(KeyboardEvent.Right))
+            awaitSnapshot()
+            assertEquals(TextInputValue("draftx", cursorOffset = 6), state.value)
+            assertEquals(0, customActions)
+            assertTrue(focused)
+            sendKeyEvent(KeyboardEvent(9))
+            awaitSnapshot()
+            assertFalse(focused)
+        }
+    }
+
     test("disabled input is dim and rejects keyboard edits") {
         val state = TextInputState(TextInputValue(text = "locked", cursorOffset = 6))
 

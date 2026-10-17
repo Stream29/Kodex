@@ -1,8 +1,15 @@
 package io.github.stream29.kodex.cli.agent
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.focus.FocusRequester
+import com.jakewharton.mosaic.focus.onFocusChanged
+import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.KeyboardEvent
+import com.jakewharton.mosaic.terminal.PasteEvent
 import com.jakewharton.mosaic.testing.runMosaicTest
+import com.jakewharton.mosaic.ui.Column
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessage
 import io.github.stream29.kodex.app.agent.contract.ComposerFailure
@@ -14,6 +21,7 @@ import io.github.stream29.kodex.app.agent.contract.ComposerState
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionResult
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmissionState
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
+import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.RequestUserInputMode
@@ -225,6 +233,80 @@ val composerViewTest by testSuite {
             awaitSnapshot()
             assertEquals(listOf(13L), model.submittedRevisions)
             assertEquals("", model.state.value.text)
+        }
+    }
+
+    for (failed in listOf(false, true)) {
+        test("submitting preserves focus and blocks edits until completion failed=$failed") {
+            val model = RenderComposerModel(ComposerState(
+                ownerId = ComposerOwnerId("agent-a"),
+                text = "draft",
+                cursorOffset = 5,
+                revision = 12,
+            ))
+            var sessionsFocused = false
+            runMosaicTest {
+                val requester = FocusRequester()
+                setContentAndSnapshot {
+                    Column {
+                        TuiButton(
+                            label = "Sessions",
+                            modifier = Modifier.onFocusChanged { sessionsFocused = it.isFocused },
+                            onClick = {},
+                        )
+                        ComposerView(
+                            model, 40, 4, NewLineKey.ShiftEnter,
+                            autoFocus = false, focusRequester = requester,
+                        )
+                    }
+                }
+                assertTrue(requester.requestFocus())
+                model.state.value = model.state.value.copy(submission = ComposerSubmissionState.Submitting)
+                while ("Submitting…" !in awaitSnapshot()) {}
+                assertFalse(sessionsFocused, "Submitting must not move focus to Sessions")
+                sendKeyEvent(KeyboardEvent('x'.code))
+                sendKeyEvent(KeyboardEvent(127))
+                sendKeyEvent(KeyboardEvent(13, modifiers = KeyboardEvent.ModifierShift))
+                sendKeyEvent(KeyboardEvent(13))
+                sendPasteEvent(PasteEvent("pasted"))
+                model.state.value = model.state.value.copy(
+                    submission = if (failed) ComposerSubmissionState.Failed(
+                        ComposerFailure(ComposerOperation.Submit, "failed"),
+                    ) else ComposerSubmissionState.Editing,
+                )
+                while ("Submitting…" in awaitSnapshot()) {}
+                assertEquals(emptyList(), model.updatedTexts)
+                assertEquals(emptyList(), model.submittedRevisions)
+                assertEquals("draft", model.state.value.text)
+                sendKeyEvent(KeyboardEvent('x'.code))
+                awaitSnapshot()
+                assertFalse(sessionsFocused)
+                assertEquals("draftx", model.state.value.text)
+            }
+        }
+    }
+
+    test("submission completion does not steal focus after explicit navigation") {
+        val model = RenderComposerModel(ComposerState(
+            ownerId = ComposerOwnerId("agent-a"),
+            text = "draft",
+            submission = ComposerSubmissionState.Submitting,
+        ))
+        var sessionsClicked by mutableStateOf(0)
+        runMosaicTest {
+            setContentAndSnapshot {
+                Column {
+                    TuiButton(label = "Sessions $sessionsClicked", onClick = { sessionsClicked++ })
+                    ComposerView(model, 40, 4, NewLineKey.ShiftEnter)
+                }
+            }
+            sendKeyEvent(KeyboardEvent(9))
+            model.state.value = model.state.value.copy(submission = ComposerSubmissionState.Editing)
+            awaitSnapshot()
+            sendKeyEvent(KeyboardEvent(13))
+            awaitSnapshot()
+            assertEquals(1, sessionsClicked)
+            assertEquals(emptyList(), model.submittedRevisions)
         }
     }
 }

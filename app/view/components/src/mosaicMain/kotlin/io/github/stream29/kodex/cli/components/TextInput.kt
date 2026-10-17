@@ -158,7 +158,10 @@ public class TextInputLayout private constructor(
     }
 }
 
-/** A focusable terminal text input backed by [state]. */
+/**
+ * A focusable terminal text input backed by [state].
+ * [readOnly] preserves focus and cursor navigation but blocks edits and custom key actions.
+ */
 @Composable
 public fun TextInput(
     state: TextInputState,
@@ -169,6 +172,7 @@ public fun TextInput(
     enabled: Boolean = true,
     onKeyEvent: ((KeyEvent) -> Boolean)? = null,
     onValueChanged: ((TextInputValue) -> Unit)? = null,
+    readOnly: Boolean = false,
 ) {
     val latestOnKeyEvent = rememberUpdatedState(onKeyEvent)
     val latestOnValueChanged = rememberUpdatedState(onValueChanged)
@@ -195,7 +199,7 @@ public fun TextInput(
     }
 
     fun applyEdit(edit: TextInputEdit) {
-        notifyIfChanged(state.edit(edit))
+        if (!readOnly) notifyIfChanged(state.edit(edit))
     }
 
     fun moveCursor(movement: TextInputMovement) {
@@ -224,14 +228,15 @@ public fun TextInput(
             }
             .onKeyEvent { event ->
                 when {
-                    latestOnKeyEvent.value?.invoke(event) == true -> true
+                    readOnly && event.key == "Enter" -> true
+                    !readOnly && latestOnKeyEvent.value?.invoke(event) == true -> true
                     event.matchesControlKey("z") -> {
-                        notifyIfChanged(state.undo())
+                        notifyIfChanged(!readOnly && state.undo())
                         true
                     }
 
                     event.matchesControlKey("y") -> {
-                        notifyIfChanged(state.redo())
+                        notifyIfChanged(!readOnly && state.redo())
                         true
                     }
 
