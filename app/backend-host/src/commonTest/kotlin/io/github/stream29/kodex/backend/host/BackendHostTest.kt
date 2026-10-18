@@ -139,8 +139,8 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
             var index = -1
             withLocalRpcClient(home, endpoint) { connection ->
                 val rpc = RpcServices(RestoringRpcClient(connection))
-                withTimeout(10.seconds) { rpc.global.getModelsFlow().first { it.any { model -> model.slug.value == "fixture" } } }
-                index = rpc.global.createSession(KodexAgentSettings(model = OpenAiModelId("fixture"), cwd = home))
+                val model = withTimeout(10.seconds) { rpc.global.getModelsFlow().first { it.isNotEmpty() }.first().slug }
+                index = rpc.global.createSession(KodexAgentSettings(model = model, cwd = home))
                 rpc.global.keepSessionAlive(index)
                 rpc.runtime.appendUserMessage(index, listOf(ContentItem.InputText("offline fixture")))
                 val waiter = launch { rpc.runtime.resume(index) }
@@ -192,8 +192,8 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
         }) { home, endpoint, _ ->
             withLocalRpcClient(home, endpoint) { connection ->
                 val rpc = RpcServices(RestoringRpcClient(connection))
-                withTimeout(10.seconds) { rpc.global.getModelsFlow().first { it.any { model -> model.slug.value == "fixture" } } }
-                val index = rpc.global.createSession(KodexAgentSettings(model = OpenAiModelId("fixture"), cwd = home))
+                val model = withTimeout(10.seconds) { rpc.global.getModelsFlow().first { it.isNotEmpty() }.first().slug }
+                val index = rpc.global.createSession(KodexAgentSettings(model = model, cwd = home))
                 rpc.global.keepSessionAlive(index)
                 rpc.runtime.appendUserMessage(index, listOf(ContentItem.InputText("offline fixture")))
                 val waiter = launch { runCatching { rpc.runtime.resume(index) } }
