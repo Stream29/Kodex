@@ -187,21 +187,38 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
     test("real running host restores original steer hint and Enter never duplicates pending preview") {
         val entered = CompletableDeferred<Unit>()
         val finish = CompletableDeferred<Unit>()
+        val preempted = CompletableDeferred<Unit>()
+        val allowCancellation = CompletableDeferred<Unit>()
+        var requests = 0
         composerHost(response = {
+            val request = ++requests
             entered.complete(Unit)
-            finish.await()
-            testAnswer()
+            try {
+                finish.await()
+                testAnswer()
+            } finally {
+                if (request == 1 && !currentCoroutineContext().isActive) {
+                    // Pin the pending-preview window while the real response is preempted.
+                    // Waiting in the response body alone cannot prevent its cancellation.
+                    withContext(NonCancellable) {
+                        preempted.complete(Unit)
+                        allowCancellation.await()
+                    }
+                }
+            }
         }) {
             val agent = requireNotNull(session.rootAgent.value)
             val binding = view.current()
-            binding.appendUserMessage(listOf(ContentItem.InputText("start")))
-            agent.resume()
-            entered.await()
-            agent.composer.state.first { it.running }
-            binding.pendingSteer.update { listOf(StableUserMessage(listOf(ContentItem.InputText("earlier")))) }
-            agent.pendingSteer.first { it.size == 1 }
-            agent.composer.update("next steer")
             try {
+                binding.appendUserMessage(listOf(ContentItem.InputText("start")))
+                agent.resume()
+                entered.await()
+                agent.composer.state.first { it.running }
+                binding.pendingSteer.update { listOf(StableUserMessage(listOf(ContentItem.InputText("earlier")))) }
+                agent.pendingSteer.first { it.size == 1 }
+                agent.composer.update("next steer")
+                withTimeout(5.seconds) { preempted.await() }
+                agent.composer.state.first { it.pendingSteer.size == 1 }
                 runComposerHostMosaicTest {
                     val focus = FocusRequester()
                     val before = setContentAndSnapshot { RepairHost(agent, focus) }
@@ -217,7 +234,22 @@ val composerHostRepairTest by testSuite(compartment = { TestCompartment.RealTime
                     assertFalse("Submit to steer" in after, after)
                     assertNull(agent.notification.value)
                 }
-            } finally { finish.complete(Unit) }
+            } finally {
+                allowCancellation.complete(Unit)
+                finish.complete(Unit)
+            }
+            withTimeout(5.seconds) { agent.running.first { !it } }
+            val index = session.sessionIndex
+            val nonce = services.index.getCacheNonce(index)
+            val latest = services.runtime.getLatestIndex(index)
+            val messages = (1..latest).map { services.index.get(index, nonce, it) }
+                .filterIsInstance<StableUserMessage>()
+                .map { it.content }
+            val expected: List<List<ContentItem>> =
+                listOf("start", "earlier", "next steer").map { listOf(ContentItem.InputText(it)) }
+            assertEquals(expected, messages)
+            assertEquals(2, requests)
+            assertTrue(services.runtime.getPendingSteer(index).isEmpty())
         }
     }
 
