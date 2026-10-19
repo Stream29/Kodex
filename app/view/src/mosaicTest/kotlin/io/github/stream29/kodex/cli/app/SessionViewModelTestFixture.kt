@@ -7,11 +7,11 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.io.files.Path
 
 internal class SessionViewModelTestFixture private constructor(val rpc: RpcFrontendFixture) {
-    private val drafts = mutableListOf<NewSessionViewModel>()
-    fun newSession(name: String): NewSessionViewModel = rpc.draft(name).also(drafts::add)
+    private val singleton = rpc.draft()
+    fun newSession(): NewSessionViewModel = singleton
     suspend fun persistedSession(name: String): PersistedSessionViewModel = rpc.create(name)
     suspend fun close() {
-        drafts.forEach(NewSessionViewModel::close)
+        singleton.close()
         rpc.closeAndJoin()
     }
     companion object {

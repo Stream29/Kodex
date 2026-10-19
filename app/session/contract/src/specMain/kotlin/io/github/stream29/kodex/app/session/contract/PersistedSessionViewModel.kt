@@ -1,5 +1,6 @@
 package io.github.stream29.kodex.app.session.contract
 
+import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Instant
@@ -18,8 +19,31 @@ import kotlin.time.Instant
  * Commands require the current ready binding and its exact settings/Agent instance.
  * Caller cancellation stops local waiting, not backend work already accepted;
  * no automatic command replay follows recovery.
+ *
+ * Read name/settings from this captured child, not a root-level mirror. Settings
+ * commands retain [AgentSettingsViewModel] admission and cancellation semantics.
+ * Unmounting a renderer or selecting another tab does not close this handle.
  */
-public interface PersistedSessionViewModel : SessionViewModel {
+public interface PersistedSessionViewModel : AgentSettingsViewModel, AutoCloseable {
+    /** Root/tab display name projected from this persisted Session's settings. */
+    public val name: StateFlow<String>
+
+    /**
+     * Renames this captured Session, not the latest selected tab.
+     * @throws IllegalStateException if its current binding is not ready.
+     * @throws Exception if the rename/storage/transport operation fails.
+     * @throws kotlinx.coroutines.CancellationException if caller waiting or this local
+     * owner is cancelled; already accepted backend work is not undone.
+     */
+    public suspend fun rename(name: String): Unit
+
+    /**
+     * Idempotently releases this handle's local observations and drafts.
+     * Withdraws its borrowed Agent through the owning RPC view; does not independently
+     * close a second Agent owner, Stop backend work, delete data, or close shared transport.
+     */
+    override fun close(): Unit
+
     /** Existing RPC address, not a new permanent remote identity or lease. */
     public val sessionIndex: Int
 

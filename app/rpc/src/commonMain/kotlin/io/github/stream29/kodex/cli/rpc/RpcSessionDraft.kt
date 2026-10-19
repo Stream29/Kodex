@@ -1,6 +1,8 @@
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
+import io.github.stream29.kodex.app.agent.contract.ComposerLifecycle
+import io.github.stream29.kodex.app.agent.contract.AgentLifecycleState
 import io.github.stream29.kodex.app.agent.contract.ComposerDependencies
 import io.github.stream29.kodex.app.agent.contract.ComposerFailureReporter
 import io.github.stream29.kodex.app.agent.contract.ComposerOwnerId
@@ -12,39 +14,58 @@ import io.github.stream29.kodex.app.agent.contract.ComposerSteerPort
 import io.github.stream29.kodex.app.agent.contract.ComposerSubmitPort
 import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
 import io.github.stream29.kodex.cli.agent.createComposerViewModel
+import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.openai.Reasoning
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.io.files.Path
 
 /**
  * Opening or editing this object does not allocate a backend Session.
  * Its original local owner is a child of [ownerScope]; parent cancellation/join
  * closes Composer and its observations. Explicit close cancels only this child.
- * Views and the shared backend are borrowed, never closed or stopped here.
+ * Views, global observations and the shared backend are borrowed, never closed or stopped here.
+ * Submission runs in the host's surviving command owner; this object adds no detached work
+ * or secondary error outlet.
  */
 public class RpcSessionDraft(
-    initialSettings: KodexAgentSettings,
+    private val initialWorkingDirectory: Path,
     private val views: RpcSessionViews,
+    private val global: RpcGlobalSettings,
     ownerScope: CoroutineScope,
 ) : AutoCloseable {
-    private val mutex = Mutex()
-    private val mutableSettings = MutableStateFlow(initialSettings)
-    public val settings: StateFlow<KodexAgentSettings> = mutableSettings.asStateFlow()
-    private val mutableEditable = MutableStateFlow(true)
-    public val editable: StateFlow<Boolean> = mutableEditable.asStateFlow()
+    private val submission = Mutex()
+    private data class WorkingDirectory(val path: Path, val revision: Long)
+    private val directory = MutableStateFlow(WorkingDirectory(initialWorkingDirectory, 0))
     private val owner = SupervisorJob(requireNotNull(ownerScope.coroutineContext[Job]) {
         "A draft requires an explicit coroutine owner."
     })
     private val composerScope = CoroutineScope(ownerScope.coroutineContext + owner)
+    public val settings: StateFlow<KodexAgentSettings> =
+        combine(global.settings.projectState { it.newSession }, directory) { defaults, cwd -> project(defaults, cwd.path) }
+            .stateIn(composerScope, SharingStarted.Eagerly, project(global.settings.value.newSession, initialWorkingDirectory))
+
+    private fun project(defaults: KodexNewSessionSettings, cwd: Path): KodexAgentSettings =
+        KodexAgentSettings(
+            model = defaults.model,
+            reasoning = Reasoning(effort = defaults.reasoningEffort),
+            serviceTier = defaults.serviceTier,
+            requestUserInputMode = defaults.requestUserInputMode,
+            cwd = cwd,
+        )
     public val composer: ComposerViewModel = createComposerViewModel(
         ownerId = ComposerOwnerId("session-draft"),
         dependencies = object : ComposerDependencies {
@@ -70,75 +91,81 @@ public class RpcSessionDraft(
         ownerScope = composerScope,
     )
     private var closed = false
-    private var createdIndex: Int? = null
-    private var submitted = false
-    private var explicitlyNamed = false
-    private var renameAttempted = false
 
     init {
         owner.invokeOnCompletion { close() }
     }
 
-    public suspend fun edit(transform: (KodexAgentSettings) -> KodexAgentSettings): Unit = mutex.withLock {
-        check(!closed && createdIndex == null) { "The draft is no longer editable." }
+    private fun checkOpen() {
+        check(!closed) { "The draft is closed." }
         owner.ensureActive()
-        applyEdit(transform(settings.value))
     }
 
-    /** Source CAS rejects nonwritable/conflicting edits at the original mutation lock. */
-    internal suspend fun tryEdit(transform: (KodexAgentSettings) -> KodexAgentSettings?): Boolean = mutex.withLock {
-        if (closed || createdIndex != null) return false
-        owner.ensureActive()
-        val next = transform(settings.value) ?: return false
-        applyEdit(next)
-        true
+    /** Freeze only this intent's target fields, preserving unrelated fields on CAS retry. */
+    public suspend fun <F> editDefaults(
+        select: (KodexNewSessionSettings) -> F,
+        replace: (KodexNewSessionSettings) -> KodexNewSessionSettings,
+    ) {
+        checkOpen()
+        val initial = select(global.settings.value.newSession)
+        check(global.settings.editField(initial, { select(it.newSession) }, { it.copy(newSession = replace(it.newSession)) }) {
+            checkOpen()
+            global.ensureActive()
+        }) { "The edited field changed. Review the latest value." }
     }
 
-    private fun applyEdit(next: KodexAgentSettings) {
-        if (next.threadName != settings.value.threadName) explicitlyNamed = true
-        mutableSettings.value = next
-    }
-
-    public suspend fun clearExplicitThreadName(): Unit = mutex.withLock {
-        check(!closed && createdIndex == null) { "The draft is no longer editable." }
-        owner.ensureActive()
-        explicitlyNamed = false
-        mutableSettings.value = mutableSettings.value.copy(threadName = "")
-    }
-
-    /** Creation and initial append are distinct commits; failure never rolls back the entity. */
-    public suspend fun materialize(): RpcSessionView = mutex.withLock {
-        owner.ensureActive()
-        check(!closed)
-        val captured = composer.state.value
-        val index = createdIndex ?: views.services.global.createSession(settings.value).also {
-            createdIndex = it
-            mutableEditable.value = false
+    public fun updateWorkingDirectory(path: Path) {
+        checkOpen()
+        directory.update {
+            check(it.revision < Long.MAX_VALUE) { "Working directory revisions exhausted." }
+            WorkingDirectory(path, it.revision + 1)
         }
-        owner.ensureActive()
-        check(!closed) { "The draft was closed while creating its Session." }
-        val view = views.open(index)
-        owner.ensureActive()
-        if (explicitlyNamed && !renameAttempted) {
-            renameAttempted = true
-            val current = view.current().settings
-            current.editField(current.value.threadName, { it.threadName }, { it.copy(threadName = settings.value.threadName) })
-        }
-        if (!submitted && captured.text.isNotBlank()) {
-            owner.ensureActive()
-            view.current().appendUserMessage(listOf(ContentItem.InputText(captured.text.trim())))
-            submitted = true
+    }
+
+    /**
+     * [open] opens the host's stable persisted handle before any append; RPC-only consumers may
+     * supply [RpcSessionViews.open]. Creation and append remain distinct commits. The caller
+     * owns accepted work and errors, so this suspends directly rather than launching hidden work.
+     */
+    public suspend fun <T> submit(expectedRevision: Long, open: suspend (Int) -> T): T? {
+        checkOpen()
+        // tryLock is admission, not a queue: a duplicate cannot wait and consume a later draft.
+        if (!submission.tryLock()) return null
+        try {
+            currentCoroutineContext().ensureActive()
+            checkOpen()
+            val captured = composer.state.value
+            if (captured.lifecycle != ComposerLifecycle.Open ||
+                captured.revision != expectedRevision || captured.text.length == 0
+            ) return null
+            val cwd = directory.value
+            val index = views.services.global.createSession(cwd.path)
+            checkOpen()
+            val persisted = open(index)
+            checkOpen()
+            val view = views.open(index)
+            val binding = view.current()
+            val agent = requireNotNull(view.agent.value)
+            binding.appendUserMessage(listOf(ContentItem.InputText(captured.text)))
+            currentCoroutineContext().ensureActive()
+            checkOpen()
+            binding.ensureActive()
+            check(view.binding.value === binding && view.agent.value === agent &&
+                agent.lifecycle.value == AgentLifecycleState.Open
+            ) { "The created Session binding changed before resume admission." }
+            agent.resume()
+            checkOpen()
             composer.clear(captured.revision)
-            owner.ensureActive()
-            requireNotNull(view.agent.value).resume()
+            // Compare revisions as well as paths: A -> B -> A is still a later directory edit.
+            directory.compareAndSet(cwd, WorkingDirectory(initialWorkingDirectory, cwd.revision))
+            return persisted
+        } finally {
+            submission.unlock()
         }
-        view
     }
 
-    public val persistedIndex: Int? get() = createdIndex
     override fun close() {
         closed = true
-        mutableEditable.value = false
         composer.close()
         composerScope.cancel()
     }

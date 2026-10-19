@@ -8,11 +8,11 @@ import com.jakewharton.mosaic.testing.runMosaicTest
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.migration.prepareKodexHome
-import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.test.deleteTestDirectory
 import io.github.stream29.kodex.app.test.testAnswer
+import io.github.stream29.kodex.cli.settings.UnifiedSettingsStore
+import io.github.stream29.kodex.rpc.server.defaultBackendSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ModelsResponse
 import io.github.stream29.kodex.openai.OpenAiLoginAuthorization
@@ -60,14 +60,21 @@ val docsSessionManagementRecordingTest by testSuite(compartment = { TestCompartm
             }
             try {
                 val prepared = prepareKodexHome(home)
+                UnifiedSettingsStore.open(home, defaultBackendSettings()).backendStore.update {
+                    it.copy(
+                        sessionTitle = it.sessionTitle.copy(enabled = false),
+                        newSession = it.newSession.copy(model = OpenAiModelId("test-model")),
+                    )
+                }
                 withKodexApplication(
                     prepared, home, Path(home, "codex"), Path(home, "agents"),
                     applicationWidth = 120,
                     createClient = { client }, createLoginClient = { loginClient },
                 ) { app ->
-                    val draft = app.viewModel.navigation.value.selected as NewSessionViewModel
-                    draft.rename("Demo session")
-                    val session = requireNotNull(app.viewModel.materializeNewSession(draft))
+                    val draft = app.viewModel.newSession
+                    val revision = draft.composer.update("Demo session")
+                    val session = requireNotNull(app.viewModel.submitNewSession(revision))
+                    session.rename("Demo session")
                     val index = session.sessionIndex
                     val clip = DocsClip("session-management", 120, 36)
                     runMosaicTest(MosaicSnapshots) {
@@ -94,7 +101,7 @@ val docsSessionManagementRecordingTest by testSuite(compartment = { TestCompartm
                         clip.add(settle(), "Close")
                         clickLabel("Close")
                         assertTrue(app.viewModel.navigation.value.tabs.none {
-                            it is PersistedSessionViewModel && it.sessionIndex == index
+                            it.sessionIndex == index
                         })
                         clip.add(settle(), "Sessions")
 
@@ -102,10 +109,9 @@ val docsSessionManagementRecordingTest by testSuite(compartment = { TestCompartm
                         clip.add(settle(), "Demo session renamed")
                         clickLabel("Demo session renamed")
                         val reopened = app.viewModel.navigation.first {
-                            it.selected is PersistedSessionViewModel &&
-                                (it.selected as PersistedSessionViewModel).sessionIndex == index
+                            it.selectedSession?.sessionIndex == index
                         }
-                        assertEquals(index, (reopened.selected as PersistedSessionViewModel).sessionIndex)
+                        assertEquals(index, requireNotNull(reopened.selectedSession).sessionIndex)
                         clip.add(settle(), "Demo session renamed")
 
                         clickLabel("Demo session renamed", MouseEvent.Button.Right)

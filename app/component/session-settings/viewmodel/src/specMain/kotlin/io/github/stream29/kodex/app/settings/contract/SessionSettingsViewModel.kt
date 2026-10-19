@@ -8,7 +8,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
 
-/** Editable fields shared by one materialized Session and one virtual New Session draft. */
+/** Editable configuration fields of one persisted Session. */
 public data class SessionSettingsConfiguration(
     public val model: OpenAiModelId,
     public val workingDirectory: Path,
@@ -16,9 +16,6 @@ public data class SessionSettingsConfiguration(
     public val serviceTier: ServiceTier,
     public val requestUserInputMode: RequestUserInputMode,
 )
-
-/** Kind of the fixed target captured at creation; never a lookup of the current selected tab. */
-public enum class SessionSettingsTargetKind { MaterializedSession, NewSessionDraft }
 
 /**
  * Source identity/configuration projection, before joining the model catalog.
@@ -30,7 +27,6 @@ public enum class SessionSettingsTargetKind { MaterializedSession, NewSessionDra
  */
 public data class SessionSettingsSnapshot(
     public val revision: Long,
-    public val targetKind: SessionSettingsTargetKind,
     public val sessionName: String,
     public val configuration: SessionSettingsConfiguration,
     public val editable: Boolean,
@@ -48,10 +44,10 @@ public sealed interface SessionSettingsDataState {
 }
 
 /**
- * Infrastructure port bound to one exact binding or draft, transferred to the component.
+ * Infrastructure port bound to one exact persisted binding or no target, transferred to the component.
  * Never resolve the active tab again during delayed commands or CAS retries.
  * Source owns revision production, field-baseline merging and runtime-owned field preservation.
- * A reactivated materialized Session does not revive this source.
+ * A reactivated Session does not revive this source. A no-target source remains unavailable.
  */
 public interface SessionSettingsDataSource : AutoCloseable {
     /** Current availability; observation itself does not initiate an edit. */
@@ -75,15 +71,16 @@ public interface SessionSettingsDataSource : AutoCloseable {
      * Attempts the already trimmed, nonblank name at the frozen revision.
      * Rename admission is revision-based, not gated by configuration [SessionSettingsSnapshot.editable].
      * Return false for a stale/unavailable target or conflicting name baseline.
+     * An always-unavailable source returns false without validating the name.
      *
-     * @throws IllegalArgumentException if [sessionName] is blank.
+     * @throws IllegalArgumentException if a binding-backed source receives a blank [sessionName].
      * @throws CancellationException if the caller/source/binding expires.
      * @throws Exception if the underlying operation fails.
      */
     public suspend fun tryRenameSession(expectedRevision: Long, sessionName: String): Boolean
 
     /**
-     * Idempotently releases only this binding/observation, never the Session, draft or catalog.
+     * Idempotently releases only this binding/observation, never the Session or catalog.
      * Implementations must not throw during cleanup.
      */
     override fun close(): Unit

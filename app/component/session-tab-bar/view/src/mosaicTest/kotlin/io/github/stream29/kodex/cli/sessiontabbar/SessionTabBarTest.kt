@@ -6,8 +6,13 @@ import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.MouseEvent
+import com.jakewharton.mosaic.terminal.KeyboardEvent
+import com.jakewharton.mosaic.terminal.AnsiLevel
+import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
+import com.jakewharton.mosaic.ui.Column
+import com.jakewharton.mosaic.ui.Text
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarCallbacks
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarState
@@ -21,6 +26,97 @@ import kotlin.test.assertTrue
 private val fixedRunningIndicatorFrame = mutableStateOf("⠋")
 
 val sessionTabBarRendererTest by testSuite {
+    test("plus and ordinary selected tab use mutually exclusive reverse video") {
+        val identity = SessionTabIdentity("persisted")
+        var selected by mutableStateOf<SessionTabIdentity?>(null)
+        val snapshots = SnapshotStrategy { mosaic ->
+            mosaic.draw().render(AnsiLevel.ANSI16, supportsKittyUnderlines = false)
+        }
+        val callbacks = RecordingCallbacks()
+        fun inverted(label: String) = Regex("\u001B\\[(?:[0-9]+;)*7m\\[${Regex.escape(label)}]")
+        runMosaicTest(snapshotStrategy = snapshots) {
+            val newSession = setContentAndSnapshot {
+                Box(Modifier.width(40)) {
+                    SessionTabBar(
+                        SessionTabBarState(listOf(SessionTabPresentation(identity, "Persisted")), selected),
+                        callbacks, fixedRunningIndicatorFrame, 40,
+                    )
+                }
+            }
+            assertTrue(inverted("+").containsMatchIn(newSession), newSession)
+            assertFalse(inverted("Persisted").containsMatchIn(newSession), newSession)
+            selected = identity
+            val persisted = awaitSnapshot()
+            assertTrue(inverted("Persisted").containsMatchIn(persisted), persisted)
+            assertFalse(inverted("+").containsMatchIn(persisted), persisted)
+        }
+    }
+
+    test("empty tabs retain Sessions and plus pointer and keyboard actions") {
+        var revision by mutableStateOf(0)
+        val recording = RecordingCallbacks()
+        val callbacks = object : SessionTabBarCallbacks by recording {
+            override fun selectNewSession() { recording.selectNewSession(); revision++ }
+            override fun openSessions() { recording.openSessions(); revision++ }
+        }
+        runMosaicTest {
+            val initial = setContentAndSnapshot {
+                Column(Modifier.width(32)) {
+                    SessionTabBar(
+                        SessionTabBarState(emptyList(), null),
+                        callbacks, fixedRunningIndicatorFrame, 32,
+                    )
+                    Text("revision=$revision")
+                }
+            }
+            assertTrue("[Sessions]" in initial && "[+]" in initial, initial)
+            sendMouseEvent(MouseEvent(30, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
+            sendMouseEvent(MouseEvent(30, 0, MouseEvent.Type.Release))
+            awaitSnapshot()
+            assertEquals(1, recording.newSessionCount)
+            sendKeyEvent(KeyboardEvent(codepoint = 13))
+            awaitSnapshot()
+            assertEquals(2, recording.newSessionCount)
+            sendKeyEvent(KeyboardEvent(codepoint = 9))
+            sendKeyEvent(KeyboardEvent(codepoint = 13))
+            awaitSnapshot()
+            assertEquals(1, recording.sessionsCount)
+        }
+        assertTrue(recording.selected.isEmpty() && recording.closed.isEmpty() && recording.menus.isEmpty())
+    }
+
+    for (width in listOf(1, 8, 14, 15, 16, 32)) {
+        test("empty top bar clips to $width columns and can page to both controls") {
+            val callbacks = RecordingCallbacks()
+            runMosaicTest {
+                val initial = setContentAndSnapshot {
+                    Box(Modifier.width(width)) {
+                        SessionTabBar(
+                            SessionTabBarState(emptyList(), null),
+                            callbacks, fixedRunningIndicatorFrame, width,
+                        )
+                    }
+                }
+                assertTrue(initial.lines().all { it.length <= width }, initial)
+                // Empty tabs leave paging available to the outer controls viewport.
+                val pages = if (width < 16) (16 - width + width - 1) / width else 0
+                var end = initial
+                repeat(pages) {
+                    sendKeyEvent(KeyboardEvent(KeyboardEvent.PageDown))
+                    end = awaitSnapshot()
+                }
+                assertTrue(end.lines().all { it.length <= width }, end)
+                if (width >= 3) assertTrue("[+]" in end, end)
+                var start = end
+                repeat(pages) {
+                    sendKeyEvent(KeyboardEvent(KeyboardEvent.PageUp))
+                    start = awaitSnapshot()
+                }
+                assertTrue(start.startsWith("[Sessions]".take(width)), start)
+            }
+        }
+    }
+
     test("ordering, running label truncation, selected bounds, and compact controls are preserved") {
         val state = SessionTabBarState(
             tabs = listOf(
@@ -174,7 +270,7 @@ private class RecordingCallbacks : SessionTabBarCallbacks {
         menus += identity
     }
 
-    override fun createNewSession() {
+    override fun selectNewSession() {
         newSessionCount++
     }
 

@@ -6,7 +6,6 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import io.github.stream29.kodex.app.history.contract.AgentHistoryViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
-import io.github.stream29.kodex.app.session.contract.SessionViewModel
 import io.github.stream29.kodex.cli.history.AgentHistoryViewState
 
 /**
@@ -16,10 +15,10 @@ import io.github.stream29.kodex.cli.history.AgentHistoryViewState
  */
 @Composable
 internal fun rememberHistoryRenderStates(
-    tabs: List<SessionViewModel>,
+    tabs: List<PersistedSessionViewModel>,
 ): MutableList<Pair<AgentHistoryViewModel, AgentHistoryViewState>> {
     val histories = buildList {
-        tabs.filterIsInstance<PersistedSessionViewModel>().forEach { tab ->
+        tabs.forEach { tab ->
             key(SessionRenderKey(tab)) {
                 tab.rootAgent.collectAsState().value?.history?.let(::add)
             }

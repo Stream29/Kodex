@@ -4,6 +4,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 val sessionTabBarContractTest by de.infix.testBalloon.framework.core.testSuite {
+    test("empty tabs and null selection represent the singleton New Session") {
+        assertEquals(null, SessionTabBarState(emptyList(), null).selected)
+        val persisted = SessionTabPresentation(SessionTabIdentity("persisted"), "Persisted")
+        assertEquals(null, SessionTabBarState(listOf(persisted), null).selected)
+        assertFailsWith<IllegalArgumentException> {
+            SessionTabBarState(emptyList(), persisted.identity)
+        }
+    }
     test("state preserves supplied ordering and exact selected identity") {
         val first = SessionTabPresentation(SessionTabIdentity("first"), "First")
         val second = SessionTabPresentation(SessionTabIdentity("second"), "Second", running = true)

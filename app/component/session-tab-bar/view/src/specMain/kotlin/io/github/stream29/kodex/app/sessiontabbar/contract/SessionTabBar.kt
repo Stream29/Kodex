@@ -30,8 +30,8 @@ public data class SessionTabPresentation(
 }
 
 /**
- * Atomic immutable snapshot consumed by the renderer. [selected] may be null
- * for an empty/transitioning host projection, but when present it must identify
+ * Atomic immutable snapshot consumed by the renderer. A null [selected] selects
+ * the singleton New Session (the plus control), not an ordinary tab. When present it must identify
  * one item in [tabs]. Duplicate identities are rejected so exact callbacks
  * cannot be ambiguous.
  *
@@ -71,8 +71,8 @@ public interface SessionTabBarCallbacks {
     /** Opens the root context-menu lifecycle for the captured identity. */
     public fun openContextMenu(identity: SessionTabIdentity): Unit
 
-    /** Creates one new tab through the Application owner. */
-    public fun createNewSession(): Unit
+    /** Selects the singleton New Session without allocating a tab. */
+    public fun selectNewSession(): Unit
 
     /** Opens the Application-owned session catalog popup. */
     public fun openSessions(): Unit

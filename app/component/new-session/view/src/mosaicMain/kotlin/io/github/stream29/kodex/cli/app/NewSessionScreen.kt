@@ -5,6 +5,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
+import com.jakewharton.mosaic.focus.FocusRequester
+import com.jakewharton.mosaic.layout.clipToBounds
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
@@ -20,12 +23,11 @@ import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.settings.NewLineKey
 
 /**
- * Renders the exact draft [viewModel], without introducing a second page state or creation API.
+ * Renders the Application-owned singleton [viewModel].
  *
  * [statusBarRows] and [statusBar] are visual layout inputs for the host's shared runtime controls.
- * [onSubmit] targets this exact draft through the registry owner, which replaces its tab after
- * materialization. The renderer does not allocate, wrap the persisted result, replay a creation,
- * or close the draft when selection unmounts it. The registry alone owns its lifetime.
+ * [onSubmit] carries the input-confirmed revision to the Application owner. Unmounting this
+ * screen does not close the Composer or cancel work already accepted by that owner.
  */
 @Composable
 public fun NewSessionScreen(
@@ -34,10 +36,10 @@ public fun NewSessionScreen(
     rows: Int,
     newLineKey: NewLineKey,
     statusBarRows: Int,
-    onSubmit: () -> Unit,
+    onSubmit: (expectedRevision: Long) -> Unit,
     statusBar: @Composable () -> Unit,
 ) {
-    Column(modifier = Modifier.width(columns).height(rows)) {
+    Column(modifier = Modifier.width(columns).height(rows).clipToBounds()) {
         NewSessionContent(
             composerViewModel = viewModel.composer,
             columns = columns,
@@ -62,11 +64,18 @@ public fun NewSessionContent(
     columns: Int,
     rows: Int,
     newLineKey: NewLineKey,
-    onSubmit: () -> Unit,
+    onSubmit: (expectedRevision: Long) -> Unit,
 ) {
     val state by composerViewModel.state.collectAsState()
     val input = remember(composerViewModel) {
         TextInputState(TextInputValue(state.text, state.cursorOffset))
+    }
+    val inputFocus = remember(composerViewModel) { FocusRequester() }
+    LaunchedEffect(composerViewModel) {
+        if (!inputFocus.requestFocus()) {
+            withFrameNanos { }
+            inputFocus.requestFocus()
+        }
     }
     LaunchedEffect(composerViewModel, state) {
         if (input.value.text != state.text || input.value.cursorOffset != state.cursorOffset) {
@@ -83,7 +92,7 @@ public fun NewSessionContent(
     val availableRows = (rows - 1).coerceAtLeast(0)
     val composerRows = minOf(fullLayout.rowCount, availableRows.coerceAtLeast(1))
     val layout = fullLayout.withViewportRows(composerRows)
-    Column(modifier = Modifier.width(columns).height(rows)) {
+    Column(modifier = Modifier.width(columns).height(rows).clipToBounds()) {
         Box(modifier = Modifier.width(columns).height((availableRows - composerRows).coerceAtLeast(0))) {}
         Text("-".repeat(columns.coerceAtLeast(1)), textStyle = TuiTheme.typography.supporting)
         ComposerInput(
@@ -91,8 +100,14 @@ public fun NewSessionContent(
             layout = layout,
             newLineKey = newLineKey,
             autoFocus = true,
+            focusRequester = inputFocus,
             onValueChanged = { value -> composerViewModel.update(value.text, value.cursorOffset) },
-            onSubmit = onSubmit,
+            onSubmit = {
+                // Confirm the widget buffer synchronously, not a collected composition snapshot.
+                val value = input.value
+                val revision = composerViewModel.update(value.text, value.cursorOffset)
+                onSubmit(revision)
+            },
         )
     }
 }

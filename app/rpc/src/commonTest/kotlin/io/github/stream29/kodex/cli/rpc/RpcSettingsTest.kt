@@ -224,7 +224,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
     }
     test("Session editor uses real CAS and becomes unavailable after its binding closes") {
         frontend {
-            val view = views.open(services.global.createSession(KodexAgentSettings(OpenAiModelId("test-model"))))
+            val view = views.open(services.global.createSession(home))
             val source = RpcSessionSettingsSource(view, this)
             try {
                 val expected = assertIs<SessionSettingsDataState.Available>(source.state.value).snapshot
@@ -251,7 +251,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
                 }
             }
         }) {
-            val view = views.open(services.global.createSession(KodexAgentSettings(OpenAiModelId("test-model"))))
+            val view = views.open(services.global.createSession(home))
             val source = RpcSessionSettingsSource(view, this)
             val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, MutableStateFlow(emptyList())), this)
             val initial = assertIs<SessionSettingsState.Available>(vm.state.value).snapshot
@@ -556,7 +556,7 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
     }
     test("settings snapshot revisions ignore backend-only fields while CAS preserves them") {
         frontend {
-            val view = views.open(services.global.createSession(KodexAgentSettings(OpenAiModelId("test-model"))))
+            val view = views.open(services.global.createSession(home))
             val source = RpcSessionSettingsSource(view, this)
             try {
                 val before = assertIs<SessionSettingsDataState.Available>(source.state.value).snapshot
@@ -569,19 +569,24 @@ val rpcSettingsTest by testSuite(compartment = { TestCompartment.RealTime }) {
             } finally { source.close() }
         }
     }
-    test("draft edits remain local and explicit names survive materialization") {
+    test("draft configuration edits shared defaults and only the persisted Session can be renamed") {
         frontend {
-            val draft = RpcSessionDraft(KodexAgentSettings(OpenAiModelId("test-model")), views, this)
-            val source = RpcDraftSettingsSource(draft, this)
+            val draft = RpcSessionDraft(home, views, global, this)
             try {
-                val expected = assertIs<SessionSettingsDataState.Available>(source.state.value).snapshot
-                assertTrue(source.tryRenameSession(expected.revision, "explicit"))
-                assertFalse(source.tryRenameSession(expected.revision, "stale"))
+                draft.editDefaults({ it.model }, { it.copy(model = OpenAiModelId("shared")) })
+                global.settings.first { it.newSession.model == OpenAiModelId("shared") }
                 assertTrue(services.global.getSessionCatalog(true).isEmpty())
-                val view = draft.materialize()
-                view.current().settings.first { it.threadName == "explicit" }
-                source.state.first { it == SessionSettingsDataState.Unavailable }
-            } finally { source.close(); draft.close() }
+                val view = assertNotNull(draft.submit(draft.composer.update("first"), views::open))
+                assertEquals("Session ${view.index}", view.current().settings.value.threadName)
+                assertEquals(OpenAiModelId("shared"), view.current().settings.value.model)
+                val source = RpcSessionSettingsSource(view, this)
+                try {
+                    val expected = assertIs<SessionSettingsDataState.Available>(source.state.value).snapshot
+                    assertTrue(source.tryRenameSession(expected.revision, "explicit"))
+                    source.state.first { it is SessionSettingsDataState.Available && it.snapshot.sessionName == "explicit" }
+                    assertFalse(source.tryRenameSession(expected.revision, "stale"))
+                } finally { source.close() }
+            } finally { draft.close() }
         }
     }
     test("MCP edit and import use values only, with sanitized observations") {

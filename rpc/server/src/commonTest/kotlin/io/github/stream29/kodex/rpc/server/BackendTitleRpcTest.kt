@@ -10,8 +10,6 @@ import io.github.stream29.kodex.cli.rpc.SessionViewStatus
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerationResult
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.inmemory.withInMemoryRpc
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -42,7 +40,7 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
             )
             val popup = RpcGlobalEditor(globalSettings, services.global, this)
             try {
-                val index = services.global.createSession(KodexAgentSettings(OpenAiModelId("test-model")))
+                val index = services.global.createSession(home)
                 val origin = views.open(index)
                 val other = otherViews.open(index)
                 val nonce = services.settings.getCacheNonce(index)
@@ -104,7 +102,7 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
         }) { services, _ ->
             val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()), { throw it })
             try {
-                val index = services.global.createSession(KodexAgentSettings(OpenAiModelId("test-model")))
+                val index = services.global.createSession(Path("."))
                 val view = views.open(index)
                 assertEquals(1, view.current().appendUserMessage(listOf(ContentItem.InputText("First text"))))
                 entered.await()
@@ -147,7 +145,7 @@ val backendTitleRpcTest by testSuite(compartment = { TestCompartment.RealTime })
         }) { services, _ ->
             val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()), { throw it })
             try {
-                val index = services.global.createSession(KodexAgentSettings(OpenAiModelId("test-model")))
+                val index = services.global.createSession(Path("."))
                 val view = views.open(index)
                 assertEquals(1, view.current().appendUserMessage(listOf(ContentItem.InputText("Obsolete text"))))
                 entered.await()

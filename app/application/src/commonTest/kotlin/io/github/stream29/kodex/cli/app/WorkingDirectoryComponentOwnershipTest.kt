@@ -2,20 +2,20 @@ package io.github.stream29.kodex.cli.app
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
-import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.io.files.Path
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem as Fs
 import kotlin.test.*
 
 val workingDirectoryComponentOwnershipTest by testSuite {
-    test("Agent cwd selection stays bound when a different draft tab is selected") {
+    test("Agent cwd selection stays bound when New Session is selected") {
         applicationFixture { app, home ->
             val application = app.viewModel
-            val session = assertNotNull(application.materializeNewSession(assertIs<NewSessionViewModel>(application.navigation.value.selected)))
+            val session = application.submitTestSession()
             val agent = assertNotNull(session.rootAgent.value)
             val popup = application.openWorkingDirectoryPopup(agent)
-            val other = application.createNewSessionTab()
+            application.selectNewSession()
+            val other = application.newSession
             val otherCwd = other.settings.value.cwd
             val chosen = Path(home, "agent-chosen")
             Fs.createDirectories(chosen)
@@ -31,7 +31,7 @@ val workingDirectoryComponentOwnershipTest by testSuite {
     test("popup replacement and target closure reject stale cwd commands") {
         applicationFixture { app, _ ->
             val application = app.viewModel
-            val target = application.navigation.value.selected
+            val target = application.submitTestSession()
             val old = application.openWorkingDirectoryPopup(target)
             val current = application.openWorkingDirectoryPopup(target)
             assertFalse(old.viewModel.isActive)
@@ -47,7 +47,7 @@ val workingDirectoryComponentOwnershipTest by testSuite {
     test("a nonpending suggestion cannot open a cwd chooser or edit its source Agent") {
         applicationFixture { app, _ ->
             val application = app.viewModel
-            val session = assertNotNull(application.materializeNewSession(assertIs<NewSessionViewModel>(application.navigation.value.selected)))
+            val session = application.submitTestSession()
             val agent = assertNotNull(session.rootAgent.value)
             val before = agent.settings.value.cwd
             assertNull(application.openSuggestedWorkingDirectoryPopup(agent, "not-pending"))

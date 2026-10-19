@@ -16,8 +16,11 @@ import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.rpc.models.OAuthAuthorization
 import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
+import io.github.stream29.kodex.utils.kotlinxioserialization.PathAsStringSerializer
 import kotlinx.coroutines.flow.Flow
+import kotlinx.io.files.Path
 import kotlinx.rpc.annotations.Rpc
+import kotlinx.serialization.Serializable
 
 /**
  * Application-wide RPC capabilities owned by the connected backend, not a Session.
@@ -275,16 +278,18 @@ public interface GlobalRpc {
     /**
      * Allocates and initializes a persisted Session, returning its index without submitting content.
      *
-     * [initialSettings] comes from the frontend's new-Session draft. Its threadName is not a
-     * creation-title input: the backend replaces it with "Session <index>" using the allocated
-     * index and validates the effective settings. No title flag or first message is accepted.
+     * The backend captures its current [BackendSettings.newSession] once at actual creation,
+     * combines its four model defaults with [cwd], and validates and initializes the settings.
+     * Frontend settings projections are not creation inputs; no configuration synchronization
+     * barrier is added. Edits not yet held by the backend need not affect this creation.
+     * The title is "Session <index>" using the allocated index. No title or first message is accepted.
      *
      * A creation failure cleans up its newly reserved target. Once creation succeeds, a later
      * submission failure does not delete the Session. A lost reply does not establish that no
      * Session was created, so the frontend must not blindly replay creation.
      * Does not select tabs, consume the frontend composer or establish a keepalive lease.
      */
-    public suspend fun createSession(initialSettings: KodexAgentSettings): Int
+    public suspend fun createSession(cwd: @Serializable(with = PathAsStringSerializer::class) Path): Int
 
     /**
      * Creates and starts a suggested-Session batch explicitly confirmed by the frontend.

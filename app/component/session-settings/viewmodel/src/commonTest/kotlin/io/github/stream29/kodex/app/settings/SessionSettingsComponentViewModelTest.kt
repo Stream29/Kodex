@@ -13,14 +13,14 @@ import kotlinx.io.files.Path
 import kotlin.test.*
 
 val sessionSettingsComponentViewModelTest by testSuite {
-    test("both target kinds project catalog order then missing current without revision changes") {
-        for (kind in SessionSettingsTargetKind.entries) runTest {
-            val source = SettingsSource(kind)
+    test("persisted target projects catalog order then missing current without revision changes") {
+        runTest {
+            val source = SettingsSource()
             val models = MutableStateFlow(listOf(model("z"), model("a"), model("z")))
             val vm = createSessionSettingsViewModel(SessionSettingsDependencies(source, models), this)
             try {
                 val initial = assertIs<SessionSettingsState.Available>(vm.state.value)
-                assertEquals(kind, initial.snapshot.targetKind)
+                assertEquals("Original", initial.snapshot.sessionName)
                 assertEquals(listOf("z", "a", "current"), initial.modelOptions.map { it.value })
                 models.value = listOf(model("current"), model("b"))
                 runCurrent()
@@ -310,13 +310,12 @@ val sessionSettingsComponentViewModelTest by testSuite {
 }
 
 private fun model(id: String) = ModelInfo(OpenAiModelId(id), id)
-private class SettingsSource(kind: SessionSettingsTargetKind = SessionSettingsTargetKind.MaterializedSession) :
-    SessionSettingsDataSource {
+private class SettingsSource : SessionSettingsDataSource {
     val configuration = SessionSettingsConfiguration(
         OpenAiModelId("current"), Path("/initial"), ReasoningEffort.Medium, ServiceTier.Default,
         RequestUserInputMode.AskUser,
     )
-    private val initial = SessionSettingsSnapshot(7, kind, "Original", configuration, true)
+    private val initial = SessionSettingsSnapshot(7, "Original", configuration, true)
     override val state = MutableStateFlow<SessionSettingsDataState>(SessionSettingsDataState.Available(initial))
     val writes = mutableListOf<Pair<Long, SessionSettingsConfiguration>>()
     val renames = mutableListOf<Pair<Long, String>>()

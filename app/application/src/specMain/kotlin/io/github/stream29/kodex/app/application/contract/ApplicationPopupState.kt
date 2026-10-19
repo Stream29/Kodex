@@ -2,7 +2,7 @@ package io.github.stream29.kodex.app.application.contract
 
 import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryViewModel
-import io.github.stream29.kodex.app.session.contract.SessionViewModel
+import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.OpenAiLoginViewModel
@@ -35,9 +35,9 @@ public sealed interface ApplicationPopupState {
         public val viewModel: SessionCatalogViewModel,
     ) : Open
 
-    /** Render Settings for this captured tab, not the latest selected tab. */
+    /** Captured persisted tab or no target; null never rebinds to later selection. */
     public class Settings(
-        public val target: SessionViewModel,
+        public val target: PersistedSessionViewModel?,
         public val viewModel: SettingsViewModel,
     ) : Open
 
@@ -72,5 +72,5 @@ public interface WorkingDirectoryPopupViewModel : WorkingDirectoryViewModel {
 /** Application ownership adapter; interaction behavior is defined by [SessionRenameViewModel]. */
 public interface RenameSessionPopupViewModel : SessionRenameViewModel {
     /** Exact captured Session, used by the parent to validate child ownership. */
-    public val target: SessionViewModel
+    public val target: PersistedSessionViewModel
 }

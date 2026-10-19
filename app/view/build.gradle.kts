@@ -60,6 +60,7 @@ kotlin {
         mosaicTest.dependencies {
             implementation(libs.mosaic.testing)
             implementation(project(":app-migration"))
+            implementation(project(":app-settings-filesystem"))
             implementation(project(":rpc-server"))
             implementation(project(":rpc-in-memory"))
             implementation(project(":app-application"))

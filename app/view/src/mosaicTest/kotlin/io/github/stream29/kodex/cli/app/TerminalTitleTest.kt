@@ -13,7 +13,6 @@ val terminalTitleTest by testSuite {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val first = fixture.persistedSession("First")
-            val draft = fixture.newSession("Draft")
             val second = fixture.persistedSession("Overflow")
             val summary = summarizeOpenSessions(
                 listOf(
@@ -21,12 +20,6 @@ val terminalTitleTest by testSuite {
                         target = first,
                         selected = false,
                         sessionName = "First",
-                        running = true,
-                    ),
-                    SessionTabRenderState(
-                        target = draft,
-                        selected = true,
-                        sessionName = "Draft",
                         running = true,
                     ),
                     SessionTabRenderState(
@@ -41,6 +34,7 @@ val terminalTitleTest by testSuite {
                 OpenSessionSummary(sessionCount = 2, runningSessionCount = 1),
                 summary,
             )
+            assertEquals(OpenSessionSummary(0, 0), summarizeOpenSessions(emptyList()))
         } finally {
             fixture.close()
         }

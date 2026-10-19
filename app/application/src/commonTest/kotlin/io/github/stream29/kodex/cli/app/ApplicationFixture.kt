@@ -1,6 +1,8 @@
 package io.github.stream29.kodex.cli.app
 
 import io.github.stream29.kodex.app.migration.prepareKodexHome
+import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
+import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.test.deleteTestDirectory
 import io.github.stream29.kodex.app.test.testAnswer
 import io.github.stream29.kodex.cli.settings.UnifiedSettingsStore
@@ -9,6 +11,7 @@ import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.rpc.server.defaultBackendSettings
+import io.github.stream29.kodex.rpc.models.AgentStateValue
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.io.files.Path
@@ -25,7 +28,10 @@ internal suspend fun applicationFixture(
         val handle = prepareKodexHome(home)
         try {
             UnifiedSettingsStore.open(home, defaultBackendSettings()).backendStore.update {
-                it.copy(sessionTitle = it.sessionTitle.copy(enabled = false))
+                it.copy(
+                    sessionTitle = it.sessionTitle.copy(enabled = false),
+                    newSession = it.newSession.copy(model = OpenAiModelId("test-model")),
+                )
             }
             withKodexApplication(
                 handle, home, Path(home, "codex"), Path(home, "agents"), applicationWidth = 120,
@@ -34,6 +40,18 @@ internal suspend fun applicationFixture(
         } finally { withContext(NonCancellable) { handle.closeAndJoin() } }
     } finally { withContext(NonCancellable) { deleteTestDirectory(home) } }
 } }
+
+/** Real singleton submission; ordinary ownership tests start from an idle persisted Session. */
+internal suspend fun ApplicationViewModel.submitTestSession(text: String = "fixture first message"): PersistedSessionViewModel {
+    newSession.composer.update(text, text.length)
+    val session = checkNotNull(submitNewSession(newSession.composer.state.value.revision))
+    val agent = checkNotNull(session.rootAgent.value)
+    // running initially projects false before the asynchronous resume request arrives.
+    // Observe this fixture's answer first instead of racing that initial value.
+    agent.state.first { it == AgentStateValue.AssistantMessage }
+    agent.running.first { !it }
+    return session
+}
 
 internal fun applicationClient(
     response: suspend FlowCollector<ResponsesStreamEvent>.() -> Unit = { testAnswer() },

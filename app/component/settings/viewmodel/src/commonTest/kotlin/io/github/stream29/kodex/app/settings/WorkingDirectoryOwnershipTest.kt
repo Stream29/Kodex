@@ -148,7 +148,7 @@ private class DirectorySettingsSource : SessionSettingsDataSource {
     var closed = false
     fun publish(revision: Long = 7, editable: Boolean = true) { state.value = snapshot(revision, editable) }
     private fun snapshot(revision: Long = 7, editable: Boolean = true) = SessionSettingsDataState.Available(
-        SessionSettingsSnapshot(revision, SessionSettingsTargetKind.NewSessionDraft, "captured", configuration, editable),
+        SessionSettingsSnapshot(revision, "captured", configuration, editable),
     )
     override suspend fun tryUpdateConfiguration(expectedRevision: Long, configuration: SessionSettingsConfiguration): Boolean {
         onWrite()

@@ -193,7 +193,7 @@ val docsHistoryRecordingTest by testSuite(compartment = { TestCompartment.RealTi
                             SessionTabBar(
                                 collectSessionTabRenderStates(tabs, tabs.indexOf(selected)),
                                 mutableStateOf(""), 80,
-                                { selected = it as PersistedSessionViewModel },
+                                { selected = it },
                                 { _, _, _, _ -> }, {}, {},
                             )
                             AgentRuntimeScreen(

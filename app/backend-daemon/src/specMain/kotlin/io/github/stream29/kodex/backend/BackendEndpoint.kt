@@ -2,8 +2,8 @@ package io.github.stream29.kodex.backend
 
 import kotlinx.serialization.Serializable
 
-/** First daemon-capable business contract checkpoint, a subset of application versions. */
-public const val BackendBusinessProtocol: String = "0.4.15"
+/** Cwd-only Session creation checkpoint; business compatibility is independent of app releases. */
+public const val BackendBusinessProtocol: String = "0.5.0"
 public const val BackendControlProtocol: Int = 1
 
 /**

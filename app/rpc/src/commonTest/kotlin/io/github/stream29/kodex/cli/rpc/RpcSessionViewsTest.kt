@@ -51,8 +51,8 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
     test("a live-transport reactivation failure affects only its captured Session owner") {
         lateinit var client: RpcClient
         frontend(decorate = { delegate -> client = delegate; delegate }) {
-            val bad = views.open(services.global.createSession(settings))
-            val healthy = views.open(services.global.createSession(settings))
+            val bad = views.open(services.global.createSession(home))
+            val healthy = views.open(services.global.createSession(home))
             val retainedAgent = healthy.agent.value
             var activations = 0
             val replacement = RpcServices(object : RpcClient by client {
@@ -74,7 +74,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
     test("a lost replacement transport is not recorded as a Session business failure") {
         lateinit var client: RpcClient
         frontend(decorate = { delegate -> client = delegate; delegate }) {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             val retained = view.agent.value
             val replacement = RpcServices(object : RpcClient by client {
                 override suspend fun <T> call(call: RpcCall): T = error("fixture socket ended")
@@ -86,14 +86,13 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
     }
     test("blank drafts and catalog construction allocate nothing") {
         frontend {
-            val draft = RpcSessionDraft(settings, views, this)
+            val draft = RpcSessionDraft(home, views, global, this)
             draft.composer.update("draft")
-            draft.edit { it.copy(instructions = "local") }
+            draft.updateWorkingDirectory(Path(home, "local"))
             val catalog = DefaultSessionCatalogViewModel(this, RpcSessionCatalogDependencies(services.global))
             try {
                 assertEquals(SessionCatalogState.Unloaded, catalog.state.value)
                 assertTrue(services.global.getSessionCatalog(true).isEmpty())
-                assertNull(draft.persistedIndex)
                 catalog.refresh()
                 assertTrue(catalog.state.value.sessions.isEmpty())
             } finally { catalog.close(); draft.close() }
@@ -102,7 +101,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
 
     test("concurrent opens share a view and local release leaves backend and connection alive") {
         frontend {
-            val index = services.global.createSession(settings)
+            val index = services.global.createSession(home)
             val first = async { views.open(index) }
             val second = async { views.open(index) }
             val view = first.await()
@@ -138,7 +137,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val index = services.global.createSession(settings)
+            val index = services.global.createSession(home)
             assertFailsWith<IllegalStateException> { views.open(index) }
             val view = views.open(index)
             assertEquals(SessionViewStatus.Ready, view.status.value)
@@ -159,7 +158,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val index = services.global.createSession(settings)
+            val index = services.global.createSession(home)
             assertFailsWith<SessionNotFound> { views.open(index) }
             val view = views.open(index)
             assertEquals(SessionViewStatus.Ready, view.status.value)
@@ -184,7 +183,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val index = services.global.createSession(settings)
+            val index = services.global.createSession(home)
             val first = async { runCatching { views.open(index) } }
             entered.await()
             val second = async(start = CoroutineStart.UNDISPATCHED) { runCatching { views.open(index) } }
@@ -214,7 +213,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val index = services.global.createSession(settings)
+            val index = services.global.createSession(home)
             val waiter = launch { views.open(index) }
             entered.await()
             waiter.cancelAndJoin()
@@ -228,7 +227,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
 
     test("delete invalidates all old bindings and terminates automatic recovery") {
         frontend {
-            val index = services.global.createSession(settings)
+            val index = services.global.createSession(home)
             val view = views.open(index)
             val binding = view.current()
             services.global.deleteSession(index)
@@ -242,7 +241,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
 
     test("settings and token projection observe real values and successful CAS never fabricates a reply value") {
         frontend {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             val binding = view.current()
             val initial = binding.settings.value
             assertEquals(0, binding.latestIndex.value)
@@ -258,7 +257,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
 
     test("append and rollback refresh the original history using the backend nonce") {
         frontend {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             val binding = view.current()
             val agent = requireNotNull(view.agent.value)
             val committed = binding.appendUserMessage(listOf(ContentItem.InputText("history")))
@@ -280,7 +279,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
 
     test("catalog dates use the snapshot while mutations are backend commands") {
         frontend {
-            val index = services.global.createSession(settings)
+            val index = services.global.createSession(home)
             val catalog = DefaultSessionCatalogViewModel(this, RpcSessionCatalogDependencies(services.global))
             try {
                 catalog.refresh()
@@ -302,8 +301,13 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
 
     test("runtime component binds exact Agent and atomically preserves unrelated fields") {
         frontend {
-            val view = views.open(services.global.createSession(settings.copy(threadName = "fixed", instructions = "keep")))
-            val other = views.open(services.global.createSession(settings.copy(threadName = "other")))
+            val view = views.open(services.global.createSession(home))
+            val initial = view.current().settings
+            initial.update { it.copy(threadName = "fixed", instructions = "keep") }
+            initial.first { it.threadName == "fixed" && it.instructions == "keep" }
+            val other = views.open(services.global.createSession(home))
+            other.current().settings.update { it.copy(threadName = "other") }
+            other.current().settings.first { it.threadName == "other" }
             val agent = requireNotNull(view.agent.value)
             try {
                 val child = agent.runtimeConfiguration
@@ -315,14 +319,14 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertEquals(ServiceTier.Fast, agent.settings.value.serviceTier)
                 assertEquals(before.threadName, agent.settings.value.threadName)
                 assertEquals(before.instructions, agent.settings.value.instructions)
-                assertEquals(settings.model, other.current().settings.value.model)
+                assertEquals(OpenAiModelId("test-model"), other.current().settings.value.model)
                 child.updateRequestUserInputMode(RequestUserInputMode.NoQuestion)
                 agent.settings.first { it.requestUserInputMode == RequestUserInputMode.NoQuestion }
                 agent.close()
                 assertTrue(child.state.value.closed)
                 child.updateModelConfiguration(OpenAiModelId("late"), ReasoningEffort.Low, ServiceTier.Default)
                 assertEquals(OpenAiModelId("edited"), view.current().settings.value.model)
-                assertEquals(settings.model, other.current().settings.value.model)
+                assertEquals(OpenAiModelId("test-model"), other.current().settings.value.model)
             } finally { agent.close() }
         }
     }
@@ -339,7 +343,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             val composer = requireNotNull(view.agent.value).composer
             val original = composer.update("original")
             val current = composer.update("current")
@@ -377,7 +381,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             val binding = view.current()
             val agent = requireNotNull(view.agent.value)
             val revision = agent.composer.update("  retained cancellation draft  ", 4)
@@ -415,7 +419,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             val agent = requireNotNull(view.agent.value)
             try {
                 val revision = agent.composer.update("  persisted but retained  ", 6)
@@ -447,7 +451,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             val binding = view.current()
             val agent = requireNotNull(view.agent.value)
             try {
@@ -475,7 +479,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             finish.await()
             answer()
         }) {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             val binding = view.current()
             binding.appendUserMessage(listOf(ContentItem.InputText("start")))
             val waiting = async { binding.resume() }
@@ -497,17 +501,21 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
         }
     }
 
-    test("new draft is materialized once and returns the existing view after successful initial submission") {
+    test("reusable draft rejects a consumed revision and creates a second Session for a new revision") {
         frontend {
-            val draft = RpcSessionDraft(settings, views, this)
+            val draft = RpcSessionDraft(home, views, global, this)
             try {
-                draft.composer.update("first")
-                val view = draft.materialize()
-                assertEquals(view.index, draft.persistedIndex)
+                val revision = draft.composer.update("first")
+                val view = assertNotNull(draft.submit(revision, views::open))
                 assertEquals("", draft.composer.state.value.text)
                 view.current().state.first { it == AgentStateValue.AssistantMessage }
-                assertSame(view, draft.materialize())
-                assertEquals(1, services.global.getSessionCatalog(true).size)
+                assertNull(draft.submit(revision, views::open))
+                val next = draft.composer.update("second")
+                assertNull(draft.submit(revision, views::open))
+                assertEquals("second", draft.composer.state.value.text)
+                val second = assertNotNull(draft.submit(next, views::open))
+                assertNotEquals(view.index, second.index)
+                assertEquals(2, services.global.getSessionCatalog(true).size)
             } finally { draft.close() }
         }
     }
@@ -524,7 +532,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
             finish.await()
             answer()
         }) {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             val binding = view.current()
             binding.appendUserMessage(listOf(ContentItem.InputText("stream please")))
             val waiting = async { binding.resume() }
@@ -565,7 +573,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             val old = view.current()
             val oldAgent = requireNotNull(view.agent.value)
             val oldComposer = oldAgent.composer
@@ -617,7 +625,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             fail.complete(Unit)
             reactivating.await()
             views.release(view)
@@ -650,7 +658,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             fail.complete(Unit)
             val failure = view.status.filterIsInstance<SessionViewStatus.Failed>().first()
             assertEquals("observer failure", failure.cause.message)
@@ -674,12 +682,11 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val draft = RpcSessionDraft(settings, views, this)
+            val draft = RpcSessionDraft(home, views, global, this)
             try {
-                draft.composer.update("keep me")
-                assertFailsWith<IllegalStateException> { draft.materialize() }
-                val index = assertNotNull(draft.persistedIndex)
-                assertEquals(index, services.global.getSessionCatalog(true).single().sessionIndex)
+                val revision = draft.composer.update("keep me")
+                assertFailsWith<IllegalStateException> { draft.submit(revision, views::open) }
+                val index = services.global.getSessionCatalog(true).single().sessionIndex
                 assertEquals("keep me", draft.composer.state.value.text)
                 assertEquals(AgentStateValue.UserMessage, services.runtime.getState(index))
                 assertEquals(1, appends)
@@ -699,7 +706,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             withTimeout(25.seconds) { renewed.await() }
             views.release(view)
             assertEquals(2, keepalives)
@@ -774,7 +781,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
 
     test("history confirmation retains its selected nonce rather than upgrading a stale target") {
         frontend {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             val binding = view.current()
             val agent = requireNotNull(view.agent.value)
             val index = binding.appendUserMessage(listOf(ContentItem.InputText("one")))
@@ -815,7 +822,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                     else delegate.callServerStreaming(call)
             }
         }) {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             val registry = requireNotNull(view.agent.value).shellSessions
             val shell = registry.activeSessions.value.getValue(9)
             shell.close()
@@ -844,7 +851,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             }
         }) {
-            val index = services.global.createSession(settings)
+            val index = services.global.createSession(home)
             val opening = async { views.open(index) }
             entered.await()
             views.release(index)
@@ -865,7 +872,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 emit(ResponsesStreamEvent.Completed(Response(id = "pending", endTurn = true)))
             } else answer()
         }) {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             view.current().appendUserMessage(listOf(ContentItem.InputText("question please")))
             view.current().resume()
             val questions = requireNotNull(view.agent.value).requestUserInput
@@ -908,7 +915,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
                 }
             },
         ) {
-            val view = views.open(services.global.createSession(settings))
+            val view = views.open(services.global.createSession(home))
             view.current().appendUserMessage(listOf(ContentItem.InputText("children please")))
             view.current().resume()
             val suggestions = requireNotNull(view.agent.value).suggestSubagentTask
@@ -923,12 +930,11 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
     }
 }
 
-private val settings = KodexAgentSettings(OpenAiModelId("test-model"))
-
 internal class FrontendFixture(
     override val coroutineContext: kotlin.coroutines.CoroutineContext,
     val services: RpcServices,
     val views: RpcSessionViews,
+    val global: RpcGlobalSettings,
     val home: Path,
     val failures: StateFlow<List<Throwable>>,
 ) : CoroutineScope
@@ -952,17 +958,27 @@ internal suspend fun frontend(
     try {
         withBackendServices(
             root, Path(root, "codex"), Path(root, "agents"),
-            defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
+            defaults = defaultBackendSettings().let {
+                it.copy(
+                    sessionTitle = SessionTitleSettings(false),
+                    newSession = it.newSession.copy(model = OpenAiModelId("test-model")),
+                )
+            },
             createClient = { client },
             createLoginClient = { login },
         ) { backend ->
             withInMemoryRpc(backend::register) { raw ->
                 val services = RpcServices(decorate(RestoringRpcClient(raw)))
+                val global = RpcGlobalSettings.open(services.global, this, 80)
                 val failures = MutableStateFlow<List<Throwable>>(emptyList())
                 val views = RpcSessionViews(this, services, MutableStateFlow(services.global.getModels()),
                     reportUnhandledError = { error -> failures.update { it + error } })
-                try { FrontendFixture(coroutineContext, services, views, root, failures).block() }
-                finally { views.close(); withContext(NonCancellable) { views.join() } }
+                try { FrontendFixture(coroutineContext, services, views, global, root, failures).block() }
+                finally {
+                    views.close()
+                    global.close()
+                    withContext(NonCancellable) { try { views.join() } finally { global.join() } }
+                }
             }
         }
     } finally {

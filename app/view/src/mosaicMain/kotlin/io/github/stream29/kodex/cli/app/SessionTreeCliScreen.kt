@@ -53,10 +53,10 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableUserMessag
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
+import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
 import io.github.stream29.kodex.app.application.contract.SidebarSettingsViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
-import io.github.stream29.kodex.app.session.contract.SessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
@@ -137,10 +137,11 @@ public fun SessionTreeCliScreen(
     }
     val currentNewLineKey by newLineKey.collectAsState()
     val sidebarConfiguration by sidebarSettings.state.collectAsState()
-    val tabStates = collectSessionTabRenderStates(navigation.tabs, navigation.selectedIndex)
+    val selectedIndex = (navigation.selection as? ApplicationTabSelection.SelectedTab)?.index
+    val tabStates = collectSessionTabRenderStates(navigation.tabs, selectedIndex)
     val historyRenderStates = rememberHistoryRenderStates(navigation.tabs)
     val tabIdentityCounter = remember { mutableStateOf(0) }
-    val tabIdentities = remember { mutableListOf<Pair<SessionViewModel, SessionTabIdentity>>() }
+    val tabIdentities = remember { mutableListOf<Pair<PersistedSessionViewModel, SessionTabIdentity>>() }
     pruneSessionTabIdentities(tabIdentities, navigation.tabs)
     val componentTabEntries = tabStates.map { tab ->
         val identity = tabIdentities.firstOrNull { it.first === tab.target }?.second ?: run {
@@ -157,11 +158,9 @@ public fun SessionTreeCliScreen(
     }
     val componentTabState = SessionTabBarState(
         tabs = componentTabEntries.map { it.second.second },
-        selected = componentTabEntries
-            .getOrNull(navigation.selectedIndex)
-            ?.first,
+        selected = selectedIndex?.let { componentTabEntries[it].first },
     )
-    fun targetFor(identity: SessionTabIdentity): SessionViewModel? =
+    fun targetFor(identity: SessionTabIdentity): PersistedSessionViewModel? =
         componentTabEntries.firstOrNull { it.first == identity }?.second?.first
     val sessionSummary = summarizeOpenSessions(tabStates)
     val runningFrame = rememberRunningIndicatorFrame(
@@ -251,15 +250,14 @@ public fun SessionTreeCliScreen(
             rightExpandButtonBridgesHoverAnimation
     val contentColumns = displayedSidebarColumns.content
     val contentRows = (rows - SessionTabBarRows).coerceAtLeast(0)
-    val selected = navigation.selected
-    val selectedPersisted = selected as? PersistedSessionViewModel
+    val selectedPersisted = navigation.selectedSession
     val selectedAgent = selectedPersisted?.rootAgent?.collectAsState()?.value
     val selectedLifecycle = selectedPersisted?.lifecycle?.collectAsState()?.value
     val currentSelectedAgent by rememberUpdatedState(selectedAgent)
     val composerFocusRequester = remember(selectedAgent) { FocusRequester() }
     val currentComposerFocusRequester by rememberUpdatedState(composerFocusRequester)
     val settingsOwner: AgentSettingsViewModel? =
-        selectedAgent ?: (selected as? NewSessionViewModel)
+        if (navigation.selection == ApplicationTabSelection.NewSession) viewModel.newSession else selectedAgent
     val runtimeConfiguration = when (settingsOwner) {
         is AgentViewModel -> settingsOwner.runtimeConfiguration
         is NewSessionViewModel -> settingsOwner.runtimeConfiguration
@@ -428,9 +426,9 @@ public fun SessionTreeCliScreen(
                             // Application-owned popup after this admission intent.
                         }
 
-                        override fun createNewSession() {
+                        override fun selectNewSession() {
                             historyMenu = null
-                            scope.launch { viewModel.createNewSessionTab() }
+                            scope.launch { viewModel.selectNewSession() }
                         }
 
                         override fun openSessions() {
@@ -563,30 +561,35 @@ public fun SessionTreeCliScreen(
                             )
                         }
                         Box(modifier = Modifier.width(contentColumns).height(contentRows)) {
-                            when (selected) {
-                                is NewSessionViewModel -> {
-                                    val draftSettings by selected.settings.collectAsState()
+                            when (navigation.selection) {
+                                ApplicationTabSelection.NewSession -> {
+                                    val draft = viewModel.newSession
+                                    val draftSettings by draft.settings.collectAsState()
                                     NewSessionScreen(
-                                        viewModel = selected,
+                                        viewModel = draft,
                                         columns = contentColumns,
                                         rows = contentRows,
                                         newLineKey = currentNewLineKey,
                                         statusBarRows = newSessionStatusBarRows(contentColumns, draftSettings),
-                                        onSubmit = {
-                                            scope.launch { viewModel.materializeNewSession(selected) }
+                                        onSubmit = { expectedRevision ->
+                                            scope.launch {
+                                                reportOperationFailure(onOperationFailure) {
+                                                    viewModel.submitNewSession(expectedRevision)
+                                                }
+                                            }
                                         },
                                         statusBar = {
                                             NewSessionStatusBar(
                                                 columns = contentColumns,
                                                 settings = draftSettings,
-                                                runtimeConfiguration = selected.runtimeConfiguration,
+                                                runtimeConfiguration = draft.runtimeConfiguration,
                                                 dropdowns = runtimeDropdowns,
                                                 onBrowseWorkingDirectory = {
-                                                    scope.launch { viewModel.openWorkingDirectoryPopup(selected) }
+                                                    scope.launch { viewModel.openWorkingDirectoryPopup(draft) }
                                                 },
                                                 onOpenSettings = {
                                                     scope.launch {
-                                                        viewModel.openSettingsPopup(selected, SettingsPage.CurrentSession)
+                                                        viewModel.openSettingsPopup(null, SettingsPage.NewSession)
                                                     }
                                                 },
                                             )
@@ -594,7 +597,8 @@ public fun SessionTreeCliScreen(
                                     )
                                 }
 
-                                is PersistedSessionViewModel -> selectedAgent?.let { agent ->
+                                is ApplicationTabSelection.SelectedTab -> selectedAgent?.let { agent ->
+                                    val selected = requireNotNull(selectedPersisted)
                                     key(agent) {
                                         AgentRuntimeScreen(
                                             viewModel = agent,
@@ -925,9 +929,7 @@ public fun SessionTreeCliScreen(
                 },
                 onDelete = { target ->
                     tabMenu = null
-                    if (target is PersistedSessionViewModel) {
-                        scope.launch { viewModel.openDeleteSessionPopup(target.sessionIndex) }
-                    }
+                    scope.launch { viewModel.openDeleteSessionPopup(target.sessionIndex) }
                 },
             )
             HistoryEntryContextMenu(
@@ -1041,8 +1043,8 @@ private suspend fun reportOperationFailure(report: (Throwable) -> Unit, action: 
 
 /** Renderer-local retention only; departed handles never keep a tab identity alive. */
 internal fun pruneSessionTabIdentities(
-    identities: MutableList<Pair<SessionViewModel, SessionTabIdentity>>,
-    openTabs: List<SessionViewModel>,
+    identities: MutableList<Pair<PersistedSessionViewModel, SessionTabIdentity>>,
+    openTabs: List<PersistedSessionViewModel>,
 ) {
     identities.removeAll { (previous, _) -> openTabs.none { it === previous } }
 }
@@ -1058,10 +1060,10 @@ private fun BoxScope.SessionTabContextMenu(
     request: SessionTabMenuRequest?,
     targetIsOpen: Boolean,
     onDismiss: () -> Unit,
-    onClose: (SessionViewModel) -> Unit,
+    onClose: (PersistedSessionViewModel) -> Unit,
     onCloseAndArchive: (PersistedSessionViewModel) -> Unit,
-    onRename: (SessionViewModel) -> Unit,
-    onDelete: (SessionViewModel) -> Unit,
+    onRename: (PersistedSessionViewModel) -> Unit,
+    onDelete: (PersistedSessionViewModel) -> Unit,
 ) {
     val current = request ?: return
     val valid = targetIsOpen && current.anchor.isPlaced
@@ -1070,10 +1072,10 @@ private fun BoxScope.SessionTabContextMenu(
     }
     if (!valid) return
     val createdAt = rememberMenuTimestamp(current) {
-        (current.target as? PersistedSessionViewModel)?.readCreatedAt()
+        current.target.readCreatedAt()
     }
     val updatedAt = rememberMenuTimestamp(current) {
-        (current.target as? PersistedSessionViewModel)?.readUpdatedAt()
+        current.target.readUpdatedAt()
     }
     SessionTabContextMenuPopup(
         target = current.target,
@@ -1096,7 +1098,7 @@ private fun BoxScope.SessionTabContextMenu(
  */
 @Composable
 internal fun BoxScope.SessionTabContextMenuPopup(
-    target: SessionViewModel,
+    target: PersistedSessionViewModel,
     anchor: TuiPopupAnchor,
     clickPosition: IntOffset?,
     onDismiss: () -> Unit,
@@ -1114,17 +1116,15 @@ internal fun BoxScope.SessionTabContextMenuPopup(
         onDismissRequest = onDismiss,
         backgroundColor = PopupMenuBackground,
     ) {
-        if (target is PersistedSessionViewModel) {
-            TuiPopupMenuItem(
-                key = "session-index-information",
-                onClick = {},
-                enabled = false,
-            ) {
-                Column {
-                    Text("Index: ${target.sessionIndex}")
-                    TimestampInformation("Created at", createdAt)
-                    TimestampInformation("Updated at", updatedAt)
-                }
+        TuiPopupMenuItem(
+            key = "session-index-information",
+            onClick = {},
+            enabled = false,
+        ) {
+            Column {
+                Text("Index: ${target.sessionIndex}")
+                TimestampInformation("Created at", createdAt)
+                TimestampInformation("Updated at", updatedAt)
             }
         }
         TuiPopupMenuItem(key = "rename", onClick = onRename) {
@@ -1133,16 +1133,14 @@ internal fun BoxScope.SessionTabContextMenuPopup(
         TuiPopupMenuItem(key = "close", onClick = onClose) {
             Text("Close")
         }
-        if (target is PersistedSessionViewModel) {
-            TuiPopupMenuItem(
-                key = "close-and-archive",
-                onClick = { onCloseAndArchive(target) },
-            ) {
-                Text("Close and archive")
-            }
-            TuiPopupMenuItem(key = "delete", onClick = onDelete) {
-                Text("Delete")
-            }
+        TuiPopupMenuItem(
+            key = "close-and-archive",
+            onClick = { onCloseAndArchive(target) },
+        ) {
+            Text("Close and archive")
+        }
+        TuiPopupMenuItem(key = "delete", onClick = onDelete) {
+            Text("Delete")
         }
     }
 }
@@ -1300,7 +1298,7 @@ internal fun BoxScope.AgentHistoryRevertDialog(agent: AgentViewModel?) {
 
 /** Each instance identifies a fresh opening, even for the same target and anchor. */
 private class SessionTabMenuRequest(
-    val target: SessionViewModel,
+    val target: PersistedSessionViewModel,
     val name: String,
     val anchor: TuiPopupAnchor,
     val clickPosition: IntOffset?,

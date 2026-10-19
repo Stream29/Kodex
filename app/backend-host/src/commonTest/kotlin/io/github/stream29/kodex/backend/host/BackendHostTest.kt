@@ -7,7 +7,6 @@ import io.github.stream29.kodex.backend.BackendInstance
 import io.github.stream29.kodex.cli.rpc.RpcServices
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.openai.ContentItem
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ModelsResponse
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -140,7 +139,11 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
             withLocalRpcClient(home, endpoint) { connection ->
                 val rpc = RpcServices(RestoringRpcClient(connection))
                 val model = withTimeout(10.seconds) { rpc.global.getModelsFlow().first { it.isNotEmpty() }.first().slug }
-                index = rpc.global.createSession(KodexAgentSettings(model = model, cwd = home))
+                val defaults = rpc.global.getSettings()
+                assertTrue(rpc.global.compareAndSetSettings(
+                    defaults, defaults.copy(newSession = defaults.newSession.copy(model = model)),
+                ))
+                index = rpc.global.createSession(home)
                 rpc.global.keepSessionAlive(index)
                 rpc.runtime.appendUserMessage(index, listOf(ContentItem.InputText("offline fixture")))
                 val waiter = launch { rpc.runtime.resume(index) }
@@ -193,7 +196,11 @@ val backendHostTest by testSuite(compartment = { TestCompartment.RealTime }) {
             withLocalRpcClient(home, endpoint) { connection ->
                 val rpc = RpcServices(RestoringRpcClient(connection))
                 val model = withTimeout(10.seconds) { rpc.global.getModelsFlow().first { it.isNotEmpty() }.first().slug }
-                val index = rpc.global.createSession(KodexAgentSettings(model = model, cwd = home))
+                val defaults = rpc.global.getSettings()
+                assertTrue(rpc.global.compareAndSetSettings(
+                    defaults, defaults.copy(newSession = defaults.newSession.copy(model = model)),
+                ))
+                val index = rpc.global.createSession(home)
                 rpc.global.keepSessionAlive(index)
                 rpc.runtime.appendUserMessage(index, listOf(ContentItem.InputText("offline fixture")))
                 val waiter = launch { runCatching { rpc.runtime.resume(index) } }
@@ -229,7 +236,7 @@ internal suspend fun withHost(
         SystemCoroutineFileSystem.createDirectories(home, mustCreate = true)
         SystemCoroutineFileSystem.writeString(Path(home, "version.json"), "\"0.4.15\"")
         SystemCoroutineFileSystem.writeString(Path(home, "settings.yml"),
-            "backend:\n  daemon_ttl_seconds: $ttl\n  session_title:\n    enabled: false\n" +
+            "backend:\n  daemon_ttl_seconds: $ttl\n  new_session:\n    model: fixture\n  session_title:\n    enabled: false\n" +
                 (if (hooks.isEmpty()) "" else hooks.prependIndent("  ") + "\n") + "frontend: {}\n")
         val mock = mockOpenAiClient {
             listModels { OpenAiResult.Success(ModelsResponse(listOf(ModelInfo(

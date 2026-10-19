@@ -21,7 +21,7 @@ val sessionViewportTest by testSuite {
     test("draft status controls also remain clipped when sidebars leave a tiny viewport") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
-            val draft = fixture.newSession("Narrow draft")
+            val draft = fixture.newSession()
             var columns by mutableStateOf(32)
             runMosaicTest {
                 setContentAndSnapshot {

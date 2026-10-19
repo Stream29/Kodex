@@ -5,6 +5,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.settings.contract.SettingsAuthenticationState
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
+import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.cli.sessiontitle.OpenAiSessionTitleGenerator
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
@@ -31,6 +32,49 @@ import kotlin.test.*
 import kotlin.time.Duration.Companion.seconds
 
 val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("real JSON GlobalRpc creation uses backend defaults despite an intentionally stale frontend snapshot") {
+        withServices { services, _ ->
+            withInMemoryRpc(services::register) { raw ->
+                val client = RestoringRpcClient(raw)
+                val global = client.withService<GlobalRpc>()
+                val timeline = client.withService<SettingsTimelineRpc>()
+                val staleFrontend = global.getSettings()
+                val firstCwd = Path("/fixture/旧目录 with spaces")
+                val first = global.createSession(firstCwd)
+                val firstNonce = timeline.getCacheNonce(first)
+                val original = timeline.get(first, firstNonce, 0)
+                val defaults = KodexNewSessionSettings(
+                    model = OpenAiModelId("backend-only-model"),
+                    reasoningEffort = ReasoningEffort.High,
+                    serviceTier = ServiceTier.Ultrafast,
+                    requestUserInputMode = RequestUserInputMode.NoQuestion,
+                )
+                // Another backend-side edit has arrived. Deliberately do not subscribe or
+                // refresh the frontend snapshot before sending the cwd-only wire request.
+                assertTrue(services.global.compareAndSetSettings(
+                    staleFrontend, staleFrontend.copy(newSession = defaults),
+                ))
+                assertNotEquals(defaults, staleFrontend.newSession)
+                val cwd = Path("/fixture/新目录 with spaces")
+                val second = global.createSession(cwd)
+                val current = timeline.get(second, timeline.getCacheNonce(second), 0)
+                assertEquals(defaults.model, current.model)
+                assertEquals(defaults.reasoningEffort, current.reasoning.effort)
+                assertEquals(defaults.serviceTier, current.serviceTier)
+                assertEquals(defaults.requestUserInputMode, current.requestUserInputMode)
+                assertEquals(cwd, current.cwd)
+                assertEquals("Session $second", current.threadName)
+                assertNotEquals(original.turnId, current.turnId)
+                assertNotEquals(original.windowId, current.windowId)
+                assertEquals(0, services.runtime.getLatestIndex(second))
+                assertFalse(services.runtime.getRunningTurn(second))
+                assertEquals(firstCwd, original.cwd)
+                assertEquals(staleFrontend.newSession.model, original.model)
+                assertEquals(original, timeline.get(first, firstNonce, 0))
+            }
+        }
+    }
+
     test("an existing RPC connection cannot create or write after business admission closes") {
         var admitted = true
         var rejected = 0
@@ -41,11 +85,11 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 val global = RestoringRpcClient(raw).withService<GlobalRpc>()
                 val before = global.getSettings()
                 val front = global.getFrontendSettings()
-                val index = global.createSession(KodexAgentSettings(OpenAiModelId("test-model")))
+                val index = global.createSession(Path("."))
                 admitted = false // The graph/transport are deliberately still alive.
                 assertTrue(coroutineContext[Job]!!.isActive)
                 // Unknown RPC failures do not promise a concrete Exception type on Native.
-                assertTrue(runCatching { global.createSession(KodexAgentSettings(OpenAiModelId("test-model"))) }.isFailure)
+                assertTrue(runCatching { global.createSession(Path(".")) }.isFailure)
                 assertTrue(runCatching { global.keepSessionAlive(index) }.isFailure)
                 assertTrue(runCatching { global.compareAndSetSettings(before, before.copy(daemonTtlSeconds = -1)) }.isFailure)
                 assertTrue(runCatching { global.compareAndSetFrontendSettings(front, front.copy(newLineKey = io.github.stream29.kodex.cli.settings.NewLineKey.Enter)) }.isFailure)
@@ -66,7 +110,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 assertTrue(global.compareAndSetSettings(settings, settings.copy(sessionTitle = SessionTitleSettings(true))))
                 assertFalse(global.compareAndSetSettings(settings, settings))
                 assertEquals(emptyList(), global.getSessionCatalog(false))
-                val index = global.createSession(KodexAgentSettings(OpenAiModelId("test-model")))
+                val index = global.createSession(Path("."))
                 global.keepSessionAlive(index)
                 assertEquals(0, runtime.getLatestIndex(index))
                 assertTrue(global.getSessionCatalog(false).single().isActive)
@@ -148,7 +192,7 @@ val backendServicesTest by testSuite(compartment = { TestCompartment.RealTime })
                 val client = RestoringRpcClient(raw)
                 val global = client.withService<GlobalRpc>()
                 val runtime = client.withService<AgentRuntimeRpc>()
-                val index = global.createSession(KodexAgentSettings(OpenAiModelId("test-model")))
+                val index = global.createSession(Path("."))
                 val event = async(start = CoroutineStart.UNDISPATCHED) { global.getNotificationFlow().first() }
                 (services.runtime as BackendAgentRuntimeRpc).notifications.subscriptionCount.first { it > 0 }
                 runtime.appendUserMessage(index, listOf(ContentItem.InputText("question")))
@@ -194,7 +238,10 @@ internal suspend fun withServices(
     try {
         withBackendServices(
             home = root, codexHome = Path(root, "codex"), agentsHome = Path(root, "agents"),
-            defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(titleGenerator != null)),
+            defaults = defaultBackendSettings().copy(
+                newSession = KodexNewSessionSettings(model = OpenAiModelId("test-model")),
+                sessionTitle = SessionTitleSettings(titleGenerator != null),
+            ),
             createLoginClient = { login }, createClient = { client },
             createTitleGenerator = { titleGenerator ?: OpenAiSessionTitleGenerator(it) },
             checkAdmission = checkAdmission,

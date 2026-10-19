@@ -10,6 +10,7 @@ import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorag
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
 import io.github.stream29.kodex.cli.sessiontitle.SessionTitleGenerator
+import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.cli.settings.SessionTitleSettings
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
@@ -18,13 +19,14 @@ import io.github.stream29.kodex.utils.coroutines.cancelAndJoin
 import io.github.stream29.kodex.utils.rpcexception.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.io.files.Path
 import kotlin.test.*
 import kotlin.time.Instant
 
 val backendSessionManagementTest by testSuite(compartment = { TestCompartment.RealTime }) {
     test("catalog preserves missing dates and does not activate entries") {
         runtimeFixture { host, initial, runtime ->
-            val management = BackendSessionManagement(host, runtime) { throw it }
+            val management = BackendSessionManagement(host, runtime, { testNewSessionDefaults() }) { throw it }
             assertTrue(management.deleteSession(initial))
             assertEquals(emptyList(), management.getSessionCatalog(false))
             val index = host.repository().create()
@@ -39,15 +41,34 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
         }
     }
 
-    test("creation generates the default title and distinct current identity without submitting") {
+    test("creation captures current backend defaults once and preserves prior settings title and identity semantics") {
         runtimeFixture { host, _, runtime ->
-            val management = BackendSessionManagement(host, runtime) { throw it }
-            val settings = KodexAgentSettings(model = OpenAiModelId("test-model"), threadName = "ignored")
-            val first = management.createSession(settings)
-            val second = management.createSession(settings)
+            var defaults = testNewSessionDefaults()
+            var captures = 0
+            val management = BackendSessionManagement(host, runtime, { captures++; defaults }) { throw it }
+            val cwd = Path("/fixture/项目 with spaces")
+            val first = management.createSession(cwd)
+            val original = host.session(first).session.storage.settings[0]
+            defaults = KodexNewSessionSettings(
+                model = OpenAiModelId("new-backend-model"),
+                reasoningEffort = ReasoningEffort.High,
+                serviceTier = ServiceTier.Ultrafast,
+                requestUserInputMode = RequestUserInputMode.NoQuestion,
+            )
+            val second = management.createSession(cwd)
             val a = host.session(first).session.storage.settings[0]
             val b = host.session(second).session.storage.settings[0]
+            assertEquals(2, captures)
+            assertEquals(original, a)
+            assertEquals(testNewSessionDefaults().model, a.model)
+            assertEquals(defaults.model, b.model)
+            assertEquals(defaults.reasoningEffort, b.reasoning.effort)
+            assertEquals(defaults.serviceTier, b.serviceTier)
+            assertEquals(defaults.requestUserInputMode, b.requestUserInputMode)
+            assertEquals(cwd, a.cwd)
+            assertEquals(cwd, b.cwd)
             assertEquals("Session $first", a.threadName)
+            assertEquals("Session $second", b.threadName)
             assertNotEquals(a.turnId, b.turnId)
             assertNotEquals(a.windowId, b.windowId)
             assertEquals(0, runtime.getLatestIndex(first))
@@ -62,7 +83,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
 
     test("catalog ordering and timestamp zero stay distinct from later timestamps") {
         runtimeFixture { host, _, runtime ->
-            val management = BackendSessionManagement(host, runtime) { throw it }
+            val management = BackendSessionManagement(host, runtime, { testNewSessionDefaults() }) { throw it }
             val a = host.repository().create()
             val b = host.repository().create()
             val timestamp = Instant.parse("2099-01-01T00:00:00Z")
@@ -87,7 +108,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
 
     test("archive is idempotent and changes neither owner nor execution") {
         runtimeFixture { host, index, runtime ->
-            val management = BackendSessionManagement(host, runtime) { throw it }
+            val management = BackendSessionManagement(host, runtime, { testNewSessionDefaults() }) { throw it }
             val owner = host.session(index)
             management.archiveSession(index)
             management.archiveSession(index)
@@ -106,7 +127,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
 
     test("history fork preserves source and inherited identity but appends a fresh current turn") {
         runtimeFixture { host, index, runtime ->
-            val management = BackendSessionManagement(host, runtime) { throw it }
+            val management = BackendSessionManagement(host, runtime, { error("Fork must not read global defaults") }) { throw it }
             runtime.appendUserMessage(index, listOf(ContentItem.InputText("keep")))
             val boundarySettings = host.session(index).session.storage.settings[1]
             runtime.appendUserMessage(index, listOf(ContentItem.InputText("remove")))
@@ -131,7 +152,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
 
     test("history admission rejects stale or invalid boundaries without creating targets") {
         runtimeFixture { host, index, runtime ->
-            val management = BackendSessionManagement(host, runtime) { throw it }
+            val management = BackendSessionManagement(host, runtime, { testNewSessionDefaults() }) { throw it }
             val nonce = BackendIndexTimelineRpc(host).getCacheNonce(index)
             assertFailsWith<CacheNonceMismatch> { management.forkSessionHistory(index, 1, nonce xor 1) }
             assertFailsWith<IllegalArgumentException> { management.forkSessionHistory(index, 0, nonce) }
@@ -145,7 +166,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
 
     test("complete fork temporarily opens an inactive source and leaves both entries closed") {
         runtimeFixture { host, index, runtime ->
-            val management = BackendSessionManagement(host, runtime) { throw it }
+            val management = BackendSessionManagement(host, runtime, { error("Fork must not read global defaults") }) { throw it }
             runtime.appendUserMessage(index, listOf(ContentItem.InputText("history")))
             management.archiveSession(index)
             host.session(index).session.cancelAndJoin()
@@ -166,7 +187,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             entered.complete(Unit)
             awaitCancellation()
         } } }) { host, index, runtime ->
-            val management = BackendSessionManagement(host, runtime) { throw it }
+            val management = BackendSessionManagement(host, runtime, { testNewSessionDefaults() }) { throw it }
             runtime.appendUserMessage(index, listOf(ContentItem.InputText("run")))
             val waiter = async { runtime.resume(index) }
             entered.await()
@@ -176,7 +197,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             assertTrue(management.deleteSession(index))
             assertEquals(emptyList(), management.getSessionCatalog(false))
             assertFalse(management.deleteSession(index))
-            assertEquals(index, management.createSession(KodexAgentSettings(OpenAiModelId("test-model"))))
+            assertEquals(index, management.createSession(Path(".")))
         }
     }
 
@@ -189,7 +210,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             release.await()
             emit(ResponsesStreamEvent.Completed(Response(id = "done", endTurn = true)))
         } } }) { host, _, runtime ->
-            val management = BackendSessionManagement(host, runtime) { failures += it }
+            val management = BackendSessionManagement(host, runtime, { error("Suggested batch must not read global defaults") }) { failures += it }
             val tasks = listOf(SuggestedSubagentTask("one", "first"), SuggestedSubagentTask("two", "second"))
             val results = management.createSuggestedSessions(tasks, KodexAgentSettings(OpenAiModelId("test-model")))
             assertEquals(listOf("one", "two"), results.map { it.meta.name })
@@ -198,6 +219,7 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
                 assertEquals(runtime.getStorageUri(result.sessionIndex), result.meta.uri)
                 assertTrue(runtime.getRunningTurn(result.sessionIndex))
                 assertEquals(result.meta.name, host.session(result.sessionIndex).session.storage.settings[0].threadName)
+                assertEquals(OpenAiModelId("test-model"), host.session(result.sessionIndex).session.storage.settings[0].model)
             }
             release.complete(Unit)
             results.forEach { result -> runtime.getRunningTurnFlow(result.sessionIndex).first { !it } }
@@ -207,8 +229,8 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
 
     test("created session remains when later submission fails") {
         runtimeFixture { host, _, runtime ->
-            val management = BackendSessionManagement(host, runtime) { throw it }
-            val created = management.createSession(KodexAgentSettings(OpenAiModelId("test-model")))
+            val management = BackendSessionManagement(host, runtime, { testNewSessionDefaults() }) { throw it }
+            val created = management.createSession(Path("."))
             assertFailsWith<IllegalStateException> {
                 host.inSession(created) { error("separate submission failed") }
             }
@@ -225,9 +247,9 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             }
         }) { host ->
             val runtime = BackendAgentRuntimeRpc(host, { SessionTitleSettings(false) }, SessionTitleGenerator { _, _, _ -> error("unused") })
-            val management = BackendSessionManagement(host, runtime) { throw it }
+            val management = BackendSessionManagement(host, runtime, { testNewSessionDefaults() }) { throw it }
             val failure = assertFailsWith<IllegalStateException> {
-                management.createSession(KodexAgentSettings(OpenAiModelId("test-model")))
+                management.createSession(Path("."))
             }
             assertEquals("load failed", failure.message)
             assertTrue(host.repository().entries.value.isEmpty())
@@ -249,14 +271,32 @@ val backendSessionManagementTest by testSuite(compartment = { TestCompartment.Re
             }
         }) { host ->
             val runtime = BackendAgentRuntimeRpc(host, { SessionTitleSettings(false) }, SessionTitleGenerator { _, _, _ -> error("unused") })
-            val management = BackendSessionManagement(host, runtime) { throw it }
-            val waiter = async { management.createSession(KodexAgentSettings(OpenAiModelId("test-model"))) }
+            var defaults = testNewSessionDefaults()
+            val captured = defaults
+            var captures = 0
+            val management = BackendSessionManagement(host, runtime, { captures++; defaults }) { throw it }
+            val waiter = async { management.createSession(Path(".")) }
             val session = opened.await()
+            defaults = defaults.copy(
+                model = OpenAiModelId("changed-during-initialization"),
+                reasoningEffort = ReasoningEffort.High,
+                serviceTier = ServiceTier.Ultrafast,
+                requestUserInputMode = RequestUserInputMode.NoQuestion,
+            )
             waiter.cancelAndJoin()
             release.complete(Unit)
             session.runtime.latestIndex.first { it >= 0 }
-            assertEquals("Session 0", session.storage.settings[0].threadName)
+            val initialized = session.storage.settings[0]
+            assertEquals("Session 0", initialized.threadName)
+            assertEquals(1, captures)
+            assertEquals(captured.model, initialized.model)
+            assertEquals(captured.reasoningEffort, initialized.reasoning.effort)
+            assertEquals(captured.serviceTier, initialized.serviceTier)
+            assertEquals(captured.requestUserInputMode, initialized.requestUserInputMode)
             assertEquals(1, host.repository().entries.value.size)
         }
     }
 }
+
+private fun testNewSessionDefaults(): KodexNewSessionSettings =
+    KodexNewSessionSettings(model = OpenAiModelId("test-model"))

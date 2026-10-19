@@ -31,6 +31,7 @@ public class RpcFrontendFixture internal constructor(
     public val root: Path,
     public val services: RpcServices,
     public val views: RpcSessionViews,
+    public val global: RpcGlobalSettings,
     public val sessions: DefaultPersistedSessionViewModelRegistry,
     public val drafts: DefaultNewSessionViewModelFactory,
     public val models: StateFlow<List<ModelInfo>>,
@@ -40,14 +41,14 @@ public class RpcFrontendFixture internal constructor(
     internal lateinit var completion: Deferred<Unit>
 
     public suspend fun create(name: String = "Test Session"): PersistedSessionViewModel {
-        val session = sessions.open(services.global.createSession(testSettings("", root)))
+        val session = sessions.open(services.global.createSession(root))
         session.rename(name)
         session.settings.first { it.threadName == name }
         return session
     }
 
-    public fun draft(name: String = "New Session"): NewSessionViewModel =
-        drafts.create(NewSessionViewModelArguments(name, testSettings("", root)))
+    public fun draft(): NewSessionViewModel =
+        drafts.create(NewSessionViewModelArguments(root))
 
     public suspend fun closeAndJoin(): Unit = withContext(NonCancellable) {
         finish.complete(Unit)
@@ -86,12 +87,16 @@ public suspend fun startRpcFrontendFixture(
                 seed(root)
                 withBackendServices(
                     root, Path(root, "codex"), Path(root, "agents"),
-                    defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
+                    defaults = defaultBackendSettings().let {
+                        it.copy(
+                            sessionTitle = SessionTitleSettings(false),
+                            newSession = it.newSession.copy(model = OpenAiModelId("test-model")),
+                        )
+                    },
                     createClient = { client }, createLoginClient = { TestLoginClient },
                 ) { backend ->
                     withInMemoryRpc(backend::register) { raw ->
                         val services = RpcServices(RestoringRpcClient(raw))
-                        val models = MutableStateFlow(services.global.getModels())
                         // Normal completion of the connection block waits for its children.
                         // Retained drafts must be cancelled before that wait, just as the
                         // actual Application closes its frontend owner before RPC teardown.
@@ -100,16 +105,27 @@ public suspend fun startRpcFrontendFixture(
                             coroutineContext + frontendJob +
                                 (frontendDispatcher ?: Dispatchers.Default),
                         )
-                        val failures = MutableStateFlow<List<Throwable>>(emptyList())
-                        val views = RpcSessionViews(frontendScope, services, models,
-                            reportUnhandledError = { error -> failures.update { it + error } })
-                        val sessions = DefaultPersistedSessionViewModelRegistry(views, models, frontendScope)
-                        val drafts = DefaultNewSessionViewModelFactory(views, sessions, models, frontendScope)
                         try {
-                            ready.complete(RpcFrontendFixture(frontendScope.coroutineContext, root, services, views, sessions, drafts, models, failures, finish))
-                            finish.await()
+                            val global = RpcGlobalSettings.open(services.global, frontendScope, 80)
+                            try {
+                                val models = global.models
+                                val failures = MutableStateFlow<List<Throwable>>(emptyList())
+                                val views = RpcSessionViews(frontendScope, services, models,
+                                    reportUnhandledError = { error -> failures.update { it + error } })
+                                val sessions = DefaultPersistedSessionViewModelRegistry(views, models, frontendScope)
+                                val drafts = DefaultNewSessionViewModelFactory(views, sessions, global, frontendScope)
+                                try {
+                                    ready.complete(RpcFrontendFixture(
+                                        frontendScope.coroutineContext, root, services, views, global,
+                                        sessions, drafts, models, failures, finish,
+                                    ))
+                                    finish.await()
+                                } finally { withContext(NonCancellable) { sessions.shutdown() } }
+                            } finally { withContext(NonCancellable) {
+                                global.close(); global.join()
+                            } }
                         } finally { withContext(NonCancellable) {
-                            try { sessions.shutdown() } finally { frontendJob.cancelAndJoin() }
+                            frontendJob.cancelAndJoin()
                         } }
                     }
                 }

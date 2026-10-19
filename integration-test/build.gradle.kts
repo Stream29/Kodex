@@ -49,6 +49,8 @@ kotlin {
         }
         jvmTest.dependencies {
             implementation(project(":app-application"))
+            implementation(project(":app-migration"))
+            implementation(project(":app-component-path-picker-viewmodel"))
             implementation(project(":app-view"))
             implementation(project(":app-rpc"))
             implementation(project(":app-session"))
@@ -56,6 +58,7 @@ kotlin {
             implementation(project(":app-component-new-session-viewmodel"))
             implementation(project(":app-component-session-catalog-viewmodel"))
             implementation(project(":app-component-settings-viewmodel"))
+            implementation(project(":app-component-session-settings-viewmodel"))
             implementation(project(":app-settings-filesystem"))
             implementation(project(":app-test-support-rpc"))
             implementation(project(":rpc-client"))

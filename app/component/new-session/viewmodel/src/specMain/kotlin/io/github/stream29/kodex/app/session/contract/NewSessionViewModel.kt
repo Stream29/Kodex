@@ -1,68 +1,51 @@
 package io.github.stream29.kodex.app.session.contract
 
+import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
-import io.github.stream29.kodex.openai.KodexAgentSettings
+import kotlinx.io.files.Path
 
 /**
- * Frontend contract for one non-persisted New Session surface.
+ * Application-owned, reusable New Session surface, independent of persisted tabs.
  *
- * This ViewModel captures and consumes its own settings and composer when
- * [materialize] is called. Its inherited settings contract is backed by one
- * process-local [kotlinx.coroutines.flow.MutableStateFlow].
- *
- * It is the same child held by the Application registry before persistence; there is no second
- * component wrapper, creation receipt model or page-state copy. Tab selection only mounts its
- * renderer. The registry closes this child when replacing/removing it, not on renderer disposal.
+ * Only Composer and working directory are local drafts. The four model configuration fields
+ * read and edit the shared backend New Session defaults; settings is their read-only projection
+ * with the local directory. Selecting another surface or unmounting the renderer closes nothing.
+ * The Application closes this child at shutdown, without closing borrowed global/session services.
  */
-public interface NewSessionViewModel : SessionViewModel {
+public interface NewSessionViewModel : AgentSettingsViewModel, AutoCloseable {
     public val composer: ComposerViewModel
-    /** Stable configuration child of this draft; neither rendering nor tab selection owns it. */
+    /** Stable configuration child, owned by this singleton rather than its renderer. */
     public val runtimeConfiguration: RuntimeConfigurationViewModel
 
     /**
-     * Clears the explicit thread name and restores the derived default name.
-     * @throws IllegalStateException if the draft is closed or already allocated.
-     * @throws kotlinx.coroutines.CancellationException if the caller stops waiting for admission.
-     */
-    public suspend fun clearExplicitThreadName(): Unit
-
-    /**
-     * Materializes the latest settings and composer as a persisted Session.
+     * Admits the exact Composer revision, creates/opens a Session, appends the unmodified text
+     * and admits its resume. Empty (length zero), stale and in-flight duplicate calls return null
+     * without queueing another creation. Nonzero whitespace is valid input.
      *
-     * The command is serialized with this ViewModel's edits. A known successful
-     * creation consumes its settings even if a later step fails; it is not rolled
-     * back or recreated. Failure escapes to the caller. Success returns the stable
-     * persisted child that must replace this exact surface.
+     * Success clears only the consumed revision and resets only an unedited working directory.
+     * This child remains usable for another creation. Later edits are never consumed by an old
+     * callback. Failure propagates, without replay, compensation, deletion or forced navigation.
      *
-     * @throws IllegalStateException if the owner was closed before/while allocation completed.
-     * @throws kotlinx.coroutines.CancellationException if the caller is cancelled; cancellation
-     * does not promise rollback of an already allocated Session or an already appended message.
-     * @throws Exception if allocation, explicit rename, initial append or persisted-child opening
-     * fails. The known allocation identity is retained rather than manufacturing another Session.
+     * The host must call this from its surviving frontend command owner, not a renderer Job.
+     * Cancelling a renderer's wait must not cancel that accepted command or lose its error outlet.
+     * The host adds/selects the returned persisted handle; this operation does not navigate.
+     *
+     * @throws IllegalStateException if this child is closed, the created binding expires before
+     * resume admission, or the consumed Composer cannot advance its revision.
+     * @throws kotlinx.coroutines.CancellationException if the command owner is cancelled.
+     * @throws Exception if creation, opening, initial append or synchronous resume admission fails.
+     * An exception does not establish whether an entity or message was already persisted.
      */
-    public suspend fun materialize(): PersistedSessionViewModel
+    public suspend fun submit(expectedRevision: Long): PersistedSessionViewModel?
 }
 
-/**
- * Explicit per-instance inputs for an independent virtual Session surface.
- * @throws IllegalArgumentException if [defaultName] is blank.
- */
+/** The CLI startup directory, restored after each successfully consumed directory draft. */
 public data class NewSessionViewModelArguments(
-    public val defaultName: String,
-    public val initialSettings: KodexAgentSettings,
-) {
-    init {
-        require(defaultName.isNotBlank()) {
-            "A New Session default display name must not be blank."
-        }
-    }
-}
+    public val initialWorkingDirectory: Path,
+)
 
-/**
- * Creates one independently owned virtual Session surface with stable Composer/configuration
- * children and borrowed model observation. Construction does not allocate backend storage.
- */
+/** Creates stable Composer/configuration children without allocating backend storage. */
 public fun interface NewSessionViewModelFactory {
     public fun create(arguments: NewSessionViewModelArguments): NewSessionViewModel
 }

@@ -1,6 +1,6 @@
 package io.github.stream29.kodex.app.settings.contract
 
-import io.github.stream29.kodex.app.session.contract.SessionViewModel
+import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -48,9 +48,9 @@ public interface SettingsViewModel : AutoCloseable {
     public val selectedPage: StateFlow<SettingsPage>
     /** Stable global composition; children and failure authority are consumed directly. */
     public val global: GlobalSettingsViewModel
-    /** Stable settings editor bound to the exact opening target, including revision admission. */
+    /** Stable editor for the exact opening target, or unavailable when no target was captured. */
     public val session: SessionSettingsViewModel
-    /** Stable shared new-session defaults editor, not the current virtual Session's draft. */
+    /** Stable shared new-session defaults editor, independent of local composer/cwd drafts. */
     public val newSession: NewSessionSettingsViewModel
 
     /**
@@ -94,18 +94,19 @@ public interface SettingsViewModel : AutoCloseable {
 
 /** Exact inputs for one independently owned Settings popup child; neither value is retargeted. */
 public data class SettingsViewModelArguments(
-    /** Session identity captured when Settings opens, not a lookup key for the latest tab. */
-    public val target: SessionViewModel,
+    /** Captured persisted handle; null means no target, never a lookup of the latest tab. */
+    public val target: PersistedSessionViewModel?,
     /** Initial render destination; OpenAi also requests one initial usage refresh. */
     public val initialPage: SettingsPage,
 )
 
 /**
- * Creates one Settings hierarchy bound to the captured Session target.
+ * Creates one Settings hierarchy bound to the captured nullable persisted target.
  *
  * The host supplies actual global/defaults editors, the exact Session source and component ports
  * (models and directory selection) through their existing typed child factories. It must not
- * create a second Global state authority. Login has a shorter, separately owned lifetime and is
+ * create a second Global state authority. A null target uses an always-unavailable Session source,
+ * not an editable default Session or a later selected tab. Login has a shorter lifetime and is
  * opened only on explicit intent. The returned owner is closed by its host, not by the renderer.
  */
 public fun interface SettingsViewModelFactory {
@@ -113,7 +114,7 @@ public fun interface SettingsViewModelFactory {
      * Construct stable children for [arguments], then a root on its initial destination.
      * Dependency/child creation failures are not replaced with empty/default settings.
      *
-     * @throws IllegalStateException if the host cannot provide a source for the captured target.
+     * @throws IllegalStateException if the host cannot provide a source for a nonnull captured target.
      * @throws Throwable if dependency/child construction or the initial OpenAi refresh request
      * throws; cancellation propagates unchanged.
      */

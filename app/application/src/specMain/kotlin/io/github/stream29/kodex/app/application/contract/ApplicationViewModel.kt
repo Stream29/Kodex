@@ -4,7 +4,6 @@ import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
-import io.github.stream29.kodex.app.session.contract.SessionViewModel
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
 import kotlinx.coroutines.flow.StateFlow
 
@@ -37,6 +36,8 @@ import kotlinx.coroutines.flow.StateFlow
 public interface ApplicationViewModel : AutoCloseable {
     /** Atomic tab order/selection; do not mirror child state into this snapshot. */
     public val navigation: StateFlow<ApplicationNavigationState>
+    /** Stable reusable child, separate from persisted tabs; never recreated by navigation. */
+    public val newSession: NewSessionViewModel
     /** The exclusive overlay; children are borrowed by its renderer. */
     public val popup: StateFlow<ApplicationPopupState>
 
@@ -54,22 +55,21 @@ public interface ApplicationViewModel : AutoCloseable {
      *
      * Membership is referential (`===`), not name/index/value equality. A moved
      * but still-owned child is selected in its current slot. Returns false if
-     * the instance has been removed or consumed; does not select its replacement.
+     * the instance has been removed; does not select its replacement.
      * No child is closed and no backend command is issued.
      *
      * @throws IllegalStateException if the Application is closed.
      * @throws kotlinx.coroutines.CancellationException if cancelled while waiting
      * for admission; no selection is made by that waiting call.
      */
-    public suspend fun selectTab(target: SessionViewModel): Boolean
+    public suspend fun selectTab(target: PersistedSessionViewModel): Boolean
 
     /**
-     * Creates one independent virtual tab and selects it.
-     * @throws IllegalStateException if closed or draft ordinals are exhausted.
-     * @throws Exception if the draft factory fails.
+     * Selects the existing singleton without creating a backend Session or a child.
+     * @throws IllegalStateException if closed.
      * @throws kotlinx.coroutines.CancellationException if cancelled during admission.
      */
-    public suspend fun createNewSessionTab(): NewSessionViewModel
+    public suspend fun selectNewSession(): Unit
 
     /**
      * Closes one child handle without deleting persisted Session data.
@@ -77,14 +77,15 @@ public interface ApplicationViewModel : AutoCloseable {
      * A popup owned by [target], including Login's retained Settings or an
      * Agent-bound directory popup, is closed in the same serialized command.
      * Returns false when [target] was already absent. Closing the last tab
-     * creates a new draft. Remaining order/selection follows the same snapshot.
+     * selects the existing New Session child. A surviving selected instance stays
+     * selected; removing a background tab while on New Session does not switch pages.
      *
      * @throws IllegalStateException if the Application is closed.
-     * @throws Exception if replacement-draft creation or local release fails.
+     * @throws Exception if local release fails.
      * @throws kotlinx.coroutines.CancellationException if caller waiting is cancelled;
      * navigation already updated before a release wait is not rolled back.
      */
-    public suspend fun closeTab(target: SessionViewModel): Boolean
+    public suspend fun closeTab(target: PersistedSessionViewModel): Boolean
 
     /**
      * Archives one exact persisted child and closes its tab after Archive succeeds.
@@ -127,28 +128,26 @@ public interface ApplicationViewModel : AutoCloseable {
     public suspend fun openCreatedSessions(sessionIndexes: List<Int>): Unit
 
     /**
-     * Materializes the captured [target] and replaces its current exact slot.
+     * Submits the singleton's exact composer revision, then appends/selects the result.
+     * Zero-length, stale and in-progress duplicate events return null without effects.
+     * Admission rejects duplicates before waiting for the application command mutex;
+     * revision is checked again at the mutation boundary.
      *
-     * Under the command mutex, locate the target by instance identity. Returns
-     * null if it was removed, closed through tab removal, or already consumed.
-     * A queued duplicate never invokes materialization a second time and never
-     * returns a remembered result. A moved, still-owned target uses its current slot.
-     *
-     * Success preserves list size and selected index, closes any popup owned by
-     * the consumed draft, replaces that draft, and closes it. Failure before
-     * replacement preserves navigation and the draft; a created backend Session
-     * may still exist after a later submission failure according to the draft's
-     * contract. Null does not mean creation/submission failure or unknown outcome.
+     * Accepted creation, append, resume admission, reset and navigation belong to
+     * the surviving frontend command owner, not the renderer's waiting coroutine.
+     * Cancelling that wait does not cancel accepted work. A live waiter receives the
+     * original failure; an abandoned wait routes failures through the owner's existing
+     * CoroutineExceptionHandler (the host's reportUnhandledError outlet), never both.
+     * The singleton is not closed. Failure does not publish partial results, recover,
+     * retry, delete the created entity or navigate.
      *
      * @throws IllegalStateException if the Application is closed.
-     * @throws Exception if draft creation/materialization, storage, opening, or
+     * @throws Exception if creation, storage, opening, or
      * transport fails; the actual failure escapes without catch-all conversion.
      * @throws kotlinx.coroutines.CancellationException if caller waiting is cancelled;
      * backend work already accepted is not cancelled or automatically retried.
      */
-    public suspend fun materializeNewSession(
-        target: NewSessionViewModel,
-    ): PersistedSessionViewModel?
+    public suspend fun submitNewSession(expectedRevision: Long): PersistedSessionViewModel?
 
     /**
      * Creates a popup-scoped catalog without loading it; caller requests first refresh.
@@ -159,14 +158,14 @@ public interface ApplicationViewModel : AutoCloseable {
     public suspend fun openSessionCatalogPopup(): ApplicationPopupState.SessionCatalog
 
     /**
-     * Opens Settings for the exact currently-owned [target].
+     * Opens Settings for the exact currently-owned [target], or no Session for null.
      * @throws IllegalArgumentException if target is no longer owned.
      * @throws IllegalStateException if the Application is closed.
      * @throws Exception if child creation fails, preserving the current popup.
      * @throws kotlinx.coroutines.CancellationException if cancelled during admission.
      */
     public suspend fun openSettingsPopup(
-        target: SessionViewModel,
+        target: PersistedSessionViewModel?,
         initialPage: SettingsPage,
     ): ApplicationPopupState.Settings
 
@@ -178,7 +177,7 @@ public interface ApplicationViewModel : AutoCloseable {
      * @throws kotlinx.coroutines.CancellationException if cancelled during admission.
      */
     public suspend fun openRenameSessionPopup(
-        target: SessionViewModel,
+        target: PersistedSessionViewModel,
     ): ApplicationPopupState.RenameSession
 
     /**
@@ -203,7 +202,7 @@ public interface ApplicationViewModel : AutoCloseable {
     ): ApplicationPopupState.Login
 
     /**
-     * Opens a directory picker for this owned Session or its current exact Agent.
+     * Opens a directory picker for the singleton, an owned Session or its current Agent.
      * @throws IllegalArgumentException if target is no longer owned/current.
      * @throws IllegalStateException if the Application is closed.
      * @throws Exception if child creation fails, preserving the current popup.
@@ -235,8 +234,9 @@ public interface ApplicationViewModel : AutoCloseable {
     public fun dismissPopup(expected: ApplicationPopupState.Open): Boolean
 
     /**
-     * Stops new commands, closes popup and tab children, and waits for owned
-     * registry resources to close. Repeated calls are idempotent. The host must
+     * Stops new commands, cancels/joins accepted local commands, closes the singleton,
+     * popup and tab children, and waits for registry cleanup. Repeated calls are
+     * idempotent. The host must
      * invoke this in its cleanup scope even after renderer/caller cancellation.
      * Does not Stop accepted backend work or release the host Home/transport.
      *

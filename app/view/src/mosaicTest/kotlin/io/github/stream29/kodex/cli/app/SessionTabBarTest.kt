@@ -17,7 +17,7 @@ import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
-import io.github.stream29.kodex.app.session.contract.SessionViewModel
+import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.cli.sessiontabbar.SessionTabBounds
 import io.github.stream29.kodex.cli.sessiontabbar.sessionTabBounds
@@ -71,10 +71,10 @@ val sessionTabBarTest by testSuite {
         )
     }
 
-    test("renamedNewSessionDisplaysItsDraftTitle") {
+    test("renamedPersistedSessionDisplaysItsTitle") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
-            val target = fixture.newSession("New Session")
+            val target = fixture.persistedSession("Session")
             target.rename("Research plan")
             withContext(Dispatchers.Default) {
                 withTimeout(5_000) { target.name.first { it == "Research plan" } }
@@ -90,7 +90,7 @@ val sessionTabBarTest by testSuite {
                             columns = 80,
                             onSelectTab = {},
                             onOpenTabMenu = { _, _, _, _ -> },
-                            onCreateNewSession = {},
+                            onSelectNewSession = {},
                             onOpenSessions = {},
                         )
                     }
@@ -106,8 +106,8 @@ val sessionTabBarTest by testSuite {
     test("selectedSessionTabUsesReverseVideo") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
-            val selected = fixture.newSession("First")
-            val inactive = fixture.newSession("Second")
+            val selected = fixture.persistedSession("First")
+            val inactive = fixture.persistedSession("Second")
 
             runMosaicTest(snapshotStrategy = ansi16Snapshots) {
                 val snapshot = setContentAndSnapshot {
@@ -129,7 +129,7 @@ val sessionTabBarTest by testSuite {
                             columns = 80,
                             onSelectTab = {},
                             onOpenTabMenu = { _, _, _, _ -> },
-                            onCreateNewSession = {},
+                            onSelectNewSession = {},
                             onOpenSessions = {},
                         )
                     }
@@ -164,7 +164,7 @@ val sessionTabBarTest by testSuite {
                             columns = 80,
                             onSelectTab = {},
                             onOpenTabMenu = { _, _, _, _ -> },
-                            onCreateNewSession = {},
+                            onSelectNewSession = {},
                             onOpenSessions = {},
                         )
                     }
@@ -183,7 +183,7 @@ val sessionTabBarTest by testSuite {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val targets = (0 until 10).map { index ->
-                fixture.newSession("Tab $index")
+                fixture.persistedSession("Tab $index")
             }
             val tabs = targets.mapIndexed { index, target ->
                 SessionTabRenderState(
@@ -202,7 +202,7 @@ val sessionTabBarTest by testSuite {
                             columns = 32,
                             onSelectTab = {},
                             onOpenTabMenu = { _, _, _, _ -> },
-                            onCreateNewSession = {},
+                            onSelectNewSession = {},
                             onOpenSessions = {},
                         )
                     }
@@ -237,7 +237,7 @@ val sessionTabBarTest by testSuite {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val targets = (0 until 10).map { index ->
-                fixture.newSession("Tab $index")
+                fixture.persistedSession("Tab $index")
             }
             val tabs = targets.mapIndexed { index, target ->
                 SessionTabRenderState(
@@ -256,7 +256,7 @@ val sessionTabBarTest by testSuite {
                             columns = 32,
                             onSelectTab = {},
                             onOpenTabMenu = { _, _, _, _ -> },
-                            onCreateNewSession = {},
+                            onSelectNewSession = {},
                             onOpenSessions = {},
                         )
                     }
@@ -284,7 +284,7 @@ val sessionTabBarTest by testSuite {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
             val targets = (0 until 10).map { index ->
-                fixture.newSession("Tab $index")
+                fixture.persistedSession("Tab $index")
             }
 
             runMosaicTest {
@@ -302,7 +302,7 @@ val sessionTabBarTest by testSuite {
                             columns = 32,
                             onSelectTab = {},
                             onOpenTabMenu = { _, _, _, _ -> },
-                            onCreateNewSession = {},
+                            onSelectNewSession = {},
                             onOpenSessions = {},
                         )
                     }
@@ -329,10 +329,10 @@ val sessionTabBarTest by testSuite {
     test("secondaryClickTargetsAnInactiveTabWithoutSelectingIt") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
-            val activeTarget = fixture.newSession("First")
-            val inactiveTarget = fixture.newSession("Second")
-            var selectedTarget by mutableStateOf<SessionViewModel?>(null)
-            var menuTarget by mutableStateOf<SessionViewModel?>(null)
+            val activeTarget = fixture.persistedSession("First")
+            val inactiveTarget = fixture.persistedSession("Second")
+            var selectedTarget by mutableStateOf<PersistedSessionViewModel?>(null)
+            var menuTarget by mutableStateOf<PersistedSessionViewModel?>(null)
             var menuInitialName by mutableStateOf<String?>(null)
             var menuClickPosition by mutableStateOf<IntOffset?>(null)
 
@@ -360,7 +360,7 @@ val sessionTabBarTest by testSuite {
                                 menuInitialName = initialName
                                 menuClickPosition = clickPosition
                             },
-                            onCreateNewSession = {},
+                            onSelectNewSession = {},
                             onOpenSessions = {},
                         )
                         Text("${selectedTarget != null}/${menuTarget != null}/$menuInitialName")
@@ -384,9 +384,9 @@ val sessionTabBarTest by testSuite {
     test("primaryClickSelectsATabWithoutOpeningItsMenu") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
-            val target = fixture.newSession("First")
-            var selectedTarget by mutableStateOf<SessionViewModel?>(null)
-            var menuTarget by mutableStateOf<SessionViewModel?>(null)
+            val target = fixture.persistedSession("First")
+            var selectedTarget by mutableStateOf<PersistedSessionViewModel?>(null)
+            var menuTarget by mutableStateOf<PersistedSessionViewModel?>(null)
 
             runMosaicTest {
                 setContentAndSnapshot {
@@ -403,7 +403,7 @@ val sessionTabBarTest by testSuite {
                             columns = 80,
                             onSelectTab = { selected -> selectedTarget = selected },
                             onOpenTabMenu = { opened, _, _, _ -> menuTarget = opened },
-                            onCreateNewSession = {},
+                            onSelectNewSession = {},
                             onOpenSessions = {},
                         )
                         Text("${selectedTarget != null}/${menuTarget != null}")

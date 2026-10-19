@@ -78,7 +78,7 @@ public suspend fun <R> withBackendServices(
                     FileSystemKodexSessionRepository(home, dependencies)
                 }, renewBackend, backendRenewalInterval, checkAdmission) { host ->
                     val runtime = BackendAgentRuntimeRpc(host, { store.settings.value.sessionTitle }, createTitleGenerator(api))
-                    val management = BackendSessionManagement(host, runtime) {
+                    val management = BackendSessionManagement(host, runtime, { store.settings.value.newSession }) {
                         BackendLogger.error(it) { "Suggested Session operation failed." }
                     }
                     val service = BackendGlobalRpc(host, global, account, oauth, management, runtime.notifications)

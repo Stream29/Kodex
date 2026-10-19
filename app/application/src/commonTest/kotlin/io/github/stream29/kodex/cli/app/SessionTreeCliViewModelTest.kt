@@ -2,6 +2,7 @@ package io.github.stream29.kodex.cli.app
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
+import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
 import io.github.stream29.kodex.app.session.contract.*
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogState
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
@@ -12,28 +13,29 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSys
 import kotlin.test.*
 
 val sessionTreeCliViewModelTest by testSuite {
-    test("materialization replaces only the exact draft slot") {
+    test("submission appends and selects a persisted tab while retaining the singleton") {
         applicationFixture { app, _ ->
             val vm = app.viewModel
-            val first = vm.navigation.value.selected
-            val target = vm.createNewSessionTab()
+            val first = vm.submitTestSession()
+            val target = vm.newSession
             val before = vm.navigation.value
-            val persisted = assertNotNull(vm.materializeNewSession(target))
-            assertEquals(before.tabs.size, vm.navigation.value.tabs.size)
+            val persisted = vm.submitTestSession("second")
+            assertEquals(before.tabs.size + 1, vm.navigation.value.tabs.size)
             assertSame(first, vm.navigation.value.tabs[0])
             assertSame(persisted, vm.navigation.value.tabs[1])
-            assertEquals(before.selectedIndex, vm.navigation.value.selectedIndex)
+            assertSame(persisted, vm.navigation.value.selectedSession)
+            assertSame(target, vm.newSession)
         }
     }
     test("opening a persisted session reuses its tab and unarchives it") {
         applicationFixture { app, _ ->
             val vm = app.viewModel
-            val session = assertNotNull(vm.materializeNewSession(assertIs<NewSessionViewModel>(vm.navigation.value.selected)))
+            val session = vm.submitTestSession()
             val catalog = vm.openSessionCatalogPopup().viewModel
             catalog.archive(session.sessionIndex)
             catalog.setShowArchived(true)
             assertTrue(assertIs<SessionCatalogState.Loaded>(catalog.state.value).sessions.single().archived)
-            vm.createNewSessionTab()
+            vm.selectNewSession()
             assertSame(session, vm.openSession(session.sessionIndex))
             catalog.refresh()
             assertFalse(assertIs<SessionCatalogState.Loaded>(catalog.state.value).sessions.single().archived)
@@ -42,7 +44,7 @@ val sessionTreeCliViewModelTest by testSuite {
     test("close and archive disposes the exact tab but retains backend state") {
         applicationFixture { app, _ ->
             val vm = app.viewModel
-            val session = assertNotNull(vm.materializeNewSession(assertIs<NewSessionViewModel>(vm.navigation.value.selected)))
+            val session = vm.submitTestSession()
             assertTrue(vm.closeAndArchiveSession(session))
             assertEquals(PersistedSessionLifecycleState.Closed, session.lifecycle.value)
             val catalog = vm.openSessionCatalogPopup().viewModel
@@ -66,12 +68,12 @@ val sessionTreeCliViewModelTest by testSuite {
     test("catalog navigation dismisses its exact opening and stale callbacks cannot dismiss its replacement") {
         applicationFixture { app, _ ->
             val vm = app.viewModel
-            val session = assertNotNull(vm.materializeNewSession(assertIs<NewSessionViewModel>(vm.navigation.value.selected)))
+            val session = vm.submitTestSession()
             val first = vm.openSessionCatalogPopup()
             first.viewModel.refresh()
             val row = assertIs<SessionCatalogState.Loaded>(first.viewModel.state.value).sessions.single()
             first.viewModel.requestOpen(row)
-            assertSame(session, vm.navigation.value.selected)
+            assertSame(session, vm.navigation.value.selectedSession)
             assertEquals(ApplicationPopupState.Closed, vm.popup.value)
             val replacement = vm.openSessionCatalogPopup()
             assertFailsWith<CancellationException> { first.viewModel.dismiss() }
@@ -82,7 +84,7 @@ val sessionTreeCliViewModelTest by testSuite {
     test("login dismissal restores its settings parent and target closure disposes both") {
         applicationFixture { app, _ ->
             val vm = app.viewModel
-            val target = vm.navigation.value.selected
+            val target = vm.submitTestSession()
             val settings = vm.openSettingsPopup(target, SettingsPage.OpenAi)
             val login = vm.openLoginPopup(settings)
             assertSame(settings, login.returnTo)
@@ -94,26 +96,31 @@ val sessionTreeCliViewModelTest by testSuite {
             assertFalse(vm.dismissPopup(second))
         }
     }
-    test("working directory popup edits only its captured draft") {
+    test("working directory popup retains the singleton target while a persisted tab is selected") {
         applicationFixture { app, home ->
             val vm = app.viewModel
-            val first = assertIs<NewSessionViewModel>(vm.navigation.value.selected)
+            val second = vm.submitTestSession()
+            val first = vm.newSession
+            vm.selectNewSession()
             val popup = vm.openWorkingDirectoryPopup(first)
-            val second = vm.createNewSessionTab()
+            vm.selectTab(second)
             val chosen = Path(home, "chosen")
             Fs.createDirectories(chosen)
             popup.viewModel.select(chosen)
+            first.settings.first { it.cwd == chosen }
             assertEquals(chosen, first.settings.value.cwd)
             assertEquals(Fs.resolve(home), second.settings.value.cwd)
             assertSame(first, popup.viewModel.target)
-            assertTrue(vm.closeTab(first))
-            assertEquals(ApplicationPopupState.Closed, vm.popup.value)
+            assertTrue(vm.closeTab(second))
+            assertSame(popup, vm.popup.value)
+            assertEquals(ApplicationTabSelection.NewSession, vm.navigation.value.selection)
+            assertTrue(vm.dismissPopup(popup))
         }
     }
     test("child updates do not republish navigation and command replies need no optimistic cache") {
         applicationFixture { app, _ ->
             val vm = app.viewModel
-            val session = assertNotNull(vm.materializeNewSession(assertIs<NewSessionViewModel>(vm.navigation.value.selected)))
+            val session = vm.submitTestSession()
             val agent = requireNotNull(session.rootAgent.value)
             val snapshot = vm.navigation.value
             var emissions = 0
@@ -131,12 +138,21 @@ val sessionTreeCliViewModelTest by testSuite {
     test("already-created child tabs are deduplicated without changing selection") {
         applicationFixture { app, _ ->
             val vm = app.viewModel
-            val source = assertNotNull(vm.materializeNewSession(assertIs<NewSessionViewModel>(vm.navigation.value.selected)))
+            val source = vm.submitTestSession()
             val fork = vm.forkSession(source.sessionIndex)
-            val selected = vm.navigation.value.selected
+            val selected = vm.navigation.value.selectedSession
             vm.openCreatedSessions(listOf(fork, fork, source.sessionIndex))
-            assertSame(selected, vm.navigation.value.selected)
+            assertSame(selected, vm.navigation.value.selectedSession)
             assertEquals(2, vm.navigation.value.tabs.size)
+            vm.selectNewSession()
+            vm.newSession.composer.update("retain while opening background sessions")
+            val input = vm.newSession.composer.state.value
+            val next = vm.forkSession(source.sessionIndex)
+            vm.openCreatedSessions(listOf(next, fork, next))
+            assertEquals(ApplicationTabSelection.NewSession, vm.navigation.value.selection)
+            assertNull(vm.navigation.value.selectedSession)
+            assertEquals(input, vm.newSession.composer.state.value)
+            assertEquals(3, vm.navigation.value.tabs.size)
         }
     }
 }

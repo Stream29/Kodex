@@ -6,17 +6,23 @@ import androidx.compose.runtime.setValue
 import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.terminal.KeyboardEvent
 import com.jakewharton.mosaic.terminal.MouseEvent
+import com.jakewharton.mosaic.terminal.PasteEvent
 import com.jakewharton.mosaic.terminal.Terminal
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Text
+import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
+import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
 import io.github.stream29.kodex.app.mcpsettings.*
 import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.app.settings.contract.*
-import io.github.stream29.kodex.app.session.contract.SessionViewModel
+import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
+import io.github.stream29.kodex.cli.settings.UnifiedSettingsStore
+import io.github.stream29.kodex.rpc.server.defaultBackendSettings
+import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabIdentity
 import io.github.stream29.kodex.app.test.deleteTestDirectory
 import io.github.stream29.kodex.app.test.testAnswer
@@ -31,16 +37,191 @@ import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
 import kotlin.test.*
 
-val settingsLoginLifetimeTest by testSuite {
+val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("New Session Settings has no target and background close keeps its default page and owner") {
+        withSettingsApplication { app ->
+            val background = app.viewModel.submitRendererSession("background")
+            app.viewModel.selectNewSession()
+            runSettingsRootTest {
+                state.size.value = Terminal.Size(120, 40)
+                setContentAndSnapshot {
+                    SessionTreeCliScreen(app.viewModel, app.newLineKey, app.sidebarSettings)
+                }
+                clickText(awaitRootText("[Settings]"), "[Settings]")
+                val popup = assertIs<ApplicationPopupState.Settings>(
+                    app.viewModel.popup.first { it is ApplicationPopupState.Settings },
+                )
+                assertNull(popup.target)
+                assertEquals(SettingsPage.NewSession, popup.viewModel.selectedPage.value)
+                assertEquals(SessionSettingsState.Unavailable, popup.viewModel.session.state.value)
+                assertTrue(app.viewModel.closeTab(background))
+                assertSame(popup, app.viewModel.popup.value)
+                assertEquals(ApplicationTabSelection.NewSession, app.viewModel.navigation.value.selection)
+                assertTrue(app.viewModel.navigation.value.tabs.isEmpty())
+                clickText(awaitRootText("Current session"), "Current session")
+                awaitRootText("No selected session")
+                assertEquals(SettingsPage.CurrentSession, popup.viewModel.selectedPage.value)
+                assertSame(popup, app.viewModel.popup.value)
+            }
+        }
+    }
+
+    test("root routes singleton cwd picker and exact persisted Settings without rebinding") {
+        withSettingsApplication { app ->
+            val session = app.viewModel.submitRendererSession("persisted settings target")
+            app.viewModel.selectNewSession()
+            val singleton = app.viewModel.newSession
+            singleton.composer.update("retained input", 3)
+            runSettingsRootTest {
+                state.size.value = Terminal.Size(120, 40)
+                setContentAndSnapshot {
+                    SessionTreeCliScreen(app.viewModel, app.newLineKey, app.sidebarSettings)
+                }
+                val cwdLabel = io.github.stream29.kodex.cli.components.workingDirectoryStatusLabel(
+                    singleton.settings.value.cwd, 119,
+                )
+                clickText(awaitRootText(cwdLabel), cwdLabel)
+                val picker = assertIs<ApplicationPopupState.WorkingDirectory>(
+                    app.viewModel.popup.first { it is ApplicationPopupState.WorkingDirectory },
+                )
+                assertSame(singleton, picker.viewModel.target)
+                app.viewModel.dismissPopup(picker)
+                assertTrue(app.viewModel.selectTab(session))
+                clickText(awaitRootText("persisted settings target"), "[Settings]")
+                val settings = assertIs<ApplicationPopupState.Settings>(
+                    app.viewModel.popup.first { it is ApplicationPopupState.Settings },
+                )
+                assertSame(session, settings.target)
+                assertEquals(SettingsPage.CurrentSession, settings.viewModel.selectedPage.value)
+                app.viewModel.dismissPopup(settings)
+                clickText(awaitRootText("[+]"), "[+]")
+                awaitRootText("retained input")
+                assertSame(singleton, app.viewModel.newSession)
+                assertEquals(3, singleton.composer.state.value.cursorOffset)
+            }
+        }
+    }
+
+    test("root passes the synchronous revision through a delayed submit and remounts its cleared singleton") {
+        withSettingsApplication { app ->
+            val singleton = app.viewModel.newSession
+            val captured = CompletableDeferred<Long>()
+            val release = CompletableDeferred<Unit>()
+            val staleFinished = CompletableDeferred<Unit>()
+            val root = object : ApplicationViewModel by app.viewModel {
+                override suspend fun submitNewSession(expectedRevision: Long): PersistedSessionViewModel? {
+                    if (!captured.isCompleted) {
+                        captured.complete(expectedRevision)
+                        release.await()
+                        return app.viewModel.submitNewSession(expectedRevision).also {
+                            assertNull(it)
+                            staleFinished.complete(Unit)
+                        }
+                    }
+                    return app.viewModel.submitNewSession(expectedRevision)
+                }
+            }
+            runSettingsRootTest {
+                state.size.value = Terminal.Size(120, 40)
+                setContentAndSnapshot { SessionTreeCliScreen(root, app.newLineKey, app.sidebarSettings) }
+                sendPasteEvent(PasteEvent("first revision"))
+                awaitRootText("first revision")
+                sendKeyEvent(KeyboardEvent(codepoint = 13))
+                val revision = awaitRootResult(captured)
+                singleton.composer.update("later revision")
+                release.complete(Unit)
+                withTimeout(2_000) { staleFinished.await() }
+                assertTrue(root.navigation.value.tabs.isEmpty())
+                assertEquals("later revision", singleton.composer.state.value.text)
+                awaitRootText("later revision")
+                sendKeyEvent(KeyboardEvent(codepoint = 13))
+                awaitRootCondition { root.navigation.value.selectedSession != null }
+                val navigation = root.navigation.value
+                assertEquals(1, navigation.tabs.size)
+                assertEquals("", singleton.composer.state.value.text)
+                assertEquals(0, singleton.composer.state.value.cursorOffset)
+                clickText(awaitRootText("[+]"), "[+]")
+                awaitRootText("[Settings]")
+                assertEquals(ApplicationTabSelection.NewSession, root.navigation.value.selection)
+                assertSame(singleton, root.newSession)
+                sendPasteEvent(PasteEvent("next unsent draft"))
+                awaitRootText("next unsent draft")
+                assertNull(app.viewModel.submitNewSession(revision))
+                assertEquals("next unsent draft", singleton.composer.state.value.text)
+            }
+        }
+    }
+
+    test("root live New Session submit reports an ordinary failure once") {
+        withSettingsApplication { app ->
+            val failure = IllegalStateException("renderer submit failure")
+            val reports = mutableListOf<Throwable>()
+            val reported = CompletableDeferred<Unit>()
+            val root = object : ApplicationViewModel by app.viewModel {
+                override suspend fun submitNewSession(expectedRevision: Long): PersistedSessionViewModel? =
+                    throw failure
+            }
+            runSettingsRootTest {
+                state.size.value = Terminal.Size(120, 40)
+                setContentAndSnapshot {
+                    SessionTreeCliScreen(root, app.newLineKey, app.sidebarSettings, onOperationFailure = {
+                        reports += it
+                        reported.complete(Unit)
+                    })
+                }
+                sendPasteEvent(PasteEvent("keep on failure"))
+                awaitRootText("keep on failure")
+                sendKeyEvent(KeyboardEvent(codepoint = 13))
+                awaitRootResult(reported)
+                awaitRootText("keep on failure")
+                assertEquals(1, reports.size)
+                assertSame(failure, reports.single())
+                assertTrue(root.navigation.value.tabs.isEmpty())
+            }
+        }
+    }
+
+    test("root New Session cancellation propagates without an operation failure notification") {
+        withSettingsApplication { app ->
+            val completed = CompletableDeferred<Unit>()
+            val reports = mutableListOf<Throwable>()
+            val root = object : ApplicationViewModel by app.viewModel {
+                override suspend fun submitNewSession(expectedRevision: Long): PersistedSessionViewModel? {
+                    try {
+                        throw CancellationException("renderer waiter cancelled")
+                    } finally {
+                        completed.complete(Unit)
+                    }
+                }
+            }
+            runSettingsRootTest {
+                state.size.value = Terminal.Size(120, 40)
+                setContentAndSnapshot {
+                    SessionTreeCliScreen(
+                        root, app.newLineKey, app.sidebarSettings,
+                        onOperationFailure = { reports += it },
+                    )
+                }
+                sendPasteEvent(PasteEvent("cancelled waiter input"))
+                awaitRootText("cancelled waiter input")
+                sendKeyEvent(KeyboardEvent(codepoint = 13))
+                awaitRootResult(completed)
+                awaitRootText("cancelled waiter input")
+                assertTrue(reports.isEmpty())
+                assertTrue(root.navigation.value.tabs.isEmpty())
+            }
+        }
+    }
+
     test("root tab identity churn releases departed keys and stale exact close cannot target replacement") {
         withSettingsApplication { app ->
             val root = app.viewModel
-            val survivor = requireNotNull(root.navigation.value.selected)
-            val identities = mutableListOf<Pair<SessionViewModel, SessionTabIdentity>>()
+            val survivor = root.submitRendererSession("survivor")
+            val identities = mutableListOf<Pair<PersistedSessionViewModel, SessionTabIdentity>>()
             val survivorIdentity = SessionTabIdentity("survivor")
             identities += survivor to survivorIdentity
             repeat(40) { index ->
-                val departed = root.createNewSessionTab()
+                val departed = root.submitRendererSession("departed-$index")
                 val departedIdentity = SessionTabIdentity("departed-$index")
                 identities += departed to departedIdentity
                 // Retain the original exact-target callback, not the later slot or label.
@@ -49,11 +230,11 @@ val settingsLoginLifetimeTest by testSuite {
                 pruneSessionTabIdentities(identities, root.navigation.value.tabs)
                 assertSame(survivor, identities.single().first)
                 assertSame(survivorIdentity, identities.single().second)
-                val replacement = root.createNewSessionTab()
+                val replacement = root.submitRendererSession("replacement-$index")
                 val before = root.navigation.value
                 assertFalse(staleClose())
                 assertSame(before, root.navigation.value)
-                assertSame(replacement, root.navigation.value.selected)
+                assertSame(replacement, root.navigation.value.selectedSession)
                 assertTrue(root.closeTab(replacement))
             }
         }
@@ -188,7 +369,7 @@ val settingsLoginLifetimeTest by testSuite {
                     clickText(awaitRootText("[Sign in]"), "[Sign in]")
                     awaitRootText("Sign in to OpenAI")
                     assertSame(root.owner, assertIs<ApplicationPopupState.Login>(root.popup.value).returnTo)
-                    assertTrue(root.closeTab(root.owner.target))
+                    assertTrue(root.closeTab(requireNotNull(root.owner.target)))
                     withTimeout(2_000) { mcp.state.first { it.closed } }
                     withTimeout(2_000) { ports.logins.last().cancelled.await() }
                     assertEquals(listOf(1, 1), ports.logins.map { it.cancellations })
@@ -245,7 +426,7 @@ private class BoundSettingsRoot(
         popup.value = if (application.popup.value === original) owner else application.popup.value
         return true
     }
-    override suspend fun closeTab(target: SessionViewModel): Boolean =
+    override suspend fun closeTab(target: PersistedSessionViewModel): Boolean =
         application.closeTab(target).also {
             if (application.popup.value === ApplicationPopupState.Closed) {
                 popup.value = ApplicationPopupState.Closed
@@ -259,7 +440,8 @@ private suspend fun withBoundSettings(
     block: suspend (BoundSettingsRoot, McpSettingsViewModel) -> Unit,
 ) = coroutineScope {
     val original = app.viewModel.openSettingsPopup(
-        requireNotNull(app.viewModel.navigation.value.selected), SettingsPage.Mcp,
+        app.viewModel.navigation.value.selectedSession ?: app.viewModel.submitRendererSession("Settings owner"),
+        SettingsPage.Mcp,
     )
     val mcp = createMcpSettingsViewModel(ports, this)
     // The injected child is closed by actual Settings owner closure, not renderer disposal.
@@ -327,6 +509,16 @@ private suspend fun TestMosaic<String>.clickText(snapshot: String, label: String
     sendMouseEvent(MouseEvent(column, row, MouseEvent.Type.Press, MouseEvent.Button.Left))
     sendMouseEvent(MouseEvent(column, row, MouseEvent.Type.Release))
     awaitSnapshot()
+    repeat(2) { withTimeoutOrNull(50) { awaitSnapshot() } }
+}
+
+private suspend fun <T> TestMosaic<String>.awaitRootResult(result: Deferred<T>): T = withTimeout(5_000) {
+    awaitRootCondition { result.isCompleted }
+    result.await()
+}
+
+private suspend fun TestMosaic<String>.awaitRootCondition(condition: () -> Boolean) = withTimeout(5_000) {
+    while (!condition()) withTimeoutOrNull(50) { awaitSnapshot() }
 }
 
 private suspend fun TestMosaic<String>.awaitRootText(expected: String): String {
@@ -342,7 +534,10 @@ private suspend fun TestMosaic<String>.awaitRootText(expected: String): String {
     return snapshot
 }
 
-private suspend fun withSettingsApplication(block: suspend (KodexApplication) -> Unit) = coroutineScope {
+private val settingsRootDispatcher = Dispatchers.Default.limitedParallelism(1)
+
+private suspend fun withSettingsApplication(block: suspend (KodexApplication) -> Unit) =
+    withContext(settingsRootDispatcher) {
     val home = Path(SystemTemporaryDirectory, "kodex-settings-root-${Random.nextLong()}")
     val client = mockOpenAiClient {
         listModels { OpenAiResult.Success(ModelsResponse(listOf(ModelInfo(
@@ -360,10 +555,25 @@ private suspend fun withSettingsApplication(block: suspend (KodexApplication) ->
     try {
         val handle = prepareKodexHome(home)
         try {
+            UnifiedSettingsStore.open(home, defaultBackendSettings()).backendStore.update {
+                it.copy(
+                    sessionTitle = it.sessionTitle.copy(enabled = false),
+                    newSession = it.newSession.copy(model = OpenAiModelId("test-model")),
+                )
+            }
             withKodexApplication(
                 handle, home, Path(home, "codex"), Path(home, "agents"), applicationWidth = 120,
                 createClient = { client }, createLoginClient = { loginClient },
             ) { app -> block(app) }
         } finally { withContext(NonCancellable) { handle.closeAndJoin() } }
     } finally { withContext(NonCancellable) { deleteTestDirectory(home) } }
+}
+
+private suspend fun ApplicationViewModel.submitRendererSession(text: String): PersistedSessionViewModel {
+    val revision = newSession.composer.update(text)
+    val session = requireNotNull(submitNewSession(revision))
+    val agent = requireNotNull(session.rootAgent.value)
+    agent.state.first { it == AgentStateValue.AssistantMessage }
+    agent.running.first { !it }
+    return session
 }

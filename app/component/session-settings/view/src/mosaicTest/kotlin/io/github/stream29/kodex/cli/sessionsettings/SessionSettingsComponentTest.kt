@@ -25,30 +25,28 @@ import kotlin.test.*
 import kotlin.time.Duration.Companion.milliseconds
 
 val sessionSettingsComponentTest by testSuite {
-    for (kind in SessionSettingsTargetKind.entries) {
-        test("$kind full panel has identity then all four fields without writes on mount") {
-            val ports = SessionRenderSource(kind)
-            withRenderer(ports) { vm, _ ->
-                runMosaicTest {
-                    val snapshot = setContentAndSnapshot {
-                        TuiPopupHost(Modifier.width(100).height(32)) { SessionSettingsComponent(vm) }
-                    }
-                    var previous = -1
-                    for (text in listOf("Identity", "Session name", "Target", "Working directory", "/original",
-                        "Model behavior", "Model [orphan]", "Reasoning [medium]", "Service tier [default]",
-                        "Questions [ask user]")) {
-                        val next = snapshot.indexOf(text)
-                        assertTrue(next > previous, snapshot)
-                        previous = next
-                    }
-                    assertTrue("[Rename]" in snapshot, snapshot)
-                    assertTrue("[Browse]" in snapshot, snapshot)
-                    assertFalse("Ultrafast:" in snapshot, snapshot)
-                    assertFalse("higher usage" in snapshot, snapshot)
-                    assertFalse("account access" in snapshot, snapshot)
-                    assertTrue(ports.writes.isEmpty())
-                    assertTrue(ports.renames.isEmpty())
+    test("persisted panel has identity then all four fields without writes on mount") {
+        val ports = SessionRenderSource()
+        withRenderer(ports) { vm, _ ->
+            runMosaicTest {
+                val snapshot = setContentAndSnapshot {
+                    TuiPopupHost(Modifier.width(100).height(32)) { SessionSettingsComponent(vm) }
                 }
+                var previous = -1
+                for (text in listOf("Identity", "Session name", "Target", "Working directory", "/original",
+                    "Model behavior", "Model [orphan]", "Reasoning [medium]", "Service tier [default]",
+                    "Questions [ask user]")) {
+                    val next = snapshot.indexOf(text)
+                    assertTrue(next > previous, snapshot)
+                    previous = next
+                }
+                assertTrue("[Rename]" in snapshot, snapshot)
+                assertTrue("[Browse]" in snapshot, snapshot)
+                assertFalse("Ultrafast:" in snapshot, snapshot)
+                assertFalse("higher usage" in snapshot, snapshot)
+                assertFalse("account access" in snapshot, snapshot)
+                assertTrue(ports.writes.isEmpty())
+                assertTrue(ports.renames.isEmpty())
             }
         }
     }
@@ -218,7 +216,7 @@ val sessionSettingsComponentTest by testSuite {
             }
         }
     }
-    test("Unavailable and close remove controls and do not synthesize a draft") {
+    test("Unavailable and close remove controls and do not synthesize editable settings") {
         val ports = SessionRenderSource()
         ports.state.value = SessionSettingsDataState.Unavailable
         withRenderer(ports) { vm, _ ->
@@ -227,7 +225,12 @@ val sessionSettingsComponentTest by testSuite {
                     TuiPopupHost(Modifier.width(100).height(32)) { SessionSettingsComponent(vm) }
                 }
                 assertTrue("No selected session" in snapshot, snapshot)
+                assertFalse("Identity" in snapshot, snapshot)
                 assertFalse("Model behavior" in snapshot, snapshot)
+                assertFalse("[Rename]" in snapshot, snapshot)
+                assertFalse("[Browse]" in snapshot, snapshot)
+                assertTrue(ports.writes.isEmpty())
+                assertTrue(ports.renames.isEmpty())
                 ports.publish()
                 snapshotWith("Identity")
                 vm.close()
@@ -274,9 +277,8 @@ private suspend fun TestMosaic<String>.clickText(snapshot: String, text: String,
     sendMouseEvent(MouseEvent(column, row, MouseEvent.Type.Release))
     snapshotWith("")
 }
-private class SessionRenderSource(kind: SessionSettingsTargetKind = SessionSettingsTargetKind.MaterializedSession) :
-    SessionSettingsDataSource {
-    private val initial = SessionSettingsSnapshot(0, kind, "Target", SessionSettingsConfiguration(
+private class SessionRenderSource : SessionSettingsDataSource {
+    private val initial = SessionSettingsSnapshot(0, "Target", SessionSettingsConfiguration(
         OpenAiModelId("orphan"), Path("/original"), ReasoningEffort.Medium, ServiceTier.Default,
         RequestUserInputMode.AskUser,
     ), true)

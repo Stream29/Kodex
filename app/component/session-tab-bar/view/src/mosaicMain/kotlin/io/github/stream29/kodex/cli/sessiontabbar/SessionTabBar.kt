@@ -7,10 +7,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import com.jakewharton.mosaic.focus.focusCursor
+import com.jakewharton.mosaic.focus.focusable
 import com.jakewharton.mosaic.layout.background
-import com.jakewharton.mosaic.layout.fillMaxWidth
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
+import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.unit.IntOffset
@@ -64,6 +66,7 @@ public fun SessionTabBar(
 ) {
     val tabColumns = (columns - TabControlsColumns).coerceAtLeast(1)
     val scrollState = rememberScrollState()
+    val controlsScrollState = rememberScrollState()
     val currentState by rememberUpdatedState(state)
     val currentCallbacks by rememberUpdatedState(callbacks)
     val presentations = state.tabs.map { tab ->
@@ -95,47 +98,56 @@ public fun SessionTabBar(
         }
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(SessionTopBarBackground)
-            .scrollablePaging(
-                state = scrollState,
-                viewportSize = { scrollState.viewportSize },
-                orientation = ScrollOrientation.Horizontal,
-            ),
+    // Keep a tab viewport even on tiny surfaces; page the clipped outer row to reach its controls.
+    Box(
+        Modifier.width(columns.coerceAtLeast(1))
+            .horizontalScroll(controlsScrollState)
+            .focusCursor(0)
+            .focusable(enabled = columns < MinimumTabBarColumns),
     ) {
-        TuiButton(
-            label = "Sessions",
-            modifier = Modifier.background(SessionButtonBackground),
-            color = SessionButtonForeground,
-            onClick = currentCallbacks::openSessions,
-        )
-        Text(" ")
         Row(
             modifier = Modifier
-                .width(tabColumns)
-                .horizontalScroll(scrollState),
+                .width(columns.coerceAtLeast(MinimumTabBarColumns))
+                .background(SessionTopBarBackground)
+                .scrollablePaging(
+                    state = scrollState,
+                    viewportSize = { scrollState.viewportSize },
+                    orientation = ScrollOrientation.Horizontal,
+                ),
         ) {
-            presentations.forEachIndexed { index, rendered ->
-                if (index != 0) Text(" ")
-                key(rendered.tab.identity) {
-                    SessionTabButton(
-                        rendered = rendered,
-                        currentState = { currentState },
-                        callbacks = { currentCallbacks },
-                        onOpenTabMenu = onOpenTabMenu,
-                    )
+            TuiButton(
+                label = "Sessions",
+                modifier = Modifier.background(SessionButtonBackground),
+                color = SessionButtonForeground,
+                onClick = currentCallbacks::openSessions,
+            )
+            Text(" ")
+            Row(
+                modifier = Modifier
+                    .width(tabColumns)
+                    .horizontalScroll(scrollState),
+            ) {
+                presentations.forEachIndexed { index, rendered ->
+                    if (index != 0) Text(" ")
+                    key(rendered.tab.identity) {
+                        SessionTabButton(
+                            rendered = rendered,
+                            currentState = { currentState },
+                            callbacks = { currentCallbacks },
+                            onOpenTabMenu = onOpenTabMenu,
+                        )
+                    }
                 }
             }
+            Text(" ")
+            TuiButton(
+                label = "+",
+                modifier = Modifier.background(SessionButtonBackground),
+                color = SessionButtonForeground,
+                selected = state.selected == null,
+                onClick = currentCallbacks::selectNewSession,
+            )
         }
-        Text(" ")
-        TuiButton(
-            label = "+",
-            modifier = Modifier.background(SessionButtonBackground),
-            color = SessionButtonForeground,
-            onClick = currentCallbacks::createNewSession,
-        )
     }
 }
 
@@ -222,6 +234,7 @@ private const val MaximumTabLabelColumns: Int = 20
 private const val TabBracketsColumns: Int = 2
 private const val TabSpacingColumns: Int = 1
 private const val TabControlsColumns: Int = 15
+private const val MinimumTabBarColumns: Int = TabControlsColumns + 1
 
 private val SessionForeground
     @Composable

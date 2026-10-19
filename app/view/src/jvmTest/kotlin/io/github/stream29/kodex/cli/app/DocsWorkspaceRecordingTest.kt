@@ -18,7 +18,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.agent.contract.AgentShellSession
 import io.github.stream29.kodex.app.agent.contract.AgentShellSessionRegistry
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
-import io.github.stream29.kodex.app.session.contract.SessionViewModel
+import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
@@ -95,9 +95,9 @@ val docsWorkspaceRecordingTest by testSuite {
     test("overflowing tabs and a nonselected tab context menu") {
         val fixture = SessionViewModelTestFixture.create(this)
         try {
-            val tabs = (1..8).map { fixture.newSession("Review $it") }
-            var selected by mutableStateOf<SessionViewModel>(tabs.first())
-            var target by mutableStateOf<SessionViewModel?>(null)
+            val tabs = (1..8).map { fixture.persistedSession("Review $it") }
+            var selected by mutableStateOf<PersistedSessionViewModel>(tabs.first())
+            var target by mutableStateOf<PersistedSessionViewModel?>(null)
             var anchor by mutableStateOf<TuiPopupAnchor?>(null)
             var position by mutableStateOf<IntOffset?>(null)
             val clip = DocsClip("session-tabs")
@@ -112,17 +112,14 @@ val docsWorkspaceRecordingTest by testSuite {
                                 { session, _, a, p -> target = session; anchor = a; position = p },
                                 {}, {},
                             )
-                            NewSessionScreen(
-                                selected as io.github.stream29.kodex.app.session.contract.NewSessionViewModel,
-                                80, 17, NewLineKey.ShiftEnter,
-                                newSessionStatusBarRows(80, selected.settings.value), {},
-                                {
-                                    NewSessionStatusBar(
-                                        80, selected.settings.value,
-                                        (selected as io.github.stream29.kodex.app.session.contract.NewSessionViewModel).runtimeConfiguration,
-                                        RuntimeConfigurationDropdowns.remember(selected), {}, {},
-                                    )
-                                },
+                            val agent = requireNotNull(selected.rootAgent.value)
+                            AgentRuntimeScreen(
+                                agent, 80, 17, NewLineKey.ShiftEnter,
+                                RuntimeConfigurationDropdowns.remember(agent),
+                                io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns.remember(
+                                    agent.suggestSubagentTask, null,
+                                ),
+                                { _, _, _, _, _ -> }, {}, {}, {},
                             )
                         }
                         anchor?.let {

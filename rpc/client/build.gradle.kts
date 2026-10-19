@@ -39,6 +39,7 @@ kotlin {
                 api(project(":agent-storage-clean-models"))
                 api(project(":agent-storage-core"))
                 api(project(":openai-models"))
+                api(project(":utils-kotlinx-io-serialization"))
                 api(libs.kotlinx.coroutines.core)
                 api(libs.kotlinx.rpc.core)
                 api(libs.kotlinx.serialization.core)

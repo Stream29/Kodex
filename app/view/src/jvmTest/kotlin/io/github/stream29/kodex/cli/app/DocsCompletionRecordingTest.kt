@@ -9,10 +9,10 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.app.agent.contract.SuggestSubagentTaskState
 import io.github.stream29.kodex.app.migration.prepareKodexHome
-import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.test.deleteTestDirectory
 import io.github.stream29.kodex.app.test.testAnswer
-import io.github.stream29.kodex.openai.ContentItem
+import io.github.stream29.kodex.cli.settings.UnifiedSettingsStore
+import io.github.stream29.kodex.rpc.server.defaultBackendSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.ModelsResponse
 import io.github.stream29.kodex.openai.OpenAiLoginAuthorization
@@ -85,18 +85,23 @@ val docsCompletionRecordingTest by testSuite(compartment = { TestCompartment.Rea
             }
             try {
                 val prepared = prepareKodexHome(home)
+                UnifiedSettingsStore.open(home, defaultBackendSettings()).backendStore.update {
+                    it.copy(
+                        sessionTitle = it.sessionTitle.copy(enabled = false),
+                        newSession = it.newSession.copy(model = OpenAiModelId("test-model")),
+                    )
+                }
                 assertTrue(project.mkdir())
                 withKodexApplication(
                     prepared, home, Path(home, "codex"), Path(home, "agents"),
                     applicationWidth = 120,
                     createClient = { client }, createLoginClient = { loginClient },
                 ) { app ->
-                    val draft = requireNotNull(app.viewModel.navigation.value.selected)
-                        as io.github.stream29.kodex.app.session.contract.NewSessionViewModel
-                    draft.rename("Review parent")
-                    val parent = requireNotNull(app.viewModel.materializeNewSession(draft))
+                    val draft = app.viewModel.newSession
+                    val revision = draft.composer.update("Please suggest two disposable reviews.")
+                    val parent = requireNotNull(app.viewModel.submitNewSession(revision))
+                    parent.rename("Review parent")
                     val agent = requireNotNull(parent.rootAgent.value)
-                    agent.submit(listOf(ContentItem.InputText("Please suggest two disposable reviews.")))
                     agent.suggestSubagentTask.state.filterIsInstance<SuggestSubagentTaskState.Pending>().first()
                     val clip = DocsClip("suggestions-accepted", 120, 36)
                     runMosaicTest(MosaicSnapshots) {
@@ -123,19 +128,17 @@ val docsCompletionRecordingTest by testSuite(compartment = { TestCompartment.Rea
                         clickLabel("Accept")
                         val createdTabs = withTimeout(10.seconds) {
                             app.viewModel.navigation.first { navigation ->
-                                navigation.tabs.filterIsInstance<PersistedSessionViewModel>()
-                                    .count { it !== parent } == 2
+                                navigation.tabs.count { it !== parent } == 2
                             }
-                        }.tabs.filterIsInstance<PersistedSessionViewModel>().filter { it !== parent }
+                        }.tabs.filter { it !== parent }
                         assertEquals(setOf("Review tests", "Review docs"),
                             createdTabs.map { it.name.first() }.toSet())
                         assertTrue(createdTabs.all { it.settings.value.cwd == Path(project.canonicalPath) })
                         clip.add(settle(), "Review tests")
                         clickLabel("Review tests")
-                        val selectedTab = app.viewModel.navigation.first {
-                            it.selected is PersistedSessionViewModel &&
-                                (it.selected as PersistedSessionViewModel).name.value == "Review tests"
-                        }.selected as PersistedSessionViewModel
+                        val selectedTab = requireNotNull(app.viewModel.navigation.first {
+                            it.selectedSession?.name?.value == "Review tests"
+                        }.selectedSession)
                         assertTrue(selectedTab in createdTabs)
                         clip.add(settle(), "Review disposable sample tests")
                     }

@@ -2,7 +2,6 @@ package io.github.stream29.kodex.cli.app
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
-import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import kotlinx.coroutines.flow.first
 import kotlin.test.*
 
@@ -10,9 +9,9 @@ val sessionActionComponentOwnershipTest by testSuite {
     test("rename remains bound to its captured session after the selected tab changes") {
         applicationFixture { app, _ ->
             val application = app.viewModel
-            val target = assertNotNull(application.materializeNewSession(assertIs<NewSessionViewModel>(application.navigation.value.selected)))
+            val target = application.submitTestSession()
             val popup = application.openRenameSessionPopup(target)
-            val other = application.createNewSessionTab()
+            val other = application.submitTestSession("other session")
             val otherName = other.name.value
             assertSame(target, popup.viewModel.target)
             popup.viewModel.updateDraftName("  captured rename  ")
@@ -27,7 +26,7 @@ val sessionActionComponentOwnershipTest by testSuite {
     test("replacing a rename closes only the old child and protects the new popup") {
         applicationFixture { app, _ ->
             val application = app.viewModel
-            val target = assertNotNull(application.materializeNewSession(assertIs<NewSessionViewModel>(application.navigation.value.selected)))
+            val target = application.submitTestSession()
             val old = application.openRenameSessionPopup(target)
             val current = application.openRenameSessionPopup(target)
             assertFalse(old.viewModel.isActive)
@@ -43,7 +42,7 @@ val sessionActionComponentOwnershipTest by testSuite {
     test("missing captured deletion returns false without closing another session") {
         applicationFixture { app, _ ->
             val application = app.viewModel
-            val target = assertNotNull(application.materializeNewSession(assertIs<NewSessionViewModel>(application.navigation.value.selected)))
+            val target = application.submitTestSession()
             val popup = application.openDeleteSessionPopup(target.sessionIndex + 1000)
             assertFalse(popup.viewModel.delete())
             assertTrue(application.navigation.value.tabs.any { it === target })

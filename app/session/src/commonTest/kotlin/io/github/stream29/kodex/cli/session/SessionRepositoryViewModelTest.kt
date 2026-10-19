@@ -10,7 +10,7 @@ import kotlin.test.*
 val sessionRepositoryViewModelTest by testSuite {
     test("catalog snapshots archive flags dates and active state without creating tabs") {
         withRpcFrontend {
-            val index = services.global.createSession(testSettings("catalog", root))
+            val index = services.global.createSession(root)
             val catalog = DefaultSessionCatalogViewModel(this, RpcSessionCatalogDependencies(services.global))
             try {
                 catalog.refresh()
@@ -35,7 +35,7 @@ val sessionRepositoryViewModelTest by testSuite {
     }
     test("catalog delegates delete exactly once to the application callback") {
         withRpcFrontend {
-            val index = services.global.createSession(testSettings("delete", root))
+            val index = services.global.createSession(root)
             var calls = 0
             val catalog = DefaultSessionCatalogViewModel(this, RpcSessionCatalogDependencies(services.global, deleteSession = {
                 calls++

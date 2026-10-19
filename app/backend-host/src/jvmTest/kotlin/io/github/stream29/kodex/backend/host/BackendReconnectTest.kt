@@ -5,7 +5,6 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.backend.BackendEndpoint
 import io.github.stream29.kodex.cli.app.withFrontendApplication
 import io.github.stream29.kodex.cli.rpc.RpcServices
-import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.local.BackendConnectionState
@@ -90,7 +89,8 @@ val backendReconnectTest by testSuite(compartment = { TestCompartment.RealTime }
                 val routed = BackendEndpoint(endpoint.instanceId, endpoint.pid, proxy.port, endpoint.password, endpoint.applicationVersion)
                 withLocalRpcClient(home, routed) { connection ->
                     val rpc = RpcServices(RestoringRpcClient(connection))
-                    val index = rpc.global.createSession(KodexAgentSettings(model = OpenAiModelId("fixture"), cwd = home))
+                    assertEquals(OpenAiModelId("fixture"), rpc.global.getSettings().newSession.model)
+                    val index = rpc.global.createSession(home)
                     withFrontendApplication(connection, home) { app ->
                         val tab = app.viewModel.openSession(index)
                         val agent = requireNotNull(tab.rootAgent.value)

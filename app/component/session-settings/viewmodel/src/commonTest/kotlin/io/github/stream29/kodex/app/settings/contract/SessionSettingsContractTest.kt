@@ -14,14 +14,14 @@ val sessionSettingsContractTest by testSuite {
         ServiceTier.Default, RequestUserInputMode.AskUser)
     test("snapshot constructors enforce authoritative revision and name invariants") {
         assertFailsWith<IllegalArgumentException> {
-            SessionSettingsSnapshot(-1, SessionSettingsTargetKind.MaterializedSession, "name", configuration, true)
+            SessionSettingsSnapshot(-1, "name", configuration, true)
         }
         assertFailsWith<IllegalArgumentException> {
-            SessionSettingsSnapshot(0, SessionSettingsTargetKind.NewSessionDraft, "  ", configuration, true)
+            SessionSettingsSnapshot(0, "  ", configuration, true)
         }
     }
     test("frontend options must be unique and include exact stored model") {
-        val snapshot = SessionSettingsSnapshot(0, SessionSettingsTargetKind.MaterializedSession, "name", configuration, true)
+        val snapshot = SessionSettingsSnapshot(0, "name", configuration, true)
         assertFailsWith<IllegalArgumentException> { SessionSettingsState.Available(snapshot, emptyList()) }
         assertFailsWith<IllegalArgumentException> {
             SessionSettingsState.Available(snapshot, listOf(configuration.model, configuration.model))

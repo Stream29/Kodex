@@ -13,6 +13,7 @@ import io.github.stream29.kodex.rpc.contract.GlobalRpc
 import io.github.stream29.kodex.rpc.models.*
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
 import kotlinx.coroutines.flow.Flow
+import kotlinx.io.files.Path
 
 /** Complete frozen GlobalRpc, delegating to the same owned backend graph. */
 public class BackendGlobalRpc(
@@ -57,7 +58,7 @@ public class BackendGlobalRpc(
         host.inBackend { settings.getCodexMcpSettings() }
     override suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry> =
         sessions.getSessionCatalog(includeArchived)
-    override suspend fun createSession(initialSettings: KodexAgentSettings): Int = sessions.createSession(initialSettings)
+    override suspend fun createSession(cwd: Path): Int = sessions.createSession(cwd)
     override suspend fun createSuggestedSessions(
         tasks: List<SuggestedSubagentTask>, initialSettings: KodexAgentSettings,
     ): List<CreatedSuggestedSession> = sessions.createSuggestedSessions(tasks, initialSettings)

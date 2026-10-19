@@ -5,8 +5,10 @@ import io.github.stream29.kodex.agentstorage.contract.ObservableKodexAgentStorag
 import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.agentstorage.contract.revert
 import io.github.stream29.kodex.agentstorage.contract.ext.initialize
+import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.openai.ContentItem
 import io.github.stream29.kodex.openai.KodexAgentSettings
+import io.github.stream29.kodex.openai.Reasoning
 import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
 import io.github.stream29.kodex.tool.multiagent.SuggestedSessionMeta
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
@@ -19,6 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.io.files.Path
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -26,6 +29,7 @@ import kotlin.uuid.Uuid
 public class BackendSessionManagement(
     private val host: BackendSessionHost,
     private val runtime: BackendAgentRuntimeRpc,
+    private val newSessionDefaults: () -> KodexNewSessionSettings,
     private val reportBackgroundFailure: (Throwable) -> Unit,
 ) {
     private val commands = Mutex()
@@ -46,8 +50,20 @@ public class BackendSessionManagement(
         }
     }
 
-    public suspend fun createSession(initialSettings: KodexAgentSettings): Int = host.inBackend {
-        commands.withLock { create(initialSettings) { "Session $it" } }
+    public suspend fun createSession(cwd: Path): Int = host.inBackend {
+        commands.withLock {
+            // Capture the owned defaults at the creation boundary, not at RPC admission
+            // or from a frontend projection. Suggested Sessions and forks never use this.
+            val defaults = newSessionDefaults()
+            val initialSettings = KodexAgentSettings(
+                model = defaults.model,
+                reasoning = Reasoning(effort = defaults.reasoningEffort),
+                serviceTier = defaults.serviceTier,
+                requestUserInputMode = defaults.requestUserInputMode,
+                cwd = cwd,
+            )
+            create(initialSettings) { "Session $it" }
+        }
     }
 
     public suspend fun keepSessionAlive(sessionIndex: Int): Unit = host.keepSessionAlive(sessionIndex)

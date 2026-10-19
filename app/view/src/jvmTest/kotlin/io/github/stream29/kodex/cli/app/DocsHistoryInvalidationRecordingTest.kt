@@ -73,7 +73,6 @@ val docsHistoryInvalidationRecordingTest by testSuite(compartment = { TestCompar
                     applicationWidth = 120,
                     createClient = { client }, createLoginClient = { loginClient },
                 ) { app ->
-                    val draft = requireNotNull(app.viewModel.navigation.value.selected)
                     val session = app.viewModel.openSession(sourceIndex)
                     val agent = requireNotNull(session.rootAgent.value)
                     val clip = DocsClip("history-invalidation", 120, 36)
@@ -100,9 +99,9 @@ val docsHistoryInvalidationRecordingTest by testSuite(compartment = { TestCompar
                         clip.add(settle(), "Revert to here")
                         clickLabel("Revert to here")
                         clip.add(settle(), "Revert history to here?")
-                        assertTrue(app.viewModel.selectTab(draft))
+                        app.viewModel.selectNewSession()
                         val invalidated = settle()
-                        clip.add(invalidated, "New Session")
+                        clip.add(invalidated, "[+]")
                         assertFalse("Revert history to here?" in invalidated.draw().render(AnsiLevel.NONE, false))
                         assertIs<AgentHistoryActionState.None>(agent.historyAction.value)
                     }

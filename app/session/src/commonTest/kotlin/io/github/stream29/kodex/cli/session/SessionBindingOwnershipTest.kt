@@ -7,7 +7,6 @@ import io.github.stream29.kodex.app.session.contract.PersistedSessionLifecycleSt
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.test.deleteTestDirectory
 import io.github.stream29.kodex.app.test.testAnswer
-import io.github.stream29.kodex.app.test.testSettings
 import io.github.stream29.kodex.cli.rpc.RpcServices
 import io.github.stream29.kodex.cli.rpc.RpcSessionViews
 import io.github.stream29.kodex.cli.rpc.SessionViewStatus
@@ -110,7 +109,7 @@ val sessionBindingOwnershipTest by testSuite(compartment = { TestCompartment.Rea
             }
         }) {
             try {
-                val index = services.global.createSession(testSettings("", home))
+                val index = services.global.createSession(home)
                 val cancelled = async(start = CoroutineStart.UNDISPATCHED) { sessions.open(index) }
                 entered.await()
                 val next = async(start = CoroutineStart.UNDISPATCHED) { sessions.open(index) }
@@ -241,7 +240,7 @@ private class SessionFrontendFixture(
     val home: Path,
 ) : CoroutineScope {
     suspend fun create(name: String = "Test Session"): PersistedSessionViewModel {
-        val session = sessions.open(services.global.createSession(testSettings("", home)))
+        val session = sessions.open(services.global.createSession(home))
         session.rename(name)
         session.name.first { it == name }
         session.settings.first { it.threadName == name }
@@ -264,7 +263,12 @@ private suspend fun sessionFrontend(
     try {
         withBackendServices(
             home, Path(home, "codex"), Path(home, "agents"),
-            defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
+            defaults = defaultBackendSettings().let {
+                it.copy(
+                    sessionTitle = SessionTitleSettings(false),
+                    newSession = it.newSession.copy(model = OpenAiModelId("test-model")),
+                )
+            },
             createClient = { client }, createLoginClient = { OwnershipLoginClient },
         ) { backend ->
             withInMemoryRpc(backend::register) { raw ->

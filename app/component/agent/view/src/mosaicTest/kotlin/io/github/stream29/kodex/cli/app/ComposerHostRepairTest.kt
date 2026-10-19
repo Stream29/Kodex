@@ -22,7 +22,6 @@ import io.github.stream29.kodex.app.agent.contract.*
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.test.deleteTestDirectory
 import io.github.stream29.kodex.app.test.testAnswer
-import io.github.stream29.kodex.app.test.testSettings
 import io.github.stream29.kodex.cli.agent.SuggestSubagentTaskDropdowns
 import io.github.stream29.kodex.cli.agent.canEditHistory
 import io.github.stream29.kodex.cli.components.TuiPopupHost
@@ -448,7 +447,12 @@ private suspend fun composerHost(
     try {
         withBackendServices(
             root, Path(root, "codex"), Path(root, "agents"),
-            defaults = defaultBackendSettings().copy(sessionTitle = SessionTitleSettings(false)),
+            defaults = defaultBackendSettings().let {
+                it.copy(
+                    sessionTitle = SessionTitleSettings(false),
+                    newSession = it.newSession.copy(model = OpenAiModelId("test-model")),
+                )
+            },
             createClient = { client },
             createLoginClient = { ComposerHostLoginClient },
         ) { backend ->
@@ -460,7 +464,7 @@ private suspend fun composerHost(
                     reportUnhandledError = { error -> failures.update { it + error } })
                 val sessions = DefaultPersistedSessionViewModelRegistry(views, models, this)
                 try {
-                    val index = services.global.createSession(testSettings(cwd = root))
+                    val index = services.global.createSession(root)
                     val session = sessions.open(index)
                     ComposerHostFixture(services, session, views.open(index), failures).block()
                 } finally { withContext(NonCancellable) { sessions.shutdown() } }

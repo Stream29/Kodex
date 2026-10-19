@@ -4,12 +4,13 @@ import de.infix.testBalloon.framework.core.testSuite
 import de.infix.testBalloon.framework.core.TestCompartment
 import io.github.stream29.kodex.app.migration.*
 import io.github.stream29.kodex.app.test.deleteTestDirectory
-import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
+import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SidebarContent
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem as Fs
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
@@ -56,7 +57,7 @@ val kodexApplicationContextSettingsTest by testSuite(compartment = { TestCompart
                     createClient = { applicationClient() }, createLoginClient = { ApplicationLoginClient },
                 ) {
                     assertFalse(Fs.exists(Path(home, "missing-agents")))
-                    assertEquals(Fs.resolve(home), it.viewModel.navigation.value.selected.settings.value.cwd)
+                    assertEquals(Fs.resolve(home), it.viewModel.newSession.settings.value.cwd)
                     "rendered"
                 }
                 assertEquals("rendered", value)
@@ -86,7 +87,7 @@ val kodexApplicationContextSettingsTest by testSuite(compartment = { TestCompart
                     assertTrue(Fs.exists(Path(home, "settings.yml")))
                     assertFalse(Fs.exists(Path(home, "settings.backend.yml")))
                     assertFalse(Fs.exists(Path(home, "settings.frontend.cli.yml")))
-                    assertEquals("fixture-migrated-model", it.viewModel.navigation.value.selected.settings.value.model.value)
+                    assertEquals("fixture-migrated-model", it.viewModel.newSession.settings.value.model.value)
                     assertEquals(NewLineKey.Enter, it.newLineKey.value)
                     assertEquals(SidebarContent.None, it.sidebarSettings.state.value.left)
                     assertEquals(SidebarContent.HistoryIndex, it.sidebarSettings.state.value.right)
@@ -94,7 +95,11 @@ val kodexApplicationContextSettingsTest by testSuite(compartment = { TestCompart
                     val encoded = Fs.readString(Path(home, "settings.yml"))
                     assertFalse("should-never-run" in encoded)
                     assertFalse("left_width" in encoded)
-                    val session = assertNotNull(it.viewModel.materializeNewSession(assertIs<NewSessionViewModel>(it.viewModel.navigation.value.selected)))
+                    // The migration assertion uses a deliberately custom model; select the
+                    // mock catalog's model before starting the first real backend turn.
+                    it.viewModel.newSession.updateModel(OpenAiModelId("test-model"))
+                    it.viewModel.newSession.settings.first { value -> value.model == OpenAiModelId("test-model") }
+                    val session = it.viewModel.submitTestSession()
                     assertTrue(session.sessionIndex >= 0)
                     assertTrue(Fs.exists(Path(home, "sessions")))
                 }

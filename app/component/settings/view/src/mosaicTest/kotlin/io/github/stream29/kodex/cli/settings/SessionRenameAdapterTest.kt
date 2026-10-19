@@ -58,7 +58,7 @@ val sessionRenameAdapterTest by testSuite {
 
 private class RenameSettingsSource(revision: Long, name: String) : SessionSettingsDataSource {
     override val state = MutableStateFlow<SessionSettingsDataState>(SessionSettingsDataState.Available(
-        SessionSettingsSnapshot(revision, SessionSettingsTargetKind.MaterializedSession, name,
+        SessionSettingsSnapshot(revision, name,
             SessionSettingsConfiguration(OpenAiModelId("test"), Path("."), ReasoningEffort.High,
                 ServiceTier.Default, RequestUserInputMode.AskUser), editable = true),
     ))

@@ -3,7 +3,6 @@ package io.github.stream29.kodex.cli.app
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.settings.contract.SettingsPage
-import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.hooksettings.HookEditorDraft
 import io.github.stream29.kodex.app.hooksettings.HookSettingsDialog
 import io.github.stream29.kodex.app.test.testAnswer
@@ -31,10 +30,9 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
                 id = "response", endTurn = true, serviceTier = "default", usage = TokenUsage(20, 3, 23),
             )))
         }) { app, home ->
-            val session = assertNotNull(app.viewModel.materializeNewSession(
-                assertIs<NewSessionViewModel>(app.viewModel.navigation.value.selected),
-            ))
-            val popup = app.viewModel.openSettingsPopup(session, SettingsPage.Hooks)
+            // Configure global Hooks before the first backend turn, rather than
+            // letting a fixture bootstrap run race Hook dispatch during setup.
+            val popup = app.viewModel.openSettingsPopup(null, SettingsPage.Hooks)
             val configured = listOf(
                 NotificationHook("failed-local-hook", setOf(NotificationHookType.StopUnhandledError), "exit 17"),
                 NotificationHook("capture", NotificationHookType.entries.toSet(),
@@ -53,9 +51,10 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
                 }
             }
             app.viewModel.dismissPopup(popup)
+            app.viewModel.newSession.updateServiceTier(ServiceTier.Ultrafast)
+            app.viewModel.newSession.settings.first { it.serviceTier == ServiceTier.Ultrafast }
+            val session = app.viewModel.submitTestSession("before local errors")
             val agent = assertNotNull(session.rootAgent.value)
-            agent.updateServiceTier(ServiceTier.Ultrafast)
-            agent.settings.first { it.serviceTier == ServiceTier.Ultrafast }
             val output = Path(home, "host-errors.jsonl")
             suspend fun lines(count: Int): List<String> = withTimeout(15.seconds) {
                 while (true) {
@@ -67,7 +66,6 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
                 @Suppress("UNREACHABLE_CODE") emptyList()
             }
             // A business Stop is handled by the backend; local errors use the separate frontend owner.
-            agent.submit(listOf(ContentItem.InputText("before local errors")))
             assertEquals(1, lines(1).size)
             agent.running.first { !it }
             assertNull(agent.notification.value, "A successful response reporting default is not a tier warning.")
@@ -91,7 +89,7 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
                 assertEquals("literal $(touch unwanted) \"warning\"", payload.getValue("message").jsonPrimitive.content)
             }
             assertFalse(Fs.exists(Path(home, "unwanted")))
-            assertSame(session, app.viewModel.navigation.value.selected)
+            assertSame(session, app.viewModel.navigation.value.selectedSession)
             // Exercise the real Agent callback, not only the exposed Application reporter.
             agent.confirmHistoryRevert(Long.MAX_VALUE)
             val agentError = Json.parseToJsonElement(lines(6).last()).jsonObject
@@ -108,8 +106,7 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
     test("one backend consumer dispatches business Stops without duplicate frontend errors") {
         var fail = false
         applicationFixture(response = { if (fail) error("test provider failure") else testAnswer() }) { app, home ->
-            val session = assertNotNull(app.viewModel.materializeNewSession(assertIs<NewSessionViewModel>(app.viewModel.navigation.value.selected)))
-            val popup = app.viewModel.openSettingsPopup(session, SettingsPage.Hooks)
+            val popup = app.viewModel.openSettingsPopup(null, SettingsPage.Hooks)
             val hook = NotificationHook("capture", NotificationHookType.entries.toSet(),
                 "cat >> notification.jsonl; printf '\\n' >> notification.jsonl")
             val hooks = popup.viewModel.global.hookSettings
@@ -127,8 +124,8 @@ val unhandledErrorReportingTest by testSuite(compartment = { TestCompartment.Rea
             local.save(localEditor.token)
             local.state.first { it.hooks.size == 1 }
             app.viewModel.dismissPopup(popup) // The single application consumer outlives the editor.
+            val session = app.viewModel.submitTestSession("first")
             val agent = requireNotNull(session.rootAgent.value)
-            agent.submit(listOf(ContentItem.InputText("first")))
             val output = Path(home, "notification.jsonl")
             suspend fun lines(count: Int): List<String> = withTimeout(15.seconds) {
                 while (true) {

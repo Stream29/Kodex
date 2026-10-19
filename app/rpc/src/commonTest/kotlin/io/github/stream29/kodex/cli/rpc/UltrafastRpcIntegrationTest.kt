@@ -14,27 +14,24 @@ import kotlinx.rpc.RpcClient
 import kotlin.test.*
 
 val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.RealTime }) {
-    test("real JSON RPC preserves Ultrafast through defaults draft materialization CAS reopen fork and child creation") {
+    test("real JSON RPC preserves Ultrafast through defaults draft submission CAS reopen fork and child creation") {
         val requests = mutableListOf<ResponsesApiRequest>()
         frontend(onRequest = { requests.add(it) }) {
             val old = services.global.getSettings()
             val defaults = old.copy(newSession = old.newSession.copy(serviceTier = ServiceTier.Ultrafast))
             assertTrue(services.global.compareAndSetSettings(old, defaults))
             assertEquals(ServiceTier.Ultrafast, services.global.getSettings().newSession.serviceTier)
-            val draft = RpcSessionDraft(
-                KodexAgentSettings(defaults.newSession.model, serviceTier = defaults.newSession.serviceTier),
-                views, this,
-            )
+            val draft = RpcSessionDraft(home, views, global, this)
             try {
                 assertTrue(services.global.getSessionCatalog(true).isEmpty())
-                draft.composer.update("first message")
-                val view = draft.materialize()
+                val revision = draft.composer.update("first message")
+                val view = assertNotNull(draft.submit(revision, views::open))
                 val binding = view.current()
                 binding.state.first { it == AgentStateValue.AssistantMessage }
                 binding.running.first { !it }
                 assertEquals(ServiceTier.Ultrafast, requests.single().serviceTier)
                 assertEquals(ServiceTier.Ultrafast, binding.settings.value.serviceTier)
-                // Updating defaults only affects future drafts, not this persisted Session.
+                // Updating defaults changes the reusable draft, not this persisted Session.
                 assertTrue(services.global.compareAndSetSettings(defaults, old))
                 assertEquals(ServiceTier.Ultrafast, binding.settings.value.serviceTier)
                 val agent = requireNotNull(view.agent.value)
@@ -67,9 +64,11 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
             finish.await()
             tierAnswer("different", "default")
         }) {
-            val view = views.open(services.global.createSession(
-                KodexAgentSettings(OpenAiModelId("captured"), serviceTier = ServiceTier.Ultrafast),
-            ))
+            val old = services.global.getSettings()
+            assertTrue(services.global.compareAndSetSettings(old, old.copy(
+                newSession = old.newSession.copy(model = OpenAiModelId("captured"), serviceTier = ServiceTier.Ultrafast),
+            )))
+            val view = views.open(services.global.createSession(home))
             val binding = view.current()
             val agent = requireNotNull(view.agent.value)
             try {
@@ -112,9 +111,11 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
                 }
             },
         ) {
-            val view = views.open(services.global.createSession(
-                KodexAgentSettings(OpenAiModelId("test"), serviceTier = ServiceTier.Ultrafast),
-            ))
+            val old = services.global.getSettings()
+            assertTrue(services.global.compareAndSetSettings(old, old.copy(
+                newSession = old.newSession.copy(model = OpenAiModelId("test"), serviceTier = ServiceTier.Ultrafast),
+            )))
+            val view = views.open(services.global.createSession(home))
             val binding = view.current()
             val agent = requireNotNull(view.agent.value)
             try {
@@ -140,9 +141,11 @@ val ultrafastRpcIntegrationTest by testSuite(compartment = { TestCompartment.Rea
         test("successful Ultrafast response with reported tier '$actual' is diagnostics only") {
             val requests = mutableListOf<ResponsesApiRequest>()
             frontend(onRequest = requests::add, response = { tierAnswer("successful", actual) }) {
-                val view = views.open(services.global.createSession(
-                    KodexAgentSettings(OpenAiModelId("captured"), serviceTier = ServiceTier.Ultrafast),
-                ))
+                val old = services.global.getSettings()
+                assertTrue(services.global.compareAndSetSettings(old, old.copy(
+                    newSession = old.newSession.copy(model = OpenAiModelId("captured"), serviceTier = ServiceTier.Ultrafast),
+                )))
+                val view = views.open(services.global.createSession(home))
                 val binding = view.current()
                 val agent = requireNotNull(view.agent.value)
                 agent.submit(listOf(ContentItem.InputText("test response")))

@@ -2,6 +2,7 @@ package io.github.stream29.kodex.rpc.server
 
 import de.infix.testBalloon.framework.core.TestCompartment
 import de.infix.testBalloon.framework.core.testSuite
+import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -23,6 +24,9 @@ val backendStartupTest by testSuite(compartment = { TestCompartment.RealTime }) 
                 try {
                     withBackendServices(
                         home, Path(home, "codex"), Path(home, "agents"),
+                        defaults = defaultBackendSettings().copy(
+                            newSession = KodexNewSessionSettings(model = OpenAiModelId("test-model")),
+                        ),
                         createLoginClient = { ServicesTestLogin() },
                         createClient = {
                             mockOpenAiClient {
@@ -38,7 +42,7 @@ val backendStartupTest by testSuite(compartment = { TestCompartment.RealTime }) 
                         if (firstAccess == "catalog") {
                             assertEquals(emptyList(), services.global.getSessionCatalog(false))
                         } else {
-                            assertEquals(0, services.global.createSession(KodexAgentSettings(OpenAiModelId("test-model"))))
+                            assertEquals(0, services.global.createSession(home))
                         }
                         assertTrue(SystemCoroutineFileSystem.metadataOrNull(sessions)?.isDirectory == true)
                     }

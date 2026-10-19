@@ -27,8 +27,9 @@ import kotlinx.io.files.Path
  *
  * Persisted Agent commands capture their field baseline, validate the exact still-open
  * binding and use full-snapshot CAS; an unrelated-field conflict may be retried but a
- * changed edited field is rejected. A New Session owner instead edits its exact local
- * draft through its existing admission rules. Neither uses the application settings queue.
+ * changed edited field is rejected. A New Session owner edits the shared backend defaults
+ * with the same field-baseline rules; only its working directory is local. Neither uses
+ * the application settings queue.
  * Render settings from this observation or the stable Runtime Configuration child;
  * never keep another editable configuration authority in the parent renderer.
  */

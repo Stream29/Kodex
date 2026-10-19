@@ -8,10 +8,15 @@ import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.terminal.KeyboardEvent
+import com.jakewharton.mosaic.terminal.MouseEvent
 import com.jakewharton.mosaic.testing.TestMosaic
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Column
 import com.jakewharton.mosaic.ui.Text
+import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarCallbacks
+import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarState
+import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabIdentity
+import io.github.stream29.kodex.cli.sessiontabbar.SessionTabBar as ComponentSessionTabBar
 import io.github.stream29.kodex.cli.components.TuiPopupHost
 import io.github.stream29.kodex.cli.components.rememberTuiPopupAnchor
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
@@ -78,41 +83,43 @@ val sessionTabContextMenuTest by testSuite {
         }
     }
 
-    test("draftTabDoesNotOfferPersistedActions") {
-        val fixture = SessionViewModelTestFixture.create(this)
-        try {
-            val target = fixture.newSession("Draft")
-            var menuSnapshot = ""
-
-            runMosaicTest {
-                setContentAndSnapshot {
-                    val anchor = rememberTuiPopupAnchor()
-                    TuiPopupHost(modifier = Modifier.width(48).height(6)) {
-                        Text("session tab", modifier = Modifier.tuiPopupAnchor(anchor))
-                        SessionTabContextMenuPopup(
-                            target = target,
-                            anchor = anchor,
-                            clickPosition = null,
-                            onDismiss = {},
-                            onClose = {},
-                            onCloseAndArchive = {},
-                            onRename = {},
-                            onDelete = {},
-                        )
-                    }
-                }
-
-                menuSnapshot = awaitSnapshotContaining("Close")
-            }
-
-            assertFalse("Index:" in menuSnapshot, menuSnapshot)
-            assertTrue("Rename" in menuSnapshot, menuSnapshot)
-            assertTrue("Close" in menuSnapshot, menuSnapshot)
-            assertFalse("Close and archive" in menuSnapshot, menuSnapshot)
-            assertFalse("Delete" in menuSnapshot, menuSnapshot)
-        } finally {
-            fixture.close()
+    test("singletonPlusHasNoOrdinaryTabContextMenu") {
+        var selections by mutableStateOf(0)
+        var menus = 0
+        var closes = 0
+        val callbacks = object : SessionTabBarCallbacks {
+            override fun select(identity: SessionTabIdentity) = Unit
+            override fun close(identity: SessionTabIdentity) { closes++ }
+            override fun openContextMenu(identity: SessionTabIdentity) { menus++ }
+            override fun selectNewSession() { selections++ }
+            override fun openSessions() = Unit
         }
+        runMosaicTest {
+            val snapshot = setContentAndSnapshot {
+                Column(Modifier.width(48)) {
+                    ComponentSessionTabBar(
+                        state = SessionTabBarState(emptyList(), null),
+                        callbacks = callbacks,
+                        runningIndicatorFrame = mutableStateOf(""),
+                        columns = 48,
+                        onOpenTabMenu = { menus++ },
+                    )
+                    Text("selections=$selections")
+                }
+            }
+            assertTrue("[+]" in snapshot, snapshot)
+            sendMouseEvent(MouseEvent(46, 0, MouseEvent.Type.Press, MouseEvent.Button.Right))
+            sendMouseEvent(MouseEvent(46, 0, MouseEvent.Type.Release))
+            sendKeyEvent(KeyboardEvent(codepoint = KeyboardEvent.F10, modifiers = KeyboardEvent.ModifierShift))
+            sendKeyEvent(KeyboardEvent(codepoint = KeyboardEvent.Menu))
+            sendMouseEvent(MouseEvent(46, 0, MouseEvent.Type.Press, MouseEvent.Button.Left))
+            sendMouseEvent(MouseEvent(46, 0, MouseEvent.Type.Release))
+            val latest = awaitSnapshot()
+            assertFalse("Rename" in latest || "Close and archive" in latest, latest)
+        }
+        assertEquals(0, menus)
+        assertEquals(0, closes)
+        assertEquals(1, selections)
     }
 }
 

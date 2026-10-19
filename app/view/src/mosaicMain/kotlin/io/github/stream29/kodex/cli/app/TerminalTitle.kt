@@ -10,12 +10,9 @@ internal data class OpenSessionSummary(
 )
 
 internal fun summarizeOpenSessions(tabs: List<SessionTabRenderState>): OpenSessionSummary {
-    val sessions = tabs.filter { tab ->
-        tab.target is io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
-    }
     return OpenSessionSummary(
-        sessionCount = sessions.size,
-        runningSessionCount = sessions.count(SessionTabRenderState::running),
+        sessionCount = tabs.size,
+        runningSessionCount = tabs.count(SessionTabRenderState::running),
     )
 }
 

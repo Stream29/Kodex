@@ -10,16 +10,12 @@ import io.github.stream29.kodex.app.settings.createOpenAiLoginViewModel
 import io.github.stream29.kodex.app.settings.createSessionSettingsViewModel
 import io.github.stream29.kodex.app.settings.createSettingsViewModel
 import io.github.stream29.kodex.app.settings.contract.*
-import io.github.stream29.kodex.cli.newsession.DEFAULT_NEW_SESSION_NAME
 import io.github.stream29.kodex.cli.newsession.DefaultNewSessionViewModelFactory
-import io.github.stream29.kodex.cli.newsession.RpcNewSessionViewModel
 import io.github.stream29.kodex.cli.notification.collectNotificationHooks
 import io.github.stream29.kodex.cli.rpc.*
 import io.github.stream29.kodex.cli.session.DefaultPersistedSessionViewModelRegistry
 import io.github.stream29.kodex.cli.session.RpcPersistedSessionViewModel
 import io.github.stream29.kodex.cli.settings.NewLineKey
-import io.github.stream29.kodex.openai.KodexAgentSettings
-import io.github.stream29.kodex.openai.Reasoning
 import io.github.stream29.kodex.rpc.client.RestoringRpcClient
 import io.github.stream29.kodex.rpc.models.OAuthTarget
 import io.github.stream29.kodex.rpc.local.FrontendRpcConnection
@@ -104,7 +100,7 @@ public suspend fun <R> withFrontendApplication(
                         sessionViews.reactivate(RpcServices(RestoringRpcClient(client)), isConnected)
                     }
                     val sessions = DefaultPersistedSessionViewModelRegistry(sessionViews, settings.models, frontendScope)
-                    val draftFactory = DefaultNewSessionViewModelFactory(sessionViews, sessions, settings.models, frontendScope)
+                    val draftFactory = DefaultNewSessionViewModelFactory(sessionViews, sessions, settings, frontendScope)
                     val directoryPicker = { path: Path -> createDirectoryPickerViewModel(path, frontendScope) }
                     root = createApplicationViewModel(
                         sessions, draftFactory,
@@ -115,7 +111,7 @@ public suspend fun <R> withFrontendApplication(
                         SettingsViewModelFactory { arguments ->
                             val source = when (val target = arguments.target) {
                                 is RpcPersistedSessionViewModel -> RpcSessionSettingsSource(target.view, frontendScope)
-                                is RpcNewSessionViewModel -> RpcDraftSettingsSource(target.draft, frontendScope)
+                                null -> UnavailableSessionSettingsDataSource
                                 else -> error("Unknown frontend Session view.")
                             }
                             createSettingsViewModel(
@@ -139,16 +135,10 @@ public suspend fun <R> withFrontendApplication(
                             )
                         },
                         directoryPicker,
-                        { ordinal ->
-                            val defaults = settings.settings.value.newSession
-                            NewSessionViewModelArguments(
-                                if (ordinal == 1) DEFAULT_NEW_SESSION_NAME else "$DEFAULT_NEW_SESSION_NAME $ordinal",
-                                KodexAgentSettings(model = defaults.model, cwd = cwd,
-                                    reasoning = Reasoning(effort = defaults.reasoningEffort), serviceTier = defaults.serviceTier,
-                                    requestUserInputMode = defaults.requestUserInputMode),
-                            )
-                        },
-                        frontendScope,
+                        NewSessionViewModelArguments(cwd),
+                        CoroutineScope(frontendScope.coroutineContext + CoroutineExceptionHandler { _, error ->
+                            reportUnhandledError(error)
+                        }),
                     )
                     application = root
                     frontendScope.launch {
