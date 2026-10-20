@@ -4,12 +4,6 @@ import io.github.stream29.kodex.utils.shellclient.Shell
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/** Default wait before an `exec_command` call yields its first output. */
-public const val UnifiedExecDefaultYieldTimeMillis: Long = 10_000L
-
-/** Default requested `write_stdin` yield; empty polls use a longer minimum. */
-public const val UnifiedExecDefaultWriteYieldTimeMillis: Long = 250L
-
 /** Default approximate output-token budget for each returned chunk. */
 public const val UnifiedExecDefaultMaxOutputTokens: Long = 10_000L
 
@@ -22,8 +16,10 @@ public const val UnifiedExecDefaultMaxOutputTokens: Long = 10_000L
  * relative path resolves against it.
  * @property shell Nullable because the host selects its current configured
  * shell when no shell is given; `null` uses that shell at process start.
- * @property yieldTimeMillis Requested wait before returning available output;
- * the host may clamp it to supported limits. Negative values are invalid.
+ * @property yieldTimeMillis Required wait the caller chose for this command
+ * before returning available output; the call returns earlier when the
+ * command exits, and the host may clamp the value to supported limits.
+ * Negative values are invalid.
  * @property maxOutputTokens Approximate token budget for the returned output;
  * negative values are invalid and the byte ceiling still applies.
  */
@@ -36,7 +32,7 @@ public data class ExecCommandArguments(
     /** Whether to allocate a terminal rather than ordinary process pipes. */
     public val tty: Boolean = false,
     @SerialName("yield_time_ms")
-    public val yieldTimeMillis: Long = UnifiedExecDefaultYieldTimeMillis,
+    public val yieldTimeMillis: Long,
     @SerialName("max_output_tokens")
     public val maxOutputTokens: Long = UnifiedExecDefaultMaxOutputTokens,
 )
@@ -47,8 +43,10 @@ public data class ExecCommandArguments(
  * @property sessionId Positive ID of a session still registered for final
  * output, even when its process has already completed.
  * @property chars Input to send; an empty string polls without writing.
- * @property yieldTimeMillis Requested wait for available output; an empty poll
- * uses a longer minimum than a nonempty write. Negative values are invalid.
+ * @property yieldTimeMillis Required wait the caller chose for available
+ * output, for both nonempty writes and empty polls; the call returns earlier
+ * when the process exits, and an empty poll uses a longer minimum than a
+ * nonempty write. Negative values are invalid.
  * @property maxOutputTokens Approximate per-result output budget; negative
  * values are invalid and the byte ceiling still applies.
  */
@@ -58,7 +56,7 @@ public data class WriteStdinArguments(
     public val sessionId: Int,
     public val chars: String = "",
     @SerialName("yield_time_ms")
-    public val yieldTimeMillis: Long = UnifiedExecDefaultWriteYieldTimeMillis,
+    public val yieldTimeMillis: Long,
     @SerialName("max_output_tokens")
     public val maxOutputTokens: Long = UnifiedExecDefaultMaxOutputTokens,
 )

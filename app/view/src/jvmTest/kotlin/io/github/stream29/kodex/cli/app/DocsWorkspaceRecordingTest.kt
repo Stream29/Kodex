@@ -38,6 +38,7 @@ val docsWorkspaceRecordingTest by testSuite {
                 override val sessionId = 42
                 override val arguments = ExecCommandArguments(
                     command = "printf 'offline fixture\\n'\nsleep 30",
+                    yieldTimeMillis = 10_000,
                 )
                 override val completed = MutableStateFlow(false)
                 override fun close() { completed.value = true }

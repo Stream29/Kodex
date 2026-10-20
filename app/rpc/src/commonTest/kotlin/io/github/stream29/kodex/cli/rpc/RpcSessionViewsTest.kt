@@ -805,7 +805,7 @@ val rpcSessionViewsTest by testSuite(compartment = { TestCompartment.RealTime })
     }
 
     test("shell completion is a projection and completed entries remain until the registry removes them") {
-        val arguments = ExecCommandArguments("not executed")
+        val arguments = ExecCommandArguments("not executed", yieldTimeMillis = 10_000)
         val snapshot = MutableStateFlow(mapOf(9 to ShellSessionState(arguments, false)))
         val closed = CompletableDeferred<Unit>()
         frontend(decorate = { delegate ->

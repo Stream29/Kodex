@@ -26,12 +26,14 @@ internal fun renderExecCommandDescription(platform: ExecCommandHostPlatform): St
     }
 
 private const val DefaultExecCommandYieldTimeDescription: String =
-    "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms."
+    "Required. Maximum time to wait before returning a session ID for a still-running command. " +
+        "Commands that finish sooner return immediately. Choose a value for each call from the " +
+        "command's expected duration. Effective range is 250-600000 ms."
 
 private const val WindowsExecCommandYieldTimeDescription: String =
-    "Maximum time to wait before returning a session ID for a still-running command. " +
-        "Commands that finish sooner return immediately. For ordinary commands, omit this " +
-        "parameter to use the 10000 ms default. Effective range on Windows is 10000-30000 ms."
+    "Required. Maximum time to wait before returning a session ID for a still-running command. " +
+        "Commands that finish sooner return immediately. Choose a value for each call from the " +
+        "command's expected duration. Effective range on Windows is 10000-600000 ms."
 
 private const val WindowsShellGuidance: String = """Windows safety rules:
 - Do not compose destructive filesystem commands across shells. Do not enumerate paths in PowerShell and then pass them to `cmd /c`, batch builtins, or another shell for deletion or moving. Use one shell end-to-end, prefer native PowerShell cmdlets such as `Remove-Item` / `Move-Item` with `-LiteralPath`, and avoid string-built shell commands for file operations.

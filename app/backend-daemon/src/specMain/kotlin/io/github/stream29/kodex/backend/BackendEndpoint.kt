@@ -2,8 +2,8 @@ package io.github.stream29.kodex.backend
 
 import kotlinx.serialization.Serializable
 
-/** Cwd-only Session creation checkpoint; business compatibility is independent of app releases. */
-public const val BackendBusinessProtocol: String = "0.5.0"
+/** Strict terminal wait contract checkpoint; business compatibility is independent of app releases. */
+public const val BackendBusinessProtocol: String = "0.5.2"
 public const val BackendControlProtocol: Int = 1
 
 /**

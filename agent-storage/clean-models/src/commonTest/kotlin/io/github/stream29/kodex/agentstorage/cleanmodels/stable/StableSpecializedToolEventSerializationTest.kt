@@ -28,11 +28,13 @@ import io.github.stream29.kodex.tool.viewimage.ViewImageDetail
 import io.github.stream29.kodex.tool.viewimage.ViewImageToolArguments
 import io.github.stream29.kodex.tool.viewimage.ViewImageToolOutput
 import kotlinx.schema.json.ObjectPropertyDefinition
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -113,6 +115,7 @@ val stableSpecializedToolEventSerializationTest by testSuite {
                         command = "./gradlew check",
                         workdir = "Kodex",
                         tty = true,
+                        yieldTimeMillis = 10_000,
                         maxOutputTokens = 20_000,
                     ),
                 ),
@@ -130,7 +133,7 @@ val stableSpecializedToolEventSerializationTest by testSuite {
                 callId = "call_write_stdin",
                 itemId = ResponseItemId("item_write_stdin"),
                 action = StableCommandExecutionAction.WriteStdin(
-                    WriteStdinArguments(sessionId = 42, chars = "\u0003"),
+                    WriteStdinArguments(sessionId = 42, chars = "\u0003", yieldTimeMillis = 250),
                 ),
                 result = StableCommandExecutionResult.Failure("Session 42 is not running."),
             ),
@@ -142,6 +145,25 @@ val stableSpecializedToolEventSerializationTest by testSuite {
             listOf("exec_command", "write_stdin"),
             events.map { event -> event.projectedFunctionName() },
         )
+        val execFunctionCall = assertIs<ResponseItem.FunctionCall>(
+            events[0].toResponseHistoryItems().first(),
+        )
+        val writeFunctionCall = assertIs<ResponseItem.FunctionCall>(
+            events[1].toResponseHistoryItems().first(),
+        )
+        assertTrue(""""yield_time_ms":10000""" in execFunctionCall.arguments)
+        assertTrue(""""yield_time_ms":250""" in writeFunctionCall.arguments)
+
+        assertFailsWith<SerializationException> {
+            specializedToolJson.decodeFromString<StableWorkEvent>(
+                """{"type":"command_execution_tool_event","call_id":"call_exec_command","action":{"type":"exec_command","arguments":{"cmd":"./gradlew check"}},"result":{"type":"failure","message":"failed"}}""",
+            )
+        }
+        assertFailsWith<SerializationException> {
+            specializedToolJson.decodeFromString<StableWorkEvent>(
+                """{"type":"command_execution_tool_event","call_id":"call_write_stdin","action":{"type":"write_stdin","arguments":{"session_id":42}},"result":{"type":"failure","message":"failed"}}""",
+            )
+        }
     }
 
     test("round trips request-user-input, plan, and web-search events") {

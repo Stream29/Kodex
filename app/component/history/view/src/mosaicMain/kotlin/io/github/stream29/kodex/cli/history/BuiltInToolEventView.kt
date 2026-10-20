@@ -13,8 +13,6 @@ import io.github.stream29.kodex.openai.SearchCommands
 import io.github.stream29.kodex.openai.WebSearchAction
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecDefaultMaxOutputTokens
-import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecDefaultWriteYieldTimeMillis
-import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecDefaultYieldTimeMillis
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -54,13 +52,13 @@ internal fun ExecCommandArguments.expandedCommandContext(): String = compactTool
     "cwd" to workdir?.takeIf(String::isNotEmpty),
     "shell" to shell?.path?.toString(),
     "tty" to tty.takeIf { it },
-    "yield_time_ms" to yieldTimeMillis.takeUnless { it == UnifiedExecDefaultYieldTimeMillis },
+    "yield_time_ms" to yieldTimeMillis,
     "max_output_tokens" to maxOutputTokens.takeUnless { it == UnifiedExecDefaultMaxOutputTokens },
 )
 
 internal fun WriteStdinArguments.expandedCommandContext(): String = compactToolLine(
     "write_stdin",
-    "yield_time_ms" to yieldTimeMillis.takeUnless { it == UnifiedExecDefaultWriteYieldTimeMillis },
+    "yield_time_ms" to yieldTimeMillis,
     "max_output_tokens" to maxOutputTokens.takeUnless { it == UnifiedExecDefaultMaxOutputTokens },
 )
 

@@ -40,11 +40,20 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 val pendingToolEventProjectionTest by testSuite {
     test("projects specialized function calls into direct pending branches") {
-        val exec = ExecCommandArguments(command = "./gradlew check", workdir = "Kodex")
-        val write = WriteStdinArguments(sessionId = 7, chars = "\u0003")
+        val exec = ExecCommandArguments(
+            command = "./gradlew check",
+            workdir = "Kodex",
+            yieldTimeMillis = 10_000,
+        )
+        val write = WriteStdinArguments(
+            sessionId = 7,
+            chars = "\u0003",
+            yieldTimeMillis = 250,
+        )
         val web = SearchCommands(searchQuery = listOf(SearchQuery("Kotlin serialization")))
         val imageGeneration = ImageGenToolArguments(prompt = "Draw the architecture.")
         val imageView = ViewImageToolArguments(path = "diagram.png")
@@ -161,25 +170,102 @@ val pendingToolEventProjectionTest by testSuite {
         )
     }
 
-    test("routes parse failures to pending invalid tool call") {
-        val call = ResponseItem.FunctionCall(
-            id = ItemId,
-            callId = "call_invalid",
-            name = UnifiedExecTools.ExecCommandName,
-            arguments = """{"cmd":""",
+    test("routes parse failures and missing or invalid yield_time_ms to pending invalid tool call") {
+        val invalidCalls = listOf(
+            ResponseItem.FunctionCall(
+                id = ItemId,
+                callId = "call_invalid",
+                name = UnifiedExecTools.ExecCommandName,
+                arguments = """{"cmd":""",
+            ),
+            ResponseItem.FunctionCall(
+                id = ItemId,
+                callId = "call_exec_missing_yield",
+                name = UnifiedExecTools.ExecCommandName,
+                arguments = """{"cmd":"pwd"}""",
+            ),
+            ResponseItem.FunctionCall(
+                id = ItemId,
+                callId = "call_exec_null_yield",
+                name = UnifiedExecTools.ExecCommandName,
+                arguments = """{"cmd":"pwd","yield_time_ms":null}""",
+            ),
+            ResponseItem.FunctionCall(
+                id = ItemId,
+                callId = "call_exec_bad_yield",
+                name = UnifiedExecTools.ExecCommandName,
+                arguments = """{"cmd":"pwd","yield_time_ms":"10s"}""",
+            ),
+            ResponseItem.FunctionCall(
+                id = ItemId,
+                callId = "call_write_missing_yield",
+                name = UnifiedExecTools.WriteStdinName,
+                arguments = """{"session_id":7,"chars":""}""",
+            ),
+            ResponseItem.FunctionCall(
+                id = ItemId,
+                callId = "call_write_null_yield",
+                name = UnifiedExecTools.WriteStdinName,
+                arguments = """{"session_id":7,"chars":"","yield_time_ms":null}""",
+            ),
+            ResponseItem.FunctionCall(
+                id = ItemId,
+                callId = "call_write_bad_yield",
+                name = UnifiedExecTools.WriteStdinName,
+                arguments = """{"session_id":7,"chars":"hi","yield_time_ms":12.5}""",
+            ),
         )
 
-        val event = assertIs<PendingInvalidToolCall>(call.toPendingToolEvent())
-        assertEquals(call.callId, event.callId)
-        assertEquals(call.id, event.itemId)
-        assertEquals(
-            PendingInvalidToolInvocation.Function(
-                name = call.name,
-                arguments = call.arguments,
-            ),
-            event.invocation,
-        )
-        assertEquals(listOf(call), event.toResponseHistoryItems())
+        invalidCalls.forEach { call ->
+            val event = assertIs<PendingInvalidToolCall>(
+                call.toPendingToolEvent(),
+                "Expected PendingInvalidToolCall for ${call.callId}",
+            )
+            assertEquals(call.callId, event.callId)
+            assertEquals(call.id, event.itemId)
+            assertEquals(
+                PendingInvalidToolInvocation.Function(
+                    name = call.name,
+                    arguments = call.arguments,
+                ),
+                event.invocation,
+            )
+            assertEquals(listOf(call), event.toResponseHistoryItems())
+        }
+    }
+
+    test("round trips explicit exec_command and write_stdin yield_time_ms including 10000, 250, and 600000") {
+        listOf(10_000L, 250L, 600_000L).forEach { yieldMillis ->
+            val exec = ExecCommandArguments(command = "echo wait", yieldTimeMillis = yieldMillis)
+            val execCall = functionCall(
+                UnifiedExecTools.ExecCommandName,
+                ExecCommandArguments.serializer(),
+                exec,
+            )
+            assertTrue(""""yield_time_ms":$yieldMillis""" in execCall.arguments)
+            val execPending = assertIs<PendingCommandExecutionToolEvent>(execCall.toPendingToolEvent())
+            assertEquals(PendingCommandExecutionAction.ExecCommand(exec), execPending.action)
+            val execProjected = assertIs<ResponseItem.FunctionCall>(
+                execPending.toResponseHistoryItems().single(),
+            )
+            assertTrue(""""yield_time_ms":$yieldMillis""" in execProjected.arguments)
+            assertEquals(execPending, execProjected.toPendingToolEvent())
+
+            val write = WriteStdinArguments(sessionId = 9, chars = "", yieldTimeMillis = yieldMillis)
+            val writeCall = functionCall(
+                UnifiedExecTools.WriteStdinName,
+                WriteStdinArguments.serializer(),
+                write,
+            )
+            assertTrue(""""yield_time_ms":$yieldMillis""" in writeCall.arguments)
+            val writePending = assertIs<PendingCommandExecutionToolEvent>(writeCall.toPendingToolEvent())
+            assertEquals(PendingCommandExecutionAction.WriteStdin(write), writePending.action)
+            val writeProjected = assertIs<ResponseItem.FunctionCall>(
+                writePending.toResponseHistoryItems().single(),
+            )
+            assertTrue(""""yield_time_ms":$yieldMillis""" in writeProjected.arguments)
+            assertEquals(writePending, writeProjected.toPendingToolEvent())
+        }
     }
 
     test("distinguishes dynamic function and MCP calls after JSON parsing") {

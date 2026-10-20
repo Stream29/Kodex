@@ -147,6 +147,7 @@ val pendingToolEventHierarchySerializationTest by testSuite {
                         command = "./gradlew check",
                         workdir = "Kodex",
                         tty = true,
+                        yieldTimeMillis = 10_000,
                         maxOutputTokens = 20_000,
                     ),
                 ),

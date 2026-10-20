@@ -546,7 +546,7 @@ val kodexToolRuntimeTest by testSuite {
         )
         val writeCall = ResponseItem.FunctionCall(
             name = "write_stdin",
-            arguments = "{\"session_id\":1,\"chars\":\"\"}",
+            arguments = "{\"session_id\":1,\"chars\":\"\",\"yield_time_ms\":250}",
             callId = "call_write",
         )
         val mcpService = TestMcpService()
@@ -568,32 +568,50 @@ val kodexToolRuntimeTest by testSuite {
     }
 
     test("invalid pending calls complete without invoking their ordinary handler") {
-        val call = ResponseItem.FunctionCall(
+        val malformedExecCall = ResponseItem.FunctionCall(
             name = UnifiedExecTools.ExecCommandName,
             arguments = """{"cmd":""",
             callId = "call_invalid",
         )
+        val missingYieldExecCall = ResponseItem.FunctionCall(
+            name = UnifiedExecTools.ExecCommandName,
+            arguments = """{"cmd":"echo should-not-run"}""",
+            callId = "call_exec_missing_yield",
+        )
+        val missingYieldWriteCall = ResponseItem.FunctionCall(
+            name = UnifiedExecTools.WriteStdinName,
+            arguments = """{"session_id":1,"chars":"should-not-write\n"}""",
+            callId = "call_write_missing_yield",
+        )
+        val invalidCalls = listOf(malformedExecCall, missingYieldExecCall, missingYieldWriteCall)
         val mcpService = TestMcpService()
-        val fixture = testStateWithCalls(mcpService, calls = arrayOf(call))
+        val fixture = testStateWithCalls(
+            mcpService,
+            calls = invalidCalls.toTypedArray(),
+        )
 
         RequestOnlyRuntime(fixture.state)
             .testToolRuntime(mcpService)
             .resume()
 
-            val completed = fixture.state.storage.work.indexesIn(0..fixture.state.latestIndex.value)
-                .map { index -> fixture.state.storage.work[index] }
-            .filterIsInstance<StableInvalidToolCall>()
-            .single()
-        assertEquals(
-            InvalidToolInvocation.Function(
-                name = call.name,
-                arguments = call.arguments,
-            ),
-            completed.invocation,
-        )
-        assertTrue(
-            completed.message.contains("Invalid JSON arguments"),
-        )
+        val workEvents = fixture.state.storage.work.indexesIn(0..fixture.state.latestIndex.value)
+            .map { index -> fixture.state.storage.work[index] }
+        assertTrue(workEvents.filterIsInstance<StableCommandExecutionToolEvent>().isEmpty())
+        val completed = workEvents.filterIsInstance<StableInvalidToolCall>()
+        assertEquals(invalidCalls.map { it.callId }, completed.map { it.callId })
+        invalidCalls.zip(completed).forEach { (call, event) ->
+            assertEquals(
+                InvalidToolInvocation.Function(
+                    name = call.name,
+                    arguments = call.arguments,
+                ),
+                event.invocation,
+            )
+            assertTrue(
+                event.message.contains("Invalid JSON arguments"),
+            )
+        }
+        assertEquals(KodexAgentStateValue.AssistantMessage, fixture.state.state.value)
     }
 
     test("update plan is handled by the ordinary tool runtime") {

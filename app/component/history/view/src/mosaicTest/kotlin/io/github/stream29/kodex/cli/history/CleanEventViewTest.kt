@@ -279,7 +279,7 @@ val cleanEventViewTest by testSuite {
         val event = StableCommandExecutionToolEvent(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
-                ExecCommandArguments(command = "pwd"),
+                ExecCommandArguments(command = "pwd", yieldTimeMillis = 10_000),
             ),
             result = StableCommandExecutionResult.Output(
                 UnifiedExecOutput(
@@ -300,7 +300,7 @@ val cleanEventViewTest by testSuite {
             assertFalse("exec_command" in collapsed)
 
             val expanded = clickFirstRow()
-            assertTrue("\nexec_command\n" in expanded)
+            assertTrue("\nexec_command; yield_time_ms=10000\n" in expanded)
             assertFalse("> Arguments" in expanded)
             assertFalse("Command: pwd" in expanded)
             assertTrue("output(exit_code=0; wall_time=0.1s;" in expanded)
@@ -312,7 +312,7 @@ val cleanEventViewTest by testSuite {
         val event = StableCommandExecutionToolEvent(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
-                ExecCommandArguments(command = "A你B".repeat(30)),
+                ExecCommandArguments(command = "A你B".repeat(30), yieldTimeMillis = 10_000),
             ),
             result = StableCommandExecutionResult.Output(
                 UnifiedExecOutput(
@@ -340,7 +340,7 @@ val cleanEventViewTest by testSuite {
     test("recordedCommandDoesNotObserveLiveProcessCompletionOrRegistryRemoval") {
         val session = TestUnifiedExecProcessSession(
             sessionId = 7,
-            arguments = ExecCommandArguments(command = "sleep 5"),
+            arguments = ExecCommandArguments(command = "sleep 5", yieldTimeMillis = 10_000),
         )
         val event = StableCommandExecutionToolEvent(
             callId = "command",
@@ -386,7 +386,7 @@ val cleanEventViewTest by testSuite {
         val event = StableCommandExecutionToolEvent(
             callId = "command",
             action = StableCommandExecutionAction.ExecCommand(
-                ExecCommandArguments(command = "sleep 5"),
+                ExecCommandArguments(command = "sleep 5", yieldTimeMillis = 10_000),
             ),
             result = StableCommandExecutionResult.Output(
                 UnifiedExecOutput(
@@ -412,12 +412,12 @@ val cleanEventViewTest by testSuite {
     test("writeStdinUsesOnlyItsOwnRecordedPoll") {
         val session = TestUnifiedExecProcessSession(
             sessionId = 7,
-            arguments = ExecCommandArguments(command = "tail -f build.log"),
+            arguments = ExecCommandArguments(command = "tail -f build.log", yieldTimeMillis = 10_000),
         )
         val event = StableCommandExecutionToolEvent(
             callId = "write",
             action = StableCommandExecutionAction.WriteStdin(
-                WriteStdinArguments(sessionId = session.sessionId),
+                WriteStdinArguments(sessionId = session.sessionId, yieldTimeMillis = 250),
             ),
             result = StableCommandExecutionResult.Output(
                 UnifiedExecOutput(
@@ -438,7 +438,7 @@ val cleanEventViewTest by testSuite {
             assertFalse("write_stdin" in collapsed)
 
             val expanded = clickFirstRow()
-            assertTrue("\nwrite_stdin\n" in expanded)
+            assertTrue("\nwrite_stdin; yield_time_ms=250\n" in expanded)
             assertFalse("> Arguments" in expanded)
             assertFalse("tail -f build.log" in expanded)
             assertFalse("session" in expanded)

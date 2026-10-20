@@ -3,6 +3,13 @@ package io.github.stream29.kodex.tool.unifiedexec
 import kotlinx.schema.json.ObjectPropertyDefinition
 import kotlinx.schema.json.PropertyBuilder
 
+internal const val WriteStdinYieldTimeDescription: String =
+    "Required for both non-empty writes and empty polls. Maximum time to wait for output " +
+        "before returning while the process is still running. Calls return immediately when " +
+        "the process exits sooner. Choose a value for each call from the expected remaining " +
+        "duration. Effective range is 250-600000 ms for non-empty writes and 5000-600000 ms " +
+        "for empty polls."
+
 public val ExecCommandParametersSchema: ObjectPropertyDefinition =
     PropertyBuilder().obj {
         additionalProperties = false
@@ -17,6 +24,7 @@ public val ExecCommandParametersSchema: ObjectPropertyDefinition =
             boolean { description = "True allocates a PTY for the command; false or omitted uses plain pipes." }
         }
         property("yield_time_ms") {
+            required = true
             integer { description = renderExecCommandYieldTimeDescription(execCommandHostPlatform) }
         }
         property("max_output_tokens") {
@@ -38,9 +46,8 @@ public val WriteStdinParametersSchema: ObjectPropertyDefinition =
             string { description = "Bytes to write to stdin. Defaults to empty, which polls without writing." }
         }
         property("yield_time_ms") {
-            integer {
-                description = "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default."
-            }
+            required = true
+            integer { description = WriteStdinYieldTimeDescription }
         }
         property("max_output_tokens") {
             integer { description = "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy." }

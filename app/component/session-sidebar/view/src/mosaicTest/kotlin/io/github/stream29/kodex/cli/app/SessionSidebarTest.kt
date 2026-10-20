@@ -909,7 +909,8 @@ private class TestAgentShellSession(
     override val sessionId: Int = 1,
     command: String = "sleep 1",
 ) : AgentShellSession {
-    override val arguments: ExecCommandArguments = ExecCommandArguments(command = command)
+    override val arguments: ExecCommandArguments =
+        ExecCommandArguments(command = command, yieldTimeMillis = 10_000)
     override val completed = MutableStateFlow(false)
     var closeCount: Int = 0
 

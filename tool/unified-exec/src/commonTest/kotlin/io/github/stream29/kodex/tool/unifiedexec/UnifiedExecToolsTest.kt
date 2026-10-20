@@ -14,6 +14,8 @@ import io.github.stream29.kodex.tool.builder.ToolBuilderJson
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.utils.shellclient.ProcessSession
 import io.github.stream29.kodex.utils.shellclient.Shell
+import io.github.stream29.kodex.utils.shellclient.ShellClient
+import io.github.stream29.kodex.utils.shellclient.ShellProcessCommand
 import io.github.stream29.kodex.utils.shellclient.ShellSettings
 import io.github.stream29.kodex.utils.shellclient.ShellType
 import io.github.stream29.kodex.utils.shellclient.StdoutBuffer
@@ -36,10 +38,13 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
 import kotlinx.io.files.SystemTemporaryDirectory
+import kotlinx.schema.json.NumericPropertyDefinition
 import kotlinx.schema.json.StringPropertyDefinition
+import kotlinx.serialization.SerializationException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.random.Random
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -140,7 +145,7 @@ val unifiedExecToolsTest by testSuite {
                 currentCoroutineContext() + SupervisorJob(currentCoroutineContext()[Job]),
             )
             val session = CompletionTrackingProcessSession(processScope)
-            val arguments = ExecCommandArguments(command = "echo managed-session")
+            val arguments = ExecCommandArguments(command = "echo managed-session", yieldTimeMillis = 10_000)
             val managed = ManagedProcessSession(
                 sessionId = 1,
                 arguments = arguments,
@@ -170,9 +175,23 @@ val unifiedExecToolsTest by testSuite {
         assertEquals(UnifiedExecTools.WriteStdinName, UnifiedExecTools.writeStdinSpec.name)
         assertEquals(UnifiedExecOutputSchema, UnifiedExecTools.execCommandSpec.outputSchema)
         assertEquals(UnifiedExecOutputSchema, UnifiedExecTools.writeStdinSpec.outputSchema)
-        assertTrue(UnifiedExecTools.execCommandSpec.parameters.required?.contains("cmd") == true)
-        assertTrue(UnifiedExecTools.writeStdinSpec.parameters.required?.contains("session_id") == true)
+        assertEquals(listOf("cmd", "yield_time_ms"), UnifiedExecTools.execCommandSpec.parameters.required)
+        assertEquals(listOf("session_id", "yield_time_ms"), UnifiedExecTools.writeStdinSpec.parameters.required)
         assertFalse(UnifiedExecTools.execCommandSpec.parameters.properties?.containsKey("login") == true)
+
+        val writeYieldProperty = assertIs<NumericPropertyDefinition>(
+            requireNotNull(WriteStdinParametersSchema.properties?.get("yield_time_ms")),
+        )
+        assertEquals(
+            "Required for both non-empty writes and empty polls. Maximum time to wait for output " +
+                "before returning while the process is still running. Calls return immediately when " +
+                "the process exits sooner. Choose a value for each call from the expected remaining " +
+                "duration. Effective range is 250-600000 ms for non-empty writes and 5000-600000 ms " +
+                "for empty polls.",
+            writeYieldProperty.description,
+        )
+        assertFalse(writeYieldProperty.description.orEmpty().contains("default", ignoreCase = true))
+        assertFalse(writeYieldProperty.description.orEmpty().contains("omit", ignoreCase = true))
     }
 
     test("exec_command describes its shell parameter without host-specific state") {
@@ -195,14 +214,21 @@ val unifiedExecToolsTest by testSuite {
     }
 
     test("exec_command describes platform-specific yield timing exactly") {
+        val windowsDescription =
+            "Required. Maximum time to wait before returning a session ID for a still-running command. " +
+                "Commands that finish sooner return immediately. Choose a value for each call from the " +
+                "command's expected duration. Effective range on Windows is 10000-600000 ms."
         assertEquals(
-            "Maximum time to wait before returning a session ID for a still-running command. " +
-                "Commands that finish sooner return immediately. For ordinary commands, omit this " +
-                "parameter to use the 10000 ms default. Effective range on Windows is 10000-30000 ms.",
+            windowsDescription,
             renderExecCommandYieldTimeDescription(ExecCommandHostPlatform.Windows),
         )
+        assertFalse(windowsDescription.contains("default", ignoreCase = true))
+        assertFalse(windowsDescription.contains("omit", ignoreCase = true))
+
         val posixDescription =
-            "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms."
+            "Required. Maximum time to wait before returning a session ID for a still-running command. " +
+                "Commands that finish sooner return immediately. Choose a value for each call from the " +
+                "command's expected duration. Effective range is 250-600000 ms."
         assertEquals(
             posixDescription,
             renderExecCommandYieldTimeDescription(ExecCommandHostPlatform.Macos),
@@ -211,41 +237,121 @@ val unifiedExecToolsTest by testSuite {
             posixDescription,
             renderExecCommandYieldTimeDescription(ExecCommandHostPlatform.Linux),
         )
+        assertFalse(posixDescription.contains("default", ignoreCase = true))
+        assertFalse(posixDescription.contains("omit", ignoreCase = true))
     }
 
-    test("exec_command clamps Windows yield timing to its documented range") {
-        assertEquals(
-            UnifiedExecWindowsMinimumYieldTimeMillis,
-            normalizedExecYieldTimeMillis(
-                requestedMillis = UnifiedExecMinimumYieldTimeMillis,
-                platform = ExecCommandHostPlatform.Windows,
-            ),
+    test("exec_command and write_stdin clamp yield timing across platforms and poll modes") {
+        assertEquals(600_000L, UnifiedExecMaximumYieldTimeMillis)
+        assertEquals(600_000L, UnifiedExecMaximumEmptyPollYieldTimeMillis)
+
+        val execCases = listOf(
+            Triple(ExecCommandHostPlatform.Windows, 0L, 10_000L),
+            Triple(ExecCommandHostPlatform.Windows, 250L, 10_000L),
+            Triple(ExecCommandHostPlatform.Windows, 10_000L, 10_000L),
+            Triple(ExecCommandHostPlatform.Windows, 30_000L, 30_000L),
+            Triple(ExecCommandHostPlatform.Windows, 300_000L, 300_000L),
+            Triple(ExecCommandHostPlatform.Windows, 600_000L, 600_000L),
+            Triple(ExecCommandHostPlatform.Windows, 600_001L, 600_000L),
+            Triple(ExecCommandHostPlatform.Windows, Long.MAX_VALUE, 600_000L),
+            Triple(ExecCommandHostPlatform.Macos, 0L, 250L),
+            Triple(ExecCommandHostPlatform.Macos, 250L, 250L),
+            Triple(ExecCommandHostPlatform.Macos, 10_000L, 10_000L),
+            Triple(ExecCommandHostPlatform.Macos, 30_000L, 30_000L),
+            Triple(ExecCommandHostPlatform.Macos, 300_000L, 300_000L),
+            Triple(ExecCommandHostPlatform.Macos, 600_000L, 600_000L),
+            Triple(ExecCommandHostPlatform.Macos, 600_001L, 600_000L),
+            Triple(ExecCommandHostPlatform.Macos, Long.MAX_VALUE, 600_000L),
+            Triple(ExecCommandHostPlatform.Linux, 0L, 250L),
+            Triple(ExecCommandHostPlatform.Linux, 250L, 250L),
+            Triple(ExecCommandHostPlatform.Linux, 10_000L, 10_000L),
+            Triple(ExecCommandHostPlatform.Linux, 30_000L, 30_000L),
+            Triple(ExecCommandHostPlatform.Linux, 300_000L, 300_000L),
+            Triple(ExecCommandHostPlatform.Linux, 600_000L, 600_000L),
+            Triple(ExecCommandHostPlatform.Linux, 600_001L, 600_000L),
+            Triple(ExecCommandHostPlatform.Linux, Long.MAX_VALUE, 600_000L),
         )
-        assertEquals(
-            UnifiedExecMinimumYieldTimeMillis,
-            normalizedExecYieldTimeMillis(
-                requestedMillis = UnifiedExecMinimumYieldTimeMillis,
-                platform = ExecCommandHostPlatform.Linux,
-            ),
+        execCases.forEach { (platform, requested, expected) ->
+            assertEquals(
+                expected,
+                normalizedExecYieldTimeMillis(requestedMillis = requested, platform = platform),
+                "exec_command yield normalization mismatch for platform=$platform requested=$requested",
+            )
+        }
+
+        val writeCases = listOf(
+            Triple(false, 0L, 250L),
+            Triple(false, 250L, 250L),
+            Triple(false, 5_000L, 5_000L),
+            Triple(false, 30_000L, 30_000L),
+            Triple(false, 300_000L, 300_000L),
+            Triple(false, 600_000L, 600_000L),
+            Triple(false, 600_001L, 600_000L),
+            Triple(false, Long.MAX_VALUE, 600_000L),
+            Triple(true, 0L, 5_000L),
+            Triple(true, 250L, 5_000L),
+            Triple(true, 5_000L, 5_000L),
+            Triple(true, 30_000L, 30_000L),
+            Triple(true, 300_000L, 300_000L),
+            Triple(true, 600_000L, 600_000L),
+            Triple(true, 600_001L, 600_000L),
+            Triple(true, Long.MAX_VALUE, 600_000L),
         )
-        assertEquals(
-            UnifiedExecMaximumYieldTimeMillis,
-            normalizedExecYieldTimeMillis(
-                requestedMillis = Long.MAX_VALUE,
-                platform = ExecCommandHostPlatform.Windows,
-            ),
-        )
+        writeCases.forEach { (isEmptyPoll, requested, expected) ->
+            assertEquals(
+                expected,
+                normalizedWriteYieldTimeMillis(requestedMillis = requested, isEmptyPoll = isEmptyPoll),
+                "write_stdin yield normalization mismatch for isEmptyPoll=$isEmptyPoll requested=$requested",
+            )
+        }
     }
 
-    test("exec_command decodes a shell string into a path-preserving shell") {
+    test("negative yield_time_ms continues to fail validation without starting or polling a process") {
+        val noOpShellClient = object : ShellClient, CoroutineScope by CoroutineScope(SupervisorJob()) {
+            override suspend fun start(command: ShellProcessCommand): ProcessSession =
+                fail("Negative yield_time_ms should fail before starting a process.")
+
+            override fun close() {
+                cancel()
+            }
+        }
+        val client = UnifiedExecToolClient(
+            workingDirectoryProvider = { Path(".") },
+            settingsProvider = { TestShellSettings() },
+            shellClient = noOpShellClient,
+        )
+        try {
+            assertFailsWith<UnifiedExecToolException> {
+                client.execCommand(ExecCommandArguments(command = "echo test", yieldTimeMillis = -1))
+            }
+            assertFailsWith<UnifiedExecToolException> {
+                client.writeStdin(WriteStdinArguments(sessionId = 1, chars = "input\n", yieldTimeMillis = -1))
+            }
+            assertFailsWith<UnifiedExecToolException> {
+                client.writeStdin(WriteStdinArguments(sessionId = 1, chars = "", yieldTimeMillis = -1))
+            }
+        } finally {
+            client.close()
+        }
+    }
+
+    test("exec_command decodes a shell string into a path-preserving shell and requires yield_time_ms") {
         val arguments = ToolBuilderJson.decodeFromString<ExecCommandArguments>(
-            """{"cmd":"echo test","shell":"/opt/codex/bash"}""",
+            """{"cmd":"echo test","shell":"/opt/codex/bash","yield_time_ms":10000}""",
         )
 
         assertEquals(
             Shell(type = ShellType.Bash, path = Path("/opt/codex/bash")),
             arguments.shell,
         )
+        assertEquals(10_000L, arguments.yieldTimeMillis)
+
+        assertFailsWith<SerializationException> {
+            ToolBuilderJson.decodeFromString<ExecCommandArguments>("""{"cmd":"echo test"}""")
+        }
+        assertFailsWith<SerializationException> {
+            ToolBuilderJson.decodeFromString<WriteStdinArguments>("""{"session_id":1,"chars":"hi"}""")
+        }
     }
 
     testFixture { testUnifiedExecToolClient() } closeWith { close() } asParameterForEach {
@@ -256,6 +362,7 @@ val unifiedExecToolsTest by testSuite {
                 ExecCommandArguments(
                     command = oneShotExecCommand,
                     shell = unifiedExecTestShell,
+                    yieldTimeMillis = 10_000,
                 ),
             ).requireUnifiedExecOutput()
             assertEquals(0, result.exitCode)
@@ -317,7 +424,12 @@ val unifiedExecToolsTest by testSuite {
             assertEquals(null, partial.exitCode)
             assertEquals(sessionId, partial.sessionId)
             assertTrue(partial.wallTimeSeconds >= 0.25)
-            val result = client.writeStdin(WriteStdinArguments(sessionId = sessionId))
+            val result = client.writeStdin(
+                WriteStdinArguments(
+                    sessionId = sessionId,
+                    yieldTimeMillis = UnifiedExecMinimumEmptyPollYieldTimeMillis,
+                ),
+            )
 
             assertEquals(0, result.exitCode)
             assertEquals(null, result.sessionId)
@@ -354,6 +466,7 @@ val unifiedExecToolsTest by testSuite {
                     WriteStdinArguments(
                         sessionId = sessionId,
                         chars = "",
+                        yieldTimeMillis = UnifiedExecMinimumEmptyPollYieldTimeMillis,
                     ),
                 ).requireUnifiedExecOutput()
                 output += completed.output
@@ -384,7 +497,10 @@ val unifiedExecToolsTest by testSuite {
             repeat(10) {
                 if (result.exitCode != null) return@repeat
                 result = write.write(
-                    WriteStdinArguments(sessionId = assertNotNull(result.sessionId)),
+                    WriteStdinArguments(
+                        sessionId = assertNotNull(result.sessionId),
+                        yieldTimeMillis = UnifiedExecMinimumEmptyPollYieldTimeMillis,
+                    ),
                 ).requireUnifiedExecOutput()
                 output.append(result.output)
             }
@@ -426,7 +542,10 @@ val unifiedExecToolsTest by testSuite {
             repeat(10) {
                 if (completed.exitCode != null) return@repeat
                 completed = write.write(
-                    WriteStdinArguments(sessionId = sessionId),
+                    WriteStdinArguments(
+                        sessionId = sessionId,
+                        yieldTimeMillis = UnifiedExecMinimumEmptyPollYieldTimeMillis,
+                    ),
                 ).requireUnifiedExecOutput()
                 output.append(completed.output)
             }
@@ -451,12 +570,17 @@ val unifiedExecToolsTest by testSuite {
         val client = testUnifiedExecToolClient(settings = { settings.value })
         try {
             settings.value = TestShellSettings()
-            var output = client.execCommand(ExecCommandArguments(command = oneShotExecCommand))
+            var output = client.execCommand(
+                ExecCommandArguments(command = oneShotExecCommand, yieldTimeMillis = 10_000),
+            )
             val text = StringBuilder(output.output)
             repeat(10) {
                 if (output.exitCode != null) return@repeat
                 output = client.writeStdin(
-                    WriteStdinArguments(sessionId = assertNotNull(output.sessionId)),
+                    WriteStdinArguments(
+                        sessionId = assertNotNull(output.sessionId),
+                        yieldTimeMillis = UnifiedExecMinimumEmptyPollYieldTimeMillis,
+                    ),
                 )
                 text.append(output.output)
             }
@@ -484,6 +608,7 @@ val unifiedExecToolsTest by testSuite {
                 ExecCommandArguments(
                     command = "echo session-cwd > $fileName; echo cwd-written",
                     shell = unifiedExecTestShell,
+                    yieldTimeMillis = 10_000,
                 ),
             )
             assertEquals(0, result.exitCode)
@@ -528,7 +653,9 @@ val unifiedExecToolsTest by testSuite {
         owner.cancel()
 
         try {
-            client.execCommand(ExecCommandArguments(command = oneShotExecCommand))
+            client.execCommand(
+                ExecCommandArguments(command = oneShotExecCommand, yieldTimeMillis = 10_000),
+            )
             fail("Cancelled owner left its unified-exec shell client usable.")
         } catch (failure: UnifiedExecToolException) {
             assertTrue(failure.message.orEmpty().contains("closed", ignoreCase = true))
@@ -562,7 +689,7 @@ val unifiedExecToolsTest by testSuite {
             }
 
             try {
-                client.writeStdin(WriteStdinArguments(sessionId = sessionId))
+                client.writeStdin(WriteStdinArguments(sessionId = sessionId, yieldTimeMillis = 250))
                 fail("Canceled process session remained registered.")
             } catch (_: UnifiedExecToolException) {
                 // Expected: cancellation removes the session entry.

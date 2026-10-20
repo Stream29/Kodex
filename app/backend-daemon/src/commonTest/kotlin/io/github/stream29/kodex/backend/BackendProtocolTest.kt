@@ -5,9 +5,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 
 val backendProtocolTest by testSuite {
-    test("cwd-only creation advances only the business checkpoint and keeps management protocol one") {
-        assertEquals("0.5.0", BackendBusinessProtocol)
-        assertNotEquals("0.4.15", BackendBusinessProtocol)
+    test("strict terminal waits advance only the business checkpoint and keep management protocol one") {
+        assertEquals("0.5.2", BackendBusinessProtocol)
+        assertNotEquals("0.5.0", BackendBusinessProtocol)
         assertEquals(1, BackendControlProtocol)
         val endpoint = BackendEndpoint(
             instanceId = "fixture-instance",

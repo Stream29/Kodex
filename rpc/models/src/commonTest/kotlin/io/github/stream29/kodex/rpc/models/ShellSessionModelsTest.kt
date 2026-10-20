@@ -28,7 +28,7 @@ val shellSessionModelsTest by testSuite {
         val snapshot = linkedMapOf(
             7 to ShellSessionState(arguments, completed = false),
             Int.MAX_VALUE to ShellSessionState(
-                ExecCommandArguments(command = "completed fixture"),
+                ExecCommandArguments(command = "completed fixture", yieldTimeMillis = 10_000),
                 completed = true,
             ),
         )
@@ -39,7 +39,10 @@ val shellSessionModelsTest by testSuite {
     }
 
     test("completion changes the value without changing registry membership") {
-        val running = ShellSessionState(ExecCommandArguments(command = "fixture"), false)
+        val running = ShellSessionState(
+            ExecCommandArguments(command = "fixture", yieldTimeMillis = 10_000),
+            false,
+        )
         val completed = running.copy(completed = true)
         val before = mapOf(1 to running)
         val after = mapOf(1 to completed)
@@ -51,14 +54,20 @@ val shellSessionModelsTest by testSuite {
         assertTrue(json.decodeFromString<ShellSessionState>(fields.toString()).completed)
     }
 
-    test("completion is required and original argument defaults remain available") {
+    test("completion and yield_time_ms are required while optional argument defaults remain available") {
         val decoded = json.decodeFromString<ShellSessionState>(
-            """{"arguments":{"cmd":"fixture"},"completed":false}""",
+            """{"arguments":{"cmd":"fixture","yield_time_ms":10000},"completed":false}""",
         )
-        assertEquals(ShellSessionState(ExecCommandArguments(command = "fixture"), false), decoded)
+        assertEquals(
+            ShellSessionState(ExecCommandArguments(command = "fixture", yieldTimeMillis = 10_000), false),
+            decoded,
+        )
         for (invalid in listOf(
-            """{"arguments":{"cmd":"fixture"}}""",
-            """{"arguments":{"cmd":"fixture"},"completed":null}""",
+            """{"arguments":{"cmd":"fixture"},"completed":false}""",
+            """{"arguments":{"cmd":"fixture","yield_time_ms":null},"completed":false}""",
+            """{"arguments":{"cmd":"fixture","yield_time_ms":"not-a-number"},"completed":false}""",
+            """{"arguments":{"cmd":"fixture","yield_time_ms":10000}}""",
+            """{"arguments":{"cmd":"fixture","yield_time_ms":10000},"completed":null}""",
             """{"completed":true}""",
         )) {
             assertFailsWith<SerializationException> {

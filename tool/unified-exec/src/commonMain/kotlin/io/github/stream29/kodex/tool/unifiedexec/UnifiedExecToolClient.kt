@@ -280,11 +280,17 @@ internal fun normalizedExecYieldTimeMillis(
     )
 
 private fun Long.normalizedWriteYieldTime(isEmptyPoll: Boolean): Duration =
+    normalizedWriteYieldTimeMillis(this, isEmptyPoll).milliseconds
+
+internal fun normalizedWriteYieldTimeMillis(
+    requestedMillis: Long,
+    isEmptyPoll: Boolean,
+): Long =
     if (isEmptyPoll) {
-        coerceIn(UnifiedExecMinimumEmptyPollYieldTimeMillis, UnifiedExecMaximumEmptyPollYieldTimeMillis)
+        requestedMillis.coerceIn(UnifiedExecMinimumEmptyPollYieldTimeMillis, UnifiedExecMaximumEmptyPollYieldTimeMillis)
     } else {
-        coerceIn(UnifiedExecMinimumYieldTimeMillis, UnifiedExecMaximumYieldTimeMillis)
-    }.milliseconds
+        requestedMillis.coerceIn(UnifiedExecMinimumYieldTimeMillis, UnifiedExecMaximumYieldTimeMillis)
+    }
 
 private data class TruncatedProcessOutput(
     val text: String,

@@ -508,7 +508,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         val requests = mutableListOf<ResponsesApiRequest>()
         val toolCall = ResponseItem.FunctionCall(
             name = "exec_command",
-            arguments = "{\"cmd\":\"date\"}",
+            arguments = "{\"cmd\":\"date\",\"yield_time_ms\":10000}",
             callId = "call_1",
         )
         val state = KodexAgentState(
@@ -534,7 +534,7 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         val pending = PendingCommandExecutionToolEvent(
             callId = "call_1",
             action = PendingCommandExecutionAction.ExecCommand(
-                ExecCommandArguments(command = "date"),
+                ExecCommandArguments(command = "date", yieldTimeMillis = 10_000),
             ),
         )
 

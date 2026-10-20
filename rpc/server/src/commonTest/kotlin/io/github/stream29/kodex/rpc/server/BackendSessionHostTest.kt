@@ -349,7 +349,11 @@ val backendSessionHostTest by testSuite(testConfig = TestConfig.testScope(isEnab
                 started.await()
                 val turn = binding.session.runtime.runningTurn.value!!
                 waiter.cancelAndJoin()
-                advanceTimeBy(130_000)
+                advanceTimeBy(600_000)
+                runCurrent()
+                assertTrue(turn.isActive)
+                assertFalse(binding.inactive.isCompleted)
+                advanceTimeBy(10_000)
                 runCurrent()
                 assertTrue(turn.isActive)
                 assertFalse(binding.inactive.isCompleted)

@@ -22,11 +22,11 @@ import kotlin.test.assertTrue
 val backendProtocolCompatibilityTest by testSuite(compartment = { TestCompartment.RealTime }) {
     test("old business checkpoint is refused without stopping or replacing the locked backend") {
         withHost { home, endpoint, backend ->
-            assertEquals("0.5.0", endpoint.businessProtocol)
+            assertEquals("0.5.2", endpoint.businessProtocol)
             assertEquals(1, endpoint.controlProtocol)
             val obsolete = BackendEndpoint(
                 endpoint.instanceId, endpoint.pid, endpoint.port, endpoint.password,
-                endpoint.applicationVersion, businessProtocol = "0.4.15",
+                endpoint.applicationVersion, businessProtocol = "0.5.0",
             )
             val record = Path(home, ".locks", "backend", "connection.json")
             val originalRecord = SystemCoroutineFileSystem.readString(record)
@@ -40,7 +40,7 @@ val backendProtocolCompatibilityTest by testSuite(compartment = { TestCompartmen
                 val stillLocked = assertNotNull(BackendInstance.discover(home))
                 assertEquals(endpoint.instanceId, stillLocked.instanceId)
                 assertEquals(endpoint.pid, stillLocked.pid)
-                assertEquals("0.4.15", stillLocked.businessProtocol)
+                assertEquals("0.5.0", stillLocked.businessProtocol)
                 assertTrue(backend.isActive)
                 assertEquals("ready", backendControlRequest(obsolete, "status")["phase"]?.jsonPrimitive?.content)
             } finally {

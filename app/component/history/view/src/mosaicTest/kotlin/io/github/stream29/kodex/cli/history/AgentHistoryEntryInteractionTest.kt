@@ -287,7 +287,7 @@ val agentHistoryEntryInteractionTest by testSuite {
     test("collapsed command header ignores live terminal session changes") {
         val session = FakeShellSession(
             sessionId = 7,
-            arguments = ExecCommandArguments(command = "tail -f build.log"),
+            arguments = ExecCommandArguments(command = "tail -f build.log", yieldTimeMillis = 10_000),
         )
         val sessions = FakeShellSessions(mapOf(session.sessionId to session))
         var width by mutableIntStateOf(60)

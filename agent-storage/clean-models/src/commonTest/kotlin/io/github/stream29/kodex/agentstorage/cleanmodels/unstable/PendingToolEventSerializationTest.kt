@@ -14,6 +14,7 @@ import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
 import io.github.stream29.kodex.tool.unifiedexec.WriteStdinArguments
 import io.github.stream29.kodex.tool.viewimage.ViewImageToolArguments
 import io.github.stream29.kodex.utils.applypatch.parsePatch
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -21,7 +22,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 private val pendingEventJson = Json
 
@@ -188,13 +191,13 @@ val pendingToolEventSerializationTest by testSuite {
             PendingCommandExecutionToolEvent(
                 callId = "call_exec",
                 action = PendingCommandExecutionAction.ExecCommand(
-                    ExecCommandArguments("pwd"),
+                    ExecCommandArguments("pwd", yieldTimeMillis = 10_000),
                 ),
             ) to ("exec_command" to null),
             PendingCommandExecutionToolEvent(
                 callId = "call_write",
                 action = PendingCommandExecutionAction.WriteStdin(
-                    WriteStdinArguments(7),
+                    WriteStdinArguments(7, yieldTimeMillis = 250),
                 ),
             ) to ("write_stdin" to null),
             PendingRequestUserInputToolEvent(
@@ -222,6 +225,26 @@ val pendingToolEventSerializationTest by testSuite {
             assertEquals(identity.first, call.name)
             assertEquals(identity.second, call.namespace)
             assertEquals(event.callId, call.callId)
+        }
+
+        val execCall = assertIs<ResponseItem.FunctionCall>(
+            cases[3].first.toResponseHistoryItems().single(),
+        )
+        val writeCall = assertIs<ResponseItem.FunctionCall>(
+            cases[4].first.toResponseHistoryItems().single(),
+        )
+        assertTrue(""""yield_time_ms":10000""" in execCall.arguments)
+        assertTrue(""""yield_time_ms":250""" in writeCall.arguments)
+
+        assertFailsWith<SerializationException> {
+            pendingEventJson.decodeFromString<PendingToolEvent>(
+                """{"type":"command_execution","call_id":"call_exec","action":{"type":"exec_command","arguments":{"cmd":"pwd"}}}""",
+            )
+        }
+        assertFailsWith<SerializationException> {
+            pendingEventJson.decodeFromString<PendingToolEvent>(
+                """{"type":"command_execution","call_id":"call_write","action":{"type":"write_stdin","arguments":{"session_id":7}}}""",
+            )
         }
     }
 }

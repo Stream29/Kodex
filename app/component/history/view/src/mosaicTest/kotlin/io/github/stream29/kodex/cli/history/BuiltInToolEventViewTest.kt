@@ -28,31 +28,48 @@ import kotlin.test.assertTrue
 
 val builtInToolEventViewTest by testSuite {
     test("commandShowsRecordedMetadataWithoutDefaultsOrIdentifiers") {
-        val event = commandEvent(ExecCommandArguments("printf hello", workdir = "/repo", maxOutputTokens = 42))
+        val event = commandEvent(
+            ExecCommandArguments(
+                "printf hello",
+                workdir = "/repo",
+                yieldTimeMillis = 10_000,
+                maxOutputTokens = 42,
+            ),
+        )
         runMosaicTest {
             val text = setContentAndSnapshot { ExpandedEvent(event) }
-            assertTrue("exec_command; cwd=/repo; max_output_tokens=42" in text)
+            assertTrue("exec_command; cwd=/repo; yield_time_ms=10000; max_output_tokens=42" in text)
             assertTrue("output(exit_code=0; wall_time=0.0s; original_token_count=0):" in text)
             assertTrue("[output truncated]" in text)
-            listOf("chunk-secret", "session_id", "Arguments", "Result", "yield_time_ms", "tty=false").forEach {
+            listOf("chunk-secret", "session_id", "Arguments", "Result", "tty=false").forEach {
                 assertFalse(it in text, it)
             }
         }
     }
 
     test("onlyKnownInputDefaultsAreOmitted") {
-        assertEquals("exec_command", ExecCommandArguments("pwd").expandedCommandContext())
-        assertEquals("write_stdin", WriteStdinArguments(1).expandedCommandContext())
-        assertEquals("exec_command; tty=true; yield_time_ms=0; max_output_tokens=0",
+        assertEquals(
+            "exec_command; yield_time_ms=10000",
+            ExecCommandArguments("pwd", yieldTimeMillis = 10_000).expandedCommandContext(),
+        )
+        assertEquals(
+            "write_stdin; yield_time_ms=250",
+            WriteStdinArguments(1, yieldTimeMillis = 250).expandedCommandContext(),
+        )
+        assertEquals(
+            "exec_command; tty=true; yield_time_ms=0; max_output_tokens=0",
             ExecCommandArguments("pwd", tty = true, yieldTimeMillis = 0, maxOutputTokens = 0)
-                .expandedCommandContext())
+                .expandedCommandContext(),
+        )
         assertEquals("Generate result.png", recordedImageTitle("C:\\images\\result.png"))
     }
 
     test("commandFullTitleKeepsLongMultilineInputAtNarrowWidths") {
         val command = "first\n  " + "x".repeat(290) + "\nlast"
         runMosaicTest {
-            val text = setContentAndSnapshot { ExpandedEvent(commandEvent(ExecCommandArguments(command)), 20) }
+            val text = setContentAndSnapshot {
+                ExpandedEvent(commandEvent(ExecCommandArguments(command, yieldTimeMillis = 10_000)), 20)
+            }
             assertTrue(text.startsWith("v Run: first\n  "))
             assertTrue("last\nexec_command" in text)
             assertEquals(290, text.substringBefore("exec_command").count { it == 'x' })

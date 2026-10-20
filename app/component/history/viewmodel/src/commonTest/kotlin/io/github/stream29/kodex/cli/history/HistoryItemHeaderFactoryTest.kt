@@ -76,6 +76,7 @@ val historyItemHeaderFactoryTest by testSuite {
             action = StableCommandExecutionAction.ExecCommand(
                 ExecCommandArguments(
                     command = "printf first\n" + "x".repeat(300),
+                    yieldTimeMillis = 10_000,
                 ),
             ),
             result = StableCommandExecutionResult.Output(
