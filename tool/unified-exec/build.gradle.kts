@@ -32,6 +32,7 @@ kotlin {
         commonTest.dependencies {
             implementation(project(":tool-core"))
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kotlinx.coroutines.test)
             implementation(libs.kotlinx.serialization.json)
         }
     }
