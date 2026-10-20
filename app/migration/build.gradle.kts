@@ -43,6 +43,9 @@ kotlin {
             dependencies {
                 implementation(libs.kotlinx.coroutines.test)
                 implementation(project(":app-settings-filesystem"))
+                implementation(project(":agent-storage-clean-models"))
+                implementation(project(":agent-storage-core"))
+                implementation(project(":openai-json-codec"))
             }
         }
     }
