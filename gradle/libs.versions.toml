@@ -1,5 +1,7 @@
 [versions]
 kotlin = "2.4.20"
+detekt = "2.0.0-alpha.6"
+kotlin-lint = "2.4.10"
 kotlinx-coroutines = "1.11.0"
 kotlinx-rpc = "0.10.3"
 kotlinx-serialization = "1.11.0"
@@ -28,6 +30,8 @@ kermit = "2.1.0"
 cache4k = "0.14.0"
 
 [libraries]
+detekt-api = { module = "dev.detekt:detekt-api", version.ref = "detekt" }
+detekt-test = { module = "dev.detekt:detekt-test", version.ref = "detekt" }
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
 kotlin-compose-compiler-gradle-plugin = { module = "org.jetbrains.kotlin:compose-compiler-gradle-plugin", version.ref = "kotlin" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
@@ -89,6 +93,8 @@ ktor-client-macos-engines = ["ktor-client-darwin"]
 ktor-client-mingw-engines = ["ktor-client-winhttp"]
 
 [plugins]
+detekt = { id = "dev.detekt", version.ref = "detekt" }
+kotlin-jvm-lint = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin-lint" }
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

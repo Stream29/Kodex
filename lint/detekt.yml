@@ -1,0 +1,6 @@
+processors:
+  active: false
+
+spec-api:
+  PublicApiOutsideSpec:
+    active: true

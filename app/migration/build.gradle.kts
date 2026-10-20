@@ -26,7 +26,7 @@ val generateKodexVersion by tasks.registering(GenerateKodexVersion::class) {
 kotlin {
     sourceSets {
         named("cliHostMain") {
-            kotlin.srcDir(generatedVersionDirectory)
+            kotlin.srcDir(files(generatedVersionDirectory).builtBy(generateKodexVersion))
             dependencies {
                 implementation(project(":utils-kotlinx-io-coroutines-system"))
                 implementation(project(":agent-storage-filesystem-layout"))

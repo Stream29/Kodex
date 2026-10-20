@@ -52,6 +52,8 @@ dependencyResolutionManagement {
 
 rootProject.name = "Kodex"
 
+includeBuild("lint")
+
 val declaredModulePaths = mutableSetOf<String>()
 
 class ModuleTreeScope(
