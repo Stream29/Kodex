@@ -2,13 +2,16 @@
 
 ## Normal builds
 
-- Use Java 25 for the Gradle JVM and regular Kodex JVM toolchains.
+- Use Java 25 for Gradle and compiler tooling; JVM is not a Kodex product target.
+- CLI/backend and native client conventions target `linuxX64`, `linuxArm64`,
+  `macosArm64` and `mingwX64`. Portable Shared libraries retain their separate
+  JS/Wasm/iOS coverage; this does not provide a Node backend.
 - Mosaic, Lucene KMP and the MCP Kotlin SDK are fixed binary dependencies.
   Their versions are declared once in `gradle/libs.versions.toml`.
 - Normal builds do not configure or publish the three source submodules.
   A clone without initialized fork submodules can use the binary build.
-- The existing full target model remains unchanged in this first integration.
-  No automatic JVM-only, dirty-source or Maven Local fallback is enabled.
+- No automatic dirty-source or Maven Local fallback is enabled. Do not restore
+  a JVM/Node product target as a development shortcut.
 
 ## Package access
 
@@ -48,30 +51,31 @@ From the Kodex checkout, for example:
 
 ```sh
 ./gradlew help
-./gradlew :mcp:jvmTest
-./gradlew :app-component-history-view:jvmTest
 # Linux x64 host:
+./gradlew :mcp-contract:linuxX64Test :mcp-backend:linuxX64Test
+./gradlew :app-component-history-view:linuxX64Test
 ./gradlew :app-cli:linkReleaseExecutableLinuxX64
 ```
 
 Keep the actual existing Gradle Daemon JVM explicit when using an agent or an
 isolated validation script. CLI configuration time is not IDEA Sync or indexing
 time. Resource and build-logic changes require separate measurements, not
-guarantees supplied by binary adoption. Keep the existing full target model;
-there is no target-profile switch.
+guarantees supplied by binary adoption. Follow the declared product/portable
+target sets; there is no target-profile switch.
 
 ## Adding a module
 
 - Declare its real directory explicitly in `settings.gradle.kts`; placing a
   new build script on disk no longer adds a project automatically.
-- A root `moduleTree` keeps its existing namespace project. A nested
+- A root `moduleTree` keeps its existing namespace project by default;
+  `includeGroupingRoot = false` makes `mcp` a directory-only group. A nested
   `moduleTree` registers itself only if it has a build script; otherwise it
   supplies the physical path for its declared children.
 - Use `module("name")` for a real leaf with `build.gradle.kts`.
   Flat project IDs still join path segments with `-`.
 - Use business directory names, not `spec`/`impl` grouping segments.
-  Use `contract` only for necessary cycle-breaking projects; actual system
-  adapters keep their business platform boundary.
+  Use `contract` for necessary cycle-breaking or shared frontend/backend
+  protocol boundaries; actual system adapters keep their business platform boundary.
 - Invalid names, missing leaves, duplicate physical declarations and colliding
   flat project IDs fail configuration instead of silently replacing a project.
 
@@ -81,22 +85,25 @@ there is no target-profile switch.
   existing KMP convention. This applies the existing TestBalloon plugin and
   common test dependencies together; platform-specific tests inherit them too.
 - Add the convention before adding ordinary or generated test sources, even
-  if `commonTest` itself is empty. View, ViewModel, JVM, JS, Native and custom
+  if `commonTest` itself is empty. View, ViewModel, portable JS, Native and custom
   test source sets follow the same rule.
 - Base conventions still declare their complete targets and test source sets.
   Empty modules do not load the test framework/compiler plugin merely because
   they use KMP. This does not disable test tasks or remove platform support.
 - Run the module's actual test task after opting in. A cached or `NO-SOURCE`
   task is not evidence that newly added tests execute.
+- Retired JVM source/test directories are not active product targets. Port
+  needed coverage to Native rather than claiming those tests still execute.
 
 ## Build conventions
 
 - Business KMP modules apply `kodex.kmp-spec-impl` before their target/renderer
   convention. Contracts live in `specMain`; `commonMain` depends on it.
-  Implementation-only modules may leave `specMain` empty.
+  Implementation-only modules may leave `specMain` empty only when they have
+  no module-owned public export.
 - A widened business module keeps narrow implementation inputs in the applicable
   intermediate source sets. `kodex.kmp-cli-host-layer` creates `cliHostMain/Test`
-  for JVM and four desktop Native targets, with `desktopNativeMain/Test` below it;
+  for four desktop Native targets, retaining `desktopNativeMain/Test` below it;
   it does not add targets or expose CLI factories on JS, Wasm or iOS.
 - `kodex.ktor-native-network-override` preserves the existing four desktop Native
   network pins independently of the enclosing module's target convention.
@@ -115,7 +122,7 @@ there is no target-profile switch.
 - `kotlin.daemon.useFallbackStrategy=false` makes a failed Kotlin daemon
   connection/startup fail the build instead of silently compiling in the
   Gradle process. Diagnose the daemon failure rather than removing the policy.
-  The existing Gradle/Kotlin maximum heaps and full targets are unchanged.
+  The existing Gradle/Kotlin maximum heaps are unchanged.
 - These changes do not certify an IDEA OOM fix or faster Sync. Complete IDE
   import and actual source navigation remain separate validation gates.
 

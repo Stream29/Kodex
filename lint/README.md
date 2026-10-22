@@ -8,6 +8,7 @@ Run from the Kodex root with the project's JDK:
 ./gradlew :lint:test
 ```
 
+- The lint tool and its tests still use a JVM; this does not add a JVM product target.
 - `checkSpecApi` is strict and fails on findings. Existing APIs are not baselined.
 - `reportSpecApi` writes the same findings without failing; success does not mean
   that the API boundary is clean.
@@ -29,6 +30,8 @@ A non-actual exported container is reported once rather than per child member.
 This is a structural guard, not type resolution. Actual/expect matching still
 needs compilation. Inherited visibility, enum-entry correspondence, typealias
 expansion, compiler-synthesized declarations and KDoc semantics are not verified.
+Whether a spec body qualifies as a permitted short declarative inline extension
+is a code-review decision, not an additional body-complexity check in this rule.
 Overrides inside public actual types are conservatively checked for explicit
 `actual`/`internal`/`private` markers; they are not blanket-exempted.
 
@@ -43,6 +46,10 @@ Overrides inside public actual types are conservatively checked for explicit
   are reloaded without restarting the shared daemon or forking every scan.
   Recheck rule reloads in the same warm daemon before removing this workaround
   on a detekt upgrade.
+- Repository-relative source paths are an explicit task input: unchanged files
+  moved between KMP modules can otherwise retain the same source-root-relative
+  fingerprint and leave stale report locations. Recheck cross-module moves,
+  restored-input cache hits and unchanged-task skips when changing source inputs.
 - AST parsing is serial by default. To compare parallel parsing without forcing
   producer tasks to rebuild:
 
