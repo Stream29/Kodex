@@ -44,6 +44,12 @@ val rulePlugins = configurations.getByName("detektPlugins").incoming.artifactVie
 }.files
 
 val implementationSources = objects.fileCollection()
+val implementationSourcePaths = run {
+    val baseDirectory = rootDir
+    implementationSources.elements.map { locations ->
+        locations.map { it.asFile.relativeTo(baseDirectory).invariantSeparatorsPath }.sorted()
+    }
+}
 
 gradle.projectsEvaluated {
     val mainSourceSets = subprojects.flatMap { module ->
@@ -66,6 +72,8 @@ detekt {
 tasks.withType<Detekt>().configureEach {
     pluginClasspath.setFrom(rulePlugins)
     inputs.property("specApiRuleLoading", "content-addressed-v1")
+    // SourceDirectorySet-relative fingerprints alone miss unchanged files moved between modules.
+    inputs.property("specApiSourcePaths", implementationSourcePaths)
     setSource(implementationSources)
     parallel.set(providers.gradleProperty("specApiParallel").map(String::toBoolean).orElse(false))
     basePath.set(rootDir.absolutePath)
