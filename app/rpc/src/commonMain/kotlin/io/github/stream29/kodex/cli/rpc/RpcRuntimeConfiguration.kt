@@ -11,8 +11,7 @@ import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.openai.ServiceTier
 import kotlinx.coroutines.CoroutineScope
 
-/** Bind once to an exact Agent or draft. No active-session lookup or settings mirror is introduced. */
-public fun createBoundRuntimeConfigurationViewModel(
+public actual fun createBoundRuntimeConfigurationViewModel(
     target: AgentSettingsViewModel,
     ownerScope: CoroutineScope,
 ): RuntimeConfigurationViewModel = createRuntimeConfigurationViewModel(

@@ -278,7 +278,7 @@ internal class CodexAccountUsageStoreImpl(
 }
 
 /** Creates a live, account-isolated Codex usage store. */
-public fun CodexAccountUsageStore(
+public actual fun CodexAccountUsageStore(
     client: OpenAiClient,
     authStore: OpenAiAuthStore,
 ): CodexAccountUsageStore =
@@ -288,7 +288,7 @@ public fun CodexAccountUsageStore(
     )
 
 /** Backend ownership and result semantics, without changing the legacy CLI factory. */
-public fun CoroutineScope.ownedCodexAccountUsageStore(
+public actual fun CoroutineScope.ownedCodexAccountUsageStore(
     client: OpenAiClient,
     authStore: OpenAiAuthStore,
 ): CodexAccountUsageStore = CodexAccountUsageStoreImpl(

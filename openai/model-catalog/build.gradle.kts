@@ -10,10 +10,10 @@ kotlin {
             dependencies {
                 api(project(":openai-models"))
                 api(libs.kotlinx.coroutines.core)
+                api(project(":openai-client"))
             }
         }
         commonMain.dependencies {
-            api(project(":openai-client"))
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {

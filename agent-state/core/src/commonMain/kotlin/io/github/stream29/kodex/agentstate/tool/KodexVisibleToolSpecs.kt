@@ -40,7 +40,7 @@ private val LocalDeferredToolSearchDocuments: List<ToolSearchDocument> =
  * MCP tools and local deferred tools remain behind ToolSearch. The ToolSearch
  * source listing is derived from the exact indexed document snapshot.
  */
-public fun McpService.visibleToolSpecs(
+public actual fun McpService.visibleToolSpecs(
     settings: KodexAgentSettings,
 ): List<ToolSpec> {
     val deferredDocuments = clients.value.values
@@ -64,7 +64,7 @@ public fun McpService.visibleToolSpecs(
 }
 
 /** Builds the deferred search directory used by both request and runtime paths. */
-public fun List<McpTool>.toDeferredToolSearchDocuments(): List<ToolSearchDocument> =
+public actual fun List<McpTool>.toDeferredToolSearchDocuments(): List<ToolSearchDocument> =
     LocalDeferredToolSearchDocuments + flatMap { tool ->
         tool.spec.toToolSearchDocuments(
             sourceInfo = ToolSearchSourceInfo(

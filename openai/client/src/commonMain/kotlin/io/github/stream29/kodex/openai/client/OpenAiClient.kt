@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.openai.client
 
 import io.github.stream29.kodex.openai.CodexAccountUsageResponse
@@ -88,9 +90,9 @@ import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
-public class OpenAiClient(
+public actual class OpenAiClient actual constructor(
     private val authStore: OpenAiAuthStore,
-    private val config: OpenAiClientConfig = OpenAiClientConfig(),
+    private val config: OpenAiClientConfig,
 ) : OpenAiClientContract {
     private val httpClient: HttpClient = HttpClient {
         install(HttpRequestRetry) {
@@ -144,7 +146,7 @@ public class OpenAiClient(
         }
     }
 
-    override suspend fun listModels(): OpenAiResponseResult<ModelsResponse> {
+    actual override suspend fun listModels(): OpenAiResponseResult<ModelsResponse> {
         val response = httpClient.get {
             authenticate()
             url {
@@ -156,7 +158,7 @@ public class OpenAiClient(
         return response.openAiResponseResult(ModelsResponse.serializer())
     }
 
-    override suspend fun getCodexAccountUsage(): OpenAiResponseResult<CodexAccountUsageResponse> {
+    actual override suspend fun getCodexAccountUsage(): OpenAiResponseResult<CodexAccountUsageResponse> {
         val response = httpClient.get(accountEndpoint("wham/usage")) {
             authenticate()
             accept(ContentType.Application.Json)
@@ -164,7 +166,7 @@ public class OpenAiClient(
         return response.httpStatusResponseResult(CodexAccountUsageResponse.serializer())
     }
 
-    override suspend fun listCodexRateLimitResetCredits():
+    actual override suspend fun listCodexRateLimitResetCredits():
         OpenAiResponseResult<CodexRateLimitResetCreditsResponse> {
         val response = httpClient.get(accountEndpoint("wham/rate-limit-reset-credits")) {
             authenticate()
@@ -173,7 +175,7 @@ public class OpenAiClient(
         return response.httpStatusResponseResult(CodexRateLimitResetCreditsResponse.serializer())
     }
 
-    override suspend fun consumeCodexRateLimitResetCredit(
+    actual override suspend fun consumeCodexRateLimitResetCredit(
         request: CodexRateLimitResetConsumeRequest,
         expectedAccount: OpenAiSubscriptionAuthState,
     ): OpenAiResponseResult<CodexRateLimitResetConsumeResponse> {
@@ -186,7 +188,7 @@ public class OpenAiClient(
         return response.httpStatusResponseResult(CodexRateLimitResetConsumeResponse.serializer())
     }
 
-    override suspend fun getCodexTokenUsageProfile(): OpenAiResponseResult<CodexTokenUsageProfile> {
+    actual override suspend fun getCodexTokenUsageProfile(): OpenAiResponseResult<CodexTokenUsageProfile> {
         val response = httpClient.get(accountEndpoint("wham/profiles/me")) {
             authenticate()
             accept(ContentType.Application.Json)
@@ -194,7 +196,7 @@ public class OpenAiClient(
         return response.httpStatusResponseResult(CodexTokenUsageProfile.serializer())
     }
 
-    override suspend fun createResponse(
+    actual override suspend fun createResponse(
         model: OpenAiModelId,
         input: List<ResponseItem>,
         instructions: String,
@@ -258,7 +260,7 @@ public class OpenAiClient(
         }
     }
 
-    override suspend fun createRemoteCompactionV2Response(
+    actual override suspend fun createRemoteCompactionV2Response(
         request: ResponsesApiRequest,
     ): RemoteCompactionV2Response =
         retryOpenAiStreamingTransportWithBudget(
@@ -282,7 +284,7 @@ public class OpenAiClient(
             }.collectRemoteCompactionV2Response()
         }
 
-    override suspend fun generateImage(request: ImageGenerationRequest): OpenAiResponseResult<ImageResponse> {
+    actual override suspend fun generateImage(request: ImageGenerationRequest): OpenAiResponseResult<ImageResponse> {
         val response = httpClient.post {
             imageRequestTimeout()
             authenticate()
@@ -296,7 +298,7 @@ public class OpenAiClient(
         return response.openAiResponseResult(ImageResponse.serializer())
     }
 
-    override suspend fun editImage(request: ImageEditRequest): OpenAiResponseResult<ImageResponse> {
+    actual override suspend fun editImage(request: ImageEditRequest): OpenAiResponseResult<ImageResponse> {
         val response = httpClient.post {
             imageRequestTimeout()
             authenticate()
@@ -310,7 +312,7 @@ public class OpenAiClient(
         return response.openAiResponseResult(ImageResponse.serializer())
     }
 
-    override suspend fun search(request: SearchRequest): OpenAiResponseResult<SearchResponse> {
+    actual override suspend fun search(request: SearchRequest): OpenAiResponseResult<SearchResponse> {
         val response = httpClient.post {
             authenticate()
             url {
@@ -324,7 +326,7 @@ public class OpenAiClient(
         return response.openAiResponseResult(SearchResponse.serializer())
     }
 
-    override fun close() {
+    actual override fun close() {
         httpClient.close()
     }
 

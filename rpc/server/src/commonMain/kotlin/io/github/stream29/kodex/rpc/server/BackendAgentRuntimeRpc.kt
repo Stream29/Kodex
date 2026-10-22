@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.rpc.server
 
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -35,12 +37,11 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
-/** Backend-owned operations and projections; no frontend Job owns an accepted command. */
-public class BackendAgentRuntimeRpc(
+public actual class BackendAgentRuntimeRpc actual constructor(
     private val host: BackendSessionHost,
     private val titleSettings: () -> SessionTitleSettings,
     private val titleGenerator: SessionTitleGenerator,
-    public val notifications: BackendNotifications = BackendNotifications(),
+    public actual val notifications: BackendNotifications,
 ) : AgentRuntimeRpc {
     private val viewsMutex = Mutex()
     private val views = mutableMapOf<BackendSessionBinding, RuntimeView>()
@@ -70,16 +71,16 @@ public class BackendAgentRuntimeRpc(
         }
     }
 
-    override suspend fun getStorageUri(sessionIndex: Int): String = host.session(sessionIndex).session.storage.uri
-    override suspend fun getLatestIndex(sessionIndex: Int): Int =
+    actual override suspend fun getStorageUri(sessionIndex: Int): String = host.session(sessionIndex).session.storage.uri
+    actual override suspend fun getLatestIndex(sessionIndex: Int): Int =
         host.session(sessionIndex).session.runtime.latestIndex.value
-    override fun getLatestIndexFlow(sessionIndex: Int): Flow<Int> = observe(sessionIndex) { latestIndex }
-    override suspend fun getState(sessionIndex: Int): AgentStateValue = view(sessionIndex).snapshot().value
-    override fun getStateFlow(sessionIndex: Int): Flow<AgentStateValue> = flow {
+    actual override fun getLatestIndexFlow(sessionIndex: Int): Flow<Int> = observe(sessionIndex) { latestIndex }
+    actual override suspend fun getState(sessionIndex: Int): AgentStateValue = view(sessionIndex).snapshot().value
+    actual override fun getStateFlow(sessionIndex: Int): Flow<AgentStateValue> = flow {
         val view = view(sessionIndex)
         emitAll(view.binding.observe(view.runtime.state.map { view.snapshot().value }).distinctUntilChanged())
     }
-    override fun currentFlow(sessionIndex: Int, nonce: Long): Flow<ResponsesStreamEvent> = flow {
+    actual override fun currentFlow(sessionIndex: Int, nonce: Long): Flow<ResponsesStreamEvent> = flow {
         val view = view(sessionIndex)
         val snapshot = view.snapshot()
         val source = snapshot.events
@@ -87,7 +88,7 @@ public class BackendAgentRuntimeRpc(
         emitAll(view.binding.observe(source))
     }
 
-    override suspend fun appendUserMessage(sessionIndex: Int, content: List<ContentItem>): Int =
+    actual override suspend fun appendUserMessage(sessionIndex: Int, content: List<ContentItem>): Int =
         command(sessionIndex) {
             val index = runtime.appendUserMessage(content)
             try {
@@ -102,7 +103,7 @@ public class BackendAgentRuntimeRpc(
             index
         }
 
-    override suspend fun resume(sessionIndex: Int): Unit = command(sessionIndex) {
+    actual override suspend fun resume(sessionIndex: Int): Unit = command(sessionIndex) {
         exclusive {
             val before = runtime.latestIndex.value
             val acceptedState = when (runtime.state.value) {
@@ -132,14 +133,14 @@ public class BackendAgentRuntimeRpc(
             }
         }
     }
-    override suspend fun forcedCompact(sessionIndex: Int): Int = command(sessionIndex) {
+    actual override suspend fun forcedCompact(sessionIndex: Int): Int = command(sessionIndex) {
         exclusive { runtime.forcedCompact() }
     }
-    override suspend fun clearPending(sessionIndex: Int): Int = command(sessionIndex) { runtime.clearPending() }
-    override suspend fun completeToolCall(sessionIndex: Int, completed: StableCleanEvent.CompletedTool): Int =
+    actual override suspend fun clearPending(sessionIndex: Int): Int = command(sessionIndex) { runtime.clearPending() }
+    actual override suspend fun completeToolCall(sessionIndex: Int, completed: StableCleanEvent.CompletedTool): Int =
         command(sessionIndex) { runtime.completeToolCall(completed) }
 
-    override suspend fun revertHistory(sessionIndex: Int, untilExclusive: Int, expectedCacheNonce: Long): Unit =
+    actual override suspend fun revertHistory(sessionIndex: Int, untilExclusive: Int, expectedCacheNonce: Long): Unit =
         command(sessionIndex) {
             exclusive {
                 require(runtime.runningTurn.value == null) { "Cannot replace running Agent history." }
@@ -164,13 +165,13 @@ public class BackendAgentRuntimeRpc(
             }
         }
 
-    override suspend fun getShellSessions(sessionIndex: Int): Map<Int, ShellSessionState> =
+    actual override suspend fun getShellSessions(sessionIndex: Int): Map<Int, ShellSessionState> =
         host.session(sessionIndex).session.runtime.unifiedExecToolClient.activeSessions.value.mapValues {
             ShellSessionState(it.value.arguments, it.value.completed.value)
         }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    override fun getShellSessionsFlow(sessionIndex: Int): Flow<Map<Int, ShellSessionState>> =
+    actual override fun getShellSessionsFlow(sessionIndex: Int): Flow<Map<Int, ShellSessionState>> =
         observe(sessionIndex) {
             unifiedExecToolClient.activeSessions.flatMapLatest { sessions ->
                 if (sessions.isEmpty()) flowOf(emptyMap())
@@ -179,24 +180,24 @@ public class BackendAgentRuntimeRpc(
                 }) { it.toMap() }
             }
         }
-    override suspend fun closeShellSession(sessionIndex: Int, shellSessionId: Int): Unit =
+    actual override suspend fun closeShellSession(sessionIndex: Int, shellSessionId: Int): Unit =
         command(sessionIndex) {
             requireNotNull(runtime.unifiedExecToolClient.activeSessions.value[shellSessionId]) {
                 "Shell session is no longer registered."
             }.close()
         }
-    override suspend fun getRunningTurn(sessionIndex: Int): Boolean =
+    actual override suspend fun getRunningTurn(sessionIndex: Int): Boolean =
         host.session(sessionIndex).session.runtime.runningTurn.value != null
-    override fun getRunningTurnFlow(sessionIndex: Int): Flow<Boolean> =
+    actual override fun getRunningTurnFlow(sessionIndex: Int): Flow<Boolean> =
         observe(sessionIndex) { runningTurn.map { it != null }.distinctUntilChanged() }
-    override suspend fun cancelRunningTurn(sessionIndex: Int): Unit = command(sessionIndex) {
+    actual override suspend fun cancelRunningTurn(sessionIndex: Int): Unit = command(sessionIndex) {
         runtime.runningTurn.value?.cancel()
     }
-    override suspend fun getPendingSteer(sessionIndex: Int): List<StableIndexEvent.Steerable> =
+    actual override suspend fun getPendingSteer(sessionIndex: Int): List<StableIndexEvent.Steerable> =
         host.session(sessionIndex).session.runtime.pendingSteer.value
-    override fun getPendingSteerFlow(sessionIndex: Int): Flow<List<StableIndexEvent.Steerable>> =
+    actual override fun getPendingSteerFlow(sessionIndex: Int): Flow<List<StableIndexEvent.Steerable>> =
         observe(sessionIndex) { pendingSteer }
-    override suspend fun compareAndSetPendingSteer(
+    actual override suspend fun compareAndSetPendingSteer(
         sessionIndex: Int,
         expect: List<StableIndexEvent.Steerable>,
         update: List<StableIndexEvent.Steerable>,

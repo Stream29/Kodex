@@ -17,7 +17,7 @@ import kotlinx.coroutines.CancellationException
  * @throws CancellationException when storage reading or updating is cancelled.
  * @throws IllegalArgumentException when no initial settings can be updated.
  */
-public suspend fun KodexAgentState.updateThreadName(threadName: String): Int {
+public actual suspend fun KodexAgentState.updateThreadName(threadName: String): Int {
     val currentSettings = storage.settings[latestIndex.value]
     return updateSettings(currentSettings.copy(threadName = threadName))
 }
@@ -34,7 +34,7 @@ public suspend fun KodexAgentState.updateThreadName(threadName: String): Int {
  * with another operation after settings were updated.
  * @throws CancellationException when either operation is cancelled.
  */
-public suspend fun KodexAgentState.appendPlanUpdate(completed: StablePlanUpdate): Int {
+public actual suspend fun KodexAgentState.appendPlanUpdate(completed: StablePlanUpdate): Int {
     val pending = (state.value as? KodexAgentStateValue.ToolPending)
         ?.events
         ?.firstOrNull { event -> event.callId == completed.callId }
@@ -57,7 +57,7 @@ public suspend fun KodexAgentState.appendPlanUpdate(completed: StablePlanUpdate)
  * @throws IllegalStateException when ownership or initial storage is absent.
  * @throws CancellationException when the delegated operation is cancelled.
  */
-public suspend fun KodexAgentState.forcedCompact(): Int =
+public actual suspend fun KodexAgentState.forcedCompact(): Int =
     compact(
         trigger = CompactionTrigger.Manual,
         reason = CompactionReason.UserRequested,
@@ -77,7 +77,7 @@ public suspend fun KodexAgentState.forcedCompact(): Int =
  * @throws IllegalArgumentException when the observed call no longer matches.
  * @throws CancellationException when a completion is cancelled.
  */
-public suspend fun KodexAgentState.clearPending(): Int {
+public actual suspend fun KodexAgentState.clearPending(): Int {
     var index = latestIndex.value
     while (true) {
         val pending = state.value as? KodexAgentStateValue.ToolPending ?: return index

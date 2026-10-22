@@ -37,7 +37,7 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 
 /** Builds the root Agent runtime. */
-public fun KodexAgentState.buildMasterAgentRuntime(
+public actual fun KodexAgentState.buildMasterAgentRuntime(
     dependencies: KodexAgentDependencies,
 ): AgentRuntime {
     val sessionLogger = RuntimeLogger.session(storage.uri)

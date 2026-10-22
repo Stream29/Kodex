@@ -2,52 +2,10 @@ package io.github.stream29.kodex.cli.components
 
 import androidx.compose.runtime.Composable
 
-/** Marks builders which declare lazy list items without composing them. */
-@DslMarker
-public annotation class LazyListScopeMarker
-
-/** Receiver used by `LazyColumn` to describe lazily composed items. */
-@LazyListScopeMarker
-public interface LazyListScope {
-    /**
-     * Adds one item.
-     *
-     * @param key `null` gives this item index identity. A non-null stable key preserves item
-     * identity across insertions and reorderings.
-     * @param contentType `null` selects the default subcomposition reuse class.
-     */
-    public fun item(
-        key: Any? = null,
-        contentType: Any? = null,
-        content: @Composable () -> Unit,
-    )
-
-    /**
-     * Adds [count] indexed items.
-     *
-     * @param key `null` gives every item its current global index as identity.
-     * @param contentType `null` selects the default subcomposition reuse class for every item. A
-     * non-null factory may itself return `null` for items in that default class.
-     */
-    public fun items(
-        count: Int,
-        key: ((index: Int) -> Any)? = null,
-        contentType: ((index: Int) -> Any?)? = null,
-        itemContent: @Composable (index: Int) -> Unit,
-    )
-}
-
-/**
- * Adds all [items] to this lazy list.
- *
- * @param key `null` uses each item's current global index as identity.
- * @param contentType `null` places every item in the default subcomposition reuse class. A
- * non-null factory may itself return `null` for items in that default class.
- */
-public fun <T> LazyListScope.items(
+public actual fun <T> LazyListScope.items(
     items: List<T>,
-    key: ((item: T) -> Any)? = null,
-    contentType: ((item: T) -> Any?)? = null,
+    key: ((item: T) -> Any)?,
+    contentType: ((item: T) -> Any?)?,
     itemContent: @Composable (item: T) -> Unit,
 ) {
     items(

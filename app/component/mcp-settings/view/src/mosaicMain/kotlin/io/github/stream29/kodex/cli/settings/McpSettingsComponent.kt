@@ -12,26 +12,14 @@ import io.github.stream29.kodex.app.mcpsettings.McpSettingsEffect
 import io.github.stream29.kodex.app.mcpsettings.McpSettingsViewModel
 import kotlinx.coroutines.CancellationException
 
-/**
- * Complete MCP list/dialog renderer inside a TuiPopupHost. Uses the stable child directly; no
- * business draft, preview selection or parallel route is remembered. Host calls hidePage when
- * leaving MCP, close when Settings ends, and installs [McpSettingsEffects] for the ENTIRE Settings
- * lifetime (even while another page is visible). No backend/store/platform opener is created here.
- * For host viewport layout, compose [McpSettingsPanel] and [McpSettingsDialogs] separately.
- */
 @Composable
-public fun BoxScope.McpSettingsComponent(viewModel: McpSettingsViewModel) {
+public actual fun BoxScope.McpSettingsComponent(viewModel: McpSettingsViewModel) {
     McpSettingsPanel(viewModel)
     McpSettingsDialogs(viewModel)
 }
 
-/**
- * List/failure surface; layout/scroll are renderer-local, runtime rows remain read-only.
- * Set [showOperationFailure] false only when the host renders the same shared failure
- * acknowledgement itself; this avoids duplicate banners without changing failure ownership.
- */
 @Composable
-public fun McpSettingsPanel(viewModel: McpSettingsViewModel, showOperationFailure: Boolean = true) {
+public actual fun McpSettingsPanel(viewModel: McpSettingsViewModel, showOperationFailure: Boolean) {
     val state by viewModel.state.collectAsState()
     if (state.closed) return
     Column {
@@ -48,9 +36,8 @@ public fun McpSettingsPanel(viewModel: McpSettingsViewModel, showOperationFailur
     }
 }
 
-/** Independent Settings overlay; exact tokens protect replacement dialogs from late callbacks. */
 @Composable
-public fun BoxScope.McpSettingsDialogs(viewModel: McpSettingsViewModel) {
+public actual fun BoxScope.McpSettingsDialogs(viewModel: McpSettingsViewModel) {
     val state by viewModel.state.collectAsState()
     if (state.closed) return
     when (val dialog = state.dialog) {
@@ -102,16 +89,8 @@ public fun BoxScope.McpSettingsDialogs(viewModel: McpSettingsViewModel) {
     }
 }
 
-/**
- * Exactly one Settings-lifetime consumer. [openUrl] returns true iff platform opening succeeded.
- * False/ordinary exception invokes this effect's exact cancellation callback, never name lookup.
- * Composition cancellation cancels the captured in-flight effect and rethrows.
- * The host retains this mount across Settings → Login → return, keyed by the exact Settings owner,
- * so that transition does not cancel the collector. Other login waits remain VM-owned until
- * Settings close. URL data is not logged or retained in renderer state.
- */
 @Composable
-public fun McpSettingsEffects(
+public actual fun McpSettingsEffects(
     viewModel: McpSettingsViewModel,
     openUrl: suspend (String) -> Boolean,
 ) {

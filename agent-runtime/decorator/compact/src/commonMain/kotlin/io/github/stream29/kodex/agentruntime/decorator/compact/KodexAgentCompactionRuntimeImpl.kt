@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.agentruntime.decorator.compact
 
 import io.github.oshai.kotlinlogging.KLogger
@@ -25,14 +27,14 @@ import kotlinx.coroutines.withContext
  *
  * @param logger Agent-scoped logger for response and compaction operations.
  */
-public class KodexAgentCompactionRuntimeImpl(
+public actual class KodexAgentCompactionRuntimeImpl actual constructor(
     private val delegate: KodexAgentState,
     private val modelCatalog: OpenAiModelCatalogStore,
     private val logger: KLogger,
     private val steerProvider: SteerProvider,
 ) : KodexAgentCompactionRuntime, KodexAgentState by delegate {
 
-    public override suspend fun resume() {
+    public actual override suspend fun resume() {
         if (state.value is KodexAgentStateValue.ToolPending) return
         deliverPendingSteer()
 
@@ -156,7 +158,7 @@ public class KodexAgentCompactionRuntimeImpl(
         return delivered
     }
 
-    override suspend fun compact(
+    actual override suspend fun compact(
         trigger: CompactionTrigger,
         reason: CompactionReason,
         phase: CompactionPhase,
@@ -203,7 +205,7 @@ public class KodexAgentCompactionRuntimeImpl(
  *
  * @param logger Agent-scoped logger for response and compaction operations.
  */
-public fun KodexAgentState.compactionRuntime(
+public actual fun KodexAgentState.compactionRuntime(
     modelCatalog: OpenAiModelCatalogStore,
     logger: KLogger,
     steerProvider: SteerProvider,

@@ -10,11 +10,11 @@ kotlin {
             dependencies {
                 api(project(":openai-models"))
                 api(project(":tool-core"))
+                api(project(":agent-state-contract"))
                 api(libs.kotlinx.schema.json)
             }
         }
         commonMain.dependencies {
-            api(project(":agent-state-contract"))
             implementation(project(":tool-core"))
             implementation(libs.kotlinx.serialization.json)
         }

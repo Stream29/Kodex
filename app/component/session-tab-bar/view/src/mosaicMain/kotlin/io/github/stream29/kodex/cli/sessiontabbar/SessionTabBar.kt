@@ -15,15 +15,12 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.Text
-import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarCallbacks
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabBarState
-import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabIdentity
 import io.github.stream29.kodex.app.sessiontabbar.contract.SessionTabPresentation
 import io.github.stream29.kodex.cli.components.ScrollOrientation
 import io.github.stream29.kodex.cli.components.ScrollState
 import io.github.stream29.kodex.cli.components.TuiButton
-import io.github.stream29.kodex.cli.components.TuiPopupAnchor
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.cli.components.horizontalScroll
 import io.github.stream29.kodex.cli.components.rememberScrollState
@@ -33,36 +30,13 @@ import io.github.stream29.kodex.cli.components.scrollablePaging
 import io.github.stream29.kodex.cli.components.tuiPopupAnchor
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 
-/**
- * Geometry-bearing context-menu request. Mosaic anchor and pointer position
- * stay in this view module; the host receives the exact [identity] and must
- * still verify admission before opening its root popup state.
- */
-public data class SessionTabContextMenuRequest(
-    public val identity: SessionTabIdentity,
-    public val label: String,
-    public val anchor: TuiPopupAnchor,
-    public val clickPosition: IntOffset?,
-)
-
-/**
- * Renders the immutable snapshot supplied by Application.
- *
- * The view owns horizontal scroll, selected-tab viewport correction, focus,
- * anchor and context-menu geometry. It does not collect a registry, retain a
- * selected index, close a Session, or create a second mutable tab list.
- * Primary click calls [SessionTabBarCallbacks.select] with the exact identity;
- * secondary click calls [SessionTabBarCallbacks.openContextMenu] and then
- * [onOpenTabMenu] with the same identity. Removed identities are rejected by
- * a current-snapshot admission check before either callback.
- */
 @Composable
-public fun SessionTabBar(
+public actual fun SessionTabBar(
     state: SessionTabBarState,
     callbacks: SessionTabBarCallbacks,
     runningIndicatorFrame: State<String>,
     columns: Int,
-    onOpenTabMenu: (SessionTabContextMenuRequest) -> Unit = {},
+    onOpenTabMenu: (SessionTabContextMenuRequest) -> Unit,
 ) {
     val tabColumns = (columns - TabControlsColumns).coerceAtLeast(1)
     val scrollState = rememberScrollState()
@@ -195,18 +169,7 @@ private data class RenderedTab(
     val selected: Boolean,
 )
 
-/** Bounds include the visible brackets and exclude the inter-tab separator. */
-public data class SessionTabBounds(
-    public val start: Int,
-    public val endExclusive: Int,
-)
-
-/**
- * Computes terminal-cell bounds in the immutable presentation order.
- * Invalid indices return null so a replacement/empty snapshot cannot move the
- * viewport to a stale tab.
- */
-public fun sessionTabBounds(
+public actual fun sessionTabBounds(
     labels: List<String>,
     index: Int,
 ): SessionTabBounds? {
@@ -221,8 +184,7 @@ public fun sessionTabBounds(
     )
 }
 
-/** Moves the renderer-only horizontal viewport until [bounds] is visible. */
-public fun ScrollState.ensureSessionTabRangeVisible(bounds: SessionTabBounds) {
+public actual fun ScrollState.ensureSessionTabRangeVisible(bounds: SessionTabBounds) {
     val viewportEnd = value + viewportSize
     when {
         bounds.start < value -> scrollTo(bounds.start)

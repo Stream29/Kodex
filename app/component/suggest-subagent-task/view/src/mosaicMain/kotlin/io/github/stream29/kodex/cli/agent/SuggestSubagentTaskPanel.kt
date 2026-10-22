@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.agent
 
 import androidx.compose.runtime.Composable
@@ -52,19 +54,14 @@ import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 import kotlinx.coroutines.launch
 import kotlinx.io.files.Path
 
-/**
- * Renderer-only anchors/menu state. Share this handle between the panel and menus rendered
- * directly in the host's TuiPopupHost; it contains no configuration or rejection draft.
- */
 @Stable
-public class SuggestSubagentTaskDropdowns private constructor(
-    public val model: TuiDropdownState,
-    public val requestUserInputMode: TuiDropdownState,
+public actual class SuggestSubagentTaskDropdowns private constructor(
+    public actual val model: TuiDropdownState,
+    public actual val requestUserInputMode: TuiDropdownState,
 ) {
-    public companion object {
-        /** Exact owner/call key disposes old menu anchors when the pending call changes. */
+    public actual companion object {
         @Composable
-        public fun remember(owner: Any?, callId: String?): SuggestSubagentTaskDropdowns =
+        public actual fun remember(owner: Any?, callId: String?): SuggestSubagentTaskDropdowns =
             key(owner, callId) {
                 val model = rememberTuiDropdownState()
                 val mode = rememberTuiDropdownState()
@@ -73,14 +70,8 @@ public class SuggestSubagentTaskDropdowns private constructor(
     }
 }
 
-/**
- * Full confirmation/configuration panel. No arbitrary configuration slot or renderer-owned
- * rejection mode exists. [onBrowseWorkingDirectory] opens a host-routed Working Directory
- * child bound to its exact call; selection edits the component through updateWorkingDirectory.
- * Removing this renderer cancels only its waits/focus work, not the Agent-owned component.
- */
 @Composable
-public fun SuggestSubagentTaskPanel(
+public actual fun SuggestSubagentTaskPanel(
     viewModel: SuggestSubagentTaskViewModel,
     state: SuggestSubagentTaskState.Pending,
     columns: Int,
@@ -168,13 +159,8 @@ public fun SuggestSubagentTaskPanel(
     }
 }
 
-/**
- * Complete typed configuration menus, rendered after persistent content directly in the
- * surrounding TuiPopupHost. Every callback edits the exact call and latest configuration;
- * stale/submitting callbacks are rejected by the component. Models are observed read-only.
- */
 @Composable
-public fun BoxScope.SuggestSubagentTaskConfigurationMenus(
+public actual fun BoxScope.SuggestSubagentTaskConfigurationMenus(
     viewModel: SuggestSubagentTaskViewModel,
     state: SuggestSubagentTaskState.Pending,
     dropdowns: SuggestSubagentTaskDropdowns,

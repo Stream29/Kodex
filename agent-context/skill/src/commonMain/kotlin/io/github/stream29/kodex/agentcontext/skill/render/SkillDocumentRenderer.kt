@@ -4,7 +4,7 @@ import io.github.stream29.kodex.agentcontext.promptdsl.promptXml
 import io.github.stream29.kodex.agentcontext.skill.contract.SkillDocument
 
 /** Renders one selected skill as durable contextual user input. */
-public fun SkillDocument.render(): String = promptXml(indented = false) {
+public actual fun SkillDocument.render(): String = promptXml(indented = false) {
     tag("skill") {
         rawText("\n")
         tag("name") { text(skill.name) }

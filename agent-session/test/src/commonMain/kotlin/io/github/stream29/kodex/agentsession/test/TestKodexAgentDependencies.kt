@@ -6,14 +6,13 @@ import io.github.stream29.kodex.agentstate.test.TestMcpService
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
-import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** Dependencies for session tests that do not execute external services. */
-public fun testKodexAgentDependencies(
-    client: OpenAiClient = mockOpenAiClient(),
+public actual fun testKodexAgentDependencies(
+    client: OpenAiClient,
 ): KodexAgentDependencies {
     val model = ModelInfo(
         slug = OpenAiModelId(TestModel),

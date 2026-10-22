@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.utils.shellclient.default
@@ -37,17 +39,17 @@ import kotlin.time.Duration.Companion.seconds
  * Settings/auth/model/global initialization does not acquire the Session
  * repository; its original host creates it on the first real Session/catalog access.
  */
-public suspend fun <R> withBackendServices(
+public actual suspend fun <R> withBackendServices(
     home: Path,
     codexHome: Path,
     agentsHome: Path,
-    defaults: BackendSettings = defaultBackendSettings(),
-    createLoginClient: () -> LoginClient = { OpenAiLoginClient() },
-    createClient: (OpenAiAuthStore) -> Client = { OpenAiClient(it) },
-    createTitleGenerator: (Client) -> SessionTitleGenerator = { OpenAiSessionTitleGenerator(it) },
-    renewBackend: suspend () -> Unit = {},
-    backendRenewalInterval: () -> Duration = { 20.seconds },
-    checkAdmission: () -> Unit = {},
+    defaults: BackendSettings,
+    createLoginClient: () -> LoginClient,
+    createClient: (OpenAiAuthStore) -> Client,
+    createTitleGenerator: (Client) -> SessionTitleGenerator,
+    renewBackend: suspend () -> Unit,
+    backendRenewalInterval: () -> Duration,
+    checkAdmission: () -> Unit,
     block: suspend CoroutineScope.(BackendServices) -> R,
 ): R = coroutineScope {
     val owner = supervisorChildScope()
@@ -106,14 +108,14 @@ public suspend fun <R> withBackendServices(
 }
 
 /** Registered exactly once per shared connection; the graph remains owned by its host. */
-public class BackendServices internal constructor(
-    public val global: GlobalRpc,
-    public val runtime: AgentRuntimeRpc,
+public actual class BackendServices internal constructor(
+    public actual val global: GlobalRpc,
+    public actual val runtime: AgentRuntimeRpc,
     private val host: BackendSessionHost,
-    public val settings: BackendGlobalState,
-    public val notifications: kotlinx.coroutines.flow.Flow<io.github.stream29.kodex.rpc.models.Notification>,
+    public actual val settings: BackendGlobalState,
+    public actual val notifications: kotlinx.coroutines.flow.Flow<io.github.stream29.kodex.rpc.models.Notification>,
 ) {
-    public fun register(server: RpcServer) {
+    public actual fun register(server: RpcServer) {
         server.registerService(GlobalRpc::class) { global }
         server.registerService(AgentRuntimeRpc::class) { runtime }
         server.registerService(IndexTimelineRpc::class) { BackendIndexTimelineRpc(host) }
@@ -125,8 +127,7 @@ public class BackendServices internal constructor(
     }
 }
 
-/** Same baseline values as the original settings, without its frontend or control-Hook fields. */
-public fun defaultBackendSettings(): BackendSettings = BackendSettings(
+public actual fun defaultBackendSettings(): BackendSettings = BackendSettings(
     authSource = KodexAuthSource.Codex,
     shell = Shell.default,
     contextSources = AgentContextSourceSettings(),

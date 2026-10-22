@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.components
 
 import androidx.compose.runtime.Composable
@@ -28,30 +30,27 @@ import io.github.stream29.kodex.utils.terminaltext.takeLastFittingTerminalWidth
 import io.github.stream29.kodex.utils.terminaltext.terminalCellSegments
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 
-/** Rendered rows, source mappings, cursor position, and optional viewport for a [TextInput]. */
 @Immutable
-public class TextInputLayout private constructor(
+public actual class TextInputLayout private constructor(
     private val visualLines: List<VisualLine>,
     private val maximumVisibleRows: Int,
-    public val width: Int,
-    public val cursorColumn: Int,
-    public val cursorRow: Int,
-    public val cursorContentColumn: Int,
+    public actual val width: Int,
+    public actual val cursorColumn: Int,
+    public actual val cursorRow: Int,
+    public actual val cursorContentColumn: Int,
 ) {
-    /** Display text before applying a bounded vertical viewport. */
-    public val renderedText: String
+    public actual val renderedText: String
         get() = lines.joinToString("\n")
 
-    public val lines: List<String> = visualLines.map { it.prefix + it.content }
+    public actual val lines: List<String> = visualLines.map { it.prefix + it.content }
 
-    public val rowCount: Int
+    public actual val rowCount: Int
         get() = visualLines.size
 
-    public val visibleRowCount: Int
+    public actual val visibleRowCount: Int
         get() = minOf(rowCount, maximumVisibleRows).coerceAtLeast(1)
 
-    /** Returns a copy whose renderer exposes at most [maximumRows] visual rows. */
-    public fun withViewportRows(maximumRows: Int): TextInputLayout {
+    public actual fun withViewportRows(maximumRows: Int): TextInputLayout {
         require(maximumRows > 0) { "A text-input viewport must contain at least one row." }
         return TextInputLayout(
             visualLines = visualLines,
@@ -63,10 +62,9 @@ public class TextInputLayout private constructor(
         )
     }
 
-    /** Builds text for a clamped slice of visual rows. */
-    public fun visibleText(
+    public actual fun visibleText(
         firstRow: Int,
-        rowCount: Int = visibleRowCount,
+        rowCount: Int,
     ): AnnotatedString {
         val safeFirst = firstRow.coerceIn(0, (this.rowCount - 1).coerceAtLeast(0))
         val safeEnd = (safeFirst + rowCount.coerceAtLeast(1)).coerceAtMost(this.rowCount)
@@ -79,8 +77,7 @@ public class TextInputLayout private constructor(
         }
     }
 
-    /** Maps a visual-row terminal-cell position to the nearest editable source boundary. */
-    public fun sourceOffsetAt(column: Int, row: Int): Int {
+    public actual fun sourceOffsetAt(column: Int, row: Int): Int {
         val line = visualLines[row.coerceIn(0, visualLines.lastIndex)]
         return line.sourceOffsetAt(column)
     }
@@ -95,19 +92,13 @@ public class TextInputLayout private constructor(
         return line.sourceEnd
     }
 
-    public companion object {
-        /**
-         * Creates a terminal-cell-aware text layout.
-         *
-         * When [softWrap] is false, each hard line retains the legacy horizontal clipping
-         * behavior. Soft wrapping preserves source ranges and never inserts text newlines.
-         */
-        public fun create(
+    public actual companion object {
+        public actual fun create(
             value: TextInputValue,
             width: Int,
-            firstLinePrefix: String = "",
-            continuationLinePrefix: String = firstLinePrefix,
-            softWrap: Boolean = false,
+            firstLinePrefix: String,
+            continuationLinePrefix: String,
+            softWrap: Boolean,
         ): TextInputLayout {
             val safeWidth = width.coerceAtLeast(1)
             val safeOffset = value.cursorOffset.coerceIn(0, value.text.length)
@@ -158,21 +149,17 @@ public class TextInputLayout private constructor(
     }
 }
 
-/**
- * A focusable terminal text input backed by [state].
- * [readOnly] preserves focus and cursor navigation but blocks edits and custom key actions.
- */
 @Composable
-public fun TextInput(
+public actual fun TextInput(
     state: TextInputState,
     layout: TextInputLayout,
-    modifier: Modifier = Modifier,
-    focusRequester: FocusRequester? = null,
-    autoFocus: Boolean = false,
-    enabled: Boolean = true,
-    onKeyEvent: ((KeyEvent) -> Boolean)? = null,
-    onValueChanged: ((TextInputValue) -> Unit)? = null,
-    readOnly: Boolean = false,
+    modifier: Modifier,
+    focusRequester: FocusRequester?,
+    autoFocus: Boolean,
+    enabled: Boolean,
+    onKeyEvent: ((KeyEvent) -> Boolean)?,
+    onValueChanged: ((TextInputValue) -> Unit)?,
+    readOnly: Boolean,
 ) {
     val latestOnKeyEvent = rememberUpdatedState(onKeyEvent)
     val latestOnValueChanged = rememberUpdatedState(onValueChanged)

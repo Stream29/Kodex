@@ -8,26 +8,14 @@ import com.jakewharton.mosaic.ui.Column
 import io.github.stream29.kodex.app.hooksettings.HookSettingsDialog
 import io.github.stream29.kodex.app.hooksettings.HookSettingsViewModel
 
-/**
- * Full Hook list and independent dialog renderer. Consume the exact stable Settings child inside
- * a TuiPopupHost; the host owns page selection and calls hidePage on leaving / close on disposal.
- * This renderer never creates a VM/store, captures a baseline or keeps business draft state.
- * For a scrollable Settings page use [HookSettingsPanel] in its viewport and
- * [HookSettingsDialogs] at the containing popup host instead.
- */
 @Composable
-public fun BoxScope.HookSettingsComponent(viewModel: HookSettingsViewModel) {
+public actual fun BoxScope.HookSettingsComponent(viewModel: HookSettingsViewModel) {
     HookSettingsPanel(viewModel)
     HookSettingsDialogs(viewModel)
 }
 
-/**
- * List/failure surface only; layout, focus and scrolling belong to its caller.
- * Set [showOperationFailure] false only when the host renders the shared failure
- * acknowledgement itself, so one application failure does not produce duplicate banners.
- */
 @Composable
-public fun HookSettingsPanel(viewModel: HookSettingsViewModel, showOperationFailure: Boolean = true) {
+public actual fun HookSettingsPanel(viewModel: HookSettingsViewModel, showOperationFailure: Boolean) {
     val state by viewModel.state.collectAsState()
     if (state.closed) return
     Column {
@@ -43,9 +31,8 @@ public fun HookSettingsPanel(viewModel: HookSettingsViewModel, showOperationFail
     }
 }
 
-/** Overlay renderer; every callback is bound to its exact VM-owned dialog token. */
 @Composable
-public fun BoxScope.HookSettingsDialogs(viewModel: HookSettingsViewModel) {
+public actual fun BoxScope.HookSettingsDialogs(viewModel: HookSettingsViewModel) {
     val state by viewModel.state.collectAsState()
     if (state.closed) return
     when (val dialog = state.dialog) {

@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.app
 
 import io.github.stream29.kodex.cli.historyindex.HistoryIndexSidebarBody
@@ -70,9 +72,8 @@ import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
 
-/** Renders one independently configured side, borrowing its exact Agent and children. */
 @Composable
-public fun SessionSidebar(
+public actual fun SessionSidebar(
     side: SessionSidebarSide,
     content: SidebarContent,
     selectedAgent: AgentViewModel?,
@@ -82,13 +83,13 @@ public fun SessionSidebar(
     onHoverChanged: (Boolean) -> Unit,
     onToggleExpanded: () -> Unit,
     onOpenShellSessionMenu: (ShellSessionMenuRequest) -> Unit,
-    onShellSessionHoverChanged: (ShellSessionInteractionRequest, Boolean) -> Unit = { _, _ -> },
-    onHistoryIndexHoverChanged: (HistoryIndexInteractionRequest, Boolean) -> Unit = { _, _ -> },
-    onOpenHistoryIndexMenu: (HistoryIndexMenuRequest) -> Unit = {},
-    resizable: Boolean = true,
-    onResizeStart: (Int) -> Unit = {},
-    onResize: (Int) -> Unit = {},
-    onResizeEnd: (Int) -> Unit = {},
+    onShellSessionHoverChanged: (ShellSessionInteractionRequest, Boolean) -> Unit,
+    onHistoryIndexHoverChanged: (HistoryIndexInteractionRequest, Boolean) -> Unit,
+    onOpenHistoryIndexMenu: (HistoryIndexMenuRequest) -> Unit,
+    resizable: Boolean,
+    onResizeStart: (Int) -> Unit,
+    onResize: (Int) -> Unit,
+    onResizeEnd: (Int) -> Unit,
 ) {
     val contentColumns = (columns - SessionSidebarSplitterColumns).coerceAtLeast(0)
     Row(
@@ -397,7 +398,7 @@ private fun TerminalSessionsSidebarBody(
 }
 
 @Composable
-public fun SessionSidebarExpandButton(
+public actual fun SessionSidebarExpandButton(
     side: SessionSidebarSide,
     onHoverChanged: (Boolean) -> Unit,
     onExpand: () -> Unit,
@@ -418,7 +419,7 @@ public fun SessionSidebarExpandButton(
 }
 
 @Composable
-public fun BoxScope.SessionSidebarContentMenu(
+public actual fun BoxScope.SessionSidebarContentMenu(
     dropdownState: TuiDropdownState,
     selected: SidebarContent,
     onSelect: (SidebarContent) -> Unit,
@@ -494,7 +495,7 @@ internal fun ShellSessionSidebarRow(
 }
 
 @Composable
-public fun BoxScope.ShellSessionContextMenu(
+public actual fun BoxScope.ShellSessionContextMenu(
     request: ShellSessionMenuRequest?,
     onDismissRequest: () -> Unit,
 ) {
@@ -521,7 +522,7 @@ public fun BoxScope.ShellSessionContextMenu(
 }
 
 @Composable
-public fun BoxScope.ShellSessionHoverPopup(
+public actual fun BoxScope.ShellSessionHoverPopup(
     request: ShellSessionInteractionRequest?,
     contentColumns: Int,
     contentRows: Int,
@@ -666,30 +667,13 @@ private fun collectOngoingShellSessions(selectedAgent: AgentViewModel?): List<Ag
     }
 }
 
-/** Renderer request retains the exact process handle, not a process-id lookup on another Agent. */
-public data class ShellSessionMenuRequest(
-    public val session: AgentShellSession,
-    public val anchor: TuiPopupAnchor,
-    public val clickPosition: IntOffset?,
-)
-
 @Stable
-public class ShellSessionInteractionRequest(
-    public val side: SessionSidebarSide,
-    public val session: AgentShellSession,
-    public val anchor: TuiPopupAnchor,
+public actual class ShellSessionInteractionRequest actual constructor(
+    public actual val side: SessionSidebarSide,
+    public actual val session: AgentShellSession,
+    public actual val anchor: TuiPopupAnchor,
 ) {
-    public var pointerPosition: IntOffset? by mutableStateOf(null)
-}
-
-/** Renderer-only direction and geometry; never a portable spec value. */
-public enum class SessionSidebarSide(
-    internal val collapseLabel: String,
-    internal val expandLabel: String,
-    internal val resizeDirection: Int,
-) {
-    Left(collapseLabel = "←", expandLabel = "→", resizeDirection = 1),
-    Right(collapseLabel = "→", expandLabel = "←", resizeDirection = -1),
+    public actual var pointerPosition: IntOffset? by mutableStateOf(null)
 }
 
 internal val SidebarContent.displayName: String
@@ -816,7 +800,7 @@ internal fun shellSessionSidebarSummary(
     return prefix + visibleContent
 }
 
-public fun canExpandSessionSidebar(
+public actual fun canExpandSessionSidebar(
     columns: Int,
     requestedColumns: Int,
     oppositeColumns: Int,
@@ -826,7 +810,7 @@ public fun canExpandSessionSidebar(
         oppositeColumns.coerceAtLeast(0) +
         SessionSidebarMinimumContentColumns
 
-public fun clampSessionSidebarResize(
+public actual fun clampSessionSidebarResize(
     columns: Int,
     oppositeColumns: Int,
     requestedColumns: Int,
@@ -843,7 +827,7 @@ public fun clampSessionSidebarResize(
     )
 }
 
-public fun resolveSessionSidebarColumns(
+public actual fun resolveSessionSidebarColumns(
     columns: Int,
     leftColumns: Int,
     rightColumns: Int,
@@ -876,14 +860,6 @@ public fun resolveSessionSidebarColumns(
     )
 }
 
-public data class SessionSidebarColumns(
-    public val left: Int,
-    public val content: Int,
-    public val right: Int,
-)
-
-public const val SessionSidebarCollapsedButtonColumns: Int = 3
-public const val SessionSidebarCollapsedButtonRows: Int = 1
 internal const val SessionSidebarSplitterColumns: Int = 1
 internal const val SessionSidebarMinimumContentColumns: Int = 1
 private val SidebarHoverDelay = 300.milliseconds

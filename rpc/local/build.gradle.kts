@@ -11,19 +11,17 @@ kotlin {
         named("specMain").dependencies {
             api(libs.kotlinx.rpc.core)
             api(libs.kotlinx.coroutines.core)
+            api(project(":app-backend-daemon"))
+            api(libs.kotlinx.io.core)
         }
         commonMain.dependencies {
-            implementation(project(":app-backend-daemon"))
             implementation(project(":rpc-websocket"))
-            api(libs.kotlinx.rpc.core)
-            api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.rpc.krpc.client)
             implementation(libs.kotlinx.rpc.krpc.serialization.json)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.websockets)
         }
-        jvmMain.dependencies { implementation(libs.ktor.client.cio) }
         macosArm64Main.dependencies { implementation(libs.ktor.client.darwin) }
         linuxMain.dependencies { implementation(libs.ktor.client.curl) }
         mingwX64Main.dependencies { implementation(libs.ktor.client.winhttp) }

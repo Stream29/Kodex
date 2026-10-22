@@ -11,9 +11,9 @@ kotlin {
             api(project(":rpc-models"))
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
+            api(project(":utils-kotlinx-io-coroutines-system"))
         }
         commonMain.dependencies {
-            api(project(":utils-kotlinx-io-coroutines-system"))
             implementation(libs.kaml)
             implementation(libs.kotlinx.serialization.core)
         }

@@ -36,34 +36,14 @@ internal class HeldLeaseKodexHomeHandle(
     }
 }
 
-public val CurrentKodexApplicationVersion: MigrationVersion by lazy {
+public actual val CurrentKodexApplicationVersion: MigrationVersion by lazy {
     MigrationVersion(GeneratedKodexApplicationVersion)
 }
 
-/**
- * Prepares [home] and returns the unique [KodexHomeHandle] contract, owned by this scope.
- *
- * Uses the generated [CurrentKodexApplicationVersion] and the existing migration
- * registry. The handle contract documents accepted versions, lease lifetime and
- * cancellation semantics. [onMigrationStarted] runs before each applicable action.
- *
- * @throws KodexHomeVersionException If the version file is invalid or unreadable,
- * the stored version is newer, or the final prepared version is missing or
- * still requires migration.
- * @throws KodexHomeLayoutException If baseline validation of an unversioned Home
- * rejects its Session entries, required timelines or latest pointers.
- * @throws KodexHomeInUseException If initialization or data migration cannot
- * obtain exclusive access because another instance is using the Home.
- * @throws IllegalStateException If migration registry targets are not unique and
- * strictly increasing.
- * @throws IllegalArgumentException If this scope has no owner Job.
- * @throws CancellationException If preparation is cancelled.
- */
-public suspend fun CoroutineScope.prepareKodexHome(
+public actual suspend fun CoroutineScope.prepareKodexHome(
     home: Path,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-    onMigrationStarted: (fromVersion: MigrationVersion, toVersion: MigrationVersion) -> Unit =
-        { _, _ -> },
+    fileSystem: CoroutineFileSystem,
+    onMigrationStarted: (fromVersion: MigrationVersion, toVersion: MigrationVersion) -> Unit,
 ): KodexHomeHandle = prepareKodexHome(
     home = home,
     currentVersion = CurrentKodexApplicationVersion,

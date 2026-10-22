@@ -5,10 +5,14 @@ plugins {
 
 kotlin {
     sourceSets {
+        named("specMain") {
+            dependencies {
+                api(project(":agent-session-contract"))
+                api(project(":openai-client-test"))
+            }
+        }
         commonMain.dependencies {
-            api(project(":agent-session-contract"))
             implementation(project(":agent-state-test"))
-            implementation(project(":openai-client-test"))
             implementation(project(":openai-model-catalog"))
             implementation(project(":openai-models"))
             implementation(libs.kotlinx.coroutines.core)

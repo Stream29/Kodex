@@ -9,27 +9,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.minutes
-import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
-/**
- * Creates the host's one lifecycle authority; no process, RPC service or background task is started.
- *
- * @throws IllegalArgumentException if [idleTimeout] is zero or negative.
- */
-public fun createBackendLifecycle(
-    idleTimeout: Duration = 5.minutes,
-    timeSource: TimeSource = TimeSource.Monotonic,
+public actual fun createBackendLifecycle(
+    idleTimeout: Duration,
+    timeSource: TimeSource,
 ): BackendLifecycle = BackendLifecycleImpl(idleTimeout, timeSource)
 
-/**
- * Host-owned expiry observer. Cancellation stops this observer only, not accepted shutdown.
- * The host should launch exactly one observer and cancel it during its resource cleanup.
- *
- * @throws IllegalArgumentException if [pollInterval] is nonpositive or infinite.
- */
-public suspend fun BackendLifecycle.monitorIdleExpiry(pollInterval: Duration = 1.seconds) {
+public actual suspend fun BackendLifecycle.monitorIdleExpiry(pollInterval: Duration) {
     require(pollInterval.isPositive() && pollInterval.isFinite()) {
         "The expiry poll interval must be finite and positive."
     }

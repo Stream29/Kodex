@@ -1,8 +1,9 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.agentstorage.filesystem
 
 import io.github.stream29.kodex.agentstorage.contract.MutableIndexVersioned
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.copyTo
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -26,27 +27,27 @@ import kotlin.uuid.Uuid
  * A failed or cancelled revert compensates its in-process file moves. Process
  * interruption is not repaired when the timeline is opened.
  */
-public class FileSystemIndexVersioned<T>(
+public actual class FileSystemIndexVersioned<T> actual constructor(
     internal val directory: Path,
     private val serializer: KSerializer<T>,
     private val json: Json,
-    internal val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    internal val fileSystem: CoroutineFileSystem,
 ) : MutableIndexVersioned<T> {
-    override suspend fun latestIndex(): Int {
+    actual override suspend fun latestIndex(): Int {
         latestIndexFromPointerOrNull()?.let { return it }
         val rebuilt = storedIndexes().lastOrNull() ?: EmptyIndex
         tryCreateLatestIndex(rebuilt)
         return rebuilt
     }
 
-    override suspend fun get(index: Int): T {
+    actual override suspend fun get(index: Int): T {
         require(index >= 0) { "Index $index must be non-negative." }
         val storedIndex = floorToIndex(index)
             ?: throw IllegalArgumentException("No value is visible at index $index.")
         return getUnsafe(storedIndex)
     }
 
-    override suspend fun getExact(index: Int): T? {
+    actual override suspend fun getExact(index: Int): T? {
         require(index >= 0) { "Index $index must be non-negative." }
         if (fileSystem.metadataOrNull(directory.entryPath(index))?.isRegularFile != true) {
             return null
@@ -54,21 +55,21 @@ public class FileSystemIndexVersioned<T>(
         return getUnsafe(index)
     }
 
-    override suspend fun floorToIndex(index: Int): Int? {
+    actual override suspend fun floorToIndex(index: Int): Int? {
         if (index >= 0 && fileSystem.metadataOrNull(directory.entryPath(index))?.isRegularFile == true) {
             return index
         }
         return storedIndexes().binaryFloor(index)
     }
 
-    override suspend fun ceilToIndex(index: Int): Int? {
+    actual override suspend fun ceilToIndex(index: Int): Int? {
         if (index >= 0 && fileSystem.metadataOrNull(directory.entryPath(index))?.isRegularFile == true) {
             return index
         }
         return storedIndexes().binaryCeil(index)
     }
 
-    override suspend fun indexesIn(range: IntRange): List<Int> {
+    actual override suspend fun indexesIn(range: IntRange): List<Int> {
         if (range.isEmpty()) return emptyList()
         require(range.first >= 0) {
             "Index lower bound ${range.first} must be non-negative."
@@ -86,7 +87,7 @@ public class FileSystemIndexVersioned<T>(
         return indexes.subList(firstPosition, lastExclusive).toList()
     }
 
-    override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>> {
+    actual override suspend fun valuesIn(range: IntRange): List<Pair<Int, T>> {
         if (range.isEmpty()) return emptyList()
         require(range.first >= 0) {
             "Index lower bound ${range.first} must be non-negative."
@@ -105,7 +106,7 @@ public class FileSystemIndexVersioned<T>(
             .map { index -> index to getUnsafe(index) }
     }
 
-    override suspend fun set(index: Int, value: T) {
+    actual override suspend fun set(index: Int, value: T) {
         require(index >= 0) { "Index $index must be non-negative." }
         val latest = latestIndex()
         require(index > latest) {
@@ -115,7 +116,7 @@ public class FileSystemIndexVersioned<T>(
     }
 
     @OptIn(ExperimentalUuidApi::class)
-    override suspend fun revert(untilExclusive: Int) {
+    actual override suspend fun revert(untilExclusive: Int) {
         require(untilExclusive >= 0) {
             "Revert boundary $untilExclusive must be non-negative."
         }
@@ -160,7 +161,7 @@ public class FileSystemIndexVersioned<T>(
     }
 
     /** Lists stored change-point indexes in ascending order. */
-    public suspend fun storedIndexes(): List<Int> {
+    public actual suspend fun storedIndexes(): List<Int> {
         if (fileSystem.metadataOrNull(directory)?.isDirectory != true) return emptyList()
         return fileSystem.list(directory)
             .mapNotNull { path -> path.name.toStoredIndexOrNull() }
@@ -171,7 +172,7 @@ public class FileSystemIndexVersioned<T>(
      * Reads exactly the entry at [index] without resolving a sparse timeline
      * floor. Callers must establish that [index] is a stored change point.
      */
-    public suspend fun getUnsafe(index: Int): T {
+    public actual suspend fun getUnsafe(index: Int): T {
         return json.decodeFromString(serializer, fileSystem.readString(directory.entryPath(index)))
     }
 
@@ -181,11 +182,11 @@ public class FileSystemIndexVersioned<T>(
      * The destination receives rebased names.  This is intentionally limited
      * to timelines whose payload needs no transformation.
      */
-    public suspend fun copyRangeRawTo(
+    public actual suspend fun copyRangeRawTo(
         from: Int,
         until: Int,
         target: FileSystemIndexVersioned<T>,
-        snapshotAtStart: Boolean = false,
+        snapshotAtStart: Boolean,
     ) {
         require(from >= 0 && until > from) { "Invalid fork range [$from, $until)." }
         require(target.latestIndex() == EmptyIndex) { "Target timeline must be empty." }
@@ -218,7 +219,7 @@ public class FileSystemIndexVersioned<T>(
      * Callers must own the timeline and maintain its index invariants.
      */
     @OptIn(ExperimentalUuidApi::class)
-    public suspend fun setUnsafe(index: Int, value: T) {
+    public actual suspend fun setUnsafe(index: Int, value: T) {
         require(index >= 0) { "Index $index must be non-negative." }
         fileSystem.createDirectories(directory)
         val previousLatest = latestIndex()
@@ -261,7 +262,7 @@ public class FileSystemIndexVersioned<T>(
      * The caller must own this timeline and prove that [index] is the greatest
      * stored index, or `-1` when the timeline is empty.
      */
-    public suspend fun reconcileLatestIndexUnsafe(index: Int) {
+    public actual suspend fun reconcileLatestIndexUnsafe(index: Int) {
         require(index >= EmptyIndex) { "Latest index $index must be at least -1." }
         require(
             index == EmptyIndex ||
@@ -280,7 +281,7 @@ public class FileSystemIndexVersioned<T>(
      *
      * Returns `null` when the pointer is missing, malformed, or dangling.
      */
-    public suspend fun latestIndexFromPointerOrNull(): Int? {
+    public actual suspend fun latestIndexFromPointerOrNull(): Int? {
         return try {
             val index = json.decodeFromString(
                 Int.serializer(),

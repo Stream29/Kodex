@@ -26,11 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/**
- * Creates a dependency-only draft owner with the lifecycle/admission contract of
- * [RequestUserInputViewModelFactory.create]; no runtime or repository is constructed here.
- */
-public fun createRequestUserInputViewModel(
+public actual fun createRequestUserInputViewModel(
     dependencies: RequestUserInputDependencies,
     ownerScope: CoroutineScope,
 ): RequestUserInputViewModel = RequestUserInputViewModelImpl(
@@ -41,8 +37,7 @@ public fun createRequestUserInputViewModel(
     }
 }
 
-/** Typed assembly entrypoint with the ownership contract declared in component spec. */
-public val requestUserInputViewModelFactory: RequestUserInputViewModelFactory =
+public actual val requestUserInputViewModelFactory: RequestUserInputViewModelFactory =
     RequestUserInputViewModelFactory(::createRequestUserInputViewModel)
 
 /** Revision-bound answer drafts for one Agent's current blocking interaction. */

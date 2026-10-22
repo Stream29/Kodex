@@ -5,12 +5,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-/**
- * Fits dimensions into a bounding square while preserving aspect ratio.
- *
- * @throws IllegalArgumentException if [maxDimension] is not positive.
- */
-public fun ImageDimensions.fitWithinMaxDimension(maxDimension: Int): ImageDimensions {
+public actual fun ImageDimensions.fitWithinMaxDimension(maxDimension: Int): ImageDimensions {
     require(maxDimension >= 1) { "maxDimension must be positive" }
     if (width <= maxDimension && height <= maxDimension) return this
 
@@ -21,10 +16,7 @@ public fun ImageDimensions.fitWithinMaxDimension(maxDimension: Int): ImageDimens
     )
 }
 
-/**
- * Computes the output dimensions for Codex prompt image patch and dimension limits.
- */
-public fun ImageDimensions.fitPromptImageLimits(
+public actual fun ImageDimensions.fitPromptImageLimits(
     limits: PromptImageResizeLimits,
 ): ImageDimensions {
     var outputWidth = width
@@ -61,10 +53,7 @@ public fun ImageDimensions.fitPromptImageLimits(
     )
 }
 
-/**
- * Returns true when dimensions already satisfy Codex prompt image limits.
- */
-public fun ImageDimensions.fitsPromptImageLimits(
+public actual fun ImageDimensions.fitsPromptImageLimits(
     limits: PromptImageResizeLimits,
 ): Boolean {
     val patchesWide = width.ceilDiv(PromptImages.PatchSize)

@@ -6,7 +6,6 @@ import io.github.stream29.kodex.agentcontext.prefix.agentsmd.contract.AgentsMdSn
 import io.github.stream29.kodex.agentcontext.prefix.agentsmd.contract.AgentsMdWarning
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSourcePlan
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -22,13 +21,13 @@ import kotlinx.io.readByteArray
  * @throws CancellationException if a filesystem operation or the caller is cancelled.
  * @throws Error if the filesystem raises a non-recoverable error.
  */
-public suspend fun loadAgentsMd(
+public actual suspend fun loadAgentsMd(
     agentsHome: Path,
     kodexHome: Path,
     cwd: Path,
-    projectRootMarkers: List<String> = listOf(".git"),
-    projectDocMaxBytes: Int = DefaultProjectDocMaxBytes,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    projectRootMarkers: List<String>,
+    projectDocMaxBytes: Int,
+    fileSystem: CoroutineFileSystem,
 ): AgentsMdSnapshot {
     val roots = discoveryRoots(
         agentsHome = agentsHome,
@@ -55,10 +54,10 @@ public suspend fun loadAgentsMd(
  * @throws CancellationException if a filesystem operation or the caller is cancelled.
  * @throws Error if the filesystem raises a non-recoverable error.
  */
-public suspend fun loadAgentsMd(
+public actual suspend fun loadAgentsMd(
     plan: AgentContextSourcePlan,
-    projectDocMaxBytes: Int = DefaultProjectDocMaxBytes,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    projectDocMaxBytes: Int,
+    fileSystem: CoroutineFileSystem,
 ): AgentsMdSnapshot {
     require(projectDocMaxBytes >= 0) { "Project document byte budget must be non-negative." }
     val discoveredSources = mutableSetOf<Path>()
@@ -255,5 +254,4 @@ private enum class AgentsMdRootScope {
 }
 
 private const val AgentsMdFileName: String = "AGENTS.md"
-private const val DefaultProjectDocMaxBytes: Int = 32 * 1024
 private const val ReadSegmentByteCount: Long = 64 * 1024L

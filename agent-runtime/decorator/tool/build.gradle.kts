@@ -9,21 +9,20 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(project(":agent-runtime-contract"))
+                api(project(":tool-core"))
+                api(project(":tool-tool-search-backend"))
+                api(libs.kotlin.logging)
+                api(libs.kotlinx.coroutines.core)
             }
         }
         commonMain.dependencies {
-            api(project(":agent-runtime-contract"))
-            api(project(":tool-core"))
-            api(project(":tool-tool-search"))
-            api(libs.kotlin.logging)
-            api(libs.kotlinx.coroutines.core)
-            implementation(project(":utils-logging"))
+            implementation(project(":utils-logging-backend-scope"))
         }
         commonTest.dependencies {
             implementation(project(":agent-state-core"))
             implementation(project(":agent-state-test"))
             implementation(project(":agent-storage-core"))
-            implementation(project(":mcp"))
+            implementation(project(":mcp-contract"))
             implementation(project(":openai-client-test"))
             implementation(project(":openai-json-codec"))
             implementation(project(":tool-apply-patch"))

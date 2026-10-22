@@ -9,7 +9,7 @@ import io.github.stream29.kodex.openai.ToolSpec
  * shape. [select] keeps the downcast at the contract boundary so tool business
  * logic receives its typed pending model directly.
  */
-public fun <Pending : PendingToolEvent> typedTool(
+public actual fun <Pending : PendingToolEvent> typedTool(
     spec: ToolSpec,
     select: (PendingToolEvent) -> Pending?,
     handler: suspend (Pending) -> StableCleanEvent.CompletedTool,

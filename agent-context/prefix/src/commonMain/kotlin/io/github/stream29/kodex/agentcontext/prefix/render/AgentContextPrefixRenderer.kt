@@ -14,12 +14,7 @@ import kotlinx.datetime.toLocalDateTime
 import kotlinx.io.files.Path
 import kotlin.time.Clock
 
-/**
- * Renders current host context into the transient prefix of one Responses request.
- *
- * The returned items are intentionally never written to agent storage.
- */
-public fun AgentContextPrefix.render(): List<ResponseItem.HistoryItem> {
+public actual fun AgentContextPrefix.render(): List<ResponseItem.HistoryItem> {
     val developerSections = listOfNotNull(
         availableSkills.takeIf { it.isNotEmpty() }?.render(),
     )

@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.components
 
 import androidx.compose.runtime.Composable
@@ -10,68 +12,16 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 
-/**
- * Consumes scrolling measured in terminal cells along one logical axis.
- *
- * Positive deltas move toward the logical end and negative deltas move toward the logical start.
- * [scrollBy] returns the signed portion that was consumed.
- */
-@Stable
-public interface ScrollableState {
-    public val canScrollBackward: Boolean
-    public val canScrollForward: Boolean
-    public val isScrollInProgress: Boolean
-
-    public fun scrollBy(delta: Int): Int
-}
-
-/** Axis interpreted by scrolling input. */
-public enum class ScrollOrientation {
-    Vertical,
-    Horizontal,
-}
-
-/** Source that initiated a [ScrollInteraction]. */
-public enum class ScrollInputSource(public val isUserInitiated: Boolean) {
-    Pointer(isUserInitiated = true),
-    Keyboard(isUserInitiated = true),
-    FocusRelocation(isUserInitiated = true),
-    Programmatic(isUserInitiated = false),
-}
-
-/**
- * A committed scroll mutation.
- *
- * Zero-consumption attempts are not interactions. A future request-based position change may emit
- * an interaction when it changes pending intent, even before layout resolves its consumed delta.
- */
-public data class ScrollInteraction(
-    public val source: ScrollInputSource,
-    public val orientation: ScrollOrientation,
-    public val requestedDelta: Int,
-    public val consumedDelta: Int,
-)
-
-/** Read-only stream of committed scroll interactions. */
-public interface ScrollInteractionSource {
-    public val interactions: SharedFlow<ScrollInteraction>
-}
-
-/**
- * Mutable publisher used by scrolling input and layout adapters.
- *
- * [onInteractionCommitted] runs synchronously before the interaction is published to [interactions].
- */
-public class MutableScrollInteractionSource(
-    private val onInteractionCommitted: ((ScrollInteraction) -> Unit)? = null,
+public actual class MutableScrollInteractionSource actual constructor(
+    private val onInteractionCommitted: ((ScrollInteraction) -> Unit)?,
 ) : ScrollInteractionSource {
-    override val interactions: SharedFlow<ScrollInteraction>
+    public actual override val interactions: SharedFlow<ScrollInteraction>
         field = MutableSharedFlow(
             extraBufferCapacity = INTERACTION_BUFFER_CAPACITY,
             onBufferOverflow = BufferOverflow.DROP_OLDEST,
         )
 
-    public fun tryEmit(interaction: ScrollInteraction): Boolean {
+    public actual fun tryEmit(interaction: ScrollInteraction): Boolean {
         onInteractionCommitted?.invoke(interaction)
         return interactions.tryEmit(interaction)
     }
@@ -81,23 +31,21 @@ public class MutableScrollInteractionSource(
     }
 }
 
-/** Creates a [ScrollableState] around caller-owned position state. */
-public fun ScrollableState(
+public actual fun ScrollableState(
     consumeScrollDelta: (Int) -> Int,
-    canScrollBackward: () -> Boolean = { true },
-    canScrollForward: () -> Boolean = { true },
+    canScrollBackward: () -> Boolean,
+    canScrollForward: () -> Boolean,
 ): ScrollableState = DefaultScrollableState(
     consumeScrollDelta = consumeScrollDelta,
     canScrollBackwardProvider = canScrollBackward,
     canScrollForwardProvider = canScrollForward,
 )
 
-/** Remembers a [ScrollableState] while always invoking the latest callbacks. */
 @Composable
-public fun rememberScrollableState(
+public actual fun rememberScrollableState(
     consumeScrollDelta: (Int) -> Int,
-    canScrollBackward: () -> Boolean = { true },
-    canScrollForward: () -> Boolean = { true },
+    canScrollBackward: () -> Boolean,
+    canScrollForward: () -> Boolean,
 ): ScrollableState {
     val latestConsumeScrollDelta = rememberUpdatedState(consumeScrollDelta)
     val latestCanScrollBackward = rememberUpdatedState(canScrollBackward)
@@ -111,9 +59,8 @@ public fun rememberScrollableState(
     }
 }
 
-/** Absolute terminal-cell position for an eagerly measured scrolling container. */
 @Stable
-public class ScrollState(initial: Int = 0) : ScrollableState {
+public actual class ScrollState actual constructor(initial: Int) : ScrollableState {
     private val valueState = mutableIntStateOf(initial)
     private val maxValueState = mutableIntStateOf(Int.MAX_VALUE)
     private val viewportSizeState = mutableIntStateOf(0)
@@ -123,25 +70,25 @@ public class ScrollState(initial: Int = 0) : ScrollableState {
         require(initial >= 0) { "Initial scroll position cannot be negative." }
     }
 
-    public val value: Int
+    public actual val value: Int
         get() = valueState.intValue
 
-    public val maxValue: Int
+    public actual val maxValue: Int
         get() = maxValueState.intValue
 
-    public val viewportSize: Int
+    public actual val viewportSize: Int
         get() = viewportSizeState.intValue
 
-    override val canScrollBackward: Boolean
+    public actual override val canScrollBackward: Boolean
         get() = value > 0
 
-    override val canScrollForward: Boolean
+    public actual override val canScrollForward: Boolean
         get() = value < maxValue
 
-    override val isScrollInProgress: Boolean
+    public actual override val isScrollInProgress: Boolean
         get() = scrollInProgressState.value
 
-    override fun scrollBy(delta: Int): Int {
+    public actual override fun scrollBy(delta: Int): Int {
         if (delta == 0) return 0
         val target = (value.toLong() + delta).coerceIn(0L, maxValue.toLong()).toInt()
         val consumed = target - value
@@ -155,7 +102,7 @@ public class ScrollState(initial: Int = 0) : ScrollableState {
         }
     }
 
-    public fun scrollTo(value: Int): Int {
+    public actual fun scrollTo(value: Int): Int {
         val target = value.coerceIn(0, maxValue)
         return scrollBy(target - this.value)
     }
@@ -169,9 +116,8 @@ public class ScrollState(initial: Int = 0) : ScrollableState {
     }
 }
 
-/** Remembers an eagerly measured [ScrollState]. */
 @Composable
-public fun rememberScrollState(initial: Int = 0): ScrollState = remember { ScrollState(initial) }
+public actual fun rememberScrollState(initial: Int): ScrollState = remember { ScrollState(initial) }
 
 private class DefaultScrollableState(
     private val consumeScrollDelta: (Int) -> Int,

@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.app.settings.contract.SettingsAccountUsageState
@@ -20,8 +22,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** Credential-free observations; private reset attempts remain in the backend. */
-public class BackendAccountState(
+public actual class BackendAccountState actual constructor(
     scope: CoroutineScope,
     authStore: OpenAiAuthStore,
     client: OpenAiClient,
@@ -29,23 +30,23 @@ public class BackendAccountState(
     private val owner = scope.supervisorChildScope()
     private val usage: CodexAccountUsageStore = owner.ownedCodexAccountUsageStore(client, authStore)
     private val reset = Mutex()
-    public val authentication: StateFlow<SettingsAuthenticationState> =
+    public actual val authentication: StateFlow<SettingsAuthenticationState> =
         authStore.state.map { it.toSummary() }.stateIn(
             owner, SharingStarted.Eagerly, authStore.state.value.toSummary(),
         )
-    public val accountUsage: StateFlow<SettingsAccountUsageState> =
+    public actual val accountUsage: StateFlow<SettingsAccountUsageState> =
         usage.state.map { it.toSummary() }.stateIn(owner, SharingStarted.Eagerly, usage.state.value.toSummary())
 
-    public suspend fun refreshAccountUsage(): Unit = usage.refresh()
+    public actual suspend fun refreshAccountUsage(): Unit = usage.refresh()
 
-    public suspend fun consumeUsageReset(creditId: String): CodexRateLimitResetOutcome {
+    public actual suspend fun consumeUsageReset(creditId: String): CodexRateLimitResetOutcome {
         require(creditId.isNotBlank()) { "A specific reset credit is required." }
         return reset.withLock {
             usage.consumeResetAttempt(usage.createResetAttempt(creditId))
         }
     }
 
-    override fun close() {
+    actual override fun close() {
         try { usage.close() } finally { owner.cancel() }
     }
 

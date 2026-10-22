@@ -11,8 +11,7 @@ import io.ktor.client.statement.bodyAsText
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 
-/** Management CLI/launch bootstrap only. No business DTO or TUI recovery dependency. */
-public suspend fun backendControlRequest(endpoint: BackendEndpoint, action: String): JsonObject {
+public actual suspend fun backendControlRequest(endpoint: BackendEndpoint, action: String): JsonObject {
     require(endpoint.controlProtocol == BackendControlProtocol) { "Backend control protocol is incompatible." }
     require(action in setOf("status", "stop", "reload"))
     val client = HttpClient {

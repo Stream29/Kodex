@@ -17,15 +17,11 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.microseconds
 import kotlin.time.Duration.Companion.milliseconds
 
-/**
- * Shared read-only History/Index typography. Mosaic Text clips instead of wrapping;
- * subcomposition from the finite incoming width keeps lazy rows independently measurable.
- */
 @Composable
-public fun WrappedHistoryText(
+public actual fun WrappedHistoryText(
     value: String,
-    textStyle: TextStyle = TextStyle.Unspecified,
-    color: Color = Color.Unspecified,
+    textStyle: TextStyle,
+    color: Color,
 ) {
     val layoutCache = remember(value) { WrappedHistoryTextLayoutCache(value) }
     SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
@@ -59,8 +55,7 @@ internal class WrappedHistoryTextLayoutCache(private val value: String) {
     }
 }
 
-/** Preserves the shared elapsed-duration display's nearest-millisecond rounding. */
-public fun Duration.roundToMilliseconds(): Duration {
+public actual fun Duration.roundToMilliseconds(): Duration {
     if (!isFinite()) return this
     val truncatedMilliseconds = inWholeMilliseconds
     val remainder = this - truncatedMilliseconds.milliseconds

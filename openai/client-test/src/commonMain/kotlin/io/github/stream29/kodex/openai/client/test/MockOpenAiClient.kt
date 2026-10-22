@@ -28,13 +28,13 @@ import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
 import kotlinx.coroutines.flow.Flow
 
-public fun mockOpenAiClient(
-    block: MockOpenAiClientBuilder.() -> Unit = {},
+public actual fun mockOpenAiClient(
+    block: MockOpenAiClientBuilder.() -> Unit,
 ): OpenAiClient =
     MockOpenAiClientBuilderImpl().apply(block).build()
 
 /** Creates a test-only OpenAI client handler builder. */
-public fun MockOpenAiClientBuilder(): MockOpenAiClientBuilder =
+public actual fun MockOpenAiClientBuilder(): MockOpenAiClientBuilder =
     MockOpenAiClientBuilderImpl()
 
 internal class MockOpenAiClientBuilderImpl : MockOpenAiClientBuilder {

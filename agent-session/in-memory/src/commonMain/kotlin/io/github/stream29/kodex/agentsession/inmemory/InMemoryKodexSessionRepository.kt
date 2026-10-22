@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.agentsession.inmemory
 
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
@@ -28,7 +30,7 @@ import kotlinx.coroutines.withContext
 import kotlin.time.Instant
 
 /** Process-local root session repository for tests and transient hosts. */
-public class InMemoryKodexSessionRepository internal constructor(
+public actual class InMemoryKodexSessionRepository internal constructor(
     scope: CoroutineScope,
     private val dependencies: KodexAgentDependencies,
 ) :
@@ -39,21 +41,21 @@ public class InMemoryKodexSessionRepository internal constructor(
     private val openRoots: MutableMap<Int, InMemoryKodexAgentSession> = mutableMapOf()
     private val mutableEntries = MutableStateFlow<List<Int>>(emptyList())
 
-    override val entries: StateFlow<List<Int>> = mutableEntries.asStateFlow()
+    actual override val entries: StateFlow<List<Int>> = mutableEntries.asStateFlow()
 
     init {
         coroutineContext[Job]?.invokeOnCompletion { openRoots.clear() }
     }
 
-    override suspend fun list(): List<Int> = entriesMutex.withLock {
+    actual override suspend fun list(): List<Int> = entriesMutex.withLock {
         requireOpen()
         entries.value
     }
 
-    override suspend fun listEntries(): List<KodexRootSessionEntry> =
+    actual override suspend fun listEntries(): List<KodexRootSessionEntry> =
         listEntries(includeArchived = true)
 
-    override suspend fun listEntries(
+    actual override suspend fun listEntries(
         includeArchived: Boolean,
     ): List<KodexRootSessionEntry> = entriesMutex.withLock {
         requireOpen()
@@ -70,7 +72,7 @@ public class InMemoryKodexSessionRepository internal constructor(
         }
     }
 
-    override suspend fun getEntry(entryIndex: Int): KodexRootSessionEntry =
+    actual override suspend fun getEntry(entryIndex: Int): KodexRootSessionEntry =
         entriesMutex.withLock {
             requireOpen()
             requireSession(entryIndex).rootEntry(
@@ -82,12 +84,12 @@ public class InMemoryKodexSessionRepository internal constructor(
             )
         }
 
-    override suspend fun readCreatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
+    actual override suspend fun readCreatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
         requireOpen()
         requireSession(entryIndex).storage.timestamp.getExact(0)
     }
 
-    override suspend fun readUpdatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
+    actual override suspend fun readUpdatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
         requireOpen()
         val timestamp = requireSession(entryIndex).storage.timestamp
         timestamp.latestIndex().takeIf { it >= 0 }?.let { timestamp.getExact(it) }
@@ -101,7 +103,7 @@ public class InMemoryKodexSessionRepository internal constructor(
         requireSession(entryIndex).archived = archived
     }
 
-    override suspend fun create(): Int = entriesMutex.withLock {
+    actual override suspend fun create(): Int = entriesMutex.withLock {
         requireOpen()
         val index = nextSessionIndex()
         check(sessions.put(index, SessionNode(InMemoryKodexAgentStorage.empty())) == null)
@@ -109,7 +111,7 @@ public class InMemoryKodexSessionRepository internal constructor(
         index
     }
 
-    override suspend fun createFork(sourceEntryIndex: Int): Int = entriesMutex.withLock {
+    actual override suspend fun createFork(sourceEntryIndex: Int): Int = entriesMutex.withLock {
         requireOpen()
         val source = requireSession(sourceEntryIndex).storage
         val index = nextSessionIndex()
@@ -120,7 +122,7 @@ public class InMemoryKodexSessionRepository internal constructor(
         index
     }
 
-    override suspend fun open(entryIndex: Int): KodexAgentSession = entriesMutex.withLock {
+    actual override suspend fun open(entryIndex: Int): KodexAgentSession = entriesMutex.withLock {
         requireOpen()
         require(entryIndex >= 0) { "Session entry index must be non-negative." }
         val root = requireSession(entryIndex)
@@ -137,7 +139,7 @@ public class InMemoryKodexSessionRepository internal constructor(
         }
     }
 
-    override suspend fun delete(entryIndex: Int) {
+    actual override suspend fun delete(entryIndex: Int) {
         val openRoot = entriesMutex.withLock {
             requireOpen()
             require(entryIndex >= 0) { "Session entry index must be non-negative." }
@@ -196,7 +198,7 @@ private class InMemoryKodexAgentSession(
 }
 
 /** Creates an in-memory session repository owned by this scope. */
-public fun CoroutineScope.InMemoryKodexSessionRepository(
+public actual fun CoroutineScope.InMemoryKodexSessionRepository(
     dependencies: KodexAgentDependencies,
 ): InMemoryKodexSessionRepository =
     InMemoryKodexSessionRepository(

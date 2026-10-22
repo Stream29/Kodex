@@ -8,5 +8,5 @@ configureCoordinates()
 
 kotlin {
     configureCompiler()
-    configureHostTargets()
+    configureDesktopTargets()
 }

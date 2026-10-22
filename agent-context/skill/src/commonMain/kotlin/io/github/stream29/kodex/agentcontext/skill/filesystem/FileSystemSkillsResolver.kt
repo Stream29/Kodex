@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.agentcontext.skill.filesystem
 
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
@@ -12,7 +14,6 @@ import io.github.stream29.kodex.agentcontext.skill.contract.SkillResourceResult
 import io.github.stream29.kodex.agentcontext.skill.contract.SkillsResolver
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.FileFingerprint
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.StateFlow
@@ -30,11 +31,11 @@ import kotlinx.io.readByteArray
  * reads the current [contextSettings], so changing either global home changes
  * the global skill roots without replacing the cache-owning resolver.
  */
-public class FileSystemSkillsResolver(
+public actual class FileSystemSkillsResolver actual constructor(
     private val contextSettings: StateFlow<AgentContextSettings>,
-    projectRootMarkers: List<String> = listOf(".git"),
-    private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-    private val metadataCacheCapacity: Int = DefaultMetadataCacheCapacity,
+    projectRootMarkers: List<String>,
+    private val fileSystem: CoroutineFileSystem,
+    private val metadataCacheCapacity: Int,
 ) : SkillsResolver {
     init {
         require(metadataCacheCapacity > 0) { "Skill metadata cache capacity must be positive." }
@@ -44,7 +45,7 @@ public class FileSystemSkillsResolver(
     private val metadataCache = LinkedHashMap<Path, CachedSkillMetadata>()
     private val projectRootMarkers = projectRootMarkers.toList()
 
-    override suspend fun resolve(cwd: Path): ResolvedSkills =
+    actual override suspend fun resolve(cwd: Path): ResolvedSkills =
         resolve(cwd, contextSettings.value)
 
     /**
@@ -53,7 +54,7 @@ public class FileSystemSkillsResolver(
      * This overload keeps a larger context-prefix capture internally
      * consistent while the public resolver continues observing its StateFlow.
      */
-    public suspend fun resolve(
+    public actual suspend fun resolve(
         cwd: Path,
         context: AgentContextSettings,
     ): ResolvedSkills {
@@ -61,7 +62,7 @@ public class FileSystemSkillsResolver(
     }
 
     /** Resolves skills from one shared, already deduplicated source plan. */
-    public suspend fun resolve(plan: AgentContextSourcePlan): ResolvedSkills =
+    public actual suspend fun resolve(plan: AgentContextSourcePlan): ResolvedSkills =
         resolveRoots(buildList {
             plan.globalRoots.forEach { root ->
                 globalSkillRoots(root).forEach { source -> addRootIfDirectory(source) }
@@ -449,4 +450,3 @@ private const val MaxDescriptionLength: Int = 1_024
 private const val MaxMetadataReadAttempts: Int = 2
 private const val MaxMetadataByteCount: Long = 64 * 1024L
 private const val MetadataReadSegmentByteCount: Long = 8 * 1024L
-private const val DefaultMetadataCacheCapacity: Int = 512

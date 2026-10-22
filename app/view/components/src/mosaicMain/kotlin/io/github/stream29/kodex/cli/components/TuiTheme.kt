@@ -1,64 +1,16 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.components
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.terminal.Terminal
 
-/**
- * Semantic terminal colors supplied to Kodex TUI components.
- *
- * [background] and [surface] intentionally use [Color.Unspecified]. Mosaic then leaves large
- * background regions to the terminal instead of assuming black or any other configured color.
- * Container roles remain available for bounded controls, headers, menus, and dialogs.
- */
-@Immutable
-public data class TuiColorScheme(
-    public val background: Color,
-    public val onBackground: Color,
-    public val primary: Color,
-    public val onPrimary: Color,
-    public val primaryContainer: Color,
-    public val onPrimaryContainer: Color,
-    public val secondaryContainer: Color,
-    public val onSecondaryContainer: Color,
-    public val tertiaryContainer: Color,
-    public val onTertiaryContainer: Color,
-    public val surface: Color,
-    public val onSurface: Color,
-    public val onSurfaceVariant: Color,
-    public val surfaceContainer: Color,
-    public val surfaceContainerHigh: Color,
-    public val surfaceContainerHighest: Color,
-    public val surfaceContainerHover: Color,
-    public val surfaceContainerActive: Color,
-    public val outline: Color,
-    public val error: Color,
-    public val onError: Color,
-    public val success: Color,
-    public val onSuccess: Color,
-)
-
-/** Semantic terminal text roles. Terminal font family and size remain terminal-owned. */
-@Immutable
-public data class TuiTypography(
-    public val headline: TextStyle,
-    public val title: TextStyle,
-    public val body: TextStyle,
-    public val label: TextStyle,
-    public val supporting: TextStyle,
-)
-
-/**
- * Generated light scheme from the Kodex teal source color `#1C444A`.
- *
- * Palette generation used `@material/material-color-utilities` npm package `0.3.0`.
- */
-public val LightTuiColorScheme: TuiColorScheme = TuiColorScheme(
+public actual val LightTuiColorScheme: TuiColorScheme = TuiColorScheme(
     background = Color.Unspecified,
     onBackground = Color(23, 29, 30),
     primary = Color(0, 104, 116),
@@ -84,12 +36,7 @@ public val LightTuiColorScheme: TuiColorScheme = TuiColorScheme(
     onSuccess = Color.White,
 )
 
-/**
- * Generated dark scheme from the Kodex teal source color `#1C444A`.
- *
- * Palette generation used `@material/material-color-utilities` npm package `0.3.0`.
- */
-public val DarkTuiColorScheme: TuiColorScheme = TuiColorScheme(
+public actual val DarkTuiColorScheme: TuiColorScheme = TuiColorScheme(
     background = Color.Unspecified,
     onBackground = Color(222, 227, 229),
     primary = Color(130, 211, 224),
@@ -115,14 +62,7 @@ public val DarkTuiColorScheme: TuiColorScheme = TuiColorScheme(
     onSuccess = Color(0, 57, 29),
 )
 
-/**
- * Compatibility fallback used when no terminal-specific scheme is provided.
- *
- * The application normally supplies [LightTuiColorScheme] or [DarkTuiColorScheme] from the
- * terminal theme. Keeping this fallback stable avoids breaking components rendered outside that
- * application root.
- */
-public val DefaultTuiColorScheme: TuiColorScheme = TuiColorScheme(
+public actual val DefaultTuiColorScheme: TuiColorScheme = TuiColorScheme(
     background = Color.Unspecified,
     onBackground = Color.White,
     primary = Color(28, 68, 74),
@@ -148,15 +88,13 @@ public val DefaultTuiColorScheme: TuiColorScheme = TuiColorScheme(
     onSuccess = Color.White,
 )
 
-/** Selects a static scheme from the terminal-reported appearance. */
-public fun tuiColorSchemeFor(theme: Terminal.Theme): TuiColorScheme = when (theme) {
+public actual fun tuiColorSchemeFor(theme: Terminal.Theme): TuiColorScheme = when (theme) {
     Terminal.Theme.Light -> LightTuiColorScheme
     Terminal.Theme.Dark,
     Terminal.Theme.Unknown -> DarkTuiColorScheme
 }
 
-/** Default terminal typography using only portable ANSI text styles. */
-public val DefaultTuiTypography: TuiTypography = TuiTypography(
+public actual val DefaultTuiTypography: TuiTypography = TuiTypography(
     headline = TextStyle.Bold,
     title = TextStyle.Bold,
     body = TextStyle.Unspecified,
@@ -164,15 +102,10 @@ public val DefaultTuiTypography: TuiTypography = TuiTypography(
     supporting = TextStyle.Dim,
 )
 
-/**
- * Supplies semantic TUI theme values to [content].
- *
- * Defaults inherit the current theme, matching Compose theme nesting semantics.
- */
 @Composable
-public fun TuiTheme(
-    colorScheme: TuiColorScheme = TuiTheme.colorScheme,
-    typography: TuiTypography = TuiTheme.typography,
+public actual fun TuiTheme(
+    colorScheme: TuiColorScheme,
+    typography: TuiTypography,
     content: @Composable () -> Unit,
 ) {
     CompositionLocalProvider(
@@ -182,14 +115,13 @@ public fun TuiTheme(
     )
 }
 
-/** Accesses semantic theme values at the current composition location. */
-public object TuiTheme {
-    public val colorScheme: TuiColorScheme
+public actual object TuiTheme {
+    public actual val colorScheme: TuiColorScheme
         @Composable
         @ReadOnlyComposable
         get() = LocalTuiColorScheme.current
 
-    public val typography: TuiTypography
+    public actual val typography: TuiTypography
         @Composable
         @ReadOnlyComposable
         get() = LocalTuiTypography.current

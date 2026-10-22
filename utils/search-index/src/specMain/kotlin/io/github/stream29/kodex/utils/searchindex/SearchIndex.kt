@@ -14,3 +14,8 @@ public data class SearchDocument<T>(
 public interface SearchIndex<T> {
     public fun search(query: String, limit: Int): List<T>
 }
+
+/**
+ * Builds the platform search implementation for a fixed document snapshot.
+ */
+public expect fun <T> createSearchIndex(documents: List<SearchDocument<T>>): SearchIndex<T>

@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.agentruntime.decorator.tool
 
 import io.github.oshai.kotlinlogging.KLogger
@@ -23,7 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Default [KodexToolRuntime] over borrowed tool catalogs.
  */
-public class KodexToolRuntimeImpl internal constructor(
+public actual class KodexToolRuntimeImpl internal constructor(
     private val delegate: ResumableAgentLayer,
     fixedTools: List<Tool>,
     private val dynamicTools: StateFlow<List<Tool>>,
@@ -32,7 +34,7 @@ public class KodexToolRuntimeImpl internal constructor(
 ) : KodexToolRuntime, KodexAgentState by delegate {
     private val fixedToolsByName: Map<ToolName, Tool> = ToolRouting.index(fixedTools)
 
-    override suspend fun resume() {
+    actual override suspend fun resume() {
         while (true) {
             val pending = state.value as? KodexAgentStateValue.ToolPending
             if (pending == null) {
@@ -149,7 +151,7 @@ private fun PendingInvalidToolInvocation.toStableInvocation(): InvalidToolInvoca
  *
  * @param logger Agent-scoped logger used to derive each Tool call logger.
  */
-public fun ResumableAgentLayer.toolRuntime(
+public actual fun ResumableAgentLayer.toolRuntime(
     fixedTools: List<Tool>,
     dynamicTools: StateFlow<List<Tool>>,
     toolSearch: StateFlow<ToolSearchEngine>,

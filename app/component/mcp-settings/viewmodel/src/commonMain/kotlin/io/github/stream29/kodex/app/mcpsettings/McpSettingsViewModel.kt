@@ -17,8 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
-/** Creates an [McpSettingsViewModel] without constructing a backend or shared client. */
-public fun createMcpSettingsViewModel(
+public actual fun createMcpSettingsViewModel(
     dependencies: McpSettingsDependencies,
     ownerScope: CoroutineScope,
 ): McpSettingsViewModel = DefaultMcpSettingsViewModel(dependencies, ownerScope)

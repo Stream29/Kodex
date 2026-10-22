@@ -10,17 +10,11 @@ import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
 
-/**
- * Measures content eagerly and exposes a horizontally scrollable terminal-cell viewport.
- *
- * The horizontal axis must have a finite maximum width. Wheel input moves by terminal columns and
- * unmodified PageUp/PageDown move by one viewport.
- */
-public fun Modifier.horizontalScroll(
+public actual fun Modifier.horizontalScroll(
     state: ScrollState,
-    enabled: Boolean = true,
-    reverseScrolling: Boolean = false,
-    interactionSource: MutableScrollInteractionSource? = null,
+    enabled: Boolean,
+    reverseScrolling: Boolean,
+    interactionSource: MutableScrollInteractionSource?,
 ): Modifier = scrollable(
     state = state,
     orientation = ScrollOrientation.Horizontal,

@@ -10,7 +10,7 @@ kotlin {
                 api(project(":agent-context-settings"))
                 api(project(":agent-runtime-contract"))
                 api(project(":agent-storage-core"))
-                api(project(":mcp"))
+                api(project(":mcp-contract"))
                 api(project(":openai-client"))
                 api(project(":openai-model-catalog"))
                 api(project(":utils-shell-client"))

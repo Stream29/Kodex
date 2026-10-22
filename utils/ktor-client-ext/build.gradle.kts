@@ -6,13 +6,6 @@ plugins {
 
 kotlin {
     sourceSets {
-        jvmMain.dependencies {
-            api(libs.bundles.ktor.client.jvm.engines)
-        }
-        jvmTest.dependencies {
-            implementation(libs.ktor.server.cio)
-            implementation(libs.ktor.server.core)
-        }
         linuxMain.dependencies {
             api(libs.bundles.ktor.client.linux.engines)
         }
@@ -30,10 +23,9 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(libs.ktor.client.core)
+                api(libs.ktor.sse)
+                api(libs.kotlinx.coroutines.core)
             }
-        }
-        commonMain.dependencies {
-            api(libs.ktor.sse)
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)

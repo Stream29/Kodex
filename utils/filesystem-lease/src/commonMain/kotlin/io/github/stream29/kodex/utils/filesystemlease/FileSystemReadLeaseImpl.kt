@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.utils.filesystemlease
 
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CompletableDeferred
@@ -22,10 +21,10 @@ import kotlin.coroutines.CoroutineContext
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
-public suspend fun CoroutineScope.FileSystemReadLease(
+public actual suspend fun CoroutineScope.FileSystemReadLease(
     directory: Path,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-    duration: Duration = DefaultOwnerDuration,
+    fileSystem: CoroutineFileSystem,
+    duration: Duration,
 ): FileSystemLease = SharedReadLeases.acquire(this, directory, fileSystem, duration)
 
 @OptIn(ExperimentalAtomicApi::class)

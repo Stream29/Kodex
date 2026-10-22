@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
@@ -32,20 +34,11 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
 
-/**
- * Owns one lazily acquired repository and its accepted work. The factory runs
- * only on actual [BackendSessionHost.repository] access and must create the
- * repository in its receiver scope; an existing frontend-owned instance is
- * not a valid factory result. Neither the host nor its bindings may escape.
- *
- * Normal return, failure and cancellation wait for repository/Session cleanup.
- * A cancelled RPC waiter does not cancel work already accepted by this host.
- */
-public suspend fun <R> withBackendSessionHost(
+public actual suspend fun <R> withBackendSessionHost(
     createRepository: suspend CoroutineScope.() -> KodexRootSessionRepository,
-    renewBackend: suspend () -> Unit = {},
-    backendRenewalInterval: () -> Duration = { 20.seconds },
-    checkAdmission: () -> Unit = {},
+    renewBackend: suspend () -> Unit,
+    backendRenewalInterval: () -> Duration,
+    checkAdmission: () -> Unit,
     block: suspend CoroutineScope.(BackendSessionHost) -> R,
 ): R = withBackendSessionHost(TimeSource.Monotonic, createRepository, renewBackend, backendRenewalInterval, checkAdmission, block)
 
@@ -84,11 +77,10 @@ internal suspend fun <R> withBackendSessionHost(
 }
 
 /**
- * Backend-only resource; no Job, repository or binding crosses the RPC boundary.
  * @property acquiredRepository Null until successful on-demand acquisition;
  * failed/cancelled attempts leave it absent, rather than publishing a dead owner.
  */
-public class BackendSessionHost internal constructor(
+public actual class BackendSessionHost internal constructor(
     private val owner: CoroutineScope,
     private val createRepository: suspend CoroutineScope.() -> KodexRootSessionRepository,
     private val origin: TimeMark,
@@ -101,14 +93,7 @@ public class BackendSessionHost internal constructor(
     private val acquisition = Mutex()
     private var acquiredRepository: KodexRootSessionRepository? = null
 
-    /**
-     * Acquires the actual repository once under the original backend owner.
-     * Concurrent first accesses share one successful factory result; failure or
-     * cancellation never publishes a partial/dead owner. A factory is responsible
-     * for cleaning its failed acquisition. Accepted work outlives an RPC waiter.
-     * Closing an untouched host never invokes the factory.
-     */
-    public suspend fun repository(): KodexRootSessionRepository = inBackend {
+    public actual suspend fun repository(): KodexRootSessionRepository = inBackend {
         acquisition.withLock {
             owner.ensureActive()
             acquiredRepository ?: owner.createRepository().also { repository ->
@@ -123,14 +108,12 @@ public class BackendSessionHost internal constructor(
     // Renewal metadata, not a second catalog/active flag. Session identity and
     // liveness remain the original repository instance and its actual Job.
     private val renewals = mutableMapOf<Int, Renewal>()
-    /** One service-graph admission check shared by commands and newly requested observations. */
-    public fun ensureAdmission() {
+    public actual fun ensureAdmission() {
         owner.ensureActive()
         checkAdmission()
     }
 
-    /** Explicit activation; a successful return grants a full TTL after loading. */
-    public suspend fun keepSessionAlive(index: Int): Unit = inBackend {
+    public actual suspend fun keepSessionAlive(index: Int): Unit = inBackend {
         lifecycle.withLock {
             owner.ensureActive()
             val repository = repository()
@@ -147,19 +130,12 @@ public class BackendSessionHost internal constructor(
         }
     }
 
-    /** Resolves a live binding without loading or extending its lifetime. */
-    public suspend fun session(index: Int): BackendSessionBinding = lifecycle.withLock {
+    public actual suspend fun session(index: Int): BackendSessionBinding = lifecycle.withLock {
         ensureAdmission()
         activeLocked(index).binding
     }
 
-    /**
-     * Accepts work into the Session scope, retaining its complete result/wait
-     * semantics. Only a runningTurn renews residency; other work can be
-     * cancelled by TTL expiry. The block must not re-enter host lifecycle APIs
-     * before its first suspension.
-     */
-    public suspend fun <R> inSession(
+    public actual suspend fun <R> inSession(
         index: Int,
         block: suspend KodexAgentSession.() -> R,
     ): R = inBackend {
@@ -177,8 +153,7 @@ public class BackendSessionHost internal constructor(
         work.await()
     }
 
-    /** Global accepted work belongs to the host, not its RPC waiter. */
-    public suspend fun <R> inBackend(block: suspend () -> R): R {
+    public actual suspend fun <R> inBackend(block: suspend () -> R): R {
         currentCoroutineContext().ensureActive()
         ensureAdmission()
         return owner.async {
@@ -187,8 +162,7 @@ public class BackendSessionHost internal constructor(
         }.await()
     }
 
-    /** Coordinates delete with activation/expiry; missing entries remain false. */
-    public suspend fun deleteSession(index: Int): Boolean = inBackend {
+    public actual suspend fun deleteSession(index: Int): Boolean = inBackend {
         lifecycle.withLock {
             owner.ensureActive()
             val repository = repository()
@@ -319,14 +293,12 @@ public class BackendSessionHost internal constructor(
     }
 }
 
-/** A binding is tied to one owner, never silently rebound after reactivation. */
-public class BackendSessionBinding internal constructor(public val session: KodexAgentSession) {
+public actual class BackendSessionBinding internal constructor(public actual val session: KodexAgentSession) {
     internal val operations: CoroutineScope = session.supervisorChildScope()
     private val deactivated = CompletableDeferred<Unit>()
-    public val inactive: Deferred<Unit> get() = deactivated
+    public actual val inactive: Deferred<Unit> get() = deactivated
 
-    /** Ends existing RPC upstreams on deactivation without keeping the owner alive. */
-    public fun <T> observe(source: Flow<T>): Flow<T> = channelFlow {
+    public actual fun <T> observe(source: Flow<T>): Flow<T> = channelFlow {
         if (deactivated.isCompleted || !session.coroutineContext.job.isActive) throw SessionNotActive()
         val watcher = launch {
             deactivated.await()

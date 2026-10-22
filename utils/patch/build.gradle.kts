@@ -21,11 +21,9 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(libs.kotlinx.serialization.core)
+                api(libs.kotlinx.io.core)
+                api(project(":utils-kotlinx-io-coroutines"))
             }
-        }
-        commonMain.dependencies {
-            api(libs.kotlinx.io.core)
-            api(project(":utils-kotlinx-io-coroutines"))
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)

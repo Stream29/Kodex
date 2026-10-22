@@ -6,9 +6,12 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies { api(project(":app-component-history-index-viewmodel")) }
-        mosaicMain.dependencies {
+        named("specMain").dependencies {
+            api(project(":app-component-history-index-viewmodel"))
             api(project(":app-view-components"))
+            api(libs.mosaic.runtime)
+        }
+        mosaicMain.dependencies {
             implementation(libs.kotlinx.datetime)
             implementation(libs.mosaic.runtime)
         }

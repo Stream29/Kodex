@@ -21,7 +21,7 @@ public actual val HostPromptImageTransformer: PromptImageTransformer = SkikoProm
 /**
  * Stateless prompt-image transformer backed by Skia through Skiko.
  */
-public object SkikoPromptImageTransformer : PromptImageTransformer {
+internal object SkikoPromptImageTransformer : PromptImageTransformer {
     override suspend fun transform(request: PromptImageTransformRequest): EncodedImage {
         val plan = request.plan
         val targetDimensions = plan.outputDimensions

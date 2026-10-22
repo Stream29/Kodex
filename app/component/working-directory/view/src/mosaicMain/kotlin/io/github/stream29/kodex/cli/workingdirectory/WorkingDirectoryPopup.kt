@@ -12,14 +12,8 @@ import io.github.stream29.kodex.cli.pathpicker.DirectoryPickerPopup
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 
-/**
- * One owning component over a borrowed browser renderer. Selection starts from
- * the browser's confirmed output; Settings handoff can finish synchronously,
- * whereas an Application operation may suspend. Only a still-present instance
- * reports normal completion to its own host.
- */
 @Composable
-public fun BoxScope.WorkingDirectoryPopup(
+public actual fun BoxScope.WorkingDirectoryPopup(
     viewModel: WorkingDirectoryViewModel,
     onDismissRequest: () -> Unit,
     onSelected: () -> Unit,

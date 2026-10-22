@@ -28,7 +28,6 @@ kotlin {
         named("cliHostMain") {
             kotlin.srcDir(files(generatedVersionDirectory).builtBy(generateKodexVersion))
             dependencies {
-                implementation(project(":utils-kotlinx-io-coroutines-system"))
                 implementation(project(":agent-storage-filesystem-layout"))
                 implementation(project(":utils-filesystem-lease"))
                 implementation(libs.kotlinx.serialization.json)
@@ -68,6 +67,7 @@ kotlin {
     sourceSets {
         named("specMain").dependencies {
             api(project(":utils-kotlinx-io-coroutines"))
+            api(project(":utils-kotlinx-io-coroutines-system"))
         }
     }
 }

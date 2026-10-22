@@ -10,15 +10,14 @@ import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskResponse
 import kotlin.time.Duration
 
 @Composable
-public fun StableSuggestSubagentTaskToolEvent.renderSuggestion(elapsed: Duration?) {
+public actual fun StableSuggestSubagentTaskToolEvent.renderSuggestion(elapsed: Duration?) {
     Column(Modifier.fillMaxWidth()) {
         suggestSubagentTaskHistoryRows(elapsed).forEach { row -> RequestUserInputHistoryRow(row) }
     }
 }
 
-/** Uses the same read-only typography and option rows as completed user input. */
-public fun StableSuggestSubagentTaskToolEvent.suggestSubagentTaskHistoryRows(
-    elapsed: Duration? = null,
+public actual fun StableSuggestSubagentTaskToolEvent.suggestSubagentTaskHistoryRows(
+    elapsed: Duration?,
 ): List<RequestUserInputHistoryRowModel> = buildList {
     add(RequestUserInputHistoryRowModel(
         "Suggested Sessions" + elapsed.historySuffix(), RequestUserInputHistoryRowRole.Header,

@@ -23,23 +23,13 @@ import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.TuiButton
 import io.github.stream29.kodex.cli.components.TuiInteractionStyle
 import io.github.stream29.kodex.utils.externalurl.OpenExternalUrlResult
-import io.github.stream29.kodex.utils.externalurl.openExternalUrl
 
-/**
- * Mosaic renderer for the component spec, without Settings or auth-store access.
- *
- * [openUrl] reports only launcher acceptance and must return a failed result
- * for launch failures (cancellation still propagates). Each output is checked
- * against the current attempt before launching; the exact id is reported back.
- * Dismissal cancels the attempt and notifies the parent, disposal closes the
- * child, and Completed remains visible until explicitly closed.
- */
 @Composable
-public fun BoxScope.OpenAiLoginPopup(
+public actual fun BoxScope.OpenAiLoginPopup(
     viewModel: OpenAiLoginViewModel,
     onDismissRequest: () -> Unit,
-    openUrl: suspend (String) -> OpenExternalUrlResult = ::openExternalUrl,
-) {
+    openUrl: suspend (String) -> OpenExternalUrlResult,
+): Unit {
     val state by viewModel.state.collectAsState()
     val currentOpenUrl by rememberUpdatedState(openUrl)
     val dialogWidth = (LocalTerminalState.current.size.columns - 4).coerceIn(1, LoginDialogMaximumWidth)

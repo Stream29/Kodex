@@ -9,12 +9,11 @@ import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 
-/** Pure measured-content layout shared by Agent and draft status bars. */
 @Composable
-public fun StatusBarLayout(
+public actual fun StatusBarLayout(
     columns: Int,
     regularContent: @Composable () -> Unit,
-    settingsContent: (@Composable () -> Unit)? = null,
+    settingsContent: (@Composable () -> Unit)?,
 ) {
     val width = statusBarWidth(columns)
     Layout(
@@ -50,17 +49,11 @@ public fun StatusBarLayout(
     }
 }
 
-public fun buttonWidth(label: String): Int = label.terminalCellWidth() + ButtonBorderColumns
+public actual fun buttonWidth(label: String): Int = label.terminalCellWidth() + ButtonBorderColumns
 
-public fun statusBarWidth(columns: Int): Int = (columns - 1).coerceAtLeast(1)
+public actual fun statusBarWidth(columns: Int): Int = (columns - 1).coerceAtLeast(1)
 
-public data class StatusBarLayoutPlan(
-    public val itemPositions: List<IntOffset>,
-    public val settingsPosition: IntOffset,
-    public val rowCount: Int,
-)
-
-public fun statusBarLayoutPlan(
+public actual fun statusBarLayoutPlan(
     width: Int,
     itemWidths: List<Int>,
     settingsWidth: Int,

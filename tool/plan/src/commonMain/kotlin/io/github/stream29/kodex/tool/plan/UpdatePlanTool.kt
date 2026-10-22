@@ -10,14 +10,7 @@ import io.github.stream29.kodex.tool.builder.ToolBuilderJson
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.typedTool
 
-/**
- * Creates the ordinary `update_plan` tool bound to this Agent.
- *
- * A successful call updates its parsed plan and completes its tool output
- * through [appendPlanUpdate]. The generic tool runtime therefore must
- * not append the returned output again when the call is no longer pending.
- */
-public fun KodexAgentState.updatePlanTool(): Tool =
+public actual fun KodexAgentState.updatePlanTool(): Tool =
     typedTool(
         spec = PlanTools.spec,
         select = { it as? PendingPlanUpdate },

@@ -8,13 +8,10 @@ kotlin {
     sourceSets {
         named("specMain").dependencies {
             api(libs.kotlinx.coroutines.core)
-        }
-        commonMain.dependencies {
-            // Compose-generated stability code participates in shared compilations.
-            implementation(libs.mosaic.runtime)
+            api(project(":app-view-components"))
+            api(libs.mosaic.runtime)
         }
         mosaicMain.dependencies {
-            implementation(project(":app-view-components"))
             implementation(project(":utils-terminal-text"))
             implementation(libs.mosaic.runtime)
         }

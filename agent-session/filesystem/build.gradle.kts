@@ -6,10 +6,14 @@ plugins {
 
 kotlin {
     sourceSets {
+        named("specMain") {
+            dependencies {
+                api(project(":agent-session-contract"))
+                api(project(":utils-kotlinx-io-coroutines-system"))
+                api(libs.kotlinx.coroutines.core)
+            }
+        }
         commonMain.dependencies {
-            api(project(":agent-session-contract"))
-            api(project(":utils-kotlinx-io-coroutines-system"))
-            api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-runtime-composition"))
             implementation(project(":agent-state-core"))
             implementation(project(":agent-storage-core"))

@@ -1,7 +1,5 @@
 package io.github.stream29.kodex.cli.sessioncatalog
 
-import io.github.stream29.kodex.cli.components.RunningIndicatorFrames
-
 import com.jakewharton.mosaic.text.AnnotatedString
 import com.jakewharton.mosaic.text.SpanStyle
 import com.jakewharton.mosaic.text.buildAnnotatedString
@@ -10,14 +8,12 @@ import com.jakewharton.mosaic.ui.TextStyle
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.cli.components.ellipsizeToTerminalWidth
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
-import kotlin.time.Clock
 import kotlin.time.Instant
 
-/** Sampled catalog label with backend running marker, bounded title and dim relative-time suffix. */
-public fun SessionCatalogEntry.sessionBrowserLabel(
+public actual fun SessionCatalogEntry.sessionBrowserLabel(
     maximumColumns: Int,
-    now: Instant = Clock.System.now(),
-    runningFrame: String = RunningIndicatorFrames.first(),
+    now: Instant,
+    runningFrame: String,
 ): AnnotatedString {
     val name = threadName ?: "Session $sessionIndex"
     val title = if (running) runningFrame + name else name

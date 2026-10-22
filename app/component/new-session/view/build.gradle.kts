@@ -6,14 +6,15 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
+        named("specMain").dependencies {
             api(project(":app-component-new-session-viewmodel"))
+            api(project(":app-view-components"))
+            api(project(":app-component-application-preferences-viewmodel"))
+            api(project(":app-component-runtime-configuration-view"))
+            api(libs.mosaic.runtime)
         }
         mosaicMain.dependencies {
-            implementation(project(":app-view-components"))
             implementation(project(":app-component-composer-view"))
-            implementation(project(":app-component-application-preferences-viewmodel"))
-            api(project(":app-component-runtime-configuration-view"))
             implementation(libs.mosaic.runtime)
         }
         mosaicTest.dependencies {

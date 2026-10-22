@@ -6,8 +6,7 @@ import io.github.stream29.kodex.agentcontext.prefix.skill.contract.AvailableSkil
 private const val SkillsIntro: String =
     "A skill is a set of local instructions stored in a `SKILL.md` file. Below is the list of skills available to the agent. Each entry includes a name, description, and path."
 
-/** Renders the model-visible catalog for the supplied available skills. */
-public fun List<AvailableSkill>.render(): String {
+public actual fun List<AvailableSkill>.render(): String {
     val skills = this
     return promptXml(indented = false) {
         tag("skills_instructions") {

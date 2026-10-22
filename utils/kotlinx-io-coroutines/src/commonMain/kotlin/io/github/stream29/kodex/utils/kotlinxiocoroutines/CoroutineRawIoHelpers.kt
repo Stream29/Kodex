@@ -4,7 +4,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.io.Buffer
 
-public suspend inline fun <T : CoroutineCloseable, R> T.use(block: suspend (T) -> R): R {
+public actual suspend inline fun <T : CoroutineCloseable, R> T.use(block: suspend (T) -> R): R {
     var failure: Throwable? = null
     try {
         return block(this)
@@ -24,9 +24,9 @@ public suspend inline fun <T : CoroutineCloseable, R> T.use(block: suspend (T) -
     }
 }
 
-public suspend fun CoroutineRawSource.copyTo(
+public actual suspend fun CoroutineRawSource.copyTo(
     sink: CoroutineRawSink,
-    byteCount: Long = Long.MAX_VALUE,
+    byteCount: Long,
 ): Long {
     require(byteCount >= 0L) { "byteCount: $byteCount" }
     val buffer = Buffer()

@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.openai.codexclistorage
 
 import dev.eav.tomlkt.Toml
@@ -7,7 +9,7 @@ import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
 
-public class CodexCliStorageImpl internal constructor(
+public actual class CodexCliStorageImpl internal constructor(
     internal val directory: Path,
     internal val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
 ) : CodexCliStorage {
@@ -18,7 +20,7 @@ public class CodexCliStorageImpl internal constructor(
      * @return Nullable because Codex CLI may not be signed in; `null` means
      * `auth.json` is absent.
      */
-    override suspend fun readAuthOrNull(): CodexAuthJson? {
+    actual override suspend fun readAuthOrNull(): CodexAuthJson? {
         val text = authPath.readTextOrNull(fileSystem) ?: return null
         return OpenAiJsonCodec.decodeFromString(CodexAuthJson.serializer(), text)
     }
@@ -29,7 +31,7 @@ public class CodexCliStorageImpl internal constructor(
      * A declaration is supported only when all of its fields can be preserved
      * by Kodex. Unsupported previews expose field names, never their values.
      */
-    override suspend fun readMcpImportCandidates(): List<CodexCliMcpImportCandidate> {
+    actual override suspend fun readMcpImportCandidates(): List<CodexCliMcpImportCandidate> {
         val text = configPath.readTextOrNull(fileSystem) ?: return emptyList()
         val root = CodexConfigToml.parseToTomlTable(text)
         val servers = root["mcp_servers"] as? TomlTable ?: return emptyList()
@@ -43,9 +45,9 @@ public class CodexCliStorageImpl internal constructor(
 }
 
 /** Creates a read-only Codex CLI storage view over [directory]. */
-public fun CodexCliStorage(
+public actual fun CodexCliStorage(
     directory: Path,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    fileSystem: CoroutineFileSystem,
 ): CodexCliStorage = CodexCliStorageImpl(directory, fileSystem)
 
 private fun classifyMcpImportCandidate(

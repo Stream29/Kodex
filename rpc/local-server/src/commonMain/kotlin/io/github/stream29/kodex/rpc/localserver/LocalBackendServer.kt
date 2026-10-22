@@ -25,8 +25,7 @@ import kotlinx.rpc.krpc.serialization.json.json
 import kotlinx.rpc.krpc.server.KrpcServer
 import kotlinx.serialization.json.JsonObject
 
-/** One port, one external service graph, independent resources for each authenticated connection. */
-public suspend fun <R> withLocalBackendServer(
+public actual suspend fun <R> withLocalBackendServer(
     password: String,
     instanceId: String,
     control: BackendControl,

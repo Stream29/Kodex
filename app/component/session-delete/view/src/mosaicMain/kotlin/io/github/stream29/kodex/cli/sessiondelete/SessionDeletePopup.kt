@@ -19,13 +19,8 @@ import io.github.stream29.kodex.cli.components.TuiDialogActionRow
 import io.github.stream29.kodex.cli.components.TuiTheme
 import kotlinx.coroutines.launch
 
-/**
- * Captured-target confirmation. Reports true and false unchanged to [onResult];
- * only the host decides whether to dismiss. Failure/cancellation does not invoke
- * that callback. Cancel performs no operation. Disposal closes only the child.
- */
 @Composable
-public fun BoxScope.SessionDeletePopup(
+public actual fun BoxScope.SessionDeletePopup(
     viewModel: SessionDeleteViewModel,
     onDismissRequest: () -> Unit,
     onResult: (Boolean) -> Unit,

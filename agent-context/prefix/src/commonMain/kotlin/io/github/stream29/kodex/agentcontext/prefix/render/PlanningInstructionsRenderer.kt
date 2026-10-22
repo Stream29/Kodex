@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.agentcontext.prefix.render
 
-/** Renders the fixed guidance for the always-available `update_plan` tool. */
-public fun renderPlanningInstructions(): String = PlanningInstructions
+public actual fun renderPlanningInstructions(): String = PlanningInstructions
 
 // Kept verbatim with codex-rs/protocol/src/prompts/base_instructions/default.md.
 private val PlanningInstructions: String =

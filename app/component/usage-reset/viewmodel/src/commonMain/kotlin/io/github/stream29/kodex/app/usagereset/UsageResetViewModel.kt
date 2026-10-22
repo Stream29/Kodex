@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.app.usagereset
 
 import io.github.stream29.kodex.app.settings.contract.UsageResetOption
@@ -17,20 +19,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** Dependency-only implementation of the typed spec factory. */
-public object DefaultUsageResetViewModelFactory : UsageResetViewModelFactory {
-    override fun create(
+public actual object DefaultUsageResetViewModelFactory : UsageResetViewModelFactory {
+    actual override fun create(
         dependencies: UsageResetDependencies,
         ownerScope: CoroutineScope,
     ): UsageResetViewModel = DefaultUsageResetViewModel(dependencies, ownerScope)
 }
 
-/**
- * Creates an initially hidden child on [ownerScope]'s dispatcher with a linked
- * local Job. Construction performs no I/O. Host closes the child explicitly;
- * cancellation propagates from owner to child, never from child to shared owner.
- */
-public fun createUsageResetViewModel(
+public actual fun createUsageResetViewModel(
     dependencies: UsageResetDependencies,
     ownerScope: CoroutineScope,
 ): UsageResetViewModel = DefaultUsageResetViewModelFactory.create(dependencies, ownerScope)

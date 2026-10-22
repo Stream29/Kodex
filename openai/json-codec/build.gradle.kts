@@ -7,8 +7,10 @@ plugins {
 kotlin {
     sourceSets {
         // This project exposes a concrete Json policy, not a separate port.
-        commonMain.dependencies {
-            api(libs.kotlinx.serialization.json)
+        named("specMain") {
+            dependencies {
+                api(libs.kotlinx.serialization.json)
+            }
         }
     }
 }

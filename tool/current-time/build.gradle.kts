@@ -14,7 +14,7 @@ kotlin {
             }
         }
         commonMain.dependencies {
-            api(libs.kotlinx.datetime)
+            implementation(libs.kotlinx.datetime)
             implementation(project(":tool-core"))
             implementation(libs.kotlinx.serialization.core)
         }

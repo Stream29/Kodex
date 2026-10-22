@@ -42,14 +42,8 @@ import io.github.stream29.kodex.cli.components.items
 import io.github.stream29.kodex.cli.components.rememberLazyListState
 import kotlinx.io.files.Path
 
-/**
- * Modal directory browser that reports an explicitly confirmed, absolute directory to its caller.
- *
- * It exposes no caller-specific persistence behavior. Cancelling and outside dismissal invoke
- * [onDismissRequest]; Escape clears an active filter before invoking it.
- */
 @Composable
-public fun BoxScope.DirectoryPickerPopup(
+public actual fun BoxScope.DirectoryPickerPopup(
     viewModel: DirectoryPickerViewModel,
     onDismissRequest: () -> Unit,
     onDirectorySelected: (Path) -> Unit,
@@ -57,13 +51,8 @@ public fun BoxScope.DirectoryPickerPopup(
     DirectoryPickerPopup(viewModel, onDismissRequest, onDirectorySelected, closeOnDispose = true)
 }
 
-/**
- * Explicit disposal-ownership variant. Set [closeOnDispose] false when an
- * enclosing component owns/closes the child. Keep this choice fixed for the
- * lifetime of one child; the three-argument overload retains standalone ownership.
- */
 @Composable
-public fun BoxScope.DirectoryPickerPopup(
+public actual fun BoxScope.DirectoryPickerPopup(
     viewModel: DirectoryPickerViewModel,
     onDismissRequest: () -> Unit,
     onDirectorySelected: (Path) -> Unit,

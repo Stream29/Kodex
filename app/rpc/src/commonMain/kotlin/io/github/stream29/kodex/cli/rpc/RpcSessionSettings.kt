@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.app.settings.contract.SessionSettingsConfiguration
@@ -17,8 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** A popup targets this exact binding; reactivation cannot silently retarget an old editor. */
-public class RpcSessionSettingsSource(
+public actual class RpcSessionSettingsSource actual constructor(
     private val view: RpcSessionView,
     scope: CoroutineScope,
 ) : SessionSettingsDataSource {
@@ -27,7 +28,7 @@ public class RpcSessionSettingsSource(
     private val local = CoroutineScope(scope.coroutineContext + owner)
     private val lock = Mutex()
     private val mutable = MutableStateFlow<SessionSettingsDataState>(available(0))
-    override val state: StateFlow<SessionSettingsDataState> = mutable.asStateFlow()
+    actual override val state: StateFlow<SessionSettingsDataState> = mutable.asStateFlow()
 
     init {
         local.launch {
@@ -65,7 +66,7 @@ public class RpcSessionSettingsSource(
         check(view.binding.value === binding) { "The settings target expired." }
     }
 
-    override suspend fun tryUpdateConfiguration(
+    actual override suspend fun tryUpdateConfiguration(
         expectedRevision: Long,
         configuration: SessionSettingsConfiguration,
     ): Boolean = lock.withLock {
@@ -95,7 +96,7 @@ public class RpcSessionSettingsSource(
         )
     }
 
-    override suspend fun tryRenameSession(expectedRevision: Long, sessionName: String): Boolean = lock.withLock {
+    actual override suspend fun tryRenameSession(expectedRevision: Long, sessionName: String): Boolean = lock.withLock {
         require(sessionName.isNotBlank())
         val expected = (state.value as? SessionSettingsDataState.Available)?.snapshot ?: return false
         if (expected.revision != expectedRevision) return false
@@ -104,7 +105,7 @@ public class RpcSessionSettingsSource(
         )
     }
 
-    override fun close() {
+    actual override fun close() {
         mutable.value = SessionSettingsDataState.Unavailable
         owner.cancel()
     }

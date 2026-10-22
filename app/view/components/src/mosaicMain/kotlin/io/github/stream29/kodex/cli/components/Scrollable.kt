@@ -4,23 +4,13 @@ import com.jakewharton.mosaic.layout.onPointerEvent
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.MouseEvent
 
-/**
- * Interprets wheel input as terminal-cell deltas along [orientation] for [state].
- * Native horizontal wheel input is consumed only by horizontal scrollables; vertical wheel input
- * remains a compatibility input for either logical axis.
- *
- * This modifier does not move, measure, or clip content. It consumes a wheel event only when
- * [ScrollableState.scrollBy] consumes a non-zero delta.
- *
- * @param interactionSource `null` when the caller does not observe scroll interactions.
- */
-public fun Modifier.scrollable(
+public actual fun Modifier.scrollable(
     state: ScrollableState,
-    orientation: ScrollOrientation = ScrollOrientation.Vertical,
-    enabled: Boolean = true,
-    reverseDirection: Boolean = false,
-    interactionSource: MutableScrollInteractionSource? = null,
-    wheelScrollLines: Int = DefaultWheelScrollLines,
+    orientation: ScrollOrientation,
+    enabled: Boolean,
+    reverseDirection: Boolean,
+    interactionSource: MutableScrollInteractionSource?,
+    wheelScrollLines: Int,
 ): Modifier {
     require(wheelScrollLines > 0) { "Wheel scroll line count must be positive." }
     if (!enabled) return this

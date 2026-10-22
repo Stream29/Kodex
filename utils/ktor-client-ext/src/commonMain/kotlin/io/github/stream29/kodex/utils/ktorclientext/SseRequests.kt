@@ -14,27 +14,14 @@ import io.ktor.sse.ServerSentEvent
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 
-/**
- * Opens an SSE response to a POST request.
- *
- * This keeps Ktor's official SSE session inside the returned Flow lifecycle.
- * [SSE] must be installed on this client. [SseCompatibility] can additionally
- * support servers that omit the SSE response content type.
- */
-public fun HttpClient.postSseEvents(
+public actual fun HttpClient.postSseEvents(
     configureRequest: HttpRequestBuilder.() -> Unit,
 ): Flow<ServerSentEvent> = postSseEventsInternal(
     socketTimeoutMillis = null,
     configureRequest = configureRequest,
 )
 
-/**
- * Opens an SSE response to a POST request with a per-request socket timeout.
- *
- * The timeout is an inactivity timeout between network packets. It intentionally
- * does not impose a total request deadline on an SSE request.
- */
-public fun HttpClient.postSseEvents(
+public actual fun HttpClient.postSseEvents(
     socketTimeoutMillis: Long,
     configureRequest: HttpRequestBuilder.() -> Unit,
 ): Flow<ServerSentEvent> = postSseEventsInternal(
@@ -42,7 +29,7 @@ public fun HttpClient.postSseEvents(
     configureRequest = configureRequest,
 )
 
-public fun HttpClient.postSseEventsWithHeaders(
+public actual fun HttpClient.postSseEventsWithHeaders(
     socketTimeoutMillis: Long,
     onResponseHeaders: suspend (Headers) -> Unit,
     configureRequest: HttpRequestBuilder.() -> Unit,

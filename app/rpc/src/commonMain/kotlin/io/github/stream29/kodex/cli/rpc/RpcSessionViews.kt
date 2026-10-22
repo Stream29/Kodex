@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
@@ -26,34 +28,20 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/** Local availability, not a remote execution state or a synthetic Agent lifecycle. */
-public sealed interface SessionViewStatus {
-    public data object Loading : SessionViewStatus
-    public data object Ready : SessionViewStatus
-    public data object Missing : SessionViewStatus
-    public data class Failed(public val cause: Throwable) : SessionViewStatus
-    public data object Closed : SessionViewStatus
-}
-
-/**
- * One view/heartbeat per opened tab index; a directory lookup does not create a view.
- * [reportUnhandledError] is the application-owned local error outlet, retained across rebinding.
- * Backend-reported run failures and cancellation never enter it.
- */
-public class RpcSessionViews(
+public actual class RpcSessionViews actual constructor(
     scope: CoroutineScope,
-    public val services: RpcServices,
+    public actual val services: RpcServices,
     private val models: StateFlow<List<ModelInfo>>,
     private val reportUnhandledError: (Throwable) -> Unit,
-    private val connectionAvailable: () -> Boolean = { true },
-    private val onCreated: (List<CreatedSuggestedSession>) -> Unit = {},
+    private val connectionAvailable: () -> Boolean,
+    private val onCreated: (List<CreatedSuggestedSession>) -> Unit,
 ) : AutoCloseable {
     private val owner = SupervisorJob(scope.coroutineContext[Job])
     private val localScope = CoroutineScope(scope.coroutineContext + owner)
     private val mutex = Mutex()
     private val views = mutableMapOf<Int, RpcSessionView>()
 
-    public suspend fun open(index: Int): RpcSessionView {
+    public actual suspend fun open(index: Int): RpcSessionView {
         val view = mutex.withLock {
             owner.ensureActive()
             views.getOrPut(index) { RpcSessionView(index, services, localScope, models, onCreated, reportUnhandledError, connectionAvailable) }
@@ -81,7 +69,7 @@ public class RpcSessionViews(
         }
     }
 
-    public suspend fun release(view: RpcSessionView) {
+    public actual suspend fun release(view: RpcSessionView): Unit {
         mutex.withLock {
             if (views[view.index] === view) views.remove(view.index)
             view.close()
@@ -90,13 +78,13 @@ public class RpcSessionViews(
     }
 
     /** Also cancels a tab that is still initializing and has not returned a view to its caller. */
-    public suspend fun release(index: Int) {
+    public actual suspend fun release(index: Int): Unit {
         val view = mutex.withLock { views.remove(index)?.also { it.close() } }
         view?.join()
     }
 
     /** Reconnect activates still-open frontend tabs before publishing the new connection. */
-    public suspend fun reactivate(replacement: RpcServices, isConnected: () -> Boolean) {
+    public actual suspend fun reactivate(replacement: RpcServices, isConnected: () -> Boolean): Unit {
         val targets = mutex.withLock {
             owner.ensureActive()
             views.values.filter { it.status.value != SessionViewStatus.Closed }
@@ -114,16 +102,12 @@ public class RpcSessionViews(
         }
     }
 
-    override fun close() { owner.cancel() }
-    public suspend fun join(): Unit = owner.join()
+    actual override fun close() { owner.cancel() }
+    public actual suspend fun join(): Unit = owner.join()
 }
 
-/**
- * The coordinator outlives an individual subscription binding, not the frontend owner.
- * Recovery only repeats activation/reads; no failed or unacknowledged command is replayed.
- */
-public class RpcSessionView internal constructor(
-    public val index: Int,
+public actual class RpcSessionView internal actual constructor(
+    public actual val index: Int,
     private val services: RpcServices,
     scope: CoroutineScope,
     private val models: StateFlow<List<ModelInfo>>,
@@ -136,11 +120,11 @@ public class RpcSessionView internal constructor(
     private val initial = CompletableDeferred<Unit>()
     private val mutableBinding = MutableStateFlow<RpcSessionBinding?>(null)
     private val mutableStatus = MutableStateFlow<SessionViewStatus>(SessionViewStatus.Loading)
-    public val binding: StateFlow<RpcSessionBinding?> = mutableBinding.asStateFlow()
-    public val status: StateFlow<SessionViewStatus> = mutableStatus.asStateFlow()
+    public actual val binding: StateFlow<RpcSessionBinding?> = mutableBinding.asStateFlow()
+    public actual val status: StateFlow<SessionViewStatus> = mutableStatus.asStateFlow()
     private val mutableAgent = MutableStateFlow<AgentViewModel?>(null)
     /** Sole binding-owned Agent; recovery replaces it rather than wrapping the previous owner. */
-    public val agent: StateFlow<AgentViewModel?> = mutableAgent.asStateFlow()
+    public actual val agent: StateFlow<AgentViewModel?> = mutableAgent.asStateFlow()
 
     init {
         owner.invokeOnCompletion {
@@ -239,13 +223,13 @@ public class RpcSessionView internal constructor(
         }
     }
 
-    public fun current(): RpcSessionBinding {
+    public actual fun current(): RpcSessionBinding {
         owner.ensureActive()
         check(status.value == SessionViewStatus.Ready) { "Session view is not ready: ${status.value}" }
         return requireNotNull(binding.value).also { it.ensureActive() }
     }
 
-    override fun close() {
+    actual override fun close() {
         mutableStatus.value = SessionViewStatus.Closed
         mutableBinding.value = null
         mutableAgent.value?.close()
@@ -253,7 +237,7 @@ public class RpcSessionView internal constructor(
         owner.cancel()
     }
 
-    public suspend fun join(): Unit = owner.join()
+    public actual suspend fun join(): Unit = owner.join()
 }
 
 private fun Throwable.remoteReason(): Throwable {

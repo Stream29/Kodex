@@ -6,8 +6,10 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
-            api(project(":utils-kotlinx-io-coroutines-system"))
+        named("specMain") {
+            dependencies {
+                api(project(":utils-kotlinx-io-coroutines-system"))
+            }
         }
     }
 }

@@ -5,9 +5,11 @@ plugins {
 }
 
 kotlin {
-sourceSets.commonMain.dependencies {
+sourceSets.named("specMain").dependencies {
     api(libs.kotlinx.rpc.krpc.core)
     api(libs.ktor.websockets)
+}
+sourceSets.commonMain.dependencies {
     implementation(libs.kotlinx.coroutines.core)
 }
 }

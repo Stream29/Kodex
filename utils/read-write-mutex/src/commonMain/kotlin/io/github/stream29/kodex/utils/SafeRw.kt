@@ -1,34 +1,11 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.utils
 
-import kotlinx.coroutines.sync.withLock
-import kotlin.contracts.ExperimentalContracts
-import kotlin.contracts.InvocationKind
-import kotlin.contracts.contract
-
-public class SafeRw<out ImmutableType, out MutableType : ImmutableType>(
+public actual class SafeRw<out ImmutableType, out MutableType : ImmutableType> actual constructor(
     @PublishedApi
-    internal val value: MutableType
+    internal actual val value: MutableType
 ) {
     @PublishedApi
-    internal val rwMutex: ReadWriteMutex = ReadWriteMutex()
-
-    @OptIn(ExperimentalContracts::class)
-    public suspend inline fun <T> readSession(block: suspend (ImmutableType) -> T): T {
-        contract {
-            callsInPlace(block, InvocationKind.EXACTLY_ONCE)
-        }
-        return rwMutex.reader.withLock {
-            block(value)
-        }
-    }
-
-    @OptIn(ExperimentalContracts::class)
-    public suspend inline fun <T> writeSession(block: suspend (MutableType) -> T): T {
-        contract {
-            callsInPlace(block, InvocationKind.EXACTLY_ONCE)
-        }
-        return rwMutex.writer.withLock {
-            block(value)
-        }
-    }
+    internal actual val rwMutex: ReadWriteMutex = ReadWriteMutex()
 }

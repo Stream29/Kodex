@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.tool.unifiedexec
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCommandExecutionAction
@@ -10,17 +12,12 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingToolEve
 import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.typedTool
+import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools.ExecCommandName
+import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools.WriteStdinDescription
+import io.github.stream29.kodex.tool.unifiedexec.UnifiedExecTools.WriteStdinName
 
-public object UnifiedExecTools {
-    public const val ExecCommandName: String = "exec_command"
-    public const val WriteStdinName: String = "write_stdin"
-
-    public const val ExecCommandDescription: String =
-        "Runs a command in a PTY, returning output or a session ID for ongoing interaction."
-    public const val WriteStdinDescription: String =
-        "Writes characters to an existing unified exec session and returns recent output."
-
-    public val execCommandSpec: ResponsesApiTool =
+internal actual object UnifiedExecToolImplementation {
+    public actual val execCommandSpec: ResponsesApiTool =
         ResponsesApiTool(
             name = ExecCommandName,
             description = renderExecCommandDescription(execCommandHostPlatform),
@@ -29,7 +26,7 @@ public object UnifiedExecTools {
             outputSchema = UnifiedExecOutputSchema,
         )
 
-    public val writeStdinSpec: ResponsesApiTool =
+    public actual val writeStdinSpec: ResponsesApiTool =
         ResponsesApiTool(
             name = WriteStdinName,
             description = WriteStdinDescription,
@@ -39,7 +36,7 @@ public object UnifiedExecTools {
         )
 
     /** Creates both tools around one shared [UnifiedExecClient]. */
-    public fun createTools(client: UnifiedExecClient): List<Tool> =
+    public actual fun createTools(client: UnifiedExecClient): List<Tool> =
         listOf(
             CloseableUnifiedExecTool(
                 delegate = typedTool(

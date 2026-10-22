@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.components
 
 import androidx.compose.runtime.Composable
@@ -39,30 +41,21 @@ import com.jakewharton.mosaic.ui.unit.Constraints
 
 /** Receiver used to declare keyed content inside [TuiPopupMenu]. */
 @Stable
-public sealed interface TuiPopupMenuScope
+public actual sealed interface TuiPopupMenuScope
 
-/**
- * State owned by one popup menu level.
- *
- * Domain selection stays with the caller. This state retains only focus identity, viewport, and
- * nested-menu navigation across recompositions.
- *
- * @property initialFocusedKey `null` derives initial focus from the selected or first enabled item.
- * @property focusedKey `null` means the menu currently has no enabled item that can hold focus.
- * @property openSubmenuKey `null` means this menu level has no open child menu.
- * @property requestedFirstVisibleKey `null` means no explicit viewport scroll is pending.
- * @property pendingFocusRequest `null` means no offscreen item is waiting to receive focus.
- */
 @Stable
-public class TuiPopupMenuState(
-    private val initialFocusedKey: Any? = null,
+public actual class TuiPopupMenuState actual constructor(
+    private val initialFocusedKey: Any?,
 ) {
-    public var focusedKey: Any? by mutableStateOf(initialFocusedKey)
+    public actual var focusedKey: Any? by mutableStateOf(initialFocusedKey)
         internal set
 
+    /** `null` means this menu level has no open child menu. */
     internal var openSubmenuKey: Any? by mutableStateOf(null)
     internal var viewport: TuiPopupMenuViewport by mutableStateOf(TuiPopupMenuViewport.Uninitialized)
+    /** `null` means no explicit viewport scroll is pending. */
     internal var requestedFirstVisibleKey: Any? by mutableStateOf(null)
+    /** `null` means no offscreen item is waiting to receive focus. */
     internal var pendingFocusRequest: TuiPopupMenuFocusRequest? by mutableStateOf(null)
 
     private val submenuAnchors = mutableMapOf<Any, TuiPopupAnchor>()
@@ -166,35 +159,20 @@ public class TuiPopupMenuState(
         focusRequesters.getOrPut(key) { FocusRequester() }
 }
 
-/**
- * Creates a [TuiPopupMenuState] that survives recomposition at this call site.
- *
- * @param initialFocusedKey `null` derives initial focus from the selected or first enabled item.
- */
 @Composable
-public fun rememberTuiPopupMenuState(initialFocusedKey: Any? = null): TuiPopupMenuState =
+public actual fun rememberTuiPopupMenuState(initialFocusedKey: Any?): TuiPopupMenuState =
     remember { TuiPopupMenuState(initialFocusedKey) }
 
-/**
- * Declares one independently focusable menu command.
- *
- * @param leadingContent `null` omits the leading content slot.
- * @param trailingContent `null` omits the trailing content slot.
- * @param dismissOnClick When true, dismisses the menu group before invoking [onClick].
- * False delegates leaf dismissal to the caller, for exact-handle admission that must precede
- * disposal. Escape/outside dismissal is unaffected; a caller accepting the command must close
- * its own menu. Submenu navigation never dismisses the group.
- */
 @Suppress("FunctionName")
-public fun TuiPopupMenuScope.TuiPopupMenuItem(
+public actual fun TuiPopupMenuScope.TuiPopupMenuItem(
     key: Any,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    selected: Boolean = false,
-    leadingContent: (@Composable () -> Unit)? = null,
-    trailingContent: (@Composable () -> Unit)? = null,
-    dismissOnClick: Boolean = true,
+    modifier: Modifier,
+    enabled: Boolean,
+    selected: Boolean,
+    leadingContent: (@Composable () -> Unit)?,
+    trailingContent: (@Composable () -> Unit)?,
+    dismissOnClick: Boolean,
     content: @Composable () -> Unit,
 ) {
     entries += TuiPopupMenuEntry.Item(
@@ -211,15 +189,10 @@ public fun TuiPopupMenuScope.TuiPopupMenuItem(
     )
 }
 
-/**
- * Declares a non-focusable separator.
- *
- * @param key `null` generates a composition-local key from the divider's declaration position.
- */
 @Suppress("FunctionName")
-public fun TuiPopupMenuScope.TuiPopupMenuDivider(
-    key: Any? = null,
-    modifier: Modifier = Modifier,
+public actual fun TuiPopupMenuScope.TuiPopupMenuDivider(
+    key: Any?,
+    modifier: Modifier,
 ) {
     val entries = entries
     entries += TuiPopupMenuEntry.Divider(
@@ -228,27 +201,19 @@ public fun TuiPopupMenuScope.TuiPopupMenuDivider(
     )
 }
 
-/**
- * Declares a command that opens a child menu beside this item.
- *
- * @param initialSubmenuFocusedKey `null` lets the child derive focus from its selected or first
- * enabled item.
- * @param leadingContent `null` omits the leading content slot.
- * @param trailingContent `null` renders the default child-menu indicator.
- */
 @Suppress("FunctionName")
-public fun TuiPopupMenuScope.TuiPopupSubmenuItem(
+public actual fun TuiPopupMenuScope.TuiPopupSubmenuItem(
     key: Any,
     submenuContent: TuiPopupMenuScope.() -> Unit,
-    initialSubmenuFocusedKey: Any? = null,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    selected: Boolean = false,
-    leadingContent: (@Composable () -> Unit)? = null,
-    trailingContent: (@Composable () -> Unit)? = null,
-    positionProvider: TuiPopupPositionProvider = TuiPopupPositionProvider.EndTop,
-    backgroundColor: Color = Color.Unspecified,
-    submenuModifier: Modifier = Modifier,
+    initialSubmenuFocusedKey: Any?,
+    modifier: Modifier,
+    enabled: Boolean,
+    selected: Boolean,
+    leadingContent: (@Composable () -> Unit)?,
+    trailingContent: (@Composable () -> Unit)?,
+    positionProvider: TuiPopupPositionProvider,
+    backgroundColor: Color,
+    submenuModifier: Modifier,
     content: @Composable () -> Unit,
 ) {
     entries += TuiPopupMenuEntry.Item(
@@ -270,22 +235,15 @@ public fun TuiPopupMenuScope.TuiPopupSubmenuItem(
     )
 }
 
-/**
- * Displays a keyed popup menu over the surrounding [TuiPopupHost].
- *
- * The menu owns focus navigation and popup lifecycle but not domain selection. Selecting a normal
- * item dismisses the whole menu group before invoking that item's callback unless the item
- * explicitly delegates dismissal to its caller with `dismissOnClick = false`.
- */
 @Composable
-public fun BoxScope.TuiPopupMenu(
+public actual fun BoxScope.TuiPopupMenu(
     expanded: Boolean,
     onDismissRequest: () -> Unit,
     anchor: TuiPopupAnchor,
-    state: TuiPopupMenuState = rememberTuiPopupMenuState(),
-    positionProvider: TuiPopupPositionProvider = TuiPopupPositionProvider.AboveStart,
-    backgroundColor: Color = Color.Unspecified,
-    modifier: Modifier = Modifier,
+    state: TuiPopupMenuState,
+    positionProvider: TuiPopupPositionProvider,
+    backgroundColor: Color,
+    modifier: Modifier,
     content: TuiPopupMenuScope.() -> Unit,
 ) {
     if (!expanded) return

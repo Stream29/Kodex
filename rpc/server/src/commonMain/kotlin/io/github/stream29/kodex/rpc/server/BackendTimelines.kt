@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
@@ -49,23 +51,23 @@ internal class BackendTimeline<T>(
         checked(sessionIndex, cacheNonce).valuesIn(fromInclusive..toInclusive)
 }
 
-public class BackendIndexTimelineRpc(host: BackendSessionHost) :
+public actual class BackendIndexTimelineRpc actual constructor(host: BackendSessionHost) :
     IndexTimelineRpc, TimelineRpc<CleanIndexEntry> by BackendTimeline(host, { it.index })
 
-public class BackendWorkTimelineRpc(host: BackendSessionHost) :
+public actual class BackendWorkTimelineRpc actual constructor(host: BackendSessionHost) :
     WorkTimelineRpc, TimelineRpc<StableWorkEvent> by BackendTimeline(host, { it.work })
 
-public class BackendTimestampTimelineRpc(host: BackendSessionHost) :
+public actual class BackendTimestampTimelineRpc actual constructor(host: BackendSessionHost) :
     TimestampTimelineRpc, TimelineRpc<Instant> by BackendTimeline(host, { it.timestamp })
 
-public class BackendTokenCountTimelineRpc(host: BackendSessionHost) :
+public actual class BackendTokenCountTimelineRpc actual constructor(host: BackendSessionHost) :
     TokenCountTimelineRpc, TimelineRpc<TokenCountSnapshot> by BackendTimeline(host, { it.tokenCount })
 
-public class BackendUnstableTimelineRpc(host: BackendSessionHost) :
+public actual class BackendUnstableTimelineRpc actual constructor(host: BackendSessionHost) :
     UnstableTimelineRpc, TimelineRpc<List<UnstableCleanEvent>> by BackendTimeline(host, { it.unstable })
 
-public class BackendSettingsTimelineRpc(private val host: BackendSessionHost) :
+public actual class BackendSettingsTimelineRpc actual constructor(private val host: BackendSessionHost) :
     SettingsTimelineRpc, TimelineRpc<KodexAgentSettings> by BackendTimeline(host, { it.settings }) {
-    override suspend fun compareAndSet(sessionIndex: Int, expect: KodexAgentSettings, update: KodexAgentSettings): Boolean =
+    actual override suspend fun compareAndSet(sessionIndex: Int, expect: KodexAgentSettings, update: KodexAgentSettings): Boolean =
         host.inSession(sessionIndex) { runtime.compareAndSetSettings(expect, update) }
 }

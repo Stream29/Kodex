@@ -7,8 +7,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
-/** Creates the standard atomic implementation of [ReadWriteMutex]. */
-public fun ReadWriteMutex(): ReadWriteMutex = ReadWriteMutexImpl()
+public actual fun ReadWriteMutex(): ReadWriteMutex = ReadWriteMutexImpl()
 
 @OptIn(ExperimentalAtomicApi::class)
 private class ReadWriteMutexImpl : ReadWriteMutex {

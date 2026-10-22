@@ -15,15 +15,8 @@ import io.ktor.util.AttributeKey
 import io.ktor.util.pipeline.PipelinePhase
 import io.ktor.utils.io.InternalAPI
 
-/**
- * Supplies the SSE response content type when an explicitly marked server
- * response omits it.
- *
- * Ktor's official SSE plugin still owns request handling, response validation,
- * session lifecycle, and event parsing.
- */
 @OptIn(InternalAPI::class)
-public val SseCompatibility: ClientPlugin<Unit> = createClientPlugin("SseCompatibility") {
+public actual val SseCompatibility: ClientPlugin<Unit> = createClientPlugin("SseCompatibility") {
     client.requestPipeline.insertPhaseBefore(HttpRequestPipeline.Send, BeforeSseCompatibilitySend)
     client.requestPipeline.intercept(BeforeSseCompatibilitySend) {
         if (!context.attributes.contains(SseCompatibilityRequestAttribute)) {

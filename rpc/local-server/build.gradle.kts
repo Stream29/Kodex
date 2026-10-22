@@ -6,11 +6,14 @@ plugins {
 
 kotlin {
 sourceSets {
-    named("specMain").dependencies { api(libs.kotlinx.serialization.json) }
+    named("specMain").dependencies {
+        api(libs.kotlinx.serialization.json)
+        api(libs.kotlinx.rpc.core)
+        api(libs.kotlinx.coroutines.core)
+    }
     commonMain.dependencies {
         implementation(project(":app-backend-daemon"))
         implementation(project(":rpc-websocket"))
-        api(libs.kotlinx.rpc.core)
         implementation(libs.kotlinx.rpc.krpc.server)
         implementation(libs.kotlinx.rpc.krpc.serialization.json)
         implementation(libs.ktor.server.core)

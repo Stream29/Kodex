@@ -10,16 +10,15 @@ import com.jakewharton.mosaic.ui.UnderlineStyle
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
 
-/** Renders one hard line, adding an ellipsis when it exceeds the measured terminal-cell width. */
 @Composable
-public fun EllipsizedText(
+public actual fun EllipsizedText(
     value: String,
-    modifier: Modifier = Modifier,
-    color: Color = Color.Unspecified,
-    background: Color = Color.Unspecified,
-    textStyle: TextStyle = TextStyle.Unspecified,
-    underlineStyle: UnderlineStyle = UnderlineStyle.Unspecified,
-    underlineColor: Color = Color.Unspecified,
+    modifier: Modifier,
+    color: Color,
+    background: Color,
+    textStyle: TextStyle,
+    underlineStyle: UnderlineStyle,
+    underlineColor: Color,
 ) {
     require('\n' !in value && '\r' !in value) {
         "EllipsizedText only supports one hard line."

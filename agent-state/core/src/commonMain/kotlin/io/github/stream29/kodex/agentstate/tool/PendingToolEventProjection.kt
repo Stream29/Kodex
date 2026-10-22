@@ -41,7 +41,7 @@ import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.JsonElement
 
 /** Converts one provider-issued local tool call at the AgentState boundary. */
-public fun ResponseItem.ToolCall.toPendingToolEvent(): PendingToolEvent =
+public actual fun ResponseItem.ToolCall.toPendingToolEvent(): PendingToolEvent =
     when (this) {
         is ResponseItem.FunctionCall -> toPendingToolEvent()
         is ResponseItem.CustomToolCall -> toPendingToolEvent()

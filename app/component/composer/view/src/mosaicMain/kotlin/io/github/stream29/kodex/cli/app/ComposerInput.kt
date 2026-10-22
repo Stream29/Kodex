@@ -16,27 +16,18 @@ import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.settings.NewLineKey
 import io.github.stream29.kodex.cli.settings.SubmitKey
 
-/**
- * Canonical Composer input widget, shared by persisted-Agent and New Session renderers.
- *
- * [state] is only the widget's buffer/selection/undo state. [onValueChanged] publishes accepted
- * edits to the real Composer child; [onSubmit] is the captured owner's intent. This primitive
- * does not allocate a ViewModel, submit/persist a message, or own the borrowed child lifecycle.
- * Newline edits remain one undo transaction and configured submit keys never insert a newline.
- * [readOnly] blocks edits and submission without removing the input's focus target.
- */
 @Composable
-public fun ComposerInput(
+public actual fun ComposerInput(
     state: TextInputState,
     layout: TextInputLayout,
     newLineKey: NewLineKey,
-    autoFocus: Boolean = true,
-    enabled: Boolean = true,
-    submitHint: String? = null,
+    autoFocus: Boolean,
+    enabled: Boolean,
+    submitHint: String?,
     onSubmit: () -> Unit,
-    onValueChanged: ((TextInputValue) -> Unit)? = null,
-    focusRequester: FocusRequester? = null,
-    readOnly: Boolean = false,
+    onValueChanged: ((TextInputValue) -> Unit)?,
+    focusRequester: FocusRequester?,
+    readOnly: Boolean,
 ) {
     Column {
         TextInput(

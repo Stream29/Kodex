@@ -8,14 +8,14 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
+                api(project(":agent-state-contract"))
+                api(project(":openai-model-catalog"))
                 api(project(":openai-models"))
                 api(project(":tool-core"))
                 api(libs.kotlinx.schema.json)
             }
         }
         commonMain.dependencies {
-            api(project(":agent-state-contract"))
-            api(project(":openai-model-catalog"))
             implementation(project(":agent-state-context-window"))
             implementation(project(":tool-core"))
             implementation(libs.kotlinx.serialization.core)

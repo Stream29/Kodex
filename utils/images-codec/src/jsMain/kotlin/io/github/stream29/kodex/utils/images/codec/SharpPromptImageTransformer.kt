@@ -17,7 +17,7 @@ import kotlinx.coroutines.await
 
 public actual val HostPromptImageTransformer: PromptImageTransformer = SharpPromptImageTransformer
 
-public object SharpPromptImageTransformer : PromptImageTransformer {
+internal object SharpPromptImageTransformer : PromptImageTransformer {
     override suspend fun transform(request: PromptImageTransformRequest): EncodedImage {
         val plan = request.plan
         val pipeline = sharp(request.sourceBytes.toUint8Array())

@@ -27,28 +27,21 @@ import io.github.stream29.kodex.cli.components.rememberTuiDropdownState
 import io.github.stream29.kodex.cli.settings.KodexAuthSource
 import io.github.stream29.kodex.openai.OpenAiAuthState
 
-/**
- * Full component inside a TuiPopupHost. Renderer owns only source menu/focus; host calls hidePage
- * on navigation and close at Settings end. It does not close the stable child on panel unmount.
- * For host scroll layout, compose Panel within content and Overlays at popup-host level using
- * the same rememberTuiDropdownState.
- */
 @Composable
-public fun BoxScope.AuthenticationSettingsComponent(
+public actual fun BoxScope.AuthenticationSettingsComponent(
     viewModel: AuthenticationSettingsViewModel,
-    showOperationFailure: Boolean = true,
+    showOperationFailure: Boolean,
 ) {
     val dropdown = rememberTuiDropdownState()
     AuthenticationSettingsPanel(viewModel, dropdown, showOperationFailure)
     AuthenticationSettingsOverlays(viewModel, dropdown)
 }
 
-/** Source trigger, safe summary and operations; false suppresses the host-owned shared banner. */
 @Composable
-public fun AuthenticationSettingsPanel(
+public actual fun AuthenticationSettingsPanel(
     viewModel: AuthenticationSettingsViewModel,
     sourceDropdown: TuiDropdownState,
-    showOperationFailure: Boolean = true,
+    showOperationFailure: Boolean,
 ) {
     val state by viewModel.state.collectAsState()
     if (state.closed) return
@@ -58,15 +51,14 @@ public fun AuthenticationSettingsPanel(
     )
 }
 
-/** Full safe renderer: disabled UI does not add command-side guards or optimistic auth changes. */
 @Composable
-public fun AuthenticationSettingsContent(
+public actual fun AuthenticationSettingsContent(
     state: AuthenticationSettingsState,
     sourceDropdown: TuiDropdownState,
     onOpenLogin: () -> Unit,
     onRequestLogout: () -> Unit,
     onDismissFailure: () -> Unit,
-    showOperationFailure: Boolean = true,
+    showOperationFailure: Boolean,
 ) {
     if (state.closed) return
     val enabled = state.operation != SettingsAuthenticationOperationState.SigningOut
@@ -114,9 +106,8 @@ public fun AuthenticationSettingsContent(
     }
 }
 
-/** Source menu plus exact-identity confirmation; place after persistent content in TuiPopupHost. */
 @Composable
-public fun BoxScope.AuthenticationSettingsOverlays(
+public actual fun BoxScope.AuthenticationSettingsOverlays(
     viewModel: AuthenticationSettingsViewModel,
     sourceDropdown: TuiDropdownState,
 ) {
@@ -140,9 +131,8 @@ public fun BoxScope.AuthenticationSettingsOverlays(
     }
 }
 
-/** Cancel initially focused; wording describes only the live selected source's local file. */
 @Composable
-public fun BoxScope.AuthenticationLogoutDialog(
+public actual fun BoxScope.AuthenticationLogoutDialog(
     source: KodexAuthSource,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,

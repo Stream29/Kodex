@@ -22,3 +22,17 @@ public interface Tool : AutoCloseable {
      */
     public suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool
 }
+
+/**
+ * Creates a resource-free [Tool] that accepts one concrete pending clean-event
+ * shape. [select] keeps the downcast at the contract boundary so tool business
+ * logic receives its typed pending model directly.
+ *
+ * @throws IllegalArgumentException when [select] returns `null` for an event
+ * passed to the resulting tool.
+ */
+public expect fun <Pending : PendingToolEvent> typedTool(
+    spec: ToolSpec,
+    select: (PendingToolEvent) -> Pending?,
+    handler: suspend (Pending) -> StableCleanEvent.CompletedTool,
+): Tool

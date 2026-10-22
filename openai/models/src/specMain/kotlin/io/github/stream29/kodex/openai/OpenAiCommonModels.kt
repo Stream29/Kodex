@@ -2,12 +2,10 @@ package io.github.stream29.kodex.openai
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlin.jvm.JvmInline
 
 /**
  * Stable OpenAI/Codex model identifier used on request wires and model catalogs.
  */
-@JvmInline
 @Serializable
 public value class OpenAiModelId(public val value: String) {
     init {

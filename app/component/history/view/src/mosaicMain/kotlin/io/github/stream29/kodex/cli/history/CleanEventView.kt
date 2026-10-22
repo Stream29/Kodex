@@ -97,10 +97,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlin.time.Duration
 
-/** Renders one committed clean event without flattening its domain model first. */
 @Composable
-public fun StableCleanEvent.render(
-    shellSessions: AgentShellSessionRegistry? = null,
+public actual fun StableCleanEvent.render(
+    shellSessions: AgentShellSessionRegistry?,
 ) {
     render(shellSessions, expansion = null, elapsed = null)
 }
@@ -158,10 +157,9 @@ internal class HistoryExpansionBinding(
 private val LocalHistoryExpansion = staticCompositionLocalOf<HistoryExpansionBinding?> { null }
 private val LocalHistoryElapsed = staticCompositionLocalOf<Duration?> { null }
 
-/** Renders one current unfinished clean event without reducing it to raw history. */
 @Composable
-public fun UnstableCleanEvent.render(
-    shellSessions: AgentShellSessionRegistry? = null,
+public actual fun UnstableCleanEvent.render(
+    shellSessions: AgentShellSessionRegistry?,
 ) {
     when (this) {
         is PendingFunctionToolEvent -> ToolEvent(

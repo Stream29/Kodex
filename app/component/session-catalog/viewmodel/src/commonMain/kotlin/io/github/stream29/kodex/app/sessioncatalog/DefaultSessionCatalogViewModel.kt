@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.app.sessioncatalog
 
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogDependencies
@@ -22,24 +24,23 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import kotlin.time.Instant
 
-/** Owns catalog presentation without knowing its RPC or persistence protocol. */
-public class DefaultSessionCatalogViewModel(
+public actual class DefaultSessionCatalogViewModel actual constructor(
     scope: CoroutineScope,
     private val dependencies: SessionCatalogDependencies,
-    private val interactions: SessionCatalogInteractions? = null,
+    private val interactions: SessionCatalogInteractions?,
 ) : SessionCatalogViewModel {
     private val owner = Job(scope.coroutineContext[Job])
     private val localContext = scope.coroutineContext + owner
     private val mutex = Mutex()
     private val mutableState = MutableStateFlow<SessionCatalogState>(SessionCatalogState.Unloaded)
-    override val state: StateFlow<SessionCatalogState> = mutableState.asStateFlow()
+    actual override val state: StateFlow<SessionCatalogState> = mutableState.asStateFlow()
     private val mutableDeleteTarget = MutableStateFlow<SessionCatalogDeleteHandle?>(null)
-    override val deleteTarget: StateFlow<SessionCatalogDeleteHandle?> = mutableDeleteTarget.asStateFlow()
+    actual override val deleteTarget: StateFlow<SessionCatalogDeleteHandle?> = mutableDeleteTarget.asStateFlow()
 
     private fun containsCapturedRow(entry: SessionCatalogEntry): Boolean =
         state.value is SessionCatalogState.Loaded && state.value.sessions.any { it == entry }
 
-    override suspend fun requestOpen(entry: SessionCatalogEntry) {
+    actual override suspend fun requestOpen(entry: SessionCatalogEntry) {
         val port = operation {
             if (!containsCapturedRow(entry)) return@operation null
             val captured = checkNotNull(interactions) { "Catalog navigation ports were not supplied." }
@@ -53,7 +54,7 @@ public class DefaultSessionCatalogViewModel(
         port?.dismissPopup()
     }
 
-    override fun requestDelete(entry: SessionCatalogEntry): SessionCatalogDeleteHandle? {
+    actual override fun requestDelete(entry: SessionCatalogEntry): SessionCatalogDeleteHandle? {
         owner.ensureActive()
         if (!containsCapturedRow(entry)) return null
         mutableDeleteTarget.value?.let(::dismissDelete)
@@ -76,39 +77,39 @@ public class DefaultSessionCatalogViewModel(
         return handle
     }
 
-    override fun dismissDelete(handle: SessionCatalogDeleteHandle) {
+    actual override fun dismissDelete(handle: SessionCatalogDeleteHandle) {
         if (mutableDeleteTarget.value !== handle) return
         mutableDeleteTarget.value = null
         handle.viewModel.close()
     }
 
-    override fun dismiss() {
+    actual override fun dismiss() {
         owner.ensureActive()
         checkNotNull(interactions) { "Catalog navigation ports were not supplied." }.dismissPopup()
     }
 
-    override suspend fun refresh(): Unit = operation { reload(state.value.showArchived) }
-    override suspend fun setShowArchived(showArchived: Boolean): Unit = operation {
+    actual override suspend fun refresh(): Unit = operation { reload(state.value.showArchived) }
+    actual override suspend fun setShowArchived(showArchived: Boolean): Unit = operation {
         if (state.value.showArchived != showArchived) reload(showArchived)
     }
-    override suspend fun readCreatedAt(sessionIndex: Int): Instant? = operation {
+    actual override suspend fun readCreatedAt(sessionIndex: Int): Instant? = operation {
         state.value.sessions.first { it.sessionIndex == sessionIndex }.createdAt
     }
-    override suspend fun readUpdatedAt(sessionIndex: Int): Instant? = operation {
+    actual override suspend fun readUpdatedAt(sessionIndex: Int): Instant? = operation {
         state.value.sessions.first { it.sessionIndex == sessionIndex }.updatedAt
     }
-    override suspend fun archive(sessionIndex: Int): Unit = operation {
+    actual override suspend fun archive(sessionIndex: Int): Unit = operation {
         dependencies.archive(sessionIndex)
         reload(state.value.showArchived)
     }
-    override suspend fun unarchive(sessionIndex: Int): Unit = operation {
+    actual override suspend fun unarchive(sessionIndex: Int): Unit = operation {
         dependencies.unarchive(sessionIndex)
         reload(state.value.showArchived)
     }
-    override suspend fun fork(sessionIndex: Int): Int = operation {
+    actual override suspend fun fork(sessionIndex: Int): Int = operation {
         dependencies.fork(sessionIndex).also { reload(state.value.showArchived) }
     }
-    override suspend fun delete(sessionIndex: Int): Boolean = operation {
+    actual override suspend fun delete(sessionIndex: Int): Boolean = operation {
         dependencies.delete(sessionIndex).also { reload(state.value.showArchived) }
     }
 
@@ -138,7 +139,7 @@ public class DefaultSessionCatalogViewModel(
         }
     }
 
-    override fun close() {
+    actual override fun close() {
         mutableDeleteTarget.value?.let(::dismissDelete)
         owner.cancel()
     }

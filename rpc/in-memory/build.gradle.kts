@@ -9,9 +9,11 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
+        named("specMain").dependencies {
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.rpc.core)
+        }
+        commonMain.dependencies {
             implementation(libs.kotlinx.rpc.krpc.client)
             implementation(libs.kotlinx.rpc.krpc.server)
             implementation(libs.kotlinx.rpc.krpc.serialization.json)

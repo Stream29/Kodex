@@ -2,8 +2,7 @@ package io.github.stream29.kodex.cli.agent
 
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 
-/** Small terminal-ready status label for one execution phase. */
-public fun AgentStateValue.label(): String = when (this) {
+public actual fun AgentStateValue.label(): String = when (this) {
     AgentStateValue.Empty -> "Idle"
     AgentStateValue.UserMessage -> "User message"
     is AgentStateValue.RequestResponse -> "Generating response"

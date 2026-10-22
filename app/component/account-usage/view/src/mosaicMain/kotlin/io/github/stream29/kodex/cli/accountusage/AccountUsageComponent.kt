@@ -21,26 +21,20 @@ import io.github.stream29.kodex.openai.accountusage.CodexAccountRateLimitWindow
 import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageSection
 import io.github.stream29.kodex.openai.accountusage.CodexAccountUsageSnapshot
 
-/**
- * Full usage summary/actions renderer. No reset dialogs, local reset state, constructor/disposal
- * refresh or child close on navigation. Set showOperationFailure false when Settings renders
- * the same application-owned flag. The host alone owns automatic page-entry refresh.
- */
 @Composable
-public fun AccountUsageComponent(viewModel: AccountUsageViewModel, showOperationFailure: Boolean = true) {
+public actual fun AccountUsageComponent(viewModel: AccountUsageViewModel, showOperationFailure: Boolean) {
     val state by viewModel.state.collectAsState()
     AccountUsageContent(state, viewModel::refresh, viewModel::requestReset, viewModel::dismissFailure,
         showOperationFailure)
 }
 
-/** Every DTO branch is rendered without fabricating zeroes or crossing into reset ownership. */
 @Composable
-public fun AccountUsageContent(
+public actual fun AccountUsageContent(
     state: AccountUsageState,
     onRefresh: () -> Unit,
     onUseReset: () -> Unit,
     onDismissFailure: () -> Unit,
-    showOperationFailure: Boolean = true,
+    showOperationFailure: Boolean,
 ) {
     if (state.closed) return
     val usage = state.usage

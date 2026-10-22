@@ -48,7 +48,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 
 /** Converts one pending local call into its matching durable failed tool event. */
-public fun PendingToolEvent.toFailedToolEvent(message: String): StableCleanEvent.CompletedTool =
+public actual fun PendingToolEvent.toFailedToolEvent(message: String): StableCleanEvent.CompletedTool =
     when (this) {
         is PendingFunctionToolEvent ->
             StableTextToolEvent(

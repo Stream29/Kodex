@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.tool.currenttime
 
 import kotlinx.datetime.LocalDateTime
@@ -7,10 +9,10 @@ import kotlin.time.Clock
 import kotlin.time.Instant
 
 /** Local current-time source used by `clock.curr_time`. */
-public class CurrentTimeToolClient(
-    private val clock: Clock = Clock.System,
+public actual class CurrentTimeToolClient actual constructor(
+    private val clock: Clock,
 ) {
-    public fun currentTime(): String =
+    public actual fun currentTime(): String =
         clock.now().formatCurrentTimeUtc()
 }
 

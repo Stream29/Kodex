@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.utils.filesystemlease
 
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.osenvironment.processId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -20,9 +19,9 @@ import kotlin.time.Duration
 import kotlin.time.Instant
 import kotlin.coroutines.CoroutineContext
 
-public suspend fun CoroutineScope.FileSystemLease(
+public actual suspend fun CoroutineScope.FileSystemLease(
     lockPath: Path,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    fileSystem: CoroutineFileSystem,
     duration: Duration,
 ): FileSystemLease = acquireRenewableFileSystemLease(lockPath, fileSystem, duration)
 

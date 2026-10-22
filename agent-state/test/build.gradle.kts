@@ -5,10 +5,14 @@ plugins {
 
 kotlin {
     sourceSets {
+        named("specMain") {
+            dependencies {
+                api(project(":agent-context-settings"))
+                api(project(":mcp-contract"))
+                api(libs.kotlinx.coroutines.core)
+            }
+        }
         commonMain.dependencies {
-            api(project(":agent-context-settings"))
-            api(project(":mcp"))
-            api(libs.kotlinx.coroutines.core)
             implementation(project(":utils-shell-client"))
             implementation(libs.kotlinx.io.core)
         }

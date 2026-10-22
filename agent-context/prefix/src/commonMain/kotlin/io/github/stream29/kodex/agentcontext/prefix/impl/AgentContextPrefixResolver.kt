@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.agentcontext.prefix.impl
 
 import io.github.stream29.kodex.agentcontext.prefix.agentsmd.filesystem.loadAgentsMd
@@ -13,22 +15,14 @@ import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
 
-/**
- * Resolves application-wide and Agent-specific data into one request prefix.
- *
- * AgentState owns this helper rather than accepting an executable context
- * provider. Each [resolve] call captures one complete [contextSettings]
- * snapshot together with the supplied Agent settings.
- */
-public class AgentContextPrefixResolver(
+public actual class AgentContextPrefixResolver actual constructor(
     private val contextSettings: StateFlow<AgentContextSettings>,
 ) {
     private val skillsResolver = FileSystemSkillsResolver(
         contextSettings = contextSettings,
     )
 
-    /** Captures global state and resolves Agent-specific context for [settings]. */
-    public suspend fun resolve(settings: KodexAgentSettings, uri: String): AgentContextPrefix {
+    public actual suspend fun resolve(settings: KodexAgentSettings, uri: String): AgentContextPrefix {
         val context = contextSettings.value
         val cwd = settings.cwd
         val plan = resolveSourcePlan(context, cwd)

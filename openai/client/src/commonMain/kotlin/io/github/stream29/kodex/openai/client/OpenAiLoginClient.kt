@@ -32,7 +32,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /** Creates an OpenAI OAuth client using the configured Codex-compatible defaults. */
-public fun OpenAiLoginClient(): OpenAiLoginClientContract {
+public actual fun OpenAiLoginClient(): OpenAiLoginClientContract {
     val clientId = configuredOpenAiLoginClientId()
     val refreshTokenEndpoint = configuredOpenAiRefreshTokenEndpoint()
     return OpenAiLoginClientImpl(

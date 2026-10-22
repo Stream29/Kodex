@@ -11,8 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
-/** Creates a [SessionTitleSettingsViewModel] using the host's default model and admission ports. */
-public fun createSessionTitleSettingsViewModel(
+public actual fun createSessionTitleSettingsViewModel(
     dependencies: SessionTitleSettingsDependencies, ownerScope: CoroutineScope,
 ): SessionTitleSettingsViewModel = DefaultSessionTitleSettingsViewModel(dependencies, ownerScope)
 

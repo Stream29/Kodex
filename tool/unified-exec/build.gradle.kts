@@ -20,14 +20,18 @@ kotlin {
     }
 
     sourceSets {
-        commonMain.dependencies {
-            api(project(":tool-unified-exec-contract"))
-            api(project(":tool-core"))
-            api(project(":utils-shell-client-system"))
-            api(libs.kotlinx.schema.json)
+        named("specMain") {
+            dependencies {
+                api(project(":tool-unified-exec-contract"))
+                api(project(":tool-core"))
+                api(libs.kotlinx.schema.json)
+                api(project(":utils-shell-client"))
+                api(libs.kotlinx.coroutines.core)
+                api(libs.kotlinx.io.core)
+            }
         }
-        jsMain.dependencies {
-            implementation(libs.kotlin.wrappers.node)
+        commonMain.dependencies {
+            implementation(project(":utils-shell-client-system"))
         }
         commonTest.dependencies {
             implementation(project(":tool-core"))

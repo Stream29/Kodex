@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.cli.auth.BackendFileSystemAuthStore
@@ -34,10 +36,10 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration
 
 /** Supplies listener-free attempts to the original manager's commit/cleanup path. */
-public class BackendMcpOAuthBridge(
+public actual class BackendMcpOAuthBridge actual constructor(
     private val prepare: suspend (McpServerConfiguration.StreamableHttp) -> PreparedMcpOAuthLogin,
 ) : McpOAuthLoginAttemptFactory {
-    override suspend fun create(configuration: McpServerConfiguration.StreamableHttp): McpOAuthLoginAttempt =
+    actual override suspend fun create(configuration: McpServerConfiguration.StreamableHttp): McpOAuthLoginAttempt =
         RemoteMcpAttempt(prepare(configuration))
 }
 
@@ -53,14 +55,14 @@ private class RemoteMcpAttempt(val prepared: PreparedMcpOAuthLogin) : McpOAuthLo
  * Backend-private attempt registry. Handles are unique across target kinds;
  * completion/cancellation never resolve a target from current frontend state.
  */
-public class BackendOAuth internal constructor(
+public actual class BackendOAuth internal constructor(
     scope: CoroutineScope,
     private val credentials: BackendFileSystemAuthStore,
     private val openAi: OpenAiLoginClient,
     private val mcp: McpManagerImpl,
     private val waitForCallbackDeadline: suspend (Duration) -> Unit,
 ) : AutoCloseable {
-    public constructor(
+    public actual constructor(
         scope: CoroutineScope,
         credentials: BackendFileSystemAuthStore,
         openAi: OpenAiLoginClient,
@@ -76,7 +78,7 @@ public class BackendOAuth internal constructor(
         owner.cancelAndJoin()
     }
 
-    public suspend fun start(target: OAuthTarget, redirectUri: String): OAuthAuthorization = accepted {
+    public actual suspend fun start(target: OAuthTarget, redirectUri: String): OAuthAuthorization = accepted {
         validateRedirect(target, redirectUri)
         val attempt = mutex.withLock {
             require(attempts.values.none { it.target == target }) { "This target is already authorizing." }
@@ -128,7 +130,7 @@ public class BackendOAuth internal constructor(
         attempt.authorization.await()
     }
 
-    public suspend fun complete(id: Long, callbackUrl: String): Unit = accepted {
+    public actual suspend fun complete(id: Long, callbackUrl: String): Unit = accepted {
         val work = mutex.withLock {
             val attempt = attempts[id] ?: error("Unknown or completed OAuth attempt.")
             check(attempt.pending) { "This OAuth attempt is not waiting for a callback." }
@@ -145,7 +147,7 @@ public class BackendOAuth internal constructor(
         work.await()
     }
 
-    public suspend fun cancel(id: Long): Unit = accepted {
+    public actual suspend fun cancel(id: Long): Unit = accepted {
         mutex.withLock {
             attempts[id]?.also {
                 it.pending = false
@@ -155,7 +157,7 @@ public class BackendOAuth internal constructor(
         }
     }
 
-    public suspend fun removeAuthentication(source: KodexAuthSource): Unit = accepted {
+    public actual suspend fun removeAuthentication(source: KodexAuthSource): Unit = accepted {
         mutex.withLock {
             attempts.values.filter { it.target == OAuthTarget.OpenAi(source) }.forEach {
                 it.pending = false
@@ -166,7 +168,7 @@ public class BackendOAuth internal constructor(
         credentials.remove(source)
     }
 
-    public suspend fun logoutMcpServer(name: String): Unit = accepted { mcp.logout(name) }
+    public actual suspend fun logoutMcpServer(name: String): Unit = accepted { mcp.logout(name) }
 
     private suspend fun ready(
         attempt: Attempt,
@@ -199,7 +201,7 @@ public class BackendOAuth internal constructor(
         return owner.async { block() }.await()
     }
 
-    override fun close() { owner.cancel() }
+    public actual override fun close() { owner.cancel() }
 }
 
 private class Attempt(val id: Long, val target: OAuthTarget, val redirectUri: String) {

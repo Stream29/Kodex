@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.session
 
 import io.github.stream29.kodex.app.agent.contract.AgentViewModel
@@ -11,9 +13,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.io.files.Path
 import kotlin.time.Instant
 
-/** Frontend handles only. The real repository and its resource graph never enter this module. */
-public class DefaultPersistedSessionViewModelRegistry(
-    public val views: RpcSessionViews,
+public actual class DefaultPersistedSessionViewModelRegistry actual constructor(
+    public actual val views: RpcSessionViews,
     private val models: StateFlow<List<ModelInfo>>,
     private val scope: CoroutineScope,
 ) : PersistedSessionViewModelRegistry {
@@ -21,14 +22,14 @@ public class DefaultPersistedSessionViewModelRegistry(
     private val handles = mutableMapOf<Int, RpcPersistedSessionViewModel>()
     private var closed = false
 
-    override suspend fun open(sessionIndex: Int): PersistedSessionViewModel = mutex.withLock {
+    actual override suspend fun open(sessionIndex: Int): PersistedSessionViewModel = mutex.withLock {
         check(!closed)
         views.services.global.unarchiveSession(sessionIndex)
         handles[sessionIndex] ?: RpcPersistedSessionViewModel(
             views.open(sessionIndex), views.services, models, scope,
         ).also { handles[sessionIndex] = it }
     }
-    override suspend fun release(sessionIndex: Int) {
+    actual override suspend fun release(sessionIndex: Int) {
         val handle = mutex.withLock {
             val removed = handles.remove(sessionIndex)
             removed?.close()
@@ -39,12 +40,12 @@ public class DefaultPersistedSessionViewModelRegistry(
         }
         handle?.join()
     }
-    override suspend fun archive(sessionIndex: Int): Unit = views.services.global.archiveSession(sessionIndex)
-    override suspend fun unarchive(sessionIndex: Int): Unit = views.services.global.unarchiveSession(sessionIndex)
-    override suspend fun fork(sessionIndex: Int): Int = views.services.global.forkSession(sessionIndex)
-    override suspend fun delete(sessionIndex: Int): Boolean =
+    actual override suspend fun archive(sessionIndex: Int): Unit = views.services.global.archiveSession(sessionIndex)
+    actual override suspend fun unarchive(sessionIndex: Int): Unit = views.services.global.unarchiveSession(sessionIndex)
+    actual override suspend fun fork(sessionIndex: Int): Int = views.services.global.forkSession(sessionIndex)
+    actual override suspend fun delete(sessionIndex: Int): Boolean =
         views.services.global.deleteSession(sessionIndex).also { if (it) release(sessionIndex) }
-    override suspend fun shutdown() {
+    actual override suspend fun shutdown() {
         val previous = mutex.withLock {
             closed = true
             handles.values.toList().also { handles.clear(); it.forEach(RpcPersistedSessionViewModel::close) }
@@ -54,22 +55,21 @@ public class DefaultPersistedSessionViewModelRegistry(
     }
 }
 
-/** A stable tab owns successive read bindings, not a stable backend resource reference. */
-public class RpcPersistedSessionViewModel internal constructor(
-    public val view: RpcSessionView,
+public actual class RpcPersistedSessionViewModel internal constructor(
+    public actual val view: RpcSessionView,
     private val services: RpcServices,
-    override val models: StateFlow<List<ModelInfo>>,
+    actual override val models: StateFlow<List<ModelInfo>>,
     scope: CoroutineScope,
 ) : PersistedSessionViewModel {
     private val owner = Job(scope.coroutineContext[Job])
     private val local = CoroutineScope(scope.coroutineContext + owner)
-    override val rootAgent: StateFlow<AgentViewModel?> = view.agent
-    override val sessionIndex: Int = view.index
+    actual override val rootAgent: StateFlow<AgentViewModel?> = view.agent
+    actual override val sessionIndex: Int = view.index
     // Last-known read cache: recovery can withdraw the Agent/binding before publishing
     // the replacement. It must not blank the tab name or become a writable second truth.
     private val mutableSettings = MutableStateFlow(view.current().settings.value)
-    override val settings: StateFlow<KodexAgentSettings> = mutableSettings.asStateFlow()
-    override val name: StateFlow<String> = settings.map { it.threadName }
+    actual override val settings: StateFlow<KodexAgentSettings> = mutableSettings.asStateFlow()
+    actual override val name: StateFlow<String> = settings.map { it.threadName }
         .stateIn(local, SharingStarted.Eagerly, settings.value.threadName)
     private fun lifecycleStatus(status: SessionViewStatus): PersistedSessionLifecycleState =
         when (status) {
@@ -80,7 +80,7 @@ public class RpcPersistedSessionViewModel internal constructor(
             SessionViewStatus.Closed -> PersistedSessionLifecycleState.Closed
         }
     private val mutableLifecycle = MutableStateFlow(lifecycleStatus(view.status.value))
-    override val lifecycle: StateFlow<PersistedSessionLifecycleState> = mutableLifecycle.asStateFlow()
+    actual override val lifecycle: StateFlow<PersistedSessionLifecycleState> = mutableLifecycle.asStateFlow()
 
     init {
         owner.invokeOnCompletion {
@@ -100,26 +100,26 @@ public class RpcPersistedSessionViewModel internal constructor(
         // exact binding. No RPC implementation cast/resolver or wrapper is needed.
         return requireNotNull(rootAgent.value).also { check(it.settings === binding.settings) }
     }
-    override suspend fun refresh() { view.current() /* subscriptions own the settings projection */ }
-    override suspend fun readCreatedAt(): Instant? = view.current().readCreatedAt()
-    override suspend fun readUpdatedAt(): Instant? = view.current().readUpdatedAt()
-    override suspend fun fork(source: AgentViewModel, untilExclusive: Int, expectedGeneration: Long): Int {
+    actual override suspend fun refresh() { view.current() /* subscriptions own the settings projection */ }
+    actual override suspend fun readCreatedAt(): Instant? = view.current().readCreatedAt()
+    actual override suspend fun readUpdatedAt(): Instant? = view.current().readUpdatedAt()
+    actual override suspend fun fork(source: AgentViewModel, untilExclusive: Int, expectedGeneration: Long): Int {
         owner.ensureActive()
         val binding = view.current()
         val capturedAgent = requireNotNull(rootAgent.value).also { check(it.settings === binding.settings) }
         require(source === capturedAgent) { "The history target expired." }
         return binding.forkHistory(untilExclusive, expectedGeneration)
     }
-    override suspend fun fork(): Int = services.global.forkSession(sessionIndex)
-    override suspend fun rename(name: String): Unit = current().renameThread(name.trim())
-    override suspend fun updateModel(model: OpenAiModelId): Unit = current().updateModel(model)
-    override suspend fun updateWorkingDirectory(workingDirectory: Path): Unit = current().updateWorkingDirectory(workingDirectory)
-    override suspend fun updateReasoningEffort(reasoningEffort: ReasoningEffort): Unit = current().updateReasoningEffort(reasoningEffort)
-    override suspend fun updateServiceTier(serviceTier: ServiceTier): Unit = current().updateServiceTier(serviceTier)
-    override suspend fun updateRequestUserInputMode(mode: RequestUserInputMode): Unit = current().updateRequestUserInputMode(mode)
-    override suspend fun updateModelConfiguration(model: OpenAiModelId, reasoningEffort: ReasoningEffort, serviceTier: ServiceTier): Unit =
+    actual override suspend fun fork(): Int = services.global.forkSession(sessionIndex)
+    actual override suspend fun rename(name: String): Unit = current().renameThread(name.trim())
+    actual override suspend fun updateModel(model: OpenAiModelId): Unit = current().updateModel(model)
+    actual override suspend fun updateWorkingDirectory(workingDirectory: Path): Unit = current().updateWorkingDirectory(workingDirectory)
+    actual override suspend fun updateReasoningEffort(reasoningEffort: ReasoningEffort): Unit = current().updateReasoningEffort(reasoningEffort)
+    actual override suspend fun updateServiceTier(serviceTier: ServiceTier): Unit = current().updateServiceTier(serviceTier)
+    actual override suspend fun updateRequestUserInputMode(mode: RequestUserInputMode): Unit = current().updateRequestUserInputMode(mode)
+    actual override suspend fun updateModelConfiguration(model: OpenAiModelId, reasoningEffort: ReasoningEffort, serviceTier: ServiceTier): Unit =
         current().updateModelConfiguration(model, reasoningEffort, serviceTier)
-    override suspend fun shutdown() { close(); join() }
-    override fun close() { view.close(); owner.cancel() }
-    public suspend fun join() { owner.join(); view.join() }
+    actual override suspend fun shutdown() { close(); join() }
+    actual override fun close() { view.close(); owner.cancel() }
+    public actual suspend fun join() { owner.join(); view.join() }
 }

@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.app.accountusage.*
@@ -20,43 +22,42 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 
-/** Stable child composition and host ports; accepted writes use the original application queue. */
-public class RpcGlobalEditor(
-    public val global: RpcGlobalSettings,
-    public val rpc: GlobalRpc,
+public actual class RpcGlobalEditor actual constructor(
+    public actual val global: RpcGlobalSettings,
+    public actual val rpc: GlobalRpc,
     applicationScope: CoroutineScope,
 ) : GlobalSettingsViewModel {
     private val owner = Job(applicationScope.coroutineContext[Job])
-    public val scope: CoroutineScope = CoroutineScope(applicationScope.coroutineContext + owner)
+    public actual val scope: CoroutineScope = CoroutineScope(applicationScope.coroutineContext + owner)
     private val updates = SettingsUpdateQueue(applicationScope, defaultReportError = global::reportOperationFailure)
     private val writes = RpcConfigurationWrites(global, ::acceptWrite)
-    public val mcp: RpcMcpSettings = RpcMcpSettings(global, rpc, applicationScope)
+    public actual val mcp: RpcMcpSettings = RpcMcpSettings(global, rpc, applicationScope)
     private val effectsChannel = Channel<GlobalSettingsEffect>(Channel.BUFFERED)
     private var closed = false
-    override val effects: Flow<GlobalSettingsEffect> = effectsChannel.receiveAsFlow()
-    override val operationFailure: StateFlow<Boolean> = global.operationFailure
-    override fun dismissOperationFailure() { global.dismissOperationFailure() }
+    actual override val effects: Flow<GlobalSettingsEffect> = effectsChannel.receiveAsFlow()
+    actual override val operationFailure: StateFlow<Boolean> = global.operationFailure
+    actual override fun dismissOperationFailure() { global.dismissOperationFailure() }
 
-    override val contextSourceSettings: ContextSourceSettingsViewModel = createContextSourceSettingsViewModel(
+    actual override val contextSourceSettings: ContextSourceSettingsViewModel = createContextSourceSettingsViewModel(
         RpcContextSourceSettingsDependencies(global, global.settings.projectState { it.contextSources }, writes),
         scope,
     )
-    override val sessionTitleSettings: SessionTitleSettingsViewModel = createSessionTitleSettingsViewModel(
+    actual override val sessionTitleSettings: SessionTitleSettingsViewModel = createSessionTitleSettingsViewModel(
         RpcSessionTitleSettingsDependencies(global, global.settings.projectState { it.sessionTitle }, writes),
         scope,
     )
-    override val applicationPreferences: ApplicationPreferencesViewModel = createApplicationPreferencesViewModel(
+    actual override val applicationPreferences: ApplicationPreferencesViewModel = createApplicationPreferencesViewModel(
         RpcApplicationPreferencesDependencies(global, global.frontend.settings.projectState { it.newLineKey }, ::acceptWrite),
         scope,
     )
-    override val usageReset: UsageResetViewModel = createUsageResetViewModel(
+    actual override val usageReset: UsageResetViewModel = createUsageResetViewModel(
         object : UsageResetDependencies {
             override val usage = global.usage
             override suspend fun consume(creditId: String): CodexRateLimitResetOutcome = rpc.consumeUsageReset(creditId)
             override suspend fun refreshUsage() { rpc.refreshAccountUsage() }
         }, scope,
     )
-    override val authenticationSettings: AuthenticationSettingsViewModel = createAuthenticationSettingsViewModel(
+    actual override val authenticationSettings: AuthenticationSettingsViewModel = createAuthenticationSettingsViewModel(
         object : AuthenticationSettingsDependencies {
             override val selectedSource = global.settings.projectState { it.authSource }
             override val authentication = global.authentication
@@ -77,7 +78,7 @@ public class RpcGlobalEditor(
             override fun dismissFailure() { global.dismissOperationFailure() }
         }, scope,
     )
-    override val accountUsage: AccountUsageViewModel = createAccountUsageViewModel(
+    actual override val accountUsage: AccountUsageViewModel = createAccountUsageViewModel(
         object : AccountUsageDependencies {
             override val usage = global.usage
             override val operationFailure = global.operationFailure
@@ -87,13 +88,13 @@ public class RpcGlobalEditor(
             override fun dismissFailure() { global.dismissOperationFailure() }
         }, scope,
     )
-    override val mcpSettings: McpSettingsViewModel = createMcpSettingsViewModel(
+    actual override val mcpSettings: McpSettingsViewModel = createMcpSettingsViewModel(
         RpcMcpSettingsDependencies(global, rpc, mcp, ::acceptWrite), scope,
     )
-    override val hookSettings: HookSettingsViewModel = createHookSettingsViewModel(
+    actual override val hookSettings: HookSettingsViewModel = createHookSettingsViewModel(
         RpcHookSettingsDependencies(global, global.settings.projectState { it.hooks }, backend = true, accept = ::acceptWrite), scope,
     )
-    override val frontendErrorHooks: HookSettingsViewModel = createHookSettingsViewModel(
+    actual override val frontendErrorHooks: HookSettingsViewModel = createHookSettingsViewModel(
         RpcHookSettingsDependencies(global, global.frontend.settings.projectState { it.hooks }, backend = false, accept = ::acceptWrite), scope,
     )
 
@@ -103,7 +104,7 @@ public class RpcGlobalEditor(
         return updates.submit { action(); global.dismissOperationFailure() }
     }
 
-    public fun createLogin(ownerScope: CoroutineScope = scope): OpenAiLoginViewModel {
+    public actual fun createLogin(ownerScope: CoroutineScope): OpenAiLoginViewModel {
         owner.ensureActive()
         val target = OAuthTarget.OpenAi(global.settings.value.authSource)
         return createOpenAiLoginViewModel(
@@ -112,7 +113,7 @@ public class RpcGlobalEditor(
         )
     }
 
-    override fun close() {
+    actual override fun close() {
         if (closed) return
         closed = true
         contextSourceSettings.close()

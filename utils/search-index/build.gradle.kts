@@ -1,10 +1,8 @@
-@file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi::class)
-
-import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
     id("kodex.kmp-spec-impl")
-    id("kodex.kmp-shared")
+    id("kodex.kmp-host")
     id("kodex.kmp-tests")
 }
 
@@ -13,33 +11,10 @@ kotlin {
     mingwX64 {
         binaries.all { linkerOpts("-lole32") }
     }
-    js {
-        nodejs {
-            testTask {
-                useMocha { timeout = "120s" }
-            }
-        }
-    }
-}
-
-kotlin {
-    applyHierarchyTemplate(KotlinHierarchyTemplate.default) {
-        common {
-            group("host") {
-                withJs()
-                group("lucene") {
-                    withJvm()
-                    withLinuxX64()
-                    withLinuxArm64()
-                    withMacosArm64()
-                    withMingwX64()
-                }
-            }
-        }
-    }
-
-    sourceSets {
-        val luceneMain by getting {
+    // Lucene belongs to concrete platform implementations, not shared API metadata.
+    targets.withType<KotlinNativeTarget>().configureEach {
+        compilations.getByName("main").defaultSourceSet.apply {
+            kotlin.srcDir("src/luceneMain/kotlin")
             dependencies {
                 implementation(libs.lucene.kmp.core)
             }

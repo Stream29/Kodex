@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.newsessiondefaults
 
 import androidx.compose.runtime.*
@@ -8,20 +10,19 @@ import io.github.stream29.kodex.cli.components.*
 import io.github.stream29.kodex.cli.settings.*
 import io.github.stream29.kodex.openai.*
 
-/** Only renderer menu anchors/open state; never a second defaults draft. */
-public class NewSessionDefaultsDropdowns(
-    public val model: TuiDropdownState,
-    public val reasoning: TuiDropdownState,
-    public val serviceTier: TuiDropdownState,
-    public val questions: TuiDropdownState,
+public actual class NewSessionDefaultsDropdowns actual constructor(
+    public actual val model: TuiDropdownState,
+    public actual val reasoning: TuiDropdownState,
+    public actual val serviceTier: TuiDropdownState,
+    public actual val questions: TuiDropdownState,
 ) {
-    public fun dismissAll() {
+    public actual fun dismissAll() {
         model.dismiss(); reasoning.dismiss(); serviceTier.dismiss(); questions.dismiss()
     }
 }
 
 @Composable
-public fun rememberNewSessionDefaultsDropdowns(): NewSessionDefaultsDropdowns {
+public actual fun rememberNewSessionDefaultsDropdowns(): NewSessionDefaultsDropdowns {
     val model = rememberTuiDropdownState()
     val reasoning = rememberTuiDropdownState()
     val tier = rememberTuiDropdownState()
@@ -31,23 +32,21 @@ public fun rememberNewSessionDefaultsDropdowns(): NewSessionDefaultsDropdowns {
     }
 }
 
-/** Full four-field component; Title remains an independently owned sibling. */
 @Composable
-public fun BoxScope.NewSessionDefaultsComponent(
+public actual fun BoxScope.NewSessionDefaultsComponent(
     viewModel: NewSessionSettingsViewModel,
-    showOperationFailure: Boolean = true,
+    showOperationFailure: Boolean,
 ) {
     val dropdowns = rememberNewSessionDefaultsDropdowns()
     NewSessionDefaultsPanel(viewModel, dropdowns, showOperationFailure)
     NewSessionDefaultsDropdownMenus(viewModel, dropdowns)
 }
 
-/** Scrollable host content. Disable its banner when the Settings host displays shared failure once. */
 @Composable
-public fun NewSessionDefaultsPanel(
+public actual fun NewSessionDefaultsPanel(
     viewModel: NewSessionSettingsViewModel,
     dropdowns: NewSessionDefaultsDropdowns,
-    showOperationFailure: Boolean = true,
+    showOperationFailure: Boolean,
 ) {
     val state by viewModel.state.collectAsState()
     val failed by viewModel.operationFailure.collectAsState()
@@ -73,9 +72,8 @@ public fun NewSessionDefaultsPanel(
     }
 }
 
-/** Full canonical menus; callbacks submit the displayed revision and no local draft. */
 @Composable
-public fun BoxScope.NewSessionDefaultsDropdownMenus(
+public actual fun BoxScope.NewSessionDefaultsDropdownMenus(
     viewModel: NewSessionSettingsViewModel,
     dropdowns: NewSessionDefaultsDropdowns,
 ) {

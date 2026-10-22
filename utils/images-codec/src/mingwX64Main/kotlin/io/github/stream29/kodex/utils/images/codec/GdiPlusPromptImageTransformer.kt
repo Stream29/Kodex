@@ -68,7 +68,7 @@ import platform.windows.TRUE
 /**
  * Stateless prompt-image transformer backed by Windows GDI+.
  */
-public object GdiPlusPromptImageTransformer : PromptImageTransformer {
+internal object GdiPlusPromptImageTransformer : PromptImageTransformer {
     override suspend fun transform(request: PromptImageTransformRequest): EncodedImage =
         transformWithGdiPlus(request)
 
@@ -128,7 +128,7 @@ public object GdiPlusPromptImageTransformer : PromptImageTransformer {
 /**
  * Windows host transformer that prefers native GDI+ and falls back to KorIM.
  */
-public object WindowsNativePromptImageTransformer : PromptImageTransformer {
+internal object WindowsNativePromptImageTransformer : PromptImageTransformer {
     override suspend fun transform(request: PromptImageTransformRequest): EncodedImage =
         try {
             GdiPlusPromptImageTransformer.transform(request)

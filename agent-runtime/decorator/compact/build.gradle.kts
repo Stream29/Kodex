@@ -9,14 +9,13 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(project(":agent-runtime-contract"))
+                api(project(":agent-runtime-steer"))
+                api(project(":openai-model-catalog"))
+                api(libs.kotlin.logging)
+                api(libs.kotlinx.coroutines.core)
             }
         }
         commonMain.dependencies {
-            api(project(":agent-runtime-contract"))
-            api(project(":agent-runtime-steer"))
-            api(project(":openai-model-catalog"))
-            api(libs.kotlin.logging)
-            api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-state-context-window"))
         }
         commonTest.dependencies {

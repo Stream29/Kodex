@@ -1,27 +1,28 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogDependencies
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
 import io.github.stream29.kodex.rpc.contract.GlobalRpc
 
-/** Adapts Global RPC to the component's backend port without opening Session runtimes. */
-public class RpcSessionCatalogDependencies(
+public actual class RpcSessionCatalogDependencies actual constructor(
     private val global: GlobalRpc,
-    private val deleteSession: suspend (Int) -> Boolean = global::deleteSession,
-    private val forkSession: suspend (Int) -> Int = global::forkSession,
+    private val deleteSession: suspend (Int) -> Boolean,
+    private val forkSession: suspend (Int) -> Int,
 ) : SessionCatalogDependencies {
-    override suspend fun load(showArchived: Boolean): List<SessionCatalogEntry> =
+    actual override suspend fun load(showArchived: Boolean): List<SessionCatalogEntry> =
         global.getSessionCatalog(showArchived)
 
-    override suspend fun archive(sessionIndex: Int): Unit =
+    actual override suspend fun archive(sessionIndex: Int): Unit =
         global.archiveSession(sessionIndex)
 
-    override suspend fun unarchive(sessionIndex: Int): Unit =
+    actual override suspend fun unarchive(sessionIndex: Int): Unit =
         global.unarchiveSession(sessionIndex)
 
-    override suspend fun fork(sessionIndex: Int): Int =
+    actual override suspend fun fork(sessionIndex: Int): Int =
         forkSession(sessionIndex)
 
-    override suspend fun delete(sessionIndex: Int): Boolean =
+    actual override suspend fun delete(sessionIndex: Int): Boolean =
         deleteSession(sessionIndex)
 }

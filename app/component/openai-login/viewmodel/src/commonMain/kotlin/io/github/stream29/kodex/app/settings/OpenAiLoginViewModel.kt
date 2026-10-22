@@ -142,15 +142,13 @@ internal class OpenAiLoginViewModelImpl(
     }
 }
 
-/** Uses the same browser/revision UI with a frontend-owned RPC login attempt. */
-public fun createOpenAiLoginViewModel(
+public actual fun createOpenAiLoginViewModel(
     ownerScope: CoroutineScope,
     startLogin: suspend () -> KodexAuthLoginAttempt,
 ): OpenAiLoginViewModel =
     createOpenAiLoginViewModel(OpenAiLoginDependencies { startLogin() }, ownerScope)
 
-/** Constructs the component using its declared dependency port and child lifecycle. */
-public fun createOpenAiLoginViewModel(
+public actual fun createOpenAiLoginViewModel(
     dependencies: OpenAiLoginDependencies,
     ownerScope: CoroutineScope,
 ): OpenAiLoginViewModel =

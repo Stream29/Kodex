@@ -17,18 +17,18 @@ import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
-public val ToolBuilderJson: Json = Json
+public actual val ToolBuilderJson: Json = Json
 
-public fun <Input, Output> jsonTool(
+public actual fun <Input, Output> jsonTool(
     spec: ToolSpec,
     inputDeserializer: DeserializationStrategy<Input>,
     outputSerializer: SerializationStrategy<Output>,
-    json: Json = ToolBuilderJson,
+    json: Json,
     completedEvent: ((
         PendingFunctionToolEvent,
         Input,
         JsonToolHandlerResult<Output>,
-    ) -> StableCleanEvent.CompletedTool)? = null,
+    ) -> StableCleanEvent.CompletedTool)?,
     handler: suspend (Input) -> JsonToolHandlerResult<Output>,
 ): Tool =
     FunctionOutputTool(spec, inputDeserializer, json) { pending, input, arguments ->
@@ -86,15 +86,15 @@ public fun <Input, Output> jsonTool(
  *
  * This does not support custom-tool payloads such as `apply_patch`.
  */
-public fun <Input> textTool(
+public actual fun <Input> textTool(
     spec: ToolSpec,
     inputDeserializer: DeserializationStrategy<Input>,
-    json: Json = ToolBuilderJson,
+    json: Json,
     completedEvent: ((
         PendingFunctionToolEvent,
         Input,
         JsonToolHandlerResult<String>,
-    ) -> StableCleanEvent.CompletedTool)? = null,
+    ) -> StableCleanEvent.CompletedTool)?,
     handler: suspend (Input) -> JsonToolHandlerResult<String>,
 ): Tool =
     FunctionOutputTool(spec, inputDeserializer, json) { pending, input, arguments ->
@@ -137,10 +137,10 @@ public fun <Input> textTool(
  *
  * This does not support custom-tool payloads such as `apply_patch`.
  */
-public fun <Input> functionOutputTool(
+public actual fun <Input> functionOutputTool(
     spec: ToolSpec,
     inputDeserializer: DeserializationStrategy<Input>,
-    json: Json = ToolBuilderJson,
+    json: Json,
     handler: suspend (
         pending: PendingFunctionToolEvent,
         input: Input,

@@ -14,10 +14,7 @@ kotlin {
             api(libs.kotlinx.coroutines.core)
         }
         commonMain.dependencies {
-            api(libs.kotlinx.rpc.core)
-            api(libs.kotlinx.coroutines.core)
             api(project(":utils-rpc-exception"))
-            api(project(":agent-storage-core"))
             implementation(libs.cache4k)
         }
         commonTest.dependencies {
@@ -35,7 +32,7 @@ kotlin {
                 api(project(":app-component-authentication-settings-viewmodel"))
                 api(project(":app-component-account-usage-viewmodel"))
                 api(project(":app-component-session-catalog-viewmodel"))
-                api(project(":mcp"))
+                api(project(":mcp-contract"))
                 api(project(":agent-storage-clean-models"))
                 api(project(":agent-storage-core"))
                 api(project(":openai-models"))

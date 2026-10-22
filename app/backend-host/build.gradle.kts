@@ -8,8 +8,13 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
+        named("specMain").dependencies {
             api(project(":app-backend-daemon"))
+            api(project(":openai-client"))
+            api(project(":utils-os-environment"))
+            api(libs.kotlinx.io.core)
+        }
+        commonMain.dependencies {
             implementation(project(":rpc-local-server"))
             implementation(project(":rpc-backend-control-client"))
             implementation(project(":rpc-server"))
@@ -17,9 +22,7 @@ kotlin {
             implementation(project(":app-settings-filesystem"))
             implementation(project(":hook-notification"))
             implementation(project(":utils-kotlinx-io-coroutines-system"))
-            implementation(project(":utils-os-environment"))
-            implementation(project(":utils-logging"))
-            implementation(project(":openai-client"))
+            implementation(project(":utils-logging-backend-file"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlin.logging)
@@ -32,9 +35,6 @@ kotlin {
             implementation(project(":app-rpc"))
             implementation(project(":utils-kotlinx-io-coroutines-system"))
             implementation(project(":rpc-client"))
-        }
-        jvmTest.dependencies {
-            implementation(project(":app-application"))
         }
     }
 }

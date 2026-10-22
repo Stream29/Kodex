@@ -19,9 +19,7 @@ internal fun KotlinMultiplatformExtension.configureCompiler() {
     }
 }
 
-internal fun KotlinMultiplatformExtension.configureHostTargets() {
-    jvm()
-
+internal fun KotlinMultiplatformExtension.configureDesktopTargets() {
     linuxX64()
     linuxArm64()
     macosArm64()
@@ -37,7 +35,6 @@ internal fun KotlinMultiplatformExtension.configureMosaicHierarchy() {
     applyHierarchyTemplate(KotlinHierarchyTemplate.default) {
         common {
             group("mosaic") {
-                withJvm()
                 withLinuxX64()
                 withLinuxArm64()
                 withMacosArm64()

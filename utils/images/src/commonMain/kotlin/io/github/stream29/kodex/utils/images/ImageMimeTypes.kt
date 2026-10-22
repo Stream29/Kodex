@@ -1,12 +1,6 @@
 package io.github.stream29.kodex.utils.images
 
-/**
- * Detects the image MIME type from common file signatures.
- *
- * @return The detected MIME type, or `null` when this byte array does not match one of
- * the prompt-image formats this module recognizes.
- */
-public fun ByteArray.detectImageMimeType(): ImageMimeType? =
+public actual fun ByteArray.detectImageMimeType(): ImageMimeType? =
     when {
         hasPrefix(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a) -> ImageMimeType.Png
         hasPrefix(0xff, 0xd8, 0xff) -> ImageMimeType.Jpeg
@@ -14,18 +8,10 @@ public fun ByteArray.detectImageMimeType(): ImageMimeType? =
         else -> null
     }
 
-/**
- * Detects the image MIME type or fails when the bytes are unsupported.
- *
- * @throws UnsupportedImageFormatException if no supported container signature matches.
- */
-public fun ByteArray.requireImageMimeType(): ImageMimeType =
+public actual fun ByteArray.requireImageMimeType(): ImageMimeType =
     detectImageMimeType() ?: throw UnsupportedImageFormatException()
 
-/**
- * Returns true when Codex can safely pass source bytes through byte-for-byte.
- */
-public val ImageMimeType.canPreserveSourceBytes: Boolean
+public actual val ImageMimeType.canPreserveSourceBytes: Boolean
     get() = when (this) {
         ImageMimeType.Png,
         ImageMimeType.Jpeg,

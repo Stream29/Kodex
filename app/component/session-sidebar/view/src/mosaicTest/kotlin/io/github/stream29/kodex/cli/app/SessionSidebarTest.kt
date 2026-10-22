@@ -58,7 +58,15 @@ import kotlin.test.assertTrue
 import kotlin.test.assertSame
 import kotlin.math.roundToInt
 
+private const val TestCollapsedButtonColumns: Int = SessionSidebarCollapsedButtonColumns
+private const val TestCollapsedButtonRows: Int = SessionSidebarCollapsedButtonRows
+
 val sessionSidebarTest by testSuite {
+    test("collapsedButtonLayoutConstantsRemainCompileTimeConstants") {
+        assertEquals(3, TestCollapsedButtonColumns)
+        assertEquals(1, TestCollapsedButtonRows)
+    }
+
     test("noneSidebarShowsAnEmptyBody") {
         runMosaicTest {
             val snapshot = setContentAndSnapshot {

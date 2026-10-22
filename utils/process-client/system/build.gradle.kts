@@ -26,15 +26,14 @@ kotlin {
     }
 
     sourceSets {
-        commonMain.dependencies {
+        named("specMain").dependencies {
             api(project(":utils-process-client"))
             api(libs.kotlinx.coroutines.core)
+        }
+        commonMain.dependencies {
             api(libs.kotlinx.io.core)
             api(project(":utils-kotlinx-io-coroutines-system"))
             implementation(project(":utils-coroutines"))
-        }
-        jsMain.dependencies {
-            implementation(libs.kotlin.wrappers.node)
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)

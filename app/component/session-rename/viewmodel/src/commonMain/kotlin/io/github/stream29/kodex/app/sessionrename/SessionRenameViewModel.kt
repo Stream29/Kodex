@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-public fun createSessionRenameViewModel(
+public actual fun createSessionRenameViewModel(
     initialName: String,
     dependencies: SessionRenameDependencies,
 ): SessionRenameViewModel = DefaultSessionRenameViewModel(initialName, dependencies)

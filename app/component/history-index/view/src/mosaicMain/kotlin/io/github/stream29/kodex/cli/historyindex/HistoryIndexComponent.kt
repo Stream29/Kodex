@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.historyindex
 
 import androidx.compose.runtime.Composable
@@ -63,46 +65,30 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Instant
 
-/** Placement policy only; does not identify or own an Agent. */
-public enum class HistoryIndexSide { Left, Right }
-
-/** Renderer-local anchor/pointer and captured child target; host owns popup arbitration/grace. */
 @Stable
-public class HistoryIndexInteractionRequest(
-    public val side: HistoryIndexSide,
-    public val viewModel: HistoryIndexViewModel,
-    public val generation: Long,
-    public val index: Int,
-    public val anchor: TuiPopupAnchor,
-    public val revision: Long = viewModel.window.value.revision,
+public actual class HistoryIndexInteractionRequest actual constructor(
+    public actual val side: HistoryIndexSide,
+    public actual val viewModel: HistoryIndexViewModel,
+    public actual val generation: Long,
+    public actual val index: Int,
+    public actual val anchor: TuiPopupAnchor,
+    public actual val revision: Long,
 ) {
-    public var pointerPosition: IntOffset? by mutableStateOf(null)
+    public actual var pointerPosition: IntOffset? by mutableStateOf(null)
 
-    /** No latest selected-Agent lookup. Host separately checks its selected stable child identity. */
-    public fun isCurrent(): Boolean = viewModel.window.value.revision == revision &&
+    public actual fun isCurrent(): Boolean = viewModel.window.value.revision == revision &&
         viewModel.contains(generation, index)
 }
 
-/** Identity (not data equality) distinguishes fresh menu openings for the same row. */
-public class HistoryIndexMenuRequest(
-    public val target: HistoryIndexInteractionRequest,
-    public val clickPosition: IntOffset?,
-)
-
-/**
- * Complete index body, borrowing one stable child. Each composed row owns/releases its read
- * handle. Two bodies share window authority but have independent viewport/interaction lifetimes.
- * Pointer/keyboard upward scroll disables follow-latest; reaching the end restores it.
- */
 @Composable
-public fun HistoryIndexSidebarBody(
+public actual fun HistoryIndexSidebarBody(
     viewModel: HistoryIndexViewModel,
     columns: Int,
     rows: Int,
-    side: HistoryIndexSide = HistoryIndexSide.Left,
-    onHoverChanged: (HistoryIndexInteractionRequest, Boolean) -> Unit = { _, _ -> },
-    onOpenMenu: (HistoryIndexMenuRequest) -> Unit = {},
-    listState: LazyListState = remember(viewModel) { LazyListState().apply { requestScrollToEnd() } },
+    side: HistoryIndexSide,
+    onHoverChanged: (HistoryIndexInteractionRequest, Boolean) -> Unit,
+    onOpenMenu: (HistoryIndexMenuRequest) -> Unit,
+    listState: LazyListState,
 ) {
     val window by viewModel.window.collectAsState()
     val followsLatest = remember(viewModel) { mutableStateOf(true) }
@@ -181,13 +167,12 @@ private fun HistoryIndexSidebarRow(
     }
 }
 
-/** Pure row rendering entrypoint, also useful for renderer snapshot coverage. */
 @Composable
-public fun HistoryIndexRowContent(
+public actual fun HistoryIndexRowContent(
     state: HistoryIndexReadState<HistoryIndexEntry>,
     graph: String,
-    hovered: Boolean = false,
-    pressed: Boolean = false,
+    hovered: Boolean,
+    pressed: Boolean,
 ) {
     if (state == HistoryIndexReadState.Closed) return
     val label = when (state) {
@@ -204,18 +189,13 @@ public fun HistoryIndexRowContent(
     )
 }
 
-/**
- * Delays hover locally, then acquires/releases a detail handle for this exact request.
- * Host filters selected child and popup priority before supplying request; hover exit grace
- * remains host-local. Invalid/released target is hidden, never shown as a new target's failure.
- */
 @Composable
-public fun BoxScope.HistoryIndexHoverPopup(
+public actual fun BoxScope.HistoryIndexHoverPopup(
     request: HistoryIndexInteractionRequest?,
     contentColumns: Int,
     contentRows: Int,
     onHoverChanged: (Boolean) -> Unit,
-    onDismissRequest: () -> Unit = {},
+    onDismissRequest: () -> Unit,
 ) {
     val current = request ?: return
     val window by current.viewModel.window.collectAsState()
@@ -240,9 +220,8 @@ public fun BoxScope.HistoryIndexHoverPopup(
     )
 }
 
-/** Full hover rendering including shared questions/options/hidden answers and scrollable detail. */
 @Composable
-public fun BoxScope.HistoryIndexHoverContent(
+public actual fun BoxScope.HistoryIndexHoverContent(
     anchor: TuiPopupAnchor,
     side: HistoryIndexSide,
     pointerPosition: IntOffset?,
@@ -333,13 +312,8 @@ private fun BoxScope.HistoryIndexHoverSurface(
     }
 }
 
-/**
- * Exact menu opening owns a timestamp handle. Only Ready(non-null) displays timestamp.
- * Check out calls the child's captured-Agent port; it never obtains an Agent from the host.
- * Host supplies only selected-child-matching requests and arbitrates shared Shell/index popup.
- */
 @Composable
-public fun BoxScope.HistoryIndexContextMenu(
+public actual fun BoxScope.HistoryIndexContextMenu(
     request: HistoryIndexMenuRequest?,
     onDismissRequest: () -> Unit,
 ) {
@@ -374,15 +348,14 @@ public fun BoxScope.HistoryIndexContextMenu(
     )
 }
 
-/** Information + Check out only; null click uses keyboard anchor, null timestamp omits its field. */
 @Composable
-public fun BoxScope.HistoryIndexContextMenuPopup(
+public actual fun BoxScope.HistoryIndexContextMenuPopup(
     anchor: TuiPopupAnchor,
     clickPosition: IntOffset?,
     index: Int,
     onDismissRequest: () -> Unit,
     onCheckOut: () -> Unit,
-    timestamp: String? = null,
+    timestamp: String?,
 ) {
     TuiContextMenu(
         expanded = true, anchor = anchor, clickPosition = clickPosition,

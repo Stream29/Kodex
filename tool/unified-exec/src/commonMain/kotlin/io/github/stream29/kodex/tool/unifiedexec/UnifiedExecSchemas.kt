@@ -10,7 +10,7 @@ internal const val WriteStdinYieldTimeDescription: String =
         "duration. Effective range is 250-600000 ms for non-empty writes and 5000-600000 ms " +
         "for empty polls."
 
-public val ExecCommandParametersSchema: ObjectPropertyDefinition =
+public actual val ExecCommandParametersSchema: ObjectPropertyDefinition =
     PropertyBuilder().obj {
         additionalProperties = false
         property("cmd") {
@@ -35,7 +35,7 @@ public val ExecCommandParametersSchema: ObjectPropertyDefinition =
         }
     }
 
-public val WriteStdinParametersSchema: ObjectPropertyDefinition =
+public actual val WriteStdinParametersSchema: ObjectPropertyDefinition =
     PropertyBuilder().obj {
         additionalProperties = false
         property("session_id") {
@@ -54,7 +54,7 @@ public val WriteStdinParametersSchema: ObjectPropertyDefinition =
         }
     }
 
-public val UnifiedExecOutputSchema: ObjectPropertyDefinition =
+public actual val UnifiedExecOutputSchema: ObjectPropertyDefinition =
     PropertyBuilder().obj {
         additionalProperties = false
         property("chunk_id") {

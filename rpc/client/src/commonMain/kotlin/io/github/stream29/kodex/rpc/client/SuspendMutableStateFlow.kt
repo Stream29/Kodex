@@ -7,14 +7,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.StateFlow
 
-/**
- * Adds an authoritative suspending CAS to an already initialized, caller-owned state projection.
- *
- * Reads and collection delegate to this StateFlow; successful CAS never writes its local value.
- * The caller owns initialization, subscriptions and invalidation checks in [compareAndSet].
- * This view creates no coroutine, cache or additional mutable state.
- */
-public fun <T> StateFlow<T>.asSuspendMutableStateFlow(
+public actual fun <T> StateFlow<T>.asSuspendMutableStateFlow(
     compareAndSet: suspend (expect: T, update: T) -> Boolean,
 ): SuspendMutableStateFlow<T> = DelegatingSuspendMutableStateFlow(this, compareAndSet)
 
@@ -29,14 +22,7 @@ private class DelegatingSuspendMutableStateFlow<T>(
 @PublishedApi
 internal const val CAS_RETRY_DELAY_MILLIS: Long = 50
 
-/**
- * Updates through CAS, recomputing [function] after each comparison failure.
- *
- * [function] can run multiple times and must not perform non-repeatable side effects.
- * Only false comparisons retry, after a cancellable 50ms delay; exceptions escape unchanged.
- * Field-level settings conflict detection belongs to the editing layer, not this generic loop.
- */
-public suspend inline fun <T> SuspendMutableStateFlow<T>.update(function: (T) -> T) {
+public actual suspend inline fun <T> SuspendMutableStateFlow<T>.update(function: (T) -> T) {
     while (true) {
         currentCoroutineContext().ensureActive()
         val expect = value
@@ -46,8 +32,7 @@ public suspend inline fun <T> SuspendMutableStateFlow<T>.update(function: (T) ->
     }
 }
 
-/** Like [update], but returns the expected value from the successful CAS, not the local value. */
-public suspend inline fun <T> SuspendMutableStateFlow<T>.getAndUpdate(function: (T) -> T): T {
+public actual suspend inline fun <T> SuspendMutableStateFlow<T>.getAndUpdate(function: (T) -> T): T {
     while (true) {
         currentCoroutineContext().ensureActive()
         val expect = value
@@ -57,8 +42,7 @@ public suspend inline fun <T> SuspendMutableStateFlow<T>.getAndUpdate(function: 
     }
 }
 
-/** Like [update], but returns the proposed value from the successful CAS, not the local value. */
-public suspend inline fun <T> SuspendMutableStateFlow<T>.updateAndGet(function: (T) -> T): T {
+public actual suspend inline fun <T> SuspendMutableStateFlow<T>.updateAndGet(function: (T) -> T): T {
     while (true) {
         currentCoroutineContext().ensureActive()
         val expect = value

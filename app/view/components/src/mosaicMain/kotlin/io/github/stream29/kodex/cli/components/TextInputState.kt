@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.components
 
 import androidx.compose.runtime.Composable
@@ -8,59 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 
-/** Immutable text and active UTF-16 cursor offset. */
-@Immutable
-public data class TextInputValue(
-    public val text: String = "",
-    public val cursorOffset: Int = text.length,
-) {
-    init {
-        require(cursorOffset in 0..text.length) { "Cursor offset must be within the text." }
-    }
-}
-
-/** A single text-input mutation or compatibility cursor movement. */
-public sealed interface TextInputEdit {
-    /**
-     * Inserts [text] at the current cursor.
-     *
-     * [mergeWithPrevious] is reserved for ordinary character input. Paste, newline, and other
-     * caller-owned edits remain atomic by using the default value.
-     */
-    public data class Insert(
-        public val text: String,
-        public val mergeWithPrevious: Boolean = false,
-    ) : TextInputEdit
-
-    public data object DeleteBeforeCursor : TextInputEdit
-
-    public data object DeleteAtCursor : TextInputEdit
-
-    public data object DeletePreviousWord : TextInputEdit
-
-    public data object MoveCursorLeft : TextInputEdit
-
-    public data object MoveCursorRight : TextInputEdit
-
-    public data object MoveCursorToStart : TextInputEdit
-
-    public data object MoveCursorToEnd : TextInputEdit
-}
-
-/** Cursor movements supported by [TextInputState.moveCursor]. */
-public enum class TextInputMovement {
-    Left,
-    Right,
-    Up,
-    Down,
-    LineStart,
-    LineEnd,
-    DocumentStart,
-    DocumentEnd,
-}
-
-/** Applies this edit to [value] using Unicode-scalar cursor semantics. */
-public fun TextInputEdit.applyTo(value: TextInputValue): TextInputValue = when (this) {
+public actual fun TextInputEdit.applyTo(value: TextInputValue): TextInputValue = when (this) {
     is TextInputEdit.Insert -> value.replaceRange(value.cursorOffset, value.cursorOffset, text)
     TextInputEdit.DeleteBeforeCursor -> {
         val start = value.text.previousScalar(value.cursorOffset)
@@ -85,18 +35,12 @@ public fun TextInputEdit.applyTo(value: TextInputValue): TextInputValue = when (
     TextInputEdit.MoveCursorToEnd -> value.withCursor(value.text.length)
 }
 
-/**
- * Mutable, composition-observable state for a terminal text input.
- *
- * Preferred vertical column, bounded undo/redo history, and viewport position are local editor
- * state. Application callers synchronize text and the active cursor.
- */
 @Stable
-public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
-    public var value: TextInputValue by mutableStateOf(initialValue.withScalarBoundaries())
+public actual class TextInputState actual constructor(initialValue: TextInputValue) {
+    public actual var value: TextInputValue by mutableStateOf(initialValue.withScalarBoundaries())
         private set
 
-    public var scrollOffset: Int by mutableStateOf(0)
+    public actual var scrollOffset: Int by mutableStateOf(0)
         private set
 
     private val undoHistory: MutableList<HistoryEntry> = mutableListOf()
@@ -107,14 +51,13 @@ public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
     private var lastViewportWidth: Int = -1
     private var lastViewportRows: Int = -1
 
-    public val canUndo: Boolean
+    public actual val canUndo: Boolean
         get() = undoHistory.isNotEmpty()
 
-    public val canRedo: Boolean
+    public actual val canRedo: Boolean
         get() = redoHistory.isNotEmpty()
 
-    /** Applies [edit] and returns whether it changed the text or cursor. */
-    public fun edit(edit: TextInputEdit): Boolean {
+    public actual fun edit(edit: TextInputEdit): Boolean {
         val before = value
         val updated = edit.applyTo(before).withScalarBoundaries()
         val movement = edit is TextInputEdit.MoveCursorLeft ||
@@ -138,14 +81,9 @@ public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
         return true
     }
 
-    /**
-     * Moves the active cursor.
-     *
-     * [layout] is required for visual [TextInputMovement.Up] and [TextInputMovement.Down].
-     */
-    public fun moveCursor(
+    public actual fun moveCursor(
         movement: TextInputMovement,
-        layout: TextInputLayout? = null,
+        layout: TextInputLayout?,
     ): Boolean {
         breakHistoryGroup()
         val current = value
@@ -196,8 +134,7 @@ public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
         return true
     }
 
-    /** Places the cursor at the nearest Unicode-scalar boundary. */
-    public fun placeCursor(offset: Int): Boolean {
+    public actual fun placeCursor(offset: Int): Boolean {
         breakHistoryGroup()
         preferredColumn = null
         followCursor = true
@@ -208,8 +145,7 @@ public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
         return true
     }
 
-    /** Restores the previous text transaction, including its cursor. */
-    public fun undo(): Boolean {
+    public actual fun undo(): Boolean {
         val entry = undoHistory.removeLastOrNull() ?: return false
         redoHistory.add(entry)
         value = entry.before
@@ -219,8 +155,7 @@ public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
         return true
     }
 
-    /** Reapplies the next text transaction, including its cursor. */
-    public fun redo(): Boolean {
+    public actual fun redo(): Boolean {
         val entry = redoHistory.removeLastOrNull() ?: return false
         undoHistory.add(entry)
         value = entry.after
@@ -230,8 +165,7 @@ public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
         return true
     }
 
-    /** Replaces the draft and clears all editor-local transient state. */
-    public fun reset(value: TextInputValue = TextInputValue()) {
+    public actual fun reset(value: TextInputValue) {
         this.value = value.withScalarBoundaries()
         undoHistory.clear()
         redoHistory.clear()
@@ -307,9 +241,8 @@ public class TextInputState(initialValue: TextInputValue = TextInputValue()) {
     }
 }
 
-/** Remembers one [TextInputState] for this composition location. */
 @Composable
-public fun rememberTextInputState(initialValue: TextInputValue = TextInputValue()): TextInputState =
+public actual fun rememberTextInputState(initialValue: TextInputValue): TextInputState =
     remember { TextInputState(initialValue) }
 
 private data class HistoryEntry(

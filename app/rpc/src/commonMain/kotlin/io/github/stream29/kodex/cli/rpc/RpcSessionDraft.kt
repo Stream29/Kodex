@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
@@ -33,15 +35,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.io.files.Path
 
-/**
- * Opening or editing this object does not allocate a backend Session.
- * Its original local owner is a child of [ownerScope]; parent cancellation/join
- * closes Composer and its observations. Explicit close cancels only this child.
- * Views, global observations and the shared backend are borrowed, never closed or stopped here.
- * Submission runs in the host's surviving command owner; this object adds no detached work
- * or secondary error outlet.
- */
-public class RpcSessionDraft(
+public actual class RpcSessionDraft actual constructor(
     private val initialWorkingDirectory: Path,
     private val views: RpcSessionViews,
     private val global: RpcGlobalSettings,
@@ -54,7 +48,7 @@ public class RpcSessionDraft(
         "A draft requires an explicit coroutine owner."
     })
     private val composerScope = CoroutineScope(ownerScope.coroutineContext + owner)
-    public val settings: StateFlow<KodexAgentSettings> =
+    public actual val settings: StateFlow<KodexAgentSettings> =
         combine(global.settings.projectState { it.newSession }, directory) { defaults, cwd -> project(defaults, cwd.path) }
             .stateIn(composerScope, SharingStarted.Eagerly, project(global.settings.value.newSession, initialWorkingDirectory))
 
@@ -66,7 +60,7 @@ public class RpcSessionDraft(
             requestUserInputMode = defaults.requestUserInputMode,
             cwd = cwd,
         )
-    public val composer: ComposerViewModel = createComposerViewModel(
+    public actual val composer: ComposerViewModel = createComposerViewModel(
         ownerId = ComposerOwnerId("session-draft"),
         dependencies = object : ComposerDependencies {
             override val runtime = object : ComposerRuntimePort {
@@ -101,8 +95,7 @@ public class RpcSessionDraft(
         owner.ensureActive()
     }
 
-    /** Freeze only this intent's target fields, preserving unrelated fields on CAS retry. */
-    public suspend fun <F> editDefaults(
+    public actual suspend fun <F> editDefaults(
         select: (KodexNewSessionSettings) -> F,
         replace: (KodexNewSessionSettings) -> KodexNewSessionSettings,
     ) {
@@ -114,7 +107,7 @@ public class RpcSessionDraft(
         }) { "The edited field changed. Review the latest value." }
     }
 
-    public fun updateWorkingDirectory(path: Path) {
+    public actual fun updateWorkingDirectory(path: Path) {
         checkOpen()
         directory.update {
             check(it.revision < Long.MAX_VALUE) { "Working directory revisions exhausted." }
@@ -122,12 +115,7 @@ public class RpcSessionDraft(
         }
     }
 
-    /**
-     * [open] opens the host's stable persisted handle before any append; RPC-only consumers may
-     * supply [RpcSessionViews.open]. Creation and append remain distinct commits. The caller
-     * owns accepted work and errors, so this suspends directly rather than launching hidden work.
-     */
-    public suspend fun <T> submit(expectedRevision: Long, open: suspend (Int) -> T): T? {
+    public actual suspend fun <T> submit(expectedRevision: Long, open: suspend (Int) -> T): T? {
         checkOpen()
         // tryLock is admission, not a queue: a duplicate cannot wait and consume a later draft.
         if (!submission.tryLock()) return null
@@ -164,7 +152,7 @@ public class RpcSessionDraft(
         }
     }
 
-    override fun close() {
+    actual override fun close() {
         closed = true
         composer.close()
         composerScope.cancel()

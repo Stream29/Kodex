@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.agentstorage.filesystem
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
@@ -9,56 +11,55 @@ import io.github.stream29.kodex.agentstorage.contract.latestIndex
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.serializer
 import kotlin.time.Instant
 
 /** Unowned direct view of the six timelines stored under one thread directory. */
-public class FileSystemAgentStorage internal constructor(
-    public val directory: Path,
+public actual class FileSystemAgentStorage internal constructor(
+    public actual val directory: Path,
     fileSystem: CoroutineFileSystem,
     @Suppress("UNUSED_PARAMETER") construction: Unit,
 ) : MutableKodexAgentStorage {
-    override val uri: String = directory.toStorageUri()
+    actual override val uri: String = directory.toStorageUri()
 
-    override val index: FileSystemIndexVersioned<CleanIndexEntry> =
+    actual override val index: FileSystemIndexVersioned<CleanIndexEntry> =
         FileSystemIndexVersioned(
             Path(directory, IndexDirectory),
             CleanIndexEntry.serializer(),
             OpenAiJsonCodec,
             fileSystem,
         )
-    override val work: FileSystemIndexVersioned<StableWorkEvent> =
+    actual override val work: FileSystemIndexVersioned<StableWorkEvent> =
         FileSystemIndexVersioned(
             Path(directory, WorkDirectory),
             StableWorkEvent.serializer(),
             OpenAiJsonCodec,
             fileSystem,
         )
-    override val settings: FileSystemIndexVersioned<KodexAgentSettings> =
+    actual override val settings: FileSystemIndexVersioned<KodexAgentSettings> =
         FileSystemIndexVersioned(
             Path(directory, SettingsDirectory),
             KodexAgentSettings.serializer(),
             OpenAiJsonCodec,
             fileSystem,
         )
-    override val timestamp: FileSystemIndexVersioned<Instant> =
+    actual override val timestamp: FileSystemIndexVersioned<Instant> =
         FileSystemIndexVersioned(
             Path(directory, TimestampDirectory),
             serializer<Instant>(),
             OpenAiJsonCodec,
             fileSystem,
         )
-    override val tokenCount: FileSystemIndexVersioned<TokenCountSnapshot> =
+    actual override val tokenCount: FileSystemIndexVersioned<TokenCountSnapshot> =
         FileSystemIndexVersioned(
             Path(directory, TokenCountDirectory),
             serializer<TokenCountSnapshot>(),
             OpenAiJsonCodec,
             fileSystem,
         )
-    override val unstable: FileSystemIndexVersioned<List<UnstableCleanEvent>> =
+    actual override val unstable: FileSystemIndexVersioned<List<UnstableCleanEvent>> =
         FileSystemIndexVersioned(
             Path(directory, UnstableDirectory),
             ListSerializer(UnstableCleanEvent.serializer()),
@@ -66,13 +67,13 @@ public class FileSystemAgentStorage internal constructor(
             fileSystem,
         )
 
-    public companion object
+    public actual companion object
 }
 
 /** Opens an existing thread directory without acquiring ownership. */
-public suspend fun FileSystemAgentStorage(
+public actual suspend fun FileSystemAgentStorage(
     directory: Path,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    fileSystem: CoroutineFileSystem,
 ): FileSystemAgentStorage {
     val resolved = fileSystem.resolve(directory)
     return FileSystemAgentStorage(
@@ -99,17 +100,17 @@ internal val TimelineDirectories: List<String> = listOf(
 )
 
 /** Directory names that make up one filesystem AgentStorage. */
-public val FileSystemAgentStorageTimelineDirectories: List<String> = TimelineDirectories
+public actual val FileSystemAgentStorageTimelineDirectories: List<String> = TimelineDirectories
 
 /**
  * Creates the uninitialized storage directory backing a freshly spawned AgentSession.
  *
  * Set [mustCreateDirectory] to `false` only when the caller has already reserved [directory].
  */
-public suspend fun FileSystemAgentStorage.Companion.ofEmpty(
+public actual suspend fun FileSystemAgentStorage.Companion.ofEmpty(
     directory: Path,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-    mustCreateDirectory: Boolean = true,
+    fileSystem: CoroutineFileSystem,
+    mustCreateDirectory: Boolean,
 ): FileSystemAgentStorage {
     fileSystem.createDirectories(directory, mustCreate = mustCreateDirectory)
     val resolved = fileSystem.resolve(directory)
@@ -129,7 +130,7 @@ public suspend fun FileSystemAgentStorage.Companion.ofEmpty(
 /**
  * Copies one initialized history prefix without decoding timeline payloads.
  */
-public suspend fun FileSystemAgentStorage.forkRawTo(
+public actual suspend fun FileSystemAgentStorage.forkRawTo(
     until: Int,
     target: FileSystemAgentStorage,
 ) {

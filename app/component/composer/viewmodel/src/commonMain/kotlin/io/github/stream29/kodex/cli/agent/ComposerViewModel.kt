@@ -22,15 +22,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** Creates one dependency-only Composer child for an exact owner identity. */
-public fun createComposerViewModel(
+public actual fun createComposerViewModel(
     ownerId: ComposerOwnerId,
     dependencies: ComposerDependencies,
     ownerScope: CoroutineScope,
 ): ComposerViewModel = ComposerViewModelImpl(ownerId, dependencies, ownerScope)
 
-/** Typed assembly entrypoint for the Composer component. */
-public val composerViewModelFactory: ComposerViewModelFactory =
+public actual val composerViewModelFactory: ComposerViewModelFactory =
     ComposerViewModelFactory(::createComposerViewModel)
 
 /**

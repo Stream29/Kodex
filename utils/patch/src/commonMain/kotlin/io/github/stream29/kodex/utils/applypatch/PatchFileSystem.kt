@@ -3,21 +3,8 @@ package io.github.stream29.kodex.utils.applypatch
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import kotlinx.io.files.Path
 
-/**
- * Applies this parsed patch in hunk order under [root], using [fileSystem].
- *
- * Absolute paths are preserved; relative paths are resolved against [root].
- * Successful results list added, modified and deleted paths in operation order.
- * This operation is not transactional: earlier hunks can remain applied when a
- * later hunk fails. The supplied filesystem is borrowed, never closed.
- *
- * @throws ApplyPatchException if no files are modified, a required source is
- * absent/not regular, or a hunk cannot be matched.
- * @throws kotlinx.io.IOException if reading or publishing filesystem content fails.
- * @throws kotlinx.coroutines.CancellationException if the calling operation is cancelled.
- */
-public suspend fun Patch.applyToFileSystem(
-    root: Path = Path("."),
+public actual suspend fun Patch.applyToFileSystem(
+    root: Path,
     fileSystem: CoroutineFileSystem,
 ): PatchApplyResult =
     applyHunksToFileSystem(root, fileSystem)

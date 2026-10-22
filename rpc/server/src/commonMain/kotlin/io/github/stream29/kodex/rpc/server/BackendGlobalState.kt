@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
@@ -35,7 +37,7 @@ import kotlinx.io.files.Path
  * The OpenAI client is borrowed from the backend authentication owner.
  * No frontend owns or closes these resources, and no partial GlobalRpc is registered.
  */
-public suspend fun <R> withBackendGlobalState(
+public actual suspend fun <R> withBackendGlobalState(
     store: BackendSettingsStore,
     unified: UnifiedSettingsStore,
     agentsHome: Path,
@@ -101,30 +103,30 @@ internal suspend fun <R> withBackendGlobalState(
     }
 }
 
-public class BackendGlobalState internal constructor(
-    public val store: BackendSettingsStore,
-    public val mcpConfigurations: McpConfigurationStore,
-    public val contextSettings: StateFlow<AgentContextSettings>,
-    public val mcpService: McpService,
-    public val mcpManager: McpManagerImpl,
-    public val modelCatalog: OpenAiModelCatalogStore,
+public actual class BackendGlobalState internal constructor(
+    public actual val store: BackendSettingsStore,
+    public actual val mcpConfigurations: McpConfigurationStore,
+    public actual val contextSettings: StateFlow<AgentContextSettings>,
+    public actual val mcpService: McpService,
+    public actual val mcpManager: McpManagerImpl,
+    public actual val modelCatalog: OpenAiModelCatalogStore,
     private val codexHome: Path,
-    public val unified: UnifiedSettingsStore,
+    public actual val unified: UnifiedSettingsStore,
 ) {
-    public val settings: StateFlow<BackendSettings> get() = store.settings
-    public val models: StateFlow<List<ModelInfo>> get() = modelCatalog.models
-    public val mcpServers: StateFlow<List<McpManagedServerState>> get() = mcpManager.servers
+    public actual val settings: StateFlow<BackendSettings> get() = store.settings
+    public actual val models: StateFlow<List<ModelInfo>> get() = modelCatalog.models
+    public actual val mcpServers: StateFlow<List<McpManagedServerState>> get() = mcpManager.servers
 
-    public suspend fun compareAndSetSettings(expect: BackendSettings, update: BackendSettings): Boolean =
+    public actual suspend fun compareAndSetSettings(expect: BackendSettings, update: BackendSettings): Boolean =
         mcpManager.commitConfigurationChange(expect.mcpServers, update.mcpServers) {
             store.compareAndSet(expect, update) { current, proposed ->
                 validateMcpConfigurationUpdate(current.mcpServers, proposed.mcpServers)
             }
         }
 
-    public suspend fun reconnectMcpServer(name: String): Unit = mcpManager.reconnect(name)
+    public actual suspend fun reconnectMcpServer(name: String): Unit = mcpManager.reconnect(name)
 
-    public suspend fun reloadSettings() {
+    public actual suspend fun reloadSettings() {
         val expected = unified.current
         val candidate = unified.readCandidate()
         val accepted = mcpManager.commitConfigurationChange(expected.backend.mcpServers, candidate.backend.mcpServers) {
@@ -135,7 +137,7 @@ public class BackendGlobalState internal constructor(
         check(accepted) { "Settings changed during reload; retry the explicit reload." }
     }
 
-    public suspend fun getCodexMcpSettings(): List<McpCodexImportCandidate> =
+    public actual suspend fun getCodexMcpSettings(): List<McpCodexImportCandidate> =
         readBackendCodexMcpSettings(codexHome)
 }
 

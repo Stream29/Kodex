@@ -7,14 +7,12 @@ import io.github.stream29.kodex.app.settings.contract.*
 import io.github.stream29.kodex.app.workingdirectory.createWorkingDirectoryViewModel
 import io.github.stream29.kodex.app.workingdirectory.contract.WorkingDirectoryDependencies
 import io.github.stream29.kodex.openai.*
-import io.github.stream29.kodex.utils.logging.global
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.io.files.Path
 
-/** Creates a [SessionSettingsViewModel] that owns [SessionSettingsDependencies.source]. */
-public fun createSessionSettingsViewModel(
+public actual fun createSessionSettingsViewModel(
     dependencies: SessionSettingsDependencies,
     ownerScope: CoroutineScope,
 ): SessionSettingsViewModel = SessionSettingsViewModelImpl(dependencies, ownerScope)
@@ -168,4 +166,4 @@ private class SessionSettingsViewModelImpl(
     }
 }
 
-private val logger by lazy { KotlinLogging.logger {}.global() }
+private val logger by lazy { KotlinLogging.logger {} }

@@ -3,6 +3,9 @@ package io.github.stream29.kodex.utils
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 
+/** Creates the standard atomic implementation of [ReadWriteMutex]. */
+public expect fun ReadWriteMutex(): ReadWriteMutex
+
 /**
  * Read/write synchronization boundary.
  *

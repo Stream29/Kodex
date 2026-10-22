@@ -12,8 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** Observe shared summaries without creating an OAuth client or executing an initial command. */
-public fun createAuthenticationSettingsViewModel(
+public actual fun createAuthenticationSettingsViewModel(
     dependencies: AuthenticationSettingsDependencies,
     ownerScope: CoroutineScope,
 ): AuthenticationSettingsViewModel = DefaultAuthenticationSettingsViewModel(dependencies, ownerScope)

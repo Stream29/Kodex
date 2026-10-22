@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.agentruntime.contract.AgentRuntime
@@ -11,12 +13,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
-/** Transient observations only; publication cannot backpressure an Agent. */
-public class BackendNotifications {
+public actual class BackendNotifications actual constructor() {
     private val events = MutableSharedFlow<Notification>(
         replay = 0, extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
-    public val flow: Flow<Notification> = events.asSharedFlow()
+    public actual val flow: Flow<Notification> = events.asSharedFlow()
     internal val subscriptionCount get() = events.subscriptionCount
 
     internal fun publish(notification: Notification) {

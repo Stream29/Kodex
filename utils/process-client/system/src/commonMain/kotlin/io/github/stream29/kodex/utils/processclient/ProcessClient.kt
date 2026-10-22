@@ -27,11 +27,7 @@ internal expect class PlatformProcessClient(
     override fun close()
 }
 
-/**
- * Creates an independently cancellable direct-process client under this scope.
- * @throws IllegalArgumentException when this scope has no parent Job.
- */
-public fun CoroutineScope.ProcessClient(): ProcessClient {
+public actual fun CoroutineScope.ProcessClient(): ProcessClient {
     return PlatformProcessClient(supervisorChildScope())
 }
 

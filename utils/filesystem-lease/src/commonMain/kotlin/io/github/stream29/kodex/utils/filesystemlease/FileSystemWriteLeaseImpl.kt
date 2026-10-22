@@ -1,7 +1,6 @@
 package io.github.stream29.kodex.utils.filesystemlease
 
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -10,11 +9,11 @@ import kotlinx.io.files.Path
 import kotlin.time.Clock
 import kotlin.time.Duration
 
-public suspend fun CoroutineScope.FileSystemWriteLease(
+public actual suspend fun CoroutineScope.FileSystemWriteLease(
     directory: Path,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-    duration: Duration = DefaultOwnerDuration,
-    waitForReaders: Duration = Duration.ZERO,
+    fileSystem: CoroutineFileSystem,
+    duration: Duration,
+    waitForReaders: Duration,
 ): FileSystemLease {
     require(duration.isPositive()) { "Lease duration must be positive." }
     require(!waitForReaders.isNegative()) { "Reader wait duration must not be negative." }

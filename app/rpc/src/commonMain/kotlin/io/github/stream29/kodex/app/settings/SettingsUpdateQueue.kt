@@ -1,21 +1,16 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.app.settings
 
 import io.github.oshai.kotlinlogging.KotlinLogging
-import io.github.stream29.kodex.utils.logging.global
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 
-/**
- * Serializes immediate Settings writes in a scope that outlives popup disposal.
- *
- * Closing rejects new work and drains accepted writes while the consumer is alive.
- * A terminal consumer cancellation is not a successful drain and rejects later admission.
- */
-public class SettingsUpdateQueue(
+public actual class SettingsUpdateQueue actual constructor(
     commandScope: CoroutineScope,
-    private val defaultReportError: ((Throwable) -> Unit)? = null,
+    private val defaultReportError: ((Throwable) -> Unit)?,
 ) {
     private class SettingsCommand(
         val block: suspend () -> Unit,
@@ -25,7 +20,7 @@ public class SettingsUpdateQueue(
     private val commands = Channel<SettingsCommand>(Channel.UNLIMITED)
     private var closed: Boolean = false
     private var terminalFailure: Throwable? = null
-    public var drained: Boolean = false
+    public actual var drained: Boolean = false
         private set
 
     private val worker = commandScope.launch {
@@ -53,8 +48,8 @@ public class SettingsUpdateQueue(
         }
     }
 
-    public fun submit(
-        reportError: ((Throwable) -> Unit)? = null,
+    public actual fun submit(
+        reportError: ((Throwable) -> Unit)?,
         block: suspend () -> Unit,
     ): Boolean {
         if (closed) return false
@@ -76,8 +71,7 @@ public class SettingsUpdateQueue(
         }
     }
 
-    /** [onClosed] is cleanup, invoked even after cancellation; its flag is true only on normal drain. */
-    public fun close(onClosed: ((drained: Boolean) -> Unit)? = null) {
+    public actual fun close(onClosed: ((drained: Boolean) -> Unit)?) {
         if (!closed) {
             closed = true
             commands.close()
@@ -91,5 +85,5 @@ public class SettingsUpdateQueue(
 }
 
 private val logger by lazy {
-    KotlinLogging.logger {}.global()
+    KotlinLogging.logger {}
 }

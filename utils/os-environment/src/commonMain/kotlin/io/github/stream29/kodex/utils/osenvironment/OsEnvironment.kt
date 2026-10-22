@@ -2,12 +2,7 @@ package io.github.stream29.kodex.utils.osenvironment
 
 import kotlinx.io.files.Path
 
-/**
- * Requires a detected user home path, without creating or probing it.
- *
- * @throws IllegalStateException when [userHomeDirectory] cannot detect a home path.
- */
-public fun requireUserHomeDirectory(): Path =
+public actual fun requireUserHomeDirectory(): Path =
     userHomeDirectory() ?: throw IllegalStateException("User home directory was not found.")
 
 internal fun userHomeDirectoryFromEnvironment(): Path? {

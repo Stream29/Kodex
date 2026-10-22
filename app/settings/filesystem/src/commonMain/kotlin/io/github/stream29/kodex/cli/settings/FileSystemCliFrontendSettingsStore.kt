@@ -2,13 +2,10 @@ package io.github.stream29.kodex.cli.settings
 
 import io.github.stream29.kodex.rpc.models.CliFrontendSettings
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.io.IOException
 import kotlinx.io.files.Path
 
 /** CLI-owned preferences and notification commands; never reads or writes backend settings. */
@@ -45,19 +42,9 @@ internal class FileSystemCliFrontendSettingsStore(
         readSplitSettings(fileSystem, settingsPath, defaults, ::decodeCliFrontendSettingsFile)
 }
 
-/**
- * Opens and reloads frontend preferences before returning the actual store interface.
- * Missing files/fields use [defaults], which defaults to the compiled [CliFrontendSettings]
- * preferences. Does not create a file or load legacy Hooks/backend settings.
- * Operations use [fileSystem], defaulting to the system filesystem.
- *
- * @throws IllegalArgumentException if YAML or a known setting is invalid.
- * @throws IOException if checking or reading the file fails.
- * @throws CancellationException if opening/reloading is cancelled.
- */
-public suspend fun openCliFrontendSettings(
+public actual suspend fun openCliFrontendSettings(
     settingsDirectory: Path,
-    defaults: CliFrontendSettings = CliFrontendSettings(),
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    defaults: CliFrontendSettings,
+    fileSystem: CoroutineFileSystem,
 ): CliFrontendSettingsStore =
     FileSystemCliFrontendSettingsStore(fileSystem, settingsDirectory, defaults).also { it.reload() }

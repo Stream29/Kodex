@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.utils.images.codec
 
 import io.github.stream29.kodex.utils.images.EncodedImage
@@ -13,11 +15,8 @@ import kotlinx.coroutines.CancellationException
 
 private val promptImageDecodeFormats = ImageFormats(PNG, GIF)
 
-/**
- * Stateless prompt-image transformer backed by KorIM's pure Kotlin PNG/GIF codecs.
- */
-public object KorimPromptImageTransformer : PromptImageTransformer {
-    override suspend fun transform(request: PromptImageTransformRequest): EncodedImage {
+public actual object KorimPromptImageTransformer : PromptImageTransformer {
+    public actual override suspend fun transform(request: PromptImageTransformRequest): EncodedImage {
         val plan = request.plan
         if (plan.outputMimeType != ImageMimeType.Png) {
             throw UnsupportedImageCodecException(plan.outputMimeType, capability = "encode")

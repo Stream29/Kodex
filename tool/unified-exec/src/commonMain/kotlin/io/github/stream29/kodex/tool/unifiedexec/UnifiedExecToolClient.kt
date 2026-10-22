@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.tool.unifiedexec
 
 import io.github.stream29.kodex.utils.shellclient.ProcessException
@@ -25,14 +27,7 @@ import kotlin.time.TimeSource
 
 internal const val UnifiedExecWindowsMinimumYieldTimeMillis: Long = 10_000L
 
-/**
- * ShellClient-backed implementation of [UnifiedExecClient].
- *
- * This client owns one [ShellClient], which owns every process session it
- * creates. The registry and process-session synchronization remain local to
- * this implementation.
- */
-public class UnifiedExecToolClient internal constructor(
+public actual class UnifiedExecToolClient internal constructor(
     private val workingDirectoryProvider: suspend () -> Path,
     private val settingsProvider: suspend () -> ShellSettings,
     private val shellClient: ShellClient,
@@ -41,10 +36,10 @@ public class UnifiedExecToolClient internal constructor(
     private val mutableSessions: MutableStateFlow<Map<Int, ManagedProcessSession>> =
         MutableStateFlow(emptyMap())
 
-    override val activeSessions: StateFlow<Map<Int, UnifiedExecProcessSession>> =
+    public actual override val activeSessions: StateFlow<Map<Int, UnifiedExecProcessSession>> =
         mutableSessions.asStateFlow()
 
-    override suspend fun execCommand(arguments: ExecCommandArguments): UnifiedExecOutput {
+    public actual override suspend fun execCommand(arguments: ExecCommandArguments): UnifiedExecOutput {
         arguments.validate()
         val started = TimeSource.Monotonic.markNow()
         val session = runProcessOperation {
@@ -88,7 +83,7 @@ public class UnifiedExecToolClient internal constructor(
         }
     }
 
-    override suspend fun writeStdin(arguments: WriteStdinArguments): UnifiedExecOutput {
+    public actual override suspend fun writeStdin(arguments: WriteStdinArguments): UnifiedExecOutput {
         arguments.validate()
         val managed = sessionFor(arguments.sessionId)
         val started = TimeSource.Monotonic.markNow()
@@ -157,7 +152,7 @@ public class UnifiedExecToolClient internal constructor(
         removeAndClose(managed)
     }
 
-    override fun close() {
+    public actual override fun close() {
         shellClient.close()
     }
 
@@ -187,10 +182,9 @@ public class UnifiedExecToolClient internal constructor(
         }
 }
 
-/** Creates a unified-exec client with a dedicated shell client under this scope. */
-public fun CoroutineScope.UnifiedExecToolClient(
+public actual fun CoroutineScope.UnifiedExecToolClient(
     settingsProvider: suspend () -> ShellSettings,
-    workingDirectoryProvider: suspend () -> Path = { Path(".") },
+    workingDirectoryProvider: suspend () -> Path,
 ): UnifiedExecToolClient =
     UnifiedExecToolClient(
         workingDirectoryProvider = workingDirectoryProvider,

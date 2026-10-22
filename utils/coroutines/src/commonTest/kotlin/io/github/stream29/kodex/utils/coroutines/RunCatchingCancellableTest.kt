@@ -36,4 +36,13 @@ val runCatchingCancellableTest by testSuite {
             },
         )
     }
+
+    test("allows non-local return from the block") {
+        assertEquals(42, returnFromBlock())
+    }
+}
+
+private fun returnFromBlock(): Int {
+    runCatchingCancellable { return 42 }
+    return -1
 }

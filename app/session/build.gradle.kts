@@ -7,9 +7,13 @@ plugins {
 
 kotlin {
     sourceSets {
+        named("specMain").dependencies {
+            api(project(":app-rpc"))
+            api(project(":app-session-contract"))
+            api(project(":openai-models"))
+            api(libs.kotlinx.coroutines.core)
+        }
         commonMain.dependencies {
-            implementation(project(":app-rpc"))
-            implementation(project(":app-session-contract"))
             implementation(project(":app-component-session-catalog-viewmodel"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(project(":utils-coroutines"))

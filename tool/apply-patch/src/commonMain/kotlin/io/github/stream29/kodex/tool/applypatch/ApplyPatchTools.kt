@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.tool.applypatch
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableCleanEvent
@@ -12,11 +14,9 @@ import io.github.stream29.kodex.openai.FreeformToolFormat
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.contract.Tool
 
-public object ApplyPatchTools {
-    public const val Name: String = "apply_patch"
-
-    public val spec: ToolSpec = FreeformTool(
-        name = Name,
+internal actual object ApplyPatchToolImplementation {
+    public actual val spec: ToolSpec = FreeformTool(
+        name = ApplyPatchTools.Name,
         description = ApplyPatchDescription,
         format = FreeformToolFormat(
             type = "grammar",
@@ -25,18 +25,18 @@ public object ApplyPatchTools {
         ),
     )
 
-    public fun createTool(client: ApplyPatchToolClient = ApplyPatchToolClient()): Tool =
+    public actual fun createTool(client: ApplyPatchToolClient): Tool =
         ApplyPatchTool(client)
 }
 
-public class ApplyPatchTool(
-    private val client: ApplyPatchToolClient = ApplyPatchToolClient(),
+public actual class ApplyPatchTool actual constructor(
+    private val client: ApplyPatchToolClient,
 ) : Tool {
-    override val spec: ToolSpec = ApplyPatchTools.spec
+    public actual override val spec: ToolSpec = ApplyPatchTools.spec
 
-    override fun close(): Unit = Unit
+    public actual override fun close(): Unit = Unit
 
-    override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool =
+    public actual override suspend fun handle(pending: PendingToolEvent): StableCleanEvent.CompletedTool =
         when (pending) {
             is PendingFunctionToolEvent -> {
                 val message = "apply_patch received function-call JSON payload"

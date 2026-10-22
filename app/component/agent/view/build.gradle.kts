@@ -7,16 +7,17 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
+        named("specMain").dependencies {
             api(project(":app-component-agent-contract"))
-        }
-        mosaicMain.dependencies {
-            implementation(project(":app-view-components"))
-            implementation(project(":app-component-application-preferences-viewmodel"))
+            api(project(":app-view-components"))
+            api(project(":app-component-application-preferences-viewmodel"))
             api(project(":app-component-runtime-configuration-view"))
             api(project(":app-component-suggest-subagent-task-view"))
+            api(project(":app-component-history-view"))
+            api(libs.mosaic.runtime)
+        }
+        mosaicMain.dependencies {
             implementation(project(":app-component-request-user-input-view"))
-            implementation(project(":app-component-history-view"))
             implementation(project(":app-component-composer-view"))
             implementation(libs.mosaic.runtime)
             implementation(libs.kotlinx.coroutines.core)

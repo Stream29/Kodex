@@ -10,7 +10,7 @@ import io.github.stream29.kodex.openai.KodexAgentSettings
 import kotlin.time.Instant
 
 /** Appends one compaction point and its provider output at consecutive indexes. */
-public suspend fun MutableKodexAgentStorage.appendCompaction(
+public actual suspend fun MutableKodexAgentStorage.appendCompaction(
     output: StableContextCompaction,
     timestamp: Instant,
     nextWindowId: String,

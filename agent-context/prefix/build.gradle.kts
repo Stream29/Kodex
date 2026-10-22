@@ -8,6 +8,9 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
+                api(project(":agent-context-settings"))
+                api(project(":openai-models"))
+                api(libs.kotlinx.coroutines.core)
                 api(project(":agent-context-agents-md"))
                 api(project(":agent-context-skill"))
                 api(project(":utils-shell-client"))
@@ -15,9 +18,6 @@ kotlin {
             }
         }
         commonMain.dependencies {
-            api(project(":agent-context-settings"))
-            api(project(":openai-models"))
-            api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
             implementation(project(":agent-context-agents-md"))
             implementation(project(":utils-os-environment"))

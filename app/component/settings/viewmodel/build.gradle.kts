@@ -23,7 +23,7 @@ kotlin {
             api(project(":app-component-path-picker-viewmodel"))
             api(project(":app-session-contract"))
             api(project(":rpc-models"))
-            api(project(":mcp"))
+            api(project(":mcp-contract"))
             api(project(":openai-account-usage"))
             api(project(":openai-models"))
             api(libs.kotlinx.coroutines.core)

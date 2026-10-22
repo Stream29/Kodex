@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.backend
 
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
@@ -7,15 +9,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlinx.serialization.json.Json
 
-/**
- * Owns a stable kernel lock inode. Metadata is a private atomic sibling in the logical lock
- * directory, never an atomic replacement/unlink of the locked inode itself.
- */
-public class BackendInstance private constructor(
+public actual class BackendInstance private constructor(
     private val lock: BackendPlatformLock,
     private val directory: Path,
 ) : AutoCloseable {
-    public suspend fun publish(endpoint: BackendEndpoint) {
+    public actual suspend fun publish(endpoint: BackendEndpoint) {
         val target = Path(directory, "connection.json")
         val temporary = Path(directory, ".connection.${endpoint.instanceId}.tmp")
         var primary: Throwable? = null
@@ -33,18 +31,16 @@ public class BackendInstance private constructor(
         }
     }
 
-    /** Caller must finish service/resource cleanup before releasing this handle. */
-    override fun close() { lock.close() }
+    actual override fun close() { lock.close() }
 
-    public companion object {
-        /** Last private record, including after exit. Never use this method as live discovery. */
-        public suspend fun readRecord(home: Path): BackendEndpoint? {
+    public actual companion object {
+        public actual suspend fun readRecord(home: Path): BackendEndpoint? {
             val path = Path(home, ".locks", "backend", "connection.json")
             if (!SystemCoroutineFileSystem.exists(path)) return null
             return EndpointJson.decodeFromString(BackendEndpoint.serializer(), SystemCoroutineFileSystem.readString(path))
         }
 
-        public suspend fun acquire(home: Path): BackendInstance {
+        public actual suspend fun acquire(home: Path): BackendInstance {
             val directory = Path(home, ".locks", "backend")
             SystemCoroutineFileSystem.createDirectories(directory)
             val lock = openBackendPlatformLock(Path(directory, "instance.lock").toString())
@@ -52,8 +48,7 @@ public class BackendInstance private constructor(
             return BackendInstance(lock, directory)
         }
 
-        /** Read-only discovery. Never deletes stale metadata or takes ownership of an alive backend. */
-        public suspend fun discover(home: Path): BackendEndpoint? {
+        public actual suspend fun discover(home: Path): BackendEndpoint? {
             val directory = Path(home, ".locks", "backend")
             val path = Path(directory, "instance.lock")
             if (!SystemCoroutineFileSystem.exists(path)) return null
@@ -78,12 +73,5 @@ internal interface BackendPlatformLock {
 }
 
 internal expect fun openBackendPlatformLock(path: String): BackendPlatformLock?
-public expect fun randomBackendPassword(): String
-public expect fun launchIndependentBackend(home: Path): Long
-public expect fun setBackendWorkingDirectory(home: Path)
-public expect fun installBackendSignals()
-public expect fun backendStopSignalReceived(): Boolean
-public expect fun backendProcessAlive(pid: Long): Boolean
-public expect fun exitKodexProcess(code: Int): Nothing
 
 private val EndpointJson = Json { encodeDefaults = true; ignoreUnknownKeys = true }

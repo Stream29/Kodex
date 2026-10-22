@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.auth
 
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -13,7 +15,6 @@ import io.github.stream29.kodex.openai.codexclistorage.CodexCliStorage
 import io.github.stream29.kodex.openai.jsoncodec.OpenAiJsonCodec
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -36,12 +37,7 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
-/**
- * Backend-only authority for the two existing file formats. Source selection
- * is observed, never rewritten by login/remove. The injected OAuth transport
- * belongs to the enclosing backend and is not closed by this store.
- */
-public class BackendFileSystemAuthStore internal constructor(
+public actual class BackendFileSystemAuthStore internal constructor(
     private val owner: CoroutineScope,
     private val dataDirectory: Path,
     private val codexHome: Path,
@@ -54,7 +50,7 @@ public class BackendFileSystemAuthStore internal constructor(
     private val writes = Mutex()
     private val generations = KodexAuthSource.entries.associateWith { 0L }.toMutableMap()
     private val loaded = mutableMapOf<KodexAuthSource, AuthLoadResult>()
-    override val state: StateFlow<OpenAiAuthState>
+    actual override val state: StateFlow<OpenAiAuthState>
         field = MutableStateFlow<OpenAiAuthState>(OpenAiAuthState.Unavailable.NotLoaded)
 
     internal suspend fun start() {
@@ -84,14 +80,12 @@ public class BackendFileSystemAuthStore internal constructor(
         }
     }
 
-    /** Internal preparation fence, not a persistent identity or wire handle. */
-    public suspend fun beginLogin(source: KodexAuthSource): Long = writes.withLock {
+    public actual suspend fun beginLogin(source: KodexAuthSource): Long = writes.withLock {
         owner.ensureActive()
         nextGeneration(source)
     }
 
-    /** Saves only the bound source and rejects a login invalidated by remove/new login. */
-    public suspend fun commitLogin(
+    public actual suspend fun commitLogin(
         source: KodexAuthSource,
         generation: Long,
         tokens: OpenAiSubscriptionTokens,
@@ -107,7 +101,7 @@ public class BackendFileSystemAuthStore internal constructor(
         }
     }
 
-    public suspend fun remove(source: KodexAuthSource) {
+    public actual suspend fun remove(source: KodexAuthSource) {
         writes.withLock {
             owner.ensureActive()
             nextGeneration(source)
@@ -117,8 +111,7 @@ public class BackendFileSystemAuthStore internal constructor(
         }
     }
 
-    /** Internal maintenance; no manual reload RPC or frontend polling. */
-    public suspend fun reload(source: KodexAuthSource) {
+    public actual suspend fun reload(source: KodexAuthSource) {
         writes.withLock {
             owner.ensureActive()
             loaded[source] = read(source)
@@ -165,7 +158,7 @@ public class BackendFileSystemAuthStore internal constructor(
         }
     }
 
-    override fun close() { owner.cancel() }
+    actual override fun close() { owner.cancel() }
 
     private fun nextGeneration(source: KodexAuthSource): Long {
         val previous = generations.getValue(source)
@@ -249,14 +242,13 @@ public class BackendFileSystemAuthStore internal constructor(
 
 private val BackendAuthLogger by lazy { KotlinLogging.logger {} }
 
-/** Creates the two-source authority in a child of the backend lifecycle. */
-public suspend fun CoroutineScope.BackendFileSystemAuthStore(
+public actual suspend fun CoroutineScope.BackendFileSystemAuthStore(
     dataDirectory: Path,
     codexHome: Path,
     selectedSource: StateFlow<KodexAuthSource>,
     loginClient: OpenAiLoginClient,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-    clock: Clock = Clock.System,
+    fileSystem: CoroutineFileSystem,
+    clock: Clock,
 ): BackendFileSystemAuthStore {
     val owner = supervisorChildScope()
     return try {

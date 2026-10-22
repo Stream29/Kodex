@@ -13,8 +13,10 @@ kotlin {
     }
 
     sourceSets {
-        commonMain.dependencies {
+        specMain.dependencies {
             api(libs.kotlinx.coroutines.core)
+        }
+        commonMain.dependencies {
             implementation("org.jetbrains.kotlinx:atomicfu:0.29.0")
         }
     }

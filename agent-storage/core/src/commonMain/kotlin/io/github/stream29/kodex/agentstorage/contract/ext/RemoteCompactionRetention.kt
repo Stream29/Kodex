@@ -35,7 +35,7 @@ private const val ApproximateCharactersPerToken: Int = 4
  * ranges. Once the token budget is exhausted, collection is cancelled and no
  * older payloads are decoded.
  */
-public suspend fun KodexAgentStorage.buildCompactionPrefix(
+public actual suspend fun KodexAgentStorage.buildCompactionPrefix(
     beforeIndex: Int,
 ): List<CompactionRetainedItem> {
     require(beforeIndex >= 0) { "Index $beforeIndex must be non-negative." }

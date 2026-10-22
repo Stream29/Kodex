@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.tool.viewimage
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableImageViewResult
@@ -7,26 +9,21 @@ import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.typedTool
 
-public object ViewImageTools {
-    public const val Name: String = "view_image"
+internal actual object ViewImageToolImplementation {
+    public actual val spec: ResponsesApiTool = toolSpec(ViewImageToolOptions())
 
-    public const val Description: String =
-        "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk."
-
-    public val spec: ResponsesApiTool = toolSpec()
-
-    public fun toolSpec(options: ViewImageToolOptions = ViewImageToolOptions()): ResponsesApiTool =
+    public actual fun toolSpec(options: ViewImageToolOptions): ResponsesApiTool =
         ResponsesApiTool(
-            name = Name,
-            description = Description,
+            name = ViewImageTools.Name,
+            description = ViewImageTools.Description,
             strict = false,
             parameters = viewImageParametersSchema(options),
             outputSchema = ViewImageOutputSchema,
         )
 
-    public fun createTool(
-        client: ViewImageToolClient = ViewImageToolClient(),
-        options: ViewImageToolOptions = ViewImageToolOptions(),
+    public actual fun createTool(
+        client: ViewImageToolClient,
+        options: ViewImageToolOptions,
     ): Tool =
         typedTool(
             spec = toolSpec(options),

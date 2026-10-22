@@ -8,7 +8,7 @@ import kotlinx.rpc.internal.utils.InternalRpcApi
 
 @OptIn(ExperimentalStdlibApi::class)
 @InternalRpcApi
-public fun String.rpcInternalHexToReadableBinary(): String {
+public actual fun String.rpcInternalHexToReadableBinary(): String {
     return hexToByteArray().joinToString("") { byte ->
         byte.toInt().toChar().display()
     }

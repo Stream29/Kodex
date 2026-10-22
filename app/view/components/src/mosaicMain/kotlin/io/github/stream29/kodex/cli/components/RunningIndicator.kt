@@ -8,13 +8,11 @@ import androidx.compose.runtime.remember
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
-public val RunningIndicatorFrames: List<String> =
+public actual val RunningIndicatorFrames: List<String> =
     listOf("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
-public const val RunningIndicatorFrameDurationMillis: Int = 100
-
 @Composable
-public fun rememberRunningIndicatorFrame(active: Boolean): State<String> {
+public actual fun rememberRunningIndicatorFrame(active: Boolean): State<String> {
     val frame = remember { mutableStateOf(RunningIndicatorFrames.first()) }
     LaunchedEffect(active) {
         frame.value = RunningIndicatorFrames.first()
@@ -30,7 +28,7 @@ public fun rememberRunningIndicatorFrame(active: Boolean): State<String> {
     return frame
 }
 
-public fun runningIndicatorLabel(
+public actual fun runningIndicatorLabel(
     name: String,
     running: Boolean,
     frame: String,

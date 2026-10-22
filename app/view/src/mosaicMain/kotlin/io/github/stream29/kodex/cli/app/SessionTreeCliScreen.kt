@@ -97,8 +97,6 @@ import io.github.stream29.kodex.cli.sessiondelete.SessionDeletePopup
 import io.github.stream29.kodex.cli.sessionrename.SessionRenamePopup
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
-import io.github.stream29.kodex.utils.externalurl.OpenExternalUrlResult
-import io.github.stream29.kodex.utils.externalurl.openExternalUrl
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -106,23 +104,15 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
 
-/**
- * Application shell; all mutable child state is collected by its exact renderer.
- * Throwing History/catalog actions reach [onOperationFailure] once. Its default
- * throws for an unwired caller; the real CLI supplies its Application-owned unhandled-error
- * reporter. Cancellation never enters the reporter.
- */
 @Composable
-public fun SessionTreeCliScreen(
+public actual fun SessionTreeCliScreen(
     viewModel: ApplicationViewModel,
     newLineKey: StateFlow<NewLineKey>,
     sidebarSettings: SidebarSettingsViewModel,
-    onOperationFailure: (Throwable) -> Unit = { throw it },
-    reservedRows: Int = 0,
-    openMcpUrl: suspend (String) -> Boolean = { url ->
-        openExternalUrl(url) !is OpenExternalUrlResult.Failed
-    },
-) {
+    onOperationFailure: (Throwable) -> Unit,
+    reservedRows: Int,
+    openMcpUrl: suspend (String) -> Boolean,
+): Unit {
     val terminal = LocalTerminalState.current
     val navigation by viewModel.navigation.collectAsState()
     val popup by viewModel.popup.collectAsState()

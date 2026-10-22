@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.sessionsettings
 
 import androidx.compose.runtime.*
@@ -15,20 +17,19 @@ import io.github.stream29.kodex.cli.settings.*
 import io.github.stream29.kodex.cli.workingdirectory.WorkingDirectoryPopup
 import io.github.stream29.kodex.openai.*
 
-/** Renderer-only menu anchors/open state; contains no configuration or target/draft authority. */
-public class SessionSettingsDropdowns(
-    public val model: TuiDropdownState,
-    public val reasoning: TuiDropdownState,
-    public val serviceTier: TuiDropdownState,
-    public val questions: TuiDropdownState,
+public actual class SessionSettingsDropdowns actual constructor(
+    public actual val model: TuiDropdownState,
+    public actual val reasoning: TuiDropdownState,
+    public actual val serviceTier: TuiDropdownState,
+    public actual val questions: TuiDropdownState,
 ) {
-    public fun dismissAll() {
+    public actual fun dismissAll() {
         model.dismiss(); reasoning.dismiss(); serviceTier.dismiss(); questions.dismiss()
     }
 }
 
 @Composable
-public fun rememberSessionSettingsDropdowns(): SessionSettingsDropdowns {
+public actual fun rememberSessionSettingsDropdowns(): SessionSettingsDropdowns {
     val model = rememberTuiDropdownState()
     val reasoning = rememberTuiDropdownState()
     val tier = rememberTuiDropdownState()
@@ -38,17 +39,15 @@ public fun rememberSessionSettingsDropdowns(): SessionSettingsDropdowns {
     }
 }
 
-/** Complete independently renderable component. Removal hides the page, never closes the stable VM. */
 @Composable
-public fun BoxScope.SessionSettingsComponent(viewModel: SessionSettingsViewModel) {
+public actual fun BoxScope.SessionSettingsComponent(viewModel: SessionSettingsViewModel) {
     val dropdowns = rememberSessionSettingsDropdowns()
     SessionSettingsPanel(viewModel, dropdowns)
     SessionSettingsOverlays(viewModel, dropdowns)
 }
 
-/** Scrollable host content; pass the same renderer menu object to [SessionSettingsOverlays]. */
 @Composable
-public fun SessionSettingsPanel(
+public actual fun SessionSettingsPanel(
     viewModel: SessionSettingsViewModel,
     dropdowns: SessionSettingsDropdowns,
 ) {
@@ -97,12 +96,8 @@ public fun SessionSettingsPanel(
     }
 }
 
-/**
- * Full four menus and borrowed exact child renderers. No effects collector or renderer-local name
- * draft/target. Child renderers retain their existing disposal and Labeled presentation contracts.
- */
 @Composable
-public fun BoxScope.SessionSettingsOverlays(
+public actual fun BoxScope.SessionSettingsOverlays(
     viewModel: SessionSettingsViewModel,
     dropdowns: SessionSettingsDropdowns,
 ) {

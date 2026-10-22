@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.tool.currenttime
 
 import io.github.stream29.kodex.openai.ResponsesApiNamespace
@@ -6,16 +8,12 @@ import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.builder.jsonToolSuccess
 import io.github.stream29.kodex.tool.builder.textTool
 import io.github.stream29.kodex.tool.contract.Tool
+import io.github.stream29.kodex.tool.currenttime.CurrentTimeTools.Description
+import io.github.stream29.kodex.tool.currenttime.CurrentTimeTools.NamespaceDescription
 import kotlinx.serialization.builtins.serializer
 
-public const val CurrentTimeNamespace: String = "clock"
-public const val CurrentTimeToolName: String = "curr_time"
-
-public object CurrentTimeTools {
-    public const val NamespaceDescription: String = "Tools for reading and waiting on time."
-    public const val Description: String = "Return the current time in UTC."
-
-    public val spec: ToolSpec =
+internal actual object CurrentTimeToolImplementation {
+    public actual val spec: ToolSpec =
         ResponsesApiNamespace(
             name = CurrentTimeNamespace,
             description = NamespaceDescription,
@@ -30,7 +28,7 @@ public object CurrentTimeTools {
             ),
         )
 
-    public fun createTool(client: CurrentTimeToolClient = CurrentTimeToolClient()): Tool =
+    public actual fun createTool(client: CurrentTimeToolClient): Tool =
         textTool(
             spec = spec,
             inputDeserializer = Unit.serializer(),

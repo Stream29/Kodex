@@ -7,6 +7,13 @@ plugins {
 
 kotlin {
     sourceSets {
+        named("specMain").dependencies {
+            api(project(":app-application"))
+            api(project(":app-component-application-preferences-viewmodel"))
+            api(project(":utils-external-url"))
+            api(libs.mosaic.runtime)
+            api(libs.kotlinx.coroutines.core)
+        }
         commonTest.dependencies {
             implementation(project(":app-test-support-rpc"))
             implementation(project(":agent-session-in-memory"))
@@ -20,7 +27,6 @@ kotlin {
         }
         mosaicMain.dependencies {
             implementation(project(":app-component-mcp-settings-view"))
-            implementation(project(":utils-external-url"))
             implementation(project(":app-component-composer-view"))
             implementation(project(":app-component-new-session-view"))
             implementation(project(":app-component-session-tab-bar-view"))
@@ -36,7 +42,6 @@ kotlin {
             implementation(project(":app-component-session-delete-view"))
             implementation(project(":app-component-session-delete-viewmodel"))
             implementation(project(":app-component-openai-login-view"))
-            api(project(":app-application"))
             implementation(project(":app-component-agent-contract"))
             implementation(project(":app-component-history-viewmodel"))
             implementation(project(":app-session-contract"))

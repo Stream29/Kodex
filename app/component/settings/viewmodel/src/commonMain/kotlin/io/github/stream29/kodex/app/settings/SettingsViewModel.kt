@@ -4,8 +4,7 @@ import io.github.stream29.kodex.app.settings.contract.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** Navigation and child disposal only; each supplied child already owns its exact commands. */
-public fun createSettingsViewModel(
+public actual fun createSettingsViewModel(
     initialPage: SettingsPage,
     global: GlobalSettingsViewModel,
     session: SessionSettingsViewModel,

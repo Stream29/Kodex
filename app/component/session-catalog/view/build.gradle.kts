@@ -6,12 +6,13 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
+        named("specMain").dependencies {
             api(project(":app-component-session-catalog-viewmodel"))
+            api(project(":app-view-components"))
+            api(libs.mosaic.runtime)
         }
         mosaicMain.dependencies {
             implementation(project(":app-component-session-delete-view"))
-            implementation(project(":app-view-components"))
             implementation(project(":utils-terminal-text"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.datetime)

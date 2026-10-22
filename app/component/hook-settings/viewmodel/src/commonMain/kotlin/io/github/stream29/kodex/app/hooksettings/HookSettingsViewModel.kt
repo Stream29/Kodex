@@ -10,8 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** Creates a [HookSettingsViewModel] using host-owned list and write ports. */
-public fun createHookSettingsViewModel(
+public actual fun createHookSettingsViewModel(
     dependencies: HookSettingsDependencies,
     ownerScope: CoroutineScope,
 ): HookSettingsViewModel = DefaultHookSettingsViewModel(dependencies, ownerScope)

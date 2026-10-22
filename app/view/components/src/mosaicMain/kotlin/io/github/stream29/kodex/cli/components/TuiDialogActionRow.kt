@@ -8,10 +8,9 @@ import com.jakewharton.mosaic.ui.Arrangement
 import com.jakewharton.mosaic.ui.Row
 import com.jakewharton.mosaic.ui.RowScope
 
-/** A trailing-aligned dialog action row with one terminal cell between actions. */
 @Composable
-public fun TuiDialogActionRow(
-    modifier: Modifier = Modifier,
+public actual fun TuiDialogActionRow(
+    modifier: Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
     Row(

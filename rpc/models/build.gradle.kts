@@ -15,7 +15,7 @@ kotlin {
                 api(project(":app-component-session-title-settings-viewmodel"))
                 api(project(":app-component-application-preferences-viewmodel"))
                 api(project(":agent-context-settings"))
-                api(project(":mcp"))
+                api(project(":mcp-contract"))
                 api(project(":utils-shell-client"))
                 api(libs.kotlinx.serialization.core)
             }

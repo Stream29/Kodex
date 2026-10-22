@@ -12,9 +12,6 @@ kotlin {
                 api(libs.kotlinx.coroutines.core)
             }
         }
-        commonMain.dependencies {
-            api(libs.kotlinx.coroutines.core)
-        }
         commonTest.dependencies {
             implementation(project(":utils-coroutines"))
             implementation(libs.kotlinx.coroutines.test)

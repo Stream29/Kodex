@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.agentstate.test
 
 import io.github.stream29.kodex.agentcontext.contract.AgentContextSettings
@@ -14,7 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
 
 /** Fixed application context for tests that do not exercise context discovery. */
-public val TestAgentContextSettings: StateFlow<AgentContextSettings> =
+public actual val TestAgentContextSettings: StateFlow<AgentContextSettings> =
     MutableStateFlow(
         object : AgentContextSettings {
             override val agentsHome: Path = Path(".")
@@ -26,23 +28,23 @@ public val TestAgentContextSettings: StateFlow<AgentContextSettings> =
     )
 
 /** In-memory MCP service for tests that need no external MCP connections. */
-public class TestMcpService(
-    initialTools: List<McpTool> = emptyList(),
+public actual class TestMcpService actual constructor(
+    initialTools: List<McpTool>,
 ) : McpService {
-    override val clients: MutableStateFlow<Map<String, McpClient>> =
+    actual override val clients: MutableStateFlow<Map<String, McpClient>> =
         MutableStateFlow(initialTools.toTestMcpClients())
-    override val authentication: StateFlow<Map<String, McpAuthenticationState>> =
+    actual override val authentication: StateFlow<Map<String, McpAuthenticationState>> =
         MutableStateFlow(emptyMap())
 
-    public fun replaceTools(tools: List<McpTool>) {
+    public actual fun replaceTools(tools: List<McpTool>) {
         clients.value = tools.toTestMcpClients()
     }
 
-    override suspend fun refresh(): Unit = Unit
+    actual override suspend fun refresh(): Unit = Unit
 
-    override suspend fun invalidate(serverName: String): Unit = Unit
+    actual override suspend fun invalidate(serverName: String): Unit = Unit
 
-    override fun close(): Unit = Unit
+    actual override fun close(): Unit = Unit
 }
 
 private class TestMcpClient(

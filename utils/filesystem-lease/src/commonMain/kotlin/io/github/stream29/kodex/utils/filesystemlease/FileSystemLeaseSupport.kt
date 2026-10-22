@@ -184,7 +184,6 @@ internal data class FileSystemLeaseHeartbeat(
 )
 
 internal val LeaseJson: Json = Json
-internal val DefaultOwnerDuration: Duration = 30.seconds
 internal val GuardDuration: Duration = 10.seconds
 internal val ReaderPollInterval: Duration = 25.milliseconds
 internal val LeaseCleanupTimeout: Duration = 10.seconds

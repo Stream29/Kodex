@@ -1,20 +1,20 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.tool.viewimage
 
 import io.github.stream29.kodex.utils.images.PromptImageMode
 import io.github.stream29.kodex.utils.images.PromptImageTransformer
-import io.github.stream29.kodex.utils.images.codec.HostPromptImageTransformer
 import io.github.stream29.kodex.utils.images.codec.readPromptImage
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
 
-public class ViewImageToolClient(
-    private val workingDirectoryProvider: suspend () -> Path = { Path(".") },
-    private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-    private val transformer: PromptImageTransformer = HostPromptImageTransformer,
-    private val canRequestOriginalImageDetail: Boolean = false,
+public actual class ViewImageToolClient actual constructor(
+    private val workingDirectoryProvider: suspend () -> Path,
+    private val fileSystem: CoroutineFileSystem,
+    private val transformer: PromptImageTransformer,
+    private val canRequestOriginalImageDetail: Boolean,
 ) {
-    public suspend fun view(arguments: ViewImageToolArguments): ViewImageToolOutput {
+    public actual suspend fun view(arguments: ViewImageToolArguments): ViewImageToolOutput {
         if (arguments.path.isBlank()) {
             throw ViewImageToolException("`path` must not be blank")
         }

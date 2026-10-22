@@ -14,13 +14,8 @@ import io.github.stream29.kodex.cli.newsessiondefaults.*
 import io.github.stream29.kodex.cli.sessionsettings.*
 import io.github.stream29.kodex.cli.usagereset.UsageResetDialogHost
 
-/**
- * Navigation and scroll layout for stable Settings children, with direct popup-host overlays.
- * All configuration, drafts and exact interaction targets belong to the components. The host renders
- * shared failure once and hides page interactions without closing their observation lifetimes.
- */
 @Composable
-public fun BoxScope.SettingsPopup(
+public actual fun BoxScope.SettingsPopup(
     viewModel: SettingsViewModel,
     onDismissRequest: () -> Unit,
     onOpenLogin: () -> Unit,

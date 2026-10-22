@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.app.settings.SettingsUpdateQueue
@@ -8,18 +10,13 @@ import io.github.stream29.kodex.openai.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 
-/**
- * Host composition of a real defaults component and its independent application-scope write queue.
- * All projection, revisions and command admission belong to the component; this adapter owns only
- * field-specific backend writes and queue disposal. Closing the child cannot cancel accepted writes.
- */
-public class RpcNewSessionSettings private constructor(
+public actual class RpcNewSessionSettings private constructor(
     private val resources: DefaultsResources,
 ) : NewSessionSettingsViewModel by resources.child {
-    public constructor(global: RpcGlobalSettings, applicationScope: CoroutineScope) :
+    public actual constructor(global: RpcGlobalSettings, applicationScope: CoroutineScope) :
         this(DefaultsResources(global, applicationScope))
 
-    override fun close() {
+    actual override fun close() {
         resources.child.close()
         resources.dependencies.close()
     }

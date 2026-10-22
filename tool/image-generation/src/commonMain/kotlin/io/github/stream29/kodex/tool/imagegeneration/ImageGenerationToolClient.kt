@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.tool.imagegeneration
 
 import io.github.stream29.kodex.openai.ImageBackground
@@ -11,20 +13,18 @@ import io.github.stream29.kodex.openai.getOrThrow
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.utils.images.PromptImageMode
 import io.github.stream29.kodex.utils.images.PromptImageTransformer
-import io.github.stream29.kodex.utils.images.codec.HostPromptImageTransformer
 import io.github.stream29.kodex.utils.images.codec.readPromptImage
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.files.Path
 
-public class ImageGenerationToolClient(
+public actual class ImageGenerationToolClient actual constructor(
     private val client: OpenAiClient,
-    private val workingDirectoryProvider: suspend () -> Path = { Path(".") },
-    private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-    private val transformer: PromptImageTransformer = HostPromptImageTransformer,
-    private val model: OpenAiModelId = ImageGenDefaultModel,
+    private val workingDirectoryProvider: suspend () -> Path,
+    private val fileSystem: CoroutineFileSystem,
+    private val transformer: PromptImageTransformer,
+    private val model: OpenAiModelId,
 ) {
-    public suspend fun run(arguments: ImageGenToolArguments): GeneratedImageOutput {
+    public actual suspend fun run(arguments: ImageGenToolArguments): GeneratedImageOutput {
         val response = when (val request = requestFor(arguments)) {
             is ImageToolRequest.Generate -> client.generateImage(request.value)
             is ImageToolRequest.Edit -> client.editImage(request.value)

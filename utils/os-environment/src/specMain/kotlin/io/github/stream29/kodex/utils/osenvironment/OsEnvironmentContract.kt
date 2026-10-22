@@ -17,3 +17,10 @@ public expect fun userHomeDirectory(): Path?
 
 /** Numeric identifier of the current host process. */
 public expect fun processId(): Long
+
+/**
+ * Requires a detected user home path, without creating or probing it.
+ *
+ * @throws IllegalStateException when [userHomeDirectory] cannot detect a home path.
+ */
+public expect fun requireUserHomeDirectory(): Path

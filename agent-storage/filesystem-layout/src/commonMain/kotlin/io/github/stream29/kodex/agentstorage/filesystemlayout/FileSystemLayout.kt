@@ -1,16 +1,15 @@
 package io.github.stream29.kodex.agentstorage.filesystemlayout
 
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import kotlinx.io.Buffer
 import kotlinx.io.IOException
 import kotlinx.io.readByteArray
 import kotlinx.io.files.Path
 
-public suspend fun requireStorageLayout(
+public actual suspend fun requireStorageLayout(
     storageDirectory: Path,
     timelineNames: Set<String>,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    fileSystem: CoroutineFileSystem,
 ) {
     requireDirectory(fileSystem, storageDirectory, "Storage")
     timelineNames.forEach { timelineName ->
@@ -22,14 +21,14 @@ public suspend fun requireStorageLayout(
     }
 }
 
-public fun timelineDirectory(
+public actual fun timelineDirectory(
     storageDirectory: Path,
     timelineName: String,
 ): Path = Path(storageDirectory, timelineName)
 
-public suspend fun storedRecordIndexes(
+public actual suspend fun storedRecordIndexes(
     timelineDirectory: Path,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    fileSystem: CoroutineFileSystem,
 ): IntArray {
     val indexes = IntArrayBuilder()
     fileSystem.list(timelineDirectory).forEach { path ->
@@ -38,7 +37,7 @@ public suspend fun storedRecordIndexes(
     return indexes.toArray().also(IntArray::sort)
 }
 
-public fun recordPath(
+public actual fun recordPath(
     timelineDirectory: Path,
     index: Int,
 ): Path {
@@ -46,18 +45,18 @@ public fun recordPath(
     return Path(timelineDirectory, "$index.json")
 }
 
-public suspend fun readRecord(
+public actual suspend fun readRecord(
     timelineDirectory: Path,
     index: Int,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-    maxByteCount: Long = Long.MAX_VALUE,
+    fileSystem: CoroutineFileSystem,
+    maxByteCount: Long,
 ): ByteArray = fileSystem.readBytes(recordPath(timelineDirectory, index), maxByteCount)
 
-public suspend fun readRecordPrefix(
+public actual suspend fun readRecordPrefix(
     timelineDirectory: Path,
     index: Int,
     byteCount: Long,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    fileSystem: CoroutineFileSystem,
 ): ByteArray {
     require(byteCount >= 0L) { "byteCount: $byteCount" }
     return fileSystem.useSource(recordPath(timelineDirectory, index)) { source ->
@@ -72,20 +71,20 @@ public suspend fun readRecordPrefix(
     }
 }
 
-public suspend fun writeRecord(
+public actual suspend fun writeRecord(
     timelineDirectory: Path,
     index: Int,
     content: ByteArray,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    fileSystem: CoroutineFileSystem,
 ) {
     fileSystem.writeBytes(recordPath(timelineDirectory, index), content)
 }
 
-public suspend fun moveRecord(
+public actual suspend fun moveRecord(
     timelineDirectory: Path,
     sourceIndex: Int,
     targetIndex: Int,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    fileSystem: CoroutineFileSystem,
 ) {
     fileSystem.atomicMove(
         recordPath(timelineDirectory, sourceIndex),
@@ -93,21 +92,21 @@ public suspend fun moveRecord(
     )
 }
 
-public suspend fun deleteRecord(
+public actual suspend fun deleteRecord(
     timelineDirectory: Path,
     index: Int,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-    mustExist: Boolean = true,
+    fileSystem: CoroutineFileSystem,
+    mustExist: Boolean,
 ) {
     fileSystem.delete(recordPath(timelineDirectory, index), mustExist)
 }
 
-public fun latestIndexPath(timelineDirectory: Path): Path =
+public actual fun latestIndexPath(timelineDirectory: Path): Path =
     Path(timelineDirectory, LatestIndexFile)
 
-public suspend fun readLatestIndex(
+public actual suspend fun readLatestIndex(
     timelineDirectory: Path,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    fileSystem: CoroutineFileSystem,
 ): Int {
     val path = latestIndexPath(timelineDirectory)
     val value = fileSystem.readString(path).trim().toIntOrNull()
@@ -118,10 +117,10 @@ public suspend fun readLatestIndex(
     return value
 }
 
-public suspend fun writeLatestIndex(
+public actual suspend fun writeLatestIndex(
     timelineDirectory: Path,
     index: Int,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    fileSystem: CoroutineFileSystem,
 ) {
     require(index >= EmptyIndex) { "Latest index must be at least -1: $index" }
     fileSystem.writeString(latestIndexPath(timelineDirectory), index.toString())

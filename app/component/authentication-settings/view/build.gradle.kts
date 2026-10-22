@@ -6,9 +6,12 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies { api(project(":app-component-authentication-settings-viewmodel")) }
+        named("specMain").dependencies {
+            api(project(":app-component-authentication-settings-viewmodel"))
+            api(project(":app-view-components"))
+            api(libs.mosaic.runtime)
+        }
         mosaicMain.dependencies {
-            implementation(project(":app-view-components"))
             implementation(libs.mosaic.runtime)
         }
         mosaicTest.dependencies {

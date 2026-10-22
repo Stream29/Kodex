@@ -34,28 +34,17 @@ import io.github.stream29.kodex.openai.AgentMessageInputContent
 import io.github.stream29.kodex.openai.ContentItem
 import kotlinx.coroutines.launch
 
-/**
- * Renders one Composer child. All draft and command state comes from [viewModel]; this renderer
- * keeps only Mosaic's widget buffer, focus, cursor, viewport and layout.
- *
- * Empty/ready/running/steer/request-input/error/closed branches are explicit in
- * [ComposerState.mode].
- * The Enter handler captures the displayed revision and invokes the component's revision-bound
- * submit command; it does not append messages, steer, clear drafts or inspect a sibling child.
- * Hosts may render the pending preview and failure themselves; hiding either never hides
- * the remaining status (including the running draft's submit-to-steer hint).
- */
 @Composable
-public fun ComposerView(
+public actual fun ComposerView(
     viewModel: ComposerViewModel,
     columns: Int,
     rows: Int,
     newLineKey: NewLineKey,
-    autoFocus: Boolean = true,
-    enabled: Boolean = true,
-    focusRequester: FocusRequester? = null,
-    showPendingSteer: Boolean = true,
-    showFailure: Boolean = true,
+    autoFocus: Boolean,
+    enabled: Boolean,
+    focusRequester: FocusRequester?,
+    showPendingSteer: Boolean,
+    showFailure: Boolean,
 ) {
     val state by viewModel.state.collectAsState()
     if (state.mode == ComposerMode.Closed || rows <= 0) return
@@ -125,8 +114,7 @@ public fun ComposerView(
     }
 }
 
-/** Renderer-local status copy; it is not a second submission/failure authority. */
-public fun composerStatusLine(state: ComposerState, showFailure: Boolean = true): String? = when {
+public actual fun composerStatusLine(state: ComposerState, showFailure: Boolean): String? = when {
     state.mode == ComposerMode.Closed -> null
     state.mode == ComposerMode.Error && showFailure -> {
         val failure = (state.submission as? ComposerSubmissionState.Failed)?.failure
@@ -147,23 +135,12 @@ public fun composerStatusLine(state: ComposerState, showFailure: Boolean = true)
 internal fun submitToSteerHint(running: Boolean, draft: String): String? =
     "Submit to steer".takeIf { running && draft.isNotBlank() }
 
-/**
- * Caps composer content at the available rows, reserving one row even when the host has no space.
- *
- * @throws IllegalArgumentException if [desiredRows] is not positive.
- */
-public fun boundedComposerRows(availableRows: Int, desiredRows: Int): Int {
+public actual fun boundedComposerRows(availableRows: Int, desiredRows: Int): Int {
     require(desiredRows > 0) { "Composer content must contain at least one row." }
     return minOf(desiredRows, availableRows.coerceAtLeast(1))
 }
 
-/**
- * Builds the shared host/Composer pending preview in queue order without claiming its inputs.
- *
- * Returns no rows for an empty queue or nonpositive [maximumRows]. Width is at least one column.
- * When truncation and capacity allow, a final row reports the omitted count.
- */
-public fun pendingSteerPreviewLines(
+public actual fun pendingSteerPreviewLines(
     pending: List<StableIndexEvent.Steerable>,
     columns: Int,
     maximumRows: Int,

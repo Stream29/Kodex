@@ -30,9 +30,8 @@ import io.github.stream29.kodex.cli.components.InteractionText
 import io.github.stream29.kodex.tool.requestuserinput.RequestUserInputQuestion
 import kotlinx.coroutines.launch
 
-/** Renders the exact pending child snapshot without taking ownership of its lifecycle. */
 @Composable
-public fun RequestUserInputPanel(
+public actual fun RequestUserInputPanel(
     viewModel: RequestUserInputViewModel,
     state: RequestUserInputState.Pending,
     columns: Int,

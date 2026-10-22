@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.agentsession.filesystem
 
 import io.github.stream29.kodex.agentsession.contract.KodexAgentSession
@@ -36,7 +38,7 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 /** Filesystem-backed root session repository. */
-public class FileSystemKodexSessionRepository internal constructor(
+public actual class FileSystemKodexSessionRepository internal constructor(
     scope: CoroutineScope,
     root: Path,
     private val fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
@@ -51,21 +53,21 @@ public class FileSystemKodexSessionRepository internal constructor(
     private val mutableEntries = MutableStateFlow(initialEntries)
     private val sessionsRoot = Path(root, SessionsDirectory)
 
-    override val entries: StateFlow<List<Int>> = mutableEntries.asStateFlow()
+    actual override val entries: StateFlow<List<Int>> = mutableEntries.asStateFlow()
 
     init {
         coroutineContext[Job]?.invokeOnCompletion { openRoots.clear() }
     }
 
-    override suspend fun list(): List<Int> = entriesMutex.withLock {
+    actual override suspend fun list(): List<Int> = entriesMutex.withLock {
         requireOpen()
         entries.value
     }
 
-    override suspend fun listEntries(): List<KodexRootSessionEntry> =
+    actual override suspend fun listEntries(): List<KodexRootSessionEntry> =
         listEntries(includeArchived = true)
 
-    override suspend fun listEntries(
+    actual override suspend fun listEntries(
         includeArchived: Boolean,
     ): List<KodexRootSessionEntry> = entriesMutex.withLock {
         requireOpen()
@@ -76,20 +78,20 @@ public class FileSystemKodexSessionRepository internal constructor(
         }
     }
 
-    override suspend fun getEntry(entryIndex: Int): KodexRootSessionEntry =
+    actual override suspend fun getEntry(entryIndex: Int): KodexRootSessionEntry =
         entriesMutex.withLock {
             requireOpen()
             requireEntry(entryIndex)
             rootEntry(entryIndex, archived = isArchived(entryIndex))
         }
 
-    override suspend fun readCreatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
+    actual override suspend fun readCreatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
         requireOpen()
         requireEntry(entryIndex)
         FileSystemAgentStorage(sessionDirectory(entryIndex), fileSystem).timestamp.getExact(0)
     }
 
-    override suspend fun readUpdatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
+    actual override suspend fun readUpdatedAt(entryIndex: Int): Instant? = entriesMutex.withLock {
         requireOpen()
         requireEntry(entryIndex)
         val storage = FileSystemAgentStorage(sessionDirectory(entryIndex), fileSystem)
@@ -139,7 +141,7 @@ public class FileSystemKodexSessionRepository internal constructor(
         }
     }
 
-    override suspend fun create(): Int = entriesMutex.withLock {
+    actual override suspend fun create(): Int = entriesMutex.withLock {
         requireOpen()
         val (index, directory) = reserveSessionDirectory()
         try {
@@ -161,7 +163,7 @@ public class FileSystemKodexSessionRepository internal constructor(
         }
     }
 
-    override suspend fun createFork(sourceEntryIndex: Int): Int = entriesMutex.withLock {
+    actual override suspend fun createFork(sourceEntryIndex: Int): Int = entriesMutex.withLock {
         requireOpen()
         requireEntry(sourceEntryIndex)
         val source = FileSystemAgentStorage(sessionDirectory(sourceEntryIndex), fileSystem)
@@ -202,7 +204,7 @@ public class FileSystemKodexSessionRepository internal constructor(
         }
     }
 
-    override suspend fun open(
+    actual override suspend fun open(
         entryIndex: Int,
     ): KodexAgentSession = entriesMutex.withLock {
         requireOpen()
@@ -228,7 +230,7 @@ public class FileSystemKodexSessionRepository internal constructor(
         }
     }
 
-    override suspend fun delete(entryIndex: Int): Unit = entriesMutex.withLock {
+    actual override suspend fun delete(entryIndex: Int): Unit = entriesMutex.withLock {
         requireOpen()
         require(entryIndex >= 0) { "Session entry index must be non-negative." }
         val openRoot = openRoots.remove(entryIndex)
@@ -466,11 +468,11 @@ private suspend fun FileSystemAgentStorage.sessionEntry(
     )
 
 /** Creates a filesystem session repository, initializing its root layout when needed. */
-public suspend fun CoroutineScope.FileSystemKodexSessionRepository(
+public actual suspend fun CoroutineScope.FileSystemKodexSessionRepository(
     root: Path,
     dependencies: KodexAgentDependencies,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
-    valueCacheSize: Int = 1_024,
+    fileSystem: CoroutineFileSystem,
+    valueCacheSize: Int,
 ): FileSystemKodexSessionRepository {
     fileSystem.createDirectories(root)
     val sessionsRoot = Path(root, SessionsDirectory)

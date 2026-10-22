@@ -6,7 +6,10 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies { api(project(":app-component-account-usage-viewmodel")) }
+        named("specMain").dependencies {
+            api(project(":app-component-account-usage-viewmodel"))
+            api(libs.mosaic.runtime)
+        }
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))
             implementation(libs.mosaic.runtime)

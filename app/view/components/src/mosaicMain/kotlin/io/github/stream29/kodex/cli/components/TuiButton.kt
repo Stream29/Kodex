@@ -11,30 +11,19 @@ import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
 
-/**
- * Compact bracketed command surface with terminal-native interaction feedback.
- *
- * Focus is represented by the terminal cursor, hover uses bold text, a held primary-pointer press
- * combines inverse video and bold by default, [selected] uses inverse video, and a disabled button
- * is dim. [interactionStyle] can preserve semantic foreground/container pairs instead. Enter,
- * Space, and primary-pointer activation converge on the same command. [idleTextStyle] applies while
- * the enabled button is neither selected, hovered, nor pressed. [onSecondaryClick] optionally
- * handles the secondary pointer button, Shift+F10, and the Menu/Application key. Its position is
- * local to this button for pointer activation and `null` for keyboard activation.
- */
 @Composable
-public fun TuiButton(
+public actual fun TuiButton(
     label: String,
-    modifier: Modifier = Modifier,
-    color: Color = Color.Unspecified,
-    idleTextStyle: TextStyle = TuiTheme.typography.label,
-    selected: Boolean = false,
-    enabled: Boolean = true,
-    focusRequester: FocusRequester? = null,
-    onKeyEvent: ((KeyEvent) -> Boolean)? = null,
-    autoFocus: Boolean = false,
-    onSecondaryClick: ((IntOffset?) -> Unit)? = null,
-    interactionStyle: TuiInteractionStyle = TuiInteractionStyle.TerminalInvert,
+    modifier: Modifier,
+    color: Color,
+    idleTextStyle: TextStyle,
+    selected: Boolean,
+    enabled: Boolean,
+    focusRequester: FocusRequester?,
+    onKeyEvent: ((KeyEvent) -> Boolean)?,
+    autoFocus: Boolean,
+    onSecondaryClick: ((IntOffset?) -> Unit)?,
+    interactionStyle: TuiInteractionStyle,
     onClick: () -> Unit,
 ) {
     TuiButtonContent(
@@ -57,20 +46,19 @@ public fun TuiButton(
     }
 }
 
-/** [TuiButton] overload retaining spans in a structured label. */
 @Composable
-public fun TuiButton(
+public actual fun TuiButton(
     label: AnnotatedString,
-    modifier: Modifier = Modifier,
-    color: Color = Color.Unspecified,
-    idleTextStyle: TextStyle = TuiTheme.typography.label,
-    selected: Boolean = false,
-    enabled: Boolean = true,
-    focusRequester: FocusRequester? = null,
-    onKeyEvent: ((KeyEvent) -> Boolean)? = null,
-    autoFocus: Boolean = false,
-    onSecondaryClick: ((IntOffset?) -> Unit)? = null,
-    interactionStyle: TuiInteractionStyle = TuiInteractionStyle.TerminalInvert,
+    modifier: Modifier,
+    color: Color,
+    idleTextStyle: TextStyle,
+    selected: Boolean,
+    enabled: Boolean,
+    focusRequester: FocusRequester?,
+    onKeyEvent: ((KeyEvent) -> Boolean)?,
+    autoFocus: Boolean,
+    onSecondaryClick: ((IntOffset?) -> Unit)?,
+    interactionStyle: TuiInteractionStyle,
     onClick: () -> Unit,
 ) {
     val bracketedLabel = buildAnnotatedString {

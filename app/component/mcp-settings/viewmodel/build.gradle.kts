@@ -7,7 +7,7 @@ plugins {
 kotlin {
     sourceSets {
         named("specMain").dependencies {
-            api(project(":mcp"))
+            api(project(":mcp-contract"))
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
         }

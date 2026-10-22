@@ -121,14 +121,14 @@ internal class OpenAiModelCatalogStoreImpl(
  * @param authStore Nullable for a fixed client; `null` disables authentication
  * observation, not authentication within the client itself.
  */
-public fun OpenAiModelCatalog(
+public actual fun OpenAiModelCatalog(
     client: OpenAiClient,
-    authStore: OpenAiAuthStore? = null,
+    authStore: OpenAiAuthStore?,
 ): OpenAiModelCatalogStore =
     OpenAiModelCatalogStoreImpl(client = client, authStore = authStore)
 
 /** Backend-owned variant: background refresh is joined by the supplied owner. */
-public fun CoroutineScope.ownedOpenAiModelCatalog(
+public actual fun CoroutineScope.ownedOpenAiModelCatalog(
     client: OpenAiClient,
     authStore: OpenAiAuthStore,
 ): OpenAiModelCatalogStore =

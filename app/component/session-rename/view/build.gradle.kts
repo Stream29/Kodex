@@ -6,8 +6,9 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
+        named("specMain").dependencies {
             api(project(":app-component-session-rename-viewmodel"))
+            api(libs.mosaic.runtime)
         }
         mosaicMain.dependencies {
             implementation(project(":app-view-components"))

@@ -6,15 +6,19 @@ plugins {
 
 kotlin {
     sourceSets {
+        named("specMain") {
+            dependencies {
+                api(project(":agent-state-contract"))
+                api(project(":agent-context-settings"))
+                api(project(":agent-storage-core"))
+                api(project(":mcp-contract"))
+                api(project(":openai-client"))
+                api(project(":tool-tool-search-backend"))
+                api(libs.kotlinx.coroutines.core)
+            }
+        }
         commonMain.dependencies {
-            api(project(":agent-state-contract"))
-            api(project(":agent-context-settings"))
-            api(project(":agent-storage-core"))
-            api(project(":mcp"))
-            api(project(":openai-client"))
-            api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-context-prefix"))
-            api(project(":tool-tool-search"))
             implementation(project(":tool-apply-patch"))
             implementation(project(":tool-current-time"))
             implementation(project(":tool-image-generation"))

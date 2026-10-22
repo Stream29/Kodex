@@ -9,7 +9,7 @@ import kotlinx.serialization.json.Json
  * default values. Models and consumers use this same value so their wire
  * projections do not silently diverge.
  */
-public val OpenAiJsonCodec: Json = Json {
+public actual val OpenAiJsonCodec: Json = Json {
     ignoreUnknownKeys = true
     explicitNulls = false
     encodeDefaults = true

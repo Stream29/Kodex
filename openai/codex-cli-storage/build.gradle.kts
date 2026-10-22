@@ -12,12 +12,11 @@ kotlin {
                 api(project(":openai-models"))
                 api(libs.kotlinx.serialization.json)
                 api(libs.tomlkt)
+                api(project(":utils-kotlinx-io-coroutines-system"))
+                api(libs.kotlinx.io.core)
             }
         }
         commonMain.dependencies {
-            api(project(":utils-kotlinx-io-coroutines-system"))
-            api(libs.kotlinx.io.core)
-            api(libs.tomlkt)
             implementation(project(":openai-json-codec"))
         }
         commonTest.dependencies {

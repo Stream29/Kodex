@@ -27,11 +27,7 @@ internal expect class PlatformShellClient(
     override fun close()
 }
 
-/**
- * Creates an independently cancellable shell client under this scope.
- * @throws IllegalArgumentException when this scope has no parent Job.
- */
-public fun CoroutineScope.ShellClient(): ShellClient {
+public actual fun CoroutineScope.ShellClient(): ShellClient {
     return PlatformShellClient(supervisorChildScope())
 }
 

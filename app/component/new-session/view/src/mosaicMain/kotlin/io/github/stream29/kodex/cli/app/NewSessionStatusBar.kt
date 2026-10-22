@@ -16,9 +16,8 @@ import io.github.stream29.kodex.cli.components.statusBarWidth
 import io.github.stream29.kodex.cli.components.workingDirectoryStatusLabel
 import io.github.stream29.kodex.openai.KodexAgentSettings
 
-/** Borrows the draft's existing configuration child; owns no draft or registry state. */
 @Composable
-public fun NewSessionStatusBar(
+public actual fun NewSessionStatusBar(
     columns: Int,
     settings: KodexAgentSettings,
     runtimeConfiguration: RuntimeConfigurationViewModel,
@@ -43,7 +42,7 @@ public fun NewSessionStatusBar(
     )
 }
 
-public fun newSessionStatusBarRows(
+public actual fun newSessionStatusBarRows(
     columns: Int,
     settings: KodexAgentSettings,
 ): Int {

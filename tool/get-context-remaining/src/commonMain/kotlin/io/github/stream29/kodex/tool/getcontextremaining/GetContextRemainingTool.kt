@@ -9,7 +9,7 @@ import io.github.stream29.kodex.tool.contract.Tool
 import kotlinx.serialization.builtins.serializer
 
 /** Creates `get_context_remaining` bound to this agent's current snapshot. */
-public fun KodexAgentState.getContextRemainingTool(
+public actual fun KodexAgentState.getContextRemainingTool(
     modelCatalog: OpenAiModelCatalogStore,
 ): Tool = textTool(
     spec = GetContextRemainingTools.spec,

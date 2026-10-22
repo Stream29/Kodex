@@ -6,10 +6,8 @@ import io.github.stream29.kodex.openai.RequestUserInputMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
-import kotlin.jvm.JvmInline
 
 /** Exact Agent or New Session address bound to one Composer child. */
-@JvmInline
 public value class ComposerOwnerId(
     public val value: String,
 ) {

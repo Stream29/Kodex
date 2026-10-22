@@ -2,8 +2,6 @@ package io.github.stream29.kodex.cli.app
 
 import io.github.stream29.kodex.app.migration.KodexHomeHandle
 import io.github.stream29.kodex.cli.notification.collectNotificationHooks
-import io.github.stream29.kodex.openai.client.OpenAiClient
-import io.github.stream29.kodex.openai.client.OpenAiLoginClient
 import io.github.stream29.kodex.openai.client.contract.OpenAiAuthStore
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient as ModelClient
 import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient as LoginClient
@@ -12,14 +10,10 @@ import io.github.stream29.kodex.rpc.local.BackendConnectionState
 import io.github.stream29.kodex.rpc.local.FrontendRpcConnection
 import io.github.stream29.kodex.rpc.server.withBackendServices
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.io.files.Path
 import kotlinx.rpc.RpcClient
-
-/** Test support only: production entrypoints never depend on this module. */
-public enum class ApplicationStartupPhase { HomePrepared, BackendReady, ServicesRegistered, FrontendReady, RendererStarted }
 
 private class InMemoryFrontendConnection(private val client: RpcClient) : FrontendRpcConnection, RpcClient by client {
     override val state = MutableStateFlow(BackendConnectionState.Connected)
@@ -30,16 +24,15 @@ private class InMemoryFrontendConnection(private val client: RpcClient) : Fronte
     }
 }
 
-/** A test fixture, not another production backend bootstrap or a selectable deployment mode. */
-public suspend fun <R> withKodexApplication(
+public actual suspend fun <R> withKodexApplication(
     homeHandle: KodexHomeHandle,
-    workingDirectory: Path = Path("."),
-    codexDirectory: Path = Path(requireUserHomeDirectory(), ".codex"),
-    agentsDirectory: Path = Path(requireUserHomeDirectory(), ".agents"),
-    applicationWidth: Int? = null,
-    createClient: (OpenAiAuthStore) -> ModelClient = { OpenAiClient(it) },
-    createLoginClient: () -> LoginClient = { OpenAiLoginClient() },
-    onPhase: suspend (ApplicationStartupPhase) -> Unit = {},
+    workingDirectory: Path,
+    codexDirectory: Path,
+    agentsDirectory: Path,
+    applicationWidth: Int?,
+    createClient: (OpenAiAuthStore) -> ModelClient,
+    createLoginClient: () -> LoginClient,
+    onPhase: suspend (ApplicationStartupPhase) -> Unit,
     render: suspend CoroutineScope.(KodexApplication) -> R,
 ): R {
     var primary: Throwable? = null

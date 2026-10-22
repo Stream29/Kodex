@@ -6,8 +6,10 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
+        named("specMain").dependencies {
             api(libs.kotlinx.io.core)
+        }
+        commonMain.dependencies {
             implementation(project(":utils-os-environment"))
         }
     }

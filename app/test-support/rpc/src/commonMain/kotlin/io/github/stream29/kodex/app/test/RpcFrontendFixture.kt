@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.app.test
 
 import io.github.stream29.kodex.app.migration.prepareKodexHome
@@ -25,51 +27,44 @@ import kotlinx.io.files.SystemTemporaryDirectory
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.seconds
 
-/** Complete real backend, JSON transport and frontend views, with only external APIs mocked. */
-public class RpcFrontendFixture internal constructor(
-    override val coroutineContext: kotlin.coroutines.CoroutineContext,
-    public val root: Path,
-    public val services: RpcServices,
-    public val views: RpcSessionViews,
-    public val global: RpcGlobalSettings,
-    public val sessions: DefaultPersistedSessionViewModelRegistry,
-    public val drafts: DefaultNewSessionViewModelFactory,
-    public val models: StateFlow<List<ModelInfo>>,
-    public val failures: StateFlow<List<Throwable>>,
+public actual class RpcFrontendFixture internal constructor(
+    actual override val coroutineContext: kotlin.coroutines.CoroutineContext,
+    public actual val root: Path,
+    public actual val services: RpcServices,
+    public actual val views: RpcSessionViews,
+    public actual val global: RpcGlobalSettings,
+    public actual val sessions: DefaultPersistedSessionViewModelRegistry,
+    public actual val drafts: DefaultNewSessionViewModelFactory,
+    public actual val models: StateFlow<List<ModelInfo>>,
+    public actual val failures: StateFlow<List<Throwable>>,
     private val finish: CompletableDeferred<Unit>,
 ) : CoroutineScope {
     internal lateinit var completion: Deferred<Unit>
 
-    public suspend fun create(name: String = "Test Session"): PersistedSessionViewModel {
+    public actual suspend fun create(name: String): PersistedSessionViewModel {
         val session = sessions.open(services.global.createSession(root))
         session.rename(name)
         session.settings.first { it.threadName == name }
         return session
     }
 
-    public fun draft(): NewSessionViewModel =
+    public actual fun draft(): NewSessionViewModel =
         drafts.create(NewSessionViewModelArguments(root))
 
-    public suspend fun closeAndJoin(): Unit = withContext(NonCancellable) {
+    public actual suspend fun closeAndJoin(): Unit = withContext(NonCancellable) {
         finish.complete(Unit)
         completion.await()
     }
 }
 
-public fun testSettings(name: String = "", cwd: Path = Path(".")): KodexAgentSettings =
+public actual fun testSettings(name: String, cwd: Path): KodexAgentSettings =
     KodexAgentSettings(model = OpenAiModelId("test-model"), cwd = cwd, threadName = name)
 
-/**
- * Runs the backend on Default. A renderer test may supply its single interaction dispatcher
- * for frontend views, so Compose state/commands and drawing do not execute concurrently.
- * Null preserves the existing backend-context frontend used by non-renderer fixtures.
- * The fixture owns all frontend jobs until [RpcFrontendFixture.closeAndJoin].
- */
-public suspend fun startRpcFrontendFixture(
+public actual suspend fun startRpcFrontendFixture(
     scope: CoroutineScope,
-    response: suspend FlowCollector<ResponsesStreamEvent>.() -> Unit = { testAnswer() },
-    seed: suspend CoroutineScope.(Path) -> Unit = {},
-    frontendDispatcher: CoroutineDispatcher? = null,
+    response: suspend FlowCollector<ResponsesStreamEvent>.() -> Unit,
+    seed: suspend CoroutineScope.(Path) -> Unit,
+    frontendDispatcher: CoroutineDispatcher?,
 ): RpcFrontendFixture {
     val ready = CompletableDeferred<RpcFrontendFixture>()
     val finish = CompletableDeferred<Unit>()
@@ -139,15 +134,15 @@ public suspend fun startRpcFrontendFixture(
     catch (error: Throwable) { job.cancel(); withContext(NonCancellable) { job.join() }; throw error }
 }
 
-public suspend fun withRpcFrontend(
-    response: suspend FlowCollector<ResponsesStreamEvent>.() -> Unit = { testAnswer() },
+public actual suspend fun withRpcFrontend(
+    response: suspend FlowCollector<ResponsesStreamEvent>.() -> Unit,
     block: suspend RpcFrontendFixture.() -> Unit,
 ): Unit = withContext(Dispatchers.Default) { withTimeout(45.seconds) {
     val fixture = startRpcFrontendFixture(this, response)
     try { fixture.block() } finally { fixture.closeAndJoin() }
 } }
 
-public suspend fun FlowCollector<ResponsesStreamEvent>.testAnswer() {
+public actual suspend fun FlowCollector<ResponsesStreamEvent>.testAnswer() {
     emit(ResponsesStreamEvent.OutputItemDone(0, ResponseItem.Message(
         id = ResponseItemId("answer"), role = MessageRole.Assistant,
         content = listOf(ContentItem.OutputText("test answer")),
@@ -155,14 +150,13 @@ public suspend fun FlowCollector<ResponsesStreamEvent>.testAnswer() {
     emit(ResponsesStreamEvent.Completed(Response(id = "response", endTurn = true)))
 }
 
-public suspend fun deleteTestDirectory(path: Path) {
+public actual suspend fun deleteTestDirectory(path: Path) {
     val metadata = SystemCoroutineFileSystem.metadataOrNull(path) ?: return
     if (metadata.isDirectory) SystemCoroutineFileSystem.list(path).forEach { deleteTestDirectory(it) }
     SystemCoroutineFileSystem.delete(path)
 }
 
-/** Offline fixture seeding finishes before the RPC backend acquires this Session. */
-public suspend fun CoroutineScope.seedTestHistory(
+public actual suspend fun CoroutineScope.seedTestHistory(
     home: Path, name: String, events: Map<Int, StableIndexEvent>,
 ): Int {
     val repository = FileSystemKodexSessionRepository(home, testKodexAgentDependencies())

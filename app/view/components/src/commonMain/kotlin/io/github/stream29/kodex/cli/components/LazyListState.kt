@@ -1,51 +1,28 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.components
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 
-/** Geometry of one currently visible lazy item, measured in terminal rows. */
-@Immutable
-public data class LazyListItemInfo(
-    public val index: Int,
-    public val key: Any,
-    public val offset: Int,
-    public val size: Int,
-)
-
-/** Immutable projection of the latest completed `LazyColumn` measure pass. */
-@Immutable
-public data class LazyListLayoutInfo(
-    public val visibleItemsInfo: List<LazyListItemInfo>,
-    public val viewportStartOffset: Int,
-    public val viewportEndOffset: Int,
-    public val totalItemsCount: Int,
-) {
-    public val viewportSize: Int
-        get() = viewportEndOffset - viewportStartOffset
-
-    internal companion object {
-        val Empty = LazyListLayoutInfo(
+@Stable
+public actual class LazyListState actual constructor(
+    initialFirstVisibleItemIndex: Int,
+    initialFirstVisibleItemScrollOffset: Int,
+) : ScrollableState {
+    private val firstVisibleItemIndexState = mutableIntStateOf(initialFirstVisibleItemIndex)
+    private val firstVisibleItemScrollOffsetState = mutableIntStateOf(initialFirstVisibleItemScrollOffset)
+    private val layoutInfoState = mutableStateOf(
+        LazyListLayoutInfo(
             visibleItemsInfo = emptyList(),
             viewportStartOffset = 0,
             viewportEndOffset = 0,
             totalItemsCount = 0,
-        )
-    }
-}
-
-/** Scroll position and measured viewport state owned independently of one `LazyColumn` call. */
-@Stable
-public class LazyListState(
-    initialFirstVisibleItemIndex: Int = 0,
-    initialFirstVisibleItemScrollOffset: Int = 0,
-) : ScrollableState {
-    private val firstVisibleItemIndexState = mutableIntStateOf(initialFirstVisibleItemIndex)
-    private val firstVisibleItemScrollOffsetState = mutableIntStateOf(initialFirstVisibleItemScrollOffset)
-    private val layoutInfoState = mutableStateOf(LazyListLayoutInfo.Empty)
+        ),
+    )
     private val canScrollBackwardState = mutableStateOf(
         initialFirstVisibleItemIndex > 0 || initialFirstVisibleItemScrollOffset > 0
     )
@@ -70,25 +47,25 @@ public class LazyListState(
         }
     }
 
-    public val firstVisibleItemIndex: Int
+    public actual val firstVisibleItemIndex: Int
         get() = firstVisibleItemIndexState.intValue
 
-    public val firstVisibleItemScrollOffset: Int
+    public actual val firstVisibleItemScrollOffset: Int
         get() = firstVisibleItemScrollOffsetState.intValue
 
-    public val layoutInfo: LazyListLayoutInfo
+    public actual val layoutInfo: LazyListLayoutInfo
         get() = layoutInfoState.value
 
-    override val canScrollBackward: Boolean
+    public actual override val canScrollBackward: Boolean
         get() = canScrollBackwardState.value
 
-    override val canScrollForward: Boolean
+    public actual override val canScrollForward: Boolean
         get() = canScrollForwardState.value
 
-    override val isScrollInProgress: Boolean
+    public actual override val isScrollInProgress: Boolean
         get() = scrollInProgressState.value
 
-    override fun scrollBy(delta: Int): Int {
+    public actual override fun scrollBy(delta: Int): Int {
         if (delta == 0) return 0
         if (delta < 0 && !canScrollBackward || delta > 0 && !canScrollForward) return 0
         val previousScrollDirection = lastScrollDirection
@@ -145,8 +122,7 @@ public class LazyListState(
         }
     }
 
-    /** Requests [index] and [scrollOffset] as the next measured anchor. */
-    public fun scrollToItem(index: Int, scrollOffset: Int = 0) {
+    public actual fun scrollToItem(index: Int, scrollOffset: Int) {
         require(index >= 0) { "Lazy list index cannot be negative." }
         require(scrollOffset >= 0) { "Lazy list scroll offset cannot be negative." }
         scrollToBeConsumed = 0
@@ -154,15 +130,13 @@ public class LazyListState(
         requestedAnchorState.value = LazyAnchorRequest.Position(index, scrollOffset)
     }
 
-    /** Requests the logical start as the next measured position. */
-    public fun requestScrollToStart() {
+    public actual fun requestScrollToStart() {
         scrollToBeConsumed = 0
         lastScrollDirection = 0
         requestedAnchorState.value = LazyAnchorRequest.Start
     }
 
-    /** Requests the logical end as the next measured position. */
-    public fun requestScrollToEnd() {
+    public actual fun requestScrollToEnd() {
         scrollToBeConsumed = 0
         lastScrollDirection = 0
         requestedAnchorState.value = LazyAnchorRequest.End
@@ -265,11 +239,10 @@ public class LazyListState(
     }
 }
 
-/** Remembers one [LazyListState] across recompositions. */
 @Composable
-public fun rememberLazyListState(
-    initialFirstVisibleItemIndex: Int = 0,
-    initialFirstVisibleItemScrollOffset: Int = 0,
+public actual fun rememberLazyListState(
+    initialFirstVisibleItemIndex: Int,
+    initialFirstVisibleItemScrollOffset: Int,
 ): LazyListState = remember {
     LazyListState(initialFirstVisibleItemIndex, initialFirstVisibleItemScrollOffset)
 }

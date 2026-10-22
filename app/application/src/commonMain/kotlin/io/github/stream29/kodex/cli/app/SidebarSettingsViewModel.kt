@@ -8,8 +8,7 @@ import io.github.stream29.kodex.cli.settings.SidebarSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
 
-/** Binds sidebar presentation to the existing settings and caller-owned scope. */
-public fun createSidebarSettingsViewModel(
+public actual fun createSidebarSettingsViewModel(
     global: RpcGlobalSettings,
     scope: CoroutineScope,
     initialized: Boolean,

@@ -12,6 +12,8 @@ import io.github.stream29.kodex.agentstorage.filesystem.FileSystemAgentStorage
 import io.github.stream29.kodex.agentstorage.filesystem.FileSystemIndexVersioned
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.utils.SafeRw
+import io.github.stream29.kodex.utils.readSession
+import io.github.stream29.kodex.utils.writeSession
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import io.github.reactivecircus.cache4k.Cache
 import io.github.reactivecircus.cache4k.CacheEventListener

@@ -15,7 +15,6 @@ import io.github.stream29.kodex.app.agent.contract.ComposerSubmitPort
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.agent.contract.ComposerCancellationPort
 import io.github.stream29.kodex.cli.agent.createComposerViewModel
-import io.github.stream29.kodex.openai.RequestUserInputMode
 import io.github.stream29.kodex.rpc.models.AgentStateValue
 import io.github.stream29.kodex.rpc.client.update
 import kotlinx.coroutines.CoroutineScope
@@ -24,13 +23,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 
-/**
- * Creates the Composer child bound to one exact RPC Session binding.
- * Command callbacks must belong to that binding's presentation owner: resume/cancel admit
- * work through its caught command boundary, and failures use the Application's error outlet.
- * No callback may resolve the currently selected Session or silently discard a failure.
- */
-public fun createRpcComposerViewModel(
+public actual fun createRpcComposerViewModel(
     binding: RpcSessionBinding,
     ownerScope: CoroutineScope,
     resumePort: ComposerResumePort,

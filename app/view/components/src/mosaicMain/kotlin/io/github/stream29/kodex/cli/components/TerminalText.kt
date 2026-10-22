@@ -4,8 +4,7 @@ import io.github.stream29.kodex.utils.terminaltext.takeFirstFittingTerminalWidth
 import io.github.stream29.kodex.utils.terminaltext.terminalCellSegments
 import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 
-/** Wraps hard lines to terminal-cell [width] without splitting a grapheme cluster. */
-public fun String.wrapToTerminalWidth(width: Int): List<String> {
+public actual fun String.wrapToTerminalWidth(width: Int): List<String> {
     if (isEmpty()) return listOf("")
 
     val wrappedLines = mutableListOf<String>()
@@ -65,8 +64,7 @@ private fun String.appendWrappedToTerminalWidth(
     }
 }
 
-/** Truncates this text to [maximumWidth] terminal cells, appending an ellipsis when possible. */
-public fun String.ellipsizeToTerminalWidth(maximumWidth: Int): String {
+public actual fun String.ellipsizeToTerminalWidth(maximumWidth: Int): String {
     if (terminalCellWidth() <= maximumWidth) return this
     val suffix = "..."
     return if (maximumWidth <= suffix.terminalCellWidth()) {

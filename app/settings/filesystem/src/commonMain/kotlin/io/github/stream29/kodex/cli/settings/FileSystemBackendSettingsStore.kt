@@ -2,13 +2,10 @@ package io.github.stream29.kodex.cli.settings
 
 import io.github.stream29.kodex.rpc.models.BackendSettings
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
-import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.io.IOException
 import kotlinx.io.files.Path
 
 /**
@@ -82,19 +79,9 @@ internal class FileSystemBackendSettingsStore(
         readSplitSettings(fileSystem, settingsPath, defaults, ::decodeBackendSettingsFile)
 }
 
-/**
- * Opens and reloads backend settings before returning the actual store interface.
- * Uses [defaults] for missing files/fields without creating a file. Reads only
- * settings.backend.yml; [defaults] (including Shell selection) must come from the
- * backend environment. Operations use [fileSystem], defaulting to the system filesystem.
- *
- * @throws IllegalArgumentException if YAML or a known setting is invalid.
- * @throws IOException if checking or reading the file fails.
- * @throws CancellationException if opening/reloading is cancelled.
- */
-public suspend fun openBackendSettings(
+public actual suspend fun openBackendSettings(
     settingsDirectory: Path,
     defaults: BackendSettings,
-    fileSystem: CoroutineFileSystem = SystemCoroutineFileSystem,
+    fileSystem: CoroutineFileSystem,
 ): BackendSettingsStore =
     FileSystemBackendSettingsStore(fileSystem, settingsDirectory, defaults).also { it.reload() }

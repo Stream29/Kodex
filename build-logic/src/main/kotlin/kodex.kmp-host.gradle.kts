@@ -7,16 +7,5 @@ configureCoordinates()
 
 kotlin {
     configureCompiler()
-    configureHostTargets()
-
-    js {
-        nodejs {
-            testTask {
-                useMocha {
-                    timeout = "120s"
-                }
-            }
-        }
-        binaries.library()
-    }
+    configureDesktopTargets()
 }

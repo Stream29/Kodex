@@ -9,12 +9,12 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(libs.kotlinx.io.core)
+                api(project(":agent-context-settings"))
+                api(project(":utils-kotlinx-io-coroutines-system"))
+                api(libs.kotlinx.coroutines.core)
             }
         }
         commonMain.dependencies {
-            api(project(":agent-context-settings"))
-            api(project(":utils-kotlinx-io-coroutines-system"))
-            api(libs.kotlinx.coroutines.core)
             implementation(project(":agent-context-prompt-dsl"))
         }
         commonTest.dependencies {

@@ -5,7 +5,7 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
+        named("specMain").dependencies {
             api(libs.kotlinx.io.core)
             api(libs.kotlinx.serialization.core)
         }

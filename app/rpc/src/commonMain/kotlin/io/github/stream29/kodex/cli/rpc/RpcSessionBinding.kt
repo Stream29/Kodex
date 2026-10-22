@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentStateValue
@@ -33,23 +35,22 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
 import kotlin.time.Instant
 
-/** A disposable frontend read/command binding. It is neither AgentRuntime nor AgentState. */
-public class RpcSessionBinding private constructor(
-    public val sessionIndex: Int,
-    public val storage: ObservableKodexAgentStorage,
-    public val latestIndex: StateFlow<Int>,
-    public val state: StateFlow<AgentStateValue>,
-    public val displayState: StateFlow<KodexAgentStateValue>,
-    public val running: StateFlow<Boolean>,
-    public val shellSessions: StateFlow<Map<Int, ShellSessionState>>,
-    public val settings: SuspendMutableStateFlow<KodexAgentSettings>,
-    public val pendingSteer: SuspendMutableStateFlow<List<StableIndexEvent.Steerable>>,
-    public val tokenCount: StateFlow<TokenCountSnapshot?>,
+public actual class RpcSessionBinding private constructor(
+    public actual val sessionIndex: Int,
+    public actual val storage: ObservableKodexAgentStorage,
+    public actual val latestIndex: StateFlow<Int>,
+    public actual val state: StateFlow<AgentStateValue>,
+    public actual val displayState: StateFlow<KodexAgentStateValue>,
+    public actual val running: StateFlow<Boolean>,
+    public actual val shellSessions: StateFlow<Map<Int, ShellSessionState>>,
+    public actual val settings: SuspendMutableStateFlow<KodexAgentSettings>,
+    public actual val pendingSteer: SuspendMutableStateFlow<List<StableIndexEvent.Steerable>>,
+    public actual val tokenCount: StateFlow<TokenCountSnapshot?>,
     private val owner: Job,
     private val services: RpcServices,
     private val invalidate: (Throwable) -> Unit,
 ) {
-    public fun ensureActive(): Unit = owner.ensureActive()
+    public actual fun ensureActive(): Unit = owner.ensureActive()
     /** Reports against this exact binding generation, not whichever tab binding comes later. */
     internal fun failRecovery(failure: Throwable) { if (owner.isActive) invalidate(failure) }
 
@@ -66,23 +67,23 @@ public class RpcSessionBinding private constructor(
         }
     }
 
-    public suspend fun appendUserMessage(content: List<ContentItem>): Int =
+    public actual suspend fun appendUserMessage(content: List<ContentItem>): Int =
         command { services.runtime.appendUserMessage(sessionIndex, content) }
-    public suspend fun resume(): Unit = command { services.runtime.resume(sessionIndex) }
-    public suspend fun stop(): Unit = command { services.runtime.cancelRunningTurn(sessionIndex) }
-    public suspend fun forcedCompact(): Int = command { services.runtime.forcedCompact(sessionIndex) }
-    public suspend fun clearPending(): Int = command { services.runtime.clearPending(sessionIndex) }
-    public suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int =
+    public actual suspend fun resume(): Unit = command { services.runtime.resume(sessionIndex) }
+    public actual suspend fun stop(): Unit = command { services.runtime.cancelRunningTurn(sessionIndex) }
+    public actual suspend fun forcedCompact(): Int = command { services.runtime.forcedCompact(sessionIndex) }
+    public actual suspend fun clearPending(): Int = command { services.runtime.clearPending(sessionIndex) }
+    public actual suspend fun completeToolCall(completed: StableCleanEvent.CompletedTool): Int =
         command { services.runtime.completeToolCall(sessionIndex, completed) }
-    public suspend fun closeShellSession(id: Int): Unit =
+    public actual suspend fun closeShellSession(id: Int): Unit =
         command { services.runtime.closeShellSession(sessionIndex, id) }
-    public suspend fun revertHistory(untilExclusive: Int, selectedCacheNonce: Long): Unit =
+    public actual suspend fun revertHistory(untilExclusive: Int, selectedCacheNonce: Long): Unit =
         command { services.runtime.revertHistory(sessionIndex, untilExclusive, selectedCacheNonce) }
-    public suspend fun forkHistory(untilExclusive: Int, selectedCacheNonce: Long): Int =
+    public actual suspend fun forkHistory(untilExclusive: Int, selectedCacheNonce: Long): Int =
         command { services.global.forkSessionHistory(sessionIndex, untilExclusive, selectedCacheNonce) }
-    public suspend fun readCreatedAt(): Instant? =
+    public actual suspend fun readCreatedAt(): Instant? =
         storage.timestamp.ceilToIndex(0)?.let { storage.timestamp.getExact(it) }
-    public suspend fun readUpdatedAt(): Instant? =
+    public actual suspend fun readUpdatedAt(): Instant? =
         storage.timestamp.latestIndex.value.takeIf { it >= 0 }?.let { storage.timestamp.getExact(it) }
 
     internal companion object {

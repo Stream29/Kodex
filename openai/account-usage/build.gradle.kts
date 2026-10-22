@@ -11,10 +11,10 @@ kotlin {
             dependencies {
                 api(libs.kotlinx.coroutines.core)
                 api(libs.kotlinx.serialization.core)
+                api(project(":openai-client"))
             }
         }
         commonMain.dependencies {
-            api(project(":openai-client"))
             implementation(project(":openai-models"))
             implementation(libs.kotlinx.coroutines.core)
         }

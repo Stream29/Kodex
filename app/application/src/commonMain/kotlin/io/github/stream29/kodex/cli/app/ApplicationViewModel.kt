@@ -38,14 +38,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.io.files.Path
 
-/**
- * Creates the navigation/popup owner using the same typed ports as the CLI host.
- * The caller owns [ownerScope] and must close and shut down the returned owner.
- * Its CoroutineExceptionHandler is the existing unhandled-error outlet for an
- * accepted submission whose renderer waiter has gone away.
- * No renderer, RPC transport or backend lifetime is created here.
- */
-public fun createApplicationViewModel(
+public actual fun createApplicationViewModel(
     sessions: PersistedSessionViewModelRegistry,
     newSessionFactory: NewSessionViewModelFactory,
     catalogFactory: SessionCatalogViewModelFactory,

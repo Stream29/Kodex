@@ -6,10 +6,14 @@ plugins {
 
 kotlin {
     sourceSets {
+        named("specMain") {
+            dependencies {
+                api(project(":agent-state-contract"))
+                api(project(":openai-models"))
+                api(project(":openai-model-catalog"))
+            }
+        }
         commonMain.dependencies {
-            api(project(":agent-state-contract"))
-            api(project(":openai-models"))
-            api(project(":openai-model-catalog"))
             implementation(project(":agent-storage-core"))
         }
         commonTest.dependencies {

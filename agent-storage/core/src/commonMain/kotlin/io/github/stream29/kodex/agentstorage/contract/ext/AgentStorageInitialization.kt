@@ -11,7 +11,7 @@ import kotlin.uuid.Uuid
 
 /** Publishes the required snapshot-zero state into an empty AgentStorage. */
 @OptIn(ExperimentalUuidApi::class)
-public suspend fun MutableKodexAgentStorage.initialize(initialSettings: KodexAgentSettings) {
+public actual suspend fun MutableKodexAgentStorage.initialize(initialSettings: KodexAgentSettings) {
     require(latestIndex() < 0) { "AgentStorage is already initialized." }
     val windowId = Uuid.generateV7().toString()
     val turnId = Uuid.generateV7().toString()

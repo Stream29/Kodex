@@ -9,12 +9,6 @@ plugins {
 }
 
 kotlin {
-    jvm {
-        testRuns["test"].executionTask.configure {
-            systemProperty("java.awt.headless", "true")
-        }
-    }
-
     applyHierarchyTemplate(KotlinHierarchyTemplate.default) {
         common {
             group("skikoNative") {
@@ -37,13 +31,6 @@ kotlin {
             api(project(":utils-kotlinx-io-coroutines-system"))
             implementation(libs.korim)
         }
-        jvmMain.dependencies {
-            implementation(libs.twelvemonkeys.imageio.jpeg)
-        }
-        jsMain.dependencies {
-            implementation(libs.kotlin.wrappers.node)
-            implementation(npm("sharp", libs.versions.sharp.get()))
-        }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
         }
@@ -55,11 +42,9 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(project(":utils-images"))
+                api(project(":utils-kotlinx-io-coroutines"))
+                api(libs.kotlinx.io.core)
             }
-        }
-        commonMain.dependencies {
-            api(project(":utils-kotlinx-io-coroutines"))
-            api(libs.kotlinx.io.core)
         }
     }
 }

@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.transform
  * @throws OpenAiResponseResultException when this result is a provider
  * [OpenAiResult.Failure].
  */
-public fun <Success> OpenAiResponseResult<Success>.getOrThrow(): Success =
+public actual fun <Success> OpenAiResponseResult<Success>.getOrThrow(): Success =
     when (this) {
         is OpenAiResult.Success -> value
         is OpenAiResult.Failure -> throw OpenAiResponseResultException(error)
@@ -22,7 +22,7 @@ public fun <Success> OpenAiResponseResult<Success>.getOrThrow(): Success =
  * @throws OpenAiResponseStreamFailureException when a failed response event
  * is collected, after that event has been emitted.
  */
-public fun Flow<ResponsesStreamEvent>.throwIfFailure(): Flow<ResponsesStreamEvent> =
+public actual fun Flow<ResponsesStreamEvent>.throwIfFailure(): Flow<ResponsesStreamEvent> =
     transform { event ->
         emit(event)
         if (event is ResponsesStreamEvent.Failed) {

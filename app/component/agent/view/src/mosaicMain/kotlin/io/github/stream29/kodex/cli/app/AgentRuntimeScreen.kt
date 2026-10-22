@@ -5,7 +5,6 @@ import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationDro
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import com.jakewharton.mosaic.focus.FocusRequester
 import com.jakewharton.mosaic.layout.height
 import com.jakewharton.mosaic.layout.width
@@ -35,14 +34,8 @@ import io.github.stream29.kodex.cli.history.AgentHistoryView
 import io.github.stream29.kodex.cli.history.AgentHistoryViewState
 import io.github.stream29.kodex.cli.settings.NewLineKey
 
-/**
- * Borrows the exact Agent and its existing children. Unmounting does not close them.
- * Menu callbacks retain the original generation, storage index and actual item.
- * [historyViewState] owns only borrowed renderer position/input; the root retains it across
- * tab unmounts by exact History identity and discards it on binding replacement or close.
- */
 @Composable
-public fun AgentRuntimeScreen(
+public actual fun AgentRuntimeScreen(
     viewModel: AgentViewModel,
     columns: Int,
     rows: Int,
@@ -59,8 +52,8 @@ public fun AgentRuntimeScreen(
     onBrowseWorkingDirectory: () -> Unit,
     onBrowseSuggestedWorkingDirectory: (String) -> Unit,
     onOpenSettings: () -> Unit,
-    composerFocusRequester: FocusRequester? = null,
-    historyViewState: AgentHistoryViewState = remember(viewModel.history) { AgentHistoryViewState() },
+    composerFocusRequester: FocusRequester?,
+    historyViewState: AgentHistoryViewState,
 ) {
     val state by viewModel.state.collectAsState()
     val running by viewModel.running.collectAsState()

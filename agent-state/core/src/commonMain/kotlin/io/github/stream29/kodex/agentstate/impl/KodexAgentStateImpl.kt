@@ -97,7 +97,7 @@ import kotlin.uuid.Uuid
  * @throws kotlinx.coroutines.CancellationException when loading is cancelled.
  * Storage read failures propagate after cancelling the newly created scope.
  */
-public suspend fun CoroutineScope.KodexAgentState(
+public actual suspend fun CoroutineScope.KodexAgentState(
     client: OpenAiClient,
     storage: MutableKodexAgentStorage,
     contextSettings: StateFlow<AgentContextSettings>,

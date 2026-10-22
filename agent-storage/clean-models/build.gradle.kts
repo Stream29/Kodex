@@ -15,7 +15,7 @@ kotlin {
                 api(project(":tool-image-generation-contract"))
                 api(project(":tool-request-user-input"))
                 api(project(":tool-multi-agent"))
-                api(project(":tool-tool-search"))
+                api(project(":tool-tool-search-contract"))
                 api(project(":tool-unified-exec-contract"))
                 api(project(":tool-view-image-contract"))
                 api(project(":utils-patch"))

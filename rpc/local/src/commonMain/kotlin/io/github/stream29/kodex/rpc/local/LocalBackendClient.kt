@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.rpc.local
 
 import io.github.stream29.kodex.backend.BackendBusinessProtocol
@@ -41,22 +43,21 @@ private suspend fun heartbeat(client: HttpClient, endpoint: BackendEndpoint): Js
 
 internal data class ActiveConnection(val client: RpcClient, val transport: WebSocketRpcTransport)
 
-/** One-shot commands fail offline; only streaming observations re-subscribe on the same instance. */
-public class LocalRpcConnection internal constructor(
+public actual class LocalRpcConnection internal constructor(
     private val active: MutableStateFlow<ActiveConnection?>,
-    override val state: StateFlow<BackendConnectionState>,
-    override val failureReason: StateFlow<String?>,
+    actual override val state: StateFlow<BackendConnectionState>,
+    actual override val failureReason: StateFlow<String?>,
 ) : FrontendRpcConnection {
-    override val available: Boolean get() = active.value?.transport?.alive == true
+    actual override val available: Boolean get() = active.value?.transport?.alive == true
     internal var recovery: suspend (RpcClient, () -> Boolean) -> Unit = { _, _ -> }
         private set
-    override fun onReconnection(handler: suspend (RpcClient, () -> Boolean) -> Unit) { recovery = handler }
-    override suspend fun <T> call(call: RpcCall): T {
+    actual override fun onReconnection(handler: suspend (RpcClient, () -> Boolean) -> Unit) { recovery = handler }
+    actual override suspend fun <T> call(call: RpcCall): T {
         val connection = active.value ?: error("Backend is disconnected; operation was not submitted.")
         check(connection.transport.alive) { "Backend is disconnected; operation was not submitted." }
         return connection.client.call(call)
     }
-    override fun <T> callServerStreaming(call: RpcCall): Flow<T> = channelFlow {
+    actual override fun <T> callServerStreaming(call: RpcCall): Flow<T> = channelFlow {
         active.collectLatest { connection ->
             if (connection != null) {
                 try { connection.client.callServerStreaming<T>(call).collect { send(it) } }
@@ -69,7 +70,7 @@ public class LocalRpcConnection internal constructor(
     }.buffer(0)
 }
 
-public suspend fun <R> withLocalRpcClient(
+public actual suspend fun <R> withLocalRpcClient(
     home: Path,
     endpoint: BackendEndpoint,
     block: suspend CoroutineScope.(LocalRpcConnection) -> R,

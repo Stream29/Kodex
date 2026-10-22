@@ -6,17 +6,15 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
-            api(libs.mosaic.runtime)
-            api(libs.kotlinx.coroutines.core)
-        }
-        mosaicMain.dependencies {
+        specMain.dependencies {
             api(project(":agent-storage-clean-models"))
             api(libs.mosaic.runtime)
+            api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.datetime)
-            api(project(":utils-terminal-text"))
-            implementation(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
+        }
+        mosaicMain.dependencies {
+            api(project(":utils-terminal-text"))
             implementation(libs.mosaic.animation)
         }
         mosaicTest.dependencies {

@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.sessiontitle
 
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState
@@ -14,13 +16,7 @@ import kotlinx.coroutines.yield
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/**
- * In-memory one-shot title generation for one Agent runtime.
- *
- * This object only addresses [KodexAgentState]. It has no Session identifier,
- * catalog, or UI selection state.
- */
-public class AgentTitleGeneration(
+public actual class AgentTitleGeneration actual constructor(
     private val scope: CoroutineScope,
 ) : AutoCloseable {
     private val mutex = Mutex()
@@ -29,13 +25,7 @@ public class AgentTitleGeneration(
     private var activeAttemptId: Long? = null
     private var activeJob: Job? = null
 
-    /**
-     * Starts one best-effort request for the first nonblank text input.
-     *
-     * A disabled setting or a non-default thread name consumes the first text
-     * without starting a request. Image-only input remains eligible.
-     */
-    public suspend fun start(
+    public actual suspend fun start(
         agentState: KodexAgentState,
         content: List<ContentItem>,
         enabled: Boolean,
@@ -87,20 +77,11 @@ public class AgentTitleGeneration(
         }
     }
 
-    /** Cancels any pending automatic result and permanently consumes this Agent's chance. */
-    public suspend fun suppress() {
+    public actual suspend fun suppress() {
         mutex.withLock { invalidateLocked() }
     }
 
-    /**
-     * Serializes one destructive history replacement against title generation.
-     *
-     * [replacement] performs the replacement and returns whether the retained
-     * history still contains an accepted nonblank user text. A retained text
-     * keeps the one-shot gate consumed; removing every such text makes the next
-     * accepted text eligible again.
-     */
-    public suspend fun replaceHistory(replacement: suspend () -> Boolean) {
+    public actual suspend fun replaceHistory(replacement: suspend () -> Boolean) {
         mutex.withLock {
             val previouslyConsumed = consumed
             invalidateAttemptLocked()
@@ -114,8 +95,7 @@ public class AgentTitleGeneration(
         }
     }
 
-    /** Serializes an explicit rename ahead of any generated title. */
-    public suspend fun renameThread(
+    public actual suspend fun renameThread(
         agentState: KodexAgentState,
         threadName: String,
     ): Int = mutex.withLock {
@@ -123,8 +103,7 @@ public class AgentTitleGeneration(
         agentState.updateThreadName(threadName)
     }
 
-    /** Serializes an explicit thread-name settings update ahead of generated output. */
-    public suspend fun updateSettings(
+    public actual suspend fun updateSettings(
         agentState: KodexAgentState,
         settings: KodexAgentSettings,
     ): Int = mutex.withLock {
@@ -132,7 +111,7 @@ public class AgentTitleGeneration(
         agentState.updateSettings(settings)
     }
 
-    override fun close() {
+    actual override fun close() {
         activeJob?.cancel()
     }
 

@@ -1,5 +1,5 @@
 plugins {
-    id("kodex.kmp-cli")
+    id("kodex.kmp-client")
     kotlin("plugin.compose")
 }
 

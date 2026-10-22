@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.app.pathpicker
 
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerEffect
@@ -204,8 +206,7 @@ private fun directoryPickerDependencies(browser: DirectoryPickerBrowser): Direct
         override val browser: DirectoryPickerBrowser = browser
     }
 
-/** Creates one short-lived picker ViewModel backed by the system filesystem. */
-public fun createDirectoryPickerViewModel(
+public actual fun createDirectoryPickerViewModel(
     initialDirectory: Path,
     ownerScope: CoroutineScope,
 ): DirectoryPickerViewModel =
@@ -215,16 +216,15 @@ public fun createDirectoryPickerViewModel(
         ownerScope = ownerScope,
     )
 
-/** Creates a picker using only the component's declared dependency ports. */
-public fun createDirectoryPickerViewModel(
+public actual fun createDirectoryPickerViewModel(
     initialDirectory: Path,
     dependencies: DirectoryPickerDependencies,
     ownerScope: CoroutineScope,
 ): DirectoryPickerViewModel =
     DefaultDirectoryPickerViewModelFactory.create(initialDirectory, dependencies, ownerScope)
 
-public object DefaultDirectoryPickerViewModelFactory : DirectoryPickerViewModelFactory {
-    override fun create(
+public actual object DefaultDirectoryPickerViewModelFactory : DirectoryPickerViewModelFactory {
+    actual override fun create(
         initialDirectory: Path,
         dependencies: DirectoryPickerDependencies,
         ownerScope: CoroutineScope,

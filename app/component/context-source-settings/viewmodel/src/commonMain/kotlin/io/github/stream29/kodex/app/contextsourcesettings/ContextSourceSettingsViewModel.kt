@@ -11,8 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** Creates a [ContextSourceSettingsViewModel] from the host's source and write ports. */
-public fun createContextSourceSettingsViewModel(
+public actual fun createContextSourceSettingsViewModel(
     dependencies: ContextSourceSettingsDependencies, ownerScope: CoroutineScope,
 ): ContextSourceSettingsViewModel = DefaultContextSourceSettingsViewModel(dependencies, ownerScope)
 

@@ -18,15 +18,14 @@ import io.github.stream29.kodex.cli.components.TuiTheme
 import io.github.stream29.kodex.cli.components.TuiDropdownState
 import io.github.stream29.kodex.cli.components.TuiDropdownTrigger
 
-/** Framework-only field/trigger shared by Settings and independently rendered editors. */
 @Composable
-public fun SettingsDropdownField(
+public actual fun SettingsDropdownField(
     label: String,
     selectedLabel: String,
     dropdownState: TuiDropdownState,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    supportingText: String? = null,
+    modifier: Modifier,
+    enabled: Boolean,
+    supportingText: String?,
 ) {
     SettingsItem(label, supportingText, modifier, enabled) {
         TuiDropdownTrigger(
@@ -40,9 +39,9 @@ public fun SettingsDropdownField(
 }
 
 @Composable
-public fun SettingsSection(
+public actual fun SettingsSection(
     title: String,
-    modifier: Modifier = Modifier,
+    modifier: Modifier,
     content: @Composable () -> Unit,
 ) {
     Column(modifier = modifier.fillMaxWidth().background(SettingsFieldBackground)) {
@@ -57,12 +56,12 @@ public fun SettingsSection(
 }
 
 @Composable
-public fun SettingsItem(
+public actual fun SettingsItem(
     label: String,
-    supportingText: String? = null,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    trailing: @Composable RowScope.() -> Unit = {},
+    supportingText: String?,
+    modifier: Modifier,
+    enabled: Boolean,
+    trailing: @Composable RowScope.() -> Unit,
 ) {
     Column(modifier = modifier.fillMaxWidth().background(SettingsFieldBackground)) {
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -86,13 +85,13 @@ public fun SettingsItem(
 }
 
 @Composable
-public fun SettingsCheckboxItem(
+public actual fun SettingsCheckboxItem(
     label: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    supportingText: String? = null,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
+    supportingText: String?,
+    modifier: Modifier,
+    enabled: Boolean,
 ) {
     Column(modifier = modifier.fillMaxWidth().background(SettingsFieldBackground)) {
         TuiCheckbox(
@@ -117,7 +116,7 @@ public fun SettingsCheckboxItem(
 }
 
 @Composable
-public fun SettingsErrorText(value: String) {
+public actual fun SettingsErrorText(value: String) {
     Text(
         value = value,
         color = SettingsErrorForeground,
@@ -126,11 +125,11 @@ public fun SettingsErrorText(value: String) {
 }
 
 @Composable
-public fun SettingsActionButton(
+public actual fun SettingsActionButton(
     label: String,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    autoFocus: Boolean = false,
+    modifier: Modifier,
+    enabled: Boolean,
+    autoFocus: Boolean,
     onClick: () -> Unit,
 ) {
     SettingsButton(
@@ -144,11 +143,11 @@ public fun SettingsActionButton(
 }
 
 @Composable
-public fun SettingsPrimaryButton(
+public actual fun SettingsPrimaryButton(
     label: String,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    autoFocus: Boolean = false,
+    modifier: Modifier,
+    enabled: Boolean,
+    autoFocus: Boolean,
     onClick: () -> Unit,
 ) {
     SettingsButton(
@@ -163,12 +162,12 @@ public fun SettingsPrimaryButton(
 }
 
 @Composable
-public fun SettingsDangerButton(
+public actual fun SettingsDangerButton(
     label: String,
-    modifier: Modifier = Modifier,
-    prominent: Boolean = false,
-    enabled: Boolean = true,
-    autoFocus: Boolean = false,
+    modifier: Modifier,
+    prominent: Boolean,
+    enabled: Boolean,
+    autoFocus: Boolean,
     onClick: () -> Unit,
 ) {
     SettingsButton(
@@ -187,12 +186,12 @@ public fun SettingsDangerButton(
 }
 
 @Composable
-public fun SettingsContentButton(
+public actual fun SettingsContentButton(
     label: String,
-    modifier: Modifier = Modifier,
-    idleTextStyle: TextStyle = TuiTheme.typography.label,
-    enabled: Boolean = true,
-    autoFocus: Boolean = false,
+    modifier: Modifier,
+    idleTextStyle: TextStyle,
+    enabled: Boolean,
+    autoFocus: Boolean,
     onClick: () -> Unit,
 ) {
     SettingsButton(
@@ -207,10 +206,10 @@ public fun SettingsContentButton(
 }
 
 @Composable
-public fun SettingsNavigationButton(
+public actual fun SettingsNavigationButton(
     label: String,
     selected: Boolean,
-    modifier: Modifier = Modifier,
+    modifier: Modifier,
     onClick: () -> Unit,
 ) {
     SettingsButton(
@@ -266,62 +265,62 @@ private val SettingsItemTextStyle: TextStyle
     @ReadOnlyComposable
     get() = TuiTheme.typography.body + TextStyle.Bold
 
-public val SettingsForeground: Color
+public actual val SettingsForeground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.onSurface
 
-public val SettingsSupportingForeground: Color
+public actual val SettingsSupportingForeground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.onSurfaceVariant
 
-public val SettingsActionForeground: Color
+public actual val SettingsActionForeground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.primary
 
-public val SettingsErrorForeground: Color
+public actual val SettingsErrorForeground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.error
 
-public val SettingsHeaderBackground: Color
+public actual val SettingsHeaderBackground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.surfaceContainerHigh
 
-public val SettingsNavigationBackground: Color
+public actual val SettingsNavigationBackground: Color
     @Composable
     @ReadOnlyComposable
     get() = Color.Unspecified
 
-public val SettingsHomeBackground: Color
+public actual val SettingsHomeBackground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.surface
 
-public val SettingsDialogBackground: Color
+public actual val SettingsDialogBackground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.surfaceContainer
 
-public val SettingsFieldBackground: Color
+public actual val SettingsFieldBackground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.surface
 
-public val SettingsSectionHeaderBackground: Color
+public actual val SettingsSectionHeaderBackground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.surfaceContainerHigh
 
-public val SettingsActionBackground: Color
+public actual val SettingsActionBackground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.surfaceContainerHigh
 
-public val PopupMenuBackground: Color
+public actual val PopupMenuBackground: Color
     @Composable
     @ReadOnlyComposable
     get() = TuiTheme.colorScheme.surfaceContainer

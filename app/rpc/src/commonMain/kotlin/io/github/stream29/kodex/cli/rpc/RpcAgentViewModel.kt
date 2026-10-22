@@ -55,8 +55,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.io.files.Path
 
-/** Creates the sole Agent ViewModel owned by this binding's frontend scope. */
-public fun createRpcAgentViewModel(
+public actual fun createRpcAgentViewModel(
     binding: RpcSessionBinding,
     scope: CoroutineScope,
     services: RpcServices,

@@ -18,7 +18,7 @@ import javax.imageio.ImageWriteParam
 
 public actual val HostPromptImageTransformer: PromptImageTransformer = JvmImageIoPromptImageTransformer
 
-public object JvmImageIoPromptImageTransformer : PromptImageTransformer {
+internal object JvmImageIoPromptImageTransformer : PromptImageTransformer {
     override suspend fun transform(request: PromptImageTransformRequest): EncodedImage = withContext(Dispatchers.IO) {
         ensureImageIoPluginsLoaded()
         val targetMimeType = request.plan.outputMimeType

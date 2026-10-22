@@ -44,11 +44,10 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import kotlin.time.Instant
 
-/** Actual dependency-only factory; no Agent/RPC/storage-owner access. */
-public val historyIndexViewModelFactory: HistoryIndexViewModelFactory =
+public actual val historyIndexViewModelFactory: HistoryIndexViewModelFactory =
     HistoryIndexViewModelFactory(::createHistoryIndexViewModel)
 
-public fun createHistoryIndexViewModel(
+public actual fun createHistoryIndexViewModel(
     dependencies: HistoryIndexDependencies,
     ownerScope: CoroutineScope,
 ): HistoryIndexViewModel = HistoryIndexViewModelImpl(dependencies, ownerScope)

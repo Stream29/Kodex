@@ -16,8 +16,6 @@ kotlin {
         allWarningsAsErrors.set(true)
     }
 
-    jvm()
-
     js {
         browser()
         nodejs()

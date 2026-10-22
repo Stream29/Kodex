@@ -16,26 +16,14 @@ import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
 
-/**
- * A vertically scrolling list which composes only the items around its measured viewport.
- *
- * The vertical axis must have a finite maximum height. Items may contain any Mosaic composables
- * and may occupy different numbers of terminal rows.
- *
- * When [reverseLayout] is true, logical item `0` is placed at the visual bottom and increasing
- * item indexes extend upward. Stable keys continue to identify the same logical items.
- *
- * @param interactionSource `null` when the caller does not observe scroll interactions.
- * @param keyboardPageSize Maps the measured viewport to the Page Up and Page Down row count.
- */
 @Composable
-public fun LazyColumn(
-    modifier: Modifier = Modifier,
-    state: LazyListState = rememberLazyListState(),
-    reverseLayout: Boolean = false,
-    userScrollEnabled: Boolean = true,
-    interactionSource: MutableScrollInteractionSource? = null,
-    keyboardPageSize: (viewportSize: Int) -> Int = { it },
+public actual fun LazyColumn(
+    modifier: Modifier,
+    state: LazyListState,
+    reverseLayout: Boolean,
+    userScrollEnabled: Boolean,
+    interactionSource: MutableScrollInteractionSource?,
+    keyboardPageSize: (viewportSize: Int) -> Int,
     content: LazyListScope.() -> Unit,
 ) {
     val latestContent = rememberUpdatedState(content)

@@ -16,7 +16,6 @@ import io.github.stream29.kodex.openai.client.contract.OpenAiLoginClient
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.SystemCoroutineFileSystem
 import io.github.stream29.kodex.utils.logging.initializeLogging
 import io.github.stream29.kodex.utils.osenvironment.processId
-import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import kotlinx.io.files.Path
@@ -27,17 +26,12 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
-/**
- * Owns the instance lock, prepared Home, backend service graph and network host.
- * Client, server-connection and RPC wait scopes never own the backend resources.
- * Factories are explicit in-process validation seams, not production environment flags.
- */
-public suspend fun runBackendHost(
+public actual suspend fun runBackendHost(
     home: Path,
-    codexHome: Path = Path(requireUserHomeDirectory(), ".codex"),
-    agentsHome: Path = Path(requireUserHomeDirectory(), ".agents"),
-    createClient: (OpenAiAuthStore) -> OpenAiClient = { io.github.stream29.kodex.openai.client.OpenAiClient(it) },
-    createLoginClient: () -> OpenAiLoginClient = { io.github.stream29.kodex.openai.client.OpenAiLoginClient() },
+    codexHome: Path,
+    agentsHome: Path,
+    createClient: (OpenAiAuthStore) -> OpenAiClient,
+    createLoginClient: () -> OpenAiLoginClient,
 ): Unit = coroutineScope {
     val hostJob = currentCoroutineContext().job
     val instance = BackendInstance.acquire(home)
@@ -213,8 +207,7 @@ public suspend fun runBackendHost(
     }
 }
 
-/** Bootstrapping has lifecycle rights; an established TUI connection never calls this function. */
-public suspend fun ensureBackendForTui(home: Path): BackendEndpoint {
+public actual suspend fun ensureBackendForTui(home: Path): BackendEndpoint {
     val current = BackendInstance.discover(home)
     if (current != null) {
         check(current.businessProtocol == BackendBusinessProtocol) { "Backend protocol differs; use the management CLI." }
@@ -276,11 +269,7 @@ private suspend fun rejectLiveLegacyOwner(home: Path) {
     }
 }
 
-/**
- * Independent rolling writers for each process, with bounded inactive history.
- * Never deletes live process groups, legacy Kodex logs or names outside this owner's pattern.
- */
-public suspend fun initializeProcessLogging(home: Path, processName: String) {
+public actual suspend fun initializeProcessLogging(home: Path, processName: String) {
     val directory = Path(home, "log")
     SystemCoroutineFileSystem.createDirectories(directory)
     // Kermit 2.1.0 rolls "<base>-1.log", not "<base>.1.log".

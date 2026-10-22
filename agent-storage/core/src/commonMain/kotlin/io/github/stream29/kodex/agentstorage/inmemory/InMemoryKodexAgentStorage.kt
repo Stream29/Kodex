@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.agentstorage.inmemory
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.CleanIndexEntry
@@ -23,7 +25,7 @@ import kotlin.uuid.Uuid
  * empty agent state without a synthetic compaction point.
  */
 @OptIn(ExperimentalUuidApi::class)
-public class InMemoryKodexAgentStorage private constructor(
+public actual class InMemoryKodexAgentStorage private constructor(
     initialIndex: MutableList<IndexedValue<CleanIndexEntry>>,
     initialSettings: MutableList<IndexedValue<KodexAgentSettings>>,
     initialTimestamp: MutableList<IndexedValue<Instant>>,
@@ -38,27 +40,27 @@ public class InMemoryKodexAgentStorage private constructor(
         initialTokenCount = initialState.tokenCount,
     )
 
-    public constructor(initialSettings: KodexAgentSettings) : this(
+    public actual constructor(initialSettings: KodexAgentSettings) : this(
         initialStorageState(initialSettings),
     )
 
-    public override val uri: String = "memory:${identity.hashCode().toUInt().toString(16)}"
-    public override val index: MutableIndexVersioned<CleanIndexEntry> =
+    public actual override val uri: String = "memory:${identity.hashCode().toUInt().toString(16)}"
+    public actual override val index: MutableIndexVersioned<CleanIndexEntry> =
         InMemoryIndexVersioned(initialIndex)
-    public override val work: MutableIndexVersioned<StableWorkEvent> =
+    public actual override val work: MutableIndexVersioned<StableWorkEvent> =
         InMemoryIndexVersioned()
-    public override val settings: MutableIndexVersioned<KodexAgentSettings> =
+    public actual override val settings: MutableIndexVersioned<KodexAgentSettings> =
         InMemoryIndexVersioned(initialSettings)
-    public override val timestamp: MutableIndexVersioned<Instant> =
+    public actual override val timestamp: MutableIndexVersioned<Instant> =
         InMemoryIndexVersioned(initialTimestamp)
-    public override val tokenCount: MutableIndexVersioned<TokenCountSnapshot> =
+    public actual override val tokenCount: MutableIndexVersioned<TokenCountSnapshot> =
         InMemoryIndexVersioned(initialTokenCount)
-    public override val unstable: MutableIndexVersioned<List<UnstableCleanEvent>> =
+    public actual override val unstable: MutableIndexVersioned<List<UnstableCleanEvent>> =
         InMemoryIndexVersioned()
 
-    public companion object {
+    public actual companion object {
         /** Creates the uninitialized storage backing a freshly spawned AgentSession. */
-        public fun empty(): InMemoryKodexAgentStorage =
+        public actual fun empty(): InMemoryKodexAgentStorage =
             InMemoryKodexAgentStorage(
                 initialIndex = mutableListOf(),
                 initialSettings = mutableListOf(),

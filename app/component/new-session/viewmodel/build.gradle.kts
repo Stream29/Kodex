@@ -9,15 +9,13 @@ kotlin {
     sourceSets {
         named("specMain").dependencies {
             api(project(":app-session-contract"))
+            api(project(":app-component-agent-contract"))
             api(project(":app-component-composer-viewmodel"))
             api(project(":app-component-runtime-configuration-viewmodel"))
-        }
-        commonMain.dependencies {
-            implementation(project(":app-rpc"))
-            implementation(project(":app-component-agent-contract"))
-            implementation(project(":openai-models"))
-            implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlinx.io.core)
+            api(project(":app-rpc"))
+            api(project(":openai-models"))
+            api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.io.core)
         }
         commonTest.dependencies {
             implementation(project(":app-test-support-rpc"))

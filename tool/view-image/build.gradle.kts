@@ -6,12 +6,12 @@ plugins {
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
+        named("specMain").dependencies {
             api(project(":tool-view-image-contract"))
             api(project(":tool-core"))
             api(project(":utils-images"))
             api(project(":utils-kotlinx-io-coroutines-system"))
-            implementation(project(":utils-images-codec"))
+            api(project(":utils-images-codec"))
         }
     }
 }

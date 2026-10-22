@@ -24,24 +24,15 @@ import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import com.jakewharton.mosaic.ui.unit.IntSize
 
-/**
- * A focusable action surface with shared Enter, Space, and primary-pointer activation semantics.
- *
- * [content] receives the current focus, hover, and press state so it can render an appropriate
- * treatment. Focus selection, pointer focus, traversal, and cursor ownership are provided by the
- * Mosaic runtime. An optional secondary action is available from the secondary pointer button or
- * Shift+F10 or the Menu/Application key without changing focus. Its position is local to this
- * surface for pointer activation and `null` for keyboard activation.
- */
 @Composable
-public fun TuiPressable(
+public actual fun TuiPressable(
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    focusRequester: FocusRequester? = null,
-    onKeyEvent: ((KeyEvent) -> Boolean)? = null,
-    autoFocus: Boolean = false,
-    onSecondaryClick: ((IntOffset?) -> Unit)? = null,
+    modifier: Modifier,
+    enabled: Boolean,
+    focusRequester: FocusRequester?,
+    onKeyEvent: ((KeyEvent) -> Boolean)?,
+    autoFocus: Boolean,
+    onSecondaryClick: ((IntOffset?) -> Unit)?,
     content: @Composable (isFocused: Boolean, isHovered: Boolean, isPressed: Boolean) -> Unit,
 ) {
     if (!enabled) {

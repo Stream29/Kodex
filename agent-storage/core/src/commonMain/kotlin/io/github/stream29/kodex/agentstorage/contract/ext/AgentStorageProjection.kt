@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.firstOrNull
  * Only index-timeline entries are inspected. The flow stops as soon as the
  * first marker is found, so callers do not decode the complete index timeline.
  */
-public suspend fun KodexAgentStorage.latestCompactionPointOrNull(): Int? =
+public actual suspend fun KodexAgentStorage.latestCompactionPointOrNull(): Int? =
     latestCompactionPointOrNull(latestIndex())
 
 /** Finds the newest compaction marker at or before [at]. */
@@ -32,7 +32,7 @@ private suspend fun KodexAgentStorage.latestCompactionPointOrNull(at: Int): Int?
  * retained prefix. The part from the marker through [index] is preserved
  * exactly, including the context-compaction output.
  */
-public suspend fun KodexAgentStorage.activeMessageWindowAt(
+public actual suspend fun KodexAgentStorage.activeMessageWindowAt(
     index: Int,
 ): List<StableCleanEvent> {
     require(index >= 0) { "Index $index must be non-negative." }

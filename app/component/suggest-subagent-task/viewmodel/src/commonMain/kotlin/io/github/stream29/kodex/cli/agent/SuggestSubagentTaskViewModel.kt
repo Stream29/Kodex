@@ -27,11 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.io.files.Path
 
-/**
- * Creates a dependency-only confirmation owner following [SuggestSubagentTaskViewModelFactory.create].
- * Creation, completion and continuation remain separate bound capabilities, not a transaction.
- */
-public fun createSuggestSubagentTaskViewModel(
+public actual fun createSuggestSubagentTaskViewModel(
     dependencies: SuggestSubagentTaskDependencies,
     ownerScope: CoroutineScope,
 ): SuggestSubagentTaskViewModel = SuggestSubagentTaskViewModelImpl(
@@ -43,8 +39,7 @@ public fun createSuggestSubagentTaskViewModel(
     }
 }
 
-/** Typed assembly entrypoint with the ownership contract declared in component spec. */
-public val suggestSubagentTaskViewModelFactory: SuggestSubagentTaskViewModelFactory =
+public actual val suggestSubagentTaskViewModelFactory: SuggestSubagentTaskViewModelFactory =
     SuggestSubagentTaskViewModelFactory(::createSuggestSubagentTaskViewModel)
 
 internal class SuggestSubagentTaskViewModelImpl(

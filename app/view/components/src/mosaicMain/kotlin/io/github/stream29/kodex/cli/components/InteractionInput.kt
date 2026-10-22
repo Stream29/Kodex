@@ -9,16 +9,15 @@ import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 
-/** Framework-only exclusive-choice button and wrapped description; owns no business state. */
 @Composable
-public fun InteractionOption(
+public actual fun InteractionOption(
     label: String,
     description: String,
     columns: Int,
     selected: Boolean,
     enabled: Boolean,
-    autoFocus: Boolean = false,
-    focusRequester: FocusRequester? = null,
+    autoFocus: Boolean,
+    focusRequester: FocusRequester?,
     onClick: () -> Unit,
 ) {
     TuiButton(
@@ -33,12 +32,8 @@ public fun InteractionOption(
     }
 }
 
-/**
- * Renderer buffer keyed by exact owner/input identity. [text] remains authoritative;
- * input edits and Enter are callbacks, never a hidden business draft or auto-submission.
- */
 @Composable
-public fun InteractionFreeForm(
+public actual fun InteractionFreeForm(
     ownerKey: Any,
     inputId: String,
     text: String,
@@ -47,7 +42,7 @@ public fun InteractionFreeForm(
     focusRequester: FocusRequester,
     focusOnPlacement: Boolean,
     enabled: Boolean,
-    allowEmpty: Boolean = false,
+    allowEmpty: Boolean,
     onValueChanged: (String) -> Unit,
     onSubmitted: () -> Unit,
     onFocusRequested: () -> Unit,
@@ -90,9 +85,8 @@ public fun InteractionFreeForm(
     )
 }
 
-/** Wrapped text with a minimum one-cell width; no domain formatting or state. */
 @Composable
-public fun InteractionText(value: String, columns: Int, textStyle: TextStyle) {
+public actual fun InteractionText(value: String, columns: Int, textStyle: TextStyle) {
     value.wrapToTerminalWidth(columns.coerceAtLeast(1)).forEach { line ->
         Text(value = line, textStyle = textStyle)
     }

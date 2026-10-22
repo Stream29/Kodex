@@ -10,19 +10,11 @@ import com.jakewharton.mosaic.ui.unit.Constraints
 import com.jakewharton.mosaic.ui.unit.constrainHeight
 import com.jakewharton.mosaic.ui.unit.constrainWidth
 
-/**
- * Measures all content eagerly and exposes a vertically scrollable viewport.
- *
- * The vertical axis must have a finite maximum height. Programmatic changes to [state] continue to
- * affect placement when [enabled] is false; that flag only disables user wheel input.
- *
- * @param interactionSource `null` when the caller does not observe scroll interactions.
- */
-public fun Modifier.verticalScroll(
+public actual fun Modifier.verticalScroll(
     state: ScrollState,
-    enabled: Boolean = true,
-    reverseScrolling: Boolean = false,
-    interactionSource: MutableScrollInteractionSource? = null,
+    enabled: Boolean,
+    reverseScrolling: Boolean,
+    interactionSource: MutableScrollInteractionSource?,
 ): Modifier = scrollable(
     state = state,
     enabled = enabled,

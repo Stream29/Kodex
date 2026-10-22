@@ -17,7 +17,6 @@ kotlin {
         commonMain.dependencies {
             implementation(project(":app-component-working-directory-viewmodel"))
             implementation(project(":app-component-session-rename-viewmodel"))
-            implementation(project(":utils-logging"))
             implementation(libs.kotlin.logging)
         }
         commonTest.dependencies { implementation(libs.kotlinx.coroutines.test) }

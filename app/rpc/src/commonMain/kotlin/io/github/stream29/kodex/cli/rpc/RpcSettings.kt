@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.rpc
 
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -28,11 +30,11 @@ import kotlinx.coroutines.flow.onCompletion
  * One editing intent keeps its target's initial value. Only false is retried; a lost response,
  * cancellation, or expired owner is never interpreted as permission to replay a write.
  */
-public suspend fun <T, F> SuspendMutableStateFlow<T>.editField(
+public actual suspend fun <T, F> SuspendMutableStateFlow<T>.editField(
     initial: F,
     select: (T) -> F,
     replace: (T) -> T,
-    checkOwner: () -> Unit = {},
+    checkOwner: () -> Unit,
 ): Boolean {
     while (true) {
         currentCoroutineContext().ensureActive()
@@ -44,50 +46,48 @@ public suspend fun <T, F> SuspendMutableStateFlow<T>.editField(
     }
 }
 
-/** Independent backend observations, not a locally writable combined settings snapshot. */
-public class RpcGlobalSettings private constructor(
-    public val settings: SuspendMutableStateFlow<BackendSettings>,
-    public val models: StateFlow<List<ModelInfo>>,
-    public val authentication: StateFlow<SettingsAuthenticationState>,
-    public val usage: StateFlow<SettingsAccountUsageState>,
-    public val mcp: StateFlow<List<McpManagedServerState>>,
-    public val frontend: FrontendSettingsAccess,
-    public val sidebarWidths: StateFlow<Pair<Int, Int>>,
+public actual class RpcGlobalSettings private constructor(
+    public actual val settings: SuspendMutableStateFlow<BackendSettings>,
+    public actual val models: StateFlow<List<ModelInfo>>,
+    public actual val authentication: StateFlow<SettingsAuthenticationState>,
+    public actual val usage: StateFlow<SettingsAccountUsageState>,
+    public actual val mcp: StateFlow<List<McpManagedServerState>>,
+    public actual val frontend: FrontendSettingsAccess,
+    public actual val sidebarWidths: StateFlow<Pair<Int, Int>>,
     private val widths: MutableStateFlow<Pair<Int, Int>>,
     private val owner: Job,
 ) : AutoCloseable {
     private val mutableOperationFailure = MutableStateFlow(false)
     internal val operationFailure: StateFlow<Boolean> = mutableOperationFailure.asStateFlow()
-    public fun ensureActive(): Unit = owner.ensureActive()
+    public actual fun ensureActive(): Unit = owner.ensureActive()
     internal fun reportOperationFailure(error: Throwable) {
         SettingsOperationLogger.error { "A Settings operation failed (${error::class.simpleName ?: "unknown"})." }
         mutableOperationFailure.value = true
     }
     internal fun dismissOperationFailure() { mutableOperationFailure.value = false }
 
-    public suspend fun <F> edit(
+    public actual suspend fun <F> edit(
         initial: F,
         select: (BackendSettings) -> F,
         replace: (BackendSettings) -> BackendSettings,
     ): Boolean = settings.editField(initial, select, replace, ::ensureActive)
 
-    /** Width changes are intentionally never persisted in either settings file. */
-    public fun resizeSidebars(left: Int, right: Int) {
+    public actual fun resizeSidebars(left: Int, right: Int) {
         ensureActive()
         require(left >= 0 && right >= 0)
         widths.value = left to right
     }
 
-    public suspend fun updateHooks(hooks: List<NotificationHook>) {
+    public actual suspend fun updateHooks(hooks: List<NotificationHook>) {
         ensureActive()
         frontend.update { it.copy(hooks = hooks) }
     }
 
-    override fun close() { owner.cancel() }
-    public suspend fun join(): Unit = owner.join()
+    public actual override fun close() { owner.cancel() }
+    public actual suspend fun join(): Unit = owner.join()
 
-    public companion object {
-        public suspend fun open(
+    public actual companion object {
+        public actual suspend fun open(
             rpc: GlobalRpc,
             scope: CoroutineScope,
             applicationWidth: Int,

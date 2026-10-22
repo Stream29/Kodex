@@ -11,20 +11,7 @@ private const val EmptyChangeContextMarker = "@@"
 private const val ChangeContextMarker = "@@ "
 private const val EnvironmentIdMarker = "*** Environment ID:"
 
-/**
- * Parses this apply-patch document into its normalized wire text and semantic
- * hunks.
- *
- * Parsing is pure: it does not inspect or modify a filesystem. The normalized
- * patch text and parsed hunks are retained together so durable events can
- * preserve the original patch meaning while consumers operate on structured
- * data.
- *
- * @throws ApplyPatchException if the document has invalid boundaries,
- * malformed hunk headers, invalid line prefixes, duplicate environment ids,
- * or an empty update hunk.
- */
-public fun String.parsePatch(): Patch {
+public actual fun String.parsePatch(): Patch {
     val patch = this
     val lines = patch.trim().lines()
     val patchLines = checkPatchBoundariesLenient(lines)

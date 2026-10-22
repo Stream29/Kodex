@@ -1,9 +1,10 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.components
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,17 +33,12 @@ import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import com.jakewharton.mosaic.ui.unit.IntSize
 
-/**
- * A stable handle that records the final surface bounds of one popup trigger.
- *
- * @property bounds `null` before the trigger is placed or after it leaves composition.
- */
 @Stable
-public class TuiPopupAnchor internal constructor() {
+public actual class TuiPopupAnchor internal actual constructor() {
     internal var bounds: TuiPopupAnchorBounds? by mutableStateOf(null)
 
     /** Whether this anchor currently belongs to a placed layout node. */
-    public val isPlaced: Boolean
+    public actual val isPlaced: Boolean
         get() = bounds != null
 
     internal fun update(coordinates: LayoutCoordinates) {
@@ -58,19 +54,10 @@ public class TuiPopupAnchor internal constructor() {
     }
 }
 
-/** Creates a [TuiPopupAnchor] that remains stable for this composition location. */
 @Composable
-public fun rememberTuiPopupAnchor(): TuiPopupAnchor = remember { TuiPopupAnchor() }
+public actual fun rememberTuiPopupAnchor(): TuiPopupAnchor = remember { TuiPopupAnchor() }
 
-/** The final terminal-cell bounds reported by a [TuiPopupAnchor]. */
-@Immutable
-public data class TuiPopupAnchorBounds(
-    public val position: IntOffset,
-    public val size: IntSize,
-)
-
-/** Marks a trigger whose final surface position can be used by [TuiPopup]. */
-public fun Modifier.tuiPopupAnchor(anchor: TuiPopupAnchor): Modifier = composed(
+public actual fun Modifier.tuiPopupAnchor(anchor: TuiPopupAnchor): Modifier = composed(
     fullyQualifiedName = "io.github.stream29.kodex.cli.components.tuiPopupAnchor",
     key1 = anchor,
 ) {
@@ -82,81 +69,9 @@ public fun Modifier.tuiPopupAnchor(anchor: TuiPopupAnchor): Modifier = composed(
     this.onPlaced(anchor::update)
 }
 
-/** Calculates a popup position from its trigger, host surface, and measured content. */
-public fun interface TuiPopupPositionProvider {
-    /** Maximum content size available around [anchorBounds] before positioning. */
-    public fun calculateMaximumSize(
-        anchorBounds: TuiPopupAnchorBounds,
-        surfaceSize: IntSize,
-    ): IntSize = surfaceSize
-
-    public fun calculatePosition(
-        anchorBounds: TuiPopupAnchorBounds,
-        surfaceSize: IntSize,
-        popupContentSize: IntSize,
-    ): IntOffset
-
-    public companion object {
-        /** Places the popup above the trigger when possible, otherwise below it. */
-        public val AboveStart: TuiPopupPositionProvider = object : TuiPopupPositionProvider {
-            override fun calculateMaximumSize(
-                anchorBounds: TuiPopupAnchorBounds,
-                surfaceSize: IntSize,
-            ): IntSize = IntSize(
-                width = surfaceSize.width,
-                height = maxOf(
-                    anchorBounds.position.y,
-                    surfaceSize.height - anchorBounds.position.y - anchorBounds.size.height,
-                ).coerceAtLeast(0),
-            )
-
-            override fun calculatePosition(
-                anchorBounds: TuiPopupAnchorBounds,
-                surfaceSize: IntSize,
-                popupContentSize: IntSize,
-            ): IntOffset = calculateAboveStartPopupPosition(
-                anchorBounds = anchorBounds,
-                surfaceSize = surfaceSize,
-                popupContentSize = popupContentSize,
-            )
-        }
-
-        /** Places a submenu beside the trigger, preferring its end side. */
-        public val EndTop: TuiPopupPositionProvider = object : TuiPopupPositionProvider {
-            override fun calculateMaximumSize(
-                anchorBounds: TuiPopupAnchorBounds,
-                surfaceSize: IntSize,
-            ): IntSize = IntSize(
-                width = maxOf(
-                    anchorBounds.position.x,
-                    surfaceSize.width - anchorBounds.position.x - anchorBounds.size.width,
-                ).coerceAtLeast(0),
-                height = surfaceSize.height,
-            )
-
-            override fun calculatePosition(
-                anchorBounds: TuiPopupAnchorBounds,
-                surfaceSize: IntSize,
-                popupContentSize: IntSize,
-            ): IntOffset = calculateEndTopPopupPosition(
-                anchorBounds = anchorBounds,
-                surfaceSize = surfaceSize,
-                popupContentSize = popupContentSize,
-            )
-        }
-    }
-}
-
-/**
- * A bounded terminal surface that can host [TuiPopup] children.
- *
- * An anchor and its popup must be declared inside the same host. Declare persistent content before
- * popup children. A popup is rendered and hit-tested above its preceding siblings without
- * contributing to their layout size.
- */
 @Composable
-public fun TuiPopupHost(
-    modifier: Modifier = Modifier,
+public actual fun TuiPopupHost(
+    modifier: Modifier,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val host = remember { TuiPopupHostState() }
@@ -168,20 +83,12 @@ public fun TuiPopupHost(
     }
 }
 
-/**
- * Renders [content] over this [TuiPopupHost] using [anchor] and [positionProvider].
- *
- * A primary-pointer press not handled by [content] invokes [onDismissRequest]. The popup must be
- * declared after the host's persistent content so it occupies the top interaction layer.
- *
- * @param onDismissRequest `null` keeps unhandled pointer presses available to the host content.
- */
 @Composable
-public fun BoxScope.TuiPopup(
+public actual fun BoxScope.TuiPopup(
     anchor: TuiPopupAnchor,
-    onDismissRequest: (() -> Unit)? = null,
-    positionProvider: TuiPopupPositionProvider = TuiPopupPositionProvider.AboveStart,
-    modifier: Modifier = Modifier,
+    onDismissRequest: (() -> Unit)?,
+    positionProvider: TuiPopupPositionProvider,
+    modifier: Modifier,
     content: @Composable () -> Unit,
 ) {
     val host = requireTuiPopupHost()
@@ -216,27 +123,12 @@ public fun BoxScope.TuiPopup(
     }
 }
 
-/**
- * Renders centered, modal [content] over this [TuiPopupHost].
- *
- * The dialog traps keyboard focus within its content, consumes pointer events that are not handled
- * by its content, and restores the prior focus when removed. An unmodified Escape invokes
- * [onEscapeRequest] before focused content handles it. By default, this delegates to
- * [onDismissRequest]. A primary click outside [content] invokes [onDismissRequest] when
- * [dismissOnOutsideClick]
- * is `true`.
- *
- * The dialog applies dim text style to the host cells behind it without replacing their characters,
- * then clears every character cell inside its measured bounds before applying caller drawing
- * modifiers and drawing [content]. Surface colors and other business styling remain the caller's
- * responsibility through [modifier].
- */
 @Composable
-public fun BoxScope.TuiDialog(
+public actual fun BoxScope.TuiDialog(
     onDismissRequest: () -> Unit,
-    dismissOnOutsideClick: Boolean = true,
-    onEscapeRequest: () -> Unit = onDismissRequest,
-    modifier: Modifier = Modifier,
+    dismissOnOutsideClick: Boolean,
+    onEscapeRequest: () -> Unit,
+    modifier: Modifier,
     content: @Composable () -> Unit,
 ) {
     requireTuiPopupHost()
@@ -353,45 +245,5 @@ private fun TuiPopupLayout(
         modifier = modifier,
         debugInfo = { "TuiPopupLayout()" },
         measurePolicy = measurePolicy,
-    )
-}
-
-private fun calculateAboveStartPopupPosition(
-    anchorBounds: TuiPopupAnchorBounds,
-    surfaceSize: IntSize,
-    popupContentSize: IntSize,
-): IntOffset {
-    val maximumX = (surfaceSize.width - popupContentSize.width).coerceAtLeast(0)
-    val maximumY = (surfaceSize.height - popupContentSize.height).coerceAtLeast(0)
-    val aboveY = anchorBounds.position.y - popupContentSize.height
-    val belowY = anchorBounds.position.y + anchorBounds.size.height
-    val preferredY = when {
-        aboveY >= 0 -> aboveY
-        belowY <= maximumY -> belowY
-        else -> aboveY
-    }
-    return IntOffset(
-        x = anchorBounds.position.x.coerceIn(0, maximumX),
-        y = preferredY.coerceIn(0, maximumY),
-    )
-}
-
-private fun calculateEndTopPopupPosition(
-    anchorBounds: TuiPopupAnchorBounds,
-    surfaceSize: IntSize,
-    popupContentSize: IntSize,
-): IntOffset {
-    val maximumX = (surfaceSize.width - popupContentSize.width).coerceAtLeast(0)
-    val maximumY = (surfaceSize.height - popupContentSize.height).coerceAtLeast(0)
-    val endX = anchorBounds.position.x + anchorBounds.size.width
-    val startX = anchorBounds.position.x - popupContentSize.width
-    val preferredX = when {
-        endX <= maximumX -> endX
-        startX >= 0 -> startX
-        else -> endX
-    }
-    return IntOffset(
-        x = preferredX.coerceIn(0, maximumX),
-        y = anchorBounds.position.y.coerceIn(0, maximumY),
     )
 }

@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.agentcontext.promptdsl
 
 /**
@@ -8,19 +10,19 @@ package io.github.stream29.kodex.agentcontext.promptdsl
  * [rawText].
  */
 @PromptXmlDsl
-public class PromptXmlBuilder internal constructor(
+public actual class PromptXmlBuilder internal constructor(
     private val indented: Boolean,
 ) {
     private val content: StringBuilder = StringBuilder()
     private var containsTag: Boolean = false
 
     /** Appends XML-escaped text content. */
-    public fun text(value: String): Unit {
+    public actual fun text(value: String): Unit {
         content.append(value.escapeXmlText())
     }
 
     /** Appends XML-escaped text content. */
-    public operator fun String.unaryPlus(): Unit = text(this)
+    public actual operator fun String.unaryPlus(): Unit = text(this)
 
     /**
      * Appends trusted prompt content without XML escaping.
@@ -28,15 +30,15 @@ public class PromptXmlBuilder internal constructor(
      * Use this only where the surrounding prompt format intentionally accepts
      * raw text, such as AGENTS.md instruction bodies.
      */
-    public fun rawText(value: String): Unit {
+    public actual fun rawText(value: String): Unit {
         content.append(value)
     }
 
     /** Adds one XML tag and its nested prompt content. */
-    public fun tag(
+    public actual fun tag(
         name: String,
-        attributes: Map<String, String> = emptyMap(),
-        block: PromptXmlBuilder.() -> Unit = {},
+        attributes: Map<String, String>,
+        block: PromptXmlBuilder.() -> Unit,
     ): Unit {
         val child = PromptXmlBuilder(indented).apply(block)
         val childContent = child.build()
@@ -72,8 +74,8 @@ public class PromptXmlBuilder internal constructor(
 }
 
 /** Builds XML-shaped prompt content. */
-public fun promptXml(
-    indented: Boolean = true,
+public actual fun promptXml(
+    indented: Boolean,
     block: PromptXmlBuilder.() -> Unit,
 ): String = PromptXmlBuilder(indented).apply(block).build()
 

@@ -30,12 +30,11 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
-/** Browser URLs and callback payloads live only for the attempt; neither is logged. */
-public suspend fun startRpcOAuth(
+public actual suspend fun startRpcOAuth(
     rpc: GlobalRpc,
     target: OAuthTarget,
     scope: CoroutineScope,
-    mcpRedirectUri: String? = null,
+    mcpRedirectUri: String?,
 ): KodexAuthLoginAttempt = startRpcOAuth(rpc, target, scope, mcpRedirectUri) { owner, candidates ->
     startLoopback(owner, candidates)
 }

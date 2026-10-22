@@ -8,13 +8,11 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
+                api(project(":openai-client"))
+                api(project(":openai-models"))
+                api(project(":tool-core"))
                 api(libs.kotlinx.schema.json)
             }
-        }
-        commonMain.dependencies {
-            api(project(":openai-client"))
-            api(project(":openai-models"))
-            api(project(":tool-core"))
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.core)

@@ -60,6 +60,7 @@ class ModuleTreeScope(
     private val settings: Settings,
     private val segments: List<String>,
     private val declaredPaths: MutableSet<String>,
+    private val includeGroupingRoot: Boolean = true,
 ) {
     private val path = segments.joinToString("/")
 
@@ -68,12 +69,12 @@ class ModuleTreeScope(
             "Invalid module path: $path"
         }
         require(segments.none { it == "spec" || it == "impl" }) {
-            "Use business module names (contract only for cycle-breaking boundaries): $path"
+            "Use business module names (contract for shared protocol or cycle-breaking boundaries): $path"
         }
         val directory = settings.settingsDir.resolve(path)
         require(directory.isDirectory) { "Missing module directory: $path" }
         require(declaredPaths.add(path)) { "Duplicate declared module path: $path" }
-        if (segments.size == 1 || directory.resolve("build.gradle.kts").isFile) {
+        if ((segments.size == 1 && includeGroupingRoot) || directory.resolve("build.gradle.kts").isFile) {
             val projectPath = ":${segments.joinToString("-")}"
             require(settings.findProject(projectPath) == null) {
                 "Duplicate module path or flat project ID: $path -> $projectPath"
@@ -97,8 +98,8 @@ class ModuleTreeScope(
     }
 }
 
-fun Settings.moduleTree(name: String, block: ModuleTreeScope.() -> Unit) {
-    ModuleTreeScope(this, listOf(name), declaredModulePaths).block()
+fun Settings.moduleTree(name: String, includeGroupingRoot: Boolean = true, block: ModuleTreeScope.() -> Unit) {
+    ModuleTreeScope(this, listOf(name), declaredModulePaths, includeGroupingRoot).block()
 }
 
 moduleTree("agent-context") {
@@ -275,7 +276,9 @@ moduleTree("hook") {
 moduleTree("integration-test") {
 }
 
-moduleTree("mcp") {
+moduleTree("mcp", includeGroupingRoot = false) {
+    module("contract")
+    module("backend")
 }
 
 moduleTree("openai") {
@@ -311,7 +314,10 @@ moduleTree("tool") {
     module("multi-agent")
     module("plan")
     module("request-user-input")
-    module("tool-search")
+    moduleTree("tool-search") {
+        module("contract")
+        module("backend")
+    }
     moduleTree("unified-exec") {
         module("contract")
     }
@@ -333,7 +339,10 @@ moduleTree("utils") {
     }
     module("kotlinx-io-serialization")
     module("ktor-client-ext")
-    module("logging")
+    moduleTree("logging") {
+        module("backend-file")
+        module("backend-scope")
+    }
     module("os-environment")
     module("patch")
     moduleTree("process-client") {

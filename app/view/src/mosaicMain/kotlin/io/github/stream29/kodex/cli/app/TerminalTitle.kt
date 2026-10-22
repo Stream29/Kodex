@@ -35,7 +35,7 @@ internal fun writeTerminalTitle(
 }
 
 /** Restores the terminal title when the CLI host exits. */
-public fun resetTerminalTitle() {
+public actual fun resetTerminalTitle(): Unit {
     writeTerminalTitle("")
 }
 

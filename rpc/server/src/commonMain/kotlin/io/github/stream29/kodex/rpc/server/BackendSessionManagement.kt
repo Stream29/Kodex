@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.rpc.server
 
 import io.github.stream29.kodex.app.sessioncatalog.contract.SessionCatalogEntry
@@ -25,8 +27,7 @@ import kotlinx.io.files.Path
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
-/** Management values from the same backend repository as live runtime services. */
-public class BackendSessionManagement(
+public actual class BackendSessionManagement actual constructor(
     private val host: BackendSessionHost,
     private val runtime: BackendAgentRuntimeRpc,
     private val newSessionDefaults: () -> KodexNewSessionSettings,
@@ -34,7 +35,7 @@ public class BackendSessionManagement(
 ) {
     private val commands = Mutex()
 
-    public suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry> = host.inBackend {
+    public actual suspend fun getSessionCatalog(includeArchived: Boolean): List<SessionCatalogEntry> = host.inBackend {
         commands.withLock {
             host.repository().listEntries(includeArchived).map { entry ->
                 SessionCatalogEntry(
@@ -50,7 +51,7 @@ public class BackendSessionManagement(
         }
     }
 
-    public suspend fun createSession(cwd: Path): Int = host.inBackend {
+    public actual suspend fun createSession(cwd: Path): Int = host.inBackend {
         commands.withLock {
             // Capture the owned defaults at the creation boundary, not at RPC admission
             // or from a frontend projection. Suggested Sessions and forks never use this.
@@ -66,29 +67,29 @@ public class BackendSessionManagement(
         }
     }
 
-    public suspend fun keepSessionAlive(sessionIndex: Int): Unit = host.keepSessionAlive(sessionIndex)
+    public actual suspend fun keepSessionAlive(sessionIndex: Int): Unit = host.keepSessionAlive(sessionIndex)
 
-    public suspend fun archiveSession(sessionIndex: Int): Unit = host.inBackend {
+    public actual suspend fun archiveSession(sessionIndex: Int): Unit = host.inBackend {
         commands.withLock {
             requireEntry(sessionIndex)
             host.repository().getEntry(sessionIndex).archive()
         }
     }
 
-    public suspend fun unarchiveSession(sessionIndex: Int): Unit = host.inBackend {
+    public actual suspend fun unarchiveSession(sessionIndex: Int): Unit = host.inBackend {
         commands.withLock {
             requireEntry(sessionIndex)
             host.repository().getEntry(sessionIndex).unarchive()
         }
     }
 
-    public suspend fun deleteSession(sessionIndex: Int): Boolean = host.inBackend {
+    public actual suspend fun deleteSession(sessionIndex: Int): Boolean = host.inBackend {
         commands.withLock { host.deleteSession(sessionIndex) }
     }
 
-    public suspend fun forkSession(sessionIndex: Int): Int = fork(sessionIndex, null, null)
+    public actual suspend fun forkSession(sessionIndex: Int): Int = fork(sessionIndex, null, null)
 
-    public suspend fun forkSessionHistory(
+    public actual suspend fun forkSessionHistory(
         sessionIndex: Int, untilExclusive: Int, expectedCacheNonce: Long,
     ): Int = fork(sessionIndex, untilExclusive, expectedCacheNonce)
 
@@ -134,7 +135,7 @@ public class BackendSessionManagement(
         }
     }
 
-    public suspend fun createSuggestedSessions(
+    public actual suspend fun createSuggestedSessions(
         tasks: List<SuggestedSubagentTask>,
         initialSettings: KodexAgentSettings,
     ): List<CreatedSuggestedSession> = host.inBackend {

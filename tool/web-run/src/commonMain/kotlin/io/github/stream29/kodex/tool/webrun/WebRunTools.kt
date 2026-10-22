@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.tool.webrun
 
 import io.github.stream29.kodex.agentstorage.cleanmodels.stable.StableWebSearchResult
@@ -9,14 +11,10 @@ import io.github.stream29.kodex.openai.ResponsesApiTool
 import io.github.stream29.kodex.openai.ToolSpec
 import io.github.stream29.kodex.tool.contract.Tool
 import io.github.stream29.kodex.tool.contract.typedTool
+import io.github.stream29.kodex.tool.webrun.WebRunTools.NamespaceDescription
 
-public const val WebRunNamespace: String = "web"
-public const val WebRunToolName: String = "run"
-
-public object WebRunTools {
-    public const val NamespaceDescription: String = "Tools in the web namespace."
-
-    public val description: String = """
+internal actual object WebRunToolImplementation {
+    public actual val description: String = """
         Tool for accessing the internet.
 
 
@@ -124,7 +122,7 @@ public object WebRunTools {
           - Again, this limit does not apply to reddit content, as long as it's appropriately indicated that those are direct quotes and you link to the source.
     """.trimIndent() + "\n"
 
-    public val spec: ToolSpec =
+    public actual val spec: ToolSpec =
         ResponsesApiNamespace(
             name = WebRunNamespace,
             description = NamespaceDescription,
@@ -138,7 +136,7 @@ public object WebRunTools {
             ),
         )
 
-    public fun createTool(client: WebRunToolClient): Tool =
+    public actual fun createTool(client: WebRunToolClient): Tool =
         typedTool(
             spec = spec,
             select = { it as? PendingWebSearchToolEvent },

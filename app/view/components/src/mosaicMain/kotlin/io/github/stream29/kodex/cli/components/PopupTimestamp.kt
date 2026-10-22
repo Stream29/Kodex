@@ -5,8 +5,7 @@ import kotlinx.datetime.offsetAt
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Instant
 
-/** Shared visual formatting only; acquiring/invalidating a timestamp belongs to its state owner. */
-public fun formatPopupTimestamp(timestamp: Instant, timeZone: TimeZone): String {
+public actual fun formatPopupTimestamp(timestamp: Instant, timeZone: TimeZone): String {
     val local = timestamp.toLocalDateTime(timeZone)
     val dateTime = "${local.year.toString().padStart(4, '0')}-" +
         "${(local.month.ordinal + 1).toString().padStart(2, '0')}-" +

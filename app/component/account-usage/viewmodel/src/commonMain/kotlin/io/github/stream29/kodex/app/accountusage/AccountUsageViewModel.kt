@@ -9,8 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** Create one short-lived observing child; the host retains navigation refresh responsibility. */
-public fun createAccountUsageViewModel(
+public actual fun createAccountUsageViewModel(
     dependencies: AccountUsageDependencies,
     ownerScope: CoroutineScope,
 ): AccountUsageViewModel = DefaultAccountUsageViewModel(dependencies, ownerScope)

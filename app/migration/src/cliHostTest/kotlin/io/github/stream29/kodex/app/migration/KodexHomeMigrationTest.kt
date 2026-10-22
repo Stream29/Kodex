@@ -11,9 +11,17 @@ import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 public val kodexHomeMigrationTest by testSuite {
+    test("application version is the stable generated migration version") {
+        val version = CurrentKodexApplicationVersion
+
+        assertEquals(MigrationVersion(GeneratedKodexApplicationVersion), version)
+        assertSame(version, CurrentKodexApplicationVersion)
+    }
+
     testFixture { temporaryDirectory() } closeWith {
         deleteRecursively(this)
     } asParameterForEach {

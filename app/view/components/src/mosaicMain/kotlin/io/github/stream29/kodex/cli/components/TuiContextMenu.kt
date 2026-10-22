@@ -8,23 +8,15 @@ import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.unit.IntOffset
 import com.jakewharton.mosaic.ui.unit.IntSize
 
-/**
- * Displays a context menu at the secondary activation position over the surrounding
- * [TuiPopupHost].
- *
- * [clickPosition] is local to [anchor]. Pointer activation starts the menu at that terminal cell,
- * while `null` starts it at the anchor's beginning for keyboard activation. The final position is
- * clamped to the popup host.
- */
 @Composable
-public fun BoxScope.TuiContextMenu(
+public actual fun BoxScope.TuiContextMenu(
     expanded: Boolean,
     onDismissRequest: () -> Unit,
     anchor: TuiPopupAnchor,
-    clickPosition: IntOffset? = null,
-    state: TuiPopupMenuState = rememberTuiPopupMenuState(),
-    backgroundColor: Color = Color.Unspecified,
-    modifier: Modifier = Modifier,
+    clickPosition: IntOffset?,
+    state: TuiPopupMenuState,
+    backgroundColor: Color,
+    modifier: Modifier,
     content: TuiPopupMenuScope.() -> Unit,
 ) {
     val positionProvider = remember(clickPosition) {

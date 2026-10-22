@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.utils.kotlinxioserialization
 
 import kotlinx.io.files.Path
@@ -8,15 +10,14 @@ import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 
-/** Serializes a [Path] through its platform-independent string representation. */
-public object PathAsStringSerializer : KSerializer<Path> {
-    override val descriptor: SerialDescriptor =
+public actual object PathAsStringSerializer : KSerializer<Path> {
+    public actual override val descriptor: SerialDescriptor =
         PrimitiveSerialDescriptor("kotlinx.io.files.Path", PrimitiveKind.STRING)
 
-    override fun serialize(encoder: Encoder, value: Path) {
+    public actual override fun serialize(encoder: Encoder, value: Path) {
         encoder.encodeString(value.toString())
     }
 
-    override fun deserialize(decoder: Decoder): Path =
+    public actual override fun deserialize(decoder: Decoder): Path =
         Path(decoder.decodeString())
 }

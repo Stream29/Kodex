@@ -8,7 +8,7 @@ import io.github.stream29.kodex.utils.terminaltext.terminalCellWidth
 import kotlinx.io.files.Path
 
 @Composable
-public fun SettingsStatusButton(onOpenSettings: () -> Unit) {
+public actual fun SettingsStatusButton(onOpenSettings: () -> Unit) {
     TuiButton(
         label = SettingsLabel,
         modifier = Modifier.background(SessionButtonBackground),
@@ -18,7 +18,7 @@ public fun SettingsStatusButton(onOpenSettings: () -> Unit) {
 }
 
 @Composable
-public fun WorkingDirectoryStatusButton(
+public actual fun WorkingDirectoryStatusButton(
     columns: Int,
     workingDirectory: Path,
     enabled: Boolean,
@@ -33,7 +33,7 @@ public fun WorkingDirectoryStatusButton(
     )
 }
 
-public fun workingDirectoryStatusLabel(
+public actual fun workingDirectoryStatusLabel(
     workingDirectory: Path,
     columns: Int,
 ): String {
@@ -52,7 +52,6 @@ public fun workingDirectoryStatusLabel(
     return displayPath
 }
 
-public const val SettingsLabel: String = "Settings"
 private const val WorkingDirectoryExpandedLabelMinimumColumns: Int = 72
 private const val WorkingDirectoryWideLabelMinimumColumns: Int = 112
 private const val WorkingDirectoryPathMaximumWidth: Int = 16

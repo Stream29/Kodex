@@ -6,10 +6,11 @@ import kotlinx.io.files.Path
 /**
  * A prepared Home and its retained shared read lease.
  *
- * The actual `CoroutineScope.prepareKodexHome` factory lives in migration impl.
- * It returns this contract only after checking the stored version and, when
- * necessary, preparing the Home under an exclusive write lease and reacquiring
- * a read lease. [version] is the persisted migration checkpoint accepted at
+ * The public `CoroutineScope.prepareKodexHome` factory is declared in this
+ * spec and provided by an actual implementation. It returns this contract only
+ * after checking the stored version and, when necessary, preparing the Home
+ * under an exclusive write lease and reacquiring a read lease. [version] is
+ * the persisted migration checkpoint accepted at
  * preparation, not a live view of `version.json` or the running application
  * version. A versioned Home with no applicable migrations retains its read
  * lease without rewriting the version or scanning Session layout, even when

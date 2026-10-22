@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.cli.components
 
 import androidx.compose.runtime.Composable
@@ -13,50 +15,35 @@ import com.jakewharton.mosaic.ui.BoxScope
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Text
 
-/**
- * State shared by a [TuiDropdownTrigger] and its host-level [TuiDropdownMenu].
- *
- * Keep the menu as a direct child of the surrounding [TuiPopupHost] so it can render above
- * dialogs and other persistent content without inheriting the trigger's layout constraints.
- */
 @Stable
-public class TuiDropdownState internal constructor() {
+public actual class TuiDropdownState internal actual constructor() {
     internal val anchor: TuiPopupAnchor = TuiPopupAnchor()
 
     /** Whether the associated menu is currently displayed. */
-    public var expanded: Boolean by mutableStateOf(false)
+    public actual var expanded: Boolean by mutableStateOf(false)
         private set
 
-    /** Opens the associated menu. */
-    public fun expand() {
+    public actual fun expand() {
         expanded = true
     }
 
-    /** Closes the associated menu. */
-    public fun dismiss() {
+    public actual fun dismiss() {
         expanded = false
     }
 }
 
-/** Creates [TuiDropdownState] that survives recomposition at this call site. */
 @Composable
-public fun rememberTuiDropdownState(): TuiDropdownState = remember { TuiDropdownState() }
+public actual fun rememberTuiDropdownState(): TuiDropdownState = remember { TuiDropdownState() }
 
-/**
- * Renders a popup-menu trigger for [dropdownState].
- *
- * Removing or disabling the trigger dismisses its menu so a stale menu cannot survive a route or
- * configuration change.
- */
 @Composable
-public fun TuiDropdownTrigger(
+public actual fun TuiDropdownTrigger(
     dropdownState: TuiDropdownState,
     label: String,
-    modifier: Modifier = Modifier,
-    color: Color = Color.Unspecified,
-    enabled: Boolean = true,
-    autoFocus: Boolean = false,
-    interactionStyle: TuiInteractionStyle = TuiInteractionStyle.TerminalInvert,
+    modifier: Modifier,
+    color: Color,
+    enabled: Boolean,
+    autoFocus: Boolean,
+    interactionStyle: TuiInteractionStyle,
 ) {
     DisposableEffect(dropdownState) {
         onDispose { dropdownState.dismiss() }
@@ -75,17 +62,12 @@ public fun TuiDropdownTrigger(
     )
 }
 
-/**
- * Displays a menu for [dropdownState] over the surrounding [TuiPopupHost].
- *
- * Call this after persistent content, including the matching [TuiDropdownTrigger].
- */
 @Composable
-public fun BoxScope.TuiDropdownMenu(
+public actual fun BoxScope.TuiDropdownMenu(
     dropdownState: TuiDropdownState,
-    positionProvider: TuiPopupPositionProvider = TuiPopupPositionProvider.AboveStart,
-    backgroundColor: Color = Color.Unspecified,
-    modifier: Modifier = Modifier,
+    positionProvider: TuiPopupPositionProvider,
+    backgroundColor: Color,
+    modifier: Modifier,
     content: TuiPopupMenuScope.() -> Unit,
 ) {
     if (!dropdownState.expanded) return
@@ -100,18 +82,17 @@ public fun BoxScope.TuiDropdownMenu(
     )
 }
 
-/** Displays one selectable menu item for each [options] value. */
 @Composable
-public fun <T : Any> BoxScope.TuiDropdownMenu(
+public actual fun <T : Any> BoxScope.TuiDropdownMenu(
     dropdownState: TuiDropdownState,
     options: List<T>,
     selected: T,
     optionLabel: (T) -> String,
     onSelect: (T) -> Unit,
-    enabled: Boolean = true,
-    positionProvider: TuiPopupPositionProvider = TuiPopupPositionProvider.AboveStart,
-    backgroundColor: Color = Color.Unspecified,
-    modifier: Modifier = Modifier,
+    enabled: Boolean,
+    positionProvider: TuiPopupPositionProvider,
+    backgroundColor: Color,
+    modifier: Modifier,
 ) {
     TuiDropdownMenu(
         dropdownState = dropdownState,

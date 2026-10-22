@@ -11,7 +11,6 @@ kotlin {
     applyHierarchyTemplate(KotlinHierarchyTemplate.default) {
         common {
             group("cliHost") {
-                withJvm()
                 group("desktopNative") {
                     withLinuxX64()
                     withLinuxArm64()

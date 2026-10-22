@@ -1,3 +1,5 @@
+@file:Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+
 package io.github.stream29.kodex.rpc.websocket
 
 import io.ktor.websocket.Frame
@@ -15,28 +17,28 @@ import kotlinx.rpc.krpc.KrpcTransport
 import kotlinx.rpc.krpc.KrpcTransportMessage
 import kotlin.coroutines.CoroutineContext
 
-public class WebSocketRpcTransport(
+public actual class WebSocketRpcTransport actual constructor(
     private val socket: WebSocketSession,
     context: CoroutineContext,
 ) : KrpcTransport {
     private val owner = SupervisorJob(context.job)
     private val closed = CompletableDeferred<Unit>()
     @kotlin.concurrent.Volatile
-    public var alive: Boolean = true
+    public actual var alive: Boolean = true
         private set
-    override val coroutineContext: CoroutineContext = context + owner + CoroutineExceptionHandler { _, _ -> lost() }
+    actual override val coroutineContext: CoroutineContext = context + owner + CoroutineExceptionHandler { _, _ -> lost() }
     init { socket.coroutineContext.job.invokeOnCompletion { lost() } }
     private fun lost() {
         alive = false
         closed.complete(Unit)
         owner.cancel()
     }
-    override suspend fun send(message: KrpcTransportMessage) {
+    actual override suspend fun send(message: KrpcTransportMessage) {
         require(message is KrpcTransportMessage.StringMessage)
         try { socket.send(Frame.Text(message.value)) }
         catch (failure: Throwable) { lost(); throw failure }
     }
-    override suspend fun receive(): KrpcTransportMessage {
+    actual override suspend fun receive(): KrpcTransportMessage {
         try {
             while (true) {
                 when (val frame = socket.incoming.receive()) {
@@ -48,8 +50,8 @@ public class WebSocketRpcTransport(
             }
         } catch (failure: Throwable) { lost(); throw failure }
     }
-    public suspend fun awaitClosed() { closed.await() }
-    public suspend fun shutdown() {
+    public actual suspend fun awaitClosed() { closed.await() }
+    public actual suspend fun shutdown() {
         lost()
         try { socket.close() } finally { owner.cancelAndJoin() }
     }

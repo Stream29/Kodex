@@ -20,25 +20,19 @@ import io.github.stream29.kodex.app.contextsourcesettings.ContextSourceSettingsV
 import io.github.stream29.kodex.app.settings.contract.BuiltInContextSource
 import io.github.stream29.kodex.cli.components.*
 
-/**
- * Complete independent list/dialog surface inside a TuiPopupHost. The host owns navigation/lifetime,
- * calls hidePage on departure and close on disposal; this renderer never creates or closes the VM.
- * Suppress the shared failure banner only when the host already renders that same source once.
- */
 @Composable
-public fun BoxScope.ContextSourceSettingsComponent(
+public actual fun BoxScope.ContextSourceSettingsComponent(
     viewModel: ContextSourceSettingsViewModel,
-    showOperationFailure: Boolean = true,
+    showOperationFailure: Boolean,
 ) {
     ContextSourceSettingsPanel(viewModel, showOperationFailure)
     ContextSourceSettingsDialogs(viewModel)
 }
 
-/** Scrollable list surface; pair with ContextSourceSettingsDialogs at the containing popup host. */
 @Composable
-public fun ContextSourceSettingsPanel(
+public actual fun ContextSourceSettingsPanel(
     viewModel: ContextSourceSettingsViewModel,
-    showOperationFailure: Boolean = true,
+    showOperationFailure: Boolean,
 ) {
     val state by viewModel.state.collectAsState()
     if (state.closed) return
@@ -94,9 +88,8 @@ private fun BuiltInItem(
     )
 }
 
-/** Exact-token dialog overlay. VM draft/error is authoritative; local input stores cursor/undo only. */
 @Composable
-public fun BoxScope.ContextSourceSettingsDialogs(viewModel: ContextSourceSettingsViewModel) {
+public actual fun BoxScope.ContextSourceSettingsDialogs(viewModel: ContextSourceSettingsViewModel) {
     val state by viewModel.state.collectAsState()
     if (state.closed) return
     when (val dialog = state.dialog) {

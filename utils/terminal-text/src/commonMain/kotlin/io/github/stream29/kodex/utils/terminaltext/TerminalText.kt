@@ -8,8 +8,7 @@ private data class TerminalTextWidthBoundary(
     val cellWidth: Int,
 )
 
-/** Returns grapheme-preserving terminal-cell segments with offsets into this string. */
-public fun String.terminalCellSegments(): List<TerminalCellSegment> =
+public actual fun String.terminalCellSegments(): List<TerminalCellSegment> =
     graphemeIndices(isExtended = true).map { cluster ->
         TerminalCellSegment(
             sourceStart = cluster.index,
@@ -18,12 +17,10 @@ public fun String.terminalCellSegments(): List<TerminalCellSegment> =
         )
     }.toList()
 
-/** Returns the number of terminal cells occupied by this text. */
-public fun String.terminalCellWidth(): Int =
+public actual fun String.terminalCellWidth(): Int =
     graphemeIndices(isExtended = true).sumOf { it.value.unicodeWidth() }
 
-/** Returns the longest grapheme-preserving prefix within [maximumWidth] terminal cells. */
-public fun String.takeFirstFittingTerminalWidth(maximumWidth: Int): String {
+public actual fun String.takeFirstFittingTerminalWidth(maximumWidth: Int): String {
     if (maximumWidth <= 0) return ""
 
     val boundary = graphemeIndices(isExtended = true)
@@ -38,8 +35,7 @@ public fun String.takeFirstFittingTerminalWidth(maximumWidth: Int): String {
     return substring(0, boundary.sourceIndex)
 }
 
-/** Returns the longest grapheme-preserving suffix within [maximumWidth] terminal cells. */
-public fun String.takeLastFittingTerminalWidth(maximumWidth: Int): String {
+public actual fun String.takeLastFittingTerminalWidth(maximumWidth: Int): String {
     if (maximumWidth <= 0) return ""
 
     val totalWidth = terminalCellWidth()

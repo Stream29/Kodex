@@ -14,7 +14,6 @@ import io.github.stream29.kodex.backend.BackendInstance
 import io.github.stream29.kodex.backend.exitKodexProcess
 import io.github.stream29.kodex.backend.host.ensureBackendForTui
 import io.github.stream29.kodex.backend.host.runBackendHost
-import io.github.stream29.kodex.backend.host.initializeProcessLogging
 import io.github.stream29.kodex.rpc.local.BackendConnectionState
 import io.github.stream29.kodex.rpc.control.backendControlRequest
 import io.github.stream29.kodex.rpc.local.withLocalRpcClient
@@ -25,7 +24,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.io.files.Path
 
-public fun main(args: Array<String>) {
+public actual fun main(args: Array<String>) {
     var result = 0
     try {
         runBlocking(CliCoroutineExceptionLogger) {
@@ -55,7 +54,7 @@ public fun main(args: Array<String>) {
             }
             val cwd = SystemCoroutineFileSystem.resolve(Path("."))
             val endpoint = ensureBackendForTui(home)
-            initializeProcessLogging(home, "Tui-${processId()}")
+            initializeTuiLogging(home)
             withLocalRpcClient(home, endpoint) { connection ->
                 withFrontendApplication(connection, cwd) { application ->
                     try {
