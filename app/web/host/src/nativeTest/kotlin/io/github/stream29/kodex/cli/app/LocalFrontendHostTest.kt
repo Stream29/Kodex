@@ -15,6 +15,7 @@ import io.ktor.server.routing.*
 import io.ktor.utils.io.*
 import kotlinx.cinterop.convert
 import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
