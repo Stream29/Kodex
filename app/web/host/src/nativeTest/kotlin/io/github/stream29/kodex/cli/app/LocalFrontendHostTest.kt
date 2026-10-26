@@ -71,6 +71,7 @@ val localFrontendHostTest by testSuite(compartment = { TestCompartment.RealTime 
                 val address = HostAddress(url)
                 val host = "Host" to address.authority
                 val origin = "Origin" to address.origin
+                val lookups = fixture.resources.lookups.value
                 for (headers in listOf(
                     listOf(origin),
                     listOf("Host" to "localhost:${address.port}", origin),
@@ -85,10 +86,13 @@ val localFrontendHostTest by testSuite(compartment = { TestCompartment.RealTime 
                 )) {
                     val reply = fixture.wire.request(address, "POST", address.bootstrap,
                         headers + ("Content-Type" to "application/json"), ticketBody())
-                    assertEquals(403, reply.status, headers.toString())
-                    reply.assertPrivateHeaders()
+                    // CIO rejects duplicate Host fields before application response headers exist.
+                    val duplicateHost = headers.count { it.first == HttpHeaders.Host } > 1
+                    assertEquals(if (duplicateHost) 400 else 403, reply.status, headers.toString())
+                    if (!duplicateHost) reply.assertPrivateHeaders()
                     assertFalse(reply.body.decodeToString().contains(BrowserPassword))
                 }
+                assertEquals(lookups, fixture.resources.lookups.value)
             }
         }
     }
@@ -167,7 +171,11 @@ val localFrontendHostTest by testSuite(compartment = { TestCompartment.RealTime 
                     listOf("Host" to address.authority, "Origin" to "http://evil.test"),
                     listOf("Host" to address.authority, "Origin" to address.origin, "Origin" to address.origin),
                     listOf("Host" to address.authority, "Sec-Fetch-Site" to "cross-site"),
-                )) assertEquals(404, fixture.wire.request(address, "GET", address.base, headers).status)
+                )) {
+                    val duplicateHost = headers.count { it.first == HttpHeaders.Host } > 1
+                    assertEquals(if (duplicateHost) 400 else 404,
+                        fixture.wire.request(address, "GET", address.base, headers).status, headers.toString())
+                }
                 assertEquals(lookups, fixture.resources.lookups.value)
                 for (path in listOf("", "/absolute", ".", "..", "a/../b", "a//b", "a\\b", "x?y")) {
                     assertFalse(frontendAssetPath(path), path)
