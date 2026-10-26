@@ -117,15 +117,18 @@ val fileSystemKodexSessionRepositoryTest by testSuite {
                     else CancellationException("published settings cleanup cancelled")
                     val secondary = IOException("settings numbered record rescan")
                     val nonce = timeline.cacheNonce.value
-                    val settingsDirectory = Path(root, "sessions/$index/settings")
+                    val settingsDirectory = Path(root, "sessions", index.toString(), "settings")
                     val durableRecord = Path(settingsDirectory, "1.json")
-                    fileSystem.arm(settingsDirectory, primary, secondary)
+                    // Storage resolves its directory. A lexical alias must still
+                    // arm both faults, even with an already absolute temp root.
+                    fileSystem.arm(Path(settingsDirectory, "."), primary, secondary)
 
                     // Catch inside the operation, including injected cancellation,
                     // without cancelling the borrowed repository/backend owner.
                     val observed = runCatching {
                         session.runtime.compareAndSetSettings(original, published)
                     }.exceptionOrNull()
+                    assertEquals(listOf("published", "cleanup", "rescan"), fileSystem.faultEvents)
                     assertSame(primary, observed)
                     assertTrue(primary.suppressedExceptions.any { it === secondary })
                     val durableBytes = SystemCoroutineFileSystem.readBytes(durableRecord)
@@ -897,12 +900,15 @@ private class SettingsPublicationRescanFaultFileSystem(
     private var targetDirectory: Path? = null
     private var primary: Throwable? = null
     private var secondary: Throwable? = null
-    private var published = false
+    private var publishedTemporary: Path? = null
+    private val mutableFaultEvents = mutableListOf<String>()
+    val faultEvents: List<String> get() = mutableFaultEvents
     var targetListCount: Int = 0
         private set
 
-    fun arm(directory: Path, primary: Throwable, secondary: Throwable) {
-        targetDirectory = directory
+    suspend fun arm(directory: Path, primary: Throwable, secondary: Throwable) {
+        // Match FileSystemAgentStorage's resolved path, not the caller's alias.
+        targetDirectory = delegate.resolve(directory)
         this.primary = primary
         this.secondary = secondary
     }
@@ -910,13 +916,17 @@ private class SettingsPublicationRescanFaultFileSystem(
     override suspend fun atomicMove(source: Path, destination: Path) {
         delegate.atomicMove(source, destination)
         val directory = targetDirectory ?: return
-        if (primary != null && destination == Path(directory, "1.json")) published = true
+        if (primary != null && destination == Path(directory, "1.json")) {
+            publishedTemporary = source
+            mutableFaultEvents += "published"
+        }
     }
 
     override suspend fun delete(path: Path, mustExist: Boolean) {
-        if (published && path.parent == targetDirectory && path.name.endsWith(".tmp")) {
+        if (path == publishedTemporary) {
             primary?.let { failure ->
                 primary = null
+                mutableFaultEvents += "cleanup"
                 throw failure
             }
         }
@@ -926,9 +936,10 @@ private class SettingsPublicationRescanFaultFileSystem(
     override suspend fun list(directory: Path): Collection<Path> {
         if (directory == targetDirectory) {
             targetListCount += 1
-            if (published && primary == null) {
+            if (publishedTemporary != null && primary == null) {
                 secondary?.let { failure ->
                     secondary = null
+                    mutableFaultEvents += "rescan"
                     throw failure
                 }
             }
