@@ -211,7 +211,7 @@ async function page() {
 
 try {
   staticHost = spawn(process.execPath, [
-    fileURLToPath(new URL("../../test-support/web-renderer/scripts/serve.mjs", import.meta.url)), website,
+    fileURLToPath(new URL("../test-support/renderer/scripts/serve.mjs", import.meta.url)), website,
   ], { stdio: ["ignore", "pipe", "pipe"] });
   staticExit = new Promise(done => staticHost.once("exit", done));
   staticHost.on("error", () => errors.push("Owned static process failed to start"));
