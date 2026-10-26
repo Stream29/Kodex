@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
 const fixture = resolve(process.argv[2]);
-assert.ok(fixture.endsWith("/app/web/test-support/backend/build/bin/linuxX64/browserDebugExecutable/kodex-product-browser-fixture.kexe"),
+assert.match(fixture, /\/app\/web\/test-support\/backend\/build\/bin\/(?:linuxX64|macosArm64)\/browserDebugExecutable\/kodex-product-browser-fixture\.kexe$/,
   "Use only the temporary-Home/offline production-host fixture, never an installed backend.");
 const website = resolve(process.argv[3]);
 const output = resolve(process.argv[4]);

@@ -251,7 +251,7 @@ try {
     Buffer.from((await send("Page.captureScreenshot", { format: "png" })).data, "base64"));
   measurements.runtimeHeap = await send("Runtime.getHeapUsage");
   measurements.rendererMetrics = (await send("Performance.getMetrics")).metrics;
-  measurements.scope = "Single isolated Linux headless run, 900x700 and 1280x1000; offline fixture with 300ms response parts. Not a cold-machine, long-history or process-RSS benchmark.";
+  measurements.scope = `Single isolated ${process.platform}/${process.arch} headless run, 900x700 and 1280x1000; offline fixture with 300ms response parts. Not a cold-machine, long-history or process-RSS benchmark.`;
   await writeFile(join(output, "performance-sample.json"), JSON.stringify(measurements, null, 2));
   await send("Emulation.clearDeviceMetricsOverride");
   await wait(editor, inputs => inputs.length === 1 && inputs[0].active, "editor after viewport restoration");
