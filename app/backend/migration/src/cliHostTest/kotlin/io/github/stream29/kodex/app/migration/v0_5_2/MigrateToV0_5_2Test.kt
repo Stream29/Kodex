@@ -28,6 +28,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 public val migrateToV0_5_2Test by testSuite(
     compartment = { TestCompartment.RealTime },
@@ -241,16 +242,17 @@ public val migrateToV0_5_2Test by testSuite(
 
             val injectedFailure = IOException("injected write failure on second work record")
             val failingFs = object : CoroutineFileSystem by SystemCoroutineFileSystem {
-                override suspend fun writeBytes(
+                override suspend fun writePrivateBytes(
                     path: Path,
                     content: ByteArray,
-                    append: Boolean,
                     mustCreate: Boolean,
                 ) {
-                    if (path == recordPath(work, 1)) {
+                    if (path == migrationTemporary(work) &&
+                        SystemCoroutineFileSystem.readString(recordPath(work, 0)) == MigratedWorkExecMissingYield
+                    ) {
                         throw injectedFailure
                     }
-                    SystemCoroutineFileSystem.writeBytes(path, content, append, mustCreate)
+                    SystemCoroutineFileSystem.writePrivateBytes(path, content, mustCreate)
                 }
             }
 
@@ -266,7 +268,7 @@ public val migrateToV0_5_2Test by testSuite(
                 },
             )
 
-            // First record was migrated in place; second record and unstable remain unmigrated; checkpoint stayed at 0.4.15
+            // Only the first record was atomically published; the checkpoint remains at 0.4.15.
             assertEquals("\"0.4.15\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
             assertEquals(MigratedWorkExecMissingYield, SystemCoroutineFileSystem.readString(recordPath(work, 0)))
             assertEquals(LegacyWorkWriteEmptyCharsMissingYield, SystemCoroutineFileSystem.readString(recordPath(work, 1)))
@@ -302,17 +304,17 @@ public val migrateToV0_5_2Test by testSuite(
             SystemCoroutineFileSystem.writeString(Path(work, "latest.json"), "0")
 
             val cancellingFs = object : CoroutineFileSystem by SystemCoroutineFileSystem {
-                override suspend fun writeBytes(
+                override suspend fun writePrivateBytes(
                     path: Path,
                     content: ByteArray,
-                    append: Boolean,
                     mustCreate: Boolean,
                 ) {
-                    if (path == recordPath(work, 0)) {
+                    if (path == migrationTemporary(work)) {
+                        SystemCoroutineFileSystem.writePrivateBytes(path, content.copyOf(7), mustCreate)
                         currentCoroutineContext().cancel(CancellationException("cancelled during 0.5.2 write"))
                         currentCoroutineContext().ensureActive()
                     }
-                    SystemCoroutineFileSystem.writeBytes(path, content, append, mustCreate)
+                    SystemCoroutineFileSystem.writePrivateBytes(path, content, mustCreate)
                 }
             }
 
@@ -329,6 +331,7 @@ public val migrateToV0_5_2Test by testSuite(
 
             assertEquals("\"0.4.15\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
             assertEquals(LegacyWorkExecMissingYield, SystemCoroutineFileSystem.readString(recordPath(work, 0)))
+            assertFalse(SystemCoroutineFileSystem.exists(migrationTemporary(work)))
             assertTrue(SystemCoroutineFileSystem.list(Path(home, ".locks", "home")).isEmpty())
 
             prepareKodexHome(
@@ -340,6 +343,150 @@ public val migrateToV0_5_2Test by testSuite(
 
             assertEquals(MigratedWorkExecMissingYield, SystemCoroutineFileSystem.readString(recordPath(work, 0)))
             assertEquals("\"0.5.2\"", SystemCoroutineFileSystem.readString(Path(home, "version.json")))
+        }
+
+        for (timelineName in listOf("work", "unstable")) {
+            for (fault in listOf("partial write", "before publish", "after publish")) {
+                test("0.6.0 preserves $timelineName records across $fault and retries safely") { home ->
+                    val version = Path(home, "version.json")
+                    SystemCoroutineFileSystem.writeString(version, "\"0.4.15\"")
+                    val session = createFullSessionSkeleton(home, 0)
+                    val timeline = timelineDirectory(session, timelineName)
+                    val target = recordPath(timeline, 0)
+                    val temporary = migrationTemporary(timeline)
+                    val original = if (timelineName == "work") LegacyWorkExecMissingYield else LegacyUnstableMultiEventArray
+                    val expected = if (timelineName == "work") MigratedWorkExecMissingYield else MigratedUnstableMultiEventArray
+                    SystemCoroutineFileSystem.writeString(target, original)
+                    SystemCoroutineFileSystem.writeString(Path(timeline, "latest.json"), "0")
+                    // Simulate an abandoned staging file from a killed prior process.
+                    SystemCoroutineFileSystem.writeString(temporary, "{stale-partial")
+                    val injected = IOException("injected $fault")
+                    val failing = object : CoroutineFileSystem by SystemCoroutineFileSystem {
+                        override suspend fun writePrivateBytes(
+                            path: Path,
+                            content: ByteArray,
+                            mustCreate: Boolean,
+                        ) {
+                            if (path == temporary && fault == "partial write") {
+                                SystemCoroutineFileSystem.writePrivateBytes(path, content.copyOf(7), mustCreate)
+                                throw injected
+                            }
+                            SystemCoroutineFileSystem.writePrivateBytes(path, content, mustCreate)
+                        }
+
+                        override suspend fun atomicMove(source: Path, destination: Path) {
+                            if (source == temporary && fault == "before publish") throw injected
+                            SystemCoroutineFileSystem.atomicMove(source, destination)
+                            if (source == temporary && fault == "after publish") throw injected
+                        }
+                    }
+                    assertSame(injected, assertFailsWith<IOException> {
+                        prepareKodexHome(
+                            home, MigrationVersion("0.6.0"), KodexHomeMigrations, failing,
+                        ).closeAndJoin()
+                    })
+                    assertEquals(if (fault == "after publish") expected else original, SystemCoroutineFileSystem.readString(target))
+                    assertEquals("\"0.4.15\"", SystemCoroutineFileSystem.readString(version))
+                    assertFalse(SystemCoroutineFileSystem.exists(temporary))
+                    prepareKodexHome(
+                        home, MigrationVersion("0.6.0"), KodexHomeMigrations, SystemCoroutineFileSystem,
+                    ).closeAndJoin()
+                    assertEquals(expected, SystemCoroutineFileSystem.readString(target))
+                    assertEquals("\"0.5.2\"", SystemCoroutineFileSystem.readString(version))
+                    assertFalse(SystemCoroutineFileSystem.exists(temporary))
+                }
+            }
+        }
+
+        test("cancellation after atomic publication retains a whole record and retries without rewriting it") { home ->
+            val version = Path(home, "version.json")
+            SystemCoroutineFileSystem.writeString(version, "\"0.4.15\"")
+            val session = createFullSessionSkeleton(home, 0)
+            val work = timelineDirectory(session, "work")
+            val target = recordPath(work, 0)
+            val temporary = migrationTemporary(work)
+            SystemCoroutineFileSystem.writeString(target, LegacyWorkExecMissingYield)
+            SystemCoroutineFileSystem.writeString(Path(work, "latest.json"), "0")
+            val cancelling = object : CoroutineFileSystem by SystemCoroutineFileSystem {
+                override suspend fun atomicMove(source: Path, destination: Path) {
+                    SystemCoroutineFileSystem.atomicMove(source, destination)
+                    if (source == temporary) {
+                        currentCoroutineContext().cancel(CancellationException("cancelled after publish"))
+                        currentCoroutineContext().ensureActive()
+                    }
+                }
+            }
+            assertFailsWith<CancellationException> {
+                coroutineScope {
+                    prepareKodexHome(
+                        home, MigrationVersion("0.6.0"), KodexHomeMigrations, cancelling,
+                    ).closeAndJoin()
+                }
+            }
+            assertEquals(MigratedWorkExecMissingYield, SystemCoroutineFileSystem.readString(target))
+            assertEquals("\"0.4.15\"", SystemCoroutineFileSystem.readString(version))
+            assertFalse(SystemCoroutineFileSystem.exists(temporary))
+            val rewritten = mutableListOf<Path>()
+            prepareKodexHome(
+                home, MigrationVersion("0.6.0"), KodexHomeMigrations,
+                WriteTrackingFileSystem(rewritten, trackOnlySessionRecords = true),
+            ).closeAndJoin()
+            assertTrue(rewritten.isEmpty())
+            assertEquals("\"0.5.2\"", SystemCoroutineFileSystem.readString(version))
+        }
+
+        test("0.6.0 upgrades published and legacy checkpoints and keeps restart read-only") { home ->
+            for (checkpoint in listOf("0.4.15", "0.5.1", "0.5.2")) {
+                val root = Path(home, checkpoint)
+                SystemCoroutineFileSystem.createDirectories(root)
+                val version = Path(root, "version.json")
+                SystemCoroutineFileSystem.writeString(version, "\"$checkpoint\"")
+                prepareKodexHome(
+                    root, MigrationVersion("0.6.0"), KodexHomeMigrations, SystemCoroutineFileSystem,
+                ).closeAndJoin()
+                assertEquals("\"0.5.2\"", SystemCoroutineFileSystem.readString(version))
+                SystemCoroutineFileSystem.writeString(Path(root, "sessions"), "must not scan")
+                val guarded = object : CoroutineFileSystem by SystemCoroutineFileSystem {
+                    override suspend fun writeBytes(
+                        path: Path,
+                        content: ByteArray,
+                        append: Boolean,
+                        mustCreate: Boolean,
+                    ) {
+                        check(path != version && !path.name.endsWith(".write.lock"))
+                        SystemCoroutineFileSystem.writeBytes(path, content, append, mustCreate)
+                    }
+                }
+                val handle = prepareKodexHome(
+                    root, MigrationVersion("0.6.0"), KodexHomeMigrations, guarded,
+                )
+                try {
+                    assertEquals(MigrationVersion("0.5.2"), handle.version)
+                } finally {
+                    handle.closeAndJoin()
+                }
+                assertEquals("\"0.5.2\"", SystemCoroutineFileSystem.readString(version))
+            }
+        }
+
+        test("migrates a Native scale fixture and performs no record writes on the second pass") { home ->
+            val session = createFullSessionSkeleton(home, 0)
+            val work = timelineDirectory(session, "work")
+            val count = 512
+            repeat(count) { index ->
+                SystemCoroutineFileSystem.writeString(recordPath(work, index), LegacyWorkExecMissingYield)
+            }
+            SystemCoroutineFileSystem.writeString(Path(work, "latest.json"), (count - 1).toString())
+            val started = TimeSource.Monotonic.markNow()
+            migrateToV0_5_2(home, SystemCoroutineFileSystem)
+            repeat(count) { index ->
+                assertEquals(MigratedWorkExecMissingYield, SystemCoroutineFileSystem.readString(recordPath(work, index)))
+            }
+            val writes = mutableListOf<Path>()
+            migrateToV0_5_2(home, WriteTrackingFileSystem(writes))
+            assertTrue(writes.isEmpty())
+            assertFalse(SystemCoroutineFileSystem.exists(migrationTemporary(work)))
+            println("0.5.2 Native fixture: records=$count sourceBytes=${count * LegacyWorkExecMissingYield.encodeToByteArray().size} migrationAndReadback=${started.elapsedNow()}")
         }
 
         for ((label, invalidWorkPayload) in invalidWorkPayloads()) {
@@ -462,12 +609,24 @@ private class WriteTrackingFileSystem(
         append: Boolean,
         mustCreate: Boolean,
     ) {
-        if (!trackOnlySessionRecords || (path.name.endsWith(".json") && path.name != "version.json" && path.name != "latest.json")) {
+        if (path.name != ".kodex-migration-0.5.2-record.tmp" &&
+            (!trackOnlySessionRecords || (path.name.endsWith(".json") && path.name != "version.json" && path.name != "latest.json"))
+        ) {
             writtenPaths += path
         }
         SystemCoroutineFileSystem.writeBytes(path, content, append, mustCreate)
     }
+
+    override suspend fun atomicMove(source: Path, destination: Path) {
+        SystemCoroutineFileSystem.atomicMove(source, destination)
+        if (source.name == ".kodex-migration-0.5.2-record.tmp") {
+            writtenPaths += destination
+        }
+    }
 }
+
+private fun migrationTemporary(timeline: Path): Path =
+    Path(timeline, ".kodex-migration-0.5.2-record.tmp")
 
 private suspend fun createFullSessionSkeleton(
     home: Path,

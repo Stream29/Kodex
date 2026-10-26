@@ -4,11 +4,12 @@ import io.github.stream29.kodex.agentstorage.filesystemlayout.readRecord
 import io.github.stream29.kodex.agentstorage.filesystemlayout.recordPath
 import io.github.stream29.kodex.agentstorage.filesystemlayout.storedRecordIndexes
 import io.github.stream29.kodex.agentstorage.filesystemlayout.timelineDirectory
-import io.github.stream29.kodex.agentstorage.filesystemlayout.writeRecord
 import io.github.stream29.kodex.utils.kotlinxiocoroutines.CoroutineFileSystem
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.io.IOException
 import kotlinx.io.files.Path
 import kotlinx.serialization.json.Json
@@ -66,9 +67,8 @@ private suspend fun migrateWorkTimeline(
         val event = element as? JsonObject
             ?: throw IOException("Work record is not a JSON object: $path")
         val migrated = migrateWorkEvent(event, path) ?: return@forEach
-        writeRecord(
-            timelineDirectory = work,
-            index = index,
+        replaceRecordAtomically(
+            path = path,
             content = MigrationJson.encodeToString(JsonObject.serializer(), migrated).encodeToByteArray(),
             fileSystem = fileSystem,
         )
@@ -104,12 +104,29 @@ private suspend fun migrateUnstableTimeline(
             },
         )
         if (!changed) return@forEach
-        writeRecord(
-            timelineDirectory = unstable,
-            index = index,
+        replaceRecordAtomically(
+            path = path,
             content = MigrationJson.encodeToString(JsonArray.serializer(), migratedEvents).encodeToByteArray(),
             fileSystem = fileSystem,
         )
+    }
+}
+
+private suspend fun replaceRecordAtomically(
+    path: Path,
+    content: ByteArray,
+    fileSystem: CoroutineFileSystem,
+) {
+    val temporary = Path(checkNotNull(path.parent), ".kodex-migration-0.5.2-record.tmp")
+    try {
+        fileSystem.delete(temporary, mustExist = false)
+        fileSystem.writePrivateBytes(temporary, content, mustCreate = true)
+        currentCoroutineContext().ensureActive()
+        fileSystem.atomicMove(temporary, path)
+    } finally {
+        withContext(NonCancellable) {
+            fileSystem.delete(temporary, mustExist = false)
+        }
     }
 }
 
