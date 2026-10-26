@@ -1,0 +1,69 @@
+plugins {
+    id("kodex.kmp-spec-impl")
+    id("kodex.kmp-view")
+    id("kodex.kmp-tests")
+}
+
+kotlin {
+    sourceSets {
+        named("specMain").dependencies {
+            api(project(":app-component-account-usage-view"))
+            api(project(":app-component-widgets"))
+            api(project(":app-component-application-view"))
+            api(project(":app-component-session-tab-bar-view"))
+            api(project(":app-component-agent-view"))
+            api(project(":app-component-session-sidebar-view"))
+            api(project(":app-component-history-index-view"))
+            api(project(":app-component-composer-view"))
+            api(project(":app-component-new-session-view"))
+            api(project(":app-component-history-view"))
+            api(project(":app-component-runtime-configuration-view"))
+            api(project(":app-tui-components"))
+            api(project(":app-component-session-delete-view"))
+            api(project(":app-component-session-rename-view"))
+            api(project(":app-component-usage-reset-view"))
+            api(project(":app-component-application-preferences-view"))
+            api(project(":app-component-session-title-settings-view"))
+            api(project(":app-component-authentication-settings-view"))
+            api(project(":app-component-openai-login-view"))
+            api(project(":app-component-new-session-defaults-view"))
+            api(project(":app-component-session-settings-view"))
+            api(project(":app-component-context-source-settings-view"))
+            api(project(":app-component-hook-settings-view"))
+            api(project(":app-component-mcp-settings-view"))
+            api(project(":app-component-path-picker-view"))
+            api(project(":app-component-working-directory-view"))
+            api(project(":app-component-session-catalog-view"))
+            api(project(":app-component-settings-view"))
+            api(project(":app-component-request-user-input-view"))
+            api(project(":app-component-suggest-subagent-task-view"))
+            api(project(":utils-external-url"))
+            api(libs.mosaic.runtime)
+        }
+        named("mosaicMain").dependencies {
+            implementation(project(":app-tui-components"))
+            implementation(project(":utils-terminal-text"))
+            implementation(libs.kotlinx.datetime)
+            implementation(libs.kotlin.logging)
+        }
+        named("mosaicTest").dependencies {
+            implementation(project(":app-component-account-usage-viewmodel"))
+            implementation(project(":app-rpc"))
+            implementation(project(":app-component-session-viewmodel"))
+            implementation(project(":app-component-session-contract"))
+            implementation(project(":rpc-server"))
+            implementation(project(":rpc-in-memory"))
+            implementation(project(":app-rpc-system"))
+            implementation(project(":app-rpc-test-support"))
+            implementation(project(":app-backend-settings"))
+            implementation(project(":app-tui-path-picker"))
+            implementation(project(":utils-kotlinx-io-coroutines-system"))
+            implementation(project(":agent-session-in-memory"))
+            implementation(project(":agent-session-test"))
+            implementation(project(":agent-storage-core"))
+            implementation(project(":utils-coroutines"))
+            implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.mosaic.testing)
+        }
+    }
+}

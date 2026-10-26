@@ -50,11 +50,21 @@ public interface DirectoryPickerBrowser {
     public suspend fun load(directory: Path): DirectoryPickerLoadResult
 }
 
-/** A successfully resolved directory and its direct child directories. */
+/**
+ * A resolved directory and ordered children, with metadata supplied by the
+ * directory capability. Frontends must not infer names or parents using their
+ * own operating system's path rules.
+ */
 public data class DirectoryPickerListing(
     public val directory: Path,
     public val children: List<Path>,
-)
+    public val parentDirectory: Path?,
+    public val childNames: Map<Path, String>,
+) {
+    init {
+        require(childNames.keys == children.toSet()) { "Every listed child must have exactly one display name." }
+    }
+}
 
 /** Result of loading a directory and its direct child directories. */
 public sealed interface DirectoryPickerLoadResult {
@@ -64,6 +74,8 @@ public sealed interface DirectoryPickerLoadResult {
 
     public data class Failure(
         public val failure: DirectoryPickerFailure,
+        /** Parent of the requested directory, or null when unavailable. */
+        public val parentDirectory: Path? = null,
     ) : DirectoryPickerLoadResult
 }
 
@@ -75,5 +87,7 @@ public sealed interface DirectoryPickerValidationResult {
 
     public data class Failure(
         public val failure: DirectoryPickerFailure,
+        /** Parent of the requested directory, or null when unavailable. */
+        public val parentDirectory: Path? = null,
     ) : DirectoryPickerValidationResult
 }

@@ -9,5 +9,6 @@ public expect suspend fun <R> withLocalBackendServer(
     instanceId: String,
     control: BackendControl,
     registerServices: RpcServer.() -> Unit,
+    browserAccess: LocalBrowserAccess? = null,
     block: suspend CoroutineScope.(Int) -> R,
 ): R

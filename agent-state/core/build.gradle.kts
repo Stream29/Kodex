@@ -33,6 +33,7 @@ kotlin {
             implementation(project(":utils-coroutines"))
         }
         commonTest.dependencies {
+            implementation(project(":agent-storage-filesystem"))
             implementation(project(":agent-context-prefix"))
             implementation(project(":agent-storage-core"))
             implementation(project(":openai-client-test"))

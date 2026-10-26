@@ -1,6 +1,6 @@
 plugins {
     id("kodex.kmp-spec-impl")
-    id("kodex.kmp-viewmodel")
+    id("kodex.kmp-frontend")
     id("kodex.kmp-tests")
 }
 
@@ -23,9 +23,11 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
             implementation(project(":openai-json-codec"))
+            implementation(project(":agent-storage-core"))
+        }
+        nativeTest.dependencies {
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-test"))
-            implementation(project(":agent-storage-core"))
         }
     }
 }

@@ -15,6 +15,7 @@ public actual suspend fun backendControlRequest(endpoint: BackendEndpoint, actio
     require(endpoint.controlProtocol == BackendControlProtocol) { "Backend control protocol is incompatible." }
     require(action in setOf("status", "stop", "reload"))
     val client = HttpClient {
+        followRedirects = false
         install(HttpTimeout) { requestTimeoutMillis = 10_000; connectTimeoutMillis = 5_000 }
     }
     try {

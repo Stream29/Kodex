@@ -2,6 +2,8 @@
 
 package io.github.stream29.kodex.cli.newsession
 
+import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
+import io.github.stream29.kodex.cli.settings.KodexNewSessionSettings
 import io.github.stream29.kodex.app.agent.contract.ComposerViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModel
 import io.github.stream29.kodex.app.session.contract.NewSessionViewModelArguments
@@ -9,9 +11,6 @@ import io.github.stream29.kodex.app.session.contract.NewSessionViewModelFactory
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModel
 import io.github.stream29.kodex.app.session.contract.PersistedSessionViewModelRegistry
 import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
-import io.github.stream29.kodex.cli.rpc.RpcGlobalSettings
-import io.github.stream29.kodex.cli.rpc.RpcSessionDraft
-import io.github.stream29.kodex.cli.rpc.RpcSessionViews
 import io.github.stream29.kodex.openai.KodexAgentSettings
 import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
@@ -23,9 +22,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.io.files.Path
 
 public expect class DefaultNewSessionViewModelFactory(
-    views: RpcSessionViews,
+    createDraft: (NewSessionViewModelArguments, CoroutineScope) -> NewSessionDraftPort,
+    models: StateFlow<List<ModelInfo>>,
     sessions: PersistedSessionViewModelRegistry,
-    global: RpcGlobalSettings,
+    createRuntimeConfiguration: (AgentSettingsViewModel, CoroutineScope) -> RuntimeConfigurationViewModel,
     scope: CoroutineScope,
 ) : NewSessionViewModelFactory {
     override fun create(arguments: NewSessionViewModelArguments): NewSessionViewModel
@@ -34,12 +34,13 @@ public expect class DefaultNewSessionViewModelFactory(
 /** Reusable frontend child; only cwd/Composer are local, model configuration edits shared defaults. */
 public expect class RpcNewSessionViewModel internal constructor(
     arguments: NewSessionViewModelArguments,
-    views: RpcSessionViews,
+    createDraft: (NewSessionViewModelArguments, CoroutineScope) -> NewSessionDraftPort,
+    models: StateFlow<List<ModelInfo>>,
     sessions: PersistedSessionViewModelRegistry,
-    global: RpcGlobalSettings,
+    createRuntimeConfiguration: (AgentSettingsViewModel, CoroutineScope) -> RuntimeConfigurationViewModel,
     scope: CoroutineScope,
 ) : NewSessionViewModel {
-    public val draft: RpcSessionDraft
+    public val draft: NewSessionDraftPort
     override val models: StateFlow<List<ModelInfo>>
     override val settings: StateFlow<KodexAgentSettings>
     override val runtimeConfiguration: RuntimeConfigurationViewModel
@@ -57,4 +58,20 @@ public expect class RpcNewSessionViewModel internal constructor(
     ): Unit
     override suspend fun submit(expectedRevision: Long): PersistedSessionViewModel?
     override fun close(): Unit
+}
+
+/**
+ * Exact owner-bound draft operations. Submission admits only the captured Composer revision;
+ * it must not replay accepted writes or consume a later cwd/edit after cancellation or recovery.
+ */
+public interface NewSessionDraftPort : AutoCloseable {
+    public val settings: StateFlow<KodexAgentSettings>
+    public val composer: ComposerViewModel
+    public suspend fun <F> editDefaults(
+        select: (KodexNewSessionSettings) -> F,
+        replace: (KodexNewSessionSettings) -> KodexNewSessionSettings,
+    )
+    public fun updateWorkingDirectory(path: Path)
+    public suspend fun <T> submit(expectedRevision: Long, open: suspend (Int) -> T): T?
+    override fun close()
 }

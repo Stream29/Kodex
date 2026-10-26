@@ -53,9 +53,17 @@ public actual class LocalRpcConnection internal constructor(
         private set
     actual override fun onReconnection(handler: suspend (RpcClient, () -> Boolean) -> Unit) { recovery = handler }
     actual override suspend fun <T> call(call: RpcCall): T {
-        val connection = active.value ?: error("Backend is disconnected; operation was not submitted.")
-        check(connection.transport.alive) { "Backend is disconnected; operation was not submitted." }
-        return connection.client.call(call)
+        currentCoroutineContext().ensureActive()
+        val connection = active.value ?: throw BackendConnectionLost("Backend is disconnected; operation was not submitted.")
+        if (!connection.transport.alive) throw BackendConnectionLost("Backend is disconnected; operation was not submitted.")
+        return try { connection.client.call(call) }
+        catch (failure: Throwable) {
+            currentCoroutineContext().ensureActive()
+            if (!connection.transport.alive) {
+                throw BackendConnectionLost("Backend transport closed; operation outcome may be unknown.", failure)
+            }
+            throw failure
+        }
     }
     actual override fun <T> callServerStreaming(call: RpcCall): Flow<T> = channelFlow {
         active.collectLatest { connection ->

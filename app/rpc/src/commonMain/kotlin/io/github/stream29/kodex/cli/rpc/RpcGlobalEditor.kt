@@ -26,6 +26,7 @@ public actual class RpcGlobalEditor actual constructor(
     public actual val global: RpcGlobalSettings,
     public actual val rpc: GlobalRpc,
     applicationScope: CoroutineScope,
+    private val environment: RpcFrontendEnvironment,
 ) : GlobalSettingsViewModel {
     private val owner = Job(applicationScope.coroutineContext[Job])
     public actual val scope: CoroutineScope = CoroutineScope(applicationScope.coroutineContext + owner)
@@ -39,7 +40,7 @@ public actual class RpcGlobalEditor actual constructor(
     actual override fun dismissOperationFailure() { global.dismissOperationFailure() }
 
     actual override val contextSourceSettings: ContextSourceSettingsViewModel = createContextSourceSettingsViewModel(
-        RpcContextSourceSettingsDependencies(global, global.settings.projectState { it.contextSources }, writes),
+        RpcContextSourceSettingsDependencies(global, global.settings.projectState { it.contextSources }, writes, environment.contextPaths),
         scope,
     )
     actual override val sessionTitleSettings: SessionTitleSettingsViewModel = createSessionTitleSettingsViewModel(
@@ -89,7 +90,7 @@ public actual class RpcGlobalEditor actual constructor(
         }, scope,
     )
     actual override val mcpSettings: McpSettingsViewModel = createMcpSettingsViewModel(
-        RpcMcpSettingsDependencies(global, rpc, mcp, ::acceptWrite), scope,
+        RpcMcpSettingsDependencies(global, rpc, mcp, ::acceptWrite, environment.oauthCallbacks), scope,
     )
     actual override val hookSettings: HookSettingsViewModel = createHookSettingsViewModel(
         RpcHookSettingsDependencies(global, global.settings.projectState { it.hooks }, backend = true, accept = ::acceptWrite), scope,
@@ -108,7 +109,7 @@ public actual class RpcGlobalEditor actual constructor(
         owner.ensureActive()
         val target = OAuthTarget.OpenAi(global.settings.value.authSource)
         return createOpenAiLoginViewModel(
-            dependencies = OpenAiLoginDependencies { startRpcOAuth(rpc, target, ownerScope) },
+            dependencies = OpenAiLoginDependencies { startRpcOAuth(rpc, target, ownerScope, environment.oauthCallbacks) },
             ownerScope = ownerScope,
         )
     }

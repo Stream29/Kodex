@@ -1,6 +1,6 @@
 plugins {
     id("kodex.kmp-spec-impl")
-    id("kodex.kmp-viewmodel")
+    id("kodex.kmp-frontend")
     id("kodex.kmp-tests")
 }
 
@@ -12,8 +12,6 @@ kotlin {
         }
         commonMain.dependencies {
             implementation(project(":utils-coroutines"))
-            implementation(project(":utils-kotlinx-io-coroutines-system"))
-            implementation(project(":utils-os-environment"))
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {

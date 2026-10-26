@@ -1,0 +1,2 @@
+headers = kauri_gtk.h
+package = dev.kauri.gtk

@@ -7,7 +7,7 @@ kotlin {
     applyDefaultHierarchyTemplate()
     sourceSets {
         named("specMain").dependencies {
-            api(project(":app-backend-daemon"))
+            api(project(":app-rpc-protocol"))
             api(libs.kotlinx.serialization.json)
         }
         commonMain.dependencies {

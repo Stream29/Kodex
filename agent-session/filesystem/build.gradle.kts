@@ -16,7 +16,7 @@ kotlin {
         commonMain.dependencies {
             implementation(project(":agent-runtime-composition"))
             implementation(project(":agent-state-core"))
-            implementation(project(":agent-storage-core"))
+            implementation(project(":agent-storage-filesystem"))
             implementation(project(":utils-coroutines"))
             implementation(project(":utils-filesystem-lease"))
             implementation(project(":utils-read-write-mutex"))

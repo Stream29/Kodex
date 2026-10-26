@@ -30,6 +30,20 @@ internal fun KotlinMultiplatformExtension.configureDesktopTargets() {
     }
 }
 
+@OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
+internal fun KotlinMultiplatformExtension.configureFrontendTargets() {
+    configureDesktopTargets()
+    configureBrowserTarget()
+}
+
+@OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
+internal fun KotlinMultiplatformExtension.configureBrowserTarget() {
+    wasmJs {
+        browser()
+        binaries.library()
+    }
+}
+
 @OptIn(ExperimentalKotlinGradlePluginApi::class)
 internal fun KotlinMultiplatformExtension.configureMosaicHierarchy() {
     applyHierarchyTemplate(KotlinHierarchyTemplate.default) {

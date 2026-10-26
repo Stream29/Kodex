@@ -1,13 +1,13 @@
 plugins {
     id("kodex.kmp-spec-impl")
-    id("kodex.kmp-host")
+    id("kodex.kmp-frontend")
     id("kodex.kmp-tests")
     alias(libs.plugins.kotlin.serialization)
 }
 
 kotlin {
     sourceSets {
-        commonMain.dependencies {
+        nativeTest.dependencies {
             implementation(project(":utils-kotlinx-io-coroutines-system"))
         }
         commonTest.dependencies {

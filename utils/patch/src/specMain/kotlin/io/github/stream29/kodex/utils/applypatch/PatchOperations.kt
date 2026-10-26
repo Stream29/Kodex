@@ -43,9 +43,6 @@ public expect fun findLineSequence(
  */
 public expect fun String.parsePatch(): Patch
 
-/** Applies this patch using the actual host filesystem; see the explicit-FS operation for guarantees. */
-public expect suspend fun Patch.applyToFileSystem(root: Path = Path(".")): PatchApplyResult
-
 /**
  * Applies this parsed patch in hunk order under [root], using [fileSystem].
  *

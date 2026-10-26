@@ -16,10 +16,10 @@ import kotlinx.rpc.withService
 public actual class RpcServices actual constructor(client: RpcClient) {
     public actual val global: GlobalRpc = client.withService()
     public actual val runtime: AgentRuntimeRpc = client.withService()
-    public actual val index: IndexTimelineRpc = client.withService()
-    public actual val work: WorkTimelineRpc = client.withService()
-    public actual val settings: SettingsTimelineRpc = client.withService()
-    public actual val timestamp: TimestampTimelineRpc = client.withService()
-    public actual val tokenCount: TokenCountTimelineRpc = client.withService()
-    public actual val unstable: UnstableTimelineRpc = client.withService()
+    public actual val index: IndexTimelineRpc = createIndexTimelineClient(client)
+    public actual val work: WorkTimelineRpc = createWorkTimelineClient(client)
+    public actual val settings: SettingsTimelineRpc = createSettingsTimelineClient(client)
+    public actual val timestamp: TimestampTimelineRpc = createTimestampTimelineClient(client)
+    public actual val tokenCount: TokenCountTimelineRpc = createTokenCountTimelineClient(client)
+    public actual val unstable: UnstableTimelineRpc = createUnstableTimelineClient(client)
 }

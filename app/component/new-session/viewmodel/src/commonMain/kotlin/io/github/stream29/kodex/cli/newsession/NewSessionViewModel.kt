@@ -2,42 +2,42 @@
 
 package io.github.stream29.kodex.cli.newsession
 
+import io.github.stream29.kodex.app.agent.contract.AgentSettingsViewModel
+import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
 import io.github.stream29.kodex.app.session.contract.*
-import io.github.stream29.kodex.cli.rpc.RpcGlobalSettings
-import io.github.stream29.kodex.cli.rpc.RpcSessionDraft
-import io.github.stream29.kodex.cli.rpc.RpcSessionViews
-import io.github.stream29.kodex.cli.rpc.createBoundRuntimeConfigurationViewModel
 import io.github.stream29.kodex.openai.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.io.files.Path
 
 public actual class DefaultNewSessionViewModelFactory actual constructor(
-    private val views: RpcSessionViews,
+    private val createDraft: (NewSessionViewModelArguments, CoroutineScope) -> NewSessionDraftPort,
+    private val models: StateFlow<List<ModelInfo>>,
     private val sessions: PersistedSessionViewModelRegistry,
-    private val global: RpcGlobalSettings,
+    private val createRuntimeConfiguration: (AgentSettingsViewModel, CoroutineScope) -> RuntimeConfigurationViewModel,
     private val scope: CoroutineScope,
 ) : NewSessionViewModelFactory {
     actual override fun create(arguments: NewSessionViewModelArguments): NewSessionViewModel =
-        RpcNewSessionViewModel(arguments, views, sessions, global, scope)
+        RpcNewSessionViewModel(arguments, createDraft, models, sessions, createRuntimeConfiguration, scope)
 }
 
 public actual class RpcNewSessionViewModel internal actual constructor(
     arguments: NewSessionViewModelArguments,
-    views: RpcSessionViews,
+    createDraft: (NewSessionViewModelArguments, CoroutineScope) -> NewSessionDraftPort,
+    models: StateFlow<List<ModelInfo>>,
     private val sessions: PersistedSessionViewModelRegistry,
-    global: RpcGlobalSettings,
+    createRuntimeConfiguration: (AgentSettingsViewModel, CoroutineScope) -> RuntimeConfigurationViewModel,
     scope: CoroutineScope,
 ) : NewSessionViewModel {
     private val owner = Job(requireNotNull(scope.coroutineContext[Job]) {
         "New Session requires an explicit frontend owner."
     })
     private val local = CoroutineScope(scope.coroutineContext + owner)
-    public actual val draft: RpcSessionDraft = RpcSessionDraft(arguments.initialWorkingDirectory, views, global, local)
-    actual override val models: StateFlow<List<ModelInfo>> = global.models
+    public actual val draft: NewSessionDraftPort = createDraft(arguments, local)
+    actual override val models: StateFlow<List<ModelInfo>> = models
     actual override val settings: StateFlow<KodexAgentSettings> = draft.settings
-    actual override val runtimeConfiguration: io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel =
-        createBoundRuntimeConfigurationViewModel(this, local)
+    actual override val runtimeConfiguration: RuntimeConfigurationViewModel =
+        createRuntimeConfiguration(this, local)
     actual override val composer: io.github.stream29.kodex.app.agent.contract.ComposerViewModel = draft.composer
     init {
         owner.invokeOnCompletion { close() }

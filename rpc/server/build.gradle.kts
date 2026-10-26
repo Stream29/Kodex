@@ -9,17 +9,17 @@ plugins {
 kotlin {
     sourceSets {
         named("specMain").dependencies {
+            api(project(":app-rpc-protocol"))
             api(project(":agent-session-contract"))
             api(project(":agent-state-contract"))
             api(project(":agent-storage-clean-models"))
             api(project(":agent-storage-core"))
-            api(project(":app-component-session-catalog-viewmodel"))
             api(project(":tool-multi-agent"))
             api(project(":rpc-client"))
             api(project(":openai-models"))
             api(project(":openai-client"))
             api(project(":openai-account-usage"))
-            api(project(":app-settings-filesystem"))
+            api(project(":app-backend-settings"))
             api(project(":mcp-backend"))
             api(project(":openai-model-catalog"))
             api(libs.kotlinx.rpc.core)
@@ -27,6 +27,7 @@ kotlin {
             api(libs.kotlinx.coroutines.core)
         }
         commonMain.dependencies {
+            implementation(project(":openai-account-usage-backend"))
             api(project(":utils-rpc-exception"))
             implementation(project(":utils-coroutines"))
             implementation(project(":openai-codex-cli-storage"))
@@ -42,6 +43,7 @@ kotlin {
             implementation(libs.kotlin.logging)
         }
         commonTest.dependencies {
+            implementation(project(":app-rpc-system"))
             implementation(project(":agent-session-in-memory"))
             implementation(project(":agent-session-filesystem"))
             implementation(project(":agent-session-test"))

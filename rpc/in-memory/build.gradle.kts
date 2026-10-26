@@ -1,7 +1,7 @@
 plugins {
     id("kodex.kmp-spec-impl")
     id("kodex.krpc-utils-patch")
-    id("kodex.kmp-cli")
+    id("kodex.kmp-frontend")
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.kotlinx.rpc)
     id("kodex.kmp-tests")

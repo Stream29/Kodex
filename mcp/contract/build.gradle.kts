@@ -1,6 +1,6 @@
 plugins {
     id("kodex.kmp-spec-impl")
-    id("kodex.kmp-host")
+    id("kodex.kmp-frontend")
     alias(libs.plugins.kotlin.serialization)
     id("kodex.kmp-tests")
 }

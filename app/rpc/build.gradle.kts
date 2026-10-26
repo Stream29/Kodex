@@ -1,7 +1,7 @@
 plugins {
     id("kodex.kmp-spec-impl")
     id("kodex.krpc-utils-patch")
-    id("kodex.kmp-viewmodel")
+    id("kodex.kmp-frontend")
     id("kodex.kmp-tests")
 }
 
@@ -29,24 +29,28 @@ kotlin {
             api(project(":mcp-contract"))
             api(project(":openai-models"))
             api(project(":rpc-client"))
+            api(project(":app-component-new-session-viewmodel"))
             api(project(":rpc-models"))
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.io.core)
             api(libs.kotlinx.rpc.core)
         }
         commonMain.dependencies {
+            implementation(project(":rpc-connection"))
             implementation(project(":app-component-composer-viewmodel"))
             implementation(project(":app-component-history-index-viewmodel"))
-            implementation(project(":utils-os-environment"))
             implementation(project(":app-component-request-user-input-viewmodel"))
             implementation(project(":app-component-suggest-subagent-task-viewmodel"))
             implementation(project(":app-component-history-viewmodel"))
             implementation(libs.kotlin.logging)
-            implementation(libs.ktor.server.cio)
-            implementation(libs.ktor.server.core)
+            implementation(libs.ktor.http)
         }
         commonTest.dependencies {
-            implementation(project(":app-settings-filesystem"))
+            implementation(libs.kotlinx.coroutines.test)
+        }
+        nativeTest.dependencies {
+            implementation(project(":app-rpc-system"))
+            implementation(project(":app-backend-settings"))
             implementation(project(":app-component-session-settings-viewmodel"))
             implementation(project(":rpc-server"))
             implementation(project(":rpc-in-memory"))

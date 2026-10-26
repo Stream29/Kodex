@@ -119,6 +119,7 @@ public expect suspend fun startRpcOAuth(
     rpc: GlobalRpc,
     target: OAuthTarget,
     scope: CoroutineScope,
+    callbackProvider: RpcOAuthCallbackProvider,
     mcpRedirectUri: String? = null,
 ): KodexAuthLoginAttempt
 
@@ -173,6 +174,7 @@ public expect class RpcGlobalEditor(
     global: RpcGlobalSettings,
     rpc: GlobalRpc,
     applicationScope: CoroutineScope,
+    environment: RpcFrontendEnvironment,
 ) : GlobalSettingsViewModel {
     public val global: RpcGlobalSettings
     public val rpc: GlobalRpc
@@ -351,24 +353,24 @@ public expect class RpcSessionDraft(
     views: RpcSessionViews,
     global: RpcGlobalSettings,
     ownerScope: CoroutineScope,
-) : AutoCloseable {
-    public val settings: StateFlow<KodexAgentSettings>
-    public val composer: ComposerViewModel
+) : io.github.stream29.kodex.cli.newsession.NewSessionDraftPort {
+    override val settings: StateFlow<KodexAgentSettings>
+    override val composer: ComposerViewModel
 
     /** Freeze only this intent's target fields, preserving unrelated fields on CAS retry. */
-    public suspend fun <F> editDefaults(
+    override suspend fun <F> editDefaults(
         select: (KodexNewSessionSettings) -> F,
         replace: (KodexNewSessionSettings) -> KodexNewSessionSettings,
     ): Unit
 
-    public fun updateWorkingDirectory(path: Path): Unit
+    override fun updateWorkingDirectory(path: Path): Unit
 
     /**
      * [open] opens the host's stable persisted handle before any append; RPC-only consumers may
      * supply [RpcSessionViews.open]. Creation and append remain distinct commits. The caller
      * owns accepted work and errors, so this suspends directly rather than launching hidden work.
      */
-    public suspend fun <T> submit(expectedRevision: Long, open: suspend (Int) -> T): T?
+    override suspend fun <T> submit(expectedRevision: Long, open: suspend (Int) -> T): T?
 
     override fun close(): Unit
 }

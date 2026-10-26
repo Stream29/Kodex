@@ -1,6 +1,6 @@
 plugins {
     id("kodex.kmp-spec-impl")
-    id("kodex.kmp-host")
+    id("kodex.kmp-frontend")
     alias(libs.plugins.kotlin.serialization)
     id("kodex.kmp-tests")
 }
@@ -24,6 +24,8 @@ kotlin {
         commonTest.dependencies {
             implementation(project(":openai-json-codec"))
             implementation(project(":utils-patch"))
+        }
+        nativeTest.dependencies {
             implementation(project(":utils-kotlinx-io-coroutines-system"))
         }
     }

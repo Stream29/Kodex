@@ -1,24 +1,20 @@
 plugins {
     id("kodex.kmp-spec-impl")
-    id("kodex.kmp-view")
+    id("kodex.kmp-component-view")
     id("kodex.kmp-tests")
+    alias(libs.plugins.compose.multiplatform)
 }
 
 kotlin {
     sourceSets {
         named("specMain").dependencies {
             api(project(":app-component-composer-viewmodel"))
-            api(project(":app-view-components"))
             api(project(":app-component-application-preferences-viewmodel"))
-            api(libs.mosaic.runtime)
+            api(compose.runtime)
         }
-        mosaicMain.dependencies {
-            implementation(libs.mosaic.runtime)
-        }
-        mosaicTest.dependencies {
-            implementation(project(":app-component-composer-viewmodel"))
-            implementation(libs.kotlinx.coroutines.test)
-            implementation(libs.mosaic.testing)
+        commonMain.dependencies {
+            implementation(project(":app-component-widgets"))
+            implementation(libs.kotlinx.coroutines.core)
         }
     }
 }

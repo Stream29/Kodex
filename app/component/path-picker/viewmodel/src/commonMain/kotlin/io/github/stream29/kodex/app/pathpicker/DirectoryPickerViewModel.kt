@@ -11,7 +11,7 @@ import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerState
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerValidationResult
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModel
 import io.github.stream29.kodex.app.pathpicker.contract.DirectoryPickerViewModelFactory
-import io.github.stream29.kodex.app.pathpicker.contract.currentDirectory
+import io.github.stream29.kodex.app.pathpicker.contract.parentDirectory
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
@@ -72,7 +72,7 @@ internal class DirectoryPickerViewModelImpl(
     override fun navigateUp() {
         val current = mutableState.value
         if (current.loadState is DirectoryPickerLoadState.Loading) return
-        val parent = current.currentDirectory.parent ?: return
+        val parent = current.parentDirectory ?: return
         request(
             directory = parent,
             expectedRequestId = current.loadState.requestId,
@@ -127,6 +127,7 @@ internal class DirectoryPickerViewModelImpl(
                                 requestId = current.requestId,
                                 requestedDirectory = current.requestedDirectory,
                                 failure = validated.failure,
+                                parentDirectory = validated.parentDirectory,
                             ),
                         )
                     }
@@ -177,6 +178,8 @@ internal class DirectoryPickerViewModelImpl(
                         requestedDirectory = request.requestedDirectory,
                         directory = result.listing.directory,
                         children = result.listing.children,
+                        parentDirectory = result.listing.parentDirectory,
+                        childNames = result.listing.childNames,
                     )
 
                 is DirectoryPickerLoadResult.Failure ->
@@ -184,6 +187,7 @@ internal class DirectoryPickerViewModelImpl(
                         requestId = request.requestId,
                         requestedDirectory = request.requestedDirectory,
                         failure = result.failure,
+                        parentDirectory = result.parentDirectory,
                     )
             }
             mutableState.update { current ->
@@ -205,16 +209,6 @@ private fun directoryPickerDependencies(browser: DirectoryPickerBrowser): Direct
     object : DirectoryPickerDependencies {
         override val browser: DirectoryPickerBrowser = browser
     }
-
-public actual fun createDirectoryPickerViewModel(
-    initialDirectory: Path,
-    ownerScope: CoroutineScope,
-): DirectoryPickerViewModel =
-    DefaultDirectoryPickerViewModelFactory.create(
-        initialDirectory = initialDirectory,
-        dependencies = directoryPickerDependencies(SystemDirectoryPickerBrowser()),
-        ownerScope = ownerScope,
-    )
 
 public actual fun createDirectoryPickerViewModel(
     initialDirectory: Path,

@@ -8,6 +8,7 @@ kotlin {
     sourceSets {
         named("specMain") {
             dependencies {
+                api(project(":agent-storage-filesystem"))
                 api(project(":utils-kotlinx-io-coroutines-system"))
             }
         }

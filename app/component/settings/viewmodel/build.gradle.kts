@@ -1,7 +1,7 @@
 plugins {
     id("kodex.kmp-spec-impl")
     id("kodex.krpc-utils-patch")
-    id("kodex.kmp-viewmodel")
+    id("kodex.kmp-frontend")
     id("kodex.kmp-tests")
     alias(libs.plugins.kotlin.serialization)
 }
@@ -21,7 +21,7 @@ kotlin {
             api(project(":app-component-mcp-settings-viewmodel"))
             api(project(":app-component-working-directory-viewmodel"))
             api(project(":app-component-path-picker-viewmodel"))
-            api(project(":app-session-contract"))
+            api(project(":app-component-session-contract"))
             api(project(":rpc-models"))
             api(project(":mcp-contract"))
             api(project(":openai-account-usage"))
@@ -34,9 +34,13 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
-            implementation(project(":app-settings-filesystem"))
+            implementation(libs.kotlinx.coroutines.test)
+        }
+        nativeTest.dependencies {
+            implementation(project(":app-rpc-system"))
+            implementation(project(":app-backend-settings"))
             implementation(project(":app-component-session-settings-viewmodel"))
-            implementation(project(":app-test-support-rpc"))
+            implementation(project(":app-rpc-test-support"))
             implementation(libs.kotlinx.coroutines.test)
         }
     }

@@ -1,0 +1,3 @@
+# Preserve vendored SDK and license bytes instead of normalizing upstream text.
+utils/kauri/src/nativeInterop/windows/WebView2.h -text -whitespace
+app/web/theme/src/wasmJsMain/composeResources/files/fonts/OFL-NotoFonts.txt -whitespace

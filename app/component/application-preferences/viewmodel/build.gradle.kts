@@ -1,6 +1,6 @@
 plugins {
     id("kodex.kmp-spec-impl")
-    id("kodex.kmp-viewmodel")
+    id("kodex.kmp-frontend")
     id("kodex.kmp-tests")
     alias(libs.plugins.kotlin.serialization)
 }
@@ -8,6 +8,7 @@ plugins {
 kotlin {
     sourceSets {
         named("specMain").dependencies {
+            api(project(":app-rpc-protocol"))
             api(libs.kotlinx.serialization.core)
             api(libs.kotlinx.coroutines.core)
         }

@@ -15,3 +15,5 @@ public expect fun AgentStateValue.runtimeControl(running: Boolean): AgentRuntime
 public expect fun AgentStateValue.canEditHistory(running: Boolean): Boolean
 
 public expect fun AgentStateValue.canCompact(running: Boolean): Boolean
+
+public expect fun AgentRuntimeControl.label(): String

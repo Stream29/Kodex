@@ -14,10 +14,53 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 val directoryPickerDependencyTest by testSuite {
+    test("names and parent targets come from directory metadata rather than frontend path syntax") {
+        runTest {
+            val directory = Path("/opaque")
+            val child = Path("/entry-token")
+            val parent = Path("/parent-token")
+            val requests = mutableListOf<Path>()
+            val dependencies = object : DirectoryPickerDependencies {
+                override val browser = object : DirectoryPickerBrowser {
+                    override suspend fun load(directory: Path): DirectoryPickerLoadResult {
+                        requests += directory
+                        return if (directory == parent) {
+                            DirectoryPickerLoadResult.Failure(DirectoryPickerFailure.FileSystem("Unavailable"), child)
+                        } else {
+                            DirectoryPickerLoadResult.Success(DirectoryPickerListing(
+                                directory, listOf(child), parent, mapOf(child to "Display name"),
+                            ))
+                        }
+                    }
+                    override suspend fun validate(directory: Path): DirectoryPickerValidationResult =
+                        DirectoryPickerValidationResult.Failure(DirectoryPickerFailure.NotDirectory(directory), child)
+                }
+            }
+            val picker = createDirectoryPickerViewModel(directory, dependencies, this)
+            try {
+                runCurrent()
+                picker.updateFilter("DISPLAY")
+                assertEquals(listOf(child), picker.state.value.visibleChildren)
+                picker.updateFilter("entry-token")
+                assertTrue(picker.state.value.visibleChildren.isEmpty())
+                picker.navigateUp()
+                runCurrent()
+                assertEquals(listOf(directory, parent), requests)
+                assertEquals(child, picker.state.value.parentDirectory)
+                picker.confirm()
+                runCurrent()
+                assertEquals(child, picker.state.value.parentDirectory)
+                picker.navigateUp()
+                runCurrent()
+                assertEquals(listOf(directory, parent, child), requests)
+            } finally { picker.close() }
+        }
+    }
+
     test("declared dependency alone supports loading retry filtering and confirmation") {
         runTest {
             val directory = Path("/picker")
-            val child = Path(directory, "Alpha")
+            val child = Path("/picker/Alpha")
             var loads = 0
             var validations = 0
             val dependencies = object : DirectoryPickerDependencies {
@@ -27,7 +70,7 @@ val directoryPickerDependencyTest by testSuite {
                         return if (loads == 1) {
                             DirectoryPickerLoadResult.Failure(DirectoryPickerFailure.NotDirectory(directory))
                         } else {
-                            DirectoryPickerLoadResult.Success(DirectoryPickerListing(directory, listOf(child)))
+                            DirectoryPickerLoadResult.Success(DirectoryPickerListing(directory, listOf(child), null, mapOf(child to "Alpha")))
                         }
                     }
 

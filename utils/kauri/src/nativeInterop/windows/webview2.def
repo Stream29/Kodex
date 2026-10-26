@@ -1,0 +1,4 @@
+headers = WebView2.h tlhelp32.h
+headerFilter = WebView2.h EventToken.h tlhelp32.h
+package = dev.kauri.webview2
+compilerOpts = -DCINTERFACE -DCOBJMACROS -DUNICODE -D_WIN32_WINNT=0x0A00

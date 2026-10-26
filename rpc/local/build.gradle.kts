@@ -9,6 +9,7 @@ plugins {
 kotlin {
     sourceSets {
         named("specMain").dependencies {
+            api(project(":rpc-connection"))
             api(libs.kotlinx.rpc.core)
             api(libs.kotlinx.coroutines.core)
             api(project(":app-backend-daemon"))

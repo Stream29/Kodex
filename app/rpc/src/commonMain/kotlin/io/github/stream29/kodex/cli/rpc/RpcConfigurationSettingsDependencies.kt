@@ -17,9 +17,7 @@ import io.github.stream29.kodex.openai.ModelInfo
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.ReasoningEffort
 import io.github.stream29.kodex.rpc.models.BackendSettings
-import io.github.stream29.kodex.utils.osenvironment.requireUserHomeDirectory
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.io.files.Path
 
 /** Every admitted field edit uses the original application queue and backend CAS rule. */
 internal class RpcConfigurationWrites(
@@ -35,30 +33,12 @@ internal class RpcConfigurationWrites(
     }
 }
 
-/** Captures only the frontend environment for comparison; never opens a user's context files. */
-private class FrontendContextPathPolicy : ContextSourcePathPolicy {
-    private val home: Path by lazy { Path(requireUserHomeDirectory()) }
-    override val builtInNormalizedPaths: Set<String>
-        get() = setOf(".agents", ".kodex", ".codex").map { Path(home, it).toString() }.toSet()
-
-    override fun normalize(path: String): String? {
-        if (path.isBlank() || '$' in path) return null
-        // Retain the existing frontend-home interpretation, even for absolute input.
-        val capturedHome = home
-        return when {
-            path == "~" -> capturedHome
-            path.startsWith("~/") -> Path(capturedHome, path.substring(2))
-            else -> Path(path).takeIf { it.isAbsolute }
-        }?.toString()
-    }
-}
-
 internal class RpcContextSourceSettingsDependencies(
     private val global: RpcGlobalSettings,
     override val sources: StateFlow<AgentContextSourceSettings>,
     private val writes: RpcConfigurationWrites,
+    override val pathPolicy: ContextSourcePathPolicy,
 ) : ContextSourceSettingsDependencies {
-    override val pathPolicy: ContextSourcePathPolicy = FrontendContextPathPolicy()
     override val operationFailure: StateFlow<Boolean> = global.operationFailure
 
     override fun setBuiltInEnabled(

@@ -56,9 +56,13 @@ public sealed interface DirectoryPickerLoadState {
         public val directory: Path,
         /** Direct child directories in the stable order chosen by the browser. */
         public val children: List<Path>,
+        public val parentDirectory: Path?,
+        /** Display names supplied by the directory capability, keyed by exact child. */
+        public val childNames: Map<Path, String>,
     ) : DirectoryPickerLoadState {
         init {
             require(requestId > 0) { "A directory-picker request id must be positive." }
+            require(childNames.keys == children.toSet()) { "Every listed child must have exactly one display name." }
         }
     }
 
@@ -71,6 +75,7 @@ public sealed interface DirectoryPickerLoadState {
         override val requestedDirectory: Path,
         /** Typed failure that the renderer must make recoverable or dismissible. */
         public val failure: DirectoryPickerFailure,
+        public val parentDirectory: Path? = null,
     ) : DirectoryPickerLoadState {
         init {
             require(requestId > 0) { "A directory-picker request id must be positive." }
@@ -112,15 +117,22 @@ public val DirectoryPickerState.currentDirectory: Path
 /** Direct child directories matching the current case-insensitive filter. */
 public val DirectoryPickerState.visibleChildren: List<Path>
     get() {
-        val children = (loadState as? DirectoryPickerLoadState.Ready)?.children.orEmpty()
+        val ready = loadState as? DirectoryPickerLoadState.Ready ?: return emptyList()
+        val children = ready.children
         if (filterQuery.isEmpty()) return children
         return children.filter { child ->
-            child.directoryPickerName().contains(filterQuery, ignoreCase = true)
+            ready.childNames.getValue(child).ifEmpty { child.toString() }.contains(filterQuery, ignoreCase = true)
         }
     }
 
 /** Whether the current non-loading target has a navigable parent. */
 public val DirectoryPickerState.canNavigateUp: Boolean
-    get() = loadState !is DirectoryPickerLoadState.Loading && currentDirectory.parent != null
+    get() = parentDirectory != null
 
-private fun Path.directoryPickerName(): String = name.ifEmpty { this.toString() }
+/** Parent supplied by the directory capability; loading never exposes navigation. */
+public val DirectoryPickerState.parentDirectory: Path?
+    get() = when (val load = loadState) {
+        is DirectoryPickerLoadState.Loading -> null
+        is DirectoryPickerLoadState.Ready -> load.parentDirectory
+        is DirectoryPickerLoadState.Failed -> load.parentDirectory
+    }

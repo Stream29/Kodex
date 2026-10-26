@@ -1,0 +1,47 @@
+package io.github.stream29.kodex.cli.app
+
+import androidx.compose.runtime.Composable
+import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfiguration
+import io.github.stream29.kodex.app.runtimeconfiguration.RuntimeConfigurationViewModel
+import io.github.stream29.kodex.cli.runtimeconfiguration.RuntimeConfigurationDropdowns
+import io.github.stream29.kodex.cli.runtimeconfiguration.runtimeConfigurationButtonWidths
+import io.github.stream29.kodex.cli.components.SettingsLabel
+import io.github.stream29.kodex.cli.components.buttonWidth
+import io.github.stream29.kodex.cli.components.statusBarLayoutPlan
+import io.github.stream29.kodex.cli.components.statusBarWidth
+import io.github.stream29.kodex.cli.components.workingDirectoryStatusLabel
+import io.github.stream29.kodex.openai.KodexAgentSettings
+
+@Composable
+public actual fun NewSessionStatusBar(
+    columns: Int,
+    settings: KodexAgentSettings,
+    runtimeConfiguration: RuntimeConfigurationViewModel,
+    dropdowns: RuntimeConfigurationDropdowns,
+    onBrowseWorkingDirectory: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    ApplicationDraftStatusContent(
+        settings, runtimeConfiguration, MosaicAgentStatusRenderer(columns, dropdowns),
+        onBrowseWorkingDirectory, onOpenSettings,
+    )
+}
+
+public actual fun newSessionStatusBarRows(
+    columns: Int,
+    settings: KodexAgentSettings,
+): Int {
+    val configuration = RuntimeConfiguration(
+        model = settings.model,
+        reasoning = settings.reasoning.effort,
+        tier = settings.serviceTier,
+        requestUserInputMode = settings.requestUserInputMode,
+    )
+    val widths = runtimeConfigurationButtonWidths(configuration) +
+        buttonWidth(workingDirectoryStatusLabel(settings.cwd, columns))
+    return statusBarLayoutPlan(
+        width = statusBarWidth(columns),
+        itemWidths = widths,
+        settingsWidth = buttonWidth(SettingsLabel),
+    ).rowCount
+}

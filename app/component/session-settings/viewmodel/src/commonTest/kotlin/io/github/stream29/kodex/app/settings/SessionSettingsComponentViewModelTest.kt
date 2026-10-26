@@ -340,7 +340,7 @@ private class SettingsSource : SessionSettingsDataSource {
 }
 private class SettingsBrowser(path: Path) : DirectoryPickerViewModel {
     override val state = MutableStateFlow(DirectoryPickerState(
-        loadState = DirectoryPickerLoadState.Ready(1, path, path, emptyList()),
+        loadState = DirectoryPickerLoadState.Ready(1, path, path, emptyList(), null, emptyMap()),
     ))
     override val effects = emptyFlow<DirectoryPickerEffect>()
     var closes = 0

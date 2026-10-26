@@ -43,6 +43,11 @@ dependencyResolutionManagement {
                     "ktor-network-(linuxx64|linuxarm64|macosarm64|mingwx64)",
                     "[0-9]+\\.[0-9]+\\.[0-9]+-kodex\\.[0-9a-f]{12}",
                 )
+                includeVersionByRegex(
+                    "org\\.jetbrains\\.compose\\.ui",
+                    "ui-wasm-js",
+                    "1\\.11\\.1-kodex\\.[0-9a-f]{12}",
+                )
             }
         }
         google()
@@ -135,15 +140,19 @@ moduleTree("agent-state") {
 }
 
 moduleTree("agent-storage") {
+    module("filesystem")
     module("clean-models")
     module("core")
     module("filesystem-layout")
 }
 
-moduleTree("app") {
-    module("application")
-    module("backend-daemon")
-    module("backend-host")
+moduleTree("app", includeGroupingRoot = false) {
+    moduleTree("backend") {
+        module("daemon")
+        module("host")
+        module("migration")
+        module("settings")
+    }
     module("cli")
     moduleTree("component") {
         moduleTree("account-usage") {
@@ -153,6 +162,10 @@ moduleTree("app") {
         moduleTree("agent") {
             module("contract")
             module("view")
+        }
+        moduleTree("application") {
+            module("view")
+            module("viewmodel")
         }
         moduleTree("application-preferences") {
             module("view")
@@ -170,7 +183,9 @@ moduleTree("app") {
             module("view")
             module("viewmodel")
         }
+        module("formatting")
         moduleTree("history") {
+            module("presentation")
             module("view")
             module("viewmodel")
         }
@@ -208,6 +223,10 @@ moduleTree("app") {
         }
         moduleTree("runtime-configuration") {
             module("view")
+            module("viewmodel")
+        }
+        moduleTree("session") {
+            module("contract")
             module("viewmodel")
         }
         moduleTree("session-catalog") {
@@ -248,24 +267,34 @@ moduleTree("app") {
             module("view")
             module("viewmodel")
         }
+        module("widgets")
         moduleTree("working-directory") {
             module("view")
             module("viewmodel")
         }
     }
-    module("migration")
-    module("rpc")
-    moduleTree("session") {
-        module("contract")
+    moduleTree("rpc") {
+        module("application")
+        module("new-session")
+        module("protocol")
+        module("session")
+        module("system")
+        module("test-support")
     }
-    moduleTree("settings") {
-        module("filesystem")
-    }
-    moduleTree("test-support") {
-        module("rpc")
-    }
-    moduleTree("view") {
+    moduleTree("tui") {
         module("components")
+        module("host")
+        module("path-picker")
+        module("renderer")
+    }
+    moduleTree("web") {
+        module("host")
+        module("renderer")
+        moduleTree("test-support") {
+            module("backend")
+            module("renderer")
+        }
+        module("theme")
     }
 }
 
@@ -282,7 +311,9 @@ moduleTree("mcp", includeGroupingRoot = false) {
 }
 
 moduleTree("openai") {
-    module("account-usage")
+    moduleTree("account-usage") {
+        module("backend")
+    }
     module("client")
     module("client-test")
     module("codex-cli-storage")
@@ -292,6 +323,8 @@ moduleTree("openai") {
 }
 
 moduleTree("rpc") {
+    module("browser-client")
+    module("connection")
     module("backend-control-client")
     module("client")
     module("in-memory")
@@ -333,6 +366,7 @@ moduleTree("utils") {
     module("filesystem-lease")
     module("images")
     module("images-codec")
+    module("kauri")
     module("kodex-home")
     moduleTree("kotlinx-io-coroutines") {
         module("system")
@@ -344,7 +378,9 @@ moduleTree("utils") {
         module("backend-scope")
     }
     module("os-environment")
-    module("patch")
+    moduleTree("patch") {
+        module("system")
+    }
     moduleTree("process-client") {
         module("system")
     }

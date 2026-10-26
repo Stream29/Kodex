@@ -40,7 +40,7 @@ public actual class RpcSessionDraft actual constructor(
     private val views: RpcSessionViews,
     private val global: RpcGlobalSettings,
     ownerScope: CoroutineScope,
-) : AutoCloseable {
+) : io.github.stream29.kodex.cli.newsession.NewSessionDraftPort {
     private val submission = Mutex()
     private data class WorkingDirectory(val path: Path, val revision: Long)
     private val directory = MutableStateFlow(WorkingDirectory(initialWorkingDirectory, 0))
@@ -48,7 +48,7 @@ public actual class RpcSessionDraft actual constructor(
         "A draft requires an explicit coroutine owner."
     })
     private val composerScope = CoroutineScope(ownerScope.coroutineContext + owner)
-    public actual val settings: StateFlow<KodexAgentSettings> =
+    actual override val settings: StateFlow<KodexAgentSettings> =
         combine(global.settings.projectState { it.newSession }, directory) { defaults, cwd -> project(defaults, cwd.path) }
             .stateIn(composerScope, SharingStarted.Eagerly, project(global.settings.value.newSession, initialWorkingDirectory))
 
@@ -60,7 +60,7 @@ public actual class RpcSessionDraft actual constructor(
             requestUserInputMode = defaults.requestUserInputMode,
             cwd = cwd,
         )
-    public actual val composer: ComposerViewModel = createComposerViewModel(
+    actual override val composer: ComposerViewModel = createComposerViewModel(
         ownerId = ComposerOwnerId("session-draft"),
         dependencies = object : ComposerDependencies {
             override val runtime = object : ComposerRuntimePort {
@@ -95,7 +95,7 @@ public actual class RpcSessionDraft actual constructor(
         owner.ensureActive()
     }
 
-    public actual suspend fun <F> editDefaults(
+    actual override suspend fun <F> editDefaults(
         select: (KodexNewSessionSettings) -> F,
         replace: (KodexNewSessionSettings) -> KodexNewSessionSettings,
     ) {
@@ -107,7 +107,7 @@ public actual class RpcSessionDraft actual constructor(
         }) { "The edited field changed. Review the latest value." }
     }
 
-    public actual fun updateWorkingDirectory(path: Path) {
+    actual override fun updateWorkingDirectory(path: Path) {
         checkOpen()
         directory.update {
             check(it.revision < Long.MAX_VALUE) { "Working directory revisions exhausted." }
@@ -115,7 +115,7 @@ public actual class RpcSessionDraft actual constructor(
         }
     }
 
-    public actual suspend fun <T> submit(expectedRevision: Long, open: suspend (Int) -> T): T? {
+    actual override suspend fun <T> submit(expectedRevision: Long, open: suspend (Int) -> T): T? {
         checkOpen()
         // tryLock is admission, not a queue: a duplicate cannot wait and consume a later draft.
         if (!submission.tryLock()) return null

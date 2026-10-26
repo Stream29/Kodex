@@ -58,7 +58,7 @@ val settingsModelsTest by testSuite {
         )
         val encoded = json.encodeToJsonElement(BackendSettings.serializer(), settings)
         assertEquals(
-            setOf("authSource", "shell", "contextSources", "newSession", "sessionTitle", "mcpServers"),
+            setOf("authSource", "shell", "contextSources", "newSession", "sessionTitle", "mcpServers", "hooks", "daemonTtlSeconds"),
             encoded.jsonObject.keys,
         )
         for (secret in listOf(

@@ -1,7 +1,7 @@
 plugins {
     id("kodex.kmp-spec-impl")
     id("kodex.krpc-utils-patch")
-    id("kodex.kmp-cli")
+    id("kodex.kmp-frontend")
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.kotlinx.rpc)
     id("kodex.kmp-tests")
@@ -10,6 +10,7 @@ plugins {
 kotlin {
     sourceSets {
         named("specMain").dependencies {
+            api(project(":app-rpc-protocol"))
             api(project(":rpc-models"))
             api(libs.kotlinx.coroutines.core)
         }
@@ -29,9 +30,6 @@ kotlin {
         named("specMain") {
             dependencies {
                 api(project(":rpc-models"))
-                api(project(":app-component-authentication-settings-viewmodel"))
-                api(project(":app-component-account-usage-viewmodel"))
-                api(project(":app-component-session-catalog-viewmodel"))
                 api(project(":mcp-contract"))
                 api(project(":agent-storage-clean-models"))
                 api(project(":agent-storage-core"))

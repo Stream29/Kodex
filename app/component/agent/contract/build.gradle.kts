@@ -1,6 +1,6 @@
 plugins {
     id("kodex.kmp-spec-impl")
-    id("kodex.kmp-cli")
+    id("kodex.kmp-frontend")
 }
 
 kotlin {

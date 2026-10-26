@@ -1,8 +1,20 @@
-// Preserve the upstream utility replacement for actual kRPC consumers.
+import org.gradle.api.artifacts.component.ModuleComponentSelector
+import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
+
 configurations.configureEach {
+    val configuration = this
     resolutionStrategy.dependencySubstitution {
-        substitute(module("org.jetbrains.kotlinx:kotlinx-rpc-utils"))
-            .using(project(":rpc-krpc-utils-patch"))
-            .because("kRPC 0.10.3 Native map accessors return live collections")
+        all {
+            val module = requested as? ModuleComponentSelector
+            if (module?.group == "org.jetbrains.kotlinx" &&
+                module.module == "kotlinx-rpc-utils" &&
+                configuration.attributes.getAttribute(KotlinPlatformType.attribute) == KotlinPlatformType.native
+            ) {
+                useTarget(
+                    project(":rpc-krpc-utils-patch"),
+                    "kRPC 0.10.3 Native map accessors return live collections",
+                )
+            }
+        }
     }
 }

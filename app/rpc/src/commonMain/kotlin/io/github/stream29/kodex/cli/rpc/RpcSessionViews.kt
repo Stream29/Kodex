@@ -6,6 +6,7 @@ import io.github.stream29.kodex.app.agent.contract.AgentViewModel
 import io.github.stream29.kodex.utils.rpcexception.SessionNotActive
 import io.github.stream29.kodex.utils.rpcexception.SessionNotFound
 import io.github.stream29.kodex.rpc.models.CreatedSuggestedSession
+import io.github.stream29.kodex.rpc.local.BackendConnectionLost
 import io.github.stream29.kodex.openai.ModelInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -209,6 +210,10 @@ public actual class RpcSessionView internal actual constructor(
             }
             when (val reason = requireNotNull(failure).remoteReason()) {
                 is SessionNotActive -> delay(50)
+                is BackendConnectionLost -> {
+                    mutableStatus.value = SessionViewStatus.Loading
+                    do { delay(50) } while (!connectionAvailable())
+                }
                 is SessionNotFound -> {
                     mutableStatus.value = SessionViewStatus.Missing
                     initial.completeExceptionally(reason)
