@@ -18,13 +18,13 @@ public actual fun SessionSettingsContent(
                 val snapshot = current.snapshot
                 val configuration = snapshot.configuration
                 renderer.Section("Identity") {
-                    renderer.Item("Session name", snapshot.sessionName) {
-                        renderer.Action("Rename", onClick = { viewModel.requestRename(snapshot.revision) })
+                    renderer.Item("Session name", snapshot.sessionName, enabled = true) {
+                        renderer.Action("Rename", onClick = { viewModel.requestRename(snapshot.revision) }, enabled = true, autoFocus = false)
                     }
                     renderer.Item("Working directory", configuration.workingDirectory.toString(), enabled = snapshot.editable) {
                         renderer.Action(
                             "Browse", enabled = snapshot.editable && directoryBrowsingAvailable,
-                            onClick = { viewModel.requestWorkingDirectory(snapshot.revision) },
+                            onClick = { viewModel.requestWorkingDirectory(snapshot.revision) }, autoFocus = false,
                         )
                     }
                 }
@@ -34,21 +34,21 @@ public actual fun SessionSettingsContent(
                         current.modelOptions.map { UiChoiceOption(it.value, it.value) }, configuration.model.value,
                         onSelect = { selected -> current.modelOptions.firstOrNull { it.value == selected }?.let {
                             viewModel.updateModel(snapshot.revision, it)
-                        } }, enabled = snapshot.editable,
+                        } }, enabled = snapshot.editable, supportingText = null,
                     )
                     renderer.Choice(
                         SessionChoiceField.Reasoning.name, "Reasoning",
                         knownEfforts.map { UiChoiceOption(it.wireName, it.wireName) }, configuration.reasoningEffort.wireName,
                         onSelect = { selected -> knownEfforts.firstOrNull { it.wireName == selected }?.let {
                             viewModel.updateReasoningEffort(snapshot.revision, it)
-                        } }, enabled = snapshot.editable,
+                        } }, enabled = snapshot.editable, supportingText = null,
                     )
                     renderer.Choice(
                         SessionChoiceField.ServiceTier.name, "Service tier",
                         ServiceTier.entries.map { UiChoiceOption(it.name, it.label()) }, configuration.serviceTier.name,
                         onSelect = { selected -> ServiceTier.entries.firstOrNull { it.name == selected }?.let {
                             viewModel.updateServiceTier(snapshot.revision, it)
-                        } }, enabled = snapshot.editable,
+                        } }, enabled = snapshot.editable, supportingText = null,
                     )
                     renderer.Choice(
                         SessionChoiceField.Questions.name, "Questions",

@@ -16,7 +16,7 @@ public interface ContextSourceSettingsLayoutRenderer {
     public fun ContextSourceDialogActions(content: @Composable () -> Unit): Unit
 
     @Composable
-    public fun ContextSourceDialogAction(label: String, primary: Boolean = false, onClick: () -> Unit): Unit
+    public fun ContextSourceDialogAction(label: String, primary: Boolean, onClick: () -> Unit): Unit
 }
 
 @Composable

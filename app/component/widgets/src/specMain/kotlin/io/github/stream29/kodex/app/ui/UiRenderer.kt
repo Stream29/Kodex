@@ -2,7 +2,7 @@ package io.github.stream29.kodex.app.ui
 
 import androidx.compose.runtime.*
 
-/** Renderer leaves only; shared content retains all child ownership and command/revision wiring. */
+/** Renderer leaves take explicit arguments; defaults belong to the non-virtual widget functions. */
 public interface UiRenderer {
     @Composable
     public fun UiTheme(content: @Composable () -> Unit): Unit
@@ -15,19 +15,19 @@ public interface UiRenderer {
 
     @Composable
     public fun UiText(
-        text: String, role: UiTextRole = UiTextRole.Body, maximumLines: Int = Int.MAX_VALUE,
+        text: String, role: UiTextRole, maximumLines: Int,
     ): Unit
 
     @Composable
-    public fun UiProse(text: String, role: UiTextRole = UiTextRole.Body): Unit
+    public fun UiProse(text: String, role: UiTextRole): Unit
 
     @Composable
     public fun UiAction(
         label: String,
         onClick: () -> Unit,
-        enabled: Boolean = true,
-        autoFocus: Boolean = false,
-        role: UiActionRole = UiActionRole.Normal,
+        enabled: Boolean,
+        autoFocus: Boolean,
+        role: UiActionRole,
     ): Unit
 
     @Composable
@@ -36,14 +36,14 @@ public interface UiRenderer {
         cursorOffset: Int,
         onChange: (String, Int) -> Long?,
         onSubmit: (text: String, cursorOffset: Int) -> Unit,
-        label: String = "",
-        enabled: Boolean = true,
-        readOnly: Boolean = false,
-        autoFocus: Boolean = false,
-        multiline: Boolean = true,
-        maximumLines: Int = 6,
-        submitKey: UiSubmitKey = UiSubmitKey.Enter,
-        revision: Long? = null,
+        label: String,
+        enabled: Boolean,
+        readOnly: Boolean,
+        autoFocus: Boolean,
+        multiline: Boolean,
+        maximumLines: Int,
+        submitKey: UiSubmitKey,
+        revision: Long?,
     ): Unit
 
     @Composable

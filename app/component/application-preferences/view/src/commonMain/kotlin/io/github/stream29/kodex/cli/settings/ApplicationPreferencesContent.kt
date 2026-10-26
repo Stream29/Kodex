@@ -22,7 +22,7 @@ public actual fun ApplicationPreferencesContent(
     key(viewModel) { UiColumn {
         if (showOperationFailure && state.operationFailure) {
             UiText("A settings operation failed.", UiTextRole.Error)
-            renderer.Action(label = "Dismiss", onClick = viewModel::dismissFailure)
+            renderer.Action(label = "Dismiss", onClick = viewModel::dismissFailure, enabled = true, autoFocus = false)
         }
         renderer.Section(title = "Sidebars") {
             PreferencesWidthItem(renderer, "Left sidebar width", state.leftWidth, viewModel::setLeftWidth)
@@ -34,12 +34,14 @@ public actual fun ApplicationPreferencesContent(
                 options = NewLineKey.entries.map { UiChoiceOption(it.name, it.preferencesLabel()) },
                 selectedKey = state.newLineKey.name,
                 onSelect = { selected -> NewLineKey.entries.firstOrNull { it.name == selected }?.let(viewModel::setNewLineKey) },
+                enabled = true, supportingText = null,
             )
             renderer.Choice(
                 fieldKey = PreferencesChoiceField.SubmitKey.name, label = "Submit key",
                 options = SubmitKey.entries.map { UiChoiceOption(it.name, it.preferencesLabel()) },
                 selectedKey = state.submitKey.name,
                 onSelect = { selected -> SubmitKey.entries.firstOrNull { it.name == selected }?.let(viewModel::setSubmitKey) },
+                enabled = true, supportingText = null,
             )
         }
     } }
@@ -47,14 +49,14 @@ public actual fun ApplicationPreferencesContent(
 
 @Composable
 private fun PreferencesWidthItem(renderer: SettingsRenderer, label: String, columns: Int, onChange: (Int) -> Unit) {
-    renderer.Item(label = label, supportingText = "$columns columns") {
+    renderer.Item(label = label, supportingText = "$columns columns", enabled = true) {
         renderer.Action(
             label = "-", enabled = columns > MinimumSidebarWidthColumns,
-            onClick = { onChange(columns - 1) },
+            onClick = { onChange(columns - 1) }, autoFocus = false,
         )
         renderer.Action(
             label = "+", enabled = columns < Int.MAX_VALUE,
-            onClick = { onChange(columns + 1) },
+            onClick = { onChange(columns + 1) }, autoFocus = false,
         )
     }
 }

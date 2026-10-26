@@ -14,7 +14,7 @@ public actual fun NewSessionDefaultsContent(
     key(viewModel) { UiColumn {
         if (showOperationFailure && failed) {
             UiText("A settings operation failed.", UiTextRole.Error)
-            renderer.Action("Dismiss", enabled = state.active, onClick = viewModel::dismissOperationFailure)
+            renderer.Action("Dismiss", enabled = state.active, onClick = viewModel::dismissOperationFailure, autoFocus = false)
         }
         renderer.Section("Model behavior") {
             renderer.Choice(
@@ -22,21 +22,21 @@ public actual fun NewSessionDefaultsContent(
                 state.modelOptions.map { UiChoiceOption(it.value, it.value) }, state.settings.model.value,
                 onSelect = { selected -> state.modelOptions.firstOrNull { it.value == selected }?.let {
                     viewModel.updateModel(state.revision, it)
-                } }, enabled = state.active,
+                } }, enabled = state.active, supportingText = null,
             )
             renderer.Choice(
                 DefaultsChoiceField.Reasoning.name, "Reasoning",
                 knownEfforts.map { UiChoiceOption(it.wireName, it.wireName) }, state.settings.reasoningEffort.wireName,
                 onSelect = { selected -> knownEfforts.firstOrNull { it.wireName == selected }?.let {
                     viewModel.updateReasoningEffort(state.revision, it)
-                } }, enabled = state.active,
+                } }, enabled = state.active, supportingText = null,
             )
             renderer.Choice(
                 DefaultsChoiceField.ServiceTier.name, "Service tier",
                 ServiceTier.entries.map { UiChoiceOption(it.name, it.label()) }, state.settings.serviceTier.name,
                 onSelect = { selected -> ServiceTier.entries.firstOrNull { it.name == selected }?.let {
                     viewModel.updateServiceTier(state.revision, it)
-                } }, enabled = state.active,
+                } }, enabled = state.active, supportingText = null,
             )
             renderer.Choice(
                 DefaultsChoiceField.Questions.name, "Questions",

@@ -56,7 +56,7 @@ internal object MosaicUiRenderer : UiRenderer {
     @Composable
     override fun TextInputFrame(label: String, content: @Composable () -> Unit) {
         Column {
-            UiText(label, UiTextRole.Supporting)
+            UiText(label, UiTextRole.Supporting, Int.MAX_VALUE)
             content()
         }
     }

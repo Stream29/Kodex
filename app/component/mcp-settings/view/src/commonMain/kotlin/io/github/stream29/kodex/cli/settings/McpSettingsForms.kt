@@ -24,7 +24,7 @@ public actual fun McpEditorContent(
                 transport.name,
                 onSelect = { selected -> McpTransportKind.entries.firstOrNull { it.name == selected }?.let { kind ->
                     onDraftChange { it.copy(transport = kind) }
-                } },
+                } }, enabled = true, supportingText = null,
             )
             McpInput(
                 if (transport == McpTransportKind.StreamableHttp) "URL" else "Command", editor.token,
@@ -42,7 +42,8 @@ public actual fun McpEditorContent(
                 }
             } else {
                 McpInput("Headers (KEY=value; use <keep> for stored values)", editor.token, draft.headers) { value -> onDraftChange { it.copy(headers = value) } }
-                renderer.Toggle("OAuth", draft.oauthEnabled, { enabled -> onDraftChange { it.copy(oauthEnabled = enabled) } })
+                renderer.Toggle("OAuth", draft.oauthEnabled, { enabled -> onDraftChange { it.copy(oauthEnabled = enabled) } },
+                    enabled = true, supportingText = null)
                 if (draft.oauthEnabled) {
                     McpInput("OAuth client id (blank for dynamic registration)", editor.token, draft.oauthClientId) { value -> onDraftChange { it.copy(oauthClientId = value) } }
                     McpInput("OAuth client secret (blank for none; <keep> retains)", editor.token, draft.oauthClientSecret) { value -> onDraftChange { it.copy(oauthClientSecret = value) } }

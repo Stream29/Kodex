@@ -23,12 +23,13 @@ public actual fun SessionTitleSettingsContent(
     key(viewModel) { UiColumn {
         if (showOperationFailure && state.operationFailure) {
             UiText("A settings operation failed.", UiTextRole.Error)
-            renderer.Action(label = "Dismiss", onClick = viewModel::dismissFailure)
+            renderer.Action(label = "Dismiss", onClick = viewModel::dismissFailure, enabled = true, autoFocus = false)
         }
         renderer.Section(title = "Title generation") {
             renderer.Toggle(
                 label = "Automatic session title", checked = state.enabled,
                 onChange = viewModel::setEnabled,
+                enabled = true, supportingText = null,
             )
             renderer.Choice(
                 fieldKey = TitleChoiceField.Model.name, label = "Title model",

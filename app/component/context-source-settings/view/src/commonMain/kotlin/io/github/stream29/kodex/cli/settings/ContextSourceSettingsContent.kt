@@ -15,23 +15,23 @@ public actual fun ContextSourceSettingsContent(
     key(viewModel) { UiColumn {
         if (showOperationFailure && state.operationFailure) {
             UiText("A settings operation failed.", UiTextRole.Error)
-            renderer.Action("Dismiss", onClick = viewModel::dismissFailure)
+            renderer.Action("Dismiss", onClick = viewModel::dismissFailure, enabled = true, autoFocus = false)
         }
         renderer.Section("Built-in sources") {
             renderer.Toggle("Agents home", state.sources.agentsHomeEnabled,
-                { viewModel.setBuiltInEnabled(BuiltInContextSource.AgentsHome, it) }, supportingText = "~/.agents/")
+                { viewModel.setBuiltInEnabled(BuiltInContextSource.AgentsHome, it) }, enabled = true, supportingText = "~/.agents/")
             renderer.Toggle("Kodex home", state.sources.kodexHomeEnabled,
-                { viewModel.setBuiltInEnabled(BuiltInContextSource.KodexHome, it) }, supportingText = "~/.kodex/")
+                { viewModel.setBuiltInEnabled(BuiltInContextSource.KodexHome, it) }, enabled = true, supportingText = "~/.kodex/")
             renderer.Toggle("Codex home", state.sources.codexHomeEnabled,
-                { viewModel.setBuiltInEnabled(BuiltInContextSource.CodexHome, it) }, supportingText = "~/.codex/")
+                { viewModel.setBuiltInEnabled(BuiltInContextSource.CodexHome, it) }, enabled = true, supportingText = "~/.codex/")
             renderer.Toggle("Git root", state.sources.gitRootEnabled,
-                { viewModel.setBuiltInEnabled(BuiltInContextSource.GitRoot, it) }, supportingText = "<git-root>/")
+                { viewModel.setBuiltInEnabled(BuiltInContextSource.GitRoot, it) }, enabled = true, supportingText = "<git-root>/")
             renderer.Toggle("Working directory", state.sources.workingDirectoryEnabled,
-                { viewModel.setBuiltInEnabled(BuiltInContextSource.WorkingDirectory, it) }, supportingText = "<cwd>/")
+                { viewModel.setBuiltInEnabled(BuiltInContextSource.WorkingDirectory, it) }, enabled = true, supportingText = "<cwd>/")
         }
         renderer.Section("Custom sources") {
-            renderer.Item("Add a global context source", supportingText = null) {
-                renderer.Action("Add source", onClick = viewModel::add)
+            renderer.Item("Add a global context source", supportingText = null, enabled = true) {
+                renderer.Action("Add source", onClick = viewModel::add, enabled = true, autoFocus = false)
             }
             if (state.sources.customSources.isEmpty()) UiText("None configured", UiTextRole.Supporting)
             state.sources.customSources.forEach { source ->

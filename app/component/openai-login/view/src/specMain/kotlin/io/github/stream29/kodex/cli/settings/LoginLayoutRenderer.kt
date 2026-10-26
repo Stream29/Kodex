@@ -9,9 +9,9 @@ public interface LoginLayoutRenderer {
 
     @Composable
     public fun LoginActions(
-    primaryLabel: String? = null,
-    primaryAction: (() -> Unit)? = null,
-    onDismissRequest: (() -> Unit)? = null,
+    primaryLabel: String?,
+    primaryAction: (() -> Unit)?,
+    onDismissRequest: (() -> Unit)?,
 ): Unit
 }
 

@@ -14,7 +14,7 @@ public interface McpSettingsLayoutRenderer {
     public fun McpListEntry(label: String, onClick: () -> Unit): Unit
 
     @Composable
-    public fun McpInput(label: String, token: Any, value: String, autoFocus: Boolean = false, onChange: (String) -> Unit): Unit
+    public fun McpInput(label: String, token: Any, value: String, autoFocus: Boolean, onChange: (String) -> Unit): Unit
 
     @Composable
     public fun McpActions(content: @Composable () -> Unit): Unit
@@ -27,8 +27,8 @@ public interface McpSettingsLayoutRenderer {
 
     @Composable
     public fun McpAction(
-    label: String, role: McpActionRole = McpActionRole.Normal, enabled: Boolean = true,
-    autoFocus: Boolean = false, onClick: () -> Unit,
+    label: String, role: McpActionRole, enabled: Boolean,
+    autoFocus: Boolean, onClick: () -> Unit,
 ): Unit
 }
 

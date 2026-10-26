@@ -14,7 +14,7 @@ public interface HookSettingsLayoutRenderer {
     public fun HookListEntry(label: String, onClick: () -> Unit): Unit
 
     @Composable
-    public fun HookInput(label: String, value: String, autoFocus: Boolean = false, onChange: (String) -> Unit): Unit
+    public fun HookInput(label: String, value: String, autoFocus: Boolean, onChange: (String) -> Unit): Unit
 
     @Composable
     public fun HookTypeChoice(label: String, checked: Boolean, onClick: () -> Unit): Unit
@@ -24,7 +24,7 @@ public interface HookSettingsLayoutRenderer {
 
     @Composable
     public fun HookAction(
-    label: String, role: HookActionRole = HookActionRole.Normal, autoFocus: Boolean = false, onClick: () -> Unit,
+    label: String, role: HookActionRole, autoFocus: Boolean, onClick: () -> Unit,
 ): Unit
 }
 

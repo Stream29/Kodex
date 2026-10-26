@@ -9,7 +9,7 @@ public interface UsageResetLayoutRenderer {
 
     @Composable
     public fun UsageResetAction(
-    label: String, primary: Boolean = false, autoFocus: Boolean = false, onClick: () -> Unit,
+    label: String, primary: Boolean, autoFocus: Boolean, onClick: () -> Unit,
 ): Unit
 
     @Composable

@@ -27,7 +27,7 @@ public actual fun AuthenticationSettingsPage(
                 options = KodexAuthSource.entries.map { UiChoiceOption(it.name, it.name) },
                 selectedKey = state.selectedSource.name,
                 onSelect = { key -> KodexAuthSource.entries.firstOrNull { it.name == key }?.let(viewModel::updateSource) },
-                enabled = enabled,
+                enabled = enabled, supportingText = null,
             )
         }
     }

@@ -15,10 +15,10 @@ public interface SettingsRenderer {
     public fun Section(title: String, content: @Composable () -> Unit)
 
     @Composable
-    public fun Item(label: String, supportingText: String?, enabled: Boolean = true, content: @Composable () -> Unit)
+    public fun Item(label: String, supportingText: String?, enabled: Boolean, content: @Composable () -> Unit)
 
     @Composable
-    public fun Action(label: String, onClick: () -> Unit, enabled: Boolean = true, autoFocus: Boolean = false)
+    public fun Action(label: String, onClick: () -> Unit, enabled: Boolean, autoFocus: Boolean)
 
     /** Controlled value from the owning child; activation emits a Boolean without optimistic storage. */
     @Composable
@@ -26,8 +26,8 @@ public interface SettingsRenderer {
         label: String,
         checked: Boolean,
         onChange: (Boolean) -> Unit,
-        enabled: Boolean = true,
-        supportingText: String? = null,
+        enabled: Boolean,
+        supportingText: String?,
     )
 
     /**
@@ -42,7 +42,7 @@ public interface SettingsRenderer {
         options: List<UiChoiceOption>,
         selectedKey: String,
         onSelect: (String) -> Unit,
-        enabled: Boolean = true,
-        supportingText: String? = null,
+        enabled: Boolean,
+        supportingText: String?,
     )
 }
