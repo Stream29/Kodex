@@ -22,7 +22,9 @@ const chrome = spawn(process.env.CHROME_BIN ?? "/usr/bin/google-chrome", [
   "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,1000",
   "--force-renderer-accessibility", "--use-gl=angle", "--use-angle=swiftshader",
   "--enable-unsafe-swiftshader", "about:blank",
-], { stdio: "ignore" });
+], { stdio: ["ignore", "ignore", "pipe"] });
+let chromeErrors = "";
+chrome.stderr.on("data", bytes => { chromeErrors = (chromeErrors + bytes).slice(-65_536); });
 const exited = new Promise(done => chrome.once("exit", done));
 let socket;
 let next = 0;
@@ -281,6 +283,18 @@ try {
   // Keep browser accessibility a separate strict gate, not a raster/functional substitute.
   assert.ok(disabledAccessibility.every(Boolean), "Browser accessibility must expose both disabled capability controls.");
 } catch (failure) {
+  await writeFile(join(output, "failure-events.json"), JSON.stringify({
+    failure: failure.message,
+    events: events.slice(-100).map(event => ({
+      method: event.method,
+      status: event.params?.response?.status,
+      path: (() => {
+        const url = event.params?.request?.url ?? event.params?.response?.url;
+        try { return url ? new URL(url).pathname : undefined; } catch { return undefined; }
+      })(),
+    })),
+  }, null, 2), { mode: 0o600 });
+  await writeFile(join(output, "chrome.stderr.log"), chromeErrors, { mode: 0o600 });
   if (sessionId && socket?.readyState === WebSocket.OPEN) {
     try {
       await writeFile(join(output, "product-failure.png"),
