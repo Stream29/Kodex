@@ -15,7 +15,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.selects.select
 import kotlinx.serialization.json.*
 import kotlin.test.*
 import kotlin.time.Duration.Companion.seconds
@@ -158,18 +157,53 @@ val localBrowserServerTest by testSuite(compartment = { TestCompartment.RealTime
     }
     test("pending unauthenticated browser sockets are bounded independently of RPC") {
         withServer { harness ->
-            val sockets = mutableListOf<DefaultClientWebSocketSession>()
-            try {
-                repeat(17) { sockets += harness.browser() }
-                val firstClose = coroutineScope {
-                    val waiters = sockets.map { async { it.closeReason.await() } }
-                    try {
-                        withTimeout(3.seconds) { select { waiters.forEach { waiter -> waiter.onAwait { it } } } }
-                    } finally { waiters.forEach { it.cancel() } }
+            withLoopbackBrowserWire(harness.port, Origin) { wire ->
+                // Complete before the production 5s hello deadline; timeout cannot free a slot for us.
+                withTimeout(3.seconds) {
+                    val pending = List(16) { index ->
+                        wire.browser().also { it.ping("opened-$index") }
+                    }
+                    assertEquals(WireClose(1013, "Browser admission busy."), wire.browser().closeReason())
+                    pending.forEachIndexed { index, peer -> peer.ping("pending-$index") }
+                    harness.assertNoBrowserWork()
+                    for ((index, peer) in pending.withIndex()) {
+                        val welcome = Json.decodeFromString(LocalBrowserWelcome.serializer(),
+                            peer.hello(encodeHello(directory = "/project")))
+                        assertEquals("/canonical/project", welcome.workingDirectory)
+                        withTimeout(3.seconds) { harness.registered.first { it == index + 1 } }
+                    }
+                    // Sixteen live RPCs must not consume the unauthenticated-hello semaphore.
+                    val recovered = Json.decodeFromString(LocalBrowserWelcome.serializer(),
+                        wire.browser().hello(encodeHello(directory = "/project")))
+                    assertEquals("/canonical/project", recovered.workingDirectory)
+                    withTimeout(3.seconds) { harness.registered.first { it == 17 } }
+                    assertEquals(17, harness.directoryChecks.value)
+                    assertEquals(0, harness.control.renewals.value)
                 }
-                assertEquals(CloseReason.Codes.TRY_AGAIN_LATER.code, firstClose?.code)
-                assertEquals(0, harness.registered.value + harness.directoryChecks.value + harness.control.renewals.value)
-            } finally { sockets.forEach { it.close() } }
+            }
+        }
+    }
+    test("pending browser slot is reusable after hello rejection") {
+        withServer { harness ->
+            withLoopbackBrowserWire(harness.port, Origin) { wire ->
+                withTimeout(3.seconds) {
+                    val pending = List(16) { index ->
+                        wire.browser().also { it.ping("opened-$index") }
+                    }
+                    assertEquals(WireClose(1013, "Browser admission busy."), wire.browser().closeReason())
+                    harness.assertNoBrowserWork()
+                    assertEquals(WireClose(1008, "Browser hello rejected or backend not ready."),
+                        pending.first().rejectHello(encodeHello(password = Secret + "-wrong")))
+                    harness.assertNoBrowserWork()
+                    val welcome = Json.decodeFromString(LocalBrowserWelcome.serializer(),
+                        wire.browser().hello(encodeHello(directory = "/project")))
+                    assertEquals("/canonical/project", welcome.workingDirectory)
+                    withTimeout(3.seconds) { harness.registered.first { it == 1 } }
+                    pending.drop(1).forEachIndexed { index, peer -> peer.ping("still-pending-$index") }
+                    assertEquals(1, harness.directoryChecks.value)
+                    assertEquals(0, harness.control.renewals.value)
+                }
+            }
         }
     }
     test("heartbeat CORS is exact and preflight never renews or grants management CORS") {
@@ -253,6 +287,11 @@ private class Harness(
     fun wsUrl(path: String): String = "ws://127.0.0.1:$port$path"
     suspend fun browser(origin: String = Origin): DefaultClientWebSocketSession =
         http.webSocketSession(wsUrl("/browser/rpc")) { header(HttpHeaders.Origin, origin) }
+    fun assertNoBrowserWork() {
+        assertEquals(0, registered.value, "Unauthenticated admission must not allocate RPC.")
+        assertEquals(0, directoryChecks.value, "Unauthenticated admission must not resolve directories.")
+        assertEquals(0, control.renewals.value, "Unauthenticated admission must not renew the daemon.")
+    }
 }
 
 private suspend fun withServer(enabled: Boolean = true, origins: Set<String> = setOf(Origin), block: suspend (Harness) -> Unit) {

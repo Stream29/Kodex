@@ -26,6 +26,7 @@ sourceSets {
         implementation(project(":rpc-backend-control-client"))
         implementation(libs.ktor.client.core)
         implementation(libs.ktor.client.websockets)
+        implementation("io.ktor:ktor-network:${libs.versions.ktor.asProvider().get()}")
     }
     macosArm64Test.dependencies { implementation(libs.ktor.client.darwin) }
     linuxTest.dependencies { implementation(libs.ktor.client.curl) }
