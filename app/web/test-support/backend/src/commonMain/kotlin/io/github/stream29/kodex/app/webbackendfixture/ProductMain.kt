@@ -16,7 +16,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.random.Random
 
 public actual fun productMain(): Unit = runBlocking {
-    val temporaryDirectory = SystemTemporaryDirectory
+    val temporaryDirectory = environmentVariable("TMPDIR")?.takeIf(String::isNotBlank)?.let(::Path)
+        ?: SystemTemporaryDirectory
     require(temporaryDirectory.isAbsolute) { "Set TMPDIR to an absolute temporary directory before starting this fixture." }
     val partDelay = environmentVariable("KODEX_BROWSER_FIXTURE_DELAY_MS")?.toLong() ?: 300L
     require(partDelay in 1..5_000)
