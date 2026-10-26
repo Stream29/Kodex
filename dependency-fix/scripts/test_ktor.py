@@ -33,7 +33,8 @@ class KtorNativePublicationTests(unittest.TestCase):
 
         def git(*args, **kwargs):
             if args[0] == "ls-tree":
-                return f"160000 commit {commit}\tKtor"
+                self.assertEqual(args, ("ls-tree", "HEAD", "--", "dependency-fix/ktor"))
+                return f"160000 commit {commit}\tdependency-fix/ktor"
             if args[0] == "rev-parse":
                 return commit
             if "get-url" in args:
@@ -46,6 +47,7 @@ class KtorNativePublicationTests(unittest.TestCase):
         with patch("pipeline.git", side_effect=git), patch("pipeline.run", return_value=""):
             actual = identity("ktor", self.repo)
         self.assertEqual(actual["version"], self.version)
+        self.assertEqual(actual["sourcePath"], "dependency-fix/ktor")
 
     def test_ktor_repository_hook_supports_configuration_on_demand(self):
         text = (Path(__file__).parent / "publish.init.gradle").read_text()

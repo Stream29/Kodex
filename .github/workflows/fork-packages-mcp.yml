@@ -3,7 +3,7 @@ name: Fork packages - MCP
 on:
   push:
     branches: [main]
-    paths: [KotlinMcpSdk]
+    paths: [dependency-fix/kotlin-mcp-sdk]
   workflow_dispatch:
     inputs:
       reviewed:
@@ -13,9 +13,10 @@ on:
         default: false
   pull_request:
     paths:
-      - KotlinMcpSdk
+      - dependency-fix/kotlin-mcp-sdk
       - .github/workflows/fork-packages-mcp.yml
-      - scripts/fork-packages/**
+      - dependency-fix/scripts/**
+      - .gitmodules
 
 permissions:
   contents: read
@@ -47,7 +48,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m unittest discover -s scripts/fork-packages -p 'test_*.py' -v
+      - run: python -m unittest discover -s dependency-fix/scripts -p 'test_*.py' -v
 
   gate:
     needs: offline-tests
@@ -73,7 +74,7 @@ jobs:
         with:
           python-version: "3.12"
       - id: guard
-        run: python scripts/fork-packages/pipeline.py guard --fork mcp --output "$RUNNER_TEMP/identity.json"
+        run: python dependency-fix/scripts/pipeline.py guard --fork mcp --output "$RUNNER_TEMP/identity.json"
 
   build:
     needs: gate
@@ -119,7 +120,7 @@ jobs:
           FORK_JDK21: ${{ steps.java21.outputs.path }}
           GRADLE_USER_HOME: ${{ runner.temp }}/fork-gradle
           KONAN_DATA_DIR: ${{ runner.temp }}/fork-konan
-        run: python scripts/fork-packages/pipeline.py build --fork mcp --host "${{ matrix.host }}" --output "$RUNNER_TEMP/sealed"
+        run: python dependency-fix/scripts/pipeline.py build --fork mcp --host "${{ matrix.host }}" --output "$RUNNER_TEMP/sealed"
       - uses: actions/upload-artifact@v4
         with:
           name: mcp-stage-${{ matrix.host }}
@@ -148,7 +149,7 @@ jobs:
           pattern: mcp-stage-*
           path: ${{ runner.temp }}/stages
       - run: >-
-          python scripts/fork-packages/pipeline.py merge --fork mcp
+          python dependency-fix/scripts/pipeline.py merge --fork mcp
           --input "$RUNNER_TEMP/stages" --output "$RUNNER_TEMP/bundle"
           --identity-sha256 "${{ needs.gate.outputs.identity_sha256 }}"
       - uses: actions/upload-artifact@v4
@@ -196,7 +197,7 @@ jobs:
           name: mcp-validated-bundle
           path: ${{ runner.temp }}/bundle
       - run: >-
-          python scripts/fork-packages/smoke.py --fork mcp --host "${{ matrix.host }}"
+          python dependency-fix/scripts/smoke.py --fork mcp --host "${{ matrix.host }}"
           --bundle "$RUNNER_TEMP/bundle" --output "$RUNNER_TEMP/consumer"
           --receipt "$RUNNER_TEMP/receipts/${{ matrix.host }}.json"
           --identity-sha256 "${{ needs.gate.outputs.identity_sha256 }}"
@@ -241,6 +242,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
-          python scripts/fork-packages/publisher.py --fork mcp
+          python dependency-fix/scripts/publisher.py --fork mcp
           --bundle "$RUNNER_TEMP/bundle" --receipts "$RUNNER_TEMP/receipts"
           --identity-sha256 "${{ needs.gate.outputs.identity_sha256 }}"

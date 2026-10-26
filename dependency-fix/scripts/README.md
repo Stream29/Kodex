@@ -1,8 +1,41 @@
 # Fork package CI handoff
 
+## Maintenance layout
+
+- Sources are maintained as gitlinks at `dependency-fix/{mosaic,kotlin-mcp-sdk,lucene-kmp,ktor,compose-ui}`.
+  Their repository identities, submodule names and commit pins are unchanged by relocation.
+  These directories are producers, not product `includeBuild` inputs.
+- Shared publication tools live in `dependency-fix/scripts/`; GitHub workflow entrypoints
+  remain in `.github/workflows/fork-packages-*.yml`.
+- New identities/manifests record the relocated `sourcePath` and repository-relative
+  recipe paths. Old bundles do not satisfy the new recipe; relocation does not authorize
+  rebuilding or overwriting an existing immutable package version.
+- Compose's existing `compat/compose-ui` input remains until the binary publication
+  below has passed immutable upload and readback. Source preparation is not a consumer switch.
+
+## Compose Wasm leaf
+
+- `dependency-fix/compose-ui` pins the standalone `kodex-ui-wasm` maintenance branch
+  in `Stream29/compose-multiplatform-core`. It verifies the official 1.11.1 source
+  archive and the reviewed semantics patch, retaining the upstream license and notice.
+- Only `org.jetbrains.compose.ui:ui-wasm-js` is replaced. The official `ui:1.11.1`
+  root and all other Compose modules remain unchanged. The exact version is
+  `1.11.1-kodex.<12-character producer commit>`, derived from the product gitlink.
+- `fork-packages-compose-ui.yml` runs the offline publication tests, stages the
+  five real Wasm payloads on macOS/Java25, normalizes self-contained leaf metadata,
+  and runs the four strict regressions in a separate binary-only browser consumer.
+  The probe checks official-root/fork-leaf selection and normal Skiko extraction.
+- `compose.py seal` binds the source commit/tree, payload digests and executed XML
+  results. A separate, single-writer main CI job uploads the sealed payloads through
+  the shared immutable publisher and reads back every byte. Protected-main pushes
+  or explicitly reviewed dispatches are required; PRs cannot publish.
+- This one-host Wasm recipe is separate from the Native/JVM matrix below. It
+  advertises no fork root, JVM, Native or JS publication. The product's production
+  Web and actual frontend-host acceptance remain required before a Kodex release.
+
 ## Ktor Native-only repair
 
-- `Ktor` pins the independent `Stream29/ktor` maintenance commit, not the upstream
+- `dependency-fix/ktor` pins the independent `Stream29/ktor` maintenance commit, not the upstream
   contribution branch. Only `ktor-network-{linuxx64,linuxarm64,macosarm64,mingwx64}`
   are published; official root/JVM and all other Ktor modules remain unchanged.
 - Native GMM is normalized to a self-contained component, not a redirect to an
@@ -17,32 +50,31 @@
   assert the actual selected versions, and exchange real loopback TCP messages.
   No new package is consumed before complete immutable upload and byte verification.
 
-- **IMPLEMENTATION READY / VALIDATION PENDING.**
-- Worker scope: these scripts and the three `fork-packages-*.yml` workflows.
-- SDK JS closure delta (Session 552): only these scripts and the MCP workflow;
-  other forks keep the original five targets. All validation is coordinator-owned.
-- No worker tests, Gradle/IDE, publication, commits/push, branch or gitlink edits.
-  The coordinator owns deployment, credentials, consumer settings and every real run.
+- Offline structural fixtures are separate from real publication and consumer acceptance.
+  The coordinator owns deployment, credentials, consumer settings and real build/runtime runs.
 - Initial product baseline: Kodex `837494340036f433e5320fabedccd874b0f320e7`
   (v0.4.10). Gitlinks, not another lock file, supply publication identity.
 
 ## Coordinates and task sets
 
-| Fork | Original group / module closure | Initial immutable version |
+| Fork | Original group / module closure | Version derived from current gitlink |
 | --- | --- | --- |
-| Mosaic | `com.jakewharton.mosaic`, `mosaic-{runtime,animation,testing,terminal,tty-terminal,tty}` | `0.19.0-SNAPSHOT-kodex.7b1a412918f7` |
-| MCP | `io.modelcontextprotocol`, `kotlin-sdk-{core,client,server}` | `0.14.0-kodex.53f717661712` |
+| Mosaic | `com.jakewharton.mosaic`, `mosaic-{runtime,animation,testing,terminal,tty-terminal,tty}` | `0.19.0-SNAPSHOT-kodex.78f94c4c2e13` |
+| MCP | `io.modelcontextprotocol`, `kotlin-sdk-{core,client,server}` | `0.14.0-kodex.51ca6e0243f8` |
 | Lucene | `org.gnit.lucene-kmp`, `lucene-kmp-core` (project `:core`) | `10.2.0-alpha14-kodex.549f8afc9570` |
+| Ktor | `io.ktor`, only `ktor-network-{linuxx64,linuxarm64,macosarm64,mingwx64}` | `3.5.0-kodex.64cf7fdbcf65` |
 
 - Version = the **literal** pinned `VERSION_NAME`/`version` + `-kodex.` + first
   12 commit characters. Mosaic's embedded `SNAPSHOT` is retained; the resulting
   version does not end in `-SNAPSHOT` and is not a timestamped Maven snapshot.
-- Mosaic commit `7b1a412918f7bc24db847343480f010242939788`;
-  MCP `53f717661712d618cd4822d1760392e903989ead`;
-  Lucene `549f8afc9570bd4289f1047653d4cd6dc9665bbd`.
+- Mosaic commit `78f94c4c2e136d908b838f09cd3231dc37ee67fd`;
+  MCP `51ca6e0243f82e4bd7a521132a1445a9ff59fc1f`;
+  Lucene `549f8afc9570bd4289f1047653d4cd6dc9665bbd`;
+  Ktor `64cf7fdbcf65eac0186df0954a03a98b922a52e3`.
+  The derived versions identify source pins; this table does not certify remote availability.
 - Matrix tasks are the Cartesian product of each fork's project closure and its
   host publications, using `:<project>:publish<Publication>PublicationToForkStagingRepository`.
-  There are 36 Mosaic, **21 MCP** and 6 Lucene tasks across hosts.
+  There are 36 Mosaic, **21 MCP**, 6 Lucene and 4 Ktor tasks across hosts.
 - Read-only baseline catalog/module-use audit confirmed direct runtime/animation/
   testing, MCP client/server and Lucene core usage. The declared package closure
   adds Mosaic terminal/tty-terminal/tty and MCP core; SDK umbrella and Lucene
@@ -84,23 +116,24 @@ developer Python environment, the workspace preference is `uv`.
 ```bash
 # Tiny offline fixtures; only a loopback HTTP server, no Gradle/Git or package endpoint.
 PYTHONDONTWRITEBYTECODE=1 python -m unittest discover \
-  -s scripts/fork-packages -p 'test_*.py' -v
+  -s dependency-fix/scripts -p 'test_*.py' -v
 
 # Print the exact task list without running it (repeat for each fork/host).
-python -B scripts/fork-packages/pipeline.py tasks --fork mosaic --host mac
-python -B scripts/fork-packages/pipeline.py tasks --fork mcp --host linux
-python -B scripts/fork-packages/pipeline.py tasks --fork mcp --host mac
-python -B scripts/fork-packages/pipeline.py tasks --fork lucene --host windows
+python -B dependency-fix/scripts/pipeline.py tasks --fork mosaic --host mac
+python -B dependency-fix/scripts/pipeline.py tasks --fork mcp --host linux
+python -B dependency-fix/scripts/pipeline.py tasks --fork mcp --host mac
+python -B dependency-fix/scripts/pipeline.py tasks --fork lucene --host windows
+python -B dependency-fix/scripts/pipeline.py tasks --fork ktor --host mac
 
 # Read-only verification of a merged bundle; this is not runtime or remote acceptance.
-python -B scripts/fork-packages/pipeline.py verify --fork mcp \
+python -B dependency-fix/scripts/pipeline.py verify --fork mcp \
   --input /absolute/validated-bundle --identity-sha256 <gate-output>
 ```
 
 The workflows use these CLI interfaces:
 
 ```text
-pipeline.py guard --fork <mosaic|mcp|lucene> --output <identity.json>
+pipeline.py guard --fork <mosaic|mcp|lucene|ktor> --output <identity.json>
 pipeline.py build --fork <fork> --host <linux|mac|windows> --output <new-sealed-dir>
 pipeline.py merge --fork <fork> --input <downloaded-stage-dirs> --output <new-bundle-dir>
                  --identity-sha256 <gate-output>
@@ -115,17 +148,18 @@ publisher.py --fork <fork> --bundle <bundle> --receipts <three-receipt-dir>
   requires a clean exact-main CI checkout, outputs the commit and an identity
   digest, fetches `kodex-submodule`, and runs `merge-base --is-ancestor`.
   Identity includes `targetClosure` (per-fork target list and host authority map);
-  stages/manifests must match it. Old SDK five-target bundles fail this contract.
+  stages/manifests must match it. Identities also bind the `sourcePath` to the
+  maintained gitlink; old SDK five-target bundles fail this contract.
 - A reviewed manual dispatch uses **ref `main`, input `reviewed=true`**. There is no
   arbitrary revision/commit input. Every checkout pins `github.sha`; live remote
   main must still be exactly that SHA before building and before completion.
 - Workflow/script-only main pushes do **not** publish. Automatic gitlink push
   admission additionally requires a protected main ref; unprotected main is
   manual-only, with explicit `reviewed=true`. First deployment with
-  unchanged gitlinks therefore needs three separately reviewed manual dispatches.
+  unchanged gitlinks therefore needs a separately reviewed manual dispatch for each fork.
   Ordinary PRs execute only offline tests with read permissions.
-- The coordinator must create the three maintenance branches at the existing
-  commits first, review/deploy these files, and execute any remote CLI with the
+- The coordinator must verify the maintenance branch ancestry at the pinned
+  commits, review/deploy these files, and execute any remote CLI with the
   shared-device/JVM/lock requirements. Never use these build commands against a
   shared/default Gradle home. `GRADLE_USER_HOME` and `KONAN_DATA_DIR` must be explicit
   private siblings under the staging/consumer parent; `JAVA_HOME` is explicit.
@@ -249,16 +283,14 @@ publisher.py --fork <fork> --bundle <bundle> --receipts <three-receipt-dir>
 - CI artifacts expire after seven days; logs remain under repository retention.
   Package versions are not automatically deleted. Save failure evidence before
   artifact expiry. A recipe/toolchain change cannot overwrite this same version.
-- The SDK JS closure was added before its first publication, retaining the version
-  above. The original MCP/Lucene bundles are now remotely byte-verified; rebuilding
-  that same fork version after recipe/toolchain changes is not permission to replace
-  it. Existing five-target, partial or different versions fail preflight; no
-  overwrite or automatic resume exception exists.
+- A previously accepted version cannot be replaced after recipe/toolchain changes.
+  Existing five-target, partial or different versions fail preflight; no overwrite
+  or automatic resume exception exists.
 - Offline JS fixtures cover payload/source loss, wrong platform/compiler,
   missing/invalid root redirects, POM/GMM dependency loss, host/task drift,
   target-bound guard identity and refusing receipts without JS compilation.
-  Original loopback immutable-writer/security tests remain; all tests and real
-  three-host/JS gates are **written, not executed by this worker**.
+  Original loopback immutable-writer/security tests remain. Offline tests do not
+  certify the real three-host/JS gates or any package upload.
 
 ## Evidence and official mechanisms
 

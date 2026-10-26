@@ -1,0 +1,116 @@
+name: Fork packages - Compose UI Wasm
+
+on:
+  push:
+    branches: [main]
+    paths: [dependency-fix/compose-ui]
+  workflow_dispatch:
+    inputs:
+      reviewed:
+        description: "I reviewed this exact main revision and authorize the pinned Compose Wasm publication"
+        type: boolean
+        required: true
+        default: false
+  pull_request:
+    paths:
+      - dependency-fix/compose-ui
+      - dependency-fix/scripts/**
+      - .github/workflows/fork-packages-compose-ui.yml
+      - .gitmodules
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-packages-compose-ui-main
+  cancel-in-progress: false
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  FORK_PUBLICATION_REVIEWED: ${{ github.event_name == 'workflow_dispatch' && inputs.reviewed && 'true' || 'false' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s dependency-fix/scripts -p 'test_*.py' -v
+
+  build:
+    needs: offline-tests
+    if: >-
+      github.repository == 'Stream29/Kodex' &&
+      github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'push' && github.ref_protected) ||
+       (github.event_name == 'workflow_dispatch' && inputs.reviewed))
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout only the reviewed Wasm producer
+        run: git submodule update --init --depth 1 dependency-fix/compose-ui
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.12.0"
+      - name: Stage and verify the exact binary publication
+        env:
+          CHROME_BIN: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+        run: |
+          set -euo pipefail
+          cd dependency-fix/compose-ui
+          VERSION="1.11.1-kodex.$(git rev-parse --short=12 HEAD)"
+          ARGS=(--no-configuration-cache --no-parallel --max-workers=1
+            "-Dorg.gradle.java.home=$JAVA_HOME"
+            "-Dorg.gradle.jvmargs=-Xmx6g -Dfile.encoding=UTF-8"
+            -Pkotlin.compiler.execution.strategy=in-process
+            "-PforkVersion=$VERSION" "-Pkodex.nodeCommand=$(command -v node)")
+          ./gradlew "${ARGS[@]}" publishWasmJsPublicationToForkStagingRepository
+          python3 publication.py prepare --version "$VERSION"
+          ./gradlew -p binary-probe "${ARGS[@]}" wasmJsBrowserTest
+          cd ../..
+          python3 dependency-fix/scripts/compose.py seal --bundle "$RUNNER_TEMP/compose-ui-bundle"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compose-ui-bundle
+          path: ${{ runner.temp }}/compose-ui-bundle
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - run: git submodule update --init --depth 1 dependency-fix/compose-ui
+      - uses: actions/download-artifact@v4
+        with:
+          name: compose-ui-bundle
+          path: ${{ runner.temp }}/compose-ui-bundle
+      - name: Publish without overwrite and read back every byte
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 dependency-fix/scripts/compose.py publish --bundle "$RUNNER_TEMP/compose-ui-bundle"

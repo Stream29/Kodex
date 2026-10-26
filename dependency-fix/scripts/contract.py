@@ -16,13 +16,13 @@ HOSTS = {
 }
 FORKS = {
     "mosaic": {
-        "path": "Mosaic", "repository": "Stream29/mosaic",
+        "path": "dependency-fix/mosaic", "repository": "Stream29/mosaic",
         "group": "com.jakewharton.mosaic",
         "modules": {f"mosaic-{m}": f":mosaic-{m}" for m in
                     ("runtime", "animation", "testing", "terminal", "tty-terminal", "tty")},
     },
     "mcp": {
-        "path": "KotlinMcpSdk", "repository": "Stream29/kotlin-mcp-sdk",
+        "path": "dependency-fix/kotlin-mcp-sdk", "repository": "Stream29/kotlin-mcp-sdk",
         "group": "io.modelcontextprotocol",
         "modules": {f"kotlin-sdk-{m}": f":kotlin-sdk-{m}" for m in ("core", "client", "server")},
         # The SDK's stdio/HTTP consumers really use JS on Node. No other fork exception.
@@ -30,11 +30,11 @@ FORKS = {
         "hosts": {**HOSTS, "mac": HOSTS["mac"] + ("js",)},
     },
     "lucene": {
-        "path": "LuceneKmp", "repository": "Stream29/lucene-kmp",
+        "path": "dependency-fix/lucene-kmp", "repository": "Stream29/lucene-kmp",
         "group": "org.gnit.lucene-kmp", "modules": {"lucene-kmp-core": ":core"},
     },
     "ktor": {
-        "path": "Ktor", "repository": "Stream29/ktor", "group": "io.ktor",
+        "path": "dependency-fix/ktor", "repository": "Stream29/ktor", "group": "io.ktor",
         "modules": {"ktor-network": ":ktor-network"},
         "versionFile": "VERSION",
         "targets": ("linuxX64", "linuxArm64", "macosArm64", "mingwX64"),

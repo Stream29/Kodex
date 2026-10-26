@@ -72,6 +72,7 @@ def identity(fork, root):
     require(re.fullmatch(r"[A-Za-z0-9._-]+", upstream), "Unsafe upstream version")
     return {
         "fork": fork, "repository": spec["repository"], "branch": "kodex-submodule",
+        "sourcePath": spec["path"],
         "commit": commit, "tree": git("rev-parse", f"{commit}^{{tree}}", cwd=source),
         "upstreamVersion": upstream, "version": f"{upstream}-kodex.{commit[:12]}",
         "targetClosure": target_closure(spec),
@@ -79,7 +80,8 @@ def identity(fork, root):
 
 
 def recipe(fork):
-    result = {p.name: digest(p.read_bytes()) for p in sorted(HERE.iterdir())
+    result = {p.relative_to(HERE.parent.parent).as_posix(): digest(p.read_bytes())
+              for p in sorted(HERE.iterdir())
               if p.suffix in (".py", ".gradle")}
     workflow = f".github/workflows/fork-packages-{fork}.yml"
     result[workflow] = digest((HERE.parent.parent / workflow).read_bytes())
@@ -434,7 +436,8 @@ def verify_bundle(bundle, fork, identity_sha256=None):
             "Guard identity target closure mismatch")
     if identity_sha256:
         require(digest(encoded(ident)) == identity_sha256, "Bundle does not match the guarded gitlink")
-    require(ident["repository"] == FORKS[fork]["repository"] and ident["branch"] == "kodex-submodule" and
+    require(ident.get("sourcePath") == FORKS[fork]["path"] and
+            ident["repository"] == FORKS[fork]["repository"] and ident["branch"] == "kodex-submodule" and
             re.fullmatch(r"[0-9a-f]{40}", ident["commit"]) and
             re.fullmatch(r"[0-9a-f]{40}", ident["tree"]) and
             ident["version"] == ident["upstreamVersion"] + "-kodex." + ident["commit"][:12],

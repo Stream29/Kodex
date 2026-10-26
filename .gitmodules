@@ -1,13 +1,17 @@
 [submodule "Mosaic"]
-	path = Mosaic
+	path = dependency-fix/mosaic
 	url = git@github.com:Stream29/mosaic.git
 [submodule "KotlinMcpSdk"]
-	path = KotlinMcpSdk
+	path = dependency-fix/kotlin-mcp-sdk
 	url = git@github.com:Stream29/kotlin-mcp-sdk.git
 [submodule "LuceneKmp"]
-	path = LuceneKmp
+	path = dependency-fix/lucene-kmp
 	url = git@github.com:Stream29/lucene-kmp.git
 [submodule "Ktor"]
-	path = Ktor
+	path = dependency-fix/ktor
 	url = git@github.com:Stream29/ktor.git
 	branch = kodex-submodule
+[submodule "dependency-fix/compose-ui"]
+	path = dependency-fix/compose-ui
+	url = https://github.com/Stream29/compose-multiplatform-core.git
+	branch = kodex-ui-wasm

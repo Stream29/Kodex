@@ -362,6 +362,7 @@ class ContractTests(unittest.TestCase):
 
     def stages(self):
         identity = {"fork": self.fork, "repository": self.spec["repository"],
+                    "sourcePath": self.spec["path"],
                     "branch": "kodex-submodule", "commit": "a" * 40, "tree": "b" * 40,
                     "upstreamVersion": self.version.split("-kodex.")[0], "version": self.version,
                     "targetClosure": target_closure(self.spec)}
@@ -405,6 +406,8 @@ class ContractTests(unittest.TestCase):
         doc, raw = verify_bundle(output, "lucene", identity_sha)
         self.assertEqual(raw, self.raw)
         self.assertEqual(doc["identity"]["commit"], "a" * 40)
+        self.assertEqual(doc["identity"]["sourcePath"], "dependency-fix/lucene-kmp")
+        self.assertIn("dependency-fix/scripts/pipeline.py", doc["recipe"])
         expected, marker = upload_set(output, "lucene", identity_sha)
         self.assertIn(marker, expected)
         self.assertNotIn("maven-metadata.xml", "\n".join(expected))
@@ -443,6 +446,23 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             merge(SimpleNamespace(input=stages, output=self.root / "bundle", fork="lucene",
                                   identity_sha256=identity_sha))
+
+    def test_manifest_refuses_old_or_missing_source_path(self):
+        stages, identity_sha = self.stages()
+        output = self.root / "bundle"
+        merge(SimpleNamespace(input=stages, output=output, fork=self.fork,
+                              identity_sha256=identity_sha))
+        manifest = output / "manifest.json"
+        doc = json.loads(manifest.read_bytes())
+        for old in ("LuceneKmp", None):
+            with self.subTest(sourcePath=old):
+                if old is None:
+                    doc["identity"].pop("sourcePath", None)
+                else:
+                    doc["identity"]["sourcePath"] = old
+                manifest.write_bytes(encoded(doc))
+                with self.assertRaisesRegex(ValueError, "manifest source identity"):
+                    verify_bundle(output, self.fork)
 
 
 class McpJsTests(unittest.TestCase):
@@ -1268,7 +1288,8 @@ class GuardTests(unittest.TestCase):
         commit = "a" * 40
         def command(*args, cwd=None):
             if args[0] == "ls-tree":
-                return f"160000 commit {commit}\tMosaic"
+                self.assertEqual(args, ("ls-tree", "HEAD", "--", "dependency-fix/mosaic"))
+                return f"160000 commit {commit}\tdependency-fix/mosaic"
             if args[:2] == ("rev-parse", "HEAD"):
                 return commit
             if args[0] in ("status", "fetch", "submodule"):
@@ -1283,10 +1304,13 @@ class GuardTests(unittest.TestCase):
         with patch("pipeline.git", side_effect=command) as commands, patch("pipeline.run", return_value="") as runs:
             result = identity("mosaic", Path("/unused-fixture"))
         self.assertEqual(result["version"], "0.19.0-SNAPSHOT-kodex." + "a" * 12)
+        self.assertEqual(result["sourcePath"], "dependency-fix/mosaic")
         self.assertEqual(result["targetClosure"], target_closure(FORKS["mosaic"]))
         self.assertTrue(any(call.args[:3] == ("fetch", "--no-tags", "https://github.com/Stream29/mosaic.git")
                             for call in commands.call_args_list))
         self.assertTrue(any("--is-ancestor" in call.args[0] for call in runs.call_args_list))
+        self.assertTrue(any(call.kwargs.get("cwd") == Path("/unused-fixture/dependency-fix/mosaic")
+                            for call in commands.call_args_list))
 
     def test_sdk_inputs_without_real_sdk_execution(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -1315,6 +1339,30 @@ class GuardTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_maintenance_paths_and_all_workflow_calls_are_relocated(self):
+        root = Path(__file__).resolve().parents[2]
+        self.assertEqual({spec["path"] for spec in FORKS.values()}, {
+            "dependency-fix/mosaic", "dependency-fix/kotlin-mcp-sdk",
+            "dependency-fix/lucene-kmp", "dependency-fix/ktor"})
+        modules = (root / ".gitmodules").read_text()
+        for fork, spec in FORKS.items():
+            with self.subTest(fork=fork):
+                self.assertIn(f'path = {spec["path"]}\n', modules)
+                self.assertIn(f'url = git@github.com:{spec["repository"]}.git', modules)
+                text = (root / ".github/workflows" / f"fork-packages-{fork}.yml").read_text()
+                self.assertNotIn("scripts/fork-packages", text)
+                self.assertIn("- dependency-fix/scripts/**", text)
+                self.assertIn("- .gitmodules", text)
+                self.assertIn("-s dependency-fix/scripts -p 'test_*.py'", text)
+                for command in ("guard", "build", "merge"):
+                    self.assertIn(f"python dependency-fix/scripts/pipeline.py {command} --fork {fork}", text)
+                for script in ("smoke", "publisher"):
+                    self.assertIn(f"python dependency-fix/scripts/{script}.py --fork {fork}", text)
+                recorded = recipe(fork)
+                self.assertIn("dependency-fix/scripts/contract.py", recorded)
+                self.assertIn(f".github/workflows/fork-packages-{fork}.yml", recorded)
+                self.assertFalse(any("/" not in key for key in recorded))
+
     def test_node_setup_is_sdk_linux_smoke_only(self):
         root = Path(__file__).resolve().parents[2]
         for fork in FORKS:
