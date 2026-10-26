@@ -24,6 +24,7 @@ kotlin {
     }
     sourceSets.commonMain.dependencies {
         implementation(project(":app-tui-host"))
+        implementation(project(":app-rpc-system"))
         api(project(":rpc-local"))
         api(project(":openai-client-test"))
         implementation(project(":hook-notification"))
