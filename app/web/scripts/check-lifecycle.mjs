@@ -231,6 +231,7 @@ try {
   native.stderr.resume();
   let record = await readRecord(0);
   chrome = spawn(process.env.CHROME_BIN ?? "/usr/bin/google-chrome", [
+    ...(process.platform === "darwin" ? ["--password-store=basic", "--use-mock-keychain"] : []),
     "--headless=new", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-component-update",
     "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
     "--no-first-run", "--no-default-browser-check", "--window-size=1280,1000", "--force-renderer-accessibility",

@@ -20,6 +20,7 @@ const chrome = spawn(process.env.CHROME_BIN ?? "/usr/bin/google-chrome", [
   "--headless=new", "--disable-dev-shm-usage", "--remote-debugging-address=127.0.0.1",
   "--disable-background-networking", "--disable-component-update", "--no-first-run", "--no-default-browser-check",
   "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,1000",
+  ...(process.platform === "darwin" ? ["--password-store=basic", "--use-mock-keychain"] : []),
   "--force-renderer-accessibility", "--use-gl=angle", "--use-angle=swiftshader",
   "--enable-unsafe-swiftshader", "about:blank",
 ], { stdio: ["ignore", "ignore", "pipe"] });
