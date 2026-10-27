@@ -84,7 +84,7 @@ async function editor() {
     function visit(root) {
       for (const e of root.querySelectorAll('*')) {
         if (e.tagName === 'TEXTAREA') found.push({ value: e.value, cursor: e.selectionEnd,
-          active: e.getRootNode().activeElement === e, disabled: e.disabled });
+          label: e.getAttribute('aria-label'), active: e.getRootNode().activeElement === e, disabled: e.disabled });
         if (e.shadowRoot) visit(e.shadowRoot);
       }
     }
@@ -259,7 +259,10 @@ try {
   await send("Emulation.clearDeviceMetricsOverride");
   await wait(editor, inputs => inputs.length === 1 && inputs[0].active, "editor after viewport restoration");
   await pointer(disconnect);
-  await wait(editor, inputs => inputs.length === 0, "disconnect unmounts application");
+  await button("Choose private connection record");
+  await wait(editor, inputs => inputs.length === 1 &&
+    inputs[0].label === "Initial backend directory (blank: backend Home)" && !inputs[0].disabled,
+    "disconnect unmounts Composer and restores only the connection-directory field");
   await delay(500);
   const heartbeatCount = requests.filter(value => value.endsWith("/heartbeat")).length;
   await delay(21_000);
