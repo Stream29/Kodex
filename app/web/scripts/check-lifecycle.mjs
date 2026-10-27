@@ -204,7 +204,10 @@ async function page() {
   const result = new Page(targetId, sessionId, browserContextId);
   pages.set(sessionId, result);
   for (const domain of ["Runtime", "Page", "Network", "Accessibility"]) await result.send(`${domain}.enable`);
+  await result.send("Page.bringToFront");
+  await result.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await result.send("Page.navigate", { url });
+  await wait(() => result.evaluate("document.visibilityState"), value => value === "visible", "foreground page");
   await result.importRecord();
   return result;
 }
@@ -317,6 +320,8 @@ try {
   if (!restartOnly) {
   phase = "freeze";
   await second.type("frozen-tab draft");
+  // Focus emulation keeps this headless renderer scheduled; disable it for the real frozen-page gate.
+  await second.send("Emulation.setFocusEmulationEnabled", { enabled: false });
   await second.send("Page.setWebLifecycleState", { state: "frozen" });
   await delay(1_000);
   const frozenHeartbeats = second.heartbeats;
@@ -362,6 +367,10 @@ try {
   await writeFile(join(output, "lifecycle-partial.json"), JSON.stringify({ phase, checks, errors, exceptionDetails }, null, 2));
   for (const [id, page] of pages) {
     try {
+      await writeFile(join(output, `failure-${id}-state.json`), JSON.stringify({
+        heartbeats: page.heartbeats, heartbeatReplies: page.heartbeatReplies, peers: page.peers.length,
+        document: await page.evaluate("({visibility:document.visibilityState, focused:document.hasFocus(), text:document.body.innerText})"),
+      }, null, 2));
       const image = await page.send("Page.captureScreenshot", { format: "png" });
       await writeFile(join(output, `failure-${id}.png`), Buffer.from(image.data, "base64"));
       await writeFile(join(output, `failure-${id}.json`), JSON.stringify(await page.tree(), null, 2));
