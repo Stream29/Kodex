@@ -1,29 +1,118 @@
 package io.github.stream29.kodex.cli.components
 
+import androidx.compose.runtime.BroadcastFrameClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.jakewharton.mosaic.Mosaic
 import com.jakewharton.mosaic.layout.padding
 import com.jakewharton.mosaic.layout.width
 import com.jakewharton.mosaic.modifier.Modifier
 import com.jakewharton.mosaic.terminal.AnsiLevel
 import com.jakewharton.mosaic.testing.SnapshotStrategy
 import com.jakewharton.mosaic.testing.TestMosaic
+import com.jakewharton.mosaic.testing.TestTerminal
 import com.jakewharton.mosaic.testing.runMosaicTest
 import com.jakewharton.mosaic.ui.Box
 import com.jakewharton.mosaic.ui.Color
 import com.jakewharton.mosaic.ui.Column
+import com.jakewharton.mosaic.ui.Layout
 import com.jakewharton.mosaic.ui.Text
 import com.jakewharton.mosaic.ui.TextStyle
 import com.jakewharton.mosaic.ui.UnderlineStyle
 import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 
 val ellipsizedTextTest by testSuite {
+    test("production frame callbacks stop measuring and rendering after constraint-only relayout") {
+        coroutineScope {
+            var width by mutableIntStateOf(6)
+            var minimumWidth by mutableIntStateOf(0)
+            var value by mutableStateOf("A你BCDEF")
+            val clock = BroadcastFrameClock()
+            val terminal = TestTerminal()
+            var frames = 0
+            var measures = 0
+            var draws = 0
+            var rendered = ""
+            val mosaic = Mosaic(
+                coroutineContext = currentCoroutineContext() + clock,
+                terminal = terminal,
+                onDraw = {
+                    draws++
+                    // Production renders inside onDraw, not when a snapshot is requested later.
+                    rendered = it.draw().render(AnsiLevel.NONE, false)
+                },
+            )
+
+            suspend fun driveFrames(count: Int) {
+                repeat(count) {
+                    assertTrue(clock.hasAwaiters, "No production frame listener before frame $frames")
+                    clock.sendFrame(++frames * 1_000_000L)
+                    delay(1.milliseconds)
+                }
+            }
+
+            suspend fun assertIdle(expected: String, previousDraws: Int) {
+                driveFrames(8)
+                assertTrue(draws > previousDraws, "The input change did not reach the renderer")
+                assertEquals(expected, rendered)
+                val settledMeasures = measures
+                val settledDraws = draws
+                driveFrames(100)
+                assertEquals(
+                    settledMeasures, measures,
+                    "Production kept measuring over 100 idle frames (draws: $settledDraws -> $draws)",
+                )
+                assertEquals(settledDraws, draws, "Production kept rendering over 100 idle frames")
+                assertEquals(expected, rendered)
+            }
+
+            try {
+                mosaic.setContent {
+                    Layout(content = { EllipsizedText(value) }) { measurables, constraints ->
+                        measures++
+                        // Read constraints in measure so these changes do not recompose the parent.
+                        val placeable = measurables.single().measure(
+                            constraints.copy(minWidth = minimumWidth, maxWidth = width),
+                        )
+                        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+                    }
+                }
+                assertTrue(measures > 0)
+                assertIdle("A你...", previousDraws = 0)
+
+                var previousDraws = draws
+                minimumWidth = 1
+                assertIdle("A你...", previousDraws)
+
+                previousDraws = draws
+                width = 8
+                assertIdle("A你BCDEF", previousDraws)
+
+                previousDraws = draws
+                width = 2
+                assertIdle("A", previousDraws)
+
+                previousDraws = draws
+                value = "👩‍💻ABCDE"
+                width = 6
+                assertIdle("👩‍💻A...", previousDraws)
+            } finally {
+                mosaic.cancel()
+                terminal.close()
+            }
+        }
+    }
+
     test("settles at idle and after text and measured width changes") {
         var width by mutableIntStateOf(6)
         var value by mutableStateOf("A你BCDEF")
