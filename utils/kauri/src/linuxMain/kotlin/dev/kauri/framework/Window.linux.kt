@@ -125,6 +125,9 @@ private const val WEBKIT_LOAD_FINISHED = 3
 private const val WEBKIT_CANCELLED = 302
 private const val WEBKIT_POLICY_INTERRUPTED = 102
 
+internal fun needsGtkLanguageFallback(language: String?): Boolean =
+    language?.substringBefore('.')?.substringBefore('@') in setOf("C", "POSIX")
+
 private fun onProcessTerminated(view: CPointer<WebKitWebView>?, reason: Int, data: COpaquePointer?) {
     state(data).failed(IllegalStateException("WebView content process terminated"))
 }
@@ -149,6 +152,14 @@ internal actual fun runPlatformWindow(window: WebViewWindow) {
         memScoped { Gtk.gtk_window_set_title(widget.reinterpret(), window.title.cstr.ptr) }
         Gtk.gtk_window_set_default_size(widget.reinterpret(), 1180, 860)
         context = checkNotNull(Gtk.webkit_web_context_new_ephemeral())
+        if (needsGtkLanguageFallback(Gtk.g_get_language_names()?.pointed?.value?.toKString())) {
+            memScoped {
+                val languages = allocArray<CPointerVar<ByteVar>>(2)
+                languages[0] = "en".cstr.ptr
+                languages[1] = null
+                Gtk.webkit_web_context_set_preferred_languages(context, languages)
+            }
+        }
         val child = checkNotNull(Gtk.webkit_web_view_new_with_context(context))
         val view = child.reinterpret<WebKitWebView>()
         state.view = view
