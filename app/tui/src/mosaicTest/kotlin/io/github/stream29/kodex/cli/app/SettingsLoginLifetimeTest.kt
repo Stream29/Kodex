@@ -17,6 +17,7 @@ import de.infix.testBalloon.framework.core.testSuite
 import io.github.stream29.kodex.app.application.contract.ApplicationPopupState
 import io.github.stream29.kodex.app.application.contract.ApplicationViewModel
 import io.github.stream29.kodex.app.application.contract.ApplicationTabSelection
+import io.github.stream29.kodex.app.application.contract.SidebarSettingsViewModel
 import io.github.stream29.kodex.app.mcpsettings.*
 import io.github.stream29.kodex.app.migration.prepareKodexHome
 import io.github.stream29.kodex.app.settings.contract.*
@@ -38,6 +39,32 @@ import kotlin.random.Random
 import kotlin.test.*
 
 val settingsLoginLifetimeTest by testSuite(compartment = { TestCompartment.RealTime }) {
+    test("root uses the full terminal width before and after resize") {
+        withSettingsApplication { app ->
+            val observedWidth = MutableStateFlow<Int?>(null)
+            val sidebar = object : SidebarSettingsViewModel by app.sidebarSettings {
+                override fun initializeViewport(columns: Int) {
+                    observedWidth.value = columns
+                    app.sidebarSettings.initializeViewport(columns)
+                }
+            }
+            runSettingsRootTest {
+                state.size.value = Terminal.Size(120, 40)
+                setContentAndSnapshot { SessionTreeCliScreen(app.viewModel, app.newLineKey, sidebar) }
+                awaitRootCondition { observedWidth.value != null }
+                assertEquals(120, observedWidth.value)
+                awaitRootText("-".repeat(120))
+                for (width in listOf(32, 120)) {
+                    observedWidth.value = null
+                    state.size.value = Terminal.Size(width, 40)
+                    awaitRootCondition { observedWidth.value != null }
+                    assertEquals(width, observedWidth.value)
+                    awaitRootText("-".repeat(width))
+                }
+            }
+        }
+    }
+
     test("New Session Settings has no target and background close keeps its default page and owner") {
         withSettingsApplication { app ->
             val background = app.viewModel.submitRendererSession("background")

@@ -76,7 +76,7 @@ public actual fun SessionTreeCliScreen(
     )
     TerminalTitleEffect(sessionSummary.sessionCount, sessionSummary.runningSessionCount)
 
-    val columns = (terminal.size.columns - 1).coerceAtLeast(1)
+    val columns = terminal.size.columns.coerceAtLeast(1)
     val rows = (terminal.size.rows - 1 - reservedRows.coerceAtLeast(0)).coerceAtLeast(1)
     LaunchedEffect(sidebarSettings, columns) { sidebarSettings.initializeViewport(columns) }
     val scope = rememberCoroutineScope()
