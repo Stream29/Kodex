@@ -3,6 +3,11 @@ package io.github.stream29.kodex.agentruntime.decorator.compact
 
 import de.infix.testBalloon.framework.core.testSuite
 import io.github.oshai.kotlinlogging.KotlinLogging
+import io.github.oshai.kotlinlogging.KLogger
+import io.github.oshai.kotlinlogging.KLoggingEvent
+import io.github.oshai.kotlinlogging.KLoggingEventBuilder
+import io.github.oshai.kotlinlogging.Level
+import io.github.oshai.kotlinlogging.Marker
 import io.github.stream29.kodex.agentruntime.contract.ResumableAgentLayer
 import io.github.stream29.kodex.agentruntime.steer.StateFlowSteerProvider
 import io.github.stream29.kodex.agentstate.contract.KodexAgentState as KodexAgentStateContract
@@ -30,11 +35,15 @@ import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
 import io.github.stream29.kodex.openai.CompactionTrigger
 import io.github.stream29.kodex.openai.Response
+import io.github.stream29.kodex.openai.ResponseError
+import io.github.stream29.kodex.openai.FailedResponse
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.TokenUsage
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
+import io.github.stream29.kodex.openai.client.OpenAiModerationBlockedException
+import io.github.stream29.kodex.openai.OpenAiFailureReason
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalog
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 import io.github.stream29.kodex.tool.unifiedexec.ExecCommandArguments
@@ -49,6 +58,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
 val kodexAgentCompactionRuntimeTest by testSuite {
     testFixture {
@@ -234,6 +244,88 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         assertEquals(21, requests.size)
     }
 
+    test("retry exhaustion logs the final structured provider diagnostic") {
+        val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
+        var attempts = 0
+        val logger = FailureRecordingLogger()
+        val state = KodexAgentState(
+            client = mockOpenAiClient {
+                createResponse {
+                    attempts++
+                    flowOf(ResponsesStreamEvent.Failed(FailedResponse(
+                        error = ResponseError(
+                            code = if (attempts == 21) "context_length_exceeded" else "server_error",
+                            message = "Bearer secret and complete private prompt",
+                        ),
+                        id = "resp_attempt_$attempts",
+                    )))
+                }
+            },
+            storage = storage,
+            contextSettings = TestAgentContextSettings,
+            mcpService = TestMcpService(),
+        )
+        val runtime = KodexAgentCompactionRuntimeImpl(
+            delegate = state,
+            modelCatalog = testModelCatalog(),
+            logger = logger,
+            steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
+        )
+        state.appendUserMessage(userMessage("complete private prompt"))
+        assertFailsWith<AgentResponseRetryLimitExceededException> { runtime.resume() }
+        assertEquals(21, attempts)
+        val text = logger.events.joinToString("\n") { "${it.message} ${it.cause}" }
+        assertTrue(text.contains("ContextLengthExceeded"))
+        assertTrue(text.contains("retries=20"))
+        assertTrue(text.contains("resp_attempt_21"))
+        assertFalse(text.contains("resp_attempt_20"))
+        assertTrue(text.contains("errorMessage=Bearer secret and complete private prompt"))
+        assertTrue(text.contains("errorCode=context_length_exceeded"))
+    }
+
+    test("request and compaction logs do not attach untrusted exception chains") {
+        for (compaction in listOf(false, true)) {
+            val logger = FailureRecordingLogger()
+            val failure = IllegalStateException(
+                "Bearer access-token Cookie=session-cookie partial private prompt",
+                IllegalArgumentException("encrypted-turn-state"),
+            )
+            failure.addSuppressed(IllegalStateException("suppressed private context"))
+            val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
+            val state = KodexAgentState(
+                client = mockOpenAiClient {
+                    createResponse { flow { throw failure } }
+                    createRemoteCompactionV2Response { throw failure }
+                },
+                storage = storage,
+                contextSettings = TestAgentContextSettings,
+                mcpService = TestMcpService(),
+            )
+            val runtime = KodexAgentCompactionRuntimeImpl(
+                delegate = state,
+                modelCatalog = testModelCatalog(),
+                logger = logger,
+                steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
+            )
+            state.appendUserMessage(userMessage("private prompt"))
+            val actual = assertFailsWith<IllegalStateException> {
+                if (compaction) {
+                    runtime.compact(CompactionTrigger.Manual, CompactionReason.UserRequested, CompactionPhase.StandaloneTurn)
+                } else {
+                    runtime.resume()
+                }
+            }
+            assertSame(failure, actual)
+            val errors = logger.events.filter { it.level == Level.ERROR }
+            assertEquals(1, errors.size)
+            assertEquals(null, errors.single().cause)
+            val text = errors.single().message.orEmpty()
+            for (secret in listOf("access-token", "session-cookie", "private prompt", "encrypted-turn-state")) {
+                assertFalse(text.contains(secret))
+            }
+        }
+    }
+
     test("successful continuation resets the response retry count") {
         val storage = InMemoryKodexAgentStorage(KodexAgentSettings(OpenAiModelId("test-model")))
         val requests = mutableListOf<ResponsesApiRequest>()
@@ -380,6 +472,48 @@ val kodexAgentCompactionRuntimeTest by testSuite {
             StableContextCompaction(encryptedContent = "committed"),
             storage.work[compactedIndex],
         )
+    }
+
+    for (automatic in listOf(false, true)) {
+        test("moderation stops ${if (automatic) "automatic" else "manual"} compaction without retry") {
+            var compactAttempts = 0
+            var responseAttempts = 0
+            val storage = InMemoryKodexAgentStorage(
+                KodexAgentSettings(OpenAiModelId("test-model"), autoCompactionTokenLimit = 90),
+            )
+            val state = KodexAgentState(
+                client = mockOpenAiClient {
+                    createRemoteCompactionV2Response {
+                        compactAttempts++
+                        throw OpenAiModerationBlockedException(OpenAiFailureReason.ContentPolicyViolation)
+                    }
+                    createResponse {
+                        responseAttempts++
+                        emptyFlow()
+                    }
+                },
+                storage = storage,
+                contextSettings = TestAgentContextSettings,
+                mcpService = TestMcpService(),
+            )
+            val runtime = KodexAgentCompactionRuntimeImpl(
+                delegate = state,
+                modelCatalog = testModelCatalog(),
+                logger = TestLogger,
+                steerProvider = StateFlowSteerProvider(MutableStateFlow(emptyList())),
+            )
+            state.appendUserMessage(userMessage("test"), tokenCount = 90)
+            val failure = assertFailsWith<OpenAiModerationBlockedException> {
+                if (automatic) {
+                    runtime.resume()
+                } else {
+                    runtime.compact(CompactionTrigger.Manual, CompactionReason.UserRequested, CompactionPhase.StandaloneTurn)
+                }
+            }
+            assertEquals(OpenAiFailureReason.ContentPolicyViolation, failure.failureDiagnostic?.reason)
+            assertEquals(1, compactAttempts)
+            assertEquals(0, responseAttempts)
+        }
     }
 
     test("resume does not compact again after manual compaction resets the token count") {
@@ -546,6 +680,22 @@ val kodexAgentCompactionRuntimeTest by testSuite {
         assertEquals(KodexAgentStateValue.ToolPending(listOf(pending)), state.state.value)
         assertEquals(pending, storage.unstable[3].single())
     }
+    }
+}
+
+private class FailureRecordingLogger : KLogger {
+    override val name: String = "failure-test"
+    val events = mutableListOf<KLoggingEvent>()
+
+    override fun isLoggingEnabledFor(level: Level, marker: Marker?): Boolean = true
+
+    override fun at(level: Level, marker: Marker?, block: KLoggingEventBuilder.() -> Unit) {
+        events += KLoggingEvent(
+            level = level,
+            marker = marker,
+            loggerName = name,
+            eventBuilder = KLoggingEventBuilder().apply(block),
+        )
     }
 }
 

@@ -72,4 +72,30 @@ val openAiClientRetryPolicyTest by testSuite {
             )
         }
     }
+
+    test("HTTP policy classification requires the structured error code") {
+        val bodies = listOf(
+            """{"error":{"code":"content_policy_violation","message":"Bearer secret"}}""" to true,
+            """{"error":{"type":"content_policy_violation","message":"private prompt"}}""" to true,
+            """{"error":{"message":"content_policy_violation"}}""" to false,
+            """{"error":{"code":"Bearer secret"}}""" to false,
+            """{"error":{}}""" to false,
+            "not json" to false,
+        )
+        for ((body, expected) in bodies) {
+            HttpClient(MockEngine { respond(body, HttpStatusCode.BadRequest) }).use { client ->
+                val response = client.get("https://example.test/responses")
+                assertTrue(ClientRequestException(response, "ignored").hasHttpPolicyBlock() == expected)
+            }
+        }
+    }
+
+    test("socket failure after HTTP 200 remains a transport retry") {
+        HttpClient(MockEngine { respond("stream", HttpStatusCode.OK) }).use { client ->
+            val response = client.get("https://example.test/responses")
+            val failure = SSEClientException(response = response, cause = IOException("socket closed"))
+            assertTrue(failure.isRetryableOpenAiException(OpenAiClientRetryConfig()))
+            assertFalse(failure.isRetryableOpenAiException(OpenAiClientRetryConfig(retryTransport = false)))
+        }
+    }
 }

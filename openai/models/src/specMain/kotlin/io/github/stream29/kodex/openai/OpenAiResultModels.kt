@@ -135,10 +135,7 @@ public class OpenAiResponseResultException(
 public class OpenAiResponseStreamFailureException(
     public val error: ResponseError?,
 ) : IllegalStateException(
-    "OpenAI response stream failed " +
-        "(code=${error?.code ?: "unknown"}, " +
-        "type=${error?.type ?: "unknown"}, " +
-        "message=${error?.message ?: "unknown"}).",
+    "OpenAI response stream failed.",
 )
 
 /**
@@ -148,5 +145,9 @@ public class OpenAiResponseStreamIncompleteException(
     public val incompleteDetails: IncompleteDetails?,
 ) : IllegalStateException(
     "OpenAI response stream was incomplete " +
-        "(reason=${incompleteDetails?.reason ?: "unknown"}).",
+        "(reason=${when (incompleteDetails?.reason) {
+            "max_output_tokens" -> "max_output_tokens"
+            "content_filter" -> "content_filter"
+            else -> "unknown"
+        }}).",
 )

@@ -8,6 +8,7 @@ import io.ktor.client.plugins.pluginOrNull
 import io.ktor.client.plugins.sse.SSE
 import io.ktor.client.plugins.sse.sse
 import io.ktor.http.Headers
+import io.ktor.http.HttpStatusCode
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.http.HttpMethod
 import io.ktor.sse.ServerSentEvent
@@ -32,13 +33,15 @@ public actual fun HttpClient.postSseEvents(
 public actual fun HttpClient.postSseEventsWithHeaders(
     socketTimeoutMillis: Long,
     onResponseHeaders: suspend (Headers) -> Unit,
+    onResponseStatus: suspend (HttpStatusCode) -> Unit,
     configureRequest: HttpRequestBuilder.() -> Unit,
 ): Flow<ServerSentEvent> =
-    postSseEventsInternal(socketTimeoutMillis, onResponseHeaders, configureRequest)
+    postSseEventsInternal(socketTimeoutMillis, onResponseHeaders, onResponseStatus, configureRequest)
 
 private fun HttpClient.postSseEventsInternal(
     socketTimeoutMillis: Long?,
     onResponseHeaders: suspend (Headers) -> Unit = {},
+    onResponseStatus: suspend (HttpStatusCode) -> Unit = {},
     configureRequest: HttpRequestBuilder.() -> Unit,
 ): Flow<ServerSentEvent> =
     channelFlow {
@@ -62,6 +65,7 @@ private fun HttpClient.postSseEventsInternal(
                 attributes.put(SseCompatibilityRequestAttribute, Unit)
             },
         ) {
+            onResponseStatus(call.response.status)
             onResponseHeaders(call.response.headers)
             incoming.collect(::send)
         }

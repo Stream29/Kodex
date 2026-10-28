@@ -12,6 +12,7 @@ import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
 import io.github.stream29.kodex.openai.OpenAiResponseStreamIncompleteException
+import io.github.stream29.kodex.openai.OpenAiFailureDiagnostic
 import io.github.stream29.kodex.agentstate.impl.KodexAgentStateInvalidTransitionException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -137,6 +138,10 @@ public val KodexAgentStateValue.canCompact: Boolean
  * between storage commits.
  */
 public interface KodexAgentState : CoroutineScope {
+    /** Safe diagnostic for the most recently completed response attempt, if available. */
+    public val lastResponseFailure: OpenAiFailureDiagnostic?
+        get() = null
+
     /**
      * Current atomic state value.
      */

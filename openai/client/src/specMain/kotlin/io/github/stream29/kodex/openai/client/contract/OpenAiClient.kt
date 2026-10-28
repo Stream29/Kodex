@@ -139,7 +139,8 @@ public interface OpenAiClient : AutoCloseable {
      * @param windowId Optional Codex context-window identity.
      * @param turnState Optional server-issued Codex turn state for continuing
      * a turn.
-     * @param onResponseHeaders Observer invoked before stream body events.
+     * @param onResponseHeaders Observer invoked before stream body events; on
+     * retryable transport failure it also receives a safe failure projection.
      *
      * @throws IllegalStateException if authentication is unavailable.
      * @throws IllegalArgumentException if only part of the Codex request

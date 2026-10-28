@@ -81,6 +81,10 @@ public data class Response(
     public val outputText: String? = null,
     @SerialName("end_turn")
     public val endTurn: Boolean? = null,
+    public val status: String? = null,
+    public val error: ResponseError? = null,
+    @SerialName("incomplete_details")
+    public val incompleteDetails: IncompleteDetails? = null,
 )
 
 @Serializable(with = ResponsesStreamEventSerializer::class)
@@ -329,6 +333,9 @@ public sealed interface ResponsesStreamEvent {
 @Serializable
 public data class FailedResponse(
     public val error: ResponseError? = null,
+    public val id: String? = null,
+    @SerialName("incomplete_details")
+    public val incompleteDetails: IncompleteDetails? = null,
 )
 
 /**
@@ -339,6 +346,8 @@ public data class FailedResponse(
 public data class IncompleteResponse(
     @SerialName("incomplete_details")
     public val incompleteDetails: IncompleteDetails? = null,
+    public val id: String? = null,
+    public val error: ResponseError? = null,
 )
 
 /**

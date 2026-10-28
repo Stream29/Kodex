@@ -12,6 +12,7 @@ import io.github.stream29.kodex.agentstate.contract.canAppendUserMessage
 import io.github.stream29.kodex.openai.CompactionPhase
 import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
+import io.github.stream29.kodex.openai.OpenAiFailureDiagnosticCarrier
 import io.github.stream29.kodex.openai.modelcatalog.OpenAiModelCatalogStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -59,9 +60,11 @@ public actual class KodexAgentCompactionRuntimeImpl actual constructor(
                 logger.info { "Agent response request cancelled." }
                 throw cancellation
             } catch (failure: Throwable) {
-                logger.error(failure) {
+                logger.error {
                     "Agent response request failed " +
-                        "(type=${failure::class.simpleName}, message=${failure.message ?: "unknown"})."
+                        "(type=${failure::class.simpleName}, " +
+                        "request=ordinary, retries=$responseRetryCount, " +
+                        "diagnostic=${(failure as? OpenAiFailureDiagnosticCarrier)?.failureDiagnostic ?: delegate.lastResponseFailure})."
                 }
                 throw failure
             }
@@ -78,7 +81,9 @@ public actual class KodexAgentCompactionRuntimeImpl actual constructor(
                     if (responseRetryCount >= CompactionRetryPolicy.maxRetries) {
                         val failure = AgentResponseRetryLimitExceededException(CompactionRetryPolicy.maxRetries)
                         logger.error(failure) {
-                            "Agent response retry limit exceeded (maxRetries=${CompactionRetryPolicy.maxRetries})."
+                            "Agent response retry limit exceeded (request=ordinary, " +
+                                "retries=$responseRetryCount, maxRetries=${CompactionRetryPolicy.maxRetries}, " +
+                                "diagnostic=${delegate.lastResponseFailure})."
                         }
                         throw failure
                     }
@@ -179,8 +184,11 @@ public actual class KodexAgentCompactionRuntimeImpl actual constructor(
             }
             throw cancellation
         } catch (failure: Throwable) {
-            logger.error(failure) {
-                "Agent compaction failed (trigger=$trigger, reason=$reason, phase=$phase)."
+            val diagnostic = failure as? OpenAiFailureDiagnosticCarrier
+            logger.error {
+                "Agent compaction failed (trigger=$trigger, reason=$reason, phase=$phase, " +
+                    "request=remote_compaction_v2, retries=${diagnostic?.retries}, " +
+                    "operation_id=${diagnostic?.operationId}, diagnostic=${diagnostic?.failureDiagnostic})."
             }
             throw failure
         }

@@ -38,6 +38,8 @@ import io.github.stream29.kodex.openai.IncompleteResponse
 import io.github.stream29.kodex.openai.MessageRole
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiResponseStreamIncompleteException
+import io.github.stream29.kodex.openai.OpenAiFailureReason
+import io.github.stream29.kodex.openai.OpenAiFailureTermination
 import io.github.stream29.kodex.openai.PlanItemArg
 import io.github.stream29.kodex.openai.RemoteCompactionV2Response
 import io.github.stream29.kodex.openai.ReasoningItemReasoningSummary
@@ -47,6 +49,7 @@ import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponseItemId
 import io.github.stream29.kodex.openai.ResponsesApiRequest
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.github.stream29.kodex.openai.client.OpenAiModerationBlockedException
 import io.github.stream29.kodex.openai.StepStatus
 import io.github.stream29.kodex.openai.TokenUsage
 import io.github.stream29.kodex.openai.UpdatePlanArgs
@@ -647,22 +650,107 @@ val kodexAgentStateImplTest by testSuite {
             val requests = mutableListOf<ResponsesApiRequest>()
             val responseError = ResponseError(
                 message = "Retryable failure.",
-                code = "server_error",
-                type = "server_error",
+                code = "vendor_code",
+                type = "vendor_type",
             )
             val agent = KodexAgentState(
                 client = mockOpenAiClient {
                     createResponse { request ->
                         requests += request
-                        flowOf(ResponsesStreamEvent.Failed(FailedResponse(responseError)))
+                        flowOf(ResponsesStreamEvent.Failed(FailedResponse(responseError, id = "resp_failed_fixture")))
                     }
                 },
                 storage = storage,
             )
 
             assertEquals(RequestFinish.Retryable, agent.requestResponseApi())
+            assertEquals(OpenAiFailureTermination.ResponseFailed, agent.lastResponseFailure?.termination)
+            assertEquals(null, agent.lastResponseFailure?.reason)
+            assertEquals("vendor_code", agent.lastResponseFailure?.errorCode)
+            assertEquals("vendor_type", agent.lastResponseFailure?.errorType)
+            assertEquals("Retryable failure.", agent.lastResponseFailure?.errorMessage)
+            assertEquals("resp_failed_fixture", agent.lastResponseFailure?.responseId)
             assertEquals(user, requests.single().input.last())
             assertTrue(requests.single().input.none { item -> item is ResponseItem.ServerToolSearchCall })
+        }
+
+        test("explicit moderation failure escapes instead of requesting an agent retry") {
+            val storage = storage()
+            var attempts = 0
+            val agent = KodexAgentState(
+                client = mockOpenAiClient {
+                    createResponse {
+                        attempts++
+                        flowOf(
+                            ResponsesStreamEvent.Failed(
+                                FailedResponse(ResponseError(code = "content_policy_violation", type = "vendor_type", message = "vendor message")),
+                            ),
+                        )
+                    }
+                },
+                storage = storage,
+            )
+            agent.appendUserMessage(userMessage("test").content)
+            val failure = assertFailsWith<OpenAiModerationBlockedException> { agent.requestResponseApi() }
+            assertEquals("vendor_type", failure.failureDiagnostic?.errorType)
+            assertEquals("vendor message", failure.failureDiagnostic?.errorMessage)
+            assertEquals(1, attempts)
+        }
+
+        test("missing terminal and incomplete reasons are safely distinguished") {
+            val storage = storage()
+            var calls = 0
+            val agent = KodexAgentState(
+                client = mockOpenAiClient {
+                    createResponse {
+                        calls++
+                        when (calls) {
+                            1 -> flowOf(ResponsesStreamEvent.Failed(FailedResponse(ResponseError(code = "server_error"), id = "resp_previous_fixture")))
+                            2 -> flowOf()
+                            else -> flowOf(ResponsesStreamEvent.Incomplete(IncompleteResponse(IncompleteDetails("max_output_tokens"), id = "resp_incomplete_fixture")))
+                        }
+                    }
+                },
+                storage = storage,
+            )
+            agent.appendUserMessage(userMessage("example").content)
+            assertEquals(RequestFinish.Retryable, agent.requestResponseApi())
+            assertEquals("resp_previous_fixture", agent.lastResponseFailure?.responseId)
+            assertEquals(RequestFinish.Retryable, agent.requestResponseApi())
+            assertEquals(OpenAiFailureTermination.MissingTerminal, agent.lastResponseFailure?.termination)
+            assertEquals(null, agent.lastResponseFailure?.requestId)
+            assertEquals(null, agent.lastResponseFailure?.responseId)
+            assertEquals(null, agent.lastResponseFailure?.errorCode)
+            assertFailsWith<OpenAiResponseStreamIncompleteException> { agent.requestResponseApi() }
+            assertEquals(OpenAiFailureTermination.ResponseIncomplete, agent.lastResponseFailure?.termination)
+            assertEquals(OpenAiFailureReason.MaxOutputTokens, agent.lastResponseFailure?.reason)
+            assertEquals("max_output_tokens", agent.lastResponseFailure?.incompleteReason)
+            assertEquals("resp_incomplete_fixture", agent.lastResponseFailure?.responseId)
+        }
+
+        test("missing terminal retains structured fields from the latest response object") {
+            val storage = storage()
+            val agent = KodexAgentState(
+                client = mockOpenAiClient {
+                    createResponse {
+                        flowOf(ResponsesStreamEvent.InProgress(Response(
+                            id = "resp_partial",
+                            status = "incomplete",
+                            error = ResponseError(code = "vendor_code", type = "vendor_type", message = "vendor message"),
+                            incompleteDetails = IncompleteDetails("vendor_reason"),
+                        )))
+                    }
+                },
+                storage = storage,
+            )
+            agent.appendUserMessage(userMessage("example").content)
+            assertEquals(RequestFinish.Retryable, agent.requestResponseApi())
+            assertEquals(OpenAiFailureTermination.MissingTerminal, agent.lastResponseFailure?.termination)
+            assertEquals("resp_partial", agent.lastResponseFailure?.responseId)
+            assertEquals("vendor_code", agent.lastResponseFailure?.errorCode)
+            assertEquals("vendor_type", agent.lastResponseFailure?.errorType)
+            assertEquals("vendor message", agent.lastResponseFailure?.errorMessage)
+            assertEquals("vendor_reason", agent.lastResponseFailure?.incompleteReason)
         }
 
         test("forced compaction stores a point and work output and resets reported usage to zero") {

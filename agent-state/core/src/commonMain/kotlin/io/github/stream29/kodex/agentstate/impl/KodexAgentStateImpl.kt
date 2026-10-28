@@ -53,6 +53,12 @@ import io.github.stream29.kodex.openai.CompactionReason
 import io.github.stream29.kodex.openai.CompactionTrigger
 import io.github.stream29.kodex.openai.ResponseItem
 import io.github.stream29.kodex.openai.ResponsesStreamEvent
+import io.github.stream29.kodex.openai.client.OpenAiModerationBlockedException
+import io.github.stream29.kodex.openai.client.OpenAiRetryableStreamException
+import io.github.stream29.kodex.openai.client.explicitModerationReason
+import io.github.stream29.kodex.openai.client.toFailureDiagnostic
+import io.github.stream29.kodex.openai.OpenAiFailureDiagnostic
+import io.github.stream29.kodex.openai.OpenAiFailureTermination
 import io.github.stream29.kodex.openai.client.contract.OpenAiClient
 import io.github.stream29.kodex.openai.client.contract.OpenAiResponseHeaders
 import io.github.stream29.kodex.utils.coroutines.supervisorChildScope
@@ -141,6 +147,9 @@ private class KodexAgentStateImpl(
     private val contextPrefixResolver = AgentContextPrefixResolver(contextSettings)
     private val writeMutex = Mutex()
 
+    override var lastResponseFailure: OpenAiFailureDiagnostic? = null
+        private set
+
     override val state: StateFlow<KodexAgentStateValue>
         field = MutableStateFlow(initialState)
 
@@ -160,6 +169,9 @@ private class KodexAgentStateImpl(
     override suspend fun requestResponseApi(): RequestFinish {
         val snapshotIndex = startRequestResponse()
         var terminalReason: RequestFinish? = null
+        var responseHeaders: OpenAiResponseHeaders? = null
+        var observedResponseId: String? = null
+        lastResponseFailure = null
         try {
             var streamingOutput: StreamingOutput? = null
 
@@ -193,8 +205,6 @@ private class KodexAgentStateImpl(
             val contextPrefix = contextPrefixResolver.resolve(settings, storage.uri).render()
             val threadId = storage.uri.toCodexThreadId()
             val windowId = settings.codexRequestWindowId(threadId)
-            var responseHeaders: OpenAiResponseHeaders? = null
-
             client.createResponse(
                 model = settings.model,
                 input = (listOf(planningContext) + contextPrefix + durableInput).toResponsesApiInput(),
@@ -216,7 +226,12 @@ private class KodexAgentStateImpl(
                 windowId = windowId,
                 turnState = settings.turnState,
                 onResponseHeaders = { headers ->
-                    responseHeaders = headers
+                    val failure = headers.failure
+                    if (failure != null) {
+                        lastResponseFailure = failure
+                    } else {
+                        responseHeaders = headers
+                    }
                     try {
                         headers.turnState?.let { value ->
                             appendTurnStateIfAbsent(settings.turnId, value)
@@ -231,6 +246,43 @@ private class KodexAgentStateImpl(
                     }
                 },
             ).collect { event ->
+                if (event is ResponsesStreamEvent.Created || event is ResponsesStreamEvent.InProgress) {
+                    lastResponseFailure = event.toFailureDiagnostic()?.copy(
+                        httpStatus = responseHeaders?.httpStatus,
+                        requestId = responseHeaders?.requestId?.takeIf { it.isNotEmpty() },
+                    )
+                }
+                val responseId = when (event) {
+                    is ResponsesStreamEvent.Metadata -> event.responseId
+                    is ResponsesStreamEvent.Created -> event.response.id
+                    is ResponsesStreamEvent.InProgress -> event.response.id
+                    is ResponsesStreamEvent.Completed -> event.response.id
+                    is ResponsesStreamEvent.Failed -> event.response.id
+                    is ResponsesStreamEvent.Incomplete -> event.response.id
+                    else -> null
+                }
+                if (!responseId.isNullOrEmpty() && responseId != observedResponseId) {
+                    observedResponseId = responseId
+                }
+                val moderationReason = event.explicitModerationReason()
+                if (moderationReason != null) {
+                    lastResponseFailure = (event.toFailureDiagnostic() ?: OpenAiFailureDiagnostic(
+                        OpenAiFailureTermination.ModerationBlocked,
+                    )).copy(
+                        termination = OpenAiFailureTermination.ModerationBlocked,
+                        httpStatus = responseHeaders?.httpStatus,
+                        reason = moderationReason,
+                        requestId = responseHeaders?.requestId?.takeIf { it.isNotEmpty() },
+                        responseId = observedResponseId,
+                    )
+                    throw OpenAiModerationBlockedException(
+                        moderationReason,
+                        httpStatus = responseHeaders?.httpStatus,
+                        requestId = responseHeaders?.requestId?.takeIf { it.isNotEmpty() },
+                        responseId = observedResponseId,
+                        diagnostic = lastResponseFailure,
+                    )
+                }
                 if (event !is ResponsesStreamEvent.OutputItemDone) {
                     acceptResponseEvent(event)
                 }
@@ -245,6 +297,7 @@ private class KodexAgentStateImpl(
                     }
 
                     is ResponsesStreamEvent.Completed -> {
+                        lastResponseFailure = null
                         writeResponseResult {
                             storage.requireNoPendingServerToolSearch()
                             event.response.usage?.let { usage ->
@@ -266,10 +319,20 @@ private class KodexAgentStateImpl(
                     }
 
                     is ResponsesStreamEvent.Failed -> {
+                        lastResponseFailure = event.toFailureDiagnostic()?.copy(
+                            httpStatus = responseHeaders?.httpStatus,
+                            requestId = responseHeaders?.requestId?.takeIf { it.isNotEmpty() },
+                            responseId = observedResponseId,
+                        )
                         terminalReason = RequestFinish.Retryable
                     }
 
                     is ResponsesStreamEvent.Incomplete -> {
+                        lastResponseFailure = event.toFailureDiagnostic()?.copy(
+                            httpStatus = responseHeaders?.httpStatus,
+                            requestId = responseHeaders?.requestId?.takeIf { it.isNotEmpty() },
+                            responseId = observedResponseId,
+                        )
                         throw OpenAiResponseStreamIncompleteException(event.response.incompleteDetails)
                     }
 
@@ -280,10 +343,23 @@ private class KodexAgentStateImpl(
                     completeResponseOutput(event.outputIndex)
                 }
             }
+        } catch (failure: OpenAiRetryableStreamException) {
+            lastResponseFailure = failure.diagnostic
+            terminalReason = RequestFinish.Retryable
         } finally {
             finishRequestResponse()
         }
 
+        if (terminalReason == null && lastResponseFailure == null) {
+            lastResponseFailure = OpenAiFailureDiagnostic(
+                OpenAiFailureTermination.MissingTerminal,
+                httpStatus = responseHeaders?.httpStatus,
+                requestId = responseHeaders?.requestId?.takeIf { it.isNotEmpty() },
+                responseId = observedResponseId,
+            )
+        } else if (terminalReason == null && lastResponseFailure?.termination == OpenAiFailureTermination.MissingTerminal) {
+            lastResponseFailure = lastResponseFailure?.copy(responseId = observedResponseId)
+        }
         return terminalReason ?: RequestFinish.Retryable
     }
 

@@ -168,6 +168,17 @@ val openAiRemoteCompactionV2Test by testSuite {
         assertTrue(failure.isRetryableOpenAiTransportException(noRetryConfig().copy(retryTransport = true)))
     }
 
+    test("wrapped SSE cancellation remains cancellation and is not retried") {
+        var attempts = 0
+        assertFailsWith<CancellationException> {
+            retryOpenAiStreamingTransport(noRetryConfig().copy(maxRetries = 2)) {
+                attempts++
+                throw SSEClientException(cause = CancellationException("cancelled"))
+            }
+        }
+        assertEquals(1, attempts)
+    }
+
     test("compaction retry budget allows two retries") {
         var attempts = 0
 

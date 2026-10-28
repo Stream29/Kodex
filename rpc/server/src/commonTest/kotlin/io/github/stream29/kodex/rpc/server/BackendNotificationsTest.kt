@@ -6,6 +6,7 @@ import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingRequest
 import io.github.stream29.kodex.agentstorage.cleanmodels.unstable.PendingSuggestSubagentTaskToolEvent
 import io.github.stream29.kodex.openai.*
 import io.github.stream29.kodex.openai.client.test.mockOpenAiClient
+import io.github.stream29.kodex.openai.client.OpenAiModerationBlockedException
 import io.github.stream29.kodex.rpc.models.Notification
 import io.github.stream29.kodex.tool.multiagent.SuggestSubagentTaskArgs
 import io.github.stream29.kodex.tool.multiagent.SuggestedSubagentTask
@@ -104,6 +105,66 @@ val backendNotificationsTest by testSuite(compartment = { TestCompartment.RealTi
             run.join()
             assertFalse(unexpected.isCompleted)
             unexpected.cancelAndJoin()
+        }
+    }
+
+    test("moderation block reports one unhandled stop without retrying") {
+        var attempts = 0
+        val client = mockOpenAiClient {
+            createResponse {
+                attempts++
+                flowOf(ResponsesStreamEvent.Failed(FailedResponse(ResponseError(
+                    code = "content_policy_violation",
+                    message = "Authorization: Bearer secret; private prompt",
+                ))))
+            }
+        }
+        runtimeFixture(client) { _, index, rpc ->
+            val events = mutableListOf<Notification>()
+            val collector = launch(start = CoroutineStart.UNDISPATCHED) {
+                rpc.notifications.flow.collect { events += it }
+            }
+            try {
+                rpc.appendUserMessage(index, listOf(ContentItem.InputText("run")))
+                val failure = assertFailsWith<io.github.stream29.kodex.utils.rpcexception.AgentRunFailureReported> {
+                    rpc.resume(index)
+                }
+                yield()
+                assertEquals(1, attempts)
+                val stop = assertIs<Notification.Stop.UnhandledError>(events.single())
+                assertEquals(stop.message, failure.diagnostic)
+                assertTrue(stop.message.orEmpty().contains("moderation"))
+                assertFalse(stop.message.orEmpty().contains("secret"))
+                assertFalse(stop.message.orEmpty().contains("private prompt"))
+            } finally {
+                collector.cancelAndJoin()
+            }
+        }
+    }
+
+    test("manual compaction moderation failure uses the operation error path without a Stop") {
+        var attempts = 0
+        val client = mockOpenAiClient {
+            createRemoteCompactionV2Response {
+                attempts++
+                throw OpenAiModerationBlockedException(OpenAiFailureReason.ContentPolicyViolation)
+            }
+        }
+        runtimeFixture(client) { _, index, rpc ->
+            val events = mutableListOf<Notification>()
+            val collector = launch(start = CoroutineStart.UNDISPATCHED) {
+                rpc.notifications.flow.collect { events += it }
+            }
+            try {
+                rpc.appendUserMessage(index, listOf(ContentItem.InputText("run")))
+                val failure = assertFailsWith<OpenAiModerationBlockedException> { rpc.forcedCompact(index) }
+                yield()
+                assertEquals(1, attempts)
+                assertEquals(OpenAiFailureReason.ContentPolicyViolation, failure.failureDiagnostic?.reason)
+                assertTrue(events.isEmpty())
+            } finally {
+                collector.cancelAndJoin()
+            }
         }
     }
 }

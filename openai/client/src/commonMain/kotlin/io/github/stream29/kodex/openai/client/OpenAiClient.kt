@@ -16,6 +16,10 @@ import io.github.stream29.kodex.openai.ImageResponse
 import io.github.stream29.kodex.openai.ModelsResponse
 import io.github.stream29.kodex.openai.OpenAiAuthState
 import io.github.stream29.kodex.openai.OpenAiErrorResponse
+import io.github.stream29.kodex.openai.OpenAiFailureDiagnostic
+import io.github.stream29.kodex.openai.escapeOpenAiDiagnosticText
+import io.github.stream29.kodex.openai.OpenAiFailureTermination
+import io.github.stream29.kodex.openai.OpenAiFailureReason
 import io.github.stream29.kodex.openai.OpenAiModelId
 import io.github.stream29.kodex.openai.OpenAiResult
 import io.github.stream29.kodex.openai.OpenAiResultSerializer
@@ -43,12 +47,15 @@ import io.github.stream29.kodex.utils.ktorclientext.CodexOriginator
 import io.github.stream29.kodex.utils.ktorclientext.OpenAiSearchVersion
 import io.github.stream29.kodex.utils.ktorclientext.SseCompatibility
 import io.github.stream29.kodex.utils.ktorclientext.addAll
-import io.github.stream29.kodex.utils.ktorclientext.postSseEvents
 import io.github.stream29.kodex.utils.ktorclientext.postSseEventsWithHeaders
 import io.ktor.client.HttpClient
+import io.ktor.client.HttpClientConfig
 import io.ktor.client.call.body
+import io.ktor.client.call.replaceResponse
 import io.ktor.client.plugins.HttpRequestRetry
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.api.createClientPlugin
+import io.ktor.client.plugins.api.Send
 import io.ktor.client.plugins.timeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.cookies.AcceptAllCookiesStorage
@@ -64,6 +71,7 @@ import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
 import io.ktor.client.utils.unwrapCancellationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -72,79 +80,171 @@ import io.ktor.http.appendPathSegments
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.util.AttributeKey
+import io.ktor.utils.io.InternalAPI
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.cancel
+import io.ktor.utils.io.core.remaining
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.takeWhile
+import kotlinx.io.Buffer
 import kotlinx.io.IOException
+import kotlinx.io.InternalIoApi
+import kotlinx.io.readByteArray
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.Json
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
+
+private val OpenAiStreamingRequestKey = AttributeKey<Unit>("OpenAiStreamingRequest")
+internal const val MaxOpenAiErrorBodyBytes: Long = 1024 * 1024
+private const val MaxOpenAiErrorJsonDepth: Int = 64
+
+// This interceptor runs inside HttpRequestRetry, where the response body is
+// still available before a retry decision. Bound the error body before
+// classifying it, and replay it for Ktor's ordinary error handling.
+@OptIn(InternalAPI::class)
+private val OpenAiPolicyGuard = createClientPlugin("OpenAiPolicyGuard") {
+    on(Send) { request ->
+        request.attributes.getOrNull(RemoteCompactionRetryBudgetKey)?.beginHttpAttempt()
+        val call = try {
+            proceed(request)
+        } catch (cause: Throwable) {
+            currentCoroutineContext().ensureActive()
+            if (cause is CancellationException) throw cause
+            val response = cause.openAiHttpResponse()
+            if (
+                request.attributes.contains(OpenAiStreamingRequestKey) &&
+                response != null && response.status.value !in 200..299 &&
+                response.hasHttpPolicyBlock()
+            ) {
+                val failure = OpenAiModerationBlockedException(OpenAiFailureReason.ContentPolicyViolation)
+                failure.failureDiagnostic = (cause.httpFailureDiagnostic() ?: failure.failureDiagnostic)?.copy(
+                    termination = OpenAiFailureTermination.ModerationBlocked,
+                    reason = OpenAiFailureReason.ContentPolicyViolation,
+                    httpStatus = response.status.value,
+                    requestId = response.providerRequestId(),
+                )
+                throw failure
+            }
+            throw cause
+        }
+        if (!request.attributes.contains(OpenAiStreamingRequestKey) || call.response.status.value in 200..299) {
+            call
+        } else {
+            val response = call.response
+            val content = response.rawContent
+            val bytes = content.readBoundedErrorBody()
+            if (bytes.size.toLong() > MaxOpenAiErrorBodyBytes) {
+                content.cancel()
+                throw OpenAiHttpStreamException(response.status.value, response.providerRequestId())
+            }
+            val errorBody = bytes.decodeToString()
+            if (!errorBody.hasSafeJsonDepth()) {
+                throw OpenAiHttpStreamException(response.status.value, response.providerRequestId())
+            }
+            if (errorBody.hasHttpPolicyBlock()) {
+                val failure = OpenAiModerationBlockedException(OpenAiFailureReason.ContentPolicyViolation)
+                failure.failureDiagnostic = (errorBody.httpFailureDiagnostic() ?: failure.failureDiagnostic)?.copy(
+                    termination = OpenAiFailureTermination.ModerationBlocked,
+                    reason = OpenAiFailureReason.ContentPolicyViolation,
+                    httpStatus = response.status.value,
+                    requestId = response.providerRequestId(),
+                )
+                throw failure
+            }
+            call.replaceResponse { ByteReadChannel(bytes) }
+        }
+    }
+}
+
+@OptIn(InternalAPI::class, InternalIoApi::class)
+internal suspend fun ByteReadChannel.readBoundedErrorBody(): ByteArray {
+    val buffer = Buffer()
+    while (buffer.size <= MaxOpenAiErrorBodyBytes && awaitContent()) {
+        val count = minOf(readBuffer.remaining, MaxOpenAiErrorBodyBytes + 1 - buffer.size)
+        readBuffer.readTo(buffer, count)
+    }
+    return buffer.readByteArray()
+}
+
+private fun HttpResponse.providerRequestId(): String? =
+    (headers["x-oai-request-id"] ?: headers["x-request-id"])?.takeIf { it.isNotEmpty() }
+
+internal fun HttpClientConfig<*>.installOpenAiRetry(retry: OpenAiClientRetryConfig) {
+    install(HttpRequestRetry) {
+        maxRetries = retry.maxRetries
+        retryIf { request, response ->
+            val state = request.attributes.getOrNull(RemoteCompactionRetryBudgetKey)
+            val retryable = response.status.isRetryableOpenAiStatus(retry)
+            if (retryable && state != null) {
+                state.reserveRetry(termination = "http_status", httpStatus = response.status.value)
+            } else {
+                retryable
+            }
+        }
+        retryOnExceptionIf { request, cause ->
+            val state = request.attributes.getOrNull(RemoteCompactionRetryBudgetKey)
+            val retryable = cause.isRetryableOpenAiException(retry)
+            if (retryable && state != null) {
+                state.reserveRetry(termination = "transport_exception")
+            } else {
+                retryable
+            }
+        }
+        exponentialDelay(
+            baseDelayMs = retry.baseDelayMillis,
+            maxDelayMs = retry.maxDelayMillis,
+            randomizationMs = retry.randomizationMillis,
+        )
+    }
+    install(OpenAiPolicyGuard)
+}
+
+internal fun HttpClientConfig<*>.configureOpenAiClient(config: OpenAiClientConfig) {
+    installOpenAiRetry(config.retry)
+    install(HttpTimeout) {
+        requestTimeoutMillis = config.requestTimeoutMillis
+        socketTimeoutMillis = config.requestTimeoutMillis
+    }
+    install(ContentNegotiation) {
+        json(OpenAiJsonCodec)
+    }
+    install(HttpCookies) {
+        storage = AcceptAllCookiesStorage()
+    }
+    install(SSE)
+    install(SseCompatibility)
+    defaultRequest {
+        url(config.baseUrl.trimEnd('/') + "/")
+        headers[HttpHeaders.CodexOriginator] = config.originator
+        headers[HttpHeaders.UserAgent] = config.userAgent
+        headers.addAll(config.defaultHeaders)
+    }
+}
 
 public actual class OpenAiClient actual constructor(
     private val authStore: OpenAiAuthStore,
     private val config: OpenAiClientConfig,
 ) : OpenAiClientContract {
-    private val httpClient: HttpClient = HttpClient {
-        install(HttpRequestRetry) {
-            maxRetries = config.retry.maxRetries
-            retryIf { request, response ->
-                val state = request.attributes.getOrNull(RemoteCompactionRetryBudgetKey)
-                val retryable = response.status.isRetryableOpenAiStatus(config.retry)
-                if (retryable && state != null) {
-                    state.reserveRetry(
-                        termination = "http_status",
-                        httpStatus = response.status.value,
-                    )
-                } else {
-                    retryable
-                }
-            }
-            retryOnExceptionIf { request, cause ->
-                val state = request.attributes.getOrNull(RemoteCompactionRetryBudgetKey)
-                val retryable = cause.isRetryableOpenAiException(config.retry)
-                if (retryable && state != null) {
-                    state.reserveRetry(
-                        termination = "transport_exception",
-                    )
-                } else {
-                    retryable
-                }
-            }
-            exponentialDelay(
-                baseDelayMs = config.retry.baseDelayMillis,
-                maxDelayMs = config.retry.maxDelayMillis,
-                randomizationMs = config.retry.randomizationMillis,
-            )
-        }
-        install(HttpTimeout) {
-            requestTimeoutMillis = config.requestTimeoutMillis
-            socketTimeoutMillis = config.requestTimeoutMillis
-        }
-        install(ContentNegotiation) {
-            json(OpenAiJsonCodec)
-        }
-        install(HttpCookies) {
-            storage = AcceptAllCookiesStorage()
-        }
-        install(SSE)
-        install(SseCompatibility)
-        defaultRequest {
-            url(config.baseUrl.trimEnd('/') + "/")
-            headers[HttpHeaders.CodexOriginator] = config.originator
-            headers[HttpHeaders.UserAgent] = config.userAgent
-            headers.addAll(config.defaultHeaders)
-        }
-    }
+    private val httpClient: HttpClient = HttpClient { configureOpenAiClient(config) }
 
     actual override suspend fun listModels(): OpenAiResponseResult<ModelsResponse> {
         val response = httpClient.get {
@@ -388,31 +488,117 @@ private const val HeaderCodexTurnMetadata: String = "x-codex-turn-metadata"
 private const val HeaderCodexWindowId: String = "x-codex-window-id"
 private const val HeaderCodexTurnState: String = "x-codex-turn-state"
 
-private fun HttpClient.streamResponseEvents(
+internal fun HttpClient.streamResponseEvents(
     socketTimeoutMillis: Long,
     retry: OpenAiClientRetryConfig,
     onResponseHeaders: suspend (OpenAiResponseHeaders) -> Unit = {},
     configureRequest: HttpRequestBuilder.() -> Unit,
 ): Flow<ResponsesStreamEvent> =
-    postSseEventsWithHeaders(
-        socketTimeoutMillis = socketTimeoutMillis,
-        onResponseHeaders = { headers ->
-            onResponseHeaders(
-                OpenAiResponseHeaders(
-                    turnState = headers[HeaderCodexTurnState],
-                    requestId = headers["x-oai-request-id"] ?: headers["x-request-id"],
-                ),
+    flow {
+        var acceptedStatus: Int? = null
+        var providerRequestId: String? = null
+        var observedResponseId: String? = null
+        emitAll(
+            postSseEventsWithHeaders(
+                socketTimeoutMillis = socketTimeoutMillis,
+                onResponseStatus = { acceptedStatus = it.value },
+                onResponseHeaders = { headers ->
+                    val requestId = headers["x-oai-request-id"] ?: headers["x-request-id"]
+                    providerRequestId = requestId?.takeIf { it.isNotEmpty() }
+                    onResponseHeaders(
+                        OpenAiResponseHeaders(
+                            turnState = headers[HeaderCodexTurnState],
+                            requestId = requestId,
+                            httpStatus = acceptedStatus,
+                        ),
+                    )
+                },
+                configureRequest = {
+                    configureRequest()
+                    attributes.put(OpenAiStreamingRequestKey, Unit)
+                },
             )
-        },
-        configureRequest = configureRequest,
-    )
-        .mapNotNull { event -> event.data?.takeIf { it != "[DONE]" } }
-        .map { data -> OpenAiJsonCodec.decodeFromString<ResponsesStreamEvent>(data) }
-        .catch { cause ->
-            if (!cause.isRetryableOpenAiException(retry)) {
-                throw cause
-            }
-        }
+                .mapNotNull { event -> event.data?.takeIf { it != "[DONE]" } }
+                .map { data -> OpenAiJsonCodec.decodeFromString<ResponsesStreamEvent>(data) }
+                .onEach { event ->
+                    val responseId = event.responseIdentifier()
+                    if (!responseId.isNullOrEmpty() && responseId != observedResponseId) {
+                        observedResponseId = responseId
+                    }
+                    if (event.isExplicitModerationBlock()) {
+                        val failure = event.moderationFailure()
+                        failure.failureDiagnostic = (event.toFailureDiagnostic() ?: failure.failureDiagnostic)?.copy(
+                            termination = OpenAiFailureTermination.ModerationBlocked,
+                            reason = event.explicitModerationReason(),
+                            httpStatus = acceptedStatus,
+                            requestId = providerRequestId,
+                            responseId = observedResponseId?.takeIf { it.isNotEmpty() },
+                        )
+                        throw failure
+                    }
+                }
+                .catch { cause ->
+                    currentCoroutineContext().ensureActive()
+                    if (cause is CancellationException) throw cause
+                    val root = cause.openAiRootCause()
+                    if (root is CancellationException) throw root
+                    if (cause !is Exception) throw cause
+                    if (cause is OpenAiModerationBlockedException) throw cause
+                    if (root is OpenAiModerationBlockedException) throw root
+                    if (root is OpenAiHttpStreamException) throw root
+                    val status = cause.openAiHttpStatus()
+                    val httpError = status != null && status !in 200..299
+                    val errorRequestId = cause.openAiHttpResponse()?.headers?.let { headers ->
+                        headers["x-oai-request-id"] ?: headers["x-request-id"]
+                    }
+                    if (httpError) providerRequestId = errorRequestId?.takeIf { it.isNotEmpty() }
+                    val httpDiagnostic = if (httpError) cause.httpFailureDiagnostic() else null
+                    val httpReason = httpDiagnostic?.reason
+                    if (httpReason == OpenAiFailureReason.ContentPolicyViolation) {
+                        val failure = OpenAiModerationBlockedException(OpenAiFailureReason.ContentPolicyViolation)
+                        failure.failureDiagnostic = httpDiagnostic.copy(
+                            termination = OpenAiFailureTermination.ModerationBlocked,
+                            reason = OpenAiFailureReason.ContentPolicyViolation,
+                            httpStatus = status,
+                            requestId = providerRequestId,
+                        )
+                        throw failure
+                    }
+                    if (cause.isRetryableOpenAiException(retry)) {
+                        onResponseHeaders(
+                            OpenAiResponseHeaders(
+                                turnState = null,
+                                requestId = null,
+                                failure = (httpDiagnostic ?: OpenAiFailureDiagnostic(
+                                    termination = if (httpError) {
+                                        OpenAiFailureTermination.HttpError
+                                    } else {
+                                        OpenAiFailureTermination.TransportError
+                                    },
+                                    httpStatus = status ?: acceptedStatus,
+                                )).copy(
+                                    httpStatus = status ?: acceptedStatus,
+                                    requestId = providerRequestId,
+                                    responseId = observedResponseId?.takeIf { it.isNotEmpty() },
+                                ),
+                            ),
+                        )
+                        return@catch
+                    }
+                    if (httpError) {
+                        val failure = OpenAiHttpStreamException(status, providerRequestId)
+                        failure.failureDiagnostic = (httpDiagnostic ?: failure.failureDiagnostic)?.copy(requestId = providerRequestId)
+                        throw failure
+                    }
+                    val failure = OpenAiStreamException(status ?: acceptedStatus)
+                    failure.failureDiagnostic = failure.failureDiagnostic?.copy(
+                        requestId = providerRequestId,
+                        responseId = observedResponseId?.takeIf { it.isNotEmpty() },
+                    )
+                    throw failure
+                },
+        )
+    }
 
 internal sealed interface RemoteCompactionStreamEvent {
     data class ResponseEvent(
@@ -433,11 +619,14 @@ internal class RemoteCompactionRetryBudget(
     private val retry: OpenAiClientRetryConfig,
     private val logger: KLogger = RemoteCompactionLogger,
 ) {
-    val operationId: String = Random.nextLong().toString()
+    val operationId: Long = Random.nextLong()
     var retries: Int = 0
         private set
     private var lastEvent: String = "none"
     private var lastHttpStatus: Int? = null
+    private var lastFailure: OpenAiFailureDiagnostic? = null
+    private var responseId: String? = null
+    private var requestId: String? = null
     private var reservedRetryDelayMillis: Long? = null
     private val operationStartedAt = TimeSource.Monotonic.markNow()
     private var attemptStartedAt = operationStartedAt
@@ -446,11 +635,112 @@ internal class RemoteCompactionRetryBudget(
         attemptStartedAt = TimeSource.Monotonic.markNow()
         lastEvent = "none"
         lastHttpStatus = null
+        lastFailure = null
+        responseId = null
+        requestId = null
         reservedRetryDelayMillis = null
+    }
+
+    fun beginHttpAttempt() {
+        lastHttpStatus = null
+        lastFailure = null
+        requestId = null
+        responseId = null
     }
 
     fun recordEvent(event: String) {
         lastEvent = event
+    }
+
+    fun recordFailure(diagnostic: OpenAiFailureDiagnostic?) {
+        if (diagnostic != null) lastFailure = diagnostic
+    }
+
+    fun clearFailure() {
+        lastFailure = null
+    }
+
+    fun recordRequestId(value: String?) {
+        requestId = value?.takeIf { it.isNotEmpty() }
+    }
+
+    fun recordResponseId(value: String?) {
+        if (!value.isNullOrEmpty() && value != responseId) {
+            responseId = value
+        }
+    }
+
+    fun recordHttpStatus(status: Int) {
+        lastHttpStatus = status
+    }
+
+    fun attachFailure(failure: Throwable): Throwable {
+        val diagnostic = lastFailure?.copy(
+            httpStatus = lastHttpStatus,
+            requestId = requestId,
+            responseId = responseId,
+        ) ?: OpenAiFailureDiagnostic(
+            termination = if (failure is OpenAiRemoteCompactionV2StreamIncompleteException) {
+                OpenAiFailureTermination.MissingTerminal
+            } else if (lastHttpStatus != null) {
+                OpenAiFailureTermination.HttpError
+            } else {
+                OpenAiFailureTermination.StreamError
+            },
+            httpStatus = lastHttpStatus,
+            requestId = requestId,
+            responseId = responseId,
+        )
+        when (failure) {
+            is OpenAiRemoteCompactionV2StreamIncompleteException -> {
+                failure.failureDiagnostic = diagnostic
+                failure.retries = retries
+                failure.operationId = operationId
+            }
+            is OpenAiRemoteCompactionV2StreamFailureException -> {
+                failure.failureDiagnostic = diagnostic
+                failure.retries = retries
+                failure.operationId = operationId
+            }
+            is OpenAiModerationBlockedException -> {
+                failure.failureDiagnostic = (lastFailure ?: failure.failureDiagnostic)?.copy(
+                    termination = OpenAiFailureTermination.ModerationBlocked,
+                    reason = failure.failureDiagnostic?.reason,
+                    httpStatus = lastHttpStatus,
+                    requestId = requestId,
+                    responseId = responseId,
+                )
+                failure.retries = retries
+                failure.operationId = operationId
+            }
+            is OpenAiHttpStreamException -> {
+                failure.failureDiagnostic = (lastFailure ?: failure.failureDiagnostic)?.copy(
+                    requestId = requestId,
+                    responseId = responseId,
+                )
+                failure.retries = retries
+                failure.operationId = operationId
+            }
+            is OpenAiRetryableStreamException -> {
+                failure.failureDiagnostic = failure.failureDiagnostic?.copy(
+                    httpStatus = lastHttpStatus,
+                    requestId = requestId,
+                    responseId = responseId,
+                )
+                failure.retries = retries
+                failure.operationId = operationId
+            }
+            is OpenAiStreamException -> {
+                failure.failureDiagnostic = failure.failureDiagnostic?.copy(
+                    httpStatus = lastHttpStatus,
+                    requestId = requestId,
+                    responseId = responseId,
+                )
+                failure.retries = retries
+                failure.operationId = operationId
+            }
+        }
+        return failure
     }
 
     fun reserveRetry(
@@ -458,8 +748,8 @@ internal class RemoteCompactionRetryBudget(
         httpStatus: Int? = null,
         retry: OpenAiClientRetryConfig = this.retry,
     ): Boolean {
+        if (httpStatus != null) lastHttpStatus = httpStatus
         if (retries >= retry.maxRetries) return false
-        lastHttpStatus = httpStatus
         val retryIndex = retries
         retries += 1
         val reservedDelayMillis = nextDelayMillis(retryIndex, retry)
@@ -531,27 +821,50 @@ internal class RemoteCompactionRetryBudget(
         append("termination=").append(termination).append(' ')
         append("last_event=").append(lastEvent).append(' ')
         append("http_status=").append(lastHttpStatus ?: "-")
+        append(" request_id=").append(requestId?.let(::escapeOpenAiDiagnosticText) ?: "-")
+        append(" response_id=").append(responseId?.let(::escapeOpenAiDiagnosticText) ?: "-")
+        lastFailure?.let {
+            append(" failure_termination=").append(it.termination)
+            append(" reason=").append(it.reason ?: "-")
+        }
         nextDelayMillis?.let { append(" next_delay_ms=").append(it) }
         retryable?.let { append(" retryable=").append(it) }
     }
 }
 
-private fun HttpClient.streamRemoteCompactionEvents(
+internal fun HttpClient.streamRemoteCompactionEvents(
     budget: RemoteCompactionRetryBudget,
     socketTimeoutMillis: Long,
     configureRequest: HttpRequestBuilder.() -> Unit,
 ): Flow<RemoteCompactionStreamEvent> =
-    postSseEvents(socketTimeoutMillis) {
-        configureRequest()
-        attributes.put(RemoteCompactionRetryBudgetKey, budget)
-    }.mapNotNull { event ->
+    postSseEventsWithHeaders(
+        socketTimeoutMillis = socketTimeoutMillis,
+        onResponseHeaders = { headers ->
+            budget.recordRequestId(headers["x-oai-request-id"] ?: headers["x-request-id"])
+        },
+        onResponseStatus = { budget.recordHttpStatus(it.value) },
+        configureRequest = {
+            configureRequest()
+            attributes.put(OpenAiStreamingRequestKey, Unit)
+            attributes.put(RemoteCompactionRetryBudgetKey, budget)
+        },
+    ).mapNotNull { event ->
         val data = event.data ?: return@mapNotNull null
         if (data == "[DONE]") {
             budget.recordEvent("done")
             RemoteCompactionStreamEvent.Done
         } else {
-            val responseEvent = OpenAiJsonCodec.decodeFromString<ResponsesStreamEvent>(data)
+            val responseEvent = try {
+                OpenAiJsonCodec.decodeFromString<ResponsesStreamEvent>(data)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                throw OpenAiRemoteCompactionV2ProtocolException("Remote compaction v2 received an invalid event.")
+            }
             budget.recordEvent(responseEvent::class.simpleName ?: "unknown")
+            budget.recordResponseId(responseEvent.responseIdentifier())
+            if (responseEvent is ResponsesStreamEvent.Completed) budget.clearFailure()
+            budget.recordFailure(responseEvent.toFailureDiagnostic())
             RemoteCompactionStreamEvent.ResponseEvent(responseEvent)
         }
     }
@@ -593,14 +906,18 @@ internal suspend fun Flow<RemoteCompactionStreamEvent>.collectRemoteCompactionV2
                 }
 
                 is ResponsesStreamEvent.Failed -> {
+                    if (event.isExplicitModerationBlock()) throw event.moderationFailure()
                     throw OpenAiRemoteCompactionV2StreamFailureException()
                 }
 
                 is ResponsesStreamEvent.Incomplete -> {
+                    if (event.isExplicitModerationBlock()) throw event.moderationFailure()
                     throw OpenAiRemoteCompactionV2StreamFailureException()
                 }
 
-                else -> Unit
+                else -> {
+                    if (event.isExplicitModerationBlock()) throw event.moderationFailure()
+                }
             }
         }
     }.takeWhile { completedResponse == null }.collect()
@@ -680,18 +997,75 @@ internal suspend fun <T> retryOpenAiStreamingTransportWithBudget(
             try {
                 return block(budget).also { budget.logSuccess() }
             } catch (cause: Throwable) {
-                if (cause is CancellationException) {
-                    throw cause
+                currentCoroutineContext().ensureActive()
+                if (cause is CancellationException) throw cause
+                val root = cause.openAiRootCause()
+                if (root is CancellationException) throw root
+                if (cause !is Exception) throw cause
+                if (root is OpenAiModerationBlockedException) {
+                    root.failureDiagnostic?.httpStatus?.let(budget::recordHttpStatus)
+                    root.failureDiagnostic?.requestId?.let(budget::recordRequestId)
+                    budget.recordResponseId(root.failureDiagnostic?.responseId)
+                    budget.recordFailure(root.failureDiagnostic)
+                    budget.logFinalFailure("moderation_blocked", retryable = false)
+                    throw budget.attachFailure(root)
+                }
+                if (root is OpenAiHttpStreamException) {
+                    budget.recordHttpStatus(root.status)
+                    root.failureDiagnostic?.requestId?.let(budget::recordRequestId)
+                    budget.recordFailure(root.failureDiagnostic)
+                    budget.logFinalFailure("http_error", retryable = false)
+                    throw budget.attachFailure(root)
                 }
                 val retryable = cause.isRetryableOpenAiException(retry)
                 val termination = cause.remoteCompactionTermination()
-                if (!retryable) {
-                    budget.logFinalFailure(termination, retryable = false)
-                    throw cause
+                val httpStatus = cause.openAiHttpStatus()
+                val httpError = httpStatus != null && httpStatus !in 200..299
+                cause.openAiHttpResponse()?.headers?.let { headers ->
+                    budget.recordRequestId(headers["x-oai-request-id"] ?: headers["x-request-id"])
                 }
-                if (!budget.reserveRetry(termination)) {
+                val httpDiagnostic = if (httpError) cause.httpFailureDiagnostic() else null
+                val httpReason = httpDiagnostic?.reason
+                if (httpError) {
+                    budget.recordFailure(
+                        httpDiagnostic ?: OpenAiFailureDiagnostic(OpenAiFailureTermination.HttpError, httpStatus = httpStatus),
+                    )
+                }
+                if (httpError && httpReason == OpenAiFailureReason.ContentPolicyViolation) {
+                    budget.recordHttpStatus(httpStatus)
+                    val failure = OpenAiModerationBlockedException(OpenAiFailureReason.ContentPolicyViolation)
+                    budget.logFinalFailure("moderation_blocked", retryable = false)
+                    throw budget.attachFailure(failure)
+                }
+                if (!retryable) {
+                    if (httpStatus != null) budget.recordHttpStatus(httpStatus)
+                    val failure = when {
+                        httpError -> OpenAiHttpStreamException(httpStatus)
+                        cause is OpenAiModerationBlockedException ||
+                            cause is OpenAiRemoteCompactionV2ProtocolException -> cause
+                        else -> OpenAiStreamException()
+                    }
+                    if (failure is OpenAiModerationBlockedException) {
+                        budget.recordFailure(failure.failureDiagnostic)
+                    }
+                    budget.logFinalFailure(termination, retryable = false)
+                    throw budget.attachFailure(failure)
+                }
+                if (!budget.reserveRetry(termination, httpStatus)) {
                     budget.logFinalFailure(termination, retryable = true)
-                    throw cause
+                    if (httpError) {
+                        throw budget.attachFailure(OpenAiHttpStreamException(httpStatus))
+                    }
+                    if (cause !is OpenAiRemoteCompactionV2StreamFailureException &&
+                        cause !is OpenAiRemoteCompactionV2StreamIncompleteException
+                    ) {
+                        throw budget.attachFailure(
+                            OpenAiRetryableStreamException(
+                                OpenAiFailureDiagnostic(OpenAiFailureTermination.TransportError, httpStatus = httpStatus),
+                            ),
+                        )
+                    }
+                    throw budget.attachFailure(cause)
                 }
                 delay(budget.nextDelayMillis().milliseconds)
             }
@@ -705,7 +1079,26 @@ private fun Throwable.remoteCompactionTermination(): String = when (this) {
     is OpenAiRemoteCompactionV2ProtocolException -> "protocol_error"
     is OpenAiRemoteCompactionV2StreamIncompleteException -> "stream_incomplete"
     is OpenAiRemoteCompactionV2StreamFailureException -> "stream_failed"
-    else -> "transport_error"
+    is OpenAiModerationBlockedException -> "moderation_blocked"
+    else -> if (openAiHttpStatus()?.let { it !in 200..299 } == true) "http_status" else "transport_error"
+}
+
+private fun ResponsesStreamEvent.moderationFailure(): OpenAiModerationBlockedException =
+    OpenAiModerationBlockedException(checkNotNull(explicitModerationReason())).also { failure ->
+        failure.failureDiagnostic = (toFailureDiagnostic() ?: failure.failureDiagnostic)?.copy(
+            termination = OpenAiFailureTermination.ModerationBlocked,
+            reason = explicitModerationReason(),
+        )
+    }
+
+private fun ResponsesStreamEvent.responseIdentifier(): String? = when (this) {
+    is ResponsesStreamEvent.Metadata -> responseId
+    is ResponsesStreamEvent.Created -> response.id
+    is ResponsesStreamEvent.InProgress -> response.id
+    is ResponsesStreamEvent.Completed -> response.id
+    is ResponsesStreamEvent.Failed -> response.id
+    is ResponsesStreamEvent.Incomplete -> response.id
+    else -> null
 }
 
 private fun codexClientMetadataOrNull(
@@ -753,15 +1146,123 @@ internal fun Throwable.isRetryableOpenAiException(
     retry: OpenAiClientRetryConfig,
 ): Boolean {
     val cause = openAiRootCause()
-    val sseResponse = (cause as? SSEClientException)?.response
-    if (sseResponse != null) {
-        return sseResponse.status.isRetryableOpenAiStatus(retry)
-    }
-    val responseException = cause as? io.ktor.client.plugins.ResponseException
-    if (responseException != null) {
-        return responseException.response.status.isRetryableOpenAiStatus(retry)
+    if (cause is CancellationException) return false
+    val status = openAiHttpStatus()
+    if (status != null && status !in 200..299) {
+        return HttpStatusCode.fromValue(status).isRetryableOpenAiStatus(retry)
     }
     return cause.isRetryableOpenAiTransportException(retry)
+}
+
+private fun Throwable.openAiHttpStatus(): Int? = openAiHttpResponse()?.status?.value
+
+private fun Throwable.openAiHttpResponse(): HttpResponse? {
+    var current: Throwable? = this
+    var successfulResponse: HttpResponse? = null
+    while (current != null) {
+        val response = when (current) {
+            is SSEClientException -> current.response
+            is io.ktor.client.plugins.ResponseException -> current.response
+            else -> null
+        }
+        if (response != null) {
+            if (response.status.value !in 200..299) return response
+            if (successfulResponse == null) successfulResponse = response
+        }
+        current = current.cause
+    }
+    return successfulResponse
+}
+
+internal suspend fun Throwable.hasHttpPolicyBlock(): Boolean {
+    val response = openAiHttpResponse() ?: return false
+    return response.hasHttpPolicyBlock()
+}
+
+private suspend fun Throwable.httpFailureDiagnostic(): OpenAiFailureDiagnostic? {
+    val response = openAiHttpResponse() ?: return null
+    return try {
+        response.bodyAsText().httpFailureDiagnostic()?.copy(httpStatus = response.status.value)
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (_: Exception) {
+        null
+    }
+}
+
+internal fun String.safeHttpFailureReason(): OpenAiFailureReason? {
+    return httpFailureDiagnostic()?.reason
+}
+
+private fun String.httpFailureDiagnostic(): OpenAiFailureDiagnostic? {
+    if (length > MaxOpenAiErrorBodyBytes || !hasSafeJsonDepth()) return null
+    return try {
+        val payload = Json.parseToJsonElement(this) as? JsonObject
+        val error = (payload?.get("error") as? JsonObject) ?: payload
+        val code = (error?.get("code") as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+        val type = (error?.get("type") as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+        val message = (error?.get("message") as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+        val reason = if (code == "content_policy_violation" || type == "content_policy_violation") {
+            OpenAiFailureReason.ContentPolicyViolation
+        } else {
+            safeFailureReason(code) ?: safeFailureReason(type)
+        }
+        OpenAiFailureDiagnostic(
+            OpenAiFailureTermination.HttpError,
+            reason = reason,
+            errorCode = code,
+            errorType = type,
+            errorMessage = message,
+        )
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private suspend fun HttpResponse.hasHttpPolicyBlock(): Boolean {
+    return try {
+        bodyAsText().hasHttpPolicyBlock()
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (_: Exception) {
+        false
+    }
+}
+
+private fun String.hasHttpPolicyBlock(): Boolean {
+    if (!hasSafeJsonDepth()) return false
+    return try {
+        val payload = Json.parseToJsonElement(this) as? JsonObject
+        val error = (payload?.get("error") as? JsonObject) ?: payload
+        val code = error?.get("code") as? JsonPrimitive
+        val type = error?.get("type") as? JsonPrimitive
+        (code?.isString == true && code.contentOrNull == "content_policy_violation") ||
+            (type?.isString == true && type.contentOrNull == "content_policy_violation")
+    } catch (_: Exception) {
+        false
+    }
+}
+
+private fun String.hasSafeJsonDepth(): Boolean {
+    var depth = 0
+    var quoted = false
+    var escaped = false
+    for (character in this) {
+        if (quoted) {
+            when {
+                escaped -> escaped = false
+                character == '\\' -> escaped = true
+                character == '"' -> quoted = false
+            }
+        } else {
+            when (character) {
+                '"' -> quoted = true
+                '{', '[' -> if (++depth > MaxOpenAiErrorJsonDepth) return false
+                '}', ']' -> depth--
+            }
+        }
+    }
+    return true
 }
 
 internal fun HttpStatusCode.isRetryableOpenAiStatus(retry: OpenAiClientRetryConfig): Boolean =
