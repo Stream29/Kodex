@@ -16,7 +16,7 @@ kotlin {
             testTask {
                 useKarma {
                     useChromeHeadless()
-                    useConfigDirectory(rootProject.file("gradle/wasm-karma.config.d"))
+                    useConfigDirectory(layout.settingsDirectory.dir("gradle/wasm-karma.config.d").asFile)
                 }
             }
         }

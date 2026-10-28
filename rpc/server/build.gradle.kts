@@ -1,4 +1,5 @@
 plugins {
+    id("kodex.spec-api-module")
     id("kodex.kmp-spec-impl")
     id("kodex.krpc-utils-patch")
     id("kodex.kmp-cli")
@@ -54,6 +55,10 @@ kotlin {
             implementation(project(":rpc-in-memory"))
             implementation(project(":rpc-client"))
             implementation(project(":app-rpc"))
+        }
+        nativeTest.dependencies {
+            implementation(libs.ktor.client.cio)
+            implementation(libs.ktor.server.cio)
         }
     }
 }

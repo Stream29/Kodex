@@ -3,6 +3,7 @@
 import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
 
 plugins {
+    id("kodex.spec-api-module")
     id("kodex.kmp-spec-impl")
     id("kodex.kmp-host")
     id("kodex.kmp-tests")
@@ -20,7 +21,7 @@ kotlin {
     }
 
     sourceSets {
-        val skikoNativeMain by getting {
+        named("skikoNativeMain") {
             dependencies {
                 implementation(libs.skiko)
             }

@@ -2,6 +2,7 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.TestExecutable
 
 plugins {
+    id("kodex.spec-api-module")
     id("kodex.kmp-spec-impl")
     id("kodex.kmp-host")
 }
@@ -75,7 +76,7 @@ kotlin {
     sourceSets {
         specMain.dependencies { api(libs.kotlinx.io.core) }
         commonTest.dependencies { implementation(kotlin("test")) }
-        val posixTest by creating { dependsOn(getByName("nativeTest")) }
+        val posixTest = create("posixTest") { dependsOn(getByName("nativeTest")) }
         getByName("linuxX64Test").dependsOn(posixTest)
         getByName("linuxArm64Test").dependsOn(posixTest)
         getByName("macosArm64Test").dependsOn(posixTest)

@@ -2,8 +2,18 @@
 
 import java.security.MessageDigest
 import java.util.HexFormat
+import javax.inject.Inject
+import org.gradle.api.file.ArchiveOperations
+import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.FileSystemOperations
+import org.gradle.api.tasks.Classpath
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.TaskAction
+import org.jetbrains.kotlin.gradle.targets.js.dsl.KotlinWasmTargetDsl
 
 plugins {
+    id("kodex.spec-api-module")
     id("kodex.kmp-spec-impl")
     id("kodex.kmp-web-executable")
     id("kodex.kmp-tests")
@@ -47,29 +57,62 @@ val composeUiNotices = configurations.create("composeUiNotices") {
 dependencies {
     composeUiNotices("org.jetbrains.compose.ui:ui-wasm-js:${libs.versions.compose.ui.wasm.get()}:sources@jar")
 }
-val webCompatibilityNotices = tasks.register<Sync>("webCompatibilityNotices") {
-    from(composeUiNotices.elements.map { sources -> sources.map { zipTree(it.asFile) } }) {
-        include(
-            "META-INF/androidx/compose/ui/ui/LICENSE.txt",
-            "META-INF/androidx/compose/ui/ui/KODEX-NOTICE.md",
-        )
-        eachFile {
-            path = "third-party/compose-ui/" + if (name == "KODEX-NOTICE.md") "NOTICE.md" else name
+
+abstract class SyncComposeNotices : DefaultTask() {
+    @get:Classpath
+    abstract val sourceArchives: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val destination: DirectoryProperty
+
+    @get:Inject
+    abstract val archives: ArchiveOperations
+
+    @get:Inject
+    abstract val files: FileSystemOperations
+
+    @TaskAction
+    fun syncNotices() {
+        files.sync {
+            from(sourceArchives.files.map { archives.zipTree(it) }) {
+                include(
+                    "META-INF/androidx/compose/ui/ui/LICENSE.txt",
+                    "META-INF/androidx/compose/ui/ui/KODEX-NOTICE.md",
+                )
+                eachFile {
+                    path = "third-party/compose-ui/" + if (name == "KODEX-NOTICE.md") "NOTICE.md" else name
+                }
+                includeEmptyDirs = false
+            }
+            into(destination)
         }
-        includeEmptyDirs = false
     }
-    into(layout.buildDirectory.dir("generated/web-third-party"))
+}
+
+val webCompatibilityNotices = tasks.register<SyncComposeNotices>("webCompatibilityNotices") {
+    sourceArchives.from(composeUiNotices)
+    destination.set(layout.buildDirectory.dir("generated/web-third-party"))
 }
 kotlin.sourceSets.named("wasmJsMain") { resources.srcDir(webCompatibilityNotices) }
 
 val webKauriNotices = tasks.register<Sync>("webKauriNotices") {
     into(layout.buildDirectory.dir("generated/web-kauri-notices"))
     into("third-party/kauri") {
-        from(rootProject.layout.projectDirectory.file("utils/kauri/LICENSE-WebView2-SDK.txt"))
-        from(rootProject.layout.projectDirectory.file("utils/kauri/NOTICE.md"))
+        from(layout.settingsDirectory.file("utils/kauri/LICENSE-WebView2-SDK.txt"))
+        from(layout.settingsDirectory.file("utils/kauri/NOTICE.md"))
     }
 }
 kotlin.sourceSets.named("wasmJsMain") { resources.srcDir(webKauriNotices) }
+
+val webDistribution = (kotlin.targets.getByName("wasmJs") as KotlinWasmTargetDsl)
+    .binaries.single { it.name == "productionExecutable" }.distribution.outputDirectory
+configurations.create("webDistributionElements") {
+    isCanBeConsumed = true
+    isCanBeResolved = false
+    outgoing.artifact(webDistribution) {
+        builtBy("wasmJsBrowserDistribution")
+    }
+}
 
 val webChecksums = tasks.register("webChecksums") {
     dependsOn("wasmJsBrowserDistribution")

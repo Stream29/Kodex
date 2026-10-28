@@ -10,7 +10,7 @@ kotlin {
     applyDefaultHierarchyTemplate()
 
     sourceSets {
-        val specMain by creating
+        val specMain = create("specMain")
         commonMain {
             dependsOn(specMain)
         }

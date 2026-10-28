@@ -34,7 +34,7 @@ Build the matching Native executable using the verified toolchain, for example `
 Use the repository's verified JDK/Gradle Daemon and toolchain conventions:
 
 ```sh
-./gradlew :app-web:webArchive checkSpecApi
+./gradlew :app-web:webArchive :app-web:checkSpecApiModule
 ```
 
 - Website: `app/web/build/dist/wasmJs/productionExecutable/`.

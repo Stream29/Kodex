@@ -1,4 +1,5 @@
 plugins {
+    id("kodex.spec-api-module")
     id("kodex.kmp-spec-impl")
     id("kodex.kmp-host")
     alias(libs.plugins.kotlin.serialization)
@@ -31,5 +32,21 @@ kotlin {
             implementation(project(":openai-json-codec"))
             implementation(libs.ktor.client.mock)
         }
+        nativeTest.dependencies {
+            implementation(libs.ktor.client.cio)
+            implementation(libs.ktor.server.cio)
+        }
+    }
+}
+
+val nativeNetworkVersion = libs.versions.ktor.network.native.get()
+configurations.configureEach {
+    if (name.contains("Test", ignoreCase = true)) {
+        resolutionStrategy.force(
+            "io.ktor:ktor-network-linuxx64:$nativeNetworkVersion",
+            "io.ktor:ktor-network-linuxarm64:$nativeNetworkVersion",
+            "io.ktor:ktor-network-macosarm64:$nativeNetworkVersion",
+            "io.ktor:ktor-network-mingwx64:$nativeNetworkVersion",
+        )
     }
 }

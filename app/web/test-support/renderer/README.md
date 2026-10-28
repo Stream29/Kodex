@@ -14,7 +14,7 @@ Use the running Gradle daemon's JVM and JVM arguments. Run Native and Wasm build
 | `:app-web-test-support-renderer:wasmJsBrowserDistribution` | `app/web/test-support/renderer/build/dist/wasmJs/productionExecutable/` |
 | `:app-web-test-support-renderer:wasmJsBrowserTest` | Connection unit tests and offscreen component, settings and History tests |
 | `:app-web-test-support-backend:linkDebugExecutableLinuxX64` | `app/web/test-support/backend/build/bin/linuxX64/debugExecutable/kodex-web-fixture.kexe` |
-| `checkSpecApi` | Exported API / source-set checks |
+| `:app-web-test-support-renderer:checkSpecApiModule` | Exported API / source-set checks |
 
 - Optional `kodex.binaryenCommand` and `kodex.nodeCommand` Gradle properties select explicitly installed tools.
 - Build development and production distributions in separate Gradle invocations; the Kotlin plugin shares npm outputs between them.

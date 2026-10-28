@@ -3,6 +3,7 @@
 import org.jetbrains.kotlin.gradle.plugin.KotlinHierarchyTemplate
 
 plugins {
+    id("kodex.spec-api-module")
     id("kodex.kmp-spec-impl")
     id("kodex.kmp-host")
     alias(libs.plugins.kotlin.serialization)

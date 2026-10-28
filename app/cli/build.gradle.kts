@@ -1,25 +1,48 @@
 import org.jetbrains.kotlin.gradle.plugin.mpp.Executable
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.gradle.api.file.FileCollection
+import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Internal
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.process.CommandLineArgumentProvider
 
 plugins {
+    id("kodex.spec-api-module")
     id("kodex.kmp-spec-impl")
     id("kodex.krpc-utils-patch")
     id("kodex.kmp-cli-executable")
     id("kodex.kmp-tests")
 }
 
-val webDistribution = project(":app-web").layout.buildDirectory.dir("dist/wasmJs/productionExecutable")
-val resourceScript = rootProject.layout.projectDirectory.file("utils/kauri/scripts/embed-frontend.mjs")
+class WebPackArguments(
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    val distribution: FileCollection,
+    @get:Internal
+    val output: File,
+) : CommandLineArgumentProvider {
+    override fun asArguments(): Iterable<String> = listOf(distribution.singleFile.absolutePath, output.absolutePath)
+}
+
+val webDistributionClasspath = configurations.create("webDistributionClasspath") {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    isTransitive = false
+}
+dependencies {
+    add("webDistributionClasspath", project(mapOf("path" to ":app-web", "configuration" to "webDistributionElements")))
+}
+val resourceScript = layout.settingsDirectory.file("utils/kauri/scripts/embed-frontend.mjs")
 val nodeExecutable = providers.gradleProperty("kodex.nodeCommand").getOrElse("node")
 val assetClang = file(providers.gradleProperty("kodex.assetClang").getOrElse("/usr/bin/clang"))
 val webPack = layout.buildDirectory.file("embedded-web/frontend.pack")
 val packWebResources = tasks.register<Exec>("packWebResources") {
-    dependsOn(":app-web:wasmJsBrowserDistribution")
-    inputs.dir(webDistribution)
     inputs.file(resourceScript)
     inputs.property("nodeExecutable", nodeExecutable)
     outputs.file(webPack)
-    commandLine(nodeExecutable, resourceScript.asFile, "pack", webDistribution.get().asFile, webPack.get().asFile)
+    commandLine(nodeExecutable, resourceScript.asFile, "pack")
+    argumentProviders.add(WebPackArguments(files(webDistributionClasspath), webPack.get().asFile))
 }
 
 kotlin {

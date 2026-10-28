@@ -3,24 +3,29 @@
 Run from the Kodex root with the project's JDK:
 
 ```shell
-./gradlew checkSpecApi
-./gradlew reportSpecApi
+./gradlew :agent-context-agents-md:checkSpecApiModule
+./gradlew :agent-context-agents-md:reportSpecApiModule
 ./gradlew :lint:test
 ```
 
 - The lint tool and its tests still use a JVM; this does not add a JVM product target.
-- `checkSpecApi` is strict and fails on findings. Existing APIs are not baselined.
-- `reportSpecApi` writes the same findings without failing; success does not mean
+- `checkSpecApiModule` is strict and fails on findings. Existing APIs are not
+  baselined.
+- `reportSpecApiModule` writes findings without failing; success does not mean
   that the API boundary is clean.
-- Reports are in `build/reports/spec-api/{detekt,reportSpecApi}.sarif`.
-- These are independent entrypoints; this change does not migrate APIs or add CI.
+- Each module writes reports under its own `build/reports/spec-api/`.
+  `module.sarif` is the normalized non-strict report.
 
 ## Scope
 
-The root task collects real KMP main-compilation source sets, excludes `specMain`,
-and scans each implementation file once. Intermediate/platform layers and
-consumable main fixtures are included. Source filters and generated-source
-producer dependencies are preserved; tests and external fork builds are excluded.
+Each KMP project checks its own real main-compilation source sets, excluding
+`specMain`. Intermediate/platform layers and consumable main fixtures are
+included. Source filters and generated-source producer dependencies are
+preserved; tests and external fork builds are excluded.
+
+Each KMP module explicitly applies `kodex.spec-api-module`, which provides
+module tasks and delegates analysis to `kodex.spec-api`. There is no root
+gate or merged report; invoke the relevant modules explicitly.
 
 `PublicApiOutsideSpec` checks explicit declaration markers, including implicit
 public declarations, constructors, constructor properties and companion objects.
@@ -50,12 +55,11 @@ Overrides inside public actual types are conservatively checked for explicit
   moved between KMP modules can otherwise retain the same source-root-relative
   fingerprint and leave stale report locations. Recheck cross-module moves,
   restored-input cache hits and unchanged-task skips when changing source inputs.
-- AST parsing is serial by default. To compare parallel parsing without forcing
-  producer tasks to rebuild:
+- AST parsing is serial by default. To select parallel parsing:
 
   ```shell
-  ./gradlew reportSpecApi --rerun -PspecApiParallel=true
+  ./gradlew :agent-context-agents-md:reportSpecApiModule -PspecApiParallel=true
   ```
 
-- Unchanged successful tasks can be `UP-TO-DATE`; after a source edit the task
-  may scan the complete input set. This is not per-file incremental analysis.
+- Unchanged module tasks can be `UP-TO-DATE`; after a source edit that module's
+  task may scan its complete input set. This is not per-file incremental analysis.

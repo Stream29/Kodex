@@ -2,6 +2,7 @@ import org.gradle.api.tasks.testing.AbstractTestTask
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
 
 plugins {
+    id("kodex.spec-api-module")
     id("kodex.kmp-spec-impl")
     id("kodex.kmp-host")
     id("kodex.kmp-cli-host-layer")
@@ -11,7 +12,7 @@ plugins {
 
 val generatedVersionDirectory =
     layout.buildDirectory.dir("generated/kodex-version/cliHostMain/kotlin")
-val generateKodexVersion by tasks.registering(GenerateKodexVersion::class) {
+val generateKodexVersion = tasks.register<GenerateKodexVersion>("generateKodexVersion") {
     applicationVersion.set(project.version.toString())
     outputFile.set(
         generatedVersionDirectory.map { directory ->
